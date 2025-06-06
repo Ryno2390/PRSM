@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRSM UI Integration Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: #ffffff;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #2a2a2a;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        .test-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #333333;
+            border-radius: 8px;
+            border-left: 4px solid #4ade80;
+        }
+        .test-result {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-family: monospace;
+        }
+        .success { background-color: rgba(74, 222, 128, 0.2); color: #4ade80; }
+        .error { background-color: rgba(248, 113, 113, 0.2); color: #f87171; }
+        .info { background-color: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+        .warning { background-color: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+        
+        button {
+            background: #4ade80;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            margin: 5px;
+        }
+        button:hover { background: #22c55e; }
+        
+        textarea {
+            width: 100%;
+            padding: 10px;
+            background: #1a1a1a;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 5px;
+            font-family: monospace;
+        }
+        
+        .api-status {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 0.9em;
+            margin-left: 10px;
+        }
+        .connected { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+        .disconnected { background: rgba(248, 113, 113, 0.2); color: #f87171; }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🧪 PRSM UI Integration Test</h1>
+        <p>This page tests the integration between the PRSM UI and API endpoints.</p>
+        
+        <div class="test-section">
+            <h2>📡 API Connection Test</h2>
+            <p>Testing connection to PRSM API server...</p>
+            <div id="connection-status">
+                <span>Status: </span>
+                <span id="api-status-indicator" class="api-status disconnected">Checking...</span>
+            </div>
+            <div id="connection-result" class="test-result info">Initializing...</div>
+            <button onclick="testConnection()">Test Connection</button>
+        </div>
+
+        <div class="test-section">
+            <h2>💬 Conversation Test</h2>
+            <p>Test conversation creation and messaging:</p>
+            <textarea id="message-input" placeholder="Enter a test message..." rows="3">Hello PRSM! This is a test message to verify the conversation API integration is working correctly.</textarea>
+            <br>
+            <button onclick="testConversation()">Send Test Message</button>
+            <div id="conversation-result" class="test-result info">Ready to test...</div>
+            <div id="conversation-response" style="max-height: 200px; overflow-y: auto; margin-top: 10px;"></div>
+        </div>
+
+        <div class="test-section">
+            <h2>📁 File Upload Test</h2>
+            <p>Test file upload functionality:</p>
+            <input type="file" id="file-input" accept="*/*">
+            <button onclick="testFileUpload()">Upload Test File</button>
+            <div id="file-result" class="test-result info">Select a file to test...</div>
+        </div>
+
+        <div class="test-section">
+            <h2>💰 Tokenomics Test</h2>
+            <p>Test tokenomics data retrieval:</p>
+            <button onclick="testTokenomics()">Load Tokenomics Data</button>
+            <div id="tokenomics-result" class="test-result info">Ready to test...</div>
+        </div>
+
+        <div class="test-section">
+            <h2>📋 Tasks Test</h2>
+            <p>Test task management:</p>
+            <button onclick="testTasks()">Load Tasks</button>
+            <button onclick="testCreateTask()">Create Test Task</button>
+            <div id="tasks-result" class="test-result info">Ready to test...</div>
+        </div>
+
+        <div class="test-section">
+            <h2>⚙️ Settings Test</h2>
+            <p>Test settings save/load:</p>
+            <button onclick="testSettings()">Test Settings Save</button>
+            <div id="settings-result" class="test-result info">Ready to test...</div>
+        </div>
+
+        <div class="test-section">
+            <h2>📊 Console Log</h2>
+            <p>Check browser developer console (F12) for detailed API call logs.</p>
+            <div id="console-log" class="test-result info" style="height: 150px; overflow-y: auto; white-space: pre-wrap;"></div>
+        </div>
+    </div>
+
+    <!-- Load PRSM API Client -->
+    <script src="js/api-client.js"></script>
+    
+    <script>
+        // Redirect console.log to our display
+        const originalLog = console.log;
+        const originalWarn = console.warn;
+        const originalError = console.error;
+        
+        function addToConsoleLog(message, type = 'info') {
+            const consoleLog = document.getElementById('console-log');
+            const timestamp = new Date().toLocaleTimeString();
+            consoleLog.textContent += `[${timestamp}] ${type.toUpperCase()}: ${message}\n`;
+            consoleLog.scrollTop = consoleLog.scrollHeight;
+        }
+        
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            addToConsoleLog(args.join(' '), 'log');
+        };
+        
+        console.warn = function(...args) {
+            originalWarn.apply(console, args);
+            addToConsoleLog(args.join(' '), 'warn');
+        };
+        
+        console.error = function(...args) {
+            originalError.apply(console, args);
+            addToConsoleLog(args.join(' '), 'error');
+        };
+
+        // Wait for API client to load
+        function waitForAPI() {
+            if (typeof window.prsmAPI === 'undefined') {
+                setTimeout(waitForAPI, 100);
+                return;
+            }
+            
+            console.log('🚀 PRSM API Client loaded');
+            updateConnectionStatus();
+            
+            // Auto-test connection
+            setTimeout(testConnection, 1000);
+        }
+        
+        function updateConnectionStatus() {
+            const indicator = document.getElementById('api-status-indicator');
+            const result = document.getElementById('connection-result');
+            
+            if (window.prsmAPI && window.prsmAPI.connected) {
+                indicator.textContent = 'Connected';
+                indicator.className = 'api-status connected';
+                result.textContent = '✅ API server detected - full functionality available';
+                result.className = 'test-result success';
+            } else {
+                indicator.textContent = 'Offline';
+                indicator.className = 'api-status disconnected';
+                result.textContent = '📱 Mock mode - using simulated data for testing';
+                result.className = 'test-result warning';
+            }
+        }
+
+        async function testConnection() {
+            const result = document.getElementById('connection-result');
+            result.textContent = '🔄 Testing connection...';
+            result.className = 'test-result info';
+            
+            try {
+                const connected = await window.prsmAPI.checkConnection();
+                updateConnectionStatus();
+                
+                if (connected) {
+                    console.log('✅ API connection test successful');
+                } else {
+                    console.log('📱 Using mock mode for testing');
+                }
+            } catch (error) {
+                result.textContent = `❌ Connection test failed: ${error.message}`;
+                result.className = 'test-result error';
+                console.error('Connection test error:', error);
+            }
+        }
+
+        async function testConversation() {
+            const messageInput = document.getElementById('message-input');
+            const result = document.getElementById('conversation-result');
+            const response = document.getElementById('conversation-response');
+            
+            const message = messageInput.value.trim();
+            if (!message) {
+                result.textContent = '⚠️ Please enter a message to test';
+                result.className = 'test-result warning';
+                return;
+            }
+            
+            result.textContent = '🔄 Sending message...';
+            result.className = 'test-result info';
+            
+            try {
+                const apiResponse = await window.prsmAPI.sendMessage(message);
+                
+                if (apiResponse.success) {
+                    result.textContent = '✅ Message sent successfully!';
+                    result.className = 'test-result success';
+                    
+                    // Display conversation
+                    response.innerHTML = `
+                        <div style="background: #2a2a2a; padding: 10px; margin: 5px 0; border-radius: 5px;">
+                            <strong>You:</strong> ${message}
+                        </div>
+                        <div style="background: #1a4a1a; padding: 10px; margin: 5px 0; border-radius: 5px;">
+                            <strong>PRSM:</strong> ${apiResponse.ai_response.content}
+                        </div>
+                    `;
+                    
+                    console.log('💬 Conversation test successful:', apiResponse);
+                } else {
+                    result.textContent = '❌ Message failed to send';
+                    result.className = 'test-result error';
+                }
+            } catch (error) {
+                result.textContent = `❌ Conversation test failed: ${error.message}`;
+                result.className = 'test-result error';
+                console.error('Conversation test error:', error);
+            }
+        }
+
+        async function testFileUpload() {
+            const fileInput = document.getElementById('file-input');
+            const result = document.getElementById('file-result');
+            
+            if (!fileInput.files.length) {
+                result.textContent = '⚠️ Please select a file to upload';
+                result.className = 'test-result warning';
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            result.textContent = `🔄 Uploading ${file.name}...`;
+            result.className = 'test-result info';
+            
+            try {
+                const response = await window.prsmAPI.uploadFile(file);
+                
+                if (response.success) {
+                    result.textContent = `✅ File uploaded: ${file.name} (${Math.round(file.size/1024)}KB)`;
+                    result.className = 'test-result success';
+                    console.log('📁 File upload test successful:', response);
+                } else {
+                    result.textContent = '❌ File upload failed';
+                    result.className = 'test-result error';
+                }
+            } catch (error) {
+                result.textContent = `❌ File upload test failed: ${error.message}`;
+                result.className = 'test-result error';
+                console.error('File upload test error:', error);
+            }
+        }
+
+        async function testTokenomics() {
+            const result = document.getElementById('tokenomics-result');
+            result.textContent = '🔄 Loading tokenomics data...';
+            result.className = 'test-result info';
+            
+            try {
+                const response = await window.prsmAPI.getTokenomics();
+                
+                if (response.success) {
+                    const { balance, staking, earnings } = response.tokenomics;
+                    result.innerHTML = `
+                        ✅ Tokenomics loaded:<br>
+                        💰 Balance: ${balance.total} FTNS<br>
+                        🏦 Staked: ${staking.staked_amount} FTNS (${staking.apy}% APY)<br>
+                        📈 Earnings: ${earnings.total_earned} FTNS
+                    `;
+                    result.className = 'test-result success';
+                    console.log('💰 Tokenomics test successful:', response);
+                } else {
+                    result.textContent = '❌ Failed to load tokenomics data';
+                    result.className = 'test-result error';
+                }
+            } catch (error) {
+                result.textContent = `❌ Tokenomics test failed: ${error.message}`;
+                result.className = 'test-result error';
+                console.error('Tokenomics test error:', error);
+            }
+        }
+
+        async function testTasks() {
+            const result = document.getElementById('tasks-result');
+            result.textContent = '🔄 Loading tasks...';
+            result.className = 'test-result info';
+            
+            try {
+                const response = await window.prsmAPI.getTasks();
+                
+                if (response.success) {
+                    const { tasks, statistics } = response;
+                    result.innerHTML = `
+                        ✅ Tasks loaded:<br>
+                        📋 Total: ${statistics.total} tasks<br>
+                        ⏳ Pending: ${statistics.pending}<br>
+                        🔄 In Progress: ${statistics.in_progress}<br>
+                        ✅ Completed: ${statistics.completed}
+                    `;
+                    result.className = 'test-result success';
+                    console.log('📋 Tasks test successful:', response);
+                } else {
+                    result.textContent = '❌ Failed to load tasks';
+                    result.className = 'test-result error';
+                }
+            } catch (error) {
+                result.textContent = `❌ Tasks test failed: ${error.message}`;
+                result.className = 'test-result error';
+                console.error('Tasks test error:', error);
+            }
+        }
+
+        async function testCreateTask() {
+            const result = document.getElementById('tasks-result');
+            result.textContent = '🔄 Creating test task...';
+            result.className = 'test-result info';
+            
+            try {
+                const taskData = {
+                    title: 'Integration Test Task',
+                    description: 'This task was created during UI integration testing',
+                    priority: 'medium'
+                };
+                
+                const response = await window.prsmAPI.createTask(taskData);
+                
+                if (response.success) {
+                    result.textContent = `✅ Task created: ${response.task.title}`;
+                    result.className = 'test-result success';
+                    console.log('📋 Task creation test successful:', response);
+                } else {
+                    result.textContent = '❌ Failed to create task';
+                    result.className = 'test-result error';
+                }
+            } catch (error) {
+                result.textContent = `❌ Task creation test failed: ${error.message}`;
+                result.className = 'test-result error';
+                console.error('Task creation test error:', error);
+            }
+        }
+
+        async function testSettings() {
+            const result = document.getElementById('settings-result');
+            result.textContent = '🔄 Testing settings save...';
+            result.className = 'test-result info';
+            
+            try {
+                const settingsData = {
+                    api_keys: {
+                        test_provider: {
+                            key: 'test_key_12345',
+                            mode_mapping: 'dynamic'
+                        }
+                    },
+                    ui_preferences: {
+                        theme: 'dark',
+                        test_mode: true
+                    }
+                };
+                
+                const response = await window.prsmAPI.saveSettings(settingsData);
+                
+                if (response.success) {
+                    result.textContent = `✅ Settings saved! API keys: ${response.api_keys_configured}`;
+                    result.className = 'test-result success';
+                    console.log('⚙️ Settings test successful:', response);
+                } else {
+                    result.textContent = '❌ Failed to save settings';
+                    result.className = 'test-result error';
+                }
+            } catch (error) {
+                result.textContent = `❌ Settings test failed: ${error.message}`;
+                result.className = 'test-result error';
+                console.error('Settings test error:', error);
+            }
+        }
+
+        // Start the test
+        console.log('🧪 Starting PRSM UI Integration Test');
+        waitForAPI();
+    </script>
+</body>
+</html>
