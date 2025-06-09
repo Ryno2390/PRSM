@@ -191,6 +191,42 @@ The Automated Distillation System transforms PRSM from requiring pre-existing sp
 - **Networking**: DAG-based protocol (e.g., IOTA) for scalable, feeless microtransactions and tracking.
 - **Execution**: Distributed compute across participant hardware (desktop, mobile, edge devices).
 - **Security**: Sharded model execution with circuit breaker fail-safes and zero-trust sandboxing.
+- **Privacy**: Anonymous networking through Tor/I2P integration with encrypted communications and private transactions.
+
+## 🔒 Privacy Infrastructure
+
+PRSM includes comprehensive privacy protection for researchers worldwide, especially those in restrictive environments:
+
+### **Anonymous Identity Management**
+- **Pseudonymous Participation**: Cryptographically-backed anonymous identities with Ed25519 signatures
+- **Sybil Resistance**: Computational challenges preventing identity farming and fake accounts
+- **Reputation Tracking**: Anonymous reputation across research quality, governance, and safety compliance
+- **Identity Mixing**: Cryptographic mixing protocols for enhanced anonymity
+
+### **Private FTNS Transactions**
+- **Ring Signatures**: Unlinkable transactions hiding sender identity within anonymity sets
+- **Stealth Addresses**: Recipient privacy through one-time addresses and shared secrets
+- **Transaction Mixing**: Multiple mixing strategies (Simple, Ring, CoinJoin, Zero-Knowledge)
+- **Decoy Transactions**: Traffic analysis resistance through synthetic transaction generation
+- **Zero-Knowledge Proofs**: Balance verification without revealing amounts
+
+### **Anonymous Networking**
+- **Tor/I2P Integration**: Anonymous routing for all PRSM communications
+- **Traffic Analysis Resistance**: Timing randomization and dummy traffic generation
+- **Geographic Diversity**: Relay nodes across jurisdictions for censorship resistance
+- **Incentivized Relays**: FTNS rewards for operating anonymous relay infrastructure
+
+### **Encrypted Communications**
+- **End-to-End Encryption**: All messages encrypted with forward secrecy
+- **Anonymous Messaging**: Secure channels without revealing participant identities
+- **Key Rotation**: Automatic key rotation for perfect forward secrecy
+- **Secure File Transfers**: Anonymous, encrypted model and data sharing
+
+### **Zero-Knowledge Model Verification**
+- **Anonymous Benchmarking**: Prove model capabilities without revealing implementation
+- **Private Auctions**: Sealed bid auctions for model capabilities
+- **IP Protection**: Verify model quality without exposing proprietary algorithms
+- **Anonymous Provenance**: Track model contributions without revealing contributor identities
 
 ---
 
@@ -213,6 +249,10 @@ The Automated Distillation System transforms PRSM from requiring pre-existing sp
 - Any participant can trip a "kill switch" if unsafe models arise (Toyota-style assembly line halt).
 - Open voting governs architectural upgrades and economic policy.
 - Token-weighted votes with decay-based term limits.
+- **Anonymous Governance**: Participants can vote and propose changes without revealing identities.
+- **Whistleblower Protection**: Secure, anonymous channels for reporting safety concerns or misconduct.
+- **Privacy-Preserving Audits**: Safety monitoring without compromising participant privacy or IP.
+- **Censorship Resistance**: Decentralized architecture prevents single points of control or censorship.
 
 ---
 
