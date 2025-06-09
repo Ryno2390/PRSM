@@ -3056,6 +3056,19 @@ async def send_notification(notification_data: Dict[str, Any]) -> Dict[str, Any]
         )
 
 
+# === Integration Layer Routers ===
+try:
+    from prsm.integrations.api.integration_api import integration_router
+    from prsm.integrations.api.config_api import config_router
+    from prsm.integrations.api.security_api import security_router
+    
+    app.include_router(integration_router, prefix="/integrations", tags=["Integrations"])
+    app.include_router(config_router, prefix="/integrations/config", tags=["Configuration"])
+    app.include_router(security_router, prefix="/integrations/security", tags=["Security"])
+    logger.info("✅ Integration layer API endpoints enabled (including enhanced security)")
+except ImportError as e:
+    logger.warning(f"⚠️ Integration layer not available: {e}")
+
 # Include additional routers when implemented
 # app.include_router(nwtn_router, prefix="/nwtn", tags=["NWTN"])
 # app.include_router(agents_router, prefix="/agents", tags=["Agents"])

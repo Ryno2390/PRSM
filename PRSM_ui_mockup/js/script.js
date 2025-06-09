@@ -31,6 +31,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveSettingsBtn = document.getElementById('save-settings-btn');
     let apiSettingFields = []; // Will populate later
     let hasUnsavedChanges = false;
+
+    // Integration Elements - Initialize references to avoid null errors
+    let integrationElements = {};
     // --- Local Storage Keys ---
     const themeKey = 'prsmThemePreference';
     const leftPanelWidthKey = 'prsmLeftPanelWidth';
@@ -838,6 +841,446 @@ document.addEventListener('DOMContentLoaded', () => {
     // Setup additional handlers
     setupFileUpload();
     setupSettingsSave();
+    setupIntegrations();
     
     console.log('🎯 PRSM UI fully initialized with API integration');
 });
+
+// === INTEGRATION LAYER FUNCTIONALITY ===
+
+// Platform connection states
+const platformStates = {
+    github: { connected: false, status: 'not_connected' },
+    huggingface: { connected: false, status: 'not_connected' },
+    ollama: { connected: false, status: 'available' }
+};
+
+// Initialize integration functionality
+function setupIntegrations() {
+    console.log('🔌 Setting up integrations functionality...');
+    
+    // Initialize integration elements after DOM is ready
+    setTimeout(() => {
+        initializeIntegrationElements();
+        loadInitialIntegrationData();
+    }, 100);
+}
+
+function initializeIntegrationElements() {
+    // Platform connection elements
+    integrationElements = {
+        github: {
+            card: document.querySelector('[data-platform="github"]'),
+            status: document.getElementById('github-status'),
+            connectBtn: document.getElementById('github-connect-btn'),
+            disconnectBtn: document.getElementById('github-disconnect-btn')
+        },
+        huggingface: {
+            card: document.querySelector('[data-platform="huggingface"]'),
+            status: document.getElementById('hf-status'),
+            connectBtn: document.getElementById('hf-connect-btn'),
+            disconnectBtn: document.getElementById('hf-disconnect-btn')
+        },
+        ollama: {
+            card: document.querySelector('[data-platform="ollama"]'),
+            status: document.getElementById('ollama-status'),
+            connectBtn: document.getElementById('ollama-connect-btn'),
+            disconnectBtn: document.getElementById('ollama-disconnect-btn')
+        }
+    };
+
+    // Search elements
+    integrationElements.search = {
+        input: document.getElementById('content-search-input'),
+        typeSelect: document.getElementById('content-type-select'),
+        platformSelect: document.getElementById('platform-select'),
+        button: document.getElementById('search-content-btn'),
+        results: document.getElementById('search-results')
+    };
+
+    // Import history elements
+    integrationElements.imports = {
+        list: document.getElementById('import-history-list'),
+        stats: document.getElementById('import-stats'),
+        refreshBtn: document.querySelector('.refresh-btn')
+    };
+
+    // Health dashboard elements
+    integrationElements.health = {
+        overall: document.getElementById('overall-health'),
+        connectors: document.getElementById('connector-health'),
+        activeImports: document.getElementById('active-imports'),
+        checkBtn: document.querySelector('.health-check-btn')
+    };
+
+    console.log('✅ Integration elements initialized');
+}
+
+async function loadInitialIntegrationData() {
+    try {
+        // Load system health
+        await checkSystemHealth();
+        
+        // Load import history
+        await refreshImportHistory();
+        
+        // Check connector health
+        await updateConnectorHealth();
+        
+        console.log('✅ Initial integration data loaded');
+    } catch (error) {
+        console.warn('⚠️ Failed to load initial integration data:', error);
+    }
+}
+
+// === PLATFORM CONNECTION FUNCTIONS ===
+
+async function connectPlatform(platform) {
+    console.log(`🔌 Connecting to ${platform}...`);
+    
+    try {
+        let credentials = {};
+        
+        if (platform === 'github') {
+            // For demo purposes, simulate OAuth flow
+            credentials = {
+                oauth_credentials: { access_token: 'demo_github_token' }
+            };
+        } else if (platform === 'huggingface') {
+            // For demo purposes, use a placeholder API key
+            credentials = {
+                api_key: 'demo_hf_token'
+            };
+        } else if (platform === 'ollama') {
+            // Local connection - no credentials needed
+            credentials = {};
+        }
+        
+        const response = await window.prsmAPI.registerConnector(platform, credentials);
+        
+        if (response.message) {
+            updatePlatformStatus(platform, 'connected');
+            window.prsmAPI.showNotification(
+                'Platform Connected',
+                `Successfully connected to ${platform}`,
+                'info'
+            );
+        } else {
+            throw new Error('Registration failed');
+        }
+        
+    } catch (error) {
+        console.error(`Failed to connect to ${platform}:`, error);
+        updatePlatformStatus(platform, 'error');
+        window.prsmAPI.showNotification(
+            'Connection Failed',
+            `Failed to connect to ${platform}: ${error.message}`,
+            'error'
+        );
+    }
+}
+
+async function disconnectPlatform(platform) {
+    console.log(`❌ Disconnecting from ${platform}...`);
+    
+    // For demo purposes, just update the UI
+    updatePlatformStatus(platform, 'not_connected');
+    
+    window.prsmAPI.showNotification(
+        'Platform Disconnected',
+        `Disconnected from ${platform}`,
+        'info'
+    );
+}
+
+function updatePlatformStatus(platform, status) {
+    const elements = integrationElements[platform];
+    if (!elements) return;
+    
+    platformStates[platform] = { 
+        connected: status === 'connected',
+        status: status 
+    };
+    
+    const statusElement = elements.status;
+    const connectBtn = elements.connectBtn;
+    const disconnectBtn = elements.disconnectBtn;
+    
+    if (statusElement) {
+        statusElement.textContent = getStatusText(status);
+        statusElement.className = `connection-status ${status}`;
+    }
+    
+    if (connectBtn && disconnectBtn) {
+        if (status === 'connected') {
+            connectBtn.classList.add('hidden');
+            disconnectBtn.classList.remove('hidden');
+        } else {
+            connectBtn.classList.remove('hidden');
+            disconnectBtn.classList.add('hidden');
+        }
+    }
+}
+
+function getStatusText(status) {
+    const statusTexts = {
+        'connected': 'Connected',
+        'not_connected': 'Not Connected',
+        'error': 'Connection Error',
+        'available': 'Available'
+    };
+    return statusTexts[status] || status;
+}
+
+// === CONTENT SEARCH FUNCTIONS ===
+
+async function searchContent() {
+    const searchElements = integrationElements.search;
+    if (!searchElements) return;
+    
+    const query = searchElements.input.value.trim();
+    if (!query) {
+        window.prsmAPI.showNotification('Search Error', 'Please enter a search query', 'error');
+        return;
+    }
+    
+    const contentType = searchElements.typeSelect.value;
+    const selectedPlatform = searchElements.platformSelect.value;
+    const platforms = selectedPlatform ? [selectedPlatform] : null;
+    
+    console.log(`🔍 Searching for "${query}" (${contentType})`);
+    
+    // Show loading state
+    searchElements.button.disabled = true;
+    searchElements.button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Searching...';
+    
+    try {
+        const results = await window.prsmAPI.searchContent(query, platforms, contentType, 10);
+        displaySearchResults(results);
+        
+        // Show results container
+        searchElements.results.classList.remove('hidden');
+        
+    } catch (error) {
+        console.error('Search failed:', error);
+        window.prsmAPI.showNotification('Search Failed', error.message, 'error');
+    } finally {
+        // Reset button state
+        searchElements.button.disabled = false;
+        searchElements.button.innerHTML = '<i class="fas fa-search"></i> Search';
+    }
+}
+
+function displaySearchResults(results) {
+    const resultsContainer = integrationElements.search.results;
+    if (!resultsContainer) return;
+    
+    if (!results || results.length === 0) {
+        resultsContainer.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-search"></i>
+                <p>No results found. Try adjusting your search terms or filters.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const resultsHTML = results.map(result => `
+        <div class="search-result-item">
+            <div class="result-info">
+                <div class="result-title">${result.display_name}</div>
+                <div class="result-description">${result.description || 'No description available'}</div>
+                <div class="result-metadata">
+                    <span>${result.platform}</span>
+                    <span>${result.owner_id}</span>
+                    ${result.metadata?.license ? `<span>License: ${result.metadata.license}</span>` : ''}
+                    ${result.metadata?.stars ? `<span>⭐ ${result.metadata.stars}</span>` : ''}
+                    ${result.metadata?.downloads ? `<span>📥 ${result.metadata.downloads}</span>` : ''}
+                </div>
+            </div>
+            <button class="import-btn" onclick="startImport('${result.platform}', '${result.external_id}', '${result.display_name}')">
+                Import
+            </button>
+        </div>
+    `).join('');
+    
+    resultsContainer.innerHTML = resultsHTML;
+}
+
+// === IMPORT FUNCTIONS ===
+
+async function startImport(platform, externalId, displayName) {
+    console.log(`📥 Starting import of ${externalId} from ${platform}`);
+    
+    const importData = {
+        source: {
+            platform: platform,
+            external_id: externalId,
+            display_name: displayName,
+            owner_id: externalId.split('/')[0] || 'unknown',
+            url: `https://${platform === 'github' ? 'github.com' : 'huggingface.co'}/${externalId}`
+        },
+        import_type: integrationElements.search.typeSelect.value,
+        security_scan_required: true,
+        license_check_required: true,
+        auto_reward_creator: true
+    };
+    
+    try {
+        const response = await window.prsmAPI.submitImportRequest(importData);
+        
+        if (response.request_id) {
+            window.prsmAPI.showNotification(
+                'Import Started',
+                `Import request submitted for ${displayName}`,
+                'info'
+            );
+            
+            // Refresh import history
+            setTimeout(() => refreshImportHistory(), 1000);
+        }
+        
+    } catch (error) {
+        console.error('Import failed:', error);
+        window.prsmAPI.showNotification('Import Failed', error.message, 'error');
+    }
+}
+
+// === IMPORT HISTORY FUNCTIONS ===
+
+async function refreshImportHistory() {
+    console.log('🔄 Refreshing import history...');
+    
+    const importsList = integrationElements.imports?.list;
+    const importStats = integrationElements.imports?.stats;
+    
+    if (!importsList) return;
+    
+    try {
+        const history = await window.prsmAPI.getImportHistory(20, 0);
+        
+        if (history.length === 0) {
+            importsList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-inbox"></i>
+                    <p>No imports yet. Start by searching and importing content from connected platforms.</p>
+                </div>
+            `;
+        } else {
+            const historyHTML = history.map(item => `
+                <div class="import-item">
+                    <div class="import-info">
+                        <div class="import-title">Import Request</div>
+                        <div class="import-details">
+                            <span>ID: ${item.request_id.substring(0, 8)}...</span>
+                            <span>${new Date(item.created_at).toLocaleDateString()}</span>
+                            <span>Duration: ${item.import_duration ? item.import_duration.toFixed(1) + 's' : 'N/A'}</span>
+                        </div>
+                    </div>
+                    <div class="import-status ${item.status}">${item.status.toUpperCase()}</div>
+                </div>
+            `).join('');
+            
+            importsList.innerHTML = historyHTML;
+        }
+        
+        if (importStats) {
+            importStats.textContent = `${history.length} imports total`;
+        }
+        
+    } catch (error) {
+        console.error('Failed to load import history:', error);
+        if (importsList) {
+            importsList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <p>Failed to load import history. Please try again.</p>
+                </div>
+            `;
+        }
+    }
+}
+
+// === HEALTH MONITORING FUNCTIONS ===
+
+async function checkSystemHealth() {
+    console.log('💓 Checking system health...');
+    
+    const healthElements = integrationElements.health;
+    if (!healthElements) return;
+    
+    try {
+        const health = await window.prsmAPI.getIntegrationHealth();
+        
+        // Update overall health
+        if (healthElements.overall) {
+            const statusElement = healthElements.overall.querySelector('.health-status');
+            const labelElement = healthElements.overall.querySelector('.health-label');
+            
+            if (statusElement) {
+                statusElement.textContent = health.overall_status;
+                statusElement.className = `health-status ${health.overall_status.toLowerCase()}`;
+            }
+        }
+        
+        // Update connectors health
+        if (healthElements.connectors) {
+            const statusElement = healthElements.connectors.querySelector('.health-status');
+            if (statusElement) {
+                statusElement.textContent = `${health.connectors.healthy}/${health.connectors.total}`;
+            }
+        }
+        
+        // Update active imports
+        if (healthElements.activeImports) {
+            const statusElement = healthElements.activeImports.querySelector('.health-status');
+            if (statusElement) {
+                statusElement.textContent = health.imports.active.toString();
+            }
+        }
+        
+    } catch (error) {
+        console.error('Health check failed:', error);
+        
+        // Show unknown status for all indicators
+        ['overall', 'connectors', 'activeImports'].forEach(key => {
+            const element = healthElements[key];
+            if (element) {
+                const statusElement = element.querySelector('.health-status');
+                if (statusElement) {
+                    statusElement.textContent = 'Unknown';
+                    statusElement.className = 'health-status unknown';
+                }
+            }
+        });
+    }
+}
+
+async function updateConnectorHealth() {
+    console.log('🔌 Updating connector health...');
+    
+    try {
+        const health = await window.prsmAPI.getConnectorsHealth();
+        
+        // Update platform statuses based on health data
+        Object.keys(health).forEach(platform => {
+            const healthData = health[platform];
+            if (healthData.status === 'healthy') {
+                updatePlatformStatus(platform, 'connected');
+            } else {
+                updatePlatformStatus(platform, 'error');
+            }
+        });
+        
+    } catch (error) {
+        console.warn('Failed to update connector health:', error);
+    }
+}
+
+// Make functions available globally for onclick handlers
+window.connectPlatform = connectPlatform;
+window.disconnectPlatform = disconnectPlatform;
+window.searchContent = searchContent;
+window.startImport = startImport;
+window.refreshImportHistory = refreshImportHistory;
+window.checkSystemHealth = checkSystemHealth;

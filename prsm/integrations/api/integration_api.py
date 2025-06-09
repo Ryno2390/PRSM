@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 from ..core.integration_manager import integration_manager
 from ..connectors.github_connector import GitHubConnector
 from ..connectors.huggingface_connector import HuggingFaceConnector
+from ..connectors.ollama_connector import OllamaConnector
 from ..models.integration_models import (
     IntegrationPlatform, ConnectorConfig, IntegrationSource,
     ImportRequest, ImportResult, ImportStatus, ConnectorHealth,
@@ -102,7 +103,7 @@ async def get_current_user() -> str:
 
 async def validate_platform_support(platform: IntegrationPlatform) -> bool:
     """Validate that platform is supported"""
-    supported_platforms = [IntegrationPlatform.GITHUB, IntegrationPlatform.HUGGINGFACE]
+    supported_platforms = [IntegrationPlatform.GITHUB, IntegrationPlatform.HUGGINGFACE, IntegrationPlatform.OLLAMA]
     return platform in supported_platforms
 
 
@@ -137,6 +138,8 @@ async def register_connector(
             connector_class = GitHubConnector
         elif config_request.platform == IntegrationPlatform.HUGGINGFACE:
             connector_class = HuggingFaceConnector
+        elif config_request.platform == IntegrationPlatform.OLLAMA:
+            connector_class = OllamaConnector
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

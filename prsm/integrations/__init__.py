@@ -22,6 +22,9 @@ Components:
 """
 
 from .core.integration_manager import IntegrationManager
+from .connectors.github_connector import GitHubConnector
+from .connectors.huggingface_connector import HuggingFaceConnector
+from .connectors.ollama_connector import OllamaConnector
 from .models.integration_models import (
     IntegrationSource,
     IntegrationRecord,
@@ -33,6 +36,9 @@ from .models.integration_models import (
 __version__ = "1.0.0"
 __all__ = [
     "IntegrationManager",
+    "GitHubConnector",
+    "HuggingFaceConnector", 
+    "OllamaConnector",
     "IntegrationSource", 
     "IntegrationRecord",
     "ConnectorConfig",

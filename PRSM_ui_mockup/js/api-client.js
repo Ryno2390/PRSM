@@ -943,6 +943,435 @@ class PRSMAPIClient {
             };
         }
 
+        // Integration layer mock responses
+        if (endpoint.includes('/integrations/connectors/register')) {
+            return {
+                message: "GitHub connector registered successfully",
+                platform: "github",
+                user_id: this.currentUserId
+            };
+        }
+
+        if (endpoint.includes('/integrations/connectors/health')) {
+            return {
+                github: {
+                    status: "healthy",
+                    platform: "github",
+                    last_check: new Date().toISOString(),
+                    error_count: 0,
+                    response_time: 120
+                },
+                huggingface: {
+                    status: "healthy",
+                    platform: "huggingface",
+                    last_check: new Date().toISOString(),
+                    error_count: 0,
+                    response_time: 200
+                },
+                ollama: {
+                    status: "healthy",
+                    platform: "ollama",
+                    last_check: new Date().toISOString(),
+                    error_count: 0,
+                    response_time: 50,
+                    ollama_version: "0.1.17",
+                    available_models: 3,
+                    running_models: 1
+                }
+            };
+        }
+
+        if (endpoint.includes('/integrations/search')) {
+            return [
+                {
+                    platform: "github",
+                    external_id: "microsoft/vscode",
+                    display_name: "Visual Studio Code",
+                    owner_id: "microsoft",
+                    url: "https://github.com/microsoft/vscode",
+                    description: "Visual Studio Code - Code Editing. Redefined.",
+                    metadata: {
+                        stars: 140000,
+                        forks: 25000,
+                        license: "MIT"
+                    }
+                },
+                {
+                    platform: "huggingface",
+                    external_id: "microsoft/DialoGPT-medium",
+                    display_name: "DialoGPT Medium",
+                    owner_id: "microsoft",
+                    url: "https://huggingface.co/microsoft/DialoGPT-medium",
+                    description: "Large-scale pretrained dialogue response generation model",
+                    metadata: {
+                        downloads: 50000,
+                        likes: 250,
+                        license: "MIT"
+                    }
+                },
+                {
+                    platform: "ollama",
+                    external_id: "llama2:7b",
+                    display_name: "Llama 2 7B",
+                    owner_id: "local",
+                    url: "http://localhost:11434/api/show?name=llama2:7b",
+                    description: "Local Ollama model - llama2:7b",
+                    metadata: {
+                        size: 3825819519,
+                        size_gb: 3.57,
+                        tag: "7b",
+                        type: "local_model"
+                    }
+                }
+            ];
+        }
+
+        if (endpoint.includes('/integrations/import') && method === 'POST') {
+            return {
+                request_id: 'mock_import_' + Date.now(),
+                status: 'submitted',
+                message: 'Import request submitted successfully',
+                source: {
+                    platform: 'github',
+                    external_id: 'test/repo'
+                }
+            };
+        }
+
+        if (endpoint.includes('/integrations/health')) {
+            return {
+                overall_status: "healthy",
+                health_percentage: 95.0,
+                connectors: {
+                    total: 3,
+                    healthy: 3,
+                    degraded: 0,
+                    unhealthy: 0
+                },
+                imports: {
+                    active: 0,
+                    total: 5,
+                    successful: 4,
+                    failed: 1
+                },
+                last_health_check: new Date().toISOString(),
+                sandbox_status: {
+                    status: "idle",
+                    active_scans: 0
+                }
+            };
+        }
+
+        if (endpoint.includes('/integrations/imports/history')) {
+            return [
+                {
+                    request_id: 'req_001',
+                    result_id: 'res_001',
+                    status: 'completed',
+                    created_at: new Date(Date.now() - 86400000).toISOString(),
+                    completed_at: new Date(Date.now() - 86000000).toISOString(),
+                    import_duration: 45.2,
+                    success_message: 'Repository imported successfully',
+                    error_details: null
+                }
+            ];
+        }
+
+        // Configuration management mock responses
+        if (endpoint.includes('/integrations/config/credentials') && method === 'POST') {
+            return {
+                message: "Credential stored successfully",
+                credential_id: 'cred_' + Date.now(),
+                platform: 'github'
+            };
+        }
+
+        if (endpoint.includes('/integrations/config/credentials') && method === 'GET') {
+            return [
+                {
+                    credential_id: 'cred_001',
+                    platform: 'github',
+                    credential_type: 'oauth_token',
+                    created_at: new Date(Date.now() - 86400000).toISOString(),
+                    expires_at: new Date(Date.now() + 86400000 * 30).toISOString(),
+                    is_active: true,
+                    metadata: {}
+                },
+                {
+                    credential_id: 'cred_002',
+                    platform: 'huggingface',
+                    credential_type: 'api_key',
+                    created_at: new Date(Date.now() - 172800000).toISOString(),
+                    expires_at: null,
+                    is_active: true,
+                    metadata: {}
+                }
+            ];
+        }
+
+        if (endpoint.includes('/integrations/config/settings') && method === 'GET') {
+            return {
+                config_id: 'config_001',
+                user_id: this.currentUserId,
+                preferences: {
+                    auto_connect_on_startup: false,
+                    show_notifications: true,
+                    notification_level: 'info',
+                    auto_scan_security: true,
+                    auto_validate_licenses: true,
+                    confirm_before_import: true,
+                    default_search_limit: 10
+                },
+                platforms: {
+                    github: {
+                        platform: 'github',
+                        enabled: true,
+                        api_base_url: 'https://api.github.com',
+                        timeout_seconds: 30,
+                        rate_limit: {
+                            requests_per_minute: 5000,
+                            burst_limit: 100
+                        }
+                    },
+                    huggingface: {
+                        platform: 'huggingface',
+                        enabled: true,
+                        api_base_url: 'https://huggingface.co',
+                        timeout_seconds: 45,
+                        rate_limit: {
+                            requests_per_minute: 1000,
+                            burst_limit: 50
+                        }
+                    },
+                    ollama: {
+                        platform: 'ollama',
+                        enabled: true,
+                        api_base_url: 'http://localhost:11434',
+                        timeout_seconds: 60,
+                        rate_limit: {
+                            requests_per_minute: 120,
+                            burst_limit: 20
+                        }
+                    }
+                },
+                global_security: {
+                    security_level: 'standard',
+                    require_license_validation: true,
+                    require_vulnerability_scan: true,
+                    allow_copyleft_licenses: false,
+                    max_file_size_mb: 100
+                }
+            };
+        }
+
+        if (endpoint.includes('/integrations/config/settings/validate')) {
+            return {
+                valid: true,
+                issues: [],
+                warnings: ['High search limit may impact performance'],
+                config_version: '1.0',
+                last_updated: new Date().toISOString()
+            };
+        }
+
+        if (endpoint.includes('/integrations/config/stats')) {
+            return {
+                configuration: {
+                    total_users: 1,
+                    active_configs: 1,
+                    platform_usage: {
+                        github: 1,
+                        huggingface: 1,
+                        ollama: 1
+                    },
+                    security_levels: {
+                        standard: 1
+                    }
+                },
+                credentials: {
+                    total_credentials: 3,
+                    active_credentials: 3,
+                    expired_credentials: 0,
+                    unique_users: 1,
+                    platforms: {
+                        github: 1,
+                        huggingface: 1,
+                        ollama: 1
+                    }
+                }
+            };
+        }
+
+        if (endpoint.includes('/integrations/config/health')) {
+            return {
+                status: 'healthy',
+                components: {
+                    credential_storage: 'healthy',
+                    configuration_storage: 'healthy',
+                    encryption: 'healthy'
+                },
+                last_check: new Date().toISOString()
+            };
+        }
+
+        // Enhanced Security API mock responses
+        if (endpoint.includes('/integrations/security/scan') && method === 'POST') {
+            return {
+                assessment_id: 'sec_' + Date.now(),
+                content_id: 'test_content_123',
+                platform: 'github',
+                timestamp: new Date().toISOString(),
+                security_passed: true,
+                overall_risk_level: 'low',
+                scan_duration: 2.5,
+                vulnerability_scan: {
+                    completed: true,
+                    risk_level: 'low',
+                    vulnerabilities_found: 0,
+                    scan_method: 'pattern_based'
+                },
+                license_scan: {
+                    completed: true,
+                    compliant: true,
+                    license_type: 'permissive',
+                    issues_found: 0
+                },
+                threat_scan: {
+                    completed: true,
+                    threat_level: 'none',
+                    threats_found: 0,
+                    scan_method: 'comprehensive'
+                },
+                sandbox_scan: {
+                    completed: true,
+                    success: true,
+                    execution_time: 1.2,
+                    security_events: 0,
+                    exit_code: 0
+                },
+                issues: [],
+                warnings: ['Content contains network requests'],
+                recommendations: ['Content passed security validation', 'All security scans completed successfully'],
+                scans_completed: ['vulnerability_scan', 'license_scan', 'threat_scan', 'sandbox_execution'],
+                scans_failed: []
+            };
+        }
+
+        if (endpoint.includes('/integrations/security/events/recent')) {
+            return [
+                {
+                    event_id: 'evt_001',
+                    event_type: 'vulnerability_scan',
+                    level: 'info',
+                    user_id: this.currentUserId,
+                    platform: 'github',
+                    description: 'Vulnerability scan completed for content test_repo',
+                    timestamp: new Date(Date.now() - 3600000).toISOString(),
+                    metadata: {
+                        content_id: 'test_repo',
+                        vulnerabilities_found: 0,
+                        risk_level: 'low'
+                    }
+                },
+                {
+                    event_id: 'evt_002',
+                    event_type: 'threat_detection',
+                    level: 'warning',
+                    user_id: this.currentUserId,
+                    platform: 'huggingface',
+                    description: 'Suspicious pattern detected in model weights',
+                    timestamp: new Date(Date.now() - 7200000).toISOString(),
+                    metadata: {
+                        content_id: 'suspicious_model',
+                        threat_level: 'medium'
+                    }
+                },
+                {
+                    event_id: 'evt_003',
+                    event_type: 'sandbox_execution',
+                    level: 'info',
+                    user_id: this.currentUserId,
+                    platform: 'ollama',
+                    description: 'Sandbox execution for content local_model',
+                    timestamp: new Date(Date.now() - 10800000).toISOString(),
+                    metadata: {
+                        content_id: 'local_model',
+                        success: true,
+                        execution_time: 0.8
+                    }
+                }
+            ];
+        }
+
+        if (endpoint.includes('/integrations/security/stats')) {
+            return {
+                total_assessments: 150,
+                assessments_passed: 142,
+                assessments_failed: 8,
+                security_events: {
+                    info: 120,
+                    warning: 25,
+                    error: 4,
+                    critical: 1
+                },
+                threat_levels: {
+                    none: 90,
+                    low: 40,
+                    medium: 15,
+                    high: 4,
+                    critical: 1
+                },
+                risk_levels: {
+                    none: 75,
+                    low: 50,
+                    medium: 20,
+                    high: 4,
+                    critical: 1
+                },
+                last_updated: new Date().toISOString()
+            };
+        }
+
+        if (endpoint.includes('/integrations/security/health')) {
+            return {
+                status: 'healthy',
+                components: {
+                    vulnerability_scanner: 'healthy',
+                    license_scanner: 'healthy',
+                    threat_detector: 'healthy',
+                    enhanced_sandbox: 'healthy',
+                    audit_logger: 'healthy',
+                    security_orchestrator: 'healthy'
+                },
+                last_check: new Date().toISOString(),
+                security_policies_active: true
+            };
+        }
+
+        if (endpoint.includes('/integrations/security/policies')) {
+            if (method === 'POST') {
+                return {
+                    message: 'Updated 3 security policies',
+                    updated_policies: {
+                        require_license_compliance: true,
+                        block_high_risk_vulnerabilities: true,
+                        block_medium_risk_threats: false
+                    }
+                };
+            } else {
+                return {
+                    policies: {
+                        require_license_compliance: true,
+                        block_high_risk_vulnerabilities: true,
+                        block_medium_risk_threats: true,
+                        require_sandbox_validation: true,
+                        auto_quarantine_threats: true
+                    },
+                    last_updated: new Date().toISOString()
+                };
+            }
+        }
+
         // Default mock response
         return {
             success: true,
@@ -971,6 +1400,230 @@ class PRSMAPIClient {
         this.reconnectAttempts = 0;
         
         console.log('✅ PRSM API client cleanup complete');
+    }
+
+    // === Integration Layer API Methods ===
+
+    async registerConnector(platform, credentials) {
+        const requestData = {
+            platform: platform,
+            oauth_credentials: credentials.oauth_credentials || null,
+            api_key: credentials.api_key || null,
+            custom_settings: credentials.custom_settings || {}
+        };
+
+        return await this.makeRequest('/integrations/connectors/register', {
+            method: 'POST',
+            body: JSON.stringify(requestData)
+        });
+    }
+
+    async getConnectorsHealth() {
+        return await this.makeRequest('/integrations/connectors/health');
+    }
+
+    async getConnectorStatus(platform) {
+        return await this.makeRequest(`/integrations/connectors/${platform}/status`);
+    }
+
+    async searchContent(query, platforms = null, contentType = 'model', limit = 10, filters = null) {
+        const searchData = {
+            query: query,
+            platforms: platforms,
+            content_type: contentType,
+            limit: limit,
+            filters: filters
+        };
+
+        return await this.makeRequest('/integrations/search', {
+            method: 'POST',
+            body: JSON.stringify(searchData)
+        });
+    }
+
+    async getContentMetadata(platform, externalId) {
+        const encodedId = encodeURIComponent(externalId);
+        return await this.makeRequest(`/integrations/content/${platform}/${encodedId}/metadata`);
+    }
+
+    async validateContentLicense(platform, externalId) {
+        const encodedId = encodeURIComponent(externalId);
+        return await this.makeRequest(`/integrations/content/${platform}/${encodedId}/license`);
+    }
+
+    async submitImportRequest(importData) {
+        return await this.makeRequest('/integrations/import', {
+            method: 'POST',
+            body: JSON.stringify(importData)
+        });
+    }
+
+    async getImportStatus(requestId) {
+        return await this.makeRequest(`/integrations/import/${requestId}/status`);
+    }
+
+    async getImportResult(requestId) {
+        return await this.makeRequest(`/integrations/import/${requestId}/result`);
+    }
+
+    async cancelImportRequest(requestId) {
+        return await this.makeRequest(`/integrations/import/${requestId}`, {
+            method: 'DELETE'
+        });
+    }
+
+    async getIntegrationHealth() {
+        return await this.makeRequest('/integrations/health');
+    }
+
+    async getIntegrationStats() {
+        return await this.makeRequest('/integrations/stats');
+    }
+
+    async getActiveImports() {
+        return await this.makeRequest('/integrations/imports/active');
+    }
+
+    async getImportHistory(limit = 20, offset = 0) {
+        return await this.makeRequest(`/integrations/imports/history?limit=${limit}&offset=${offset}`);
+    }
+
+    // === Configuration Management API Methods ===
+
+    async storeCredential(platform, credentialData) {
+        const requestData = {
+            platform: platform,
+            ...credentialData
+        };
+
+        return await this.makeRequest('/integrations/config/credentials', {
+            method: 'POST',
+            body: JSON.stringify(requestData)
+        });
+    }
+
+    async listCredentials(platform = null, includeExpired = false) {
+        const params = new URLSearchParams();
+        if (platform) params.append('platform', platform);
+        if (includeExpired) params.append('include_expired', 'true');
+
+        return await this.makeRequest(`/integrations/config/credentials?${params}`);
+    }
+
+    async validateCredential(credentialId) {
+        return await this.makeRequest(`/integrations/config/credentials/${credentialId}/validate`);
+    }
+
+    async deleteCredential(credentialId) {
+        return await this.makeRequest(`/integrations/config/credentials/${credentialId}`, {
+            method: 'DELETE'
+        });
+    }
+
+    async cleanupExpiredCredentials() {
+        return await this.makeRequest('/integrations/config/credentials/cleanup', {
+            method: 'POST'
+        });
+    }
+
+    async getUserConfiguration() {
+        return await this.makeRequest('/integrations/config/settings');
+    }
+
+    async updateUserConfiguration(configData) {
+        return await this.makeRequest('/integrations/config/settings', {
+            method: 'PUT',
+            body: JSON.stringify(configData)
+        });
+    }
+
+    async getPlatformConfiguration(platform) {
+        return await this.makeRequest(`/integrations/config/settings/platforms/${platform}`);
+    }
+
+    async updatePlatformConfiguration(platform, configData) {
+        return await this.makeRequest(`/integrations/config/settings/platforms/${platform}`, {
+            method: 'PUT',
+            body: JSON.stringify(configData)
+        });
+    }
+
+    async validateConfiguration(platform = null) {
+        const params = platform ? `?platform=${platform}` : '';
+        return await this.makeRequest(`/integrations/config/settings/validate${params}`);
+    }
+
+    async exportConfiguration() {
+        return await this.makeRequest('/integrations/config/settings/export');
+    }
+
+    async importConfiguration(configData, merge = true) {
+        return await this.makeRequest(`/integrations/config/settings/import?merge=${merge}`, {
+            method: 'POST',
+            body: JSON.stringify(configData)
+        });
+    }
+
+    async resetConfiguration() {
+        return await this.makeRequest('/integrations/config/settings/reset', {
+            method: 'POST'
+        });
+    }
+
+    async getConfigurationStats() {
+        return await this.makeRequest('/integrations/config/stats');
+    }
+
+    async getConfigurationHealth() {
+        return await this.makeRequest('/integrations/config/health');
+    }
+
+    // === Enhanced Security API Methods ===
+
+    async performSecurityScan(contentPath, contentId, platform, metadata, enableSandbox = true) {
+        const requestData = {
+            content_path: contentPath,
+            content_id: contentId,
+            platform: platform,
+            metadata: metadata,
+            enable_sandbox: enableSandbox
+        };
+
+        return await this.makeRequest('/integrations/security/scan', {
+            method: 'POST',
+            body: JSON.stringify(requestData)
+        });
+    }
+
+    async getSecurityAssessment(assessmentId) {
+        return await this.makeRequest(`/integrations/security/assessment/${assessmentId}`);
+    }
+
+    async getRecentSecurityEvents(limit = 50, level = null) {
+        const params = new URLSearchParams();
+        params.append('limit', limit.toString());
+        if (level) params.append('level', level);
+
+        return await this.makeRequest(`/integrations/security/events/recent?${params}`);
+    }
+
+    async getSecurityStatistics() {
+        return await this.makeRequest('/integrations/security/stats');
+    }
+
+    async getSecurityHealth() {
+        return await this.makeRequest('/integrations/security/health');
+    }
+
+    async getSecurityPolicies() {
+        return await this.makeRequest('/integrations/security/policies');
+    }
+
+    async updateSecurityPolicies(policies) {
+        return await this.makeRequest('/integrations/security/policies/update', {
+            method: 'POST',
+            body: JSON.stringify(policies)
+        });
     }
 
     // Check WebSocket health and reconnect if needed

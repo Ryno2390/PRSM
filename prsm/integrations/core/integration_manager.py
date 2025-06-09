@@ -383,8 +383,12 @@ class IntegrationManager:
         start_time = time.time()
         
         try:
-            # Execute import through connector
+            # Phase 1: Execute initial import through connector
             result = await connector.import_content(request)
+            
+            # Phase 2: Enhanced security scanning if required
+            if request.security_scan_required and result.status == ImportStatus.COMPLETED:
+                result = await self._perform_security_scanning(request, result)
             
             # Update statistics
             self.stats.total_imports += 1
@@ -443,6 +447,72 @@ class IntegrationManager:
         except Exception as e:
             print(f"⚠️ Search failed for {connector.platform.value}: {e}")
             return []
+    
+    async def _perform_security_scanning(self, request: ImportRequest, result: ImportResult) -> ImportResult:
+        """Perform comprehensive security scanning on imported content"""
+        try:
+            # Import security orchestrator (dynamic import to avoid circular dependencies)
+            from ..security.security_orchestrator import security_orchestrator
+            
+            print(f"🔍 Starting security scan for content: {request.source.external_id}")
+            
+            # Perform comprehensive security assessment
+            security_assessment = await security_orchestrator.comprehensive_security_assessment(
+                content_path=result.local_path,
+                metadata=result.metadata,
+                user_id=request.user_id,
+                platform=request.source.platform.value,
+                content_id=request.source.external_id,
+                enable_sandbox=True
+            )
+            
+            # Update import result with security information
+            result.security_scan_results = {
+                "assessment_id": security_assessment.assessment_id,
+                "security_passed": security_assessment.security_passed,
+                "overall_risk_level": security_assessment.overall_risk_level.value,
+                "issues": security_assessment.issues,
+                "warnings": security_assessment.warnings,
+                "recommendations": security_assessment.recommendations,
+                "scan_duration": security_assessment.scan_duration,
+                "scans_completed": security_assessment.scans_completed,
+                "scans_failed": security_assessment.scans_failed
+            }
+            
+            # Block import if security scan failed
+            if not security_assessment.security_passed:
+                print(f"🚨 Security scan failed - blocking import: {security_assessment.issues}")
+                result.status = ImportStatus.SECURITY_BLOCKED
+                result.error_details = f"Security validation failed: {'; '.join(security_assessment.issues[:3])}"
+                
+                # Clean up imported content if security failed
+                await self._cleanup_blocked_content(result.local_path)
+            else:
+                print(f"✅ Security scan passed for content: {request.source.external_id}")
+            
+            return result
+            
+        except Exception as e:
+            print(f"❌ Security scanning failed: {e}")
+            # If security scanning fails, err on the side of caution
+            result.status = ImportStatus.SECURITY_ERROR
+            result.error_details = f"Security scan error: {str(e)}"
+            return result
+    
+    async def _cleanup_blocked_content(self, content_path: str) -> None:
+        """Clean up content that was blocked by security scan"""
+        try:
+            import os
+            import shutil
+            
+            if os.path.exists(content_path):
+                if os.path.isfile(content_path):
+                    os.remove(content_path)
+                elif os.path.isdir(content_path):
+                    shutil.rmtree(content_path)
+                print(f"🧹 Cleaned up blocked content: {content_path}")
+        except Exception as e:
+            print(f"⚠️ Failed to cleanup blocked content: {e}")
     
     async def _distribute_creator_rewards(self, result: ImportResult) -> None:
         """Distribute FTNS rewards to content creators"""

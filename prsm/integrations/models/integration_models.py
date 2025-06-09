@@ -44,6 +44,8 @@ class ImportStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    SECURITY_BLOCKED = "security_blocked"
+    SECURITY_ERROR = "security_error"
 
 
 class SecurityRisk(str, Enum):
