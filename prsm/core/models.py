@@ -43,6 +43,17 @@ Advanced Tokenomics:
 - MarketplaceListing: Model rental marketplace integration
 - RoyaltyPayment: Content creator compensation system
 
+Institutional Dynamics (NEW):
+- InstitutionalParticipant: Enterprise-scale participants with tiers and quotas
+- ProvenanceNode: Strategic provenance tracking for competitive incentives
+- ConcentrationMetrics: Anti-monopoly monitoring and enforcement
+- RevenueDistribution: Strategic revenue sharing to drive adoption
+
+Integration Layer:
+- IntegrationSource: External platform content with security assessments
+- SecurityScanResult: Comprehensive security validation results
+- CredentialData: Encrypted storage for API keys and OAuth tokens
+
 All models follow the PRSMBaseModel pattern with:
 - Consistent UUID-based identification
 - Timestamp tracking for audit trails  

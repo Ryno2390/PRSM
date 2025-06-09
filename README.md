@@ -23,12 +23,14 @@ PRSM represents the first **production-ready implementation** of:
 
 ## 🏗️ Unified Architecture
 
-PRSM consists of **9 integrated subsystems** working together as a unified platform:
+PRSM consists of **10 integrated subsystems** working together as a unified platform designed for institutional-scale adoption:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        PRSM UNIFIED SYSTEM                      │
 ├─────────────────────────────────────────────────────────────────┤
+│  🏛️ Institutional Gateway (Enterprise Onboarding + Anti-Monopoly)│
+│    ↓                                                           │
 │  🔗 Integration Layer (Platform Connectors + Security)         │
 │    ↓                                                           │
 │  🧠 NWTN Orchestrator (Core AGI Coordination)                  │
@@ -41,9 +43,9 @@ PRSM consists of **9 integrated subsystems** working together as a unified platf
 │    ↓                                                           │
 │  🌐 P2P Federation (ModelNetwork→Consensus→Validation)         │
 │    ↓                                                           │
-│  💰 Advanced Tokenomics (EnhancedFTNS→Marketplace→Incentives)  │
+│  💰 Strategic Tokenomics (Provenance→Revenue→Incentives)       │
 │    ↓                                                           │
-│  🗳️ Governance System (TokenVoting→ProposalMgmt→Democracy)     │
+│  🗳️ Anti-Monopoly Governance (ConstitutionalLimits→Democracy)  │
 │    ↓                                                           │
 │  🔄 Recursive Self-Improvement (Monitor→Proposals→Evolution)   │
 └─────────────────────────────────────────────────────────────────┘
@@ -54,6 +56,9 @@ PRSM consists of **9 integrated subsystems** working together as a unified platf
 **Current Version: 1.0.0-beta** 
 
 ### ✅ **Production Ready**
+- **Institutional Gateway**: Enterprise-scale onboarding with anti-monopoly protections
+- **Strategic Provenance**: Competitive revenue sharing to incentivize major AI lab participation
+- **Anti-Monopoly Governance**: Constitutional limits and automated enforcement mechanisms
 - **Integration Layer**: GitHub, Hugging Face, Ollama connectors with enterprise security
 - **Enhanced Security**: Multi-layered threat detection, vulnerability scanning, sandbox execution
 - **Configuration Management**: Encrypted credential storage and platform management
@@ -77,6 +82,21 @@ PRSM consists of **9 integrated subsystems** working together as a unified platf
 - **Cross-Domain Transfer**: Multi-field knowledge integration
 
 ## 🎯 Core Capabilities
+
+### **🏛️ Institutional Gateway & Strategic Dynamics**
+Enterprise-scale onboarding designed for the inevitable transition to institutional dominance:
+- **Tiered Participation System** - Hobbyist (10%) → Startup (20%) → Enterprise (45%) → Frontier Labs (25%)
+- **Anti-Monopoly Constitutional Framework** - 15% single entity limit with automated enforcement
+- **Strategic Revenue Incentives** - First-mover advantages and competitive pressure dynamics
+- **Competitive Firewalls** - Isolation between direct competitors (OpenAI/Anthropic/DeepMind)
+- **Early Adopter Bonuses** - 2x royalty multipliers for first movers, 1.5x for early adopters
+- **Provenance Revenue Sharing** - 8-15% royalties creating prisoner's dilemma for major labs
+- **Concentration Monitoring** - Real-time Gini coefficient and Herfindahl index tracking
+- **Democratic Safeguards** - Diversity requirements for supermajority decisions
+- **Micro-Node Empowerment** - Logarithmic rewards curve protecting individual researchers (2x multiplier)
+- **Liquidity-Provenance Enforcement** - Anti-hoarding mechanisms requiring genuine accessibility
+- **Quadratic Voting** - Prevents plutocracy while enabling efficient governance
+- **Federated Councils** - Domain experts, geographic regions, and institutional tiers
 
 ### **🔗 Integration Layer**
 Secure connection to external AI/ML platforms with enterprise-grade security:
