@@ -174,6 +174,128 @@ class InstitutionalGateway:
             "next_target_institutions": self._identify_target_institutions()
         }
     
+    async def integrate_with_cdn_infrastructure(self, participant_id: UUID) -> Dict[str, Any]:
+        """
+        Integrate institutional participant with PRSM CDN infrastructure,
+        enabling enterprise nodes to participate in decentralized content delivery.
+        """
+        
+        if participant_id not in self.participants:
+            raise ValueError(f"Participant {participant_id} not found")
+        
+        participant = self.participants[participant_id]
+        
+        # Import CDN components
+        from ..infrastructure.cdn_layer import prsm_cdn, NodeType, BandwidthMetrics, GeographicLocation
+        from ..infrastructure.sybil_resistance import sybil_resistance
+        
+        # Determine CDN node type based on institutional tier
+        cdn_node_type_mapping = {
+            InstitutionTier.FRONTIER_LAB: NodeType.CORE_PRSM,
+            InstitutionTier.ENTERPRISE: NodeType.ENTERPRISE_GATEWAY,
+            InstitutionTier.STARTUP: NodeType.EDGE_NODE,
+            InstitutionTier.HOBBYIST: NodeType.MICRO_CACHE
+        }
+        
+        node_type = cdn_node_type_mapping[participant.tier]
+        
+        # Estimate geographic location (would be provided during registration in production)
+        location = GeographicLocation(
+            continent="North America",
+            country="United States", 
+            region="West Coast",
+            latitude=37.7749,
+            longitude=-122.4194
+        )
+        
+        # Create bandwidth metrics based on institutional capacity
+        bandwidth_metrics = BandwidthMetrics(
+            download_mbps=min(participant.capacity.bandwidth_gbps * 1000, 100000),  # Cap at 100 Gbps
+            upload_mbps=min(participant.capacity.bandwidth_gbps * 1000 * 0.8, 80000),  # 80% of download
+            latency_ms=max(1.0, 50.0 / (participant.capacity.bandwidth_gbps + 1)),  # Better capacity = lower latency
+            packet_loss_rate=max(0.001, 0.01 / (participant.capacity.compute_tflops / 1000 + 1)),  # Better compute = better infrastructure
+            uptime_percentage=min(0.9999, 0.95 + (participant.tier.value == "frontier_lab") * 0.05),  # Tier-based uptime
+            geographic_location=location
+        )
+        
+        # Register CDN node
+        cdn_node = await prsm_cdn.register_cdn_node(
+            node_type=node_type,
+            operator_id=participant_id,
+            storage_capacity_gb=participant.capacity.storage_petabytes * 1000 * 1000,  # Convert PB to GB
+            bandwidth_metrics=bandwidth_metrics
+        )
+        
+        # Fast-track validation for institutional participants
+        institutional_voucher = f"{participant.institution_name.lower().replace(' ', '_')}@institutional.prsm.ai"
+        
+        validation_status = await sybil_resistance.validate_new_node(
+            node_id=cdn_node.node_id,
+            claimed_capabilities={
+                "bandwidth_mbps": bandwidth_metrics.download_mbps,
+                "storage_gb": cdn_node.storage_capacity_gb,
+                "institutional_tier": participant.tier.value,
+                "geographic_location": f"{location.continent},{location.country},{location.region}"
+            },
+            institutional_voucher=institutional_voucher
+        )
+        
+        # Create enterprise-specific CDN configuration
+        enterprise_config = {
+            "dedicated_capacity_reserved": participant.capacity.storage_petabytes * 0.1,  # Reserve 10% for PRSM
+            "priority_bandwidth_allocation": participant.priority_access_level,
+            "competitive_firewall_active": participant.competitive_firewall,
+            "sla_guarantees": participant.sla_guarantees,
+            "revenue_sharing_model": {
+                "base_ftns_per_gb": 0.01 * participant.priority_access_level,  # Higher tier = better rates
+                "institutional_bonus_multiplier": {
+                    InstitutionTier.FRONTIER_LAB: 2.5,
+                    InstitutionTier.ENTERPRISE: 2.0,
+                    InstitutionTier.STARTUP: 1.5,
+                    InstitutionTier.HOBBYIST: 1.0
+                }[participant.tier],
+                "early_adopter_bonus": 1.5 if len(self.participants) <= 5 else 1.0  # First 5 get bonus
+            }
+        }
+        
+        print(f"🌐 CDN integration completed for {participant.institution_name}")
+        print(f"   - CDN Node ID: {cdn_node.node_id}")
+        print(f"   - Node Type: {node_type}")
+        print(f"   - Storage Capacity: {cdn_node.storage_capacity_gb:,.0f} GB")
+        print(f"   - Bandwidth: {bandwidth_metrics.download_mbps:,.0f} Mbps")
+        print(f"   - Validation Status: {validation_status}")
+        
+        return {
+            "cdn_node_id": cdn_node.node_id,
+            "node_type": node_type,
+            "validation_status": validation_status,
+            "enterprise_config": enterprise_config,
+            "estimated_monthly_ftns_earnings": self._estimate_cdn_earnings(participant, enterprise_config),
+            "integration_timestamp": datetime.now(timezone.utc)
+        }
+    
+    def _estimate_cdn_earnings(self, participant: InstitutionalParticipant, enterprise_config: Dict[str, Any]) -> float:
+        """Estimate monthly FTNS earnings from CDN participation"""
+        
+        # Base calculation: storage * usage_rate * ftns_per_gb * days_per_month
+        base_storage_gb = participant.capacity.storage_petabytes * 1000 * 1000 * 0.1  # 10% utilization
+        usage_factor = {
+            InstitutionTier.FRONTIER_LAB: 0.8,  # High usage due to popularity
+            InstitutionTier.ENTERPRISE: 0.6,
+            InstitutionTier.STARTUP: 0.4,
+            InstitutionTier.HOBBYIST: 0.2
+        }[participant.tier]
+        
+        daily_gb_served = base_storage_gb * usage_factor
+        ftns_per_gb = enterprise_config["revenue_sharing_model"]["base_ftns_per_gb"]
+        institutional_multiplier = enterprise_config["revenue_sharing_model"]["institutional_bonus_multiplier"]
+        early_adopter_bonus = enterprise_config["revenue_sharing_model"]["early_adopter_bonus"]
+        
+        monthly_earnings = (daily_gb_served * ftns_per_gb * institutional_multiplier * 
+                          early_adopter_bonus * 30)  # 30 days
+        
+        return float(monthly_earnings)
+    
     def _assess_institutional_tier(self, capacity: InstitutionalCapacity) -> InstitutionTier:
         """Assess appropriate tier based on institutional capacity"""
         
