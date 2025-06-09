@@ -34,6 +34,7 @@ from prsm.integrations.core.integration_manager import IntegrationManager
 from prsm.integrations.core.base_connector import BaseConnector, ConnectorStatus
 from prsm.integrations.connectors.github_connector import GitHubConnector
 from prsm.integrations.connectors.huggingface_connector import HuggingFaceConnector
+from prsm.integrations.connectors.ollama_connector import OllamaConnector
 from prsm.integrations.security.sandbox_manager import SandboxManager
 from prsm.integrations.models.integration_models import (
     IntegrationPlatform, ConnectorConfig, IntegrationSource,
@@ -60,6 +61,16 @@ def mock_hf_config():
         platform=IntegrationPlatform.HUGGINGFACE,
         user_id="test_user",
         api_key="test_api_key"
+    )
+
+
+@pytest.fixture
+def mock_ollama_config():
+    """Mock Ollama connector configuration"""
+    return ConnectorConfig(
+        platform=IntegrationPlatform.OLLAMA,
+        user_id="test_user",
+        custom_settings={"base_url": "http://localhost:11434"}
     )
 
 
@@ -100,6 +111,24 @@ def sample_hf_model():
         "lastModified": "2023-12-01T14:30:00Z",
         "cardData": {"license": "mit"},
         "config": {"model_type": "gpt2"}
+    }
+
+
+@pytest.fixture
+def sample_ollama_model():
+    """Sample Ollama model metadata"""
+    return {
+        "name": "llama2:7b",
+        "size": 3825819519,
+        "digest": "sha256:8fdf52f7",
+        "modified_at": "2024-01-15T10:30:00Z",
+        "details": {
+            "family": "llama",
+            "families": ["llama"],
+            "format": "gguf",
+            "parameter_size": "7B",
+            "quantization_level": "Q4_0"
+        }
     }
 
 
@@ -241,6 +270,95 @@ class TestGitHubConnector:
             assert license_info["type"] == "copyleft"
             assert license_info["compliant"] is False
             assert len(license_info["issues"]) > 0
+
+
+# === Unit Tests - Ollama Connector ===
+
+class TestOllamaConnector:
+    """Test Ollama connector functionality"""
+    
+    @pytest.mark.asyncio
+    async def test_authentication_local(self, mock_ollama_config):
+        """Test Ollama local authentication"""
+        connector = OllamaConnector(mock_ollama_config)
+        
+        with patch.object(connector, '_test_connection', new_callable=AsyncMock) as mock_test:
+            mock_test.return_value = True
+            
+            result = await connector.authenticate()
+            
+            assert result is True
+            assert connector.authenticated_user == "local"
+    
+    @pytest.mark.asyncio
+    async def test_search_local_models(self, mock_ollama_config, sample_ollama_model):
+        """Test Ollama local model search"""
+        connector = OllamaConnector(mock_ollama_config)
+        
+        # Mock model data
+        from prsm.integrations.connectors.ollama_connector import OllamaModelInfo
+        connector.available_models = [
+            OllamaModelInfo(
+                name="llama2:7b",
+                tag="7b",
+                size=3825819519,
+                digest="sha256:8fdf52f7",
+                details={"parameter_size": "7B"}
+            )
+        ]
+        
+        with patch.object(connector, '_refresh_available_models', new_callable=AsyncMock):
+            results = await connector.search_content("llama", "model", limit=1)
+            
+            assert len(results) == 1
+            assert results[0].platform == IntegrationPlatform.OLLAMA
+            assert results[0].external_id == "llama2:7b"
+            assert results[0].display_name == "llama2"
+            assert results[0].owner_id == "local"
+    
+    @pytest.mark.asyncio
+    async def test_get_model_metadata_local(self, mock_ollama_config):
+        """Test getting local model metadata"""
+        connector = OllamaConnector(mock_ollama_config)
+        
+        mock_response = {
+            "template": "{{ .System }}\n\n{{ .Prompt }}",
+            "parameters": {"temperature": 0.8},
+            "details": {"parameter_size": "7B"},
+            "license": "Apache License 2.0"
+        }
+        
+        with patch.object(connector, '_make_api_request', new_callable=AsyncMock) as mock_api:
+            mock_api.return_value = mock_response
+            
+            # Add model to available models
+            from prsm.integrations.connectors.ollama_connector import OllamaModelInfo
+            connector.available_models = [
+                OllamaModelInfo(name="llama2:7b", tag="7b", size=3825819519)
+            ]
+            
+            metadata = await connector.get_content_metadata("llama2:7b")
+            
+            assert metadata["type"] == "local_model"
+            assert metadata["name"] == "llama2:7b"
+            assert metadata["platform"] == "ollama"
+            assert metadata["size_gb"] == 3.57
+    
+    @pytest.mark.asyncio
+    async def test_license_validation_local_model(self, mock_ollama_config):
+        """Test license validation for local Ollama model"""
+        connector = OllamaConnector(mock_ollama_config)
+        
+        with patch.object(connector, 'get_content_metadata', new_callable=AsyncMock) as mock_meta:
+            mock_meta.return_value = {
+                "license": "Apache License 2.0"
+            }
+            
+            license_info = await connector.validate_license("llama2:7b")
+            
+            assert license_info["type"] == "permissive"
+            assert license_info["compliant"] is True
+            assert "Local Ollama model" in license_info["note"]
 
 
 # === Unit Tests - Hugging Face Connector ===

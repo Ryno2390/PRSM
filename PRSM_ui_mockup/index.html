@@ -124,6 +124,7 @@
                      <button class="nav-tab-btn active" data-target="tasks-content"><i class="fas fa-tasks"></i><span>Tasks</span></button>
                      <button class="nav-tab-btn" data-target="info-space-content"><i class="fas fa-lightbulb"></i><span>Information Space</span></button>
                      <button class="nav-tab-btn" data-target="my-files-content"><i class="fas fa-folder-open"></i><span>My Files</span></button>
+                     <button class="nav-tab-btn" data-target="integrations-content"><i class="fas fa-plug"></i><span>Integrations</span></button>
                      <button class="nav-tab-btn" data-target="tokenomics-content"><i class="fas fa-coins"></i><span>Tokenomics</span></button>
                  </nav>
                  <div class="header-controls">
@@ -179,6 +180,125 @@
                             <li>File: analysis.ipynb <button class="inline-btn">Make Public (IPFS)</button> <span class="file-status">(Core AI Access Only)</span></li>
                         </ul>
                         <button>Upload File</button> <button>Connect Source</button>
+                    </div>
+                </section>
+
+                <!-- Integrations Section -->
+                <section id="integrations-content" class="content-section">
+                    <h4>Platform Integrations</h4>
+                    <div class="integrations-container">
+                        <!-- Platform Connectors -->
+                        <div class="integration-section">
+                            <h5><i class="fas fa-plug"></i> Connected Platforms</h5>
+                            <div class="platform-connectors">
+                                <div class="platform-card" data-platform="github">
+                                    <div class="platform-header">
+                                        <i class="fab fa-github"></i>
+                                        <span class="platform-name">GitHub</span>
+                                        <span class="connection-status" id="github-status">Not Connected</span>
+                                    </div>
+                                    <div class="platform-actions">
+                                        <button class="connect-btn" id="github-connect-btn" onclick="connectPlatform('github')">Connect</button>
+                                        <button class="disconnect-btn hidden" id="github-disconnect-btn" onclick="disconnectPlatform('github')">Disconnect</button>
+                                    </div>
+                                </div>
+                                
+                                <div class="platform-card" data-platform="huggingface">
+                                    <div class="platform-header">
+                                        <i class="fas fa-brain"></i>
+                                        <span class="platform-name">Hugging Face</span>
+                                        <span class="connection-status" id="hf-status">Not Connected</span>
+                                    </div>
+                                    <div class="platform-actions">
+                                        <button class="connect-btn" id="hf-connect-btn" onclick="connectPlatform('huggingface')">Connect</button>
+                                        <button class="disconnect-btn hidden" id="hf-disconnect-btn" onclick="disconnectPlatform('huggingface')">Disconnect</button>
+                                    </div>
+                                </div>
+                                
+                                <div class="platform-card" data-platform="ollama">
+                                    <div class="platform-header">
+                                        <i class="fas fa-server"></i>
+                                        <span class="platform-name">Ollama (Local)</span>
+                                        <span class="connection-status" id="ollama-status">Available</span>
+                                    </div>
+                                    <div class="platform-actions">
+                                        <button class="connect-btn" id="ollama-connect-btn" onclick="connectPlatform('ollama')">Connect</button>
+                                        <button class="disconnect-btn hidden" id="ollama-disconnect-btn" onclick="disconnectPlatform('ollama')">Disconnect</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Content Search -->
+                        <div class="integration-section">
+                            <h5><i class="fas fa-search"></i> Search External Content</h5>
+                            <div class="search-container">
+                                <div class="search-form">
+                                    <input type="text" id="content-search-input" placeholder="Search models, repositories, datasets..." class="search-input">
+                                    <select id="content-type-select" class="search-select">
+                                        <option value="model">Models</option>
+                                        <option value="repository">Repositories</option>
+                                        <option value="dataset">Datasets</option>
+                                        <option value="space">Spaces</option>
+                                    </select>
+                                    <select id="platform-select" class="search-select">
+                                        <option value="">All Platforms</option>
+                                        <option value="github">GitHub</option>
+                                        <option value="huggingface">Hugging Face</option>
+                                        <option value="ollama">Ollama</option>
+                                    </select>
+                                    <button id="search-content-btn" onclick="searchContent()" class="search-btn">
+                                        <i class="fas fa-search"></i> Search
+                                    </button>
+                                </div>
+                                <div id="search-results" class="search-results hidden">
+                                    <!-- Search results will be populated here -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Import History -->
+                        <div class="integration-section">
+                            <h5><i class="fas fa-history"></i> Import History</h5>
+                            <div class="import-history">
+                                <div class="import-controls">
+                                    <button onclick="refreshImportHistory()" class="refresh-btn">
+                                        <i class="fas fa-sync-alt"></i> Refresh
+                                    </button>
+                                    <span class="import-stats" id="import-stats">0 imports total</span>
+                                </div>
+                                <div id="import-history-list" class="import-list">
+                                    <div class="empty-state">
+                                        <i class="fas fa-inbox"></i>
+                                        <p>No imports yet. Start by searching and importing content from connected platforms.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- System Health -->
+                        <div class="integration-section">
+                            <h5><i class="fas fa-heartbeat"></i> System Health</h5>
+                            <div class="health-dashboard">
+                                <div class="health-summary">
+                                    <div class="health-indicator" id="overall-health">
+                                        <span class="health-status unknown">Unknown</span>
+                                        <span class="health-label">Overall Status</span>
+                                    </div>
+                                    <div class="health-indicator" id="connector-health">
+                                        <span class="health-status">0/0</span>
+                                        <span class="health-label">Connectors Healthy</span>
+                                    </div>
+                                    <div class="health-indicator" id="active-imports">
+                                        <span class="health-status">0</span>
+                                        <span class="health-label">Active Imports</span>
+                                    </div>
+                                </div>
+                                <button onclick="checkSystemHealth()" class="health-check-btn">
+                                    <i class="fas fa-stethoscope"></i> Check Health
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </section>
 

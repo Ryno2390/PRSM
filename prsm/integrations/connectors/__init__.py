@@ -17,8 +17,10 @@ Available Connectors:
 
 from .github_connector import GitHubConnector
 from .huggingface_connector import HuggingFaceConnector
+from .ollama_connector import OllamaConnector
 
 __all__ = [
     "GitHubConnector",
-    "HuggingFaceConnector"
+    "HuggingFaceConnector",
+    "OllamaConnector"
 ]
