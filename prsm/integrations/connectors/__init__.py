@@ -15,5 +15,10 @@ Available Connectors:
 - Mistral: Mistral AI model integration
 """
 
-# Connectors will be imported as they're implemented
-__all__ = []
+from .github_connector import GitHubConnector
+from .huggingface_connector import HuggingFaceConnector
+
+__all__ = [
+    "GitHubConnector",
+    "HuggingFaceConnector"
+]
