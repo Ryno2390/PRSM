@@ -100,7 +100,7 @@ class CreateProposalRequest(BaseModel):
 
 class CastVoteRequest(BaseModel):
     """Request model for casting votes"""
-    vote: str = Field(..., regex="^(for|against|abstain)$")
+    vote: str = Field(..., pattern="^(for|against|abstain)$")
     rationale: Optional[str] = None
 
 
