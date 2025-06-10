@@ -25,6 +25,11 @@ ipfshttpclient>=0.8.0a2
 py-multiaddr>=0.0.9
 py-multicodec>=0.2.1
 
+# Web3 & Blockchain
+web3>=6.15.0
+eth-account>=0.10.0
+eth-utils>=2.3.0
+
 # AI & ML
 openai>=1.6.0
 anthropic>=0.8.0
