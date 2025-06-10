@@ -20,6 +20,8 @@ from prsm.core.models import (
     FTNSTransaction, TimestampMixin
 )
 from prsm.federation.model_registry import ModelRegistry
+from prsm.agents.routers.marketplace_integration import marketplace_integration
+from prsm.agents.routers.performance_tracker import performance_tracker, MetricType
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -173,6 +175,9 @@ class ModelRouter(BaseAgent):
         self.marketplace_endpoints: List[str] = self._initialize_marketplace_endpoints()
         self.teacher_pool: Dict[str, List[TeacherModel]] = {}  # domain -> teachers
         
+        # Initialize performance tracking
+        self._initialize_performance_tracking()
+        
         logger.info("Enhanced ModelRouter initialized",
                    agent_id=self.agent_id,
                    marketplace_endpoints=len(self.marketplace_endpoints))
@@ -186,6 +191,15 @@ class ModelRouter(BaseAgent):
             "https://api.anthropic.com/models",
             "https://api.cohere.ai/models"
         ]
+    
+    def _initialize_performance_tracking(self):
+        """Initialize performance tracking integration"""
+        try:
+            # Initialize performance tracker asynchronously
+            asyncio.create_task(performance_tracker.initialize())
+            logger.info("Performance tracking integration initialized")
+        except Exception as e:
+            logger.warning("Failed to initialize performance tracking", error=str(e))
     
     async def process(self, input_data: Any, context: Optional[Dict[str, Any]] = None) -> RoutingDecision:
         """
@@ -305,7 +319,7 @@ class ModelRouter(BaseAgent):
         return candidates
     
     async def _discover_local_candidates(self, task_description: str, complexity: float) -> List[ModelCandidate]:
-        """Discover candidates from local model registry"""
+        """Discover candidates from local model registry with performance enhancement"""
         candidates = []
         task_category = await self._categorize_task(task_description)
         
@@ -315,63 +329,123 @@ class ModelRouter(BaseAgent):
         for model_id in specialist_ids:
             model_details = await self.model_registry.get_model_details(model_id)
             if model_details:
+                # Get enhanced performance data
+                performance_profile = await performance_tracker.get_model_performance(model_id)
+                
                 compatibility_score = await self._calculate_compatibility(
                     task_description, model_details, complexity
                 )
+                
+                # Use real performance data if available
+                if performance_profile:
+                    performance_score = performance_profile.accuracy_score or model_details.performance_score
+                    actual_latency = performance_profile.response_time_avg
+                    availability_score = performance_profile.availability_score
+                    
+                    # Check for performance issues
+                    issues = await performance_tracker.detect_performance_issues(model_id)
+                    if issues:
+                        # Reduce scores for models with issues
+                        performance_score *= 0.8
+                        availability_score *= 0.9
+                else:
+                    performance_score = model_details.performance_score
+                    actual_latency = 0.5  # Default for local models
+                    availability_score = 1.0
                 
                 candidate = ModelCandidate(
                     model_id=model_id,
                     name=getattr(model_details, 'name', model_id),
                     specialization=model_details.specialization,
                     source=ModelSource.LOCAL_REGISTRY,
-                    performance_score=model_details.performance_score,
+                    performance_score=performance_score,
                     compatibility_score=compatibility_score,
-                    availability_score=1.0,  # Local models are always available
+                    availability_score=availability_score,
                     cost_score=0.9,  # Local models are cost-effective
-                    latency_score=0.8,  # Local models have good latency
+                    latency_score=self._calculate_latency_score(actual_latency),
                     capabilities=getattr(model_details, 'capabilities', []),
                     limitations=getattr(model_details, 'limitations', [])
                 )
                 candidates.append(candidate)
         
+        logger.debug("Local candidates discovery completed",
+                    task_category=task_category,
+                    candidates_found=len(candidates))
+        
         return candidates
     
     async def _discover_marketplace_candidates(self, task_description: str) -> List[ModelCandidate]:
-        """Discover candidates from marketplace APIs"""
+        """Discover candidates from marketplace APIs using real integrations"""
         candidates = []
         
-        # Simulate marketplace discovery (in production, this would make real API calls)
-        marketplace_models = [
+        try:
+            # Use real marketplace integration
+            marketplace_models = await marketplace_integration.discover_marketplace_models(
+                task_description, limit=10
+            )
+            
+            for marketplace_model in marketplace_models:
+                # Calculate compatibility score for task
+                compatibility_score = await self._calculate_marketplace_compatibility_enhanced(
+                    task_description, marketplace_model
+                )
+                
+                # Convert marketplace model to router candidate
+                candidate = ModelCandidate(
+                    model_id=marketplace_model.model_id,
+                    name=marketplace_model.name,
+                    specialization=marketplace_model.specialization,
+                    source=ModelSource.MARKETPLACE,
+                    performance_score=marketplace_model.performance_score,
+                    compatibility_score=compatibility_score,
+                    availability_score=marketplace_model.availability_score,
+                    cost_score=self._calculate_cost_score(marketplace_model.cost_per_token),
+                    latency_score=self._calculate_latency_score(marketplace_model.estimated_latency),
+                    marketplace_url=marketplace_model.marketplace_url,
+                    cost_per_token=marketplace_model.cost_per_token,
+                    estimated_latency=marketplace_model.estimated_latency,
+                    provider_reputation=marketplace_model.provider_reputation,
+                    capabilities=marketplace_model.capabilities,
+                    limitations=marketplace_model.limitations,
+                    last_updated=marketplace_model.last_updated
+                )
+                candidates.append(candidate)
+                
+            logger.info("Real marketplace discovery completed",
+                       task=task_description[:50],
+                       candidates_found=len(candidates))
+                       
+        except Exception as e:
+            logger.error("Error in marketplace discovery, falling back to simulation", 
+                        error=str(e))
+            
+            # Fallback to simulation if real integration fails
+            candidates = await self._discover_marketplace_candidates_fallback(task_description)
+        
+        return candidates
+    
+    async def _discover_marketplace_candidates_fallback(self, task_description: str) -> List[ModelCandidate]:
+        """Fallback marketplace discovery with simulated data"""
+        candidates = []
+        
+        # Minimal fallback candidates
+        fallback_models = [
             {
-                "model_id": "marketplace_gpt4",
-                "name": "GPT-4 Marketplace",
+                "model_id": "fallback_gpt4",
+                "name": "GPT-4 (Fallback)",
                 "specialization": "general",
-                "performance_score": 0.95,
+                "performance_score": 0.90,
                 "cost_per_token": 0.03,
                 "estimated_latency": 2.5,
                 "provider_reputation": 0.9,
                 "marketplace_url": "https://api.openai.com/v1/chat/completions"
-            },
-            {
-                "model_id": "marketplace_claude",
-                "name": "Claude-3 Marketplace", 
-                "specialization": "reasoning",
-                "performance_score": 0.92,
-                "cost_per_token": 0.025,
-                "estimated_latency": 2.0,
-                "provider_reputation": 0.85,
-                "marketplace_url": "https://api.anthropic.com/v1/messages"
             }
         ]
         
-        for model_data in marketplace_models:
+        for model_data in fallback_models:
             compatibility_score = await self._calculate_marketplace_compatibility(
                 task_description, model_data
             )
-            
-            # Calculate cost and latency scores (lower values = higher scores)
-            cost_score = max(0.1, 1.0 - (model_data["cost_per_token"] / 0.05))
-            latency_score = max(0.1, 1.0 - (model_data["estimated_latency"] / 10.0))
             
             candidate = ModelCandidate(
                 model_id=model_data["model_id"],
@@ -380,9 +454,9 @@ class ModelRouter(BaseAgent):
                 source=ModelSource.MARKETPLACE,
                 performance_score=model_data["performance_score"],
                 compatibility_score=compatibility_score,
-                availability_score=0.8,  # Marketplace availability varies
-                cost_score=cost_score,
-                latency_score=latency_score,
+                availability_score=0.7,  # Lower availability for fallback
+                cost_score=self._calculate_cost_score(model_data["cost_per_token"]),
+                latency_score=self._calculate_latency_score(model_data["estimated_latency"]),
                 marketplace_url=model_data["marketplace_url"],
                 cost_per_token=model_data["cost_per_token"],
                 estimated_latency=model_data["estimated_latency"],
@@ -565,6 +639,59 @@ class ModelRouter(BaseAgent):
         
         return min(compatibility, 1.0)
     
+    async def _calculate_marketplace_compatibility_enhanced(self, task_description: str, 
+                                                          marketplace_model) -> float:
+        """Enhanced compatibility calculation for marketplace models"""
+        compatibility = 0.5  # Base marketplace compatibility
+        
+        task_category = await self._categorize_task(task_description)
+        specialization = marketplace_model.specialization
+        
+        # Exact specialization match
+        if specialization == task_category:
+            compatibility += 0.3
+        elif task_category in specialization or specialization in task_category:
+            compatibility += 0.15
+        elif specialization == "general":
+            compatibility += 0.1
+        
+        # Provider reputation bonus
+        compatibility += marketplace_model.provider_reputation * 0.2
+        
+        # Capability matching
+        task_lower = task_description.lower()
+        for capability in marketplace_model.capabilities:
+            if capability.lower() in task_lower:
+                compatibility += 0.05
+        
+        # Performance bonus for high-performing models
+        if marketplace_model.performance_score > 0.9:
+            compatibility += 0.1
+        elif marketplace_model.performance_score > 0.8:
+            compatibility += 0.05
+        
+        return min(compatibility, 1.0)
+    
+    def _calculate_cost_score(self, cost_per_token: Optional[float]) -> float:
+        """Calculate cost score (lower cost = higher score)"""
+        if cost_per_token is None:
+            return 0.5  # Default score for unknown cost
+        
+        # Normalize cost to score (0.05 = max cost for score calculation)
+        max_cost = 0.05
+        cost_score = max(0.1, 1.0 - (cost_per_token / max_cost))
+        return min(cost_score, 1.0)
+    
+    def _calculate_latency_score(self, estimated_latency: Optional[float]) -> float:
+        """Calculate latency score (lower latency = higher score)"""
+        if estimated_latency is None:
+            return 0.5  # Default score for unknown latency
+        
+        # Normalize latency to score (10.0 = max latency for score calculation)
+        max_latency = 10.0
+        latency_score = max(0.1, 1.0 - (estimated_latency / max_latency))
+        return min(latency_score, 1.0)
+    
     async def _extract_domain_from_task(self, task_description: str) -> str:
         """Extract domain for teacher selection"""
         task_category = await self._categorize_task(task_description)
@@ -719,6 +846,161 @@ class ModelRouter(BaseAgent):
             "source_distribution": source_usage,
             "cache_hit_rate": len(self.routing_cache) / max(total_decisions, 1)
         }
+    
+    async def record_execution_feedback(self, decision_id: UUID, model_id: str, 
+                                      metrics: Dict[str, float], 
+                                      context: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Record performance feedback after model execution
+        
+        Args:
+            decision_id: ID of the routing decision
+            model_id: ID of the model that was executed
+            metrics: Performance metrics (response_time, accuracy, success, etc.)
+            context: Additional context (task_id, user_id, etc.)
+            
+        Returns:
+            True if feedback was recorded successfully
+        """
+        try:
+            # Record individual metrics
+            for metric_name, value in metrics.items():
+                try:
+                    metric_type = MetricType(metric_name.lower())
+                    await performance_tracker.record_metric(
+                        model_id=model_id,
+                        metric_type=metric_type,
+                        value=value,
+                        context=context
+                    )
+                except ValueError:
+                    # Skip unknown metric types
+                    logger.debug("Unknown metric type", metric_name=metric_name)
+                    continue
+            
+            # Update local performance history
+            if "accuracy" in metrics:
+                self.update_model_performance(model_id, metrics["accuracy"])
+            
+            logger.info("Execution feedback recorded",
+                       decision_id=str(decision_id),
+                       model_id=model_id,
+                       metrics=list(metrics.keys()))
+            
+            return True
+            
+        except Exception as e:
+            logger.error("Failed to record execution feedback",
+                        decision_id=str(decision_id),
+                        model_id=model_id,
+                        error=str(e))
+            return False
+    
+    async def get_model_performance_insights(self, model_id: str) -> Dict[str, Any]:
+        """Get comprehensive performance insights for a model"""
+        try:
+            profile = await performance_tracker.get_model_performance(model_id)
+            
+            if not profile:
+                return {"error": "Model performance data not found"}
+            
+            # Get performance trends
+            trends = await performance_tracker.get_performance_trends(model_id, hours=168)  # 1 week
+            
+            # Get performance issues
+            issues = await performance_tracker.detect_performance_issues(model_id)
+            
+            return {
+                "model_id": model_id,
+                "performance_profile": {
+                    "overall_rank": profile.overall_rank,
+                    "performance_grade": profile.performance_grade.value,
+                    "accuracy_score": profile.accuracy_score,
+                    "response_time_avg": profile.response_time_avg,
+                    "success_rate": profile.success_rate,
+                    "availability_score": profile.availability_score,
+                    "total_requests": profile.total_requests,
+                    "last_used": profile.last_used.isoformat() if profile.last_used else None
+                },
+                "trends": {
+                    metric_type.value: len(values) for metric_type, values in trends.items()
+                },
+                "issues": issues,
+                "recommendations": await self._generate_performance_recommendations(profile, issues)
+            }
+            
+        except Exception as e:
+            logger.error("Failed to get performance insights", model_id=model_id, error=str(e))
+            return {"error": str(e)}
+    
+    async def get_top_performing_models(self, category: Optional[str] = None, 
+                                      limit: int = 10) -> List[Dict[str, Any]]:
+        """Get top performing models with routing context"""
+        try:
+            top_models = await performance_tracker.get_top_models(category=category, limit=limit)
+            
+            results = []
+            for profile in top_models:
+                # Get recent routing decisions for this model
+                recent_decisions = [
+                    d for d in self.routing_decisions[-100:]  # Last 100 decisions
+                    if d.primary_candidate.model_id == profile.model_id
+                ]
+                
+                results.append({
+                    "model_id": profile.model_id,
+                    "model_name": profile.model_name,
+                    "provider": profile.provider,
+                    "performance_grade": profile.performance_grade.value,
+                    "overall_rank": profile.overall_rank,
+                    "key_metrics": {
+                        "accuracy": profile.accuracy_score,
+                        "response_time": profile.response_time_avg,
+                        "success_rate": profile.success_rate,
+                        "availability": profile.availability_score
+                    },
+                    "usage_stats": {
+                        "total_requests": profile.total_requests,
+                        "recent_routing_decisions": len(recent_decisions),
+                        "last_used": profile.last_used.isoformat() if profile.last_used else None
+                    }
+                })
+            
+            return results
+            
+        except Exception as e:
+            logger.error("Failed to get top performing models", error=str(e))
+            return []
+    
+    async def _generate_performance_recommendations(self, profile: ModelPerformanceProfile, 
+                                                  issues: List[str]) -> List[str]:
+        """Generate actionable performance recommendations"""
+        recommendations = []
+        
+        # Response time recommendations
+        if profile.response_time_avg > 5.0:
+            recommendations.append("Consider using this model for non-time-critical tasks")
+        elif profile.response_time_avg < 1.0:
+            recommendations.append("Excellent for real-time applications")
+        
+        # Accuracy recommendations
+        if profile.accuracy_score > 0.9:
+            recommendations.append("Suitable for high-accuracy requirements")
+        elif profile.accuracy_score < 0.7:
+            recommendations.append("May need additional validation or fallback models")
+        
+        # Usage recommendations
+        if profile.total_requests < 10:
+            recommendations.append("Limited usage data - performance metrics may be unreliable")
+        
+        # Issue-based recommendations
+        if "Critical success rate" in str(issues):
+            recommendations.append("Avoid using for production workloads until issues are resolved")
+        
+        if "Response time degrading" in str(issues):
+            recommendations.append("Monitor closely - performance may be declining")
+        
+        return recommendations
     
     def update_model_performance(self, model_id: str, performance_score: float):
         """Update performance history for a model"""
