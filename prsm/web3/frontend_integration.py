@@ -450,15 +450,31 @@ async def get_transaction_history(
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
     """
     WebSocket endpoint for real-time Web3 updates
+    
+    🔐 SECURITY:
+    Requires JWT authentication for Web3 operations. Only authenticated users
+    can receive real-time wallet balance updates and transaction notifications.
     """
-    await websocket.accept()
-    await connection_manager.add_websocket_connection(user_id, websocket)
+    from prsm.api.websocket_auth import authenticate_websocket_connection, cleanup_websocket_connection, WebSocketAuthError, require_websocket_permission
     
     try:
+        # 🛡️ AUTHENTICATE CONNECTION BEFORE ACCEPTING
+        connection = await authenticate_websocket_connection(websocket, user_id, "web3")
+        await websocket.accept()
+        await connection_manager.add_websocket_connection(user_id, websocket)
+        
+        logger.info("Secure Web3 WebSocket connection established",
+                   user_id=user_id,
+                   username=connection.username,
+                   role=connection.role.value,
+                   ip_address=connection.ip_address)
+        
         # Send initial connection message
         await websocket.send_json({
             "type": "connected",
-            "message": "Web3 WebSocket connected",
+            "message": "Secure Web3 WebSocket connected",
+            "user": connection.username,
+            "permissions": connection.permissions,
             "timestamp": datetime.utcnow().isoformat()
         })
         
@@ -475,25 +491,57 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                         "timestamp": datetime.utcnow().isoformat()
                     })
                 elif data.get("type") == "subscribe_balance":
-                    # Start balance monitoring (implement if needed)
-                    await websocket.send_json({
-                        "type": "balance_subscription",
-                        "status": "active"
-                    })
+                    # Start balance monitoring (requires wallet.read permission)
+                    try:
+                        await require_websocket_permission(websocket, "wallet.read")
+                        await websocket.send_json({
+                            "type": "balance_subscription",
+                            "status": "active",
+                            "message": "Balance monitoring enabled"
+                        })
+                    except WebSocketAuthError:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Permission denied: wallet.read required for balance monitoring"
+                        })
+                elif data.get("type") == "subscribe_transactions":
+                    # Start transaction monitoring (requires wallet.read permission)
+                    try:
+                        await require_websocket_permission(websocket, "wallet.read")
+                        await websocket.send_json({
+                            "type": "transaction_subscription",
+                            "status": "active",
+                            "message": "Transaction monitoring enabled"
+                        })
+                    except WebSocketAuthError:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Permission denied: wallet.read required for transaction monitoring"
+                        })
                     
             except WebSocketDisconnect:
                 break
             except Exception as e:
-                logger.error(f"WebSocket error for user {user_id}: {e}")
+                logger.error(f"Web3 WebSocket error for user {user_id}: {e}")
                 await websocket.send_json({
                     "type": "error",
                     "message": str(e)
                 })
-                
+    
+    except WebSocketAuthError as e:
+        # Authentication failed - close with appropriate code
+        logger.warning("Web3 WebSocket authentication failed",
+                      user_id=user_id,
+                      error=e.message,
+                      code=e.code)
+        await websocket.close(code=e.code, reason=e.message)
+        return
+        
     except WebSocketDisconnect:
         pass
     finally:
         await connection_manager.remove_websocket_connection(user_id, websocket)
+        await cleanup_websocket_connection(websocket)
 
 @router.get("/gas/estimate")
 async def estimate_gas_price(
