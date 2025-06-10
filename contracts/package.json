@@ -1,0 +1,51 @@
+{
+  "name": "prsm-ftns-contracts",
+  "version": "1.0.0",
+  "description": "PRSM FTNS Smart Contracts for Polygon",
+  "main": "index.js",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:testnet": "hardhat run scripts/deploy.js --network polygon-mumbai",
+    "deploy:mainnet": "hardhat run scripts/deploy.js --network polygon-mainnet",
+    "verify": "hardhat verify --network polygon-mumbai",
+    "node": "hardhat node",
+    "console": "hardhat console"
+  },
+  "keywords": [
+    "ethereum",
+    "polygon",
+    "smart-contracts",
+    "ftns",
+    "tokens",
+    "defi",
+    "marketplace"
+  ],
+  "author": "PRSM Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^2.0.9",
+    "@nomicfoundation/hardhat-ethers": "^3.0.9",
+    "@nomicfoundation/hardhat-network-helpers": "^1.0.12",
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@nomicfoundation/hardhat-verify": "^2.0.0",
+    "@openzeppelin/hardhat-upgrades": "^2.4.1",
+    "@typechain/ethers-v6": "^0.5.1",
+    "@typechain/hardhat": "^9.1.0",
+    "@types/chai": "^4.3.20",
+    "@types/mocha": "^10.0.10",
+    "chai": "^4.5.0",
+    "ethers": "^5.8.0",
+    "hardhat": "^2.19.4",
+    "hardhat-gas-reporter": "^1.0.9",
+    "solidity-coverage": "^0.8.5",
+    "ts-node": "^10.9.2",
+    "typechain": "^8.3.2",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.1",
+    "@openzeppelin/contracts-upgradeable": "^5.0.1",
+    "dotenv": "^16.3.1"
+  }
+}
