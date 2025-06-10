@@ -39,6 +39,7 @@ from prsm.api.security_status_api import router as security_router
 from prsm.api.marketplace_api import router as marketplace_router
 from prsm.api.marketplace_launch_api import router as marketplace_launch_router
 from prsm.api.governance_api import router as governance_router
+from prsm.api.mainnet_deployment_api import router as mainnet_router
 from prsm.web3.frontend_integration import router as web3_router
 from prsm.auth.auth_manager import auth_manager
 from prsm.auth import get_current_user
@@ -3253,9 +3254,11 @@ app.include_router(security_router, tags=["Security"])
 app.include_router(marketplace_router, tags=["Marketplace"])
 app.include_router(marketplace_launch_router, tags=["Marketplace Launch"])
 app.include_router(governance_router, tags=["Governance"])
+app.include_router(mainnet_router, tags=["Mainnet Deployment"])
 app.include_router(web3_router, prefix="/api/v1", tags=["Web3"])
 logger.info("✅ Teams API endpoints enabled")
 logger.info("✅ Governance API endpoints enabled")
+logger.info("✅ Mainnet Deployment API endpoints enabled")
 
 # Include additional routers when implemented
 # app.include_router(nwtn_router, prefix="/nwtn", tags=["NWTN"])
