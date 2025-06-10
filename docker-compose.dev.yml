@@ -1,0 +1,118 @@
+# PRSM Development Docker Compose Override
+# Extends base docker-compose.yml for development
+
+version: '3.8'
+
+services:
+  # ===================================
+  # Development PRSM API
+  # ===================================
+  prsm-api:
+    build:
+      target: development  # Use development stage
+    environment:
+      PRSM_ENV: development
+      PRSM_LOG_LEVEL: DEBUG
+      PRSM_RELOAD: true
+      FTNS_ENABLED: false  # Disable for easier development
+    volumes:
+      # Mount source code for live reloading
+      - .:/app:cached
+      - /app/venv  # Exclude virtual environment
+    ports:
+      - "8000:8000"
+      - "8001:8001"  # Additional port for debugging
+    command: ["uvicorn", "prsm.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--log-level", "debug"]
+    
+  # ===================================
+  # PostgreSQL Development Configuration
+  # ===================================
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: dev_password
+    ports:
+      - "5432:5432"  # Expose for direct access
+    volumes:
+      # Use local directory for easier development
+      - ./dev-data/postgres:/var/lib/postgresql/data
+    command: >
+      postgres
+      -c log_statement=all
+      -c log_destination=stderr
+      -c log_min_messages=info
+      -c max_connections=100
+
+  # ===================================
+  # Redis Development Configuration
+  # ===================================
+  redis:
+    ports:
+      - "6379:6379"  # Expose for direct access
+    volumes:
+      - ./dev-data/redis:/data
+    command: redis-server --appendonly yes --loglevel verbose
+
+  # ===================================
+  # Development Database Manager
+  # ===================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: prsm-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@prsm.dev
+      PGADMIN_DEFAULT_PASSWORD: dev_password
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    networks:
+      - prsm-network
+    depends_on:
+      - postgres
+
+  # ===================================
+  # Redis Commander (Development Tool)
+  # ===================================
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: prsm-redis-commander
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    networks:
+      - prsm-network
+    depends_on:
+      - redis
+
+  # ===================================
+  # Jupyter Notebook for Data Science
+  # ===================================
+  jupyter:
+    image: jupyter/datascience-notebook:latest
+    container_name: prsm-jupyter
+    restart: unless-stopped
+    environment:
+      JUPYTER_ENABLE_LAB: yes
+      JUPYTER_TOKEN: prsm_dev_token
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebooks:/home/jovyan/work/notebooks
+      - ./data:/home/jovyan/work/data
+      - .:/home/jovyan/work/prsm:ro
+    networks:
+      - prsm-network
+    profiles:
+      - jupyter
+
+# ===================================
+# Development Volumes
+# ===================================
+volumes:
+  pgadmin-data:
+    driver: local
+    name: prsm-pgadmin-dev
