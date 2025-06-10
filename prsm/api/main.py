@@ -33,6 +33,9 @@ from prsm.core.ipfs_client import (
     init_ipfs, close_ipfs, get_ipfs_client, prsm_ipfs
 )
 from prsm.api.teams_api import router as teams_router
+from prsm.api.auth_api import router as auth_router
+from prsm.auth.auth_manager import auth_manager
+from prsm.auth.middleware import AuthMiddleware, SecurityHeadersMiddleware
 
 
 # Configure structured logging
@@ -326,6 +329,23 @@ app = FastAPI(
     redoc_url="/redoc" if settings.is_development else None,
     lifespan=lifespan
 )
+# Add security middleware
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(AuthMiddleware, rate_limit_requests=100, rate_limit_window=60)
+
+# Initialize auth manager
+@app.on_event("startup")
+async def initialize_auth():
+    """Initialize authentication system"""
+    try:
+        await auth_manager.initialize()
+        logger.info("Authentication system initialized")
+    except Exception as e:
+        logger.error("Failed to initialize auth system", error=str(e))
+
+# Include authentication router
+app.include_router(auth_router)
+
 
 # Add CORS middleware
 app.add_middleware(
