@@ -34,6 +34,7 @@ from prsm.core.ipfs_client import (
 )
 from prsm.api.teams_api import router as teams_router
 from prsm.api.auth_api import router as auth_router
+from prsm.web3.frontend_integration import router as web3_router
 from prsm.auth.auth_manager import auth_manager
 from prsm.auth.middleware import AuthMiddleware, SecurityHeadersMiddleware
 
@@ -3092,6 +3093,7 @@ except ImportError as e:
 
 # Include teams API router
 app.include_router(teams_router, prefix="/api/v1", tags=["Teams"])
+app.include_router(web3_router, prefix="/api/v1", tags=["Web3"])
 logger.info("✅ Teams API endpoints enabled")
 
 # Include additional routers when implemented
