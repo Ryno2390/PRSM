@@ -34,6 +34,7 @@ from prsm.core.ipfs_client import (
 )
 from prsm.api.teams_api import router as teams_router
 from prsm.api.auth_api import router as auth_router
+from prsm.api.credential_api import router as credential_router
 from prsm.web3.frontend_integration import router as web3_router
 from prsm.auth.auth_manager import auth_manager
 from prsm.auth import get_current_user
@@ -281,6 +282,14 @@ async def lifespan(app: FastAPI):
         # 🌐 Initialize IPFS distributed storage
         await init_ipfs()
         logger.info("✅ IPFS distributed storage initialized")
+        
+        # 🔐 Initialize secure credential management
+        from prsm.integrations.security.secure_config_manager import initialize_secure_configuration
+        secure_config_success = await initialize_secure_configuration()
+        if secure_config_success:
+            logger.info("✅ Secure credential management initialized")
+        else:
+            logger.warning("⚠️ Secure credential management initialization incomplete")
         
         # 📊 Start background monitoring tasks
         # await start_background_tasks()
@@ -3195,6 +3204,7 @@ except ImportError as e:
 
 # Include teams API router
 app.include_router(teams_router, prefix="/api/v1", tags=["Teams"])
+app.include_router(credential_router, tags=["Credentials"])
 app.include_router(web3_router, prefix="/api/v1", tags=["Web3"])
 logger.info("✅ Teams API endpoints enabled")
 

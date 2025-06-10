@@ -400,40 +400,20 @@ class ModelExecutor(BaseAgent):
     
     def _initialize_providers(self):
         """
-        Initialize provider configurations from environment/settings
+        Initialize provider configurations using secure credential management
         
-        🔧 PROVIDER SETUP:
-        - Load API keys from environment variables
+        🔧 SECURE PROVIDER SETUP:
+        - Load API keys from encrypted credential manager
+        - Validate credentials before provider registration
         - Configure rate limits and timeouts
-        - Set up fallback strategies
+        - Set up fallback strategies with secure fallbacks
         """
+        # This method is kept for backward compatibility but now uses secure credentials
+        # Actual secure initialization happens in _initialize_secure_providers
+        asyncio.create_task(self._initialize_secure_providers())
+        
+        # 📂 Local Models Configuration (no credentials needed)
         import os
-        
-        # 🔑 OpenAI Configuration
-        openai_key = os.getenv('OPENAI_API_KEY')
-        if openai_key:
-            self.client_registry.register_provider(ModelProvider.OPENAI, {
-                'api_key': openai_key
-            })
-            logger.info("OpenAI provider configured")
-        
-        # 🔑 Anthropic Configuration  
-        anthropic_key = os.getenv('ANTHROPIC_API_KEY')
-        if anthropic_key:
-            self.client_registry.register_provider(ModelProvider.ANTHROPIC, {
-                'api_key': anthropic_key
-            })
-            logger.info("Anthropic provider configured")
-        
-        # 🔑 Hugging Face Configuration
-        hf_key = os.getenv('HUGGINGFACE_API_KEY')
-        if hf_key:
-            self.client_registry.register_provider(ModelProvider.HUGGINGFACE, {
-                'api_key': hf_key
-            })
-            logger.info("HuggingFace provider configured")
-        
-        # 📂 Local Models Configuration
         local_models_path = os.getenv('PRSM_LOCAL_MODELS_PATH', '/models')
         self.client_registry.register_provider(ModelProvider.LOCAL, {
             'model_path': local_models_path
@@ -441,6 +421,107 @@ class ModelExecutor(BaseAgent):
         
         # 🎯 Default Model Provider Mappings
         self._setup_default_model_mappings()
+    
+    async def _initialize_secure_providers(self):
+        """
+        Initialize providers using secure credential management
+        
+        🔐 SECURITY FEATURES:
+        - Uses encrypted credential manager instead of environment variables
+        - Validates credentials before registration
+        - Logs all credential access for audit trail
+        - Supports both user-specific and system credentials
+        """
+        from prsm.integrations.security.secure_api_client_factory import secure_client_factory, SecureClientType
+        
+        try:
+            # Initialize for system-level operations (background tasks, etc.)
+            user_id = "system"
+            
+            # 🔐 Secure OpenAI Configuration
+            if await secure_client_factory.validate_client_credentials(SecureClientType.OPENAI, user_id):
+                openai_client = await secure_client_factory.get_secure_client(SecureClientType.OPENAI, user_id)
+                if openai_client:
+                    # Register secure OpenAI client
+                    self.client_registry.register_provider(ModelProvider.OPENAI, {
+                        'secure_client': openai_client,
+                        'client_type': SecureClientType.OPENAI
+                    })
+                    logger.info("Secure OpenAI provider configured")
+            else:
+                logger.warning("OpenAI credentials not available or invalid")
+            
+            # 🔐 Secure Anthropic Configuration  
+            if await secure_client_factory.validate_client_credentials(SecureClientType.ANTHROPIC, user_id):
+                anthropic_client = await secure_client_factory.get_secure_client(SecureClientType.ANTHROPIC, user_id)
+                if anthropic_client:
+                    # Register secure Anthropic client
+                    self.client_registry.register_provider(ModelProvider.ANTHROPIC, {
+                        'secure_client': anthropic_client,
+                        'client_type': SecureClientType.ANTHROPIC
+                    })
+                    logger.info("Secure Anthropic provider configured")
+            else:
+                logger.warning("Anthropic credentials not available or invalid")
+            
+            # 🔐 Secure Hugging Face Configuration
+            if await secure_client_factory.validate_client_credentials(SecureClientType.HUGGINGFACE, user_id):
+                hf_client = await secure_client_factory.get_secure_client(SecureClientType.HUGGINGFACE, user_id)
+                if hf_client:
+                    # Register secure HuggingFace client
+                    self.client_registry.register_provider(ModelProvider.HUGGINGFACE, {
+                        'secure_client': hf_client,
+                        'client_type': SecureClientType.HUGGINGFACE
+                    })
+                    logger.info("Secure HuggingFace provider configured")
+            else:
+                logger.warning("HuggingFace credentials not available or invalid")
+            
+            logger.info("Secure provider initialization completed")
+            
+        except Exception as e:
+            logger.error("Failed to initialize secure providers", error=str(e))
+            # Fall back to insecure initialization for development
+            await self._fallback_insecure_initialization()
+    
+    async def _fallback_insecure_initialization(self):
+        """
+        Fallback to insecure environment variable initialization for development
+        
+        ⚠️ SECURITY WARNING:
+        This method is only for development/testing purposes.
+        Production deployments should use secure credential management.
+        """
+        import os
+        
+        logger.warning("Using insecure credential fallback - not recommended for production")
+        
+        # 🔑 OpenAI Configuration (INSECURE FALLBACK)
+        openai_key = os.getenv('OPENAI_API_KEY')
+        if openai_key:
+            self.client_registry.register_provider(ModelProvider.OPENAI, {
+                'api_key': openai_key,
+                'secure': False  # Mark as insecure
+            })
+            logger.warning("OpenAI provider configured with insecure credentials")
+        
+        # 🔑 Anthropic Configuration (INSECURE FALLBACK)
+        anthropic_key = os.getenv('ANTHROPIC_API_KEY')
+        if anthropic_key:
+            self.client_registry.register_provider(ModelProvider.ANTHROPIC, {
+                'api_key': anthropic_key,
+                'secure': False  # Mark as insecure
+            })
+            logger.warning("Anthropic provider configured with insecure credentials")
+        
+        # 🔑 Hugging Face Configuration (INSECURE FALLBACK)
+        hf_key = os.getenv('HUGGINGFACE_API_KEY')
+        if hf_key:
+            self.client_registry.register_provider(ModelProvider.HUGGINGFACE, {
+                'api_key': hf_key,
+                'secure': False  # Mark as insecure
+            })
+            logger.warning("HuggingFace provider configured with insecure credentials")
     
     def _setup_default_model_mappings(self):
         """Set up default mappings from model IDs to providers"""
