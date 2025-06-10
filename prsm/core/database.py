@@ -149,7 +149,7 @@ class PRSMSessionModel(Base):
     nwtn_context_allocation = Column(Integer, default=0)
     context_used = Column(Integer, default=0)
     status = Column(String(50), default="pending", index=True)
-    metadata = Column(JSON, default=dict)
+    model_metadata = Column(JSON, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
@@ -224,7 +224,7 @@ class ArchitectTaskModel(Base):
     assigned_agent = Column(String(255))
     result = Column(JSON)
     execution_time = Column(Float)
-    metadata = Column(JSON, default=dict)
+    model_metadata = Column(JSON, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
@@ -726,7 +726,7 @@ class TeamModel(Base):
     # Metadata
     external_links = Column(JSON, default=dict)
     contact_info = Column(JSON, default=dict)
-    metadata = Column(JSON, default=dict)
+    model_metadata = Column(JSON, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
@@ -784,7 +784,7 @@ class TeamMemberModel(Base):
     bio = Column(Text)
     expertise_areas = Column(JSON, default=list)
     public_profile = Column(Boolean, default=True)
-    metadata = Column(JSON, default=dict)
+    model_metadata = Column(JSON, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
@@ -888,7 +888,7 @@ class TeamTaskModel(Base):
     # Metadata
     tags = Column(JSON, default=list)
     external_links = Column(JSON, default=dict)
-    metadata = Column(JSON, default=dict)
+    model_metadata = Column(JSON, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     

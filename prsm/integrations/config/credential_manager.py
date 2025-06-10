@@ -85,7 +85,7 @@ class CredentialManager:
         """Initialize credential manager"""
         
         # Storage configuration
-        self.storage_dir = Path(storage_dir or settings.get("credential_storage_dir", "~/.prsm/credentials")).expanduser()
+        self.storage_dir = Path(storage_dir or getattr(settings, "credential_storage_dir", "~/.prsm/credentials")).expanduser()
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         
         # Encryption setup

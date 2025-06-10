@@ -181,7 +181,7 @@ class ConfigurationManager:
         """Initialize configuration manager"""
         
         # Storage setup
-        self.storage_dir = Path(storage_dir or settings.get("config_storage_dir", "~/.prsm/config")).expanduser()
+        self.storage_dir = Path(storage_dir or getattr(settings, "config_storage_dir", "~/.prsm/config")).expanduser()
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         
         self.config_file = self.storage_dir / "integration_config.json"
