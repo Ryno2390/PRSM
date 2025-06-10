@@ -32,6 +32,7 @@ from prsm.core.vector_db import (
 from prsm.core.ipfs_client import (
     init_ipfs, close_ipfs, get_ipfs_client, prsm_ipfs
 )
+from prsm.api.teams_api import router as teams_router
 
 
 # Configure structured logging
@@ -3068,6 +3069,10 @@ try:
     logger.info("✅ Integration layer API endpoints enabled (including enhanced security)")
 except ImportError as e:
     logger.warning(f"⚠️ Integration layer not available: {e}")
+
+# Include teams API router
+app.include_router(teams_router, prefix="/api/v1", tags=["Teams"])
+logger.info("✅ Teams API endpoints enabled")
 
 # Include additional routers when implemented
 # app.include_router(nwtn_router, prefix="/nwtn", tags=["NWTN"])

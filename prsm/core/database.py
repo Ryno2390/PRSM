@@ -680,6 +680,281 @@ class ModelQueries:
             ]
 
 
+# === Team Models ===
+
+class TeamModel(Base):
+    """
+    Database model for teams
+    
+    🧑‍🤝‍🧑 TEAMS INTEGRATION:
+    Collaborative research units with shared resources and governance
+    """
+    __tablename__ = "teams"
+    
+    team_id = Column(UUID(as_uuid=True), primary_key=True)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=False)
+    team_type = Column(String(50), default="research", index=True)
+    
+    # Visual identity
+    avatar_url = Column(String(500))
+    logo_url = Column(String(500))
+    
+    # Configuration
+    governance_model = Column(String(50), default="democratic")
+    reward_policy = Column(String(50), default="proportional")
+    is_public = Column(Boolean, default=True, index=True)
+    max_members = Column(Integer)
+    
+    # Financial settings
+    entry_stake_required = Column(Float, default=0.0)
+    
+    # Research focus
+    research_domains = Column(JSON, default=list)
+    keywords = Column(JSON, default=list)
+    
+    # Status
+    is_active = Column(Boolean, default=True, index=True)
+    founding_date = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Statistics
+    member_count = Column(Integer, default=0)
+    total_ftns_earned = Column(Float, default=0.0)
+    total_tasks_completed = Column(Integer, default=0)
+    impact_score = Column(Float, default=0.0, index=True)
+    
+    # Metadata
+    external_links = Column(JSON, default=dict)
+    contact_info = Column(JSON, default=dict)
+    metadata = Column(JSON, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    members = relationship("TeamMemberModel", back_populates="team")
+    wallet = relationship("TeamWalletModel", back_populates="team", uselist=False)
+    tasks = relationship("TeamTaskModel", back_populates="team")
+    governance = relationship("TeamGovernanceModel", back_populates="team", uselist=False)
+    
+    __table_args__ = (
+        Index('idx_team_type_active', 'team_type', 'is_active'),
+        Index('idx_team_impact_score', 'impact_score'),
+        Index('idx_team_public_active', 'is_public', 'is_active'),
+        UniqueConstraint('name', name='uq_team_name'),
+    )
+
+
+class TeamMemberModel(Base):
+    """Database model for team members"""
+    __tablename__ = "team_members"
+    
+    membership_id = Column(UUID(as_uuid=True), primary_key=True)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.team_id"), nullable=False)
+    user_id = Column(String(255), nullable=False, index=True)
+    
+    # Membership details
+    role = Column(String(50), default="member", index=True)
+    status = Column(String(50), default="pending", index=True)
+    invited_by = Column(String(255))
+    invitation_message = Column(Text)
+    
+    # Dates
+    invited_at = Column(DateTime(timezone=True), server_default=func.now())
+    joined_at = Column(DateTime(timezone=True))
+    left_at = Column(DateTime(timezone=True))
+    
+    # Contribution tracking
+    ftns_contributed = Column(Float, default=0.0)
+    tasks_completed = Column(Integer, default=0)
+    models_contributed = Column(Integer, default=0)
+    datasets_uploaded = Column(Integer, default=0)
+    
+    # Performance metrics
+    performance_score = Column(Float, default=0.0)
+    reputation_score = Column(Float, default=0.5)
+    collaboration_score = Column(Float, default=0.0)
+    
+    # Permissions
+    can_invite_members = Column(Boolean, default=False)
+    can_manage_tasks = Column(Boolean, default=False)
+    can_access_treasury = Column(Boolean, default=False)
+    can_vote = Column(Boolean, default=True)
+    
+    # Profile
+    bio = Column(Text)
+    expertise_areas = Column(JSON, default=list)
+    public_profile = Column(Boolean, default=True)
+    metadata = Column(JSON, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    team = relationship("TeamModel", back_populates="members")
+    
+    __table_args__ = (
+        Index('idx_team_member_team_user', 'team_id', 'user_id'),
+        Index('idx_team_member_status', 'status'),
+        Index('idx_team_member_role', 'role'),
+        UniqueConstraint('team_id', 'user_id', name='uq_team_member'),
+    )
+
+
+class TeamWalletModel(Base):
+    """Database model for team wallets"""
+    __tablename__ = "team_wallets"
+    
+    wallet_id = Column(UUID(as_uuid=True), primary_key=True)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.team_id"), nullable=False, unique=True)
+    
+    # Wallet configuration
+    is_multisig = Column(Boolean, default=True)
+    required_signatures = Column(Integer, default=1)
+    authorized_signers = Column(JSON, default=list)
+    
+    # Balances
+    total_balance = Column(Float, default=0.0)
+    available_balance = Column(Float, default=0.0)
+    locked_balance = Column(Float, default=0.0)
+    
+    # Distribution policy
+    reward_policy = Column(String(50), default="proportional")
+    policy_config = Column(JSON, default=dict)
+    distribution_metrics = Column(JSON, default=list)
+    metric_weights = Column(JSON, default=list)
+    
+    # Treasury management
+    auto_distribution_enabled = Column(Boolean, default=False)
+    distribution_frequency_days = Column(Integer, default=30)
+    last_distribution = Column(DateTime(timezone=True))
+    
+    # Security
+    wallet_address = Column(String(255))
+    spending_limits = Column(JSON, default=dict)
+    emergency_freeze = Column(Boolean, default=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    team = relationship("TeamModel", back_populates="wallet")
+    
+    __table_args__ = (
+        Index('idx_team_wallet_balance', 'total_balance'),
+        Index('idx_team_wallet_emergency', 'emergency_freeze'),
+    )
+
+
+class TeamTaskModel(Base):
+    """Database model for team tasks"""
+    __tablename__ = "team_tasks"
+    
+    task_id = Column(UUID(as_uuid=True), primary_key=True)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.team_id"), nullable=False)
+    
+    # Task details
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=False)
+    task_type = Column(String(50), default="research", index=True)
+    
+    # Assignment
+    assigned_to = Column(JSON, default=list)
+    created_by = Column(String(255), nullable=False)
+    priority = Column(String(20), default="medium", index=True)
+    
+    # Execution
+    status = Column(String(50), default="pending", index=True)
+    progress_percentage = Column(Float, default=0.0)
+    
+    # FTNS allocation
+    ftns_budget = Column(Float, default=0.0)
+    ftns_spent = Column(Float, default=0.0)
+    
+    # Deadlines
+    due_date = Column(DateTime(timezone=True))
+    estimated_hours = Column(Float)
+    actual_hours = Column(Float)
+    
+    # Results
+    output_artifacts = Column(JSON, default=list)
+    output_models = Column(JSON, default=list)
+    performance_metrics = Column(JSON, default=dict)
+    
+    # Collaboration
+    requires_consensus = Column(Boolean, default=False)
+    consensus_threshold = Column(Float, default=0.6)
+    votes_for = Column(Integer, default=0)
+    votes_against = Column(Integer, default=0)
+    
+    # Metadata
+    tags = Column(JSON, default=list)
+    external_links = Column(JSON, default=dict)
+    metadata = Column(JSON, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    team = relationship("TeamModel", back_populates="tasks")
+    
+    __table_args__ = (
+        Index('idx_team_task_team_status', 'team_id', 'status'),
+        Index('idx_team_task_type_priority', 'task_type', 'priority'),
+        Index('idx_team_task_due_date', 'due_date'),
+        Index('idx_team_task_created_by', 'created_by'),
+    )
+
+
+class TeamGovernanceModel(Base):
+    """Database model for team governance"""
+    __tablename__ = "team_governance"
+    
+    governance_id = Column(UUID(as_uuid=True), primary_key=True)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.team_id"), nullable=False, unique=True)
+    
+    # Governance configuration
+    model = Column(String(50), default="democratic")
+    constitution = Column(JSON, default=dict)
+    
+    # Voting configuration
+    voting_period_days = Column(Integer, default=7)
+    quorum_percentage = Column(Float, default=0.5)
+    approval_threshold = Column(Float, default=0.6)
+    
+    # Role management
+    role_assignments = Column(JSON, default=dict)
+    role_term_limits = Column(JSON, default=dict)
+    
+    # Proposal configuration
+    proposal_types = Column(JSON, default=list)
+    type_thresholds = Column(JSON, default=dict)
+    
+    # Emergency procedures
+    emergency_roles = Column(JSON, default=list)
+    emergency_procedures = Column(JSON, default=dict)
+    
+    # Constitutional limits
+    max_owner_power = Column(Float, default=0.4)
+    member_protection_threshold = Column(Float, default=0.25)
+    
+    # Active proposals
+    active_proposals = Column(JSON, default=list)
+    
+    # Statistics
+    total_proposals = Column(Integer, default=0)
+    proposals_passed = Column(Integer, default=0)
+    average_participation = Column(Float, default=0.0)
+    last_vote = Column(DateTime(timezone=True))
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    team = relationship("TeamModel", back_populates="governance")
+    
+    __table_args__ = (
+        Index('idx_team_governance_model', 'model'),
+    )
+
+
 # Global database manager instance
 db_manager = DatabaseManager()
 
