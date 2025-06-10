@@ -15,7 +15,14 @@
       "Bash(alembic downgrade:*)",
       "Bash(chmod:*)",
       "Bash(mkdir:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(ls:*)",
+      "Bash(npm install)",
+      "Bash(npm install:*)",
+      "Bash(test -f .env)",
+      "Bash(npx hardhat compile:*)",
+      "Bash(npx hardhat run:*)",
+      "Bash(true)"
     ],
     "deny": []
   }

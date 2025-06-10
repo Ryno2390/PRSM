@@ -1,0 +1,36 @@
+# Hardhat files
+cache
+artifacts
+node_modules
+.env
+
+# Coverage reports
+coverage
+coverage.json
+
+# Build info
+build-info
+
+# Deployment outputs
+deployments/*.json
+
+# Package manager
+package-lock.json
+yarn.lock
+
+# IDE
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test outputs
+test-results/
+test-report.xml
+
+# Temporary files
+*.tmp
+*.temp
+.tmp
