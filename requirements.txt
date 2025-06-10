@@ -57,3 +57,7 @@ click>=8.1.0
 python-dotenv>=1.0.0
 httpx>=0.25.0
 tenacity>=8.2.0
+# Authentication dependencies
+PyJWT==2.8.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
