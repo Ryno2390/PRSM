@@ -35,6 +35,7 @@ from prsm.core.ipfs_client import (
 from prsm.api.teams_api import router as teams_router
 from prsm.api.auth_api import router as auth_router
 from prsm.api.credential_api import router as credential_router
+from prsm.api.security_status_api import router as security_router
 from prsm.web3.frontend_integration import router as web3_router
 from prsm.auth.auth_manager import auth_manager
 from prsm.auth import get_current_user
@@ -340,7 +341,10 @@ app = FastAPI(
     redoc_url="/redoc" if settings.is_development else None,
     lifespan=lifespan
 )
-# Add security middleware
+# Add security middleware (order matters - most specific first)
+from prsm.security import RequestLimitsMiddleware, request_limits_config
+
+app.add_middleware(RequestLimitsMiddleware, config=request_limits_config)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(AuthMiddleware, rate_limit_requests=100, rate_limit_window=60)
 
@@ -2754,6 +2758,18 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
         while True:
             # Listen for messages from client
             data = await websocket.receive_text()
+            
+            # 🛡️ VALIDATE MESSAGE SIZE AND RATE LIMITS
+            from prsm.security import validate_websocket_message
+            try:
+                await validate_websocket_message(websocket, data, user_id)
+            except Exception as e:
+                logger.warning("WebSocket message validation failed",
+                             user_id=user_id,
+                             error=str(e))
+                await websocket.close(code=1008, reason="Message validation failed")
+                return
+            
             message = json.loads(data)
             
             # Handle different message types with authentication context
@@ -2776,6 +2792,10 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
         logger.error("WebSocket error", user_id=user_id, error=str(e))
         await websocket_manager.disconnect(websocket)
         await cleanup_websocket_connection(websocket)
+        
+        # 🛡️ CLEANUP SECURITY TRACKING
+        from prsm.security import cleanup_websocket_connection as cleanup_security
+        await cleanup_security(websocket)
 
 
 @app.websocket("/ws/conversation/{user_id}/{conversation_id}")
@@ -2817,6 +2837,19 @@ async def conversation_websocket(websocket: WebSocket, user_id: str, conversatio
         while True:
             # Listen for conversation messages
             data = await websocket.receive_text()
+            
+            # 🛡️ VALIDATE MESSAGE SIZE AND RATE LIMITS
+            from prsm.security import validate_websocket_message
+            try:
+                await validate_websocket_message(websocket, data, user_id)
+            except Exception as e:
+                logger.warning("Conversation WebSocket message validation failed",
+                             user_id=user_id,
+                             conversation_id=conversation_id,
+                             error=str(e))
+                await websocket.close(code=1008, reason="Message validation failed")
+                return
+            
             message = json.loads(data)
             
             # Handle conversation-specific messages with authentication context
@@ -2836,6 +2869,10 @@ async def conversation_websocket(websocket: WebSocket, user_id: str, conversatio
         await websocket_manager.disconnect(websocket)
         await cleanup_websocket_connection(websocket)
         
+        # 🛡️ CLEANUP SECURITY TRACKING
+        from prsm.security import cleanup_websocket_connection as cleanup_security
+        await cleanup_security(websocket)
+        
     except Exception as e:
         logger.error("Conversation WebSocket error",
                     user_id=user_id,
@@ -2843,6 +2880,10 @@ async def conversation_websocket(websocket: WebSocket, user_id: str, conversatio
                     error=str(e))
         await websocket_manager.disconnect(websocket)
         await cleanup_websocket_connection(websocket)
+        
+        # 🛡️ CLEANUP SECURITY TRACKING
+        from prsm.security import cleanup_websocket_connection as cleanup_security
+        await cleanup_security(websocket)
 
 
 async def handle_websocket_message(websocket: WebSocket, user_id: str, message: Dict[str, Any], connection=None):
@@ -3205,6 +3246,7 @@ except ImportError as e:
 # Include teams API router
 app.include_router(teams_router, prefix="/api/v1", tags=["Teams"])
 app.include_router(credential_router, tags=["Credentials"])
+app.include_router(security_router, tags=["Security"])
 app.include_router(web3_router, prefix="/api/v1", tags=["Web3"])
 logger.info("✅ Teams API endpoints enabled")
 

@@ -482,7 +482,20 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
         while True:
             try:
                 # Wait for incoming messages
-                data = await websocket.receive_json()
+                data_text = await websocket.receive_text()
+                
+                # 🛡️ VALIDATE MESSAGE SIZE AND RATE LIMITS
+                from prsm.security import validate_websocket_message
+                try:
+                    await validate_websocket_message(websocket, data_text, user_id)
+                except Exception as e:
+                    logger.warning("Web3 WebSocket message validation failed",
+                                 user_id=user_id,
+                                 error=str(e))
+                    await websocket.close(code=1008, reason="Message validation failed")
+                    return
+                
+                data = json.loads(data_text)
                 
                 # Handle different message types
                 if data.get("type") == "ping":
@@ -542,6 +555,10 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
     finally:
         await connection_manager.remove_websocket_connection(user_id, websocket)
         await cleanup_websocket_connection(websocket)
+        
+        # 🛡️ CLEANUP SECURITY TRACKING
+        from prsm.security import cleanup_websocket_connection as cleanup_security
+        await cleanup_security(websocket)
 
 @router.get("/gas/estimate")
 async def estimate_gas_price(
