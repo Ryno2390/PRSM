@@ -22,7 +22,8 @@
       "Bash(test -f .env)",
       "Bash(npx hardhat compile:*)",
       "Bash(npx hardhat run:*)",
-      "Bash(true)"
+      "Bash(true)",
+      "Bash(node:*)"
     ],
     "deny": []
   }
