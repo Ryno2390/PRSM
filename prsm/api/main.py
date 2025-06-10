@@ -36,6 +36,7 @@ from prsm.api.teams_api import router as teams_router
 from prsm.api.auth_api import router as auth_router
 from prsm.web3.frontend_integration import router as web3_router
 from prsm.auth.auth_manager import auth_manager
+from prsm.auth import get_current_user
 from prsm.auth.middleware import AuthMiddleware, SecurityHeadersMiddleware
 
 
@@ -2717,26 +2718,55 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
     🔌 REAL-TIME CONNECTION:
     Establishes persistent connection for live updates including:
     - Conversation message streaming
-    - Real-time notifications
+    - Real-time notifications  
     - Live data updates (tokenomics, tasks, files)
     - System status updates
+    
+    🔐 SECURITY:
+    Requires JWT authentication via query parameter, Authorization header, or cookie.
+    Connection authenticated before acceptance to prevent unauthorized access.
     """
-    await websocket_manager.connect(websocket, user_id, "general")
+    from .websocket_auth import authenticate_websocket_connection, cleanup_websocket_connection, WebSocketAuthError
     
     try:
+        # 🛡️ AUTHENTICATE CONNECTION BEFORE ACCEPTING
+        connection = await authenticate_websocket_connection(websocket, user_id, "general")
+        await websocket.accept()
+        
+        # Connect to websocket manager after authentication
+        await websocket_manager.connect(websocket, user_id, "general")
+        
+        logger.info("Secure WebSocket connection established",
+                   user_id=user_id,
+                   username=connection.username,
+                   role=connection.role.value,
+                   ip_address=connection.ip_address)
+        
         while True:
             # Listen for messages from client
             data = await websocket.receive_text()
             message = json.loads(data)
             
-            # Handle different message types
-            await handle_websocket_message(websocket, user_id, message)
+            # Handle different message types with authentication context
+            await handle_websocket_message(websocket, user_id, message, connection)
             
+    except WebSocketAuthError as e:
+        # Authentication failed - close with appropriate code
+        logger.warning("WebSocket authentication failed",
+                      user_id=user_id,
+                      error=e.message,
+                      code=e.code)
+        await websocket.close(code=e.code, reason=e.message)
+        return
+        
     except WebSocketDisconnect:
         await websocket_manager.disconnect(websocket)
+        await cleanup_websocket_connection(websocket)
+        
     except Exception as e:
         logger.error("WebSocket error", user_id=user_id, error=str(e))
         await websocket_manager.disconnect(websocket)
+        await cleanup_websocket_connection(websocket)
 
 
 @app.websocket("/ws/conversation/{user_id}/{conversation_id}")
@@ -2750,31 +2780,66 @@ async def conversation_websocket(websocket: WebSocket, user_id: str, conversatio
     - Live typing indicators
     - Message status updates
     - Context usage tracking
+    
+    🔐 SECURITY:
+    Requires JWT authentication and verifies user has access to the specific conversation.
+    Prevents unauthorized access to private conversation streams.
     """
-    await websocket_manager.connect(websocket, user_id, "conversation")
-    await websocket_manager.subscribe_to_conversation(websocket, conversation_id)
+    from .websocket_auth import authenticate_websocket_connection, cleanup_websocket_connection, WebSocketAuthError
     
     try:
+        # 🛡️ AUTHENTICATE CONNECTION AND VERIFY CONVERSATION ACCESS
+        connection = await authenticate_websocket_connection(
+            websocket, user_id, "conversation", conversation_id
+        )
+        await websocket.accept()
+        
+        # Connect to websocket manager after authentication
+        await websocket_manager.connect(websocket, user_id, "conversation")
+        await websocket_manager.subscribe_to_conversation(websocket, conversation_id)
+        
+        logger.info("Secure conversation WebSocket established",
+                   user_id=user_id,
+                   conversation_id=conversation_id,
+                   username=connection.username,
+                   role=connection.role.value,
+                   ip_address=connection.ip_address)
+        
         while True:
             # Listen for conversation messages
             data = await websocket.receive_text()
             message = json.loads(data)
             
-            # Handle conversation-specific messages
-            await handle_conversation_message(websocket, user_id, conversation_id, message)
+            # Handle conversation-specific messages with authentication context
+            await handle_conversation_message(websocket, user_id, conversation_id, message, connection)
             
+    except WebSocketAuthError as e:
+        # Authentication failed - close with appropriate code
+        logger.warning("Conversation WebSocket authentication failed",
+                      user_id=user_id,
+                      conversation_id=conversation_id,
+                      error=e.message,
+                      code=e.code)
+        await websocket.close(code=e.code, reason=e.message)
+        return
+        
     except WebSocketDisconnect:
         await websocket_manager.disconnect(websocket)
+        await cleanup_websocket_connection(websocket)
+        
     except Exception as e:
         logger.error("Conversation WebSocket error",
                     user_id=user_id,
                     conversation_id=conversation_id,
                     error=str(e))
         await websocket_manager.disconnect(websocket)
+        await cleanup_websocket_connection(websocket)
 
 
-async def handle_websocket_message(websocket: WebSocket, user_id: str, message: Dict[str, Any]):
-    """Handle incoming WebSocket messages"""
+async def handle_websocket_message(websocket: WebSocket, user_id: str, message: Dict[str, Any], connection=None):
+    """Handle incoming WebSocket messages with authentication context"""
+    from .websocket_auth import require_websocket_permission, WebSocketAuthError
+    
     message_type = message.get("type")
     
     if message_type == "ping":
@@ -2785,7 +2850,17 @@ async def handle_websocket_message(websocket: WebSocket, user_id: str, message: 
         }, websocket)
         
     elif message_type == "subscribe_conversation":
-        # Subscribe to conversation updates
+        # Subscribe to conversation updates (requires conversation permission)
+        try:
+            await require_websocket_permission(websocket, "conversation.read")
+        except WebSocketAuthError:
+            await websocket_manager.send_personal_message({
+                "type": "error",
+                "message": "Permission denied: conversation.read required",
+                "timestamp": asyncio.get_event_loop().time()
+            }, websocket)
+            return
+            
         conversation_id = message.get("conversation_id")
         if conversation_id:
             await websocket_manager.subscribe_to_conversation(websocket, conversation_id)
@@ -2825,8 +2900,10 @@ async def handle_websocket_message(websocket: WebSocket, user_id: str, message: 
         }, websocket)
 
 
-async def handle_conversation_message(websocket: WebSocket, user_id: str, conversation_id: str, message: Dict[str, Any]):
-    """Handle conversation-specific WebSocket messages"""
+async def handle_conversation_message(websocket: WebSocket, user_id: str, conversation_id: str, message: Dict[str, Any], connection=None):
+    """Handle conversation-specific WebSocket messages with authentication context"""
+    from .websocket_auth import require_websocket_permission, WebSocketAuthError
+    
     message_type = message.get("type")
     
     if message_type == "send_message":
@@ -2934,23 +3011,48 @@ async def stream_ai_response(conversation_id: str, user_message: str, user_id: s
 
 
 @app.get("/ws/stats")
-async def get_websocket_stats() -> Dict[str, Any]:
+async def get_websocket_stats(user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
     """
     Get WebSocket connection statistics
     
     📊 CONNECTION MONITORING:
     Returns real-time statistics about WebSocket connections
     for monitoring and debugging purposes
+    
+    🔐 SECURITY:
+    Requires authentication and admin permissions to view system statistics
     """
+    from .websocket_auth import websocket_auth
+    
     try:
-        stats = websocket_manager.get_connection_stats()
+        # Check admin permissions
+        user = await auth_manager.get_user_by_id(user_id)
+        if not user or user.role not in ["admin", "moderator"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Admin permissions required to view WebSocket statistics"
+            )
+        
+        # Get combined stats from both managers
+        websocket_stats = websocket_manager.get_connection_stats()
+        auth_stats = await websocket_auth.get_connection_stats()
         
         return {
             "success": True,
-            "stats": stats,
+            "stats": {
+                "websocket_manager": websocket_stats,
+                "authentication": auth_stats,
+                "security": {
+                    "authenticated_connections": auth_stats["active_connections"],
+                    "unique_authenticated_users": auth_stats["unique_users"],
+                    "max_connections_per_user": auth_stats["max_connections_per_user"]
+                }
+            },
             "timestamp": asyncio.get_event_loop().time()
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to get WebSocket stats", error=str(e))
         raise HTTPException(
