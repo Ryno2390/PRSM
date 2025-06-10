@@ -38,6 +38,7 @@ from prsm.api.credential_api import router as credential_router
 from prsm.api.security_status_api import router as security_router
 from prsm.api.security_logging_api import router as security_logging_router
 from prsm.api.payment_api import router as payment_router
+from prsm.api.cryptography_api import router as crypto_router
 from prsm.api.marketplace_api import router as marketplace_router
 from prsm.api.marketplace_launch_api import router as marketplace_launch_router
 from prsm.api.governance_api import router as governance_router
@@ -3255,6 +3256,7 @@ app.include_router(credential_router, tags=["Credentials"])
 app.include_router(security_router, tags=["Security"])
 app.include_router(security_logging_router, tags=["Security Logging"])
 app.include_router(payment_router, tags=["Payments"])
+app.include_router(crypto_router, tags=["Cryptography"])
 app.include_router(marketplace_router, tags=["Marketplace"])
 app.include_router(marketplace_launch_router, tags=["Marketplace Launch"])
 app.include_router(governance_router, tags=["Governance"])
@@ -3263,6 +3265,7 @@ app.include_router(web3_router, prefix="/api/v1", tags=["Web3"])
 logger.info("✅ Teams API endpoints enabled")
 logger.info("✅ Security Logging API endpoints enabled")
 logger.info("✅ Payment Processing API endpoints enabled")
+logger.info("✅ Cryptography API endpoints enabled")
 logger.info("✅ Governance API endpoints enabled")
 logger.info("✅ Mainnet Deployment API endpoints enabled")
 
