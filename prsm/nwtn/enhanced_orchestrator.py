@@ -42,6 +42,8 @@ from prsm.agents.routers.model_router import ModelRouter
 from prsm.agents.prompters.prompt_optimizer import PromptOptimizer
 from prsm.agents.executors.model_executor import ModelExecutor
 from prsm.agents.compilers.hierarchical_compiler import HierarchicalCompiler
+from prsm.agents.routers.tool_router import ToolRouter, ToolRequest, ToolExecutionRequest
+from prsm.marketplace.tool_marketplace import tool_marketplace
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -81,14 +83,19 @@ class EnhancedNWTNOrchestrator:
         self.safety_monitor = safety_monitor or SafetyMonitor()
         self.circuit_breaker = circuit_breaker or CircuitBreakerNetwork()
         
-        # Agent instances - real implementations
+        # Agent instances - real implementations with MCP tool integration
         self.architect = HierarchicalArchitect(agent_id="arch_001")
-        self.router = ModelRouter(agent_id="router_001") 
+        self.router = ModelRouter(agent_id="router_001")  # Now includes tool routing
         self.prompt_optimizer = PromptOptimizer(agent_id="prompter_001")
         self.executor = ModelExecutor(agent_id="executor_001")
         self.compiler = HierarchicalCompiler(agent_id="compiler_001")
         
-        # Performance tracking
+        # MCP Tool Integration
+        self.tool_router = ToolRouter(agent_id="tool_router_001")
+        self.tool_marketplace = tool_marketplace
+        self.tool_enabled_models = set()  # Track which models have tool access
+        
+        # Performance tracking with MCP tool metrics
         self.session_metrics = {}
         self.performance_stats = {
             "total_sessions": 0,
@@ -96,7 +103,14 @@ class EnhancedNWTNOrchestrator:
             "failed_sessions": 0,
             "total_execution_time": 0.0,
             "total_ftns_charged": 0.0,
-            "safety_violations": 0
+            "safety_violations": 0,
+            "tool_usage": {
+                "total_tool_requests": 0,
+                "successful_tool_executions": 0,
+                "total_tool_cost_ftns": 0.0,
+                "unique_tools_used": set(),
+                "tool_enhanced_sessions": 0
+            }
         }
         
         logger.info("Enhanced NWTN Orchestrator initialized with real agent coordination")
@@ -680,7 +694,7 @@ class EnhancedNWTNOrchestrator:
         agent_results: Dict[str, Any], 
         session: PRSMSession
     ) -> Dict[str, Any]:
-        """Execute real models with API integration"""
+        """Execute real models with API integration and MCP tool support"""
         try:
             executor = assignment["agent"]
             routing_result = assignment.get("routing_result")
@@ -702,23 +716,71 @@ class EnhancedNWTNOrchestrator:
                 "parallel": True
             }
             
-            # Execute with real ModelExecutor
+            # Check if models need tool access
+            task_description = execution_request["task"]
+            tool_enhanced_results = []
+            
+            for model_id in model_assignments:
+                # Get recommended tools for this model and task
+                recommended_tools = await self.router.get_tools_for_model(model_id, task_description)
+                
+                if recommended_tools:
+                    logger.info("Executing model with tool access",
+                               model_id=model_id,
+                               tool_count=len(recommended_tools))
+                    
+                    # Execute model with tool access
+                    tool_result = await self.router.execute_model_with_tools(
+                        model_id, task_description, recommended_tools
+                    )
+                    tool_enhanced_results.append(tool_result)
+                    
+                    # Track tool usage metrics
+                    self.performance_stats["tool_usage"]["total_tool_requests"] += tool_result.get("tool_execution_count", 0)
+                    if tool_result.get("tools_used"):
+                        self.performance_stats["tool_usage"]["successful_tool_executions"] += len(tool_result["tools_used"])
+                        self.performance_stats["tool_usage"]["unique_tools_used"].update(tool_result["tools_used"])
+                        self.performance_stats["tool_usage"]["tool_enhanced_sessions"] += 1
+            
+            # Execute with real ModelExecutor (fallback for non-tool models)
             execution_results = await executor.process(execution_request)
             
+            # Combine regular and tool-enhanced results
+            all_results = execution_results + [
+                type('MockResult', (), {
+                    'success': r['success'],
+                    'result': r['result'],
+                    'execution_time': r['execution_time'],
+                    'confidence': r.get('confidence', 0.8),
+                    'tokens_used': 100,  # Estimate
+                    'model_id': r['model_id']
+                })() for r in tool_enhanced_results
+            ]
+            
             # Process results and track API usage
-            successful_results = [r for r in execution_results if r.success]
+            successful_results = [r for r in all_results if getattr(r, 'success', r.get('success', False))]
             total_tokens = sum(getattr(r, 'tokens_used', 100) for r in successful_results)
+            
+            # Calculate tool usage cost
+            tool_cost_ftns = sum(
+                len(r.get("tools_used", [])) * 0.5  # 0.5 FTNS per tool usage
+                for r in tool_enhanced_results
+            )
+            self.performance_stats["tool_usage"]["total_tool_cost_ftns"] += tool_cost_ftns
             
             return {
                 "success": len(successful_results) > 0,
-                "execution_results": execution_results,
+                "execution_results": all_results,
+                "tool_enhanced_results": tool_enhanced_results,
                 "successful_count": len(successful_results),
-                "total_count": len(execution_results),
+                "total_count": len(all_results),
                 "context_used": total_tokens // 10,  # Convert tokens to context units
                 "models_used": model_assignments,
-                "confidence": sum(getattr(r, 'confidence', 0.8) for r in successful_results) / max(len(successful_results), 1),
+                "confidence": sum(getattr(r, 'confidence', r.get('confidence', 0.8)) for r in successful_results) / max(len(successful_results), 1),
                 "api_calls": len(execution_results),
-                "processing_time": sum(r.execution_time for r in execution_results)
+                "tool_executions": sum(r.get("tool_execution_count", 0) for r in tool_enhanced_results),
+                "tool_cost_ftns": tool_cost_ftns,
+                "processing_time": sum(getattr(r, 'execution_time', r.get('execution_time', 0.0)) for r in all_results)
             }
             
         except Exception as e:
@@ -1106,6 +1168,291 @@ class EnhancedNWTNOrchestrator:
                         session_id=session.session_id,
                         original_error=str(error),
                         handling_error=str(e))
+    
+    # ===============================
+    # MCP Tool Integration Methods
+    # ===============================
+    
+    async def handle_model_tool_request(self, model_id: str, tool_request: ToolRequest, 
+                                       session: PRSMSession) -> Dict[str, Any]:
+        """
+        Handle tool request from a model during execution
+        
+        This method enables models to request tools during their execution,
+        creating powerful recursive workflows where models can:
+        - Access real-time data
+        - Perform calculations
+        - Interact with external systems
+        - Execute code in secure sandboxes
+        
+        Args:
+            model_id: ID of the requesting model
+            tool_request: Tool request specification
+            session: Current session context
+            
+        Returns:
+            Tool execution result with usage tracking
+        """
+        logger.info("Processing tool request from model",
+                   session_id=session.session_id,
+                   model_id=model_id,
+                   request_id=str(tool_request.request_id))
+        
+        try:
+            # Route tool request
+            routing_decision = await self.router.route_tool_request(model_id, tool_request)
+            
+            if routing_decision.confidence_score < 0.3:
+                logger.warning("Low confidence tool routing decision",
+                             session_id=session.session_id,
+                             confidence=routing_decision.confidence_score)
+            
+            # Create tool execution request
+            tool_execution_request = ToolExecutionRequest(
+                tool_id=routing_decision.primary_tool.tool_spec.tool_id,
+                tool_action="execute",
+                parameters=tool_request.task_context,
+                user_id=session.user_id,
+                permissions=["tool_execution"],
+                sandbox_level=tool_request.max_security_level
+            )
+            
+            # Execute tool through tool router
+            execution_result = await self.tool_router.execute_tool(tool_execution_request)
+            
+            # Calculate FTNS cost for tool usage
+            tool_cost = routing_decision.primary_tool.tool_spec.cost_per_use or 0.5
+            
+            # Update session metrics
+            if session.session_id in self.session_metrics:
+                self.session_metrics[session.session_id]["ftns_charged"] += tool_cost
+            
+            # Store reasoning step for tool usage
+            step_id = await self.database_service.create_reasoning_step(
+                session_id=session.session_id,
+                step_data={
+                    "agent_type": "tool_execution",
+                    "agent_id": f"tool_{routing_decision.primary_tool.tool_spec.tool_id}",
+                    "input_data": {
+                        "model_id": model_id,
+                        "tool_request": tool_request.task_description,
+                        "tool_selected": routing_decision.primary_tool.tool_spec.tool_id
+                    },
+                    "output_data": {
+                        "execution_result": execution_result.result_data,
+                        "success": execution_result.success,
+                        "tool_cost": tool_cost
+                    },
+                    "execution_time": execution_result.execution_time,
+                    "confidence_score": routing_decision.confidence_score
+                }
+            )
+            
+            # Update tool usage statistics
+            self.performance_stats["tool_usage"]["total_tool_requests"] += 1
+            if execution_result.success:
+                self.performance_stats["tool_usage"]["successful_tool_executions"] += 1
+            self.performance_stats["tool_usage"]["total_tool_cost_ftns"] += tool_cost
+            self.performance_stats["tool_usage"]["unique_tools_used"].add(routing_decision.primary_tool.tool_spec.tool_id)
+            
+            return {
+                "success": execution_result.success,
+                "tool_id": routing_decision.primary_tool.tool_spec.tool_id,
+                "tool_name": routing_decision.primary_tool.tool_spec.name,
+                "result": execution_result.result_data,
+                "execution_time": execution_result.execution_time,
+                "cost_ftns": tool_cost,
+                "step_id": step_id,
+                "routing_confidence": routing_decision.confidence_score,
+                "error": execution_result.error_message if not execution_result.success else None
+            }
+            
+        except Exception as e:
+            logger.error("Tool request handling failed",
+                        session_id=session.session_id,
+                        model_id=model_id,
+                        error=str(e))
+            
+            # Create error reasoning step
+            await self.database_service.create_reasoning_step(
+                session_id=session.session_id,
+                step_data={
+                    "agent_type": "tool_execution_error",
+                    "agent_id": "tool_router",
+                    "input_data": {"model_id": model_id, "error": str(e)},
+                    "output_data": {"success": False, "error": str(e)},
+                    "execution_time": 0.0,
+                    "confidence_score": 0.0
+                }
+            )
+            
+            return {
+                "success": False,
+                "error": str(e),
+                "tool_id": None,
+                "cost_ftns": 0.0
+            }
+    
+    async def orchestrate_tool_enhanced_workflow(self, session: PRSMSession, 
+                                               initial_prompt: str) -> Dict[str, Any]:
+        """
+        Orchestrate a complete tool-enhanced workflow
+        
+        This method creates sophisticated workflows where models can
+        recursively request tools, process results, and make additional
+        tool requests based on intermediate results.
+        
+        Args:
+            session: Current session
+            initial_prompt: Initial user prompt
+            
+        Returns:
+            Complete workflow result with tool trace
+        """
+        workflow_start = time.time()
+        tool_trace = []
+        
+        logger.info("Starting tool-enhanced workflow",
+                   session_id=session.session_id,
+                   prompt_length=len(initial_prompt))
+        
+        try:
+            # Phase 1: Initial model execution with tool discovery
+            phase1_start = time.time()
+            
+            # Use architect to analyze tool requirements
+            tool_analysis = await self.architect.assess_complexity(initial_prompt)
+            
+            # Determine which models need tool access
+            models_with_tools = {}
+            for model_id in ["gpt-4", "claude-3-sonnet"]:  # Example models
+                recommended_tools = await self.router.get_tools_for_model(model_id, initial_prompt)
+                if recommended_tools:
+                    models_with_tools[model_id] = recommended_tools
+            
+            phase1_time = time.time() - phase1_start
+            
+            # Phase 2: Execute models with tool access
+            phase2_start = time.time()
+            model_results = {}
+            
+            for model_id, available_tools in models_with_tools.items():
+                logger.info("Executing model with tools",
+                           model_id=model_id,
+                           tool_count=len(available_tools))
+                
+                # Execute model with tool access
+                result = await self.router.execute_model_with_tools(
+                    model_id, initial_prompt, available_tools
+                )
+                
+                model_results[model_id] = result
+                
+                # Track tools used in this workflow
+                if result.get("tools_used"):
+                    for tool_id in result["tools_used"]:
+                        tool_trace.append({
+                            "model_id": model_id,
+                            "tool_id": tool_id,
+                            "execution_time": result["execution_time"],
+                            "success": result["success"]
+                        })
+            
+            phase2_time = time.time() - phase2_start
+            
+            # Phase 3: Synthesis and compilation
+            phase3_start = time.time()
+            
+            # Compile results using hierarchical compiler
+            compilation_input = []
+            for model_id, result in model_results.items():
+                if result["success"]:
+                    compilation_input.append({
+                        "model_id": model_id,
+                        "content": result["result"],
+                        "tools_used": result.get("tools_used", []),
+                        "tool_execution_count": result.get("tool_execution_count", 0),
+                        "confidence": result.get("confidence", 0.8)
+                    })
+            
+            # Use compiler to synthesize tool-enhanced results
+            compiled_result = await self.compiler.safe_process(compilation_input, {
+                "session_id": session.session_id,
+                "workflow_type": "tool_enhanced",
+                "tool_trace": tool_trace
+            })
+            
+            phase3_time = time.time() - phase3_start
+            total_workflow_time = time.time() - workflow_start
+            
+            # Calculate workflow statistics
+            total_tools_used = sum(len(r.get("tools_used", [])) for r in model_results.values())
+            total_tool_executions = sum(r.get("tool_execution_count", 0) for r in model_results.values())
+            successful_models = sum(1 for r in model_results.values() if r["success"])
+            
+            # Update performance statistics
+            self.performance_stats["tool_usage"]["tool_enhanced_sessions"] += 1
+            
+            return {
+                "success": compiled_result.success,
+                "final_result": compiled_result.output_data if compiled_result.success else None,
+                "error": compiled_result.error_message if not compiled_result.success else None,
+                "workflow_metrics": {
+                    "total_time": total_workflow_time,
+                    "phase_times": {
+                        "analysis": phase1_time,
+                        "execution": phase2_time,
+                        "compilation": phase3_time
+                    },
+                    "models_executed": len(model_results),
+                    "successful_models": successful_models,
+                    "total_tools_used": total_tools_used,
+                    "total_tool_executions": total_tool_executions
+                },
+                "tool_trace": tool_trace,
+                "model_results": model_results,
+                "compilation_confidence": getattr(compiled_result, 'confidence_score', 0.8)
+            }
+            
+        except Exception as e:
+            logger.error("Tool-enhanced workflow failed",
+                        session_id=session.session_id,
+                        error=str(e))
+            
+            return {
+                "success": False,
+                "error": str(e),
+                "workflow_metrics": {
+                    "total_time": time.time() - workflow_start
+                },
+                "tool_trace": tool_trace
+            }
+    
+    def get_tool_usage_analytics(self) -> Dict[str, Any]:
+        """Get comprehensive tool usage analytics"""
+        tool_stats = self.performance_stats["tool_usage"]
+        
+        return {
+            "session_analytics": {
+                "total_sessions": self.performance_stats["total_sessions"],
+                "tool_enhanced_sessions": tool_stats["tool_enhanced_sessions"],
+                "tool_enhancement_rate": (
+                    tool_stats["tool_enhanced_sessions"] / max(self.performance_stats["total_sessions"], 1)
+                )
+            },
+            "tool_usage_metrics": {
+                "total_requests": tool_stats["total_tool_requests"],
+                "successful_executions": tool_stats["successful_tool_executions"],
+                "success_rate": (
+                    tool_stats["successful_tool_executions"] / max(tool_stats["total_tool_requests"], 1)
+                ),
+                "unique_tools": len(tool_stats["unique_tools_used"]),
+                "total_cost_ftns": tool_stats["total_tool_cost_ftns"]
+            },
+            "tool_router_analytics": self.tool_router.get_tool_analytics(),
+            "model_router_analytics": self.router.get_tool_usage_analytics(),
+            "marketplace_stats": self.tool_marketplace.get_marketplace_stats()
+        }
 
 # Global enhanced orchestrator instance
 enhanced_nwtn_orchestrator = None
