@@ -22,6 +22,7 @@ from prsm.core.models import (
 from prsm.federation.model_registry import ModelRegistry
 from prsm.agents.routers.marketplace_integration import marketplace_integration
 from prsm.agents.routers.performance_tracker import performance_tracker, MetricType
+from prsm.agents.routers.tool_router import ToolRouter, ToolRequest, ToolRoutingDecision
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -156,7 +157,7 @@ class ModelCandidate(BaseModel):
 
 class ModelRouter(BaseAgent):
     """
-    Enhanced Model Router for PRSM
+    Enhanced Model Router for PRSM with MCP Tool Integration
     
     Advanced routing capabilities:
     - Intelligent specialist matching with domain expertise
@@ -164,6 +165,13 @@ class ModelRouter(BaseAgent):
     - Teacher model selection for student training
     - Multi-strategy routing optimization
     - Performance-based adaptive routing
+    - MCP Tool routing for tool-augmented models
+    
+    MCP Tool Integration:
+    - Routes tool requests from models to appropriate MCP tools
+    - Coordinates model-tool workflows for enhanced capabilities
+    - Manages tool execution security and sandboxing
+    - Tracks tool usage and performance metrics
     """
     
     def __init__(self, model_registry: Optional[ModelRegistry] = None, agent_id: Optional[str] = None):
@@ -175,12 +183,18 @@ class ModelRouter(BaseAgent):
         self.marketplace_endpoints: List[str] = self._initialize_marketplace_endpoints()
         self.teacher_pool: Dict[str, List[TeacherModel]] = {}  # domain -> teachers
         
+        # MCP Tool Integration
+        self.tool_router = ToolRouter()
+        self.tool_routing_decisions: List[ToolRoutingDecision] = []
+        self.model_tool_associations: Dict[str, List[str]] = {}  # model_id -> tool_ids
+        
         # Initialize performance tracking
         self._initialize_performance_tracking()
         
-        logger.info("Enhanced ModelRouter initialized",
+        logger.info("Enhanced ModelRouter with MCP Tool integration initialized",
                    agent_id=self.agent_id,
-                   marketplace_endpoints=len(self.marketplace_endpoints))
+                   marketplace_endpoints=len(self.marketplace_endpoints),
+                   available_tools=len(self.tool_router.tool_registry.tools))
     
     def _initialize_marketplace_endpoints(self) -> List[str]:
         """Initialize marketplace endpoints for model discovery"""
@@ -1038,6 +1052,346 @@ class ModelRouter(BaseAgent):
         logger.info("Routing cache cleared",
                    agent_id=self.agent_id,
                    cleared_entries=cache_size)
+    
+    # ===============================
+    # MCP Tool Integration Methods
+    # ===============================
+    
+    async def route_tool_request(self, model_id: str, tool_request: ToolRequest) -> ToolRoutingDecision:
+        """
+        Route a tool request from a model to appropriate MCP tools
+        
+        This method enables models to request tools during execution, creating
+        powerful tool-augmented AI workflows where models can:
+        - Access real-time data through APIs
+        - Perform calculations and computations
+        - Interact with file systems and databases
+        - Execute code in secure sandboxes
+        - Communicate with external services
+        
+        Args:
+            model_id: ID of the requesting model
+            tool_request: Specification of tool requirements
+            
+        Returns:
+            ToolRoutingDecision: Complete routing decision with selected tools
+        """
+        logger.info("Processing tool request from model",
+                   agent_id=self.agent_id,
+                   model_id=model_id,
+                   request_id=str(tool_request.request_id))
+        
+        # Route through tool router
+        decision = await self.tool_router.process(tool_request)
+        
+        # Store decision for analytics
+        self.tool_routing_decisions.append(decision)
+        
+        # Update model-tool associations
+        if model_id not in self.model_tool_associations:
+            self.model_tool_associations[model_id] = []
+        
+        tool_id = decision.primary_tool.tool_spec.tool_id
+        if tool_id not in self.model_tool_associations[model_id]:
+            self.model_tool_associations[model_id].append(tool_id)
+        
+        logger.info("Tool request routed successfully",
+                   agent_id=self.agent_id,
+                   model_id=model_id,
+                   selected_tool=tool_id,
+                   confidence=decision.confidence_score)
+        
+        return decision
+    
+    async def get_tools_for_model(self, model_id: str, task_description: str = None) -> List[str]:
+        """
+        Get recommended tools for a specific model and task
+        
+        This method analyzes a model's capabilities and the current task
+        to recommend appropriate MCP tools that could enhance the model's
+        performance and capabilities.
+        
+        Args:
+            model_id: ID of the model
+            task_description: Optional description of the current task
+            
+        Returns:
+            List of recommended tool IDs
+        """
+        # Get model details for capability analysis
+        model_details = await self.model_registry.get_model_details(model_id)
+        
+        if not model_details:
+            logger.warning("Model not found for tool recommendation", model_id=model_id)
+            return []
+        
+        # Create tool request based on model capabilities and task
+        if task_description:
+            tool_request = ToolRequest(
+                model_id=model_id,
+                task_description=task_description
+            )
+        else:
+            # Recommend general tools based on model specialization
+            specialization = getattr(model_details, 'specialization', 'general')
+            tool_request = ToolRequest(
+                model_id=model_id,
+                task_description=f"General {specialization} tasks"
+            )
+        
+        # Get tool routing decision
+        decision = await self.tool_router.process(tool_request)
+        
+        # Return all suitable tools (primary + backups)
+        recommended_tools = [decision.primary_tool.tool_spec.tool_id]
+        recommended_tools.extend([t.tool_spec.tool_id for t in decision.backup_tools])
+        
+        return recommended_tools[:5]  # Limit to top 5 recommendations
+    
+    async def associate_model_with_tools(self, model_id: str, tool_ids: List[str]) -> bool:
+        """
+        Create persistent association between a model and tools
+        
+        This enables automatic tool availability for models, creating
+        specialized tool-augmented model configurations.
+        
+        Args:
+            model_id: ID of the model
+            tool_ids: List of tool IDs to associate
+            
+        Returns:
+            True if association was successful
+        """
+        try:
+            # Validate that tools exist
+            valid_tools = []
+            for tool_id in tool_ids:
+                tool = self.tool_router.tool_registry.get_tool(tool_id)
+                if tool:
+                    valid_tools.append(tool_id)
+                else:
+                    logger.warning("Tool not found for association", 
+                                  tool_id=tool_id, model_id=model_id)
+            
+            if not valid_tools:
+                return False
+            
+            # Create/update association
+            self.model_tool_associations[model_id] = valid_tools
+            
+            logger.info("Model-tool association created",
+                       agent_id=self.agent_id,
+                       model_id=model_id,
+                       tool_count=len(valid_tools))
+            
+            return True
+            
+        except Exception as e:
+            logger.error("Failed to associate model with tools",
+                        model_id=model_id,
+                        error=str(e))
+            return False
+    
+    async def execute_model_with_tools(self, model_id: str, task: str, 
+                                     available_tools: List[str] = None) -> Dict[str, Any]:
+        """
+        Execute a model with access to specified MCP tools
+        
+        This method coordinates the execution of a model while providing
+        it with access to MCP tools for enhanced capabilities. The model
+        can request tools during execution through the tool router.
+        
+        Args:
+            model_id: ID of the model to execute
+            task: Task description for the model
+            available_tools: List of tool IDs available to the model
+            
+        Returns:
+            Execution result with tool usage information
+        """
+        start_time = time.time()
+        
+        # Get associated tools if none specified
+        if available_tools is None:
+            available_tools = self.model_tool_associations.get(model_id, [])
+        
+        logger.info("Executing model with tool access",
+                   agent_id=self.agent_id,
+                   model_id=model_id,
+                   available_tools=len(available_tools))
+        
+        try:
+            # Create execution context with tool access
+            execution_context = {
+                "model_id": model_id,
+                "available_tools": available_tools,
+                "tool_router": self.tool_router,
+                "tool_enabled": True
+            }
+            
+            # For now, simulate model execution with tool access
+            # In production, this would integrate with the actual model executor
+            result = await self._simulate_tool_enhanced_execution(
+                model_id, task, available_tools
+            )
+            
+            execution_time = time.time() - start_time
+            
+            return {
+                "model_id": model_id,
+                "task": task,
+                "result": result,
+                "execution_time": execution_time,
+                "tools_used": result.get("tools_used", []),
+                "tool_execution_count": result.get("tool_execution_count", 0),
+                "success": True
+            }
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            logger.error("Model execution with tools failed",
+                        model_id=model_id,
+                        error=str(e))
+            
+            return {
+                "model_id": model_id,
+                "task": task,
+                "result": None,
+                "execution_time": execution_time,
+                "error": str(e),
+                "success": False
+            }
+    
+    async def _simulate_tool_enhanced_execution(self, model_id: str, task: str, 
+                                              available_tools: List[str]) -> Dict[str, Any]:
+        """Simulate model execution with tool access"""
+        task_lower = task.lower()
+        tools_used = []
+        tool_execution_count = 0
+        
+        # Simulate tool usage based on task characteristics
+        if "search" in task_lower or "find" in task_lower:
+            if "web_search" in available_tools:
+                tools_used.append("web_search")
+                tool_execution_count += 1
+        
+        if "file" in task_lower or "read" in task_lower:
+            if "file_reader" in available_tools:
+                tools_used.append("file_reader")
+                tool_execution_count += 1
+        
+        if "calculate" in task_lower or "compute" in task_lower:
+            if "python_executor" in available_tools:
+                tools_used.append("python_executor")
+                tool_execution_count += 1
+        
+        if "database" in task_lower or "query" in task_lower:
+            if "database_query" in available_tools:
+                tools_used.append("database_query")
+                tool_execution_count += 1
+        
+        # Generate enhanced result
+        base_result = f"Enhanced analysis of: {task}"
+        if tools_used:
+            base_result += f"\n\nTools utilized: {', '.join(tools_used)}"
+            base_result += f"\nTool-enhanced insights: Additional data and capabilities provided through {len(tools_used)} tools"
+        
+        return {
+            "type": "tool_enhanced_response",
+            "content": base_result,
+            "tools_used": tools_used,
+            "tool_execution_count": tool_execution_count,
+            "enhancement_factor": len(tools_used) * 0.2 + 1.0,  # 20% improvement per tool
+            "confidence": 0.9 + len(tools_used) * 0.02  # Higher confidence with tools
+        }
+    
+    def get_tool_usage_analytics(self) -> Dict[str, Any]:
+        """Get analytics on tool usage by models"""
+        return {
+            "total_tool_routing_decisions": len(self.tool_routing_decisions),
+            "models_with_tool_access": len(self.model_tool_associations),
+            "tool_associations": dict(self.model_tool_associations),
+            "recent_tool_decisions": [
+                {
+                    "model_id": "unknown",  # Would need to track this
+                    "tool_selected": d.primary_tool.tool_spec.tool_id,
+                    "confidence": d.confidence_score,
+                    "routing_time": d.routing_time
+                }
+                for d in self.tool_routing_decisions[-10:]
+            ],
+            "tool_router_analytics": self.tool_router.get_tool_analytics()
+        }
+    
+    async def optimize_model_tool_pairing(self, model_id: str) -> Dict[str, Any]:
+        """
+        Optimize tool selection for a specific model based on usage patterns
+        
+        Analyzes historical performance to recommend the best tool combinations
+        for a given model, creating optimized tool-augmented configurations.
+        
+        Args:
+            model_id: ID of the model to optimize
+            
+        Returns:
+            Optimization recommendations and metrics
+        """
+        # Get historical performance data
+        model_decisions = [
+            d for d in self.tool_routing_decisions 
+            if hasattr(d, 'model_id') and getattr(d, 'model_id', None) == model_id
+        ]
+        
+        if not model_decisions:
+            return {
+                "model_id": model_id,
+                "optimization_available": False,
+                "reason": "Insufficient usage data for optimization"
+            }
+        
+        # Analyze tool performance for this model
+        tool_performance = {}
+        for decision in model_decisions:
+            tool_id = decision.primary_tool.tool_spec.tool_id
+            if tool_id not in tool_performance:
+                tool_performance[tool_id] = {
+                    "usage_count": 0,
+                    "avg_confidence": 0.0,
+                    "avg_routing_time": 0.0
+                }
+            
+            tool_performance[tool_id]["usage_count"] += 1
+            tool_performance[tool_id]["avg_confidence"] += decision.confidence_score
+            tool_performance[tool_id]["avg_routing_time"] += decision.routing_time
+        
+        # Calculate averages
+        for tool_id, stats in tool_performance.items():
+            count = stats["usage_count"]
+            stats["avg_confidence"] /= count
+            stats["avg_routing_time"] /= count
+        
+        # Generate recommendations
+        recommended_tools = sorted(
+            tool_performance.items(),
+            key=lambda x: (x[1]["avg_confidence"], -x[1]["avg_routing_time"]),
+            reverse=True
+        )[:5]  # Top 5 tools
+        
+        return {
+            "model_id": model_id,
+            "optimization_available": True,
+            "total_decisions_analyzed": len(model_decisions),
+            "recommended_tools": [
+                {
+                    "tool_id": tool_id,
+                    "usage_count": stats["usage_count"],
+                    "avg_confidence": stats["avg_confidence"],
+                    "avg_routing_time": stats["avg_routing_time"]
+                }
+                for tool_id, stats in recommended_tools
+            ],
+            "optimization_score": sum(stats["avg_confidence"] for _, stats in recommended_tools) / len(recommended_tools) if recommended_tools else 0.0
+        }
 
 
 # Factory function
