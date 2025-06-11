@@ -13,6 +13,18 @@ from pydantic import BaseModel, Field
 from ..core.models import PRSMBaseModel, TimestampMixin
 
 
+class TrainingMetrics(BaseModel):
+    """Metrics collected during training"""
+    step: int
+    loss: float
+    accuracy: float = 0.0
+    distillation_loss: float = 0.0
+    student_loss: float = 0.0
+    learning_rate: float = 0.0
+    temperature: float = 4.0
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class DistillationStatus(str, Enum):
     """Status of distillation jobs"""
     QUEUED = "queued"

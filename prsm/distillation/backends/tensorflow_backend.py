@@ -241,8 +241,10 @@ class TensorFlowDistillationBackend(DistillationBackend):
         
         return teacher_model, student_model
     
-    def _build_student_model(self, architecture: Dict[str, Any]) -> tf.keras.Model:
+    def _build_student_model(self, architecture: Dict[str, Any]):
         """Build student model using Keras functional API"""
+        if not TENSORFLOW_AVAILABLE:
+            raise ImportError("TensorFlow not available")
         
         # 📝 INPUT LAYERS
         input_ids = tf.keras.Input(
