@@ -197,6 +197,8 @@ services:
     volumes:
       - prometheus-data:/prometheus
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/alert_rules.yml:/etc/prometheus/prometheus/alert_rules.yml:ro
+      - ./config/prometheus/recording_rules.yml:/etc/prometheus/prometheus/recording_rules.yml:ro
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -229,6 +231,33 @@ services:
       - prsm-network
     depends_on:
       - prometheus
+
+  # ===================================
+  # Alertmanager for Notifications
+  # ===================================
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: prsm-alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - alertmanager-data:/alertmanager
+      - ./config/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+      - '--log.level=info'
+    networks:
+      - prsm-network
+    depends_on:
+      - prometheus
+    environment:
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      PAGERDUTY_INTEGRATION_KEY: ${PAGERDUTY_INTEGRATION_KEY:-}
+      WEBHOOK_PASSWORD: ${WEBHOOK_PASSWORD:-alertmanager_webhook}
 
   # ===================================
   # ChromaDB Vector Database (Alternative)
@@ -325,6 +354,9 @@ volumes:
   grafana-data:
     driver: local
     name: prsm-grafana-data
+  alertmanager-data:
+    driver: local
+    name: prsm-alertmanager-data
   
   # Nginx
   nginx-logs:
