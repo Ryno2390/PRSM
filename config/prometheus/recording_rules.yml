@@ -1,0 +1,304 @@
+groups:
+# =============================================================================
+# PRSM API Performance Recording Rules
+# =============================================================================
+- name: prsm.api.recording
+  interval: 30s
+  rules:
+  # API Request Rate (requests per second)
+  - record: prsm:api_request_rate
+    expr: rate(http_requests_total{job="prsm-api"}[5m])
+    labels:
+      component: "api"
+
+  # API Error Rate (errors per second)
+  - record: prsm:api_error_rate
+    expr: rate(http_requests_total{job="prsm-api", status=~"5.."}[5m])
+    labels:
+      component: "api"
+
+  # API Error Percentage
+  - record: prsm:api_error_percentage
+    expr: |
+      (
+        rate(http_requests_total{job="prsm-api", status=~"5.."}[5m])
+        /
+        rate(http_requests_total{job="prsm-api"}[5m])
+      ) * 100
+    labels:
+      component: "api"
+
+  # API Response Time Percentiles
+  - record: prsm:api_response_time_p50
+    expr: histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{job="prsm-api"}[5m]))
+    labels:
+      component: "api"
+      quantile: "50"
+
+  - record: prsm:api_response_time_p95
+    expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="prsm-api"}[5m]))
+    labels:
+      component: "api"
+      quantile: "95"
+
+  - record: prsm:api_response_time_p99
+    expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="prsm-api"}[5m]))
+    labels:
+      component: "api"
+      quantile: "99"
+
+# =============================================================================
+# Database Performance Recording Rules
+# =============================================================================
+- name: prsm.database.recording
+  interval: 30s
+  rules:
+  # Database Connection Utilization
+  - record: prsm:db_connection_utilization
+    expr: |
+      (
+        pg_stat_database_numbackends
+        /
+        pg_settings_max_connections
+      ) * 100
+    labels:
+      component: "database"
+
+  # Database Query Rate
+  - record: prsm:db_query_rate
+    expr: rate(pg_stat_database_xact_commit[5m]) + rate(pg_stat_database_xact_rollback[5m])
+    labels:
+      component: "database"
+
+  # Database Cache Hit Ratio
+  - record: prsm:db_cache_hit_ratio
+    expr: |
+      (
+        pg_stat_database_blks_hit
+        /
+        (pg_stat_database_blks_hit + pg_stat_database_blks_read)
+      ) * 100
+    labels:
+      component: "database"
+
+# =============================================================================
+# Redis Performance Recording Rules
+# =============================================================================
+- name: prsm.redis.recording
+  interval: 30s
+  rules:
+  # Redis Memory Utilization
+  - record: prsm:redis_memory_utilization
+    expr: |
+      (
+        redis_memory_used_bytes
+        /
+        redis_memory_max_bytes
+      ) * 100
+    labels:
+      component: "redis"
+
+  # Redis Operations Rate
+  - record: prsm:redis_ops_rate
+    expr: rate(redis_commands_processed_total[5m])
+    labels:
+      component: "redis"
+
+  # Redis Hit Rate
+  - record: prsm:redis_hit_rate
+    expr: |
+      (
+        rate(redis_keyspace_hits_total[5m])
+        /
+        (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m]))
+      ) * 100
+    labels:
+      component: "redis"
+
+# =============================================================================
+# System Resource Recording Rules
+# =============================================================================
+- name: prsm.system.recording
+  interval: 30s
+  rules:
+  # CPU Utilization
+  - record: prsm:cpu_utilization
+    expr: |
+      100 - (
+        avg by(instance) (
+          irate(node_cpu_seconds_total{mode="idle"}[5m])
+        ) * 100
+      )
+    labels:
+      component: "system"
+
+  # Memory Utilization
+  - record: prsm:memory_utilization
+    expr: |
+      (
+        (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes)
+        /
+        node_memory_MemTotal_bytes
+      ) * 100
+    labels:
+      component: "system"
+
+  # Disk Utilization
+  - record: prsm:disk_utilization
+    expr: |
+      (
+        (node_filesystem_size_bytes - node_filesystem_free_bytes)
+        /
+        node_filesystem_size_bytes
+      ) * 100
+    labels:
+      component: "system"
+
+  # Network Throughput (bytes per second)
+  - record: prsm:network_throughput_bytes
+    expr: rate(node_network_transmit_bytes_total[5m]) + rate(node_network_receive_bytes_total[5m])
+    labels:
+      component: "system"
+
+# =============================================================================
+# IPFS Storage Recording Rules
+# =============================================================================
+- name: prsm.ipfs.recording
+  interval: 60s
+  rules:
+  # IPFS Storage Utilization
+  - record: prsm:ipfs_storage_utilization
+    expr: |
+      (
+        ipfs_repo_size_bytes
+        /
+        ipfs_repo_size_limit_bytes
+      ) * 100
+    labels:
+      component: "ipfs"
+
+  # IPFS Request Rate
+  - record: prsm:ipfs_request_rate
+    expr: rate(ipfs_api_requests_total[5m])
+    labels:
+      component: "ipfs"
+
+  # IPFS Peer Count Average
+  - record: prsm:ipfs_peer_count_avg
+    expr: avg_over_time(ipfs_swarm_peers[10m])
+    labels:
+      component: "ipfs"
+
+# =============================================================================
+# Business Metrics Recording Rules
+# =============================================================================
+- name: prsm.business.recording
+  interval: 60s
+  rules:
+  # Model Training Success Rate
+  - record: prsm:training_success_rate
+    expr: |
+      (
+        rate(model_training_success_total[1h])
+        /
+        rate(model_training_attempts_total[1h])
+      ) * 100
+    labels:
+      component: "training"
+
+  # Marketplace Transaction Rate
+  - record: prsm:marketplace_transaction_rate
+    expr: rate(marketplace_transactions_total[5m])
+    labels:
+      component: "marketplace"
+
+  # FTNS Token Transfer Rate
+  - record: prsm:ftns_transfer_rate
+    expr: rate(ftns_transfers_total[5m])
+    labels:
+      component: "tokens"
+
+  # Governance Participation Rate
+  - record: prsm:governance_participation_rate
+    expr: |
+      (
+        governance_active_voters
+        /
+        governance_total_eligible
+      ) * 100
+    labels:
+      component: "governance"
+
+  # API Availability (SLA calculation)
+  - record: prsm:api_availability_sla
+    expr: |
+      (
+        (
+          rate(http_requests_total{job="prsm-api"}[24h])
+          -
+          rate(http_requests_total{job="prsm-api", status=~"5.."}[24h])
+        )
+        /
+        rate(http_requests_total{job="prsm-api"}[24h])
+      ) * 100
+    labels:
+      component: "api"
+      sla: "daily"
+
+# =============================================================================
+# Security Metrics Recording Rules
+# =============================================================================
+- name: prsm.security.recording
+  interval: 30s
+  rules:
+  # Security Threat Rate
+  - record: prsm:security_threat_rate
+    expr: rate(security_threats_detected_total[5m])
+    labels:
+      component: "security"
+
+  # Authentication Failure Rate
+  - record: prsm:auth_failure_rate
+    expr: rate(http_requests_total{status="401"}[5m])
+    labels:
+      component: "security"
+
+  # Rate Limiting Trigger Rate
+  - record: prsm:rate_limit_trigger_rate
+    expr: rate(http_requests_total{status="429"}[5m])
+    labels:
+      component: "security"
+
+# =============================================================================
+# Kubernetes Metrics Recording Rules
+# =============================================================================
+- name: prsm.kubernetes.recording
+  interval: 30s
+  rules:
+  # Pod Restart Rate
+  - record: prsm:pod_restart_rate
+    expr: rate(kube_pod_container_status_restarts_total{container=~"prsm-.*"}[15m])
+    labels:
+      component: "kubernetes"
+
+  # Pod Memory Usage
+  - record: prsm:pod_memory_usage
+    expr: |
+      (
+        container_memory_usage_bytes{container=~"prsm-.*"}
+        /
+        container_spec_memory_limit_bytes{container=~"prsm-.*"}
+      ) * 100
+    labels:
+      component: "kubernetes"
+
+  # Pod CPU Usage
+  - record: prsm:pod_cpu_usage
+    expr: |
+      (
+        rate(container_cpu_usage_seconds_total{container=~"prsm-.*"}[5m])
+        /
+        container_spec_cpu_quota{container=~"prsm-.*"}
+      ) * 100
+    labels:
+      component: "kubernetes"
