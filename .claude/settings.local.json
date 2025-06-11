@@ -23,7 +23,8 @@
       "Bash(npx hardhat compile:*)",
       "Bash(npx hardhat run:*)",
       "Bash(true)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(pip install:*)"
     ],
     "deny": []
   }
