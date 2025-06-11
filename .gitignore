@@ -151,3 +151,79 @@ Desktop.ini
 
 # Claude Code
 .claude/
+
+# Development artifacts and temporary files
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Testing
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.pytest_cache/
+pytest.ini
+.pytest.ini
+
+# System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Log files
+*.log
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# OS generated files
+*.db
+
+# Package manager
+*.lock
+
+# Development and testing artifacts
+deployments/mock_*
+test_results/
+coverage_reports/
+*.test.log
