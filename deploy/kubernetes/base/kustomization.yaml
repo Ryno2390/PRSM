@@ -1,0 +1,48 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secrets.yaml
+  - prsm-api-deployment.yaml
+  - prsm-api-service.yaml
+  - prsm-worker-deployment.yaml
+  - postgres-deployment.yaml
+  - postgres-service.yaml
+  - postgres-pvc.yaml
+  - redis-deployment.yaml
+  - redis-service.yaml
+  - ipfs-deployment.yaml
+  - ipfs-service.yaml
+  - prometheus-deployment.yaml
+  - prometheus-service.yaml
+  - grafana-deployment.yaml
+  - grafana-service.yaml
+  - ingress.yaml
+  - hpa.yaml
+  - network-policies.yaml
+
+commonLabels:
+  app.kubernetes.io/name: prsm
+  app.kubernetes.io/part-of: prsm-platform
+
+namespace: prsm-system
+
+images:
+  - name: prsm-api
+    newTag: latest
+  - name: prsm-worker
+    newTag: latest
+
+replicas:
+  - name: prsm-api
+    count: 3
+  - name: prsm-worker
+    count: 2
+  - name: postgres
+    count: 1
+  - name: redis
+    count: 3
+  - name: ipfs
+    count: 2
