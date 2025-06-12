@@ -38,6 +38,18 @@ The AI industry faces fundamental structural problems that create trillion-dolla
 - **Compute Commoditization**: H100 alternatives and edge devices democratizing access
 - **Regulatory Pressure**: Governments seeking alternatives to Big Tech dominance
 - **Developer Frustration**: API dependency and rate limiting driving demand for alternatives
+- **Efficiency Frontier Opening**: Physical scaling limits make optimization the new battleground
+
+#### **The Efficiency Singularity Opportunity**
+
+As centralized labs approach trillion-dollar compute clusters (projected by Leopold Aschenbrenner's "Situational Awareness"), **PRSM targets the efficiency frontier**: getting more intelligence per compute unit rather than simply adding more units.
+
+**Strategic Advantage**: While Big Tech scales by adding resources, PRSM scales by getting smarter with existing ones through:
+
+- **Global Distillation Swarm**: Open, recursive, reward-driven model compression across millions of nodes
+- **Evolutionary Intelligence**: Natural selection for fastest and most accurate model variants
+- **Real-World Optimization**: Usage-driven efficiency improvements with token incentives
+- **Complementary Paradigms**: Hyperscale clusters train foundation models, PRSM optimizes them for edge deployment
 
 ---
 
@@ -77,13 +89,15 @@ PRSM doesn't compete with OpenAI or Google—it makes their extraction model obs
 
 | Solution | Approach | Limitations | PRSM Non-Profit Advantage |
 |----------|----------|-------------|---------------------------|
-| **OpenAI/Anthropic** | For-profit centralized LLMs | Extraction model, shareholder priority | Zero extraction, community benefits |
+| **OpenAI/Anthropic** | For-profit centralized LLMs | Scaling bottlenecks, $1T+ capex requirements | Efficiency swarm optimization, distributed innovation |
 | **Hugging Face** | For-profit model marketplace | VC-funded, eventual monetization pressure | Mission-protected public service |
 | **Bittensor** | For-profit blockchain AI | Token speculation, profit motive | Utility-first, surplus redistribution |
 | **FedML** | Academic federated learning | Limited funding, no sustainability model | Grant-funded sustainability |
 | **Ocean Protocol** | For-profit data marketplace | Complex tokenomics, extraction focus | Simple: all surplus → contributors |
 
-**Unique Position**: PRSM is the only major AI infrastructure project structured as a public charity, creating unassailable trust and mission credibility.
+**Strategic Positioning**: While competitors chase bigger clusters, PRSM owns the efficiency frontier—the future competitive advantage as physical scaling limits are reached.
+
+**The Efficiency Singularity Thesis**: There's a tipping point where aggregate intelligence of many optimized small models exceeds the utility of single massive models. PRSM's architecture is designed to find this inflection point first.
 
 ---
 
