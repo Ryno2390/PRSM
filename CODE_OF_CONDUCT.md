@@ -233,10 +233,10 @@ If you need support or have questions about this Code of Conduct:
 
 ### **Educational Resources**
 
-- [Inclusive Language Guidelines](https://example.com/inclusive-language)
-- [Research Ethics Training](https://example.com/research-ethics)
-- [AI Safety Best Practices](https://example.com/ai-safety)
-- [Open Science Resources](https://example.com/open-science)
+- [Contributor Covenant](https://www.contributor-covenant.org/)
+- [IEEE Code of Ethics](https://www.ieee.org/about/corporate/governance/p7-8.html)
+- [ACM Code of Ethics](https://www.acm.org/code-of-ethics)
+- [Partnership on AI Tenets](https://partnershiponai.org/tenets/)
 
 ## Acknowledgments
 
