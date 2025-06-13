@@ -28,6 +28,8 @@ help:
 	@echo "  benchmark-full   Run comprehensive benchmarks (vs GPT-4/Claude)"
 	@echo "  benchmark-load   Run concurrent load test (1000 users)"
 	@echo "  validate-compliance  Validate Phase 1 compliance requirements"
+	@echo "  test-circuit-breakers  Run circuit breaker failure tests"
+	@echo "  validate-resilience  Validate Phase 1 resilience requirements"
 	@echo "  load-test    Run comprehensive load testing suite"
 	@echo "  validate-phase1  Complete Phase 1 validation suite"
 
@@ -263,11 +265,37 @@ validate-compliance:
 	@echo "✅ Validating Phase 1 compliance requirements..."
 	python scripts/test-performance-benchmarks.py validate
 
+# Circuit Breaker Testing
+test-circuit-breakers:
+	@echo "🛡️ Running circuit breaker tests..."
+	python scripts/test-circuit-breakers.py
+
+test-circuit-breakers-quick:
+	@echo "🔧 Running quick circuit breaker test..."
+	python scripts/test-circuit-breakers.py quick
+
+test-circuit-breakers-comprehensive:
+	@echo "🧪 Running comprehensive circuit breaker test suite..."
+	python scripts/test-circuit-breakers.py comprehensive
+
+test-component-circuits:
+	@echo "🔧 Testing component-specific circuit breakers..."
+	python scripts/test-circuit-breakers.py components
+
+validate-resilience:
+	@echo "🛡️ Validating Phase 1 resilience requirements..."
+	python scripts/validate-circuit-breaker-resilience.py
+
+validate-resilience-quick:
+	@echo "🔧 Running quick resilience check..."
+	python scripts/validate-circuit-breaker-resilience.py quick
+
 # Development workflow with performance validation
-dev-test: install-dev test lint nwtn-test ftns-test test-benchmarks
+dev-test: install-dev test lint nwtn-test ftns-test test-benchmarks test-circuit-breakers
 	@echo "🔧 Development testing complete!"
 
 # Complete Phase 1 validation
-validate-phase1: nwtn-test ftns-test test-benchmarks load-test-phase1
+validate-phase1: nwtn-test ftns-test test-benchmarks test-circuit-breakers load-test-phase1
 	@echo "✅ Complete Phase 1 validation finished!"
 	python scripts/test-performance-benchmarks.py validate
+	python scripts/validate-circuit-breaker-resilience.py
