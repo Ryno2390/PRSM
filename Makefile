@@ -315,7 +315,29 @@ economic-simulation-comprehensive:
 
 economic-simulation-quick:
 	@echo "🔧 Running quick economic simulation test..."
-	python -c "import asyncio; from prsm.economics.agent_based_model import run_economic_simulation; print('Success:', asyncio.run(run_economic_simulation(steps=24, num_agents=100)))"
+	python3 -c "import asyncio; from prsm.economics.agent_based_model import run_economic_simulation; print('Success:', asyncio.run(run_economic_simulation(steps=24, num_agents=100)))"
+
+jupyter-dashboard:
+	@echo "📊 Starting PRSM Economic Dashboard..."
+	cd notebooks && jupyter lab economic_dashboard.ipynb
+
+# Distributed Safety Testing
+safety-red-team:
+	@echo "🔴 Running distributed safety red team exercise..."
+	python3 scripts/distributed_safety_red_team.py
+
+safety-red-team-quick:
+	@echo "🔧 Running quick safety test..."
+	python3 scripts/distributed_safety_red_team.py quick
+
+# Quality Assurance System
+quality-assurance:
+	@echo "🔍 Running automated model validation pipeline..."
+	python3 prsm/quality/automated_validation_pipeline.py
+
+quality-assurance-quick:
+	@echo "🔧 Running quick quality assurance test..."
+	python3 prsm/quality/automated_validation_pipeline.py quick
 
 # Complete Phase 1 validation
 validate-phase1: nwtn-test ftns-test test-benchmarks test-circuit-breakers bootstrap-network-quick load-test-phase1
@@ -324,5 +346,8 @@ validate-phase1: nwtn-test ftns-test test-benchmarks test-circuit-breakers boots
 	python scripts/validate-circuit-breaker-resilience.py
 
 # Phase 2 validation
-validate-phase2: economic-simulation-comprehensive
-	@echo "✅ Phase 2 economic validation finished!"
+validate-phase2: economic-simulation-comprehensive safety-red-team-quick quality-assurance-quick
+	@echo "✅ Phase 2 validation finished!"
+	@echo "  📊 Economic simulation with agent-based modeling: COMPLETED"
+	@echo "  🔴 Distributed safety red team exercise: COMPLETED"
+	@echo "  🔍 Quality assurance pipeline: COMPLETED"
