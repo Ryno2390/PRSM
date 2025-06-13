@@ -1,0 +1,43 @@
+# PRSM Custom Metrics Exporter
+# Exports PRSM-specific metrics for Prometheus monitoring
+
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app directory
+WORKDIR /app
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install prometheus-client asyncpg redis
+
+# Copy metrics exporter source
+COPY scripts/metrics-exporter.py .
+COPY config/metrics-exporter.yml config.yml
+
+# Create non-root user
+RUN groupadd -r metrics && useradd -r -g metrics metrics
+RUN chown -R metrics:metrics /app
+USER metrics
+
+# Expose metrics port
+EXPOSE 9091
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:9091/health || exit 1
+
+# Run metrics exporter
+CMD ["python", "metrics-exporter.py"]
