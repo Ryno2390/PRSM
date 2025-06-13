@@ -33,15 +33,36 @@ spec:
       target:
         type: AverageValue
         averageValue: "50"
+  - type: External
+    external:
+      metric:
+        name: sqs_messages_visible
+        selector:
+          matchLabels:
+            queue: prsm-task-queue
+      target:
+        type: AverageValue
+        averageValue: "10"
+  - type: Object
+    object:
+      metric:
+        name: prsm_active_sessions
+      describedObject:
+        apiVersion: v1
+        kind: Service
+        name: prsm-api-service
+      target:
+        type: Value
+        value: "100"
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 60
       policies:
       - type: Replicas
-        value: 2
+        value: 4  # Increased for faster scaling under load
         periodSeconds: 60
       - type: Percent
-        value: 50
+        value: 100  # Allow doubling under extreme load
         periodSeconds: 60
       selectPolicy: Max
     scaleDown:
@@ -49,10 +70,10 @@ spec:
       policies:
       - type: Replicas
         value: 1
-        periodSeconds: 60
+        periodSeconds: 180  # Slower scale-down
       - type: Percent
         value: 10
-        periodSeconds: 60
+        periodSeconds: 180
       selectPolicy: Min
 ---
 apiVersion: autoscaling/v2

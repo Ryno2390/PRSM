@@ -9,15 +9,19 @@ FROM python:3.11-slim as builder
 # Set build arguments
 ARG BUILD_ENV=production
 ARG PRSM_VERSION=0.1.0
+ARG BUILDKIT_INLINE_CACHE=1
 
 # Set environment variables for build
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies for building
-RUN apt-get update && apt-get install -y \
+# Install system dependencies for building (optimized layer)
+RUN --mount=type=cache,target=/var/cache/apt \
+    --mount=type=cache,target=/var/lib/apt \
+    apt-get update && apt-get install -y \
     build-essential \
     gcc \
     g++ \
@@ -26,6 +30,7 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     libffi-dev \
     libssl-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # Create build directory
@@ -34,8 +39,9 @@ WORKDIR /build
 # Copy dependency files
 COPY requirements.txt requirements-dev.txt pyproject.toml ./
 
-# Install Python dependencies
-RUN pip install --upgrade pip setuptools wheel && \
+# Install Python dependencies with cache mount
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy source code
@@ -56,11 +62,14 @@ ENV PYTHONUNBUFFERED=1 \
     PRSM_LOG_LEVEL=INFO \
     PRSM_WORKERS=4
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+# Install runtime dependencies (optimized)
+RUN --mount=type=cache,target=/var/cache/apt \
+    --mount=type=cache,target=/var/lib/apt \
+    apt-get update && apt-get install -y \
     libpq5 \
     curl \
     wget \
+    tini \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -r prsm \
     && useradd -r -g prsm prsm
@@ -131,8 +140,11 @@ VOLUME ["/app/logs", "/app/data"]
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD python /app/healthcheck.py
 
-# Default command
-CMD ["uvicorn", "prsm.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# Use tini as init system for proper signal handling
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+# Default command with optimized uvicorn settings
+CMD ["uvicorn", "prsm.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--access-log", "--loop", "asyncio"]
 
 # ===================================
 # Stage 3: Development Environment

@@ -1,7 +1,7 @@
 # PRSM Development Makefile
 # Provides common development tasks
 
-.PHONY: help install install-dev test lint format clean run docker docs
+.PHONY: help install install-dev test lint format clean run docker docker-optimized docs
 
 # Default target
 help:
@@ -14,7 +14,11 @@ help:
 	@echo "  clean        Clean up generated files"
 	@echo "  run          Run the PRSM development server"
 	@echo "  docker       Build and run with Docker"
+	@echo "  docker-optimized  Build optimized Docker images"
+	@echo "  docker-performance  Run with performance optimizations"
 	@echo "  docs         Build documentation"
+	@echo "  k8s-deploy   Deploy to Kubernetes"
+	@echo "  k8s-test-autoscaling  Test autoscaling under load"
 
 # Installation
 install:
@@ -81,11 +85,36 @@ db-revision:
 docker-build:
 	docker build -t prsm:latest .
 
+docker-build-optimized:
+	./scripts/optimize-docker-build.sh production
+
+docker-build-dev:
+	./scripts/optimize-docker-build.sh development
+
+docker-build-all:
+	./scripts/optimize-docker-build.sh all
+
 docker-run:
 	docker-compose up -d
 
+docker-run-dev:
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+docker-run-performance:
+	docker-compose -f docker-compose.yml -f docker-compose.performance.yml up -d
+
 docker-down:
 	docker-compose down
+
+docker-clean:
+	docker system prune -f
+	docker volume prune -f
+
+docker-logs:
+	docker-compose logs -f prsm-api
+
+docker-shell:
+	docker-compose exec prsm-api bash
 
 # Documentation
 docs:
@@ -117,3 +146,22 @@ ci-test: lint test-cov
 # Network setup for P2P
 setup-p2p:
 	python -m prsm.federation.setup_network
+
+# Kubernetes autoscaling
+k8s-deploy:
+	kubectl apply -k deploy/kubernetes/base
+
+k8s-deploy-production:
+	kubectl apply -k deploy/kubernetes/overlays/production
+
+k8s-test-autoscaling:
+	./scripts/test-autoscaling.sh --duration 300 --concurrent 1000 --rps 100
+
+k8s-scale-test:
+	./scripts/test-autoscaling.sh --duration 600 --concurrent 2000 --rps 200
+
+k8s-status:
+	kubectl get pods,hpa,vpa -n prsm-system
+
+k8s-logs:
+	kubectl logs -f deployment/prsm-api -n prsm-system

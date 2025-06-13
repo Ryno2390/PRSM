@@ -21,6 +21,9 @@ resources:
   - grafana-service.yaml
   - ingress.yaml
   - hpa.yaml
+  - vpa.yaml
+  - cluster-autoscaler.yaml
+  - custom-metrics-config.yaml
   - network-policies.yaml
 
 commonLabels:
@@ -37,7 +40,7 @@ images:
 
 replicas:
   - name: prsm-api
-    count: 3
+    count: 5
   - name: prsm-worker
     count: 2
   - name: postgres
