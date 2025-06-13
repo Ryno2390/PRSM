@@ -19,6 +19,8 @@ help:
 	@echo "  docs         Build documentation"
 	@echo "  k8s-deploy   Deploy to Kubernetes"
 	@echo "  k8s-test-autoscaling  Test autoscaling under load"
+	@echo "  obs-stack-up  Start observability stack"
+	@echo "  obs-dashboards  Show monitoring dashboard URLs"
 
 # Installation
 install:
@@ -165,3 +167,22 @@ k8s-status:
 
 k8s-logs:
 	kubectl logs -f deployment/prsm-api -n prsm-system
+
+# Observability stack
+obs-stack-up:
+	docker-compose -f docker-compose.yml -f docker-compose.observability.yml up -d
+
+obs-stack-down:
+	docker-compose -f docker-compose.yml -f docker-compose.observability.yml down
+
+obs-metrics:
+	curl -s http://localhost:9091/metrics | head -20
+
+obs-logs:
+	docker-compose -f docker-compose.yml -f docker-compose.observability.yml logs -f grafana-enhanced
+
+obs-dashboards:
+	@echo "Grafana: http://localhost:3000 (admin/prsm_admin)"
+	@echo "Prometheus: http://localhost:9090"
+	@echo "Jaeger: http://localhost:16686"
+	@echo "Kibana: http://localhost:5601"
