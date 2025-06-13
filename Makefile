@@ -1,7 +1,7 @@
 # PRSM Development Makefile
 # Provides common development tasks
 
-.PHONY: help install install-dev test lint format clean run docker docker-optimized docs
+.PHONY: help install install-dev test lint format clean run docker docker-optimized docs nwtn-test nwtn-stress load-test
 
 # Default target
 help:
@@ -21,6 +21,9 @@ help:
 	@echo "  k8s-test-autoscaling  Test autoscaling under load"
 	@echo "  obs-stack-up  Start observability stack"
 	@echo "  obs-dashboards  Show monitoring dashboard URLs"
+	@echo "  nwtn-test    Validate NWTN 5-agent pipeline"
+	@echo "  nwtn-stress  Stress test NWTN orchestrator (1000 users)"
+	@echo "  load-test    Run comprehensive load testing suite"
 
 # Installation
 install:
@@ -186,3 +189,44 @@ obs-dashboards:
 	@echo "Prometheus: http://localhost:9090"
 	@echo "Jaeger: http://localhost:16686"
 	@echo "Kibana: http://localhost:5601"
+
+# NWTN Orchestrator Testing (Phase 1 requirements)
+nwtn-test:
+	@echo "🤖 Running NWTN Agent Pipeline Validation..."
+	python scripts/validate-nwtn-agents.py
+
+nwtn-stress:
+	@echo "🚀 Running NWTN Orchestrator Stress Test (1000 concurrent users)..."
+	python scripts/nwtn-stress-test.py --users 1000 --duration 300 --latency 2000
+
+nwtn-stress-quick:
+	@echo "🚀 Running Quick NWTN Stress Test (100 concurrent users)..."
+	python scripts/nwtn-stress-test.py --quick
+
+nwtn-stress-extended:
+	@echo "🚀 Running Extended NWTN Stress Test (2000 concurrent users)..."
+	python scripts/nwtn-stress-test.py --users 2000 --duration 600 --latency 2000
+
+# Load Testing Suite
+load-test:
+	@echo "📈 Running Comprehensive Load Test Suite..."
+	./scripts/load-test-suite.sh --users 1000 --duration 300s
+
+load-test-quick:
+	@echo "📈 Running Quick Load Test..."
+	./scripts/load-test-suite.sh --quick
+
+load-test-phase1:
+	@echo "🎯 Running Phase 1 Load Test Validation..."
+	./scripts/validate-phase1-requirements.sh --url http://localhost:8000
+
+# Performance Testing Pipeline
+test-phase1: nwtn-test load-test-phase1
+	@echo "✅ Phase 1 validation complete!"
+
+test-performance: nwtn-stress load-test
+	@echo "📊 Performance testing complete!"
+
+# Development workflow with performance validation
+dev-test: install-dev test lint nwtn-test
+	@echo "🔧 Development testing complete!"

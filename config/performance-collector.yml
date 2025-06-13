@@ -1,0 +1,35 @@
+# PRSM Performance Collector Configuration
+
+# Collection settings
+collection_interval: 5  # seconds
+metrics_port: 9092
+
+# Target application
+target_url: "http://prsm-api:8000"
+
+# Endpoints to monitor
+endpoints:
+  - "/health"
+  - "/metrics"
+  - "/api/v1/sessions"
+  - "/api/v1/marketplace/models"
+  - "/api/v1/governance/proposals"
+
+# System monitoring
+system_monitoring:
+  enabled: true
+  detailed_process_monitoring: true
+  collect_network_io: true
+  collect_disk_io: true
+
+# Phase 1 targets
+phase1_targets:
+  max_latency_seconds: 2.0
+  min_concurrent_users: 1000
+  max_error_rate: 0.05
+  min_success_rate: 0.95
+
+# Logging
+logging:
+  level: "INFO"
+  format: "json"
