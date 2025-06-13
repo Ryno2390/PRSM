@@ -24,6 +24,10 @@ help:
 	@echo "  nwtn-test    Validate NWTN 5-agent pipeline"
 	@echo "  nwtn-stress  Stress test NWTN orchestrator (1000 users)"
 	@echo "  ftns-test    Test FTNS microsecond precision and accuracy"
+	@echo "  benchmark-quick  Run performance benchmarks (PRSM only)"
+	@echo "  benchmark-full   Run comprehensive benchmarks (vs GPT-4/Claude)"
+	@echo "  benchmark-load   Run concurrent load test (1000 users)"
+	@echo "  validate-compliance  Validate Phase 1 compliance requirements"
 	@echo "  load-test    Run comprehensive load testing suite"
 	@echo "  validate-phase1  Complete Phase 1 validation suite"
 
@@ -238,10 +242,32 @@ ftns-validate:
 	@echo "🔍 Validating FTNS microsecond precision..."
 	python scripts/test-ftns-precision.py --quick
 
+# Performance Benchmark Testing
+test-benchmarks:
+	@echo "🎯 Running performance benchmark tests..."
+	python scripts/test-performance-benchmarks.py
+
+benchmark-quick:
+	@echo "🚀 Running quick benchmark (PRSM only)..."
+	python scripts/performance-benchmark-suite.py quick
+
+benchmark-full:
+	@echo "🚀 Running comprehensive benchmark (PRSM vs GPT-4/Claude)..."
+	python scripts/performance-benchmark-suite.py full
+
+benchmark-load:
+	@echo "🔥 Running concurrent load test (1000 users)..."
+	python scripts/performance-benchmark-suite.py load
+
+validate-compliance:
+	@echo "✅ Validating Phase 1 compliance requirements..."
+	python scripts/test-performance-benchmarks.py validate
+
 # Development workflow with performance validation
-dev-test: install-dev test lint nwtn-test ftns-test
+dev-test: install-dev test lint nwtn-test ftns-test test-benchmarks
 	@echo "🔧 Development testing complete!"
 
 # Complete Phase 1 validation
-validate-phase1: nwtn-test ftns-test load-test-phase1
+validate-phase1: nwtn-test ftns-test test-benchmarks load-test-phase1
 	@echo "✅ Complete Phase 1 validation finished!"
+	python scripts/test-performance-benchmarks.py validate
