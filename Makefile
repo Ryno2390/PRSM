@@ -33,6 +33,8 @@ help:
 	@echo "  bootstrap-network  Deploy 10-node bootstrap test network"
 	@echo "  load-test    Run comprehensive load testing suite"
 	@echo "  validate-phase1  Complete Phase 1 validation suite"
+	@echo "  safeguard-test   Test Recursive Self-Improvement Safeguards"
+	@echo "  validate-phase3  Complete Phase 3 validation suite"
 
 # Installation
 install:
@@ -381,10 +383,19 @@ data-spine-test-full:
 	@echo "🌐 Running full Data Spine Proxy deployment..."
 	python3 prsm/spine/data_spine_proxy.py
 
+safeguard-test:
+	@echo "🛡️ Testing Recursive Self-Improvement Safeguards..."
+	python3 prsm/safety/recursive_improvement_safeguards.py quick
+
+safeguard-test-full:
+	@echo "🛡️ Running full Recursive Self-Improvement Safeguards deployment..."
+	python3 prsm/safety/recursive_improvement_safeguards.py
+
 # Phase 3 validation
-validate-phase3: p2p-network-test marketplace-test onboarding-test data-spine-test
+validate-phase3: p2p-network-test marketplace-test onboarding-test data-spine-test safeguard-test
 	@echo "✅ Phase 3 validation finished!"
 	@echo "  🌍 Multi-Region P2P Network: COMPLETED"
 	@echo "  🏪 Model Marketplace MVP: COMPLETED"
 	@echo "  👥 Contributor Onboarding System: COMPLETED"
 	@echo "  🌐 PRSM Data Spine Proxy: COMPLETED"
+	@echo "  🛡️ Recursive Self-Improvement Safeguards: COMPLETED"
