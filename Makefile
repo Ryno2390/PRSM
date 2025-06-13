@@ -373,9 +373,18 @@ onboarding-test-full:
 	@echo "👥 Running full Contributor Onboarding deployment..."
 	python3 prsm/onboarding/contributor_onboarding.py
 
+data-spine-test:
+	@echo "🌐 Testing PRSM Data Spine Proxy..."
+	python3 prsm/spine/data_spine_proxy.py quick
+
+data-spine-test-full:
+	@echo "🌐 Running full Data Spine Proxy deployment..."
+	python3 prsm/spine/data_spine_proxy.py
+
 # Phase 3 validation
-validate-phase3: p2p-network-test marketplace-test onboarding-test
+validate-phase3: p2p-network-test marketplace-test onboarding-test data-spine-test
 	@echo "✅ Phase 3 validation finished!"
 	@echo "  🌍 Multi-Region P2P Network: COMPLETED"
 	@echo "  🏪 Model Marketplace MVP: COMPLETED"
 	@echo "  👥 Contributor Onboarding System: COMPLETED"
+	@echo "  🌐 PRSM Data Spine Proxy: COMPLETED"
