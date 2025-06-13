@@ -304,8 +304,25 @@ bootstrap-network-quick:
 dev-test: install-dev test lint nwtn-test ftns-test test-benchmarks test-circuit-breakers
 	@echo "🔧 Development testing complete!"
 
+# Phase 2 Economic Model Testing
+economic-simulation:
+	@echo "🏦 Running economic simulation with agent-based model..."
+	python prsm/economics/agent_based_model.py
+
+economic-simulation-comprehensive:
+	@echo "📊 Running comprehensive economic validation..."
+	python prsm/economics/agent_based_model.py comprehensive
+
+economic-simulation-quick:
+	@echo "🔧 Running quick economic simulation test..."
+	python -c "import asyncio; from prsm.economics.agent_based_model import run_economic_simulation; print('Success:', asyncio.run(run_economic_simulation(steps=24, num_agents=100)))"
+
 # Complete Phase 1 validation
 validate-phase1: nwtn-test ftns-test test-benchmarks test-circuit-breakers bootstrap-network-quick load-test-phase1
 	@echo "✅ Complete Phase 1 validation finished!"
 	python scripts/test-performance-benchmarks.py validate
 	python scripts/validate-circuit-breaker-resilience.py
+
+# Phase 2 validation
+validate-phase2: economic-simulation-comprehensive
+	@echo "✅ Phase 2 economic validation finished!"
