@@ -19,6 +19,9 @@ services:
       args:
         BUILD_ENV: production
         PRSM_VERSION: 0.1.0
+        BUILDKIT_INLINE_CACHE: 1
+      cache_from:
+        - prsm:latest
     container_name: prsm-api
     restart: unless-stopped
     ports:
@@ -32,7 +35,9 @@ services:
       PRSM_ENV: production
       PRSM_LOG_LEVEL: INFO
       PRSM_PORT: 8000
-      PRSM_WORKERS: 4
+      PRSM_WORKERS: ${PRSM_WORKERS:-4}
+      PRSM_MAX_WORKERS: ${PRSM_MAX_WORKERS:-8}
+      PRSM_WORKER_CONNECTIONS: ${PRSM_WORKER_CONNECTIONS:-1000}
       
       # FTNS and tokenomics
       FTNS_ENABLED: true
@@ -109,6 +114,12 @@ services:
       -c checkpoint_completion_target=0.9
       -c wal_buffers=16MB
       -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c max_worker_processes=8
+      -c max_parallel_workers_per_gather=2
+      -c max_parallel_workers=8
+      -c max_parallel_maintenance_workers=2
 
   # ===================================
   # Redis Cache and Task Queue

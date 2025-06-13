@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/component: api
     app.kubernetes.io/version: "0.1.0"
 spec:
-  replicas: 3
+  replicas: 5
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -50,7 +50,17 @@ spec:
         - name: PRSM_LOG_LEVEL
           value: "INFO"
         - name: PRSM_WORKERS
-          value: "4"
+          value: "8"
+        - name: PRSM_MAX_WORKERS
+          value: "16"
+        - name: PRSM_WORKER_CONNECTIONS
+          value: "2000"
+        - name: PRSM_KEEPALIVE
+          value: "5"
+        - name: PRSM_MAX_REQUESTS
+          value: "10000"
+        - name: PRSM_MAX_REQUESTS_JITTER
+          value: "1000"
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
@@ -72,11 +82,11 @@ spec:
             name: prsm-secrets
         resources:
           requests:
-            memory: "512Mi"
-            cpu: "250m"
+            memory: "1Gi"
+            cpu: "500m"
           limits:
-            memory: "2Gi"
-            cpu: "1000m"
+            memory: "4Gi"
+            cpu: "2000m"
         livenessProbe:
           httpGet:
             path: /health

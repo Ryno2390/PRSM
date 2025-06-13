@@ -61,6 +61,7 @@ Thumbs.db
 # Documentation
 docs/_build/
 *.md
+!README.md
 
 # Logs and temporary files
 *.log
@@ -128,4 +129,7 @@ Outstanding_Items.md
 TODO.md
 CHANGELOG.md
 LICENSE
-README.md
+Adversarial_Testing/
+dev-data/
+test_results/
+logos/
