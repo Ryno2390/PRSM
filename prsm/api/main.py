@@ -45,6 +45,7 @@ from prsm.api.governance_api import router as governance_router
 from prsm.api.mainnet_deployment_api import router as mainnet_router
 from prsm.api.health_api import router as health_router
 from prsm.web3.frontend_integration import router as web3_router
+from prsm.chronos.api import router as chronos_router
 from prsm.auth.auth_manager import auth_manager
 from prsm.auth import get_current_user
 from prsm.auth.middleware import AuthMiddleware, SecurityHeadersMiddleware
@@ -3264,9 +3265,11 @@ app.include_router(governance_router, tags=["Governance"])
 app.include_router(mainnet_router, tags=["Mainnet Deployment"])
 app.include_router(health_router, tags=["Health"])
 app.include_router(web3_router, prefix="/api/v1", tags=["Web3"])
+app.include_router(chronos_router, prefix="/api/v1", tags=["CHRONOS"])
 logger.info("✅ Teams API endpoints enabled")
 logger.info("✅ Security Logging API endpoints enabled")
 logger.info("✅ Payment Processing API endpoints enabled")
+logger.info("✅ CHRONOS Clearing Protocol API endpoints enabled")
 logger.info("✅ Cryptography API endpoints enabled")
 logger.info("✅ Governance API endpoints enabled")
 logger.info("✅ Mainnet Deployment API endpoints enabled")
