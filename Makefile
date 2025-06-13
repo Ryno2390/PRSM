@@ -23,7 +23,9 @@ help:
 	@echo "  obs-dashboards  Show monitoring dashboard URLs"
 	@echo "  nwtn-test    Validate NWTN 5-agent pipeline"
 	@echo "  nwtn-stress  Stress test NWTN orchestrator (1000 users)"
+	@echo "  ftns-test    Test FTNS microsecond precision and accuracy"
 	@echo "  load-test    Run comprehensive load testing suite"
+	@echo "  validate-phase1  Complete Phase 1 validation suite"
 
 # Installation
 install:
@@ -227,6 +229,19 @@ test-phase1: nwtn-test load-test-phase1
 test-performance: nwtn-stress load-test
 	@echo "📊 Performance testing complete!"
 
+# FTNS Accounting Ledger Testing
+ftns-test:
+	@echo "💰 Running FTNS precision and accuracy tests..."
+	python scripts/test-ftns-precision.py
+
+ftns-validate:
+	@echo "🔍 Validating FTNS microsecond precision..."
+	python scripts/test-ftns-precision.py --quick
+
 # Development workflow with performance validation
-dev-test: install-dev test lint nwtn-test
+dev-test: install-dev test lint nwtn-test ftns-test
 	@echo "🔧 Development testing complete!"
+
+# Complete Phase 1 validation
+validate-phase1: nwtn-test ftns-test load-test-phase1
+	@echo "✅ Complete Phase 1 validation finished!"
