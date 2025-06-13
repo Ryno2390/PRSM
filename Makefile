@@ -30,6 +30,7 @@ help:
 	@echo "  validate-compliance  Validate Phase 1 compliance requirements"
 	@echo "  test-circuit-breakers  Run circuit breaker failure tests"
 	@echo "  validate-resilience  Validate Phase 1 resilience requirements"
+	@echo "  bootstrap-network  Deploy 10-node bootstrap test network"
 	@echo "  load-test    Run comprehensive load testing suite"
 	@echo "  validate-phase1  Complete Phase 1 validation suite"
 
@@ -290,12 +291,21 @@ validate-resilience-quick:
 	@echo "🔧 Running quick resilience check..."
 	python scripts/validate-circuit-breaker-resilience.py quick
 
+# Bootstrap Test Network
+bootstrap-network:
+	@echo "🚀 Deploying 10-node bootstrap test network..."
+	python scripts/bootstrap-test-network.py
+
+bootstrap-network-quick:
+	@echo "🔧 Running quick bootstrap test..."
+	python scripts/bootstrap-test-network.py quick
+
 # Development workflow with performance validation
 dev-test: install-dev test lint nwtn-test ftns-test test-benchmarks test-circuit-breakers
 	@echo "🔧 Development testing complete!"
 
 # Complete Phase 1 validation
-validate-phase1: nwtn-test ftns-test test-benchmarks test-circuit-breakers load-test-phase1
+validate-phase1: nwtn-test ftns-test test-benchmarks test-circuit-breakers bootstrap-network-quick load-test-phase1
 	@echo "✅ Complete Phase 1 validation finished!"
 	python scripts/test-performance-benchmarks.py validate
 	python scripts/validate-circuit-breaker-resilience.py
