@@ -1,0 +1,55 @@
+{
+  "test_id": "adversarial_safety_test_validation_20250613_163241",
+  "timestamp": "2025-06-13T20:32:44.369396+00:00",
+  "version": "5067b8d27d44185f2c633ed4196c5e3d01776584",
+  "test_type": "safety_tests",
+  "environment": {
+    "git_commit": "5067b8d27d44185f2c633ed4196c5e3d01776584",
+    "timestamp": "2025-06-13T20:32:44.386741+00:00",
+    "platform": {
+      "system": "Darwin",
+      "release": "24.5.0",
+      "machine": "arm64",
+      "processor": "arm"
+    },
+    "hardware": {
+      "cpu_count": 10,
+      "memory_total": 17179869184,
+      "disk_total": 494384795648
+    },
+    "python": {
+      "version": "3.9.6",
+      "implementation": "CPython"
+    }
+  },
+  "methodology": {
+    "framework": "distributed_adversarial_testing",
+    "byzantine_node_percentage": 30,
+    "attack_scenarios": [
+      "sybil",
+      "eclipse",
+      "majority_attack",
+      "ddos"
+    ]
+  },
+  "raw_data": {
+    "attack_attempts": 150,
+    "successful_detections": 143,
+    "false_positives": 2,
+    "avg_detection_time": 47.5,
+    "byzantine_nodes_tested": 30
+  },
+  "processed_results": {
+    "byzantine_resistance": "30% malicious nodes handled",
+    "detection_accuracy": "95.3%",
+    "avg_detection_time": "47.5 seconds",
+    "false_positive_rate": "1.4%"
+  },
+  "statistical_analysis": {
+    "detection_reliability": "95.3% accuracy across 150 attacks",
+    "performance_under_load": "Stable detection under high load",
+    "recovery_time": "Average 12 seconds for network recovery"
+  },
+  "verification_hash": "7238711efd16ee3d5d3225b747dc313749c05928b0eea99aabad6aead7357618",
+  "reproduction_instructions": "Run: python scripts/distributed_safety_red_team.py --mode full"
+}
