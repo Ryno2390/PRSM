@@ -35,7 +35,9 @@
       "Bash(rg:*)",
       "Bash(find:*)",
       "Bash(sed:*)",
-      "Bash(make:*)"
+      "Bash(make:*)",
+      "Bash(timeout:*)",
+      "Bash(echo:*)"
     ],
     "deny": []
   }

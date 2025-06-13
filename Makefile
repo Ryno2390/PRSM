@@ -351,3 +351,31 @@ validate-phase2: economic-simulation-comprehensive safety-red-team-quick quality
 	@echo "  📊 Economic simulation with agent-based modeling: COMPLETED"
 	@echo "  🔴 Distributed safety red team exercise: COMPLETED"
 	@echo "  🔍 Quality assurance pipeline: COMPLETED"
+
+# Phase 3 Testing
+p2p-network-test:
+	@echo "🌍 Testing Multi-Region P2P Network..."
+	python3 prsm/federation/multi_region_p2p_network.py quick
+
+marketplace-test:
+	@echo "🏪 Testing Model Marketplace MVP..."
+	python3 prsm/marketplace/model_marketplace.py quick
+
+marketplace-test-full:
+	@echo "🏪 Running full Model Marketplace deployment..."
+	python3 prsm/marketplace/model_marketplace.py
+
+onboarding-test:
+	@echo "👥 Testing Contributor Onboarding System..."
+	python3 prsm/onboarding/contributor_onboarding.py quick
+
+onboarding-test-full:
+	@echo "👥 Running full Contributor Onboarding deployment..."
+	python3 prsm/onboarding/contributor_onboarding.py
+
+# Phase 3 validation
+validate-phase3: p2p-network-test marketplace-test onboarding-test
+	@echo "✅ Phase 3 validation finished!"
+	@echo "  🌍 Multi-Region P2P Network: COMPLETED"
+	@echo "  🏪 Model Marketplace MVP: COMPLETED"
+	@echo "  👥 Contributor Onboarding System: COMPLETED"
