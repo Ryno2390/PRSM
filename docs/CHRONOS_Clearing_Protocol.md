@@ -6,9 +6,9 @@
 
 ## 🏛 Institutional Structure
 
-CHRONOS is envisioned as a **legally distinct financial entity**, majority owned and funded by Apple Inc., to avoid conflicts with its core hardware/software business while enabling strategic control over cross-asset liquidity flows that support PRSM.
+CHRONOS is envisioned as a **legally distinct financial entity**, majority owned and funded by institutional investors, to avoid conflicts with their core business operations while enabling strategic control over cross-asset liquidity flows that support PRSM.
 
-- **Governance Model**: Apple as majority stakeholder, with remaining equity distributed among strategic contributors, exchanges, and institutional partners.
+- **Governance Model**: Primary institutional stakeholder as majority owner, with remaining equity distributed among strategic contributors, exchanges, and institutional partners.
 - **Custody Framework**: FTNS and Bitcoin reserves held in verifiable multi-sig wallets; fiat reserves held in Tier 1 bank custodial accounts.
 - **Regulatory Compliance**: Registered as a clearing authority in multiple jurisdictions with full AML/KYC compliance and audited transparency reports.
 
@@ -35,7 +35,7 @@ This mechanism allows:
 
 Each transaction through CHRONOS follows a secure, layered process:
 
-1. **Initiation**: User requests conversion or payment via Safari’s FTNS Broker (or other CHRONOS-compatible interface).
+1. **Initiation**: User requests conversion or payment via Mobile FTNS Broker (or other CHRONOS-compatible interface).
 2. **Verification**: CHRONOS verifies the transaction provenance and confirms available liquidity.
 3. **Atomic Swap**: Cross-chain, cryptographically secure asset conversion is executed using hashed time-lock contracts (HTLCs) or DAG-based equivalents.
 4. **Ledger Update**: IPFS-based audit trail is updated with unique provenance hash.
@@ -69,7 +69,7 @@ Using open APIs, CHRONOS acts as a **universal clearing layer** for FTNS liquidi
 | Integrated with PRSM provenance | Ensures settlement transparency |
 | Designed for institutional trust | Accelerates ecosystem onboarding |
 | Liquidity for scientific IP holders | Fosters continuous research incentives |
-| Safari FTNS Broker support | Empowers Apple ecosystem users |
+| Mobile FTNS Broker support | Empowers mobile ecosystem users |
 
 ---
 
@@ -77,12 +77,12 @@ Using open APIs, CHRONOS acts as a **universal clearing layer** for FTNS liquidi
 
 **Phase 1: Formation**
 - Legal entity creation
-- Initial capital allocation by Apple
+- Initial capital allocation by institutional investors
 - Onboarding of initial exchange partners
 
 **Phase 2: Integration**
 - FTNS node staking infrastructure
-- Safari wallet & FTNS Broker implementation
+- Mobile wallet & FTNS Broker implementation
 - IPFS-native smart contract deployment
 
 **Phase 3: Expansion**
@@ -95,7 +95,7 @@ Using open APIs, CHRONOS acts as a **universal clearing layer** for FTNS liquidi
 ## 📎 Dependencies
 
 - **IOTA DAG ledger** for low-latency, high-throughput FTNS settlement
-- **Safari Broker Layer** for user interface and identity key management
+- **Mobile Broker Layer** for user interface and identity key management
 - **IPFS for provenance** and audit trail of token transfers
 - **Bitcoin Lightning Network** or equivalent BTC L2 for real-time conversion
 - **PRSM Governance Protocol** to integrate dividend distribution and staking consensus
