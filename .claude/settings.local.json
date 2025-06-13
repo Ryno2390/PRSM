@@ -37,7 +37,10 @@
       "Bash(sed:*)",
       "Bash(make:*)",
       "Bash(timeout:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(sha256sum:*)",
+      "Bash(./hash_verification.sh:*)",
+      "Bash(git tag:*)"
     ],
     "deny": []
   }
