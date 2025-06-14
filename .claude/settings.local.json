@@ -40,7 +40,8 @@
       "Bash(echo:*)",
       "Bash(sha256sum:*)",
       "Bash(./hash_verification.sh:*)",
-      "Bash(git tag:*)"
+      "Bash(git tag:*)",
+      "WebFetch(domain:openrouter.ai)"
     ],
     "deny": []
   }
