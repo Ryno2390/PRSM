@@ -41,7 +41,11 @@
       "Bash(sha256sum:*)",
       "Bash(./hash_verification.sh:*)",
       "Bash(git tag:*)",
-      "WebFetch(domain:openrouter.ai)"
+      "WebFetch(domain:openrouter.ai)",
+      "Bash(ollama:*)",
+      "Bash(export OLLAMA_MODELS=~/.ollama/models)",
+      "Bash(curl:*)",
+      "Bash(cat:*)"
     ],
     "deny": []
   }
