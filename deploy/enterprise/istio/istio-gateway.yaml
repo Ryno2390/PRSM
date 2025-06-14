@@ -1,0 +1,556 @@
+# PRSM Enterprise Service Mesh Configuration
+# Istio Gateway, VirtualService, and DestinationRule for production traffic management
+---
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: prsm-enterprise-istio
+  namespace: istio-system
+spec:
+  values:
+    global:
+      meshID: prsm-mesh
+      multiCluster:
+        clusterName: prsm-cluster
+      network: prsm-network
+    pilot:
+      env:
+        EXTERNAL_ISTIOD: false
+  components:
+    pilot:
+      k8s:
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2048Mi
+          limits:
+            cpu: 1000m
+            memory: 4096Mi
+        hpaSpec:
+          minReplicas: 2
+          maxReplicas: 5
+          scaleTargetRef:
+            apiVersion: apps/v1
+            kind: Deployment
+            name: istiod
+          metrics:
+          - type: Resource
+            resource:
+              name: cpu
+              target:
+                type: Utilization
+                averageUtilization: 80
+    ingressGateways:
+    - name: istio-ingressgateway
+      enabled: true
+      k8s:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 2000m
+            memory: 1024Mi
+        hpaSpec:
+          minReplicas: 3
+          maxReplicas: 10
+          scaleTargetRef:
+            apiVersion: apps/v1
+            kind: Deployment
+            name: istio-ingressgateway
+          metrics:
+          - type: Resource
+            resource:
+              name: cpu
+              target:
+                type: Utilization
+                averageUtilization: 80
+        service:
+          type: LoadBalancer
+          loadBalancerIP: ""
+          ports:
+          - port: 15021
+            targetPort: 15021
+            name: status-port
+          - port: 80
+            targetPort: 8080
+            name: http2
+          - port: 443
+            targetPort: 8443
+            name: https
+          - port: 15443
+            targetPort: 15443
+            name: tls
+    egressGateways:
+    - name: istio-egressgateway
+      enabled: true
+      k8s:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        hpaSpec:
+          minReplicas: 2
+          maxReplicas: 5
+---
+# Gateway for PRSM API traffic
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: prsm-gateway
+  namespace: prsm-system
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE
+      credentialName: prsm-tls-cert
+    hosts:
+    - api.prsm.network
+    - "*.api.prsm.network"
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - api.prsm.network
+    - "*.api.prsm.network"
+    tls:
+      httpsRedirect: true
+---
+# VirtualService for PRSM API routing
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: prsm-api-vs
+  namespace: prsm-system
+spec:
+  hosts:
+  - api.prsm.network
+  gateways:
+  - prsm-gateway
+  http:
+  # Health check route (bypass authentication)
+  - match:
+    - uri:
+        exact: /health
+    - uri:
+        exact: /health/ready
+    - uri:
+        exact: /health/live
+    route:
+    - destination:
+        host: prsm-api-service
+        port:
+          number: 8000
+    timeout: 10s
+    retries:
+      attempts: 3
+      perTryTimeout: 3s
+  
+  # API v1 routes with advanced traffic management
+  - match:
+    - uri:
+        prefix: /api/v1/
+    route:
+    - destination:
+        host: prsm-api-service
+        port:
+          number: 8000
+        subset: stable
+      weight: 90
+    - destination:
+        host: prsm-api-service
+        port:
+          number: 8000
+        subset: canary
+      weight: 10
+    fault:
+      delay:
+        percentage:
+          value: 0.1
+        fixedDelay: 5s
+    timeout: 30s
+    retries:
+      attempts: 3
+      perTryTimeout: 10s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+    headers:
+      request:
+        add:
+          x-prsm-version: "1.0"
+          x-request-id: "%REQ(x-request-id)%"
+      response:
+        add:
+          x-prsm-region: "us-west-2"
+          x-prsm-cluster: "production"
+  
+  # WebSocket routes for real-time features
+  - match:
+    - uri:
+        prefix: /ws/
+    route:
+    - destination:
+        host: prsm-api-service
+        port:
+          number: 8000
+    timeout: 0s  # No timeout for WebSocket connections
+    websocketUpgrade: true
+  
+  # Federation API routes
+  - match:
+    - uri:
+        prefix: /federation/
+    route:
+    - destination:
+        host: prsm-federation-service
+        port:
+          number: 8002
+    timeout: 60s
+    retries:
+      attempts: 2
+      perTryTimeout: 30s
+  
+  # Model execution routes (higher timeout)
+  - match:
+    - uri:
+        prefix: /models/
+    route:
+    - destination:
+        host: prsm-worker-service
+        port:
+          number: 8001
+    timeout: 120s
+    retries:
+      attempts: 1
+      perTryTimeout: 120s
+  
+  # Default route
+  - route:
+    - destination:
+        host: prsm-api-service
+        port:
+          number: 8000
+        subset: stable
+    timeout: 30s
+---
+# DestinationRule for PRSM API service
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: prsm-api-dr
+  namespace: prsm-system
+spec:
+  host: prsm-api-service
+  trafficPolicy:
+    loadBalancer:
+      simple: LEAST_CONN
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 30s
+        keepAlive:
+          time: 7200s
+          interval: 75s
+      http:
+        http1MaxPendingRequests: 64
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 10
+        maxRetries: 3
+        idleTimeout: 60s
+        h2UpgradePolicy: UPGRADE
+    circuitBreaker:
+      consecutiveGatewayErrors: 5
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minHealthPercent: 30
+    outlierDetection:
+      consecutiveGatewayErrors: 5
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minHealthPercent: 30
+  subsets:
+  - name: stable
+    labels:
+      version: stable
+    trafficPolicy:
+      connectionPool:
+        tcp:
+          maxConnections: 100
+        http:
+          http1MaxPendingRequests: 64
+          maxRequestsPerConnection: 10
+  - name: canary
+    labels:
+      version: canary
+    trafficPolicy:
+      connectionPool:
+        tcp:
+          maxConnections: 20
+        http:
+          http1MaxPendingRequests: 10
+          maxRequestsPerConnection: 5
+---
+# DestinationRule for PRSM Worker service
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: prsm-worker-dr
+  namespace: prsm-system
+spec:
+  host: prsm-worker-service
+  trafficPolicy:
+    loadBalancer:
+      simple: ROUND_ROBIN
+    connectionPool:
+      tcp:
+        maxConnections: 50
+        connectTimeout: 10s
+      http:
+        http1MaxPendingRequests: 32
+        http2MaxRequests: 50
+        maxRequestsPerConnection: 5
+        maxRetries: 2
+        idleTimeout: 300s
+    circuitBreaker:
+      consecutiveGatewayErrors: 3
+      consecutive5xxErrors: 3
+      interval: 60s
+      baseEjectionTime: 60s
+      maxEjectionPercent: 30
+---
+# DestinationRule for Federation service
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: prsm-federation-dr
+  namespace: prsm-system
+spec:
+  host: prsm-federation-service
+  trafficPolicy:
+    loadBalancer:
+      simple: RANDOM
+    connectionPool:
+      tcp:
+        maxConnections: 25
+        connectTimeout: 5s
+        keepAlive:
+          time: 7200s
+          interval: 75s
+      http:
+        http1MaxPendingRequests: 16
+        http2MaxRequests: 25
+        maxRequestsPerConnection: 20
+        maxRetries: 1
+        idleTimeout: 120s
+    circuitBreaker:
+      consecutiveGatewayErrors: 3
+      consecutive5xxErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+---
+# AuthorizationPolicy for API security
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: prsm-api-authz
+  namespace: prsm-system
+spec:
+  selector:
+    matchLabels:
+      app: prsm-api
+  rules:
+  # Allow health checks from anywhere
+  - from:
+    - source:
+        principals: ["*"]
+    to:
+    - operation:
+        paths: ["/health", "/health/ready", "/health/live"]
+    when:
+    - key: request.headers[user-agent]
+      values: ["kube-probe/*", "GoogleHC/*", "ELB-HealthChecker/*"]
+  
+  # Allow authenticated API access
+  - from:
+    - source:
+        principals: ["cluster.local/ns/prsm-system/sa/prsm-api"]
+    - source:
+        requestPrincipals: ["*"]
+    to:
+    - operation:
+        paths: ["/api/*"]
+    when:
+    - key: source.namespace
+      values: ["prsm-system", "istio-system"]
+  
+  # Allow federation access from federation nodes
+  - from:
+    - source:
+        principals: ["cluster.local/ns/prsm-system/sa/prsm-federation"]
+    to:
+    - operation:
+        paths: ["/federation/*"]
+  
+  # Deny all other access
+---
+# PeerAuthentication for mTLS
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: prsm-mtls
+  namespace: prsm-system
+spec:
+  mtls:
+    mode: STRICT
+---
+# RequestAuthentication for JWT validation
+apiVersion: security.istio.io/v1beta1
+kind: RequestAuthentication
+metadata:
+  name: prsm-jwt
+  namespace: prsm-system
+spec:
+  selector:
+    matchLabels:
+      app: prsm-api
+  jwtRules:
+  - issuer: "https://auth.prsm.network"
+    jwksUri: "https://auth.prsm.network/.well-known/jwks.json"
+    audiences:
+    - "api.prsm.network"
+    forwardOriginalToken: true
+---
+# ServiceEntry for external model providers
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: openai-api
+  namespace: prsm-system
+spec:
+  hosts:
+  - api.openai.com
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: anthropic-api
+  namespace: prsm-system
+spec:
+  hosts:
+  - api.anthropic.com
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  location: MESH_EXTERNAL
+  resolution: DNS
+---
+# VirtualService for external API rate limiting
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: external-apis-vs
+  namespace: prsm-system
+spec:
+  hosts:
+  - api.openai.com
+  - api.anthropic.com
+  http:
+  - fault:
+      delay:
+        percentage:
+          value: 0.01
+        fixedDelay: 100ms
+    route:
+    - destination:
+        host: api.openai.com
+    retries:
+      attempts: 3
+      perTryTimeout: 30s
+      retryOn: 5xx,reset,connect-failure,refused-stream
+---
+# Telemetry configuration for observability
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: prsm-metrics
+  namespace: prsm-system
+spec:
+  metrics:
+  - providers:
+    - name: prometheus
+  - overrides:
+    - match:
+        metric: ALL_METRICS
+      tagOverrides:
+        prsm_version:
+          value: "1.0.0"
+        prsm_environment:
+          value: "production"
+---
+# EnvoyFilter for custom headers and request ID
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: prsm-headers
+  namespace: prsm-system
+spec:
+  workloadSelector:
+    labels:
+      app: prsm-api
+  configPatches:
+  - applyTo: HTTP_FILTER
+    match:
+      context: SIDECAR_INBOUND
+      listener:
+        filterChain:
+          filter:
+            name: "envoy.filters.network.http_connection_manager"
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.filters.http.local_ratelimit
+        typed_config:
+          "@type": type.googleapis.com/udpa.type.v1.TypedStruct
+          type_url: type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+          value:
+            stat_prefix: local_rate_limiter
+            token_bucket:
+              max_tokens: 1000
+              tokens_per_fill: 100
+              fill_interval: 1s
+            filter_enabled:
+              runtime_key: local_rate_limit_enabled
+              default_value:
+                numerator: 100
+                denominator: HUNDRED
+            filter_enforced:
+              runtime_key: local_rate_limit_enforced
+              default_value:
+                numerator: 100
+                denominator: HUNDRED
+            response_headers_to_add:
+            - append: false
+              header:
+                key: x-local-rate-limit
+                value: 'true'

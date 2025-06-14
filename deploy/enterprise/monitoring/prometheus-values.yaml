@@ -1,0 +1,509 @@
+# PRSM Enterprise Monitoring Stack Configuration
+# Prometheus, Grafana, and Alertmanager for production-grade observability
+
+# Global configuration
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+# Prometheus Operator Configuration
+prometheusOperator:
+  enabled: true
+  logLevel: info
+  
+  # Resource requirements for operator
+  resources:
+    limits:
+      cpu: 200m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  
+  # Security context
+  securityContext:
+    fsGroup: 65534
+    runAsNonRoot: true
+    runAsUser: 65534
+
+# Prometheus Server Configuration
+prometheus:
+  enabled: true
+  
+  prometheusSpec:
+    # Retention and storage
+    retention: 30d
+    retentionSize: 50GB
+    
+    # Resource requirements
+    resources:
+      requests:
+        memory: 2Gi
+        cpu: 1000m
+      limits:
+        memory: 8Gi
+        cpu: 4000m
+    
+    # Storage configuration
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3-ssd
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 100Gi
+    
+    # Scrape configuration
+    scrapeInterval: 30s
+    scrapeTimeout: 10s
+    evaluationInterval: 30s
+    
+    # External URL for alerting
+    externalUrl: https://prometheus.prsm.network
+    
+    # Rule selectors
+    ruleSelector:
+      matchLabels:
+        app: prsm
+        tier: production
+    
+    # Service monitor selector
+    serviceMonitorSelector:
+      matchLabels:
+        app: prsm
+    
+    # Pod monitor selector
+    podMonitorSelector:
+      matchLabels:
+        app: prsm
+    
+    # Additional scrape configs for PRSM components
+    additionalScrapeConfigs:
+    - job_name: 'prsm-api'
+      static_configs:
+      - targets: ['prsm-api-service:8000']
+      metrics_path: /metrics
+      scrape_interval: 15s
+      scrape_timeout: 10s
+    
+    - job_name: 'prsm-worker'
+      static_configs:
+      - targets: ['prsm-worker-service:8001']
+      metrics_path: /metrics
+      scrape_interval: 30s
+    
+    - job_name: 'prsm-federation'
+      static_configs:
+      - targets: ['prsm-federation-service:8002']
+      metrics_path: /metrics
+      scrape_interval: 60s
+    
+    - job_name: 'ipfs-nodes'
+      static_configs:
+      - targets: ['ipfs-service:5001']
+      metrics_path: /debug/metrics/prometheus
+      scrape_interval: 60s
+    
+    # Alert configuration
+    alerting:
+      alertmanagers:
+      - namespace: monitoring
+        name: alertmanager-operated
+        port: web
+
+# Alertmanager Configuration
+alertmanager:
+  enabled: true
+  
+  alertmanagerSpec:
+    # Resource requirements
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 512Mi
+        cpu: 200m
+    
+    # Storage
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3-ssd
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+    
+    # Retention
+    retention: 120h
+    
+    # External URL
+    externalUrl: https://alertmanager.prsm.network
+    
+    # Configuration
+    configSecret: alertmanager-config
+
+# Grafana Configuration
+grafana:
+  enabled: true
+  
+  # Admin credentials
+  adminPassword: "prsm-enterprise-2024!"
+  
+  # Persistence
+  persistence:
+    enabled: true
+    type: pvc
+    storageClassName: gp3-ssd
+    accessModes:
+    - ReadWriteOnce
+    size: 10Gi
+  
+  # Resource requirements
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+  
+  # Grafana configuration
+  grafana.ini:
+    server:
+      domain: grafana.prsm.network
+      root_url: https://grafana.prsm.network
+    
+    security:
+      admin_user: admin
+      admin_password: prsm-enterprise-2024!
+    
+    auth:
+      disable_login_form: false
+      disable_signout_menu: false
+    
+    auth.anonymous:
+      enabled: false
+    
+    analytics:
+      reporting_enabled: false
+      check_for_updates: false
+    
+    snapshots:
+      external_enabled: false
+    
+    alerting:
+      enabled: true
+      execute_alerts: true
+    
+    unified_alerting:
+      enabled: true
+  
+  # Data sources
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus-operated:9090
+        access: proxy
+        isDefault: true
+        editable: true
+      
+      - name: Loki
+        type: loki
+        url: http://loki:3100
+        access: proxy
+        editable: true
+      
+      - name: Jaeger
+        type: jaeger
+        url: http://jaeger-query:16686
+        access: proxy
+        editable: true
+  
+  # Dashboard providers
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+      - name: 'prsm-dashboards'
+        orgId: 1
+        folder: 'PRSM'
+        type: file
+        disableDeletion: false
+        editable: true
+        updateIntervalSeconds: 10
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards/prsm
+      
+      - name: 'kubernetes-dashboards'
+        orgId: 1
+        folder: 'Kubernetes'
+        type: file
+        disableDeletion: false
+        editable: true
+        updateIntervalSeconds: 10
+        options:
+          path: /var/lib/grafana/dashboards/kubernetes
+  
+  # Custom dashboards
+  dashboards:
+    prsm:
+      prsm-overview:
+        gnetId: 15172
+        revision: 1
+        datasource: Prometheus
+      
+      prsm-api-performance:
+        url: https://raw.githubusercontent.com/PRSM-Network/monitoring/main/grafana/dashboards/api-performance.json
+      
+      prsm-federation-network:
+        url: https://raw.githubusercontent.com/PRSM-Network/monitoring/main/grafana/dashboards/federation-network.json
+      
+      prsm-model-execution:
+        url: https://raw.githubusercontent.com/PRSM-Network/monitoring/main/grafana/dashboards/model-execution.json
+    
+    kubernetes:
+      kubernetes-cluster:
+        gnetId: 7249
+        revision: 1
+        datasource: Prometheus
+      
+      kubernetes-pods:
+        gnetId: 6417
+        revision: 1
+        datasource: Prometheus
+
+# Node Exporter for system metrics
+nodeExporter:
+  enabled: true
+  
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 50m
+    limits:
+      memory: 128Mi
+      cpu: 100m
+
+# kube-state-metrics for Kubernetes object metrics
+kubeStateMetrics:
+  enabled: true
+  
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 256Mi
+      cpu: 200m
+
+# Prometheus Adapter for custom metrics API
+prometheusAdapter:
+  enabled: true
+  
+  prometheus:
+    url: http://prometheus-operated
+    port: 9090
+  
+  rules:
+    default: true
+    custom:
+    # PRSM API metrics
+    - seriesQuery: 'http_requests_total{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^(.*)_total$"
+        as: "${1}_per_second"
+      metricsQuery: 'rate(<<.Series>>{<<.LabelMatchers>>}[2m])'
+    
+    # PRSM worker queue metrics
+    - seriesQuery: 'prsm_queue_size{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        as: "prsm_queue_size"
+      metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>})'
+    
+    # PRSM model execution metrics
+    - seriesQuery: 'prsm_model_execution_duration_seconds{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        as: "prsm_model_execution_duration"
+      metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>})'
+
+# Service monitors for PRSM components
+additionalPrometheusRulesMap:
+  prsm-alerts:
+    groups:
+    - name: prsm.rules
+      rules:
+      # API Health Rules
+      - alert: PRSMAPIDown
+        expr: up{job="prsm-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: prsm-api
+        annotations:
+          summary: "PRSM API is down"
+          description: "PRSM API has been down for more than 1 minute"
+      
+      - alert: PRSMAPIHighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="prsm-api"}[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: prsm-api
+        annotations:
+          summary: "PRSM API high latency"
+          description: "PRSM API 95th percentile latency is above 1 second"
+      
+      - alert: PRSMAPIHighErrorRate
+        expr: rate(http_requests_total{job="prsm-api",status=~"5.."}[5m]) / rate(http_requests_total{job="prsm-api"}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          service: prsm-api
+        annotations:
+          summary: "PRSM API high error rate"
+          description: "PRSM API error rate is above 5%"
+      
+      # Worker Health Rules
+      - alert: PRSMWorkerDown
+        expr: up{job="prsm-worker"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: prsm-worker
+        annotations:
+          summary: "PRSM Worker is down"
+          description: "PRSM Worker has been down for more than 2 minutes"
+      
+      - alert: PRSMWorkerQueueBacklog
+        expr: prsm_queue_size > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: prsm-worker
+        annotations:
+          summary: "PRSM Worker queue backlog"
+          description: "PRSM Worker queue has more than 100 pending tasks"
+      
+      # Database Rules
+      - alert: PRSMDatabaseDown
+        expr: up{job="postgresql"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: "PRSM Database is down"
+          description: "PRSM Database has been down for more than 1 minute"
+      
+      - alert: PRSMDatabaseHighConnections
+        expr: pg_stat_activity_count / pg_settings_max_connections * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "PRSM Database high connection usage"
+          description: "PRSM Database connection usage is above 80%"
+      
+      # Redis Rules
+      - alert: PRSMRedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "PRSM Redis is down"
+          description: "PRSM Redis has been down for more than 1 minute"
+      
+      - alert: PRSMRedisHighMemoryUsage
+        expr: redis_memory_used_bytes / redis_config_maxmemory * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "PRSM Redis high memory usage"
+          description: "PRSM Redis memory usage is above 90%"
+      
+      # Federation Network Rules
+      - alert: PRSMFederationNodeDown
+        expr: prsm_federation_nodes_connected < 3
+        for: 2m
+        labels:
+          severity: warning
+          service: federation
+        annotations:
+          summary: "PRSM Federation nodes low"
+          description: "Less than 3 federation nodes are connected"
+      
+      - alert: PRSMFederationNetworkPartition
+        expr: prsm_federation_network_partitions > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: federation
+        annotations:
+          summary: "PRSM Federation network partition detected"
+          description: "Network partition detected in PRSM federation"
+      
+      # IPFS Rules
+      - alert: PRSMIPFSDown
+        expr: up{job="ipfs-nodes"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: ipfs
+        annotations:
+          summary: "PRSM IPFS node is down"
+          description: "PRSM IPFS node has been down for more than 2 minutes"
+      
+      # System Resource Rules
+      - alert: PRSMHighCPUUsage
+        expr: rate(container_cpu_usage_seconds_total{namespace="prsm-system"}[5m]) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "PRSM high CPU usage"
+          description: "PRSM container CPU usage is above 80%"
+      
+      - alert: PRSMHighMemoryUsage
+        expr: container_memory_usage_bytes{namespace="prsm-system"} / container_spec_memory_limit_bytes * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "PRSM high memory usage"
+          description: "PRSM container memory usage is above 90%"
+      
+      - alert: PRSMPodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total{namespace="prsm-system"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "PRSM pod crash looping"
+          description: "PRSM pod {{ $labels.pod }} is crash looping"
