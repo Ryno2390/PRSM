@@ -227,3 +227,28 @@ deployments/mock_*
 test_results/
 coverage_reports/
 *.test.log
+
+# PRSM-specific temporary files
+validation/*_202*_*.json
+validation/logs/
+validation/results/*_202*_*
+**/economic_simulations/*_202*_*
+**/network_deployments/*_202*_*
+**/safety_tests/*_202*_*
+**/benchmarks/*_202*_*
+**/*_latest.json
+
+# API keys and secrets (NEVER COMMIT)
+**/API_Key.txt
+**/api_key.txt
+**/*_key.txt
+**/*_secret.txt
+**/secrets/
+**/credentials/
+
+# Draft and work-in-progress files
+**/*_DRAFT*
+**/*_WIP*
+**/*_TODO*
+**/Adversarial_Testing/
+**/Round_*/
