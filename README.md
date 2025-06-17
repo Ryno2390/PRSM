@@ -44,6 +44,7 @@
 | 🎯 [**Key Differentiators**](docs/TECHNICAL_ADVANTAGES.md) | 🏗️ [**Architecture**](docs/architecture.md) | 💰 [**Funding Structure**](docs/FUNDING_MILESTONES.md) |
 | 👥 [**Team Capability**](docs/TEAM_CAPABILITY.md) | 🧪 [**Validation Evidence**](validation/VALIDATION_EVIDENCE.md) | ⚡ [**Visual Roadmap**](docs/VISUAL_ROADMAP.md) |
 
+> **🎮 Quick Demo**: Jump to [**Working Demo Architecture**](#-working-demo-architecture) to see our interactive system components  
 > **🚀 Ready to Invest?** Complete investor package: [**INVESTOR_MATERIALS.md**](INVESTOR_MATERIALS.md)
 
 ---
@@ -233,6 +234,61 @@ SEAL integration positions PRSM as the only system capable of **autonomous recur
 - **Advanced Monitoring Stack**: Prometheus, Grafana, distributed tracing with microsecond precision
 - **High-Availability Architecture**: 99.9% uptime targets with comprehensive disaster recovery
 - **Database Persistence**: Production-ready PostgreSQL with transaction integrity and real-time analytics
+
+---
+
+## 🎮 **Working Demo Architecture**
+
+### **Live System Components**
+Experience PRSM's working prototype through interactive demonstrations:
+
+```mermaid
+flowchart TB
+    subgraph "🌐 P2P Network Demo"
+        A[Node 1<br/>Coordinator] <--> B[Node 2<br/>Worker]
+        A <--> C[Node 3<br/>Validator]
+        B <--> C
+        
+        D[Consensus<br/>Mechanism] --> A
+        E[Byzantine Fault<br/>Tolerance] --> B
+        F[Message<br/>Routing] --> C
+    end
+    
+    subgraph "💰 Token Economics Simulation"
+        G[Economic Agents<br/>30-50 participants] --> H[Multi-Scenario<br/>Stress Testing]
+        H --> I[Fairness Analysis<br/>Gini Coefficient]
+        I --> J[Quality Metrics<br/>Reward Distribution]
+    end
+    
+    subgraph "🤖 SEAL Framework"
+        K[MIT Research<br/>Implementation] --> L[Autonomous<br/>Self-Improvement]
+        L --> M[ReSTEM<br/>Methodology]
+        M --> N[Performance<br/>Validation]
+    end
+    
+    subgraph "📊 Interactive Dashboards"
+        O[Real-time<br/>Network Monitor] --> P[Economic<br/>Analysis Interface]
+        P --> Q[Performance<br/>Metrics Display]
+    end
+    
+    A -.-> O
+    G -.-> P
+    K -.-> Q
+    
+    style A fill:#e1f5fe
+    style G fill:#f3e5f5
+    style K fill:#e8f5e8
+    style O fill:#fff3e0
+```
+
+### **Demo Execution Flow**
+1. **Environment Validation** → Run `python check_requirements.py` for system readiness
+2. **P2P Network Demo** → 3-node consensus with Byzantine fault tolerance (3 min)
+3. **Economic Simulation** → Multi-agent stress testing across 4 scenarios (5 min)
+4. **Interactive Dashboards** → Real-time monitoring and analysis interfaces
+5. **SEAL Validation** → MIT research implementation with performance benchmarks
+
+**🎯 Demo Access**: `cd demos/ && python run_demos.py`
 
 ---
 
