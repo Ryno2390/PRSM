@@ -1,8 +1,19 @@
 # PRSM Business Case: The World's First Non-Profit AI Infrastructure Protocol
 
+## 🎯 Seeking $18M Series A for Production Implementation
+
+![Funding](https://img.shields.io/badge/stage-Seeking%20Series%20A-green.svg)
+![Status](https://img.shields.io/badge/status-Advanced%20Prototype-blue.svg)
+![Market](https://img.shields.io/badge/market-$1.3T%20AI%20Infrastructure-orange.svg)
+
+**Current Stage**: Advanced prototype with validated architecture  
+**Funding Target**: $18M Series A round  
+**Timeline**: 18-month roadmap to production deployment  
+**Structure**: 501(c)(3) public charity ensuring mission alignment  
+
 ## Executive Summary
 
-**The Opportunity**: The AI industry is approaching a $1.3 trillion market trapped in an unsustainable arms race that threatens both innovation and society. PRSM represents the first production-ready non-profit protocol to escape this "Kobayashi Maru" scenario through decentralized infrastructure that returns 100% of surplus value to the community that creates it.
+**The Opportunity**: The AI industry is approaching a $1.3 trillion market trapped in an unsustainable arms race that threatens both innovation and society. PRSM represents an advanced prototype for non-profit AI infrastructure designed to escape this "Kobayashi Maru" scenario through decentralized architecture that returns 100% of surplus value to the community that creates it.
 
 **The Solution**: PRSM (Protocol for Recursive Scientific Modeling) is a complete decentralized AI ecosystem operating as a 501(c)(3) public charity, featuring recursive orchestration, MCP tool integration, Byzantine fault-tolerant consensus, and a revolutionary token economy where all profits above operating costs are redistributed to FTNS token holders.
 
