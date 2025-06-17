@@ -19,7 +19,7 @@
 
 ## Overview
 
-The PRSM API provides a comprehensive RESTful interface for interacting with the Protocol for Recursive Scientific Modeling. All endpoints follow REST conventions and return JSON responses.
+The PRSM API provides a comprehensive RESTful interface for interacting with the Protocol for Recursive Scientific Modeling, featuring MIT's breakthrough SEAL (Self-Adapting Language Models) technology. All endpoints follow REST conventions and return JSON responses.
 
 ### Base URLs
 
@@ -119,7 +119,13 @@ Content-Type: application/json
   "domain": "environmental_science",
   "methodology": "comprehensive_analysis",
   "max_iterations": 5,
-  "include_citations": true
+  "include_citations": true,
+  "seal_enhancement": {
+    "enabled": true,
+    "autonomous_improvement": true,
+    "target_learning_gain": 0.15,
+    "restem_methodology": true
+  }
 }
 ```
 
@@ -133,6 +139,12 @@ Content-Type: application/json
   "cost_estimate": {
     "ftns_tokens": 150,
     "usd_equivalent": 0.75
+  },
+  "seal_status": {
+    "enhancement_enabled": true,
+    "autonomous_improvement_active": true,
+    "estimated_learning_gain": 0.15,
+    "self_edit_generation_rate": 3784
   }
 }
 ```
@@ -168,6 +180,13 @@ Authorization: Bearer <token>
   "cost_actual": {
     "ftns_tokens": 145,
     "usd_equivalent": 0.73
+  },
+  "seal_performance": {
+    "autonomous_improvements_applied": 3,
+    "learning_gain_achieved": 0.16,
+    "knowledge_incorporation_improvement": 0.135,
+    "self_edit_examples_generated": 127,
+    "restem_policy_updates": 5
   }
 }
 ```
@@ -175,6 +194,54 @@ Authorization: Bearer <token>
 #### List User Sessions
 ```http
 GET /api/v1/nwtn/sessions?limit=20&offset=0&status=completed
+Authorization: Bearer <token>
+```
+
+### SEAL Technology API
+
+#### Get SEAL Performance Metrics
+```http
+GET /api/v1/seal/metrics
+Authorization: Bearer <token>
+```
+
+**Response**:
+```json
+{
+  "seal_system_status": "active",
+  "production_metrics": {
+    "knowledge_incorporation_baseline": 0.335,
+    "knowledge_incorporation_current": 0.470,
+    "improvement_percentage": 0.403,
+    "few_shot_learning_success_rate": 0.725,
+    "self_edit_generation_rate": 3784,
+    "autonomous_improvement_cycles_completed": 1547
+  },
+  "real_time_performance": {
+    "restem_policy_updates_per_second": 15327,
+    "seal_reward_calculations_per_second": 24130,
+    "autonomous_improvement_rate": 0.187
+  }
+}
+```
+
+#### Trigger SEAL Autonomous Improvement
+```http
+POST /api/v1/seal/improve
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "domain": "biomedical_research",
+  "target_improvement": 0.20,
+  "improvement_strategy": "restem_methodology",
+  "max_iterations": 10
+}
+```
+
+#### Get SEAL Enhancement Status for Session
+```http
+GET /api/v1/seal/sessions/{session_id}/status
 Authorization: Bearer <token>
 ```
 
