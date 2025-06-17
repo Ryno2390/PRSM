@@ -45,7 +45,8 @@
       "Bash(ollama:*)",
       "Bash(export OLLAMA_MODELS=~/.ollama/models)",
       "Bash(curl:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(pdftotext:*)"
     ],
     "deny": []
   }
