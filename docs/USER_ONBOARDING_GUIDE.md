@@ -14,7 +14,7 @@
 
 ## Welcome to PRSM
 
-Welcome to the Protocol for Recursive Scientific Modeling (PRSM) - the world's first production-ready decentralized AI platform featuring MIT's breakthrough SEAL (Self-Adapting Language Models) technology for autonomous AI improvement. This comprehensive onboarding guide will help you get started regardless of your background or intended use of the platform.
+Welcome to the Protocol for Recursive Scientific Modeling (PRSM) - an advanced prototype decentralized AI platform featuring MIT's breakthrough SEAL (Self-Adapting Language Models) technology for autonomous AI improvement. This comprehensive onboarding guide will help you get started regardless of your background or intended use of the platform.
 
 ### What PRSM Offers
 
