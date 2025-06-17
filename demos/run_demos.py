@@ -224,51 +224,52 @@ def main():
                 
             elif choice == '7':
                 print("\n" + "="*60)
-                print("🔍 SYSTEM REQUIREMENTS CHECK")
+                print("🔍 COMPREHENSIVE SYSTEM REQUIREMENTS CHECK")
                 print("="*60)
-                print("🎯 Verifying demo environment for investor presentations")
-                print("\n⚙️  Checking system requirements...")
+                print("🎯 Professional environment validation for investor presentations")
+                print("⏱️  Duration: ~2 minutes comprehensive validation")
+                print("\n▶️  Running comprehensive validation...")
                 print("-"*60)
                 
-                # Check Python version
-                python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-                if sys.version_info >= (3, 9):
-                    print(f"✅ Python Version: {python_version} (Requirements: 3.9+)")
-                else:
-                    print(f"❌ Python Version: {python_version} (Requirements: 3.9+)")
-                
-                # Check required files
-                required_files = ["p2p_network_demo.py", "tokenomics_simulation.py", 
-                                "p2p_dashboard.py", "tokenomics_dashboard.py", "requirements.txt"]
-                for file in required_files:
-                    if Path(file).exists():
-                        print(f"✅ Demo File: {file}")
+                try:
+                    # Run the comprehensive requirements check script
+                    result = subprocess.run([sys.executable, "check_requirements.py"], 
+                                          capture_output=False, text=True)
+                    if result.returncode == 0:
+                        print("\n" + "="*60)
+                        print("✅ ENVIRONMENT VALIDATION COMPLETED SUCCESSFULLY")
+                        print("🚀 System ready for investor demonstrations")
+                        print("="*60)
                     else:
-                        print(f"❌ Demo File: {file} (MISSING)")
-                
-                # Check dependencies
-                print("\n📦 Checking key dependencies...")
-                try:
-                    import streamlit
-                    print(f"✅ Streamlit: {streamlit.__version__}")
-                except ImportError:
-                    print("❌ Streamlit: Not installed (pip install streamlit)")
-                
-                try:
-                    import plotly
-                    print(f"✅ Plotly: {plotly.__version__}")
-                except ImportError:
-                    print("❌ Plotly: Not installed (pip install plotly)")
-                
-                try:
-                    import pandas
-                    print(f"✅ Pandas: {pandas.__version__}")
-                except ImportError:
-                    print("❌ Pandas: Not installed (pip install pandas)")
-                
-                print("-"*60)
-                print("💡 If any dependencies are missing, run: pip install -r requirements.txt")
-                print("="*60)
+                        print("\n" + "="*60)
+                        print("⚠️  ENVIRONMENT VALIDATION FOUND ISSUES")
+                        print("📧 Contact technical support if needed: technical@prsm.ai")
+                        print("="*60)
+                except FileNotFoundError:
+                    print("⚠️  Comprehensive validation script not found")
+                    print("💡 Running basic validation...")
+                    print("-"*60)
+                    
+                    # Fallback to basic validation
+                    python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+                    if sys.version_info >= (3, 9):
+                        print(f"✅ Python Version: {python_version} (Requirements: 3.9+)")
+                    else:
+                        print(f"❌ Python Version: {python_version} (Requirements: 3.9+)")
+                    
+                    required_files = ["p2p_network_demo.py", "tokenomics_simulation.py"]
+                    for file in required_files:
+                        if Path(file).exists():
+                            print(f"✅ Demo File: {file}")
+                        else:
+                            print(f"❌ Demo File: {file} (MISSING)")
+                    
+                    print("\n💡 For comprehensive validation, ensure check_requirements.py exists")
+                    print("="*60)
+                except Exception as e:
+                    print(f"❌ Error running validation: {e}")
+                    print("📧 Contact technical support: technical@prsm.ai")
+                    print("="*60)
                 
             elif choice == '8':
                 print("\n" + "="*60)

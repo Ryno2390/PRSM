@@ -52,11 +52,19 @@ python run_demos.py
 ```
 
 ### Pre-Demo Checklist
+- [ ] **Run comprehensive validation**: `python check_requirements.py`
 - [ ] Python 3.9+ installed and working
 - [ ] All dependencies installed without errors
 - [ ] Port 8501 and 8502 available for Streamlit dashboards
 - [ ] Terminal ready for command execution
 - [ ] Browser ready for dashboard viewing
+
+**💡 Pro Tip**: Run the comprehensive environment check before any investor presentation:
+```bash
+cd demos/
+python check_requirements.py
+```
+This validates your system and provides a demo readiness score.
 
 ---
 
