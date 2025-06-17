@@ -37,6 +37,15 @@
 
 > 💡 **For Investors**: Our prototype demonstrates technical feasibility and validates core concepts. Funding will enable rapid progression from validated prototype to production deployment with clear milestones and measurable deliverables.
 
+### 🎯 **Investor Quick Navigation**
+| **For 5-Minute Assessment** | **For Technical Deep Dive** | **For Business Analysis** |
+|---------------------------|----------------------------|--------------------------|
+| 📊 [**Investor Quickstart**](INVESTOR_QUICKSTART.md) | 🔬 [**Live Demo Guide**](demos/INVESTOR_DEMO.md) | 💼 [**Business Case**](docs/BUSINESS_CASE.md) |
+| 🎯 [**Key Differentiators**](docs/TECHNICAL_ADVANTAGES.md) | 🏗️ [**Architecture**](docs/architecture.md) | 💰 [**Funding Structure**](docs/FUNDING_MILESTONES.md) |
+| 👥 [**Team Capability**](docs/TEAM_CAPABILITY.md) | 🧪 [**Validation Evidence**](validation/VALIDATION_EVIDENCE.md) | ⚡ [**Visual Roadmap**](docs/VISUAL_ROADMAP.md) |
+
+> **🚀 Ready to Invest?** Complete investor package: [**INVESTOR_MATERIALS.md**](INVESTOR_MATERIALS.md)
+
 ---
 
 ## The Kobayashi Maru of AI: Escaping the Thucydides Trap Through Open Intelligence
@@ -251,6 +260,43 @@ SEAL integration positions PRSM as the only system capable of **autonomous recur
 - **Security Coverage**: Comprehensive safety monitoring framework with threat detection
 - **Network Consensus**: 3,516+ consensus operations/sec target with Byzantine fault tolerance
 
+---
+
+## 💼 **Investment Opportunity & Market Position**
+
+### **🎯 $100B+ Market Opportunity**
+PRSM addresses the **$100B+ AI infrastructure market** with a unique position targeting the efficiency frontier as scaling costs exponentially increase:
+
+- **Current Market**: Centralized AI racing toward trillion-dollar compute clusters
+- **PRSM Advantage**: Distributed optimization achieving more intelligence per compute unit
+- **Market Timing**: Positioned ahead of physical scaling limitations and energy constraints
+- **Revenue Model**: Non-profit structure enabling unique surplus redistribution to community
+
+### **🏆 Competitive Differentiation**
+| **Competitors** | **Approach** | **PRSM Advantage** |
+|-----------------|--------------|-------------------|
+| **OpenAI/Google** | Massive centralized models | Distributed efficiency optimization |
+| **Bittensor** | For-profit blockchain AI | Non-profit mission protection |
+| **Hugging Face** | Model marketplace | Democratic governance + token economics |
+
+### **🚀 Why Now? The Efficiency Inflection Point**
+- **Physical Limits**: Computing power scaling hitting energy and hardware constraints
+- **Economic Pressure**: Trillion-dollar compute costs becoming unsustainable  
+- **Academic Validation**: MIT SEAL technology proves autonomous improvement possible
+- **Market Readiness**: Research institutions seeking alternatives to Big Tech dependency
+
+> **Investment Thesis**: PRSM owns the efficiency frontier that becomes the dominant paradigm as physical scaling limits are reached. Non-profit structure creates uncopiable competitive moats while distributed optimization delivers superior intelligence per dollar invested.
+
+### **📊 Funding & Returns**
+- **$18M Series A**: Risk-mitigated tranche structure over 18 months
+- **Return Mechanism**: FTNS token appreciation + social impact through democratized AI
+- **Exit Strategy**: Self-sustaining network growth + potential strategic acquisition
+- **Impact Multiplier**: Every dollar invested democratizes AI infrastructure globally
+
+**→ [Complete Business Case & Financial Projections](docs/BUSINESS_CASE.md)**
+
+---
+
 ## ⚡ The Efficiency Singularity: Why Distributed Intelligence Wins the Long Game
 
 While centralized labs race toward trillion-dollar compute clusters, PRSM targets a different frontier: **getting more intelligence per compute unit rather than simply adding more units**.
@@ -377,6 +423,32 @@ PRSM is built as a public good. We welcome contributions from:
 - **🌍 Community**: Participate in governance and provide feedback
 
 See our [Contributing Guide](CONTRIBUTING.md) for details.
+
+---
+
+## 💰 **Ready to Invest? Next Steps for Investors**
+
+### **🚀 Immediate Actions**
+1. **[5-Minute Assessment](INVESTOR_QUICKSTART.md)** - Rapid opportunity evaluation
+2. **[Live Demo](demos/INVESTOR_DEMO.md)** - Hands-on technical validation  
+3. **[Business Case Review](docs/BUSINESS_CASE.md)** - Market analysis and financial projections
+
+### **📞 Schedule Investment Discussion**
+- **Technical Deep Dive**: [technical@prsm.ai](mailto:technical@prsm.ai) - 2-hour architecture review
+- **Business Strategy**: [business@prsm.ai](mailto:business@prsm.ai) - Market opportunity and competitive analysis  
+- **Investment Terms**: [funding@prsm.ai](mailto:funding@prsm.ai) - Series A structure and terms discussion
+
+### **🎯 Investment Committee Materials**
+- **[Complete Investor Package](INVESTOR_MATERIALS.md)** - All materials organized by evaluation stage
+- **[Risk Assessment](docs/RISK_MITIGATION_ROADMAP.md)** - Comprehensive risk analysis and mitigation
+- **[Visual Roadmap](docs/VISUAL_ROADMAP.md)** - Interactive 18-month development timeline
+- **[Team Validation](docs/TEAM_CAPABILITY.md)** - Execution capability evidence and scaling strategy
+
+> **🎯 Investment Opportunity**: $18M Series A to transform validated prototype into production platform. First-mover advantage in efficiency-focused AI infrastructure with MIT research validation and comprehensive risk mitigation strategy.
+
+**Ready to join the future of democratic AI? [Contact our investment team →](mailto:funding@prsm.ai)**
+
+---
 
 ## 📄 Documentation
 
