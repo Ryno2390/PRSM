@@ -1,5 +1,8 @@
 # PRSM Architecture
 
+![Status](https://img.shields.io/badge/status-Advanced%20Prototype-blue.svg)
+![Architecture](https://img.shields.io/badge/architecture-Validated%20Design-green.svg)
+
 The Protocol for Recursive Scientific Modeling (PRSM) is a decentralized, multi-agent AI framework designed to coordinate, execute, and refine complex scientific tasks through a recursive, parallelized system of lightweight models. This document provides an overview of PRSM’s architectural layers, agents, data routing, and integration with decentralized technologies.
 
 ---
@@ -15,7 +18,7 @@ The Protocol for Recursive Scientific Modeling (PRSM) is a decentralized, multi-
 
 ## 🔬 SEAL Technology Integration
 
-**PRSM is the first production system to integrate MIT's breakthrough SEAL (Self-Adapting Language Models) technology**, enabling autonomous AI improvement through self-generated training data and recursive optimization.
+**PRSM demonstrates an advanced prototype implementation of MIT's breakthrough SEAL (Self-Adapting Language Models) technology**, validating autonomous AI improvement through self-generated training data and recursive optimization.
 
 ### **SEAL-Enhanced Teacher Model Architecture**
 
