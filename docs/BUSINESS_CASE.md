@@ -160,47 +160,47 @@ PRSM doesn't compete with OpenAI or Google—it makes their extraction model obs
 
 ### 18-Month Timeline & Milestones
 
-#### **Months 1-6: Production Launch**
+#### **Months 1-6: Production Launch (Tranche 1: $6M)**
 
-**Q1 2025 - Infrastructure Scaling**
+**Q1 2025 - Infrastructure Scaling & Team Building**
 - Deploy production Kubernetes clusters (AWS, GCP, Azure)
-- Launch mainnet FTNS token on Polygon
-- Onboard first 10 research institutions
-- Release production API with SLA guarantees
+- Hire and onboard 8-person core engineering team
+- Complete professional security audit with remediation
+- Launch CI/CD pipeline with automated testing
 
-**Q2 2025 - Early Adopter Program**
+**Q2 2025 - Platform Integration & Alpha Launch**
+- Integrate all 13 subsystems into unified platform
+- Launch mainnet FTNS token on Polygon with full functionality
+- Alpha program with 10 research institutions
 - 100+ active developers using PRSM APIs
-- 10,000+ models deployed on network
-- $100K+ monthly transaction volume
-- First enterprise partnerships signed
 
-#### **Months 7-12: Market Expansion**
+#### **Months 7-12: Market Expansion (Tranche 2: $7M)**
 
-**Q3 2025 - Ecosystem Growth**
-- 1,000+ active developers
-- 50,000+ models on network
-- $1M+ monthly transaction volume
+**Q3 2025 - Enterprise Features & Developer Ecosystem**
+- 1,000+ active developers with advanced tooling
 - MCP tool marketplace with 500+ tools
+- Enterprise-grade features and SLA guarantees
+- Professional services program launched
 
-**Q4 2025 - Enterprise Adoption**
+**Q4 2025 - Global Deployment & Scaling**
+- Multi-region node network (50+ nodes globally)
 - 10+ enterprise clients generating $500K+ monthly revenue
-- 10,000+ active users
-- 100,000+ models deployed
-- Series B funding round preparation
+- 10,000+ active users across research and enterprise
+- $1M+ monthly transaction volume
 
-#### **Months 13-18: Market Leadership**
+#### **Months 13-18: Market Leadership (Tranche 3: $5M)**
 
-**Q1 2026 - Scale Achievement**
-- 50,000+ active users
+**Q1 2026 - Advanced AI Capabilities & Scale Achievement**
+- 50,000+ active users with advanced AI features
 - $10M+ annual recurring revenue
-- 500,000+ models on network
-- International expansion (EU, Asia)
+- Full SEAL autonomous improvement deployment
+- International expansion (EU, Asia regulatory compliance)
 
-**Q2 2026 - Platform Maturity**
-- 100,000+ active users
-- $25M+ annual recurring revenue
-- Industry recognition as standard protocol
-- IPO preparation or strategic acquisition
+**Q2 2026 - Ecosystem Maturity & Series B Preparation**
+- 100,000+ active users across global markets
+- $25M+ annual recurring revenue run rate
+- Industry recognition as standard AI infrastructure protocol
+- Series B funding round preparation for global expansion
 
 ### Resource Requirements
 
@@ -211,25 +211,30 @@ PRSM doesn't compete with OpenAI or Google—it makes their extraction model obs
 - Full-stack development & DevOps
 - Research & algorithm development
 
-**Phase 3 Team (25-30 people)**
+**Phase 3 Team Scaling Plan (25-30 people by Month 18)**
 
-**Engineering (15 people)**
+**Tranche 1 Team (8 people by Month 6)**
 - 3 Senior Backend Engineers ($180K + equity)
-- 3 Senior Frontend Engineers ($170K + equity)
 - 2 DevOps/Infrastructure Engineers ($190K + equity)
-- 2 Blockchain Engineers ($200K + equity)
-- 2 ML/AI Engineers ($195K + equity)
-- 2 Security Engineers ($185K + equity)
+- 2 ML/AI Engineers ($195K + equity) 
 - 1 Engineering Manager ($220K + equity)
 
-**Business & Operations (8 people)**
-- 1 CEO/Founder ($250K + equity)
-- 1 CTO/Technical Cofounder ($230K + equity)
+**Tranche 2 Expansion (16 people by Month 12)**
+- 3 Senior Frontend Engineers ($170K + equity)
+- 2 Blockchain Engineers ($200K + equity)
+- 2 Security Engineers ($185K + equity)
 - 2 Business Development ($160K + equity)
 - 1 Product Manager ($175K + equity)
 - 1 Head of Marketing ($180K + equity)
 - 1 Community Manager ($120K + equity)
+
+**Tranche 3 Leadership Team (25-30 people by Month 18)**
+- 1 CEO/Founder ($250K + equity)
+- 1 CTO/Technical Cofounder ($230K + equity)
 - 1 Operations Manager ($140K + equity)
+- 2 Research Scientists ($200K + equity)
+- 1 General Counsel ($250K + equity)
+- Additional specialized roles based on growth needs
 
 **Research & Advisory (4 people)**
 - 2 Research Scientists ($200K + equity)
@@ -247,8 +252,9 @@ PRSM doesn't compete with OpenAI or Google—it makes their extraction model obs
 ### 18-Month Operating Costs
 
 #### **Personnel Costs (70% of budget)**
-- **Year 1**: $3.2M (average 12 people)
-- **Year 2**: $5.8M (full 30-person team)
+- **Months 1-6**: $1.8M (8-person core team)
+- **Months 7-12**: $3.2M (16-person expanded team) 
+- **Months 13-18**: $4.0M (25-30 person full team)
 - **Total**: $9.0M
 
 #### **Infrastructure Costs (20% of budget)**
@@ -265,73 +271,65 @@ PRSM doesn't compete with OpenAI or Google—it makes their extraction model obs
 - **Total**: $2.1M
 
 #### **Total 18-Month Operating Costs: $14.5M**
+**Funding Structure**: $18M total ($14.5M operations + $3.5M contingency/growth capital)
 
 ### Revenue Projections
 
-#### **Conservative Scenario**
-- **Year 1**: $500K (early adopter usage)
-- **Year 2**: $5M (enterprise clients + network growth)
-- **Year 3**: $15M (market expansion)
+#### **Milestone-Based Revenue Projections**
 
-#### **Optimistic Scenario**
-- **Year 1**: $1.5M (faster enterprise adoption)
-- **Year 2**: $12M (viral network growth)
-- **Year 3**: $35M (market leadership position)
+**Months 1-6 (Tranche 1 Period)**
+- **Conservative**: $50K (alpha testing, early partnerships)
+- **Optimistic**: $150K (faster enterprise pilot adoption)
+
+**Months 7-12 (Tranche 2 Period)**
+- **Conservative**: $500K (enterprise clients, developer ecosystem)
+- **Optimistic**: $1.2M (accelerated market adoption)
+
+**Months 13-18 (Tranche 3 Period)**
+- **Conservative**: $2M (established enterprise revenue)
+- **Optimistic**: $5M (market leadership position)
 
 #### **Break-even Analysis**
-- **Conservative**: Month 24 (cumulative)
-- **Optimistic**: Month 18 (cumulative)
-- **Cash flow positive**: Month 15-20
+- **Cumulative Break-even**: Month 20-24 based on revenue trajectory
+- **Operating Cash Flow Positive**: Month 15-18 with Tranche 3 deployment
+- **Self-Sustaining Operations**: Month 24+ with $15M+ annual revenue run rate
 
 ---
 
 ## Non-Profit Funding Strategy
 
-### Initial Funding: $18M Target (Grants + Impact Investment)
+### Funding Structure: $18M Series A (Progressive Tranches)
 
-#### **Funding Sources Breakdown**
+#### **Tranche-Based Funding Sources**
 
-**Grant Funding (60% - $11M)**
-- **NSF/DARPA**: $4-5M for AI infrastructure research
-- **Foundation Grants**: $3-4M from Gates, Ford, Mozilla foundations  
-- **Corporate Research Grants**: $2-3M from cloud providers and tech companies
-- **International Grants**: $1-2M from EU, UK, Canadian research programs
+**Tranche 1: $6M (Foundation & Core Platform)**
+- **Grant Funding (70% - $4.2M)**: NSF/DARPA research grants, foundation grants
+- **Impact Investment (30% - $1.8M)**: Social impact VCs, program-related investments
 
-**Impact Investment (25% - $4.5M)**
-- **Social Impact VCs**: Funds focused on public good technology
-- **Program-Related Investments**: From foundations seeking both impact and mission alignment
-- **Revenue-Based Financing**: Based on transaction fee growth, not equity
+**Tranche 2: $7M (Market Expansion)**
+- **Impact Investment (60% - $4.2M)**: Revenue-based financing, social impact funds
+- **Corporate Partnerships (40% - $2.8M)**: Strategic investors, enterprise partnerships
 
-**Donations & Endowment (15% - $2.5M)**
-- **High-Net-Worth Individuals**: Tech leaders supporting AI democratization
-- **Corporate Donations**: Tax-advantaged giving from profitable tech companies
-- **Crowdfunding**: Community-driven funding from future PRSM users
+**Tranche 3: $5M (Global Leadership)**
+- **Revenue-Based Financing (60% - $3M)**: Based on demonstrated traction
+- **Strategic Investment (40% - $2M)**: International expansion partners, ecosystem funds
 
-#### **Use of Funds (Mission-Focused)**
+#### **Milestone-Based Use of Funds**
 
-**Product Development (50% - $9M)**
-- Core platform engineering and global scaling
-- MCP tool ecosystem development and community tools
-- Mobile and edge device integration for developing nations
-- Advanced ML/AI research published openly
+**Tranche 1 Allocation: $6M (Months 1-6)**
+- **Team Building (40% - $2.4M)**: Core 8-person engineering team
+- **Infrastructure (35% - $2.1M)**: Production deployment, security audit
+- **Research & Development (25% - $1.5M)**: SEAL integration, platform optimization
 
-**Team Building (30% - $5.4M)**
-- Recruit mission-aligned engineering talent with competitive salaries
-- Build global community development team
-- Expand research and advisory board with academic partnerships
-- Legal and compliance for international non-profit operations
+**Tranche 2 Allocation: $7M (Months 7-12)**
+- **Market Expansion (50% - $3.5M)**: Enterprise features, developer ecosystem
+- **Team Scaling (30% - $2.1M)**: 8 additional team members
+- **Infrastructure Scaling (20% - $1.4M)**: Global deployment, performance optimization
 
-**Community Building (15% - $2.7M)**
-- Global developer ecosystem programs and grants
-- Educational initiatives and documentation
-- Research institution partnerships and pilot programs
-- Open source community support and hackathons
-
-**Infrastructure (5% - $0.9M)**
-- Production cloud infrastructure with cost optimization
-- Security and compliance for global operations
-- International regulatory compliance and legal setup
-- Disaster recovery and data sovereignty protection
+**Tranche 3 Allocation: $5M (Months 13-18)**
+- **Advanced Capabilities (40% - $2M)**: AI features, autonomous systems
+- **Global Operations (35% - $1.75M)**: International expansion, compliance
+- **Series B Preparation (25% - $1.25M)**: Growth capital, strategic initiatives
 
 ### Long-Term Sustainability Model
 
@@ -484,11 +482,17 @@ PRSM doesn't compete with OpenAI or Google—it makes their extraction model obs
 
 ### Investment Process Timeline
 
-**Week 1-2**: Initial investor outreach and interest validation
-**Week 3-4**: Pitch deck refinement and demo preparation
-**Week 5-8**: First round investor meetings and feedback incorporation
-**Week 9-12**: Term sheet negotiations and due diligence
-**Week 13-16**: Final negotiations and closing
+**Tranche 1 Funding Timeline**
+**Week 1-2**: Grant applications and impact investor outreach
+**Week 3-4**: Technical demonstrations and prototype validation
+**Week 5-8**: Due diligence and foundation program reviews
+**Week 9-12**: Term sheet negotiations and compliance review
+**Week 13-16**: Tranche 1 closing and team hiring initiation
+
+**Future Tranche Timing**
+**Month 6**: Tranche 2 preparation based on Tranche 1 milestones
+**Month 12**: Tranche 3 preparation based on market traction
+**Month 18**: Series B preparation for global expansion
 
 ### Contact Information
 
