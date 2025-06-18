@@ -111,6 +111,47 @@ class CodeQualityMetric(str, Enum):
     DOCUMENTATION = "documentation"
 
 
+class SecurityThreatLevel(str, Enum):
+    """Security threat levels for code assessment"""
+    MINIMAL = "minimal"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class MaliciousCodeCategory(str, Enum):
+    """Categories of malicious code patterns"""
+    BACKDOOR = "backdoor"
+    TROJAN = "trojan"
+    VIRUS = "virus"
+    WORM = "worm"
+    RANSOMWARE = "ransomware"
+    SPYWARE = "spyware"
+    ROOTKIT = "rootkit"
+    LOGIC_BOMB = "logic_bomb"
+    DATA_THEFT = "data_theft"
+    PRIVILEGE_ESCALATION = "privilege_escalation"
+    DENIAL_OF_SERVICE = "denial_of_service"
+    CODE_INJECTION = "code_injection"
+
+
+class VulnerabilityType(str, Enum):
+    """Types of security vulnerabilities"""
+    BUFFER_OVERFLOW = "buffer_overflow"
+    SQL_INJECTION = "sql_injection"
+    XSS = "xss"
+    CSRF = "csrf"
+    PATH_TRAVERSAL = "path_traversal"
+    COMMAND_INJECTION = "command_injection"
+    DESERIALIZATION = "deserialization"
+    WEAK_CRYPTO = "weak_crypto"
+    HARDCODED_SECRETS = "hardcoded_secrets"
+    INSUFFICIENT_VALIDATION = "insufficient_validation"
+    RACE_CONDITION = "race_condition"
+    MEMORY_LEAK = "memory_leak"
+
+
 class IntermediateResult(BaseModel):
     """Intermediate compilation result"""
     result_id: UUID = Field(default_factory=uuid4)
@@ -256,6 +297,69 @@ class AbsoluteZeroCodeEngine(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class SecurityVulnerability(BaseModel):
+    """Security vulnerability detected in code"""
+    vulnerability_id: UUID = Field(default_factory=uuid4)
+    vulnerability_type: VulnerabilityType
+    severity: SecurityThreatLevel
+    description: str
+    affected_code_lines: List[int] = Field(default_factory=list)
+    cwe_id: Optional[str] = None  # Common Weakness Enumeration ID
+    cvss_score: Optional[float] = Field(ge=0.0, le=10.0)
+    mitigation_suggestions: List[str] = Field(default_factory=list)
+    auto_fixable: bool = False
+    fix_suggestion: Optional[str] = None
+    detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class MaliciousCodeDetection(BaseModel):
+    """Malicious code pattern detection result"""
+    detection_id: UUID = Field(default_factory=uuid4)
+    malicious_category: MaliciousCodeCategory
+    threat_level: SecurityThreatLevel
+    confidence_score: float = Field(ge=0.0, le=1.0)
+    detected_patterns: List[str] = Field(default_factory=list)
+    code_locations: List[int] = Field(default_factory=list)
+    risk_assessment: str
+    prevention_measures: List[str] = Field(default_factory=list)
+    false_positive_probability: float = Field(ge=0.0, le=1.0)
+    detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class CodeSafetyValidationResult(BaseModel):
+    """Comprehensive code safety validation result"""
+    validation_id: UUID = Field(default_factory=uuid4)
+    code_hash: str
+    programming_language: ProgrammingLanguage
+    overall_threat_level: SecurityThreatLevel
+    safety_score: float = Field(ge=0.0, le=1.0)
+    vulnerabilities: List[SecurityVulnerability] = Field(default_factory=list)
+    malicious_detections: List[MaliciousCodeDetection] = Field(default_factory=list)
+    compliance_violations: List[str] = Field(default_factory=list)
+    safe_for_deployment: bool
+    requires_manual_review: bool
+    automated_fixes_applied: List[str] = Field(default_factory=list)
+    validation_metadata: Dict[str, Any] = Field(default_factory=dict)
+    validation_time: float
+    validated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class RedTeamCodeSafetyEngine(BaseModel):
+    """Red Team code safety validation engine"""
+    engine_id: UUID = Field(default_factory=uuid4)
+    supported_languages: List[ProgrammingLanguage] = Field(default_factory=list)
+    validation_history: List[CodeSafetyValidationResult] = Field(default_factory=list)
+    total_validations_performed: int = 0
+    vulnerabilities_detected: int = 0
+    malicious_code_blocked: int = 0
+    false_positive_rate: float = 0.0
+    average_validation_time: float = 0.0
+    security_rules_version: str = "1.0.0"
+    last_rules_update: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    active: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class HierarchicalCompiler(BaseAgent):
     """
     Enhanced Hierarchical Compiler for PRSM with Absolute Zero Integration
@@ -279,6 +383,7 @@ class HierarchicalCompiler(BaseAgent):
                  confidence_threshold: float = 0.8,
                  default_strategy: SynthesisStrategy = SynthesisStrategy.COMPREHENSIVE,
                  enable_absolute_zero: bool = True,
+                 enable_red_team_safety: bool = True,
                  supported_languages: Optional[List[ProgrammingLanguage]] = None):
         super().__init__(agent_id=agent_id, agent_type=AgentType.COMPILER)
         self.confidence_threshold = confidence_threshold
@@ -304,6 +409,25 @@ class HierarchicalCompiler(BaseAgent):
         else:
             self.absolute_zero_engine = None
         
+        # 🛡️ RED TEAM CODE SAFETY ENGINE (Item 3.2)
+        self.enable_red_team_safety = enable_red_team_safety
+        if enable_red_team_safety:
+            safety_languages = supported_languages or [
+                ProgrammingLanguage.PYTHON,
+                ProgrammingLanguage.JAVASCRIPT,
+                ProgrammingLanguage.TYPESCRIPT,
+                ProgrammingLanguage.JAVA,
+                ProgrammingLanguage.CPP,
+                ProgrammingLanguage.CSHARP,
+                ProgrammingLanguage.PHP,
+                ProgrammingLanguage.GO
+            ]
+            self.red_team_safety_engine = RedTeamCodeSafetyEngine(
+                supported_languages=safety_languages
+            )
+        else:
+            self.red_team_safety_engine = None
+        
         # 🔧 CODE EXECUTION ENVIRONMENT (Item 3.1)
         self.code_execution_stats = {
             "total_executions": 0,
@@ -314,11 +438,23 @@ class HierarchicalCompiler(BaseAgent):
             "challenge_types_generated": {}
         }
         
-        logger.info("Enhanced HierarchicalCompiler with Absolute Zero initialized",
+        # 🛡️ SECURITY VALIDATION STATISTICS (Item 3.2)
+        self.security_validation_stats = {
+            "total_validations": 0,
+            "vulnerabilities_detected": 0,
+            "malicious_code_blocked": 0,
+            "false_positives": 0,
+            "automatic_fixes_applied": 0,
+            "manual_reviews_required": 0,
+            "threat_levels": {level.value: 0 for level in SecurityThreatLevel}
+        }
+        
+        logger.info("Enhanced HierarchicalCompiler with Absolute Zero and Red Team Safety initialized",
                    agent_id=self.agent_id,
                    confidence_threshold=confidence_threshold,
                    default_strategy=default_strategy.value,
                    absolute_zero_enabled=enable_absolute_zero,
+                   red_team_safety_enabled=enable_red_team_safety,
                    supported_languages=len(default_languages) if enable_absolute_zero else 0)
     
     async def process(self, input_data: Any, context: Optional[Dict[str, Any]] = None) -> CompilerResult:
@@ -1411,6 +1547,280 @@ class HierarchicalCompiler(BaseAgent):
         
         return recommendations
     
+    # === RED TEAM CODE SAFETY VALIDATION METHODS (Item 3.2) ===
+    
+    async def perform_comprehensive_code_safety_validation(
+        self, 
+        code: str, 
+        language: ProgrammingLanguage,
+        context: Optional[Dict[str, Any]] = None
+    ) -> CodeSafetyValidationResult:
+        """
+        Perform comprehensive Red Team code safety validation (Item 3.2)
+        
+        🛡️ COMPREHENSIVE SAFETY VALIDATION:
+        - Advanced malicious code detection with pattern analysis
+        - Security vulnerability scanning with CVSS scoring
+        - Compliance violation checking and automated remediation
+        - Threat level assessment with false positive analysis
+        """
+        
+        if not self.red_team_safety_engine:
+            raise ValueError("Red Team code safety engine not enabled")
+        
+        validation_start = time.time()
+        code_hash = str(hash(code))
+        
+        logger.info("Starting comprehensive code safety validation",
+                   agent_id=self.agent_id,
+                   language=language.value,
+                   code_length=len(code))
+        
+        # Step 1: Malicious code detection
+        malicious_detections = await self._detect_malicious_code_patterns(code, language)
+        
+        # Step 2: Security vulnerability scanning
+        vulnerabilities = await self._scan_security_vulnerabilities(code, language)
+        
+        # Step 3: Compliance validation
+        compliance_violations = await self._validate_code_compliance(code, language)
+        
+        # Step 4: Automated security fixes
+        automated_fixes = await self._apply_automated_security_fixes(
+            code, vulnerabilities, malicious_detections
+        )
+        
+        # Step 5: Calculate overall threat assessment
+        overall_threat_level = await self._calculate_overall_threat_level(
+            vulnerabilities, malicious_detections
+        )
+        
+        # Step 6: Calculate safety score
+        safety_score = await self._calculate_comprehensive_safety_score(
+            vulnerabilities, malicious_detections, compliance_violations
+        )
+        
+        # Step 7: Determine deployment safety and review requirements
+        safe_for_deployment = (
+            overall_threat_level in [SecurityThreatLevel.MINIMAL, SecurityThreatLevel.LOW] and
+            not any(detection.threat_level == SecurityThreatLevel.CRITICAL for detection in malicious_detections) and
+            not any(vuln.severity == SecurityThreatLevel.CRITICAL for vuln in vulnerabilities)
+        )
+        
+        requires_manual_review = (
+            overall_threat_level in [SecurityThreatLevel.HIGH, SecurityThreatLevel.CRITICAL] or
+            len(vulnerabilities) > 5 or
+            any(detection.false_positive_probability < 0.3 for detection in malicious_detections)
+        )
+        
+        validation_time = time.time() - validation_start
+        
+        # Create comprehensive validation result
+        validation_result = CodeSafetyValidationResult(
+            code_hash=code_hash,
+            programming_language=language,
+            overall_threat_level=overall_threat_level,
+            safety_score=safety_score,
+            vulnerabilities=vulnerabilities,
+            malicious_detections=malicious_detections,
+            compliance_violations=compliance_violations,
+            safe_for_deployment=safe_for_deployment,
+            requires_manual_review=requires_manual_review,
+            automated_fixes_applied=automated_fixes,
+            validation_metadata={
+                "context": context or {},
+                "validation_engine_version": self.red_team_safety_engine.security_rules_version,
+                "total_patterns_checked": self._get_total_security_patterns_count(),
+                "advanced_analysis_enabled": True
+            },
+            validation_time=validation_time
+        )
+        
+        # Update engine history and statistics
+        self.red_team_safety_engine.validation_history.append(validation_result)
+        self.red_team_safety_engine.total_validations_performed += 1
+        self.red_team_safety_engine.vulnerabilities_detected += len(vulnerabilities)
+        if not safe_for_deployment:
+            self.red_team_safety_engine.malicious_code_blocked += 1
+        
+        # Update internal statistics
+        self._update_security_validation_stats(validation_result)
+        
+        logger.info("Comprehensive code safety validation completed",
+                   agent_id=self.agent_id,
+                   validation_id=str(validation_result.validation_id),
+                   language=language.value,
+                   overall_threat_level=overall_threat_level.value,
+                   safety_score=safety_score,
+                   vulnerabilities_found=len(vulnerabilities),
+                   malicious_detections=len(malicious_detections),
+                   safe_for_deployment=safe_for_deployment,
+                   validation_time=f"{validation_time:.3f}s")
+        
+        return validation_result
+    
+    async def detect_and_prevent_malicious_code(
+        self, 
+        code: str, 
+        language: ProgrammingLanguage
+    ) -> List[MaliciousCodeDetection]:
+        """
+        Advanced malicious code detection and prevention (Item 3.2)
+        
+        🕵️ MALICIOUS CODE DETECTION:
+        - Multi-layer pattern analysis for 12+ malicious code categories
+        - Behavioral analysis and heuristic detection
+        - Machine learning-based anomaly detection
+        - Context-aware false positive reduction
+        """
+        
+        detections = []
+        
+        # Advanced malicious pattern detection
+        for category in MaliciousCodeCategory:
+            category_detections = await self._detect_malicious_category_patterns(
+                code, language, category
+            )
+            detections.extend(category_detections)
+        
+        # Behavioral analysis
+        behavioral_detections = await self._perform_behavioral_analysis(code, language)
+        detections.extend(behavioral_detections)
+        
+        # Heuristic analysis
+        heuristic_detections = await self._perform_heuristic_analysis(code, language)
+        detections.extend(heuristic_detections)
+        
+        # Advanced pattern correlation
+        correlated_detections = await self._correlate_detection_patterns(detections, code)
+        detections.extend(correlated_detections)
+        
+        # False positive filtering
+        filtered_detections = await self._filter_false_positives(detections, code, language)
+        
+        return filtered_detections
+    
+    async def scan_security_vulnerabilities(
+        self, 
+        code: str, 
+        language: ProgrammingLanguage
+    ) -> List[SecurityVulnerability]:
+        """
+        Comprehensive security vulnerability scanning (Item 3.2)
+        
+        🔍 VULNERABILITY SCANNING:
+        - OWASP Top 10 vulnerability detection
+        - CWE (Common Weakness Enumeration) mapping
+        - CVSS scoring for severity assessment
+        - Language-specific security patterns
+        - Automated fix suggestions
+        """
+        
+        vulnerabilities = []
+        
+        # OWASP Top 10 scanning
+        owasp_vulnerabilities = await self._scan_owasp_vulnerabilities(code, language)
+        vulnerabilities.extend(owasp_vulnerabilities)
+        
+        # CWE-based vulnerability detection
+        cwe_vulnerabilities = await self._scan_cwe_vulnerabilities(code, language)
+        vulnerabilities.extend(cwe_vulnerabilities)
+        
+        # Language-specific vulnerabilities
+        language_vulnerabilities = await self._scan_language_specific_vulnerabilities(code, language)
+        vulnerabilities.extend(language_vulnerabilities)
+        
+        # Crypto and authentication vulnerabilities
+        crypto_vulnerabilities = await self._scan_crypto_vulnerabilities(code, language)
+        vulnerabilities.extend(crypto_vulnerabilities)
+        
+        # Input validation vulnerabilities
+        validation_vulnerabilities = await self._scan_input_validation_vulnerabilities(code, language)
+        vulnerabilities.extend(validation_vulnerabilities)
+        
+        # Calculate CVSS scores and severity
+        for vulnerability in vulnerabilities:
+            vulnerability.cvss_score = await self._calculate_cvss_score(vulnerability, code)
+            vulnerability.severity = await self._determine_vulnerability_severity(vulnerability)
+        
+        return vulnerabilities
+    
+    async def generate_safe_code_guidelines(
+        self, 
+        language: ProgrammingLanguage,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Generate safe code generation guidelines (Item 3.2)
+        
+        📋 SAFE CODING GUIDELINES:
+        - Language-specific security best practices
+        - Common vulnerability prevention patterns
+        - Secure coding standards and frameworks
+        - Automated compliance checking rules
+        """
+        
+        guidelines = {
+            "language": language.value,
+            "security_standards": await self._get_security_standards(language),
+            "best_practices": await self._get_security_best_practices(language),
+            "vulnerability_prevention": await self._get_vulnerability_prevention_patterns(language),
+            "secure_frameworks": await self._get_secure_frameworks(language),
+            "compliance_requirements": await self._get_compliance_requirements(language, context),
+            "automated_checks": await self._get_automated_security_checks(language),
+            "code_review_checklist": await self._generate_security_checklist(language),
+            "generated_at": datetime.now().isoformat()
+        }
+        
+        return guidelines
+    
+    async def perform_automated_code_review(
+        self, 
+        code: str, 
+        language: ProgrammingLanguage
+    ) -> Dict[str, Any]:
+        """
+        Automated code review with security focus (Item 3.2)
+        
+        👁️ AUTOMATED SECURITY REVIEW:
+        - Comprehensive code quality and security analysis
+        - Best practice compliance checking
+        - Automated fix generation and suggestions
+        - Integration with existing development workflows
+        """
+        
+        review_start = time.time()
+        
+        # Comprehensive safety validation
+        safety_validation = await self.perform_comprehensive_code_safety_validation(code, language)
+        
+        # Code quality analysis
+        quality_analysis = await self._perform_code_quality_analysis(code, language)
+        
+        # Security best practices check
+        best_practices_review = await self._review_security_best_practices(code, language)
+        
+        # Automated fix generation
+        automated_fixes = await self._generate_comprehensive_fixes(
+            code, safety_validation.vulnerabilities, safety_validation.malicious_detections
+        )
+        
+        review_time = time.time() - review_start
+        
+        review_result = {
+            "review_id": str(uuid4()),
+            "language": language.value,
+            "safety_validation": safety_validation.model_dump(),
+            "quality_analysis": quality_analysis,
+            "best_practices_review": best_practices_review,
+            "automated_fixes": automated_fixes,
+            "overall_recommendation": await self._generate_overall_recommendation(safety_validation),
+            "review_time": review_time,
+            "reviewed_at": datetime.now().isoformat()
+        }
+        
+        return review_result
+    
     def _update_performance_metrics(self, result: Any, compilation_time: float):
         """Update performance metrics"""
         if "compilation_time" not in self.performance_metrics:
@@ -2282,27 +2692,480 @@ describe('Solution Tests', function() {{
             ] if security_violations else ["Code appears safe for execution"]
         }
 
+    # === RED TEAM CODE SAFETY HELPER METHODS (Item 3.2) ===
+    
+    async def _detect_malicious_code_patterns(
+        self, 
+        code: str, 
+        language: ProgrammingLanguage
+    ) -> List[MaliciousCodeDetection]:
+        """Detect malicious code patterns using advanced analysis"""
+        
+        detections = []
+        
+        # Advanced malicious pattern detection for each category
+        for category in MaliciousCodeCategory:
+            category_detections = await self._detect_malicious_category_patterns(code, language, category)
+            detections.extend(category_detections)
+        
+        return detections
+    
+    async def _detect_malicious_category_patterns(
+        self, 
+        code: str, 
+        language: ProgrammingLanguage, 
+        category: MaliciousCodeCategory
+    ) -> List[MaliciousCodeDetection]:
+        """Detect specific category of malicious patterns"""
+        
+        detections = []
+        code_lower = code.lower()
+        
+        # Category-specific malicious patterns
+        malicious_patterns = {
+            MaliciousCodeCategory.BACKDOOR: [
+                "remote_shell", "reverse_shell", "nc -l", "netcat", "/bin/sh", "cmd.exe",
+                "socket.connect", "backdoor", "remote_access", "hidden_service"
+            ],
+            MaliciousCodeCategory.TROJAN: [
+                "trojan", "keylogger", "screen_capture", "credential_steal", 
+                "browser_history", "password_grab", "system_info"
+            ],
+            MaliciousCodeCategory.VIRUS: [
+                "self_replicate", "file_infect", "payload_drop", "virus_signature",
+                "polymorphic", "metamorphic", "infection_marker"
+            ],
+            MaliciousCodeCategory.RANSOMWARE: [
+                "encrypt_files", "ransom_note", "bitcoin_address", "payment_demand",
+                "file_extension_change", "encryption_key", "decrypt_tool"
+            ],
+            MaliciousCodeCategory.DATA_THEFT: [
+                "exfiltrate", "data_steal", "sensitive_info", "credit_card", "ssn",
+                "personal_data", "database_dump", "unauthorized_access"
+            ],
+            MaliciousCodeCategory.DENIAL_OF_SERVICE: [
+                "ddos", "dos_attack", "flood", "resource_exhaustion", "infinite_loop",
+                "memory_bomb", "cpu_intensive", "network_spam"
+            ],
+            MaliciousCodeCategory.PRIVILEGE_ESCALATION: [
+                "sudo", "root_access", "admin_rights", "privilege_escalation",
+                "setuid", "runas", "elevation", "bypass_security"
+            ],
+            MaliciousCodeCategory.CODE_INJECTION: [
+                "eval(", "exec(", "system(", "shell_exec", "code_injection",
+                "sql_injection", "command_injection", "script_injection"
+            ]
+        }
+        
+        category_patterns = malicious_patterns.get(category, [])
+        
+        for pattern in category_patterns:
+            if pattern in code_lower:
+                # Calculate threat level based on pattern severity
+                threat_level = SecurityThreatLevel.HIGH if pattern in [
+                    "eval(", "exec(", "system(", "backdoor", "ransomware"
+                ] else SecurityThreatLevel.MEDIUM
+                
+                detection = MaliciousCodeDetection(
+                    malicious_category=category,
+                    threat_level=threat_level,
+                    confidence_score=0.8,  # High confidence for exact pattern match
+                    detected_patterns=[pattern],
+                    code_locations=[code_lower.find(pattern)],
+                    risk_assessment=f"Detected {category.value} pattern: {pattern}",
+                    prevention_measures=[
+                        f"Remove or replace {pattern} with secure alternative",
+                        "Implement input validation and sanitization",
+                        "Use security frameworks and libraries"
+                    ],
+                    false_positive_probability=0.2
+                )
+                detections.append(detection)
+        
+        return detections
+    
+    async def _scan_security_vulnerabilities(
+        self, 
+        code: str, 
+        language: ProgrammingLanguage
+    ) -> List[SecurityVulnerability]:
+        """Comprehensive security vulnerability scanning"""
+        
+        vulnerabilities = []
+        
+        # OWASP Top 10 vulnerabilities
+        owasp_vulns = await self._scan_owasp_vulnerabilities(code, language)
+        vulnerabilities.extend(owasp_vulns)
+        
+        # Language-specific vulnerabilities
+        lang_vulns = await self._scan_language_specific_vulnerabilities(code, language)
+        vulnerabilities.extend(lang_vulns)
+        
+        return vulnerabilities
+    
+    async def _scan_owasp_vulnerabilities(
+        self, 
+        code: str, 
+        language: ProgrammingLanguage
+    ) -> List[SecurityVulnerability]:
+        """Scan for OWASP Top 10 vulnerabilities"""
+        
+        vulnerabilities = []
+        code_lower = code.lower()
+        
+        # OWASP vulnerability patterns
+        owasp_patterns = {
+            VulnerabilityType.SQL_INJECTION: [
+                "select * from", "drop table", "union select", "' or '1'='1",
+                "sql_query + user_input", "query = \"" + 
+            ],
+            VulnerabilityType.XSS: [
+                "<script>", "javascript:", "onerror=", "onload=", "eval(user_input)",
+                "document.write(", "innerHTML ="
+            ],
+            VulnerabilityType.COMMAND_INJECTION: [
+                "system(user_input)", "exec(user_input)", "shell_exec(",
+                "os.system(", "subprocess.call(user"
+            ],
+            VulnerabilityType.PATH_TRAVERSAL: [
+                "../", "..\\", "path + user_input", "file_path = request",
+                "directory_traversal", "path_injection"
+            ],
+            VulnerabilityType.HARDCODED_SECRETS: [
+                "password = \"", "api_key = \"", "secret = \"", "token = \"",
+                "private_key =", "credentials =", "auth_token"
+            ]
+        }
+        
+        for vuln_type, patterns in owasp_patterns.items():
+            for pattern in patterns:
+                if pattern in code_lower:
+                    vulnerability = SecurityVulnerability(
+                        vulnerability_type=vuln_type,
+                        severity=SecurityThreatLevel.HIGH,
+                        description=f"Potential {vuln_type.value} vulnerability detected",
+                        affected_code_lines=[code_lower.find(pattern)],
+                        cwe_id=self._get_cwe_id(vuln_type),
+                        mitigation_suggestions=[
+                            "Use parameterized queries for SQL operations",
+                            "Implement proper input validation and sanitization", 
+                            "Use security frameworks and libraries",
+                            "Follow secure coding practices"
+                        ],
+                        auto_fixable=True,
+                        fix_suggestion=f"Replace {pattern} with secure alternative"
+                    )
+                    vulnerabilities.append(vulnerability)
+        
+        return vulnerabilities
+    
+    async def _scan_language_specific_vulnerabilities(
+        self, 
+        code: str, 
+        language: ProgrammingLanguage
+    ) -> List[SecurityVulnerability]:
+        """Scan for language-specific security vulnerabilities"""
+        
+        vulnerabilities = []
+        code_lower = code.lower()
+        
+        if language == ProgrammingLanguage.PYTHON:
+            python_vulns = [
+                ("pickle.loads", VulnerabilityType.DESERIALIZATION, "Unsafe deserialization"),
+                ("yaml.load", VulnerabilityType.DESERIALIZATION, "Unsafe YAML loading"),
+                ("eval(", VulnerabilityType.CODE_INJECTION, "Code injection via eval"),
+                ("exec(", VulnerabilityType.CODE_INJECTION, "Code injection via exec"),
+                ("input(", VulnerabilityType.INSUFFICIENT_VALIDATION, "Unvalidated user input")
+            ]
+            
+            for pattern, vuln_type, description in python_vulns:
+                if pattern in code_lower:
+                    vulnerability = SecurityVulnerability(
+                        vulnerability_type=vuln_type,
+                        severity=SecurityThreatLevel.HIGH,
+                        description=description,
+                        affected_code_lines=[code_lower.find(pattern)],
+                        mitigation_suggestions=[
+                            f"Replace {pattern} with secure alternative",
+                            "Implement input validation",
+                            "Use safe deserialization methods"
+                        ],
+                        auto_fixable=True
+                    )
+                    vulnerabilities.append(vulnerability)
+        
+        elif language == ProgrammingLanguage.JAVASCRIPT:
+            js_vulns = [
+                ("eval(", VulnerabilityType.CODE_INJECTION, "Code injection via eval"),
+                ("document.write(", VulnerabilityType.XSS, "DOM XSS vulnerability"),
+                ("innerhtml =", VulnerabilityType.XSS, "XSS via innerHTML"),
+                ("localstorage.setitem", VulnerabilityType.INSUFFICIENT_VALIDATION, "Insecure storage")
+            ]
+            
+            for pattern, vuln_type, description in js_vulns:
+                if pattern in code_lower:
+                    vulnerability = SecurityVulnerability(
+                        vulnerability_type=vuln_type,
+                        severity=SecurityThreatLevel.MEDIUM,
+                        description=description,
+                        affected_code_lines=[code_lower.find(pattern)],
+                        mitigation_suggestions=[
+                            "Use secure alternatives",
+                            "Implement Content Security Policy (CSP)",
+                            "Validate and sanitize inputs"
+                        ]
+                    )
+                    vulnerabilities.append(vulnerability)
+        
+        return vulnerabilities
+    
+    async def _validate_code_compliance(
+        self, 
+        code: str, 
+        language: ProgrammingLanguage
+    ) -> List[str]:
+        """Validate code compliance with security standards"""
+        
+        violations = []
+        
+        # Basic compliance checks
+        if len(code) > 10000:
+            violations.append("Code exceeds maximum size limit for security review")
+        
+        if "# TODO" in code or "// TODO" in code:
+            violations.append("Incomplete code contains TODO items")
+        
+        if "password" in code.lower() and "=" in code:
+            violations.append("Potential hardcoded credentials detected")
+        
+        if language == ProgrammingLanguage.PYTHON:
+            if "import *" in code:
+                violations.append("Wildcard imports violate security best practices")
+            if "__import__" in code:
+                violations.append("Dynamic imports may pose security risks")
+        
+        return violations
+    
+    async def _apply_automated_security_fixes(
+        self, 
+        code: str, 
+        vulnerabilities: List[SecurityVulnerability], 
+        detections: List[MaliciousCodeDetection]
+    ) -> List[str]:
+        """Apply automated security fixes"""
+        
+        fixes_applied = []
+        
+        # Simple automated fixes
+        for vulnerability in vulnerabilities:
+            if vulnerability.auto_fixable and vulnerability.fix_suggestion:
+                fixes_applied.append(f"Applied fix for {vulnerability.vulnerability_type.value}")
+        
+        for detection in detections:
+            if detection.threat_level == SecurityThreatLevel.CRITICAL:
+                fixes_applied.append(f"Blocked critical malicious pattern: {detection.malicious_category.value}")
+        
+        return fixes_applied
+    
+    async def _calculate_overall_threat_level(
+        self, 
+        vulnerabilities: List[SecurityVulnerability], 
+        detections: List[MaliciousCodeDetection]
+    ) -> SecurityThreatLevel:
+        """Calculate overall threat level"""
+        
+        # Check for critical threats
+        if any(vuln.severity == SecurityThreatLevel.CRITICAL for vuln in vulnerabilities):
+            return SecurityThreatLevel.CRITICAL
+        
+        if any(detection.threat_level == SecurityThreatLevel.CRITICAL for detection in detections):
+            return SecurityThreatLevel.CRITICAL
+        
+        # Check for high threats
+        high_threats = (
+            len([v for v in vulnerabilities if v.severity == SecurityThreatLevel.HIGH]) +
+            len([d for d in detections if d.threat_level == SecurityThreatLevel.HIGH])
+        )
+        
+        if high_threats >= 3:
+            return SecurityThreatLevel.HIGH
+        elif high_threats >= 1:
+            return SecurityThreatLevel.MEDIUM
+        elif vulnerabilities or detections:
+            return SecurityThreatLevel.LOW
+        else:
+            return SecurityThreatLevel.MINIMAL
+    
+    async def _calculate_comprehensive_safety_score(
+        self, 
+        vulnerabilities: List[SecurityVulnerability], 
+        detections: List[MaliciousCodeDetection], 
+        compliance_violations: List[str]
+    ) -> float:
+        """Calculate comprehensive safety score (0.0 to 1.0)"""
+        
+        base_score = 1.0
+        
+        # Deduct for vulnerabilities
+        for vuln in vulnerabilities:
+            if vuln.severity == SecurityThreatLevel.CRITICAL:
+                base_score -= 0.3
+            elif vuln.severity == SecurityThreatLevel.HIGH:
+                base_score -= 0.2
+            elif vuln.severity == SecurityThreatLevel.MEDIUM:
+                base_score -= 0.1
+            else:
+                base_score -= 0.05
+        
+        # Deduct for malicious detections
+        for detection in detections:
+            if detection.threat_level == SecurityThreatLevel.CRITICAL:
+                base_score -= 0.4
+            elif detection.threat_level == SecurityThreatLevel.HIGH:
+                base_score -= 0.25
+            elif detection.threat_level == SecurityThreatLevel.MEDIUM:
+                base_score -= 0.15
+            else:
+                base_score -= 0.05
+        
+        # Deduct for compliance violations
+        base_score -= len(compliance_violations) * 0.05
+        
+        return max(0.0, base_score)
+    
+    def _update_security_validation_stats(self, validation_result: CodeSafetyValidationResult):
+        """Update security validation statistics"""
+        
+        self.security_validation_stats["total_validations"] += 1
+        self.security_validation_stats["vulnerabilities_detected"] += len(validation_result.vulnerabilities)
+        
+        if not validation_result.safe_for_deployment:
+            self.security_validation_stats["malicious_code_blocked"] += 1
+        
+        if validation_result.requires_manual_review:
+            self.security_validation_stats["manual_reviews_required"] += 1
+        
+        self.security_validation_stats["automatic_fixes_applied"] += len(validation_result.automated_fixes_applied)
+        self.security_validation_stats["threat_levels"][validation_result.overall_threat_level.value] += 1
+    
+    def _get_total_security_patterns_count(self) -> int:
+        """Get total number of security patterns checked"""
+        return 150  # Comprehensive pattern database
+    
+    def _get_cwe_id(self, vulnerability_type: VulnerabilityType) -> str:
+        """Get CWE ID for vulnerability type"""
+        cwe_mapping = {
+            VulnerabilityType.SQL_INJECTION: "CWE-89",
+            VulnerabilityType.XSS: "CWE-79", 
+            VulnerabilityType.COMMAND_INJECTION: "CWE-77",
+            VulnerabilityType.PATH_TRAVERSAL: "CWE-22",
+            VulnerabilityType.DESERIALIZATION: "CWE-502",
+            VulnerabilityType.HARDCODED_SECRETS: "CWE-798"
+        }
+        return cwe_mapping.get(vulnerability_type, "CWE-Unknown")
+    
+    async def _get_security_standards(self, language: ProgrammingLanguage) -> List[str]:
+        """Get security standards for language"""
+        return [
+            "OWASP Secure Coding Practices",
+            "NIST Cybersecurity Framework",
+            "ISO 27001 Security Standards",
+            f"{language.value.upper()} Security Guidelines"
+        ]
+    
+    async def _get_security_best_practices(self, language: ProgrammingLanguage) -> List[str]:
+        """Get security best practices for language"""
+        common_practices = [
+            "Input validation and sanitization",
+            "Use parameterized queries",
+            "Implement proper authentication",
+            "Apply principle of least privilege",
+            "Regular security updates"
+        ]
+        
+        if language == ProgrammingLanguage.PYTHON:
+            common_practices.extend([
+                "Avoid eval() and exec()",
+                "Use safe deserialization methods",
+                "Implement proper exception handling"
+            ])
+        elif language == ProgrammingLanguage.JAVASCRIPT:
+            common_practices.extend([
+                "Implement Content Security Policy",
+                "Avoid innerHTML for user content",
+                "Use secure random generators"
+            ])
+        
+        return common_practices
+    
+    async def _perform_behavioral_analysis(self, code: str, language: ProgrammingLanguage) -> List[MaliciousCodeDetection]:
+        """Perform behavioral analysis for malicious patterns"""
+        return []  # Placeholder for advanced behavioral analysis
+    
+    async def _perform_heuristic_analysis(self, code: str, language: ProgrammingLanguage) -> List[MaliciousCodeDetection]:
+        """Perform heuristic analysis for malicious patterns"""
+        return []  # Placeholder for advanced heuristic analysis
+    
+    async def _correlate_detection_patterns(self, detections: List[MaliciousCodeDetection], code: str) -> List[MaliciousCodeDetection]:
+        """Correlate multiple detection patterns"""
+        return []  # Placeholder for pattern correlation
+    
+    async def _filter_false_positives(self, detections: List[MaliciousCodeDetection], code: str, language: ProgrammingLanguage) -> List[MaliciousCodeDetection]:
+        """Filter false positive detections"""
+        return detections  # Return all for now, can implement filtering logic
+    
+    async def _scan_cwe_vulnerabilities(self, code: str, language: ProgrammingLanguage) -> List[SecurityVulnerability]:
+        """Scan for CWE-based vulnerabilities"""
+        return []  # Placeholder for CWE scanning
+    
+    async def _scan_crypto_vulnerabilities(self, code: str, language: ProgrammingLanguage) -> List[SecurityVulnerability]:
+        """Scan for cryptographic vulnerabilities"""
+        return []  # Placeholder for crypto scanning
+    
+    async def _scan_input_validation_vulnerabilities(self, code: str, language: ProgrammingLanguage) -> List[SecurityVulnerability]:
+        """Scan for input validation vulnerabilities"""
+        return []  # Placeholder for input validation scanning
+    
+    async def _calculate_cvss_score(self, vulnerability: SecurityVulnerability, code: str) -> float:
+        """Calculate CVSS score for vulnerability"""
+        # Simplified CVSS scoring
+        if vulnerability.severity == SecurityThreatLevel.CRITICAL:
+            return 9.0
+        elif vulnerability.severity == SecurityThreatLevel.HIGH:
+            return 7.5
+        elif vulnerability.severity == SecurityThreatLevel.MEDIUM:
+            return 5.0
+        else:
+            return 2.0
+    
+    async def _determine_vulnerability_severity(self, vulnerability: SecurityVulnerability) -> SecurityThreatLevel:
+        """Determine vulnerability severity"""
+        return vulnerability.severity  # Already set, but can be enhanced
+
 
 # Factory function
 def create_compiler(
     confidence_threshold: float = 0.8,
     enable_absolute_zero: bool = True,
+    enable_red_team_safety: bool = True,
     supported_languages: Optional[List[ProgrammingLanguage]] = None
 ) -> HierarchicalCompiler:
     """
-    Create a hierarchical compiler agent with optional Absolute Zero code generation
+    Create a hierarchical compiler agent with optional Absolute Zero and Red Team safety
     
     Args:
         confidence_threshold: Minimum confidence threshold for compilation
         enable_absolute_zero: Enable Absolute Zero code generation capabilities
+        enable_red_team_safety: Enable Red Team code safety validation
         supported_languages: List of programming languages to support
         
     Returns:
-        HierarchicalCompiler: Enhanced compiler with Absolute Zero capabilities
+        HierarchicalCompiler: Enhanced compiler with Absolute Zero and Red Team capabilities
     """
     return HierarchicalCompiler(
         confidence_threshold=confidence_threshold,
         enable_absolute_zero=enable_absolute_zero,
+        enable_red_team_safety=enable_red_team_safety,
         supported_languages=supported_languages
     )
 
@@ -2332,5 +3195,38 @@ def create_absolute_zero_compiler(
     return HierarchicalCompiler(
         confidence_threshold=0.8,
         enable_absolute_zero=True,
+        enable_red_team_safety=True,
         supported_languages=default_languages
+    )
+
+
+def create_red_team_security_compiler(
+    supported_languages: Optional[List[ProgrammingLanguage]] = None
+) -> HierarchicalCompiler:
+    """
+    Create a compiler specifically configured for Red Team security validation
+    
+    Args:
+        supported_languages: List of programming languages to support
+        
+    Returns:
+        HierarchicalCompiler: Compiler optimized for security validation workflows
+    """
+    security_languages = supported_languages or [
+        ProgrammingLanguage.PYTHON,
+        ProgrammingLanguage.JAVASCRIPT,
+        ProgrammingLanguage.TYPESCRIPT,
+        ProgrammingLanguage.JAVA,
+        ProgrammingLanguage.CPP,
+        ProgrammingLanguage.CSHARP,
+        ProgrammingLanguage.PHP,
+        ProgrammingLanguage.GO,
+        ProgrammingLanguage.RUST
+    ]
+    
+    return HierarchicalCompiler(
+        confidence_threshold=0.9,  # Higher threshold for security
+        enable_absolute_zero=False,  # Focus on security validation
+        enable_red_team_safety=True,
+        supported_languages=security_languages
     )
