@@ -46,7 +46,18 @@
       "Bash(export OLLAMA_MODELS=~/.ollama/models)",
       "Bash(curl:*)",
       "Bash(cat:*)",
-      "Bash(pdftotext:*)"
+      "Bash(pdftotext:*)",
+      "Bash(git checkout:*)",
+      "Bash(gh auth:*)",
+      "Bash(gh repo view:*)",
+      "Bash(git remote set-url:*)",
+      "Bash(gh repo sync:*)",
+      "Bash(git config:*)",
+      "Bash(gh api:*)",
+      "Bash(GIT_ASKPASS=/opt/homebrew/bin/gh git push origin main)",
+      "Bash(git fetch:*)",
+      "Bash(git stash:*)",
+      "Bash(git reset:*)"
     ],
     "deny": []
   }
