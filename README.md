@@ -659,8 +659,15 @@ See our [Organizational Structure](ORGANIZATIONAL_STRUCTURE.md) and [Contributin
 
 ## 📄 Documentation
 
-- **[🍎 Apple Partnership Proposal](APPLE_PARTNERSHIP_PROPOSAL.md)**: Strategic transformation through infrastructure collaboration
-- **[🌈 Organizational Structure](ORGANIZATIONAL_STRUCTURE.md)**: Newton's light spectrum team organization
+### 🍎 **Apple Strategic Partnership**
+- **[Partnership Proposal](APPLE_PARTNERSHIP_PROPOSAL.md)**: Complete strategic transformation framework
+- **[Executive Outreach Strategy](APPLE_EXECUTIVE_OUTREACH_STRATEGY.md)**: Contact strategy and engagement plan
+- **[Executive One-Pager](APPLE_EXECUTIVE_ONE_PAGER.md)**: Strategic overview for C-level presentations
+- **[Technical Deep-Dive](APPLE_TECHNICAL_DEEP_DIVE.md)**: Engineering integration specifications
+- **[Media & PR Strategy](APPLE_MEDIA_PR_STRATEGY.md)**: Partnership announcement and communication plan
+
+### 🌈 **Core Documentation**
+- **[Organizational Structure](ORGANIZATIONAL_STRUCTURE.md)**: Newton's light spectrum team organization
 - **[Architecture Overview](docs/architecture.md)**: System design and components
 - **[API Reference](docs/API_REFERENCE.md)**: Complete API documentation
 - **[Operations Manual](docs/PRODUCTION_OPERATIONS_MANUAL.md)**: Production deployment guide
