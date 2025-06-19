@@ -617,7 +617,19 @@ PRSM is built as a public good. We welcome contributions from:
 - **🏛️ Institutions**: Deploy nodes and contribute compute resources
 - **🌍 Community**: Participate in governance and provide feedback
 
-See our [Contributing Guide](CONTRIBUTING.md) for details.
+### 🌈 Join Our Spectrum Teams
+
+PRSM organizes contributors through Newton's light spectrum structure - find your wavelength:
+
+- **🔴 RED Team**: Foundational AI & SEAL Technology → [red-team@prsm.ai](mailto:red-team@prsm.ai)
+- **🟠 ORANGE Team**: System Orchestration & Optimization → [orange-team@prsm.ai](mailto:orange-team@prsm.ai)  
+- **🟡 YELLOW Team**: Code Generation & Developer Tools → [yellow-team@prsm.ai](mailto:yellow-team@prsm.ai)
+- **🟢 GREEN Team**: Learning Systems & Community → [green-team@prsm.ai](mailto:green-team@prsm.ai)
+- **🔵 BLUE Team**: Security & Governance → [blue-team@prsm.ai](mailto:blue-team@prsm.ai)
+- **🟣 INDIGO Team**: Multi-Agent Intelligence → [indigo-team@prsm.ai](mailto:indigo-team@prsm.ai)
+- **🟪 VIOLET Team**: Marketplace & Enterprise → [violet-team@prsm.ai](mailto:violet-team@prsm.ai)
+
+See our [Organizational Structure](ORGANIZATIONAL_STRUCTURE.md) and [Contributing Guide](CONTRIBUTING.md) for details.
 
 ---
 
@@ -647,6 +659,7 @@ See our [Contributing Guide](CONTRIBUTING.md) for details.
 
 ## 📄 Documentation
 
+- **[🌈 Organizational Structure](ORGANIZATIONAL_STRUCTURE.md)**: Newton's light spectrum team organization
 - **[Architecture Overview](docs/architecture.md)**: System design and components
 - **[API Reference](docs/API_REFERENCE.md)**: Complete API documentation
 - **[Operations Manual](docs/PRODUCTION_OPERATIONS_MANUAL.md)**: Production deployment guide
