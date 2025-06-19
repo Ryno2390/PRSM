@@ -66,7 +66,8 @@
       "Bash(ssh-keygen:*)",
       "Bash(gh ssh-key add:*)",
       "Bash(ssh:*)",
-      "WebFetch(domain:cognition.ai)"
+      "WebFetch(domain:cognition.ai)",
+      "WebFetch(domain:ml-site.cdn-apple.com)"
     ],
     "deny": []
   }
