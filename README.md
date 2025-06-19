@@ -659,6 +659,7 @@ See our [Organizational Structure](ORGANIZATIONAL_STRUCTURE.md) and [Contributin
 
 ## 📄 Documentation
 
+- **[🍎 Apple Partnership Proposal](APPLE_PARTNERSHIP_PROPOSAL.md)**: Strategic transformation through infrastructure collaboration
 - **[🌈 Organizational Structure](ORGANIZATIONAL_STRUCTURE.md)**: Newton's light spectrum team organization
 - **[Architecture Overview](docs/architecture.md)**: System design and components
 - **[API Reference](docs/API_REFERENCE.md)**: Complete API documentation
