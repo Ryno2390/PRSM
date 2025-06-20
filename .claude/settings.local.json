@@ -79,7 +79,9 @@
       "Bash(do echo \"=== $file ===\")",
       "Bash(head:*)",
       "Bash(PYTHONPATH=/Users/ryneschultz/Documents/GitHub/PRSM python tests/test_ftns_budget_manager.py)",
-      "Bash(PYTHONPATH=/Users/ryneschultz/Documents/GitHub/PRSM python examples/budget_example.py)"
+      "Bash(PYTHONPATH=/Users/ryneschultz/Documents/GitHub/PRSM python examples/budget_example.py)",
+      "Bash(PYTHONPATH=/Users/ryneschultz/Documents/GitHub/PRSM python tests/test_expanded_marketplace.py)",
+      "Bash(PYTHONPATH=/Users/ryneschultz/Documents/GitHub/PRSM python examples/expanded_marketplace_workflows.py)"
     ],
     "deny": []
   }
