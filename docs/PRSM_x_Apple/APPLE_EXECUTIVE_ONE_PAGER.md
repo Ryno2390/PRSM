@@ -30,10 +30,13 @@ Apple's research sparked crucial debate about LRM capabilities, revealing both c
 
 | **Investment Component** | **Amount** | **Returns (5-Year)** | **ROI** |
 |-------------------------|------------|---------------------|---------|
-| **IPFS Infrastructure** | $20-30B | $150-200B (provenance royalties) | **7-10x** |
+| **IPFS Infrastructure** | $20-30B | $150-200B (provenance + hungry nodes) | **7-10x** |
 | **MicroStrategy Acquisition** | $50-60B | $100-150B (crypto + clearing) | **2-3x** |  
 | **V-ARM Development** | $5-10B | $200-300B (hardware premium) | **20-40x** |
-| **Total Investment** | **$80-110B** | **$450-650B** | **5-7x** |
+| **Hungry Nodes Revenue** | $0B* | $14B (5-year cumulative) | **∞ ROI** |
+| **Total Investment** | **$80-110B** | **$464-664B** | **5.8-8x** |
+
+*Hungry nodes repurpose existing IPFS infrastructure - no additional investment required
 
 ---
 

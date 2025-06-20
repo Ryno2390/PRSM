@@ -35,7 +35,8 @@ PRSM (Protocol for Recursive Scientific Modeling) offers Apple a path to **leapf
 
 **Total Partnership Value**: $500B+ over 10 years
 - **Apple's Investment**: $60-80B (IPFS infrastructure + MicroStrategy acquisition)
-- **Apple's Returns**: $300-500B (provenance royalties + FTNS appreciation + V-ARM advantage)
+- **Apple's Returns**: $300-500B (provenance royalties + FTNS appreciation + V-ARM advantage + hungry nodes revenue)
+- **Hungry Nodes Revenue**: $2.8B+ annually by Year 5 (repurposing IPFS infrastructure)
 - **ROI Timeline**: 5-10x returns within 60 months
 
 ---
