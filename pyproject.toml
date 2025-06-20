@@ -95,6 +95,8 @@ dev = [
     "flake8>=6.1.0",
     "mypy>=1.8.0",
     "pre-commit>=3.6.0",
+    "docker>=6.1.0",
+    "requests>=2.31.0",
 ]
 test = [
     "pytest>=7.4.0",
@@ -119,6 +121,7 @@ Changelog = "https://github.com/prsm-org/prsm/blob/main/CHANGELOG.md"
 
 [project.scripts]
 prsm = "prsm.cli:main"
+prsm-dev = "prsm.dev_cli:main"
 prsm-node = "prsm.node:main"
 prsm-teacher = "prsm.teachers.cli:main"
 
