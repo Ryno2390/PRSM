@@ -1,0 +1,158 @@
+# PRSM Tutorial Environment
+# Comprehensive setup for following tutorials with monitoring
+# Usage: docker-compose -f docker-compose.tutorial.yml up
+
+version: '3.8'
+
+services:
+  # ===================================
+  # Core Services
+  # ===================================
+  
+  redis:
+    image: redis:7-alpine
+    container_name: prsm-tutorial-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-tutorial-data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - prsm-tutorial
+
+  ipfs:
+    image: ipfs/kubo:latest
+    container_name: prsm-tutorial-ipfs
+    restart: unless-stopped
+    ports:
+      - "5001:5001"     # API
+      - "8080:8080"     # Gateway
+    volumes:
+      - ipfs-tutorial-data:/data/ipfs
+    environment:
+      IPFS_PROFILE: server
+      IPFS_PATH: /data/ipfs
+    networks:
+      - prsm-tutorial
+    command: >
+      sh -c "
+        ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin '[\"*\"]' &&
+        ipfs config --json API.HTTPHeaders.Access-Control-Allow-Methods '[\"PUT\", \"POST\", \"GET\"]' &&
+        ipfs daemon --migrate=true
+      "
+
+  # ===================================
+  # Developer Tools & Monitoring
+  # ===================================
+
+  # Redis monitoring
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: prsm-tutorial-redis-ui
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: tutorial:redis:6379
+      HTTP_USER: tutorial
+      HTTP_PASSWORD: prsm_tutorial
+    ports:
+      - "8081:8081"
+    networks:
+      - prsm-tutorial
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Tutorial progress tracker
+  tutorial-dashboard:
+    image: nginx:alpine
+    container_name: prsm-tutorial-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    volumes:
+      - ./docs/tutorials:/usr/share/nginx/html/tutorials:ro
+      - ./examples/tutorials:/usr/share/nginx/html/examples:ro
+      - ./config/nginx/tutorial-dashboard.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - prsm-tutorial
+    labels:
+      - "prsm.service=tutorial-dashboard"
+      - "prsm.description=Tutorial documentation and examples"
+
+  # ===================================
+  # Optional: Code Server for Web-based Development
+  # Enable with: --profile web-dev
+  # ===================================
+  code-server:
+    image: codercom/code-server:latest
+    container_name: prsm-tutorial-vscode
+    restart: unless-stopped
+    ports:
+      - "8443:8080"
+    environment:
+      PASSWORD: prsm_tutorial_code
+    volumes:
+      - .:/home/coder/workspace
+      - tutorial-vscode-config:/home/coder/.local/share/code-server
+    networks:
+      - prsm-tutorial
+    profiles:
+      - web-dev
+    labels:
+      - "prsm.service=code-server"
+      - "prsm.description=Web-based VS Code for tutorial development"
+
+  # ===================================
+  # Optional: Jupyter for Interactive Learning
+  # Enable with: --profile jupyter
+  # ===================================
+  jupyter:
+    image: jupyter/datascience-notebook:latest
+    container_name: prsm-tutorial-jupyter
+    restart: unless-stopped
+    environment:
+      JUPYTER_ENABLE_LAB: yes
+      JUPYTER_TOKEN: prsm_tutorial_jupyter
+      GRANT_SUDO: yes
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebooks:/home/jovyan/work/notebooks
+      - ./examples:/home/jovyan/work/examples:ro
+      - ./docs:/home/jovyan/work/docs:ro
+      - .:/home/jovyan/work/prsm:ro
+    networks:
+      - prsm-tutorial
+    profiles:
+      - jupyter
+    labels:
+      - "prsm.service=jupyter"
+      - "prsm.description=Interactive Jupyter environment for PRSM tutorials"
+
+# ===================================
+# Networks
+# ===================================
+networks:
+  prsm-tutorial:
+    driver: bridge
+    name: prsm-tutorial-network
+
+# ===================================
+# Volumes
+# ===================================
+volumes:
+  redis-tutorial-data:
+    driver: local
+    name: prsm-tutorial-redis
+  ipfs-tutorial-data:
+    driver: local
+    name: prsm-tutorial-ipfs
+  tutorial-vscode-config:
+    driver: local
+    name: prsm-tutorial-vscode

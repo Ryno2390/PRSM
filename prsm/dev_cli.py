@@ -207,25 +207,57 @@ CIRCUIT_BREAKER_ENABLED=true
         try:
             self.docker_client = docker.from_env()
             
-            # Check if docker-compose file exists
-            compose_file = self.project_root / "docker-compose.dev.yml"
-            if not compose_file.exists():
-                console.print("❌ docker-compose.dev.yml not found", style="red")
+            # Check for available Docker configurations (in order of preference)
+            compose_options = [
+                ("docker-compose.quickstart.yml", "quickstart", "Quickstart (30s)"),
+                ("docker-compose.onboarding.yml", "onboarding", "Onboarding (1min)"),
+                ("docker-compose.dev.yml", "development", "Development (3min)")
+            ]
+            
+            selected_compose = None
+            for compose_file, env_type, description in compose_options:
+                compose_path = self.project_root / compose_file
+                if compose_path.exists():
+                    console.print(f"📁 Found {compose_file} - {description}")
+                    
+                    # For setup automation, prefer quickstart for speed
+                    if env_type == "quickstart":
+                        selected_compose = (compose_path, env_type, description)
+                        break
+                    elif selected_compose is None:
+                        selected_compose = (compose_path, env_type, description)
+            
+            if not selected_compose:
+                console.print("❌ No Docker Compose files found", style="red")
+                console.print("💡 Available options:", style="blue")
+                console.print("   • docker-compose.quickstart.yml - Fastest setup")
+                console.print("   • docker-compose.onboarding.yml - Balanced features")
+                console.print("   • docker-compose.dev.yml - Full development")
                 return False
             
-            # Start development services
-            console.print("Starting Redis and IPFS services...")
-            result = subprocess.run([
-                "docker-compose", "-f", str(compose_file), "up", "-d", 
-                "redis", "ipfs"
-            ], capture_output=True, text=True)
+            compose_path, env_type, description = selected_compose
+            console.print(f"🚀 Using {env_type} environment: {description}")
+            
+            # Start services based on environment type
+            if env_type == "quickstart":
+                services = []  # Start all services in quickstart
+                console.print("Starting minimal services (Redis + IPFS)...")
+            elif env_type == "onboarding":
+                services = []  # Start all services in onboarding
+                console.print("Starting onboarding services...")
+            else:
+                services = ["redis", "ipfs"]  # Only essential services for dev
+                console.print("Starting essential services (Redis + IPFS)...")
+            
+            cmd = ["docker-compose", "-f", str(compose_path), "up", "-d"] + services
+            result = subprocess.run(cmd, capture_output=True, text=True)
             
             if result.returncode == 0:
                 console.print("✅ Docker services started!", style="green")
                 
                 # Wait for services to be ready
                 console.print("Waiting for services to be ready...")
-                time.sleep(5)
+                time.sleep(3 if env_type == "quickstart" else 5)
                 
                 # Test Redis connection
                 if self._test_redis():
@@ -239,14 +271,28 @@ CIRCUIT_BREAKER_ENABLED=true
                 else:
                     console.print("⚠️ IPFS connection test failed", style="yellow")
                 
+                # Show helpful information
+                console.print(f"\n💡 Using {env_type} Docker environment")
+                if env_type != "quickstart":
+                    console.print("🔧 For faster setup next time, use quickstart:")
+                    console.print(f"   docker-compose -f docker-compose.quickstart.yml up -d")
+                
                 return True
             else:
                 console.print(f"❌ Failed to start Docker services: {result.stderr}", style="red")
+                # Provide helpful fallback suggestions
+                console.print("\n🔧 Troubleshooting suggestions:", style="blue")
+                console.print(f"   1. Manual start: docker-compose -f {compose_path.name} up -d")
+                console.print("   2. Check Docker is running: docker ps")
+                console.print("   3. Try quickstart: scripts/docker-helper.sh start quickstart")
                 return False
                 
         except Exception as e:
             console.print(f"❌ Docker setup failed: {e}", style="red")
-            console.print("💡 Try: docker-compose -f docker-compose.dev.yml up -d", style="blue")
+            console.print("\n🔧 Alternative setup options:", style="blue")
+            console.print("   • Use Docker helper: scripts/docker-helper.sh start quickstart")
+            console.print("   • Manual setup: docker-compose -f docker-compose.quickstart.yml up -d")
+            console.print("   • Check Docker installation: docker --version")
             return False
     
     def _test_redis(self) -> bool:
