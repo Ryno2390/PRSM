@@ -21,6 +21,7 @@ Key Improvements:
 import asyncio
 import time
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Dict, Any, List, Optional, Tuple
 from uuid import UUID, uuid4
 
@@ -35,6 +36,7 @@ from prsm.core.config import get_settings
 from prsm.core.database_service import get_database_service
 from prsm.nwtn.context_manager import ContextManager
 from prsm.tokenomics.ftns_service import FTNSService
+from prsm.tokenomics.ftns_budget_manager import FTNSBudgetManager, get_ftns_budget_manager
 from prsm.safety.monitor import SafetyMonitor
 from prsm.safety.circuit_breaker import CircuitBreakerNetwork
 from prsm.agents.architects.hierarchical_architect import HierarchicalArchitect
@@ -73,6 +75,7 @@ class EnhancedNWTNOrchestrator:
         self,
         context_manager: Optional[ContextManager] = None,
         ftns_service: Optional[FTNSService] = None,
+        budget_manager: Optional[FTNSBudgetManager] = None,
         safety_monitor: Optional[SafetyMonitor] = None,
         circuit_breaker: Optional[CircuitBreakerNetwork] = None
     ):
@@ -80,6 +83,7 @@ class EnhancedNWTNOrchestrator:
         self.database_service = get_database_service()
         self.context_manager = context_manager or ContextManager()
         self.ftns_service = ftns_service or FTNSService()
+        self.budget_manager = budget_manager or get_ftns_budget_manager()
         self.safety_monitor = safety_monitor or SafetyMonitor()
         self.circuit_breaker = circuit_breaker or CircuitBreakerNetwork()
         
@@ -145,25 +149,28 @@ class EnhancedNWTNOrchestrator:
             # Step 1: Create session with database persistence
             session = await self._create_persistent_session(user_input)
             
-            # Step 2: Validate context allocation and FTNS balance
+            # Step 2: Create session budget with predictive cost estimation
+            session_budget = await self._create_session_budget(user_input, session)
+            
+            # Step 3: Validate context allocation and FTNS balance
             if not await self._validate_enhanced_context_allocation(session):
                 raise ValueError("Insufficient FTNS context allocation")
             
-            # Step 3: Enhanced intent clarification
+            # Step 4: Enhanced intent clarification
             clarified = await self._enhanced_intent_clarification(user_input.prompt, session)
             
-            # Step 4: Check circuit breaker status before proceeding
+            # Step 5: Check circuit breaker status before proceeding
             if not await self._check_circuit_breaker_status(session):
                 raise RuntimeError("Circuit breaker activated - system in safe mode")
             
-            # Step 5: Real agent coordination with safety monitoring
+            # Step 6: Real agent coordination with safety monitoring
             pipeline_config = await self._coordinate_real_agents(clarified, session)
             
-            # Step 6: Execute pipeline with actual APIs and safety validation
-            final_response = await self._execute_enhanced_pipeline(pipeline_config, session)
+            # Step 7: Execute pipeline with actual APIs and budget tracking
+            final_response = await self._execute_enhanced_pipeline(pipeline_config, session, session_budget)
             
-            # Step 7: Finalize session with database persistence
-            await self._finalize_enhanced_session(session, final_response, time.time() - start_time)
+            # Step 8: Finalize session with database persistence and budget completion
+            await self._finalize_enhanced_session(session, final_response, time.time() - start_time, session_budget)
             
             return final_response
             
@@ -177,6 +184,36 @@ class EnhancedNWTNOrchestrator:
                 await self._handle_enhanced_error(session, e, time.time() - start_time)
             
             raise
+    
+    async def _create_session_budget(self, user_input: UserInput, session: PRSMSession):
+        """Create session budget with predictive cost estimation"""
+        try:
+            # Check if user provided budget preferences
+            budget_config = getattr(user_input, 'budget_config', {})
+            
+            # Create budget for session
+            session_budget = await self.budget_manager.create_session_budget(
+                session, user_input, budget_config
+            )
+            
+            # Store budget ID in session metadata
+            session.metadata = session.metadata or {}
+            session.metadata["budget_id"] = str(session_budget.budget_id)
+            
+            logger.info("Session budget created with predictive estimation",
+                       session_id=session.session_id,
+                       budget_id=session_budget.budget_id,
+                       total_budget=float(session_budget.total_budget),
+                       predicted_cost=float(session_budget.initial_prediction.estimated_total_cost) if session_budget.initial_prediction else 0)
+            
+            return session_budget
+            
+        except Exception as e:
+            logger.error("Session budget creation failed",
+                        session_id=session.session_id,
+                        error=str(e))
+            # Continue without budget if creation fails
+            return None
     
     async def _create_persistent_session(self, user_input: UserInput) -> PRSMSession:
         """Create session with database persistence"""
@@ -528,7 +565,8 @@ class EnhancedNWTNOrchestrator:
     async def _execute_enhanced_pipeline(
         self, 
         pipeline_config: Dict[str, Any], 
-        session: PRSMSession
+        session: PRSMSession,
+        session_budget: Optional[Any] = None
     ) -> PRSMResponse:
         """Execute enhanced pipeline with real agents and database integration"""
         try:
@@ -578,6 +616,12 @@ class EnhancedNWTNOrchestrator:
                         session_id, context_used, agent_name
                     )
                     total_context_used += context_used
+                    
+                    # Track budget spending if budget manager available
+                    if session_budget and self.budget_manager:
+                        await self._track_agent_spending(
+                            session_budget, agent_name, result, execution_time
+                        )
                     
                     # Store reasoning step in database
                     step_id = await self.database_service.create_reasoning_step(
@@ -1081,11 +1125,62 @@ class EnhancedNWTNOrchestrator:
         else:
             return "standard_pipeline"
     
+    async def _track_agent_spending(
+        self,
+        session_budget: Any,
+        agent_name: str,
+        result: Dict[str, Any],
+        execution_time: float
+    ):
+        """Track spending for agent execution"""
+        try:
+            from ..tokenomics.ftns_budget_manager import SpendingCategory
+            
+            # Calculate spending based on agent type and result
+            if agent_name == "executor":
+                # Model execution costs
+                spending_amount = result.get("context_used", 10) * 0.5  # 0.5 FTNS per context unit
+                spending_category = SpendingCategory.MODEL_INFERENCE
+                
+                # Add tool costs if any
+                tool_cost = result.get("tool_cost_ftns", 0)
+                if tool_cost > 0:
+                    await self.budget_manager.spend_budget_amount(
+                        session_budget.budget_id,
+                        Decimal(str(tool_cost)),
+                        SpendingCategory.TOOL_EXECUTION,
+                        f"Tool execution costs for {agent_name}"
+                    )
+                    
+            elif agent_name in ["architect", "router", "prompt_optimizer", "compiler"]:
+                # Agent coordination costs
+                spending_amount = 5.0  # Fixed cost per agent
+                spending_category = SpendingCategory.AGENT_COORDINATION
+            else:
+                # Default processing costs
+                spending_amount = 2.0
+                spending_category = SpendingCategory.CONTEXT_PROCESSING
+            
+            # Record spending
+            if spending_amount > 0:
+                await self.budget_manager.spend_budget_amount(
+                    session_budget.budget_id,
+                    Decimal(str(spending_amount)),
+                    spending_category,
+                    f"{agent_name} execution (time: {execution_time:.2f}s)"
+                )
+                
+        except Exception as e:
+            logger.error("Budget spending tracking failed",
+                        agent=agent_name,
+                        error=str(e))
+    
     async def _finalize_enhanced_session(
         self, 
         session: PRSMSession, 
         response: PRSMResponse, 
-        execution_time: float
+        execution_time: float,
+        session_budget: Optional[Any] = None
     ):
         """Finalize session with enhanced tracking"""
         try:
@@ -1106,6 +1201,10 @@ class EnhancedNWTNOrchestrator:
                 metrics["ftns_charged"] = response.ftns_charged
                 metrics["reasoning_steps"] = len(response.reasoning_trace)
             
+            # Finalize budget if available
+            if session_budget and self.budget_manager:
+                await self._finalize_session_budget(session_budget, response, execution_time)
+            
             logger.info("Enhanced session finalized",
                        session_id=session.session_id,
                        context_used=response.context_used,
@@ -1117,6 +1216,48 @@ class EnhancedNWTNOrchestrator:
             logger.error("Session finalization failed",
                         session_id=session.session_id,
                         error=str(e))
+    
+    async def _finalize_session_budget(
+        self,
+        session_budget: Any,
+        response: PRSMResponse,
+        execution_time: float
+    ):
+        """Finalize session budget with completion tracking"""
+        try:
+            from ..tokenomics.ftns_budget_manager import BudgetStatus
+            
+            # Mark budget as completed
+            if hasattr(session_budget, 'status'):
+                session_budget.status = BudgetStatus.COMPLETED
+                session_budget.completed_at = datetime.now(timezone.utc)
+            
+            # Add final spending summary to budget history
+            if hasattr(session_budget, 'spending_history'):
+                session_budget.spending_history.append({
+                    "action": "session_complete",
+                    "amount": 0.0,
+                    "category": "system",
+                    "description": f"Session completed in {execution_time:.2f}s with {response.confidence_score:.2f} confidence",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "final_budget_utilization": session_budget.utilization_percentage if hasattr(session_budget, 'utilization_percentage') else 0,
+                    "context_used": response.context_used,
+                    "reasoning_steps": len(response.reasoning_trace)
+                })
+            
+            # Move to budget history
+            if hasattr(session_budget, 'budget_id'):
+                self.budget_manager.budget_history[session_budget.budget_id] = session_budget
+                if session_budget.budget_id in self.budget_manager.active_budgets:
+                    del self.budget_manager.active_budgets[session_budget.budget_id]
+            
+            logger.info("Session budget finalized",
+                       budget_id=getattr(session_budget, 'budget_id', 'unknown'),
+                       utilization=getattr(session_budget, 'utilization_percentage', 0),
+                       total_spent=float(getattr(session_budget, 'total_spent', 0)))
+            
+        except Exception as e:
+            logger.error("Budget finalization failed", error=str(e))
     
     async def _handle_enhanced_error(
         self, 

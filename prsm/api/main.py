@@ -44,6 +44,7 @@ from prsm.api.marketplace_launch_api import router as marketplace_launch_router
 from prsm.api.governance_api import router as governance_router
 from prsm.api.mainnet_deployment_api import router as mainnet_router
 from prsm.api.health_api import router as health_router
+from prsm.api.budget_api import router as budget_router
 from prsm.web3.frontend_integration import router as web3_router
 from prsm.chronos.api import router as chronos_router
 from prsm.auth.auth_manager import auth_manager
@@ -3264,6 +3265,7 @@ app.include_router(marketplace_launch_router, tags=["Marketplace Launch"])
 app.include_router(governance_router, tags=["Governance"])
 app.include_router(mainnet_router, tags=["Mainnet Deployment"])
 app.include_router(health_router, tags=["Health"])
+app.include_router(budget_router, tags=["Budget Management"])
 app.include_router(web3_router, prefix="/api/v1", tags=["Web3"])
 app.include_router(chronos_router, prefix="/api/v1", tags=["CHRONOS"])
 logger.info("✅ Teams API endpoints enabled")

@@ -77,7 +77,9 @@
       "Bash(done)",
       "Bash(for file in *.txt)",
       "Bash(do echo \"=== $file ===\")",
-      "Bash(head:*)"
+      "Bash(head:*)",
+      "Bash(PYTHONPATH=/Users/ryneschultz/Documents/GitHub/PRSM python tests/test_ftns_budget_manager.py)",
+      "Bash(PYTHONPATH=/Users/ryneschultz/Documents/GitHub/PRSM python examples/budget_example.py)"
     ],
     "deny": []
   }
