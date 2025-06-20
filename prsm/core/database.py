@@ -959,6 +959,14 @@ class TeamGovernanceModel(Base):
 db_manager = DatabaseManager()
 
 
+# === Service Functions ===
+
+def get_database_service():
+    """Get the database service instance"""
+    # For compatibility with existing imports
+    return db_manager
+
+
 # === Initialization Functions ===
 
 async def init_database():
