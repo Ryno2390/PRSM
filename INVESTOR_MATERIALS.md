@@ -1,13 +1,15 @@
 # PRSM Investor Materials Index
 ## Game-Theoretic Investment Opportunity: The Coordination Singularity
 
-![Status](https://img.shields.io/badge/status-Production%20Ready-green.svg)
+![Status](https://img.shields.io/badge/status-Advanced%20Prototype-blue.svg)
 ![Inevitability](https://img.shields.io/badge/economics-Mathematically%20Inevitable-gold.svg)
 ![Updated](https://img.shields.io/badge/updated-2025--06--18-orange.svg)
 
 **Investment Thesis**: PRSM represents economic inevitability, not market speculation—multiple game-theoretic forcing functions make adoption mathematically certain  
 **Target**: Strategic investors who understand coordination infrastructure, network effects, and platform capture dynamics  
-**Core Insight**: Not betting on technology adoption—betting on economic rationality and investor capital recovery pressure  
+**Core Insight**: Not betting on technology adoption—betting on economic rationality and investor capital recovery pressure
+
+> **⚠️ TRANSPARENCY DISCLAIMER**: PRSM is currently an **advanced prototype** with working demonstrations of core concepts. Investment opportunity is based on prototype validation + clear development roadmap, not production claims. All performance metrics clearly categorized as **Measured** (actual), **Target** (design capacity), or **Theoretical** (optimized projections).  
 
 ---
 
