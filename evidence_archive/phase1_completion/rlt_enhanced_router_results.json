@@ -1,0 +1,24 @@
+{
+  "timestamp": "2025-06-24T22:25:23.415002+00:00",
+  "test_results": {
+    "RLT Teacher Candidate": true,
+    "Domain Extraction": true,
+    "Difficulty Assessment": true,
+    "Teacher Discovery": true,
+    "Teacher-Student Matching": true,
+    "Quality Tracking": true,
+    "Routing Performance": true
+  },
+  "performance_benchmark": {
+    "teacher_discovery_rate": 788.8973040752351,
+    "quality_tracking_rate": 685343.7908496732,
+    "routing_request_rate": 7685.11277644429,
+    "overall_performance_score": 231272.60031006424
+  },
+  "summary": {
+    "total_tests": 7,
+    "passed_tests": 7,
+    "success_rate": 1.0,
+    "router_functional": true
+  }
+}

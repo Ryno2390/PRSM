@@ -1,0 +1,197 @@
+# Enhanced Prometheus configuration for PRSM Phase 1 validation
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'prsm-production'
+    environment: 'production'
+    phase: 'phase1-validation'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Load rules
+rule_files:
+  - "alert_rules.yml"
+  - "recording_rules.yml"
+  - "prsm_rules.yml"
+
+# Scrape configurations
+scrape_configs:
+  # ===================================
+  # PRSM Core Services
+  # ===================================
+  - job_name: 'prsm-api'
+    static_configs:
+      - targets: ['prsm-api:9090']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    labels:
+      service: 'prsm-api'
+      component: 'core'
+      tier: 'frontend'
+
+  - job_name: 'prsm-metrics-exporter'
+    static_configs:
+      - targets: ['prsm-metrics-exporter:9091']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    labels:
+      service: 'prsm-metrics'
+      component: 'monitoring'
+      tier: 'observability'
+
+  # ===================================
+  # Infrastructure Services
+  # ===================================
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    labels:
+      service: 'postgres'
+      component: 'database'
+      tier: 'data'
+
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    labels:
+      service: 'redis'
+      component: 'cache'
+      tier: 'data'
+
+  - job_name: 'ipfs'
+    static_configs:
+      - targets: ['ipfs:5001']
+    metrics_path: '/debug/metrics/prometheus'
+    scrape_interval: 30s
+    labels:
+      service: 'ipfs'
+      component: 'storage'
+      tier: 'data'
+
+  # ===================================
+  # Vector Databases
+  # ===================================
+  - job_name: 'weaviate'
+    static_configs:
+      - targets: ['weaviate:8080']
+    metrics_path: '/v1/metrics'
+    scrape_interval: 30s
+    labels:
+      service: 'weaviate'
+      component: 'vector-db'
+      tier: 'data'
+
+  # ===================================
+  # System and Container Metrics
+  # ===================================
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
+    labels:
+      service: 'node-exporter'
+      component: 'system'
+      tier: 'infrastructure'
+
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 15s
+    metrics_path: '/metrics'
+    labels:
+      service: 'cadvisor'
+      component: 'containers'
+      tier: 'infrastructure'
+
+  # ===================================
+  # Performance Testing (when enabled)
+  # ===================================
+  - job_name: 'performance-collector'
+    static_configs:
+      - targets: ['performance-collector:9092']
+    scrape_interval: 5s
+    scrape_timeout: 5s
+    labels:
+      service: 'performance-testing'
+      component: 'testing'
+      tier: 'validation'
+
+  # ===================================
+  # Monitoring Infrastructure
+  # ===================================
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 30s
+    labels:
+      service: 'prometheus'
+      component: 'monitoring'
+      tier: 'observability'
+
+  - job_name: 'jaeger'
+    static_configs:
+      - targets: ['jaeger:14269']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    labels:
+      service: 'jaeger'
+      component: 'tracing'
+      tier: 'observability'
+
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['loki:3100']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    labels:
+      service: 'loki'
+      component: 'logging'
+      tier: 'observability'
+
+  # ===================================
+  # Service Discovery (Kubernetes)
+  # ===================================
+  - job_name: 'kubernetes-pods'
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: kubernetes_namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: kubernetes_pod_name
+
+# Remote write for long-term storage (optional)
+# remote_write:
+#   - url: "https://prometheus-remote-write-endpoint/api/v1/write"
+#     basic_auth:
+#       username: "user"
+#       password: "password"

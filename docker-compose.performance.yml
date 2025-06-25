@@ -1,0 +1,146 @@
+# PRSM Performance-Optimized Docker Compose Override
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.performance.yml up
+
+version: '3.8'
+
+services:
+  prsm-api:
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+    environment:
+      # Performance tuning
+      PRSM_WORKERS: 8
+      PRSM_MAX_WORKERS: 16
+      PRSM_WORKER_CONNECTIONS: 2000
+      PRSM_KEEPALIVE: 5
+      PRSM_MAX_REQUESTS: 10000
+      PRSM_MAX_REQUESTS_JITTER: 1000
+      
+      # Memory optimization
+      PYTHONMALLOC: pymalloc
+      PYTHONHASHSEED: random
+      
+      # AsyncIO optimization
+      PYTHONASYNCIODEBUG: 0
+      
+      # Garbage collection tuning
+      PYTHON_GC_THRESHOLD0: 700
+      PYTHON_GC_THRESHOLD1: 10
+      PYTHON_GC_THRESHOLD2: 10
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    sysctls:
+      net.core.somaxconn: 4096
+      net.ipv4.tcp_keepalive_time: 600
+      net.ipv4.tcp_keepalive_intvl: 60
+      net.ipv4.tcp_keepalive_probes: 9
+
+  postgres:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    environment:
+      # Connection pooling
+      POSTGRES_MAX_CONNECTIONS: 400
+    command: >
+      postgres
+      -c max_connections=400
+      -c shared_buffers=512MB
+      -c effective_cache_size=1536MB
+      -c maintenance_work_mem=128MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=32MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=8MB
+      -c min_wal_size=2GB
+      -c max_wal_size=8GB
+      -c max_worker_processes=8
+      -c max_parallel_workers_per_gather=4
+      -c max_parallel_workers=8
+      -c max_parallel_maintenance_workers=4
+      -c synchronous_commit=off
+      -c fsync=off
+      -c full_page_writes=off
+
+  redis:
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+    command: >
+      redis-server
+      --maxmemory 768mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --tcp-keepalive 60
+      --timeout 300
+      --tcp-backlog 511
+      --databases 16
+
+  ipfs:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    environment:
+      IPFS_FD_MAX: 8192
+    command: >
+      sh -c "
+        ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin '[\"*\"]' &&
+        ipfs config --json API.HTTPHeaders.Access-Control-Allow-Methods '[\"PUT\", \"POST\", \"GET\"]' &&
+        ipfs config --json Swarm.ConnMgr.HighWater 400 &&
+        ipfs config --json Swarm.ConnMgr.LowWater 200 &&
+        ipfs config --json Datastore.BloomFilterSize 1048576 &&
+        ipfs config --json Gateway.PublicGateways null &&
+        ipfs daemon --migrate=true --enable-gc --routing=dhtclient
+      "
+
+  weaviate:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    environment:
+      QUERY_DEFAULTS_LIMIT: 100
+      QUERY_MAXIMUM_RESULTS: 10000
+      VECTOR_CACHE_SIZE_LIMIT: 1073741824  # 1GB
+      DISK_USE_MEMORY_CACHE: true
+      ENABLE_CPU_PROFILE: false
+      ENABLE_MEMORY_PROFILE: false
+
+networks:
+  prsm-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "true"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+      com.docker.network.bridge.host_binding_ipv4: "0.0.0.0"
+      com.docker.network.driver.mtu: "1500"

@@ -1,0 +1,56 @@
+# PRSM 30-Second Quickstart
+# Absolute minimal setup for tutorials and testing
+# Usage: docker-compose -f docker-compose.quickstart.yml up -d
+
+version: '3.8'
+
+services:
+  # ===================================
+  # Minimal Redis (Required)
+  # ===================================
+  redis:
+    image: redis:7-alpine
+    container_name: prsm-quickstart-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+      start_period: 3s
+    networks:
+      - prsm-quickstart
+
+  # ===================================
+  # Minimal IPFS (Required)
+  # ===================================
+  ipfs:
+    image: ipfs/kubo:latest
+    container_name: prsm-quickstart-ipfs
+    restart: unless-stopped
+    ports:
+      - "5001:5001"     # API port only
+    environment:
+      IPFS_PROFILE: test
+      IPFS_PATH: /data/ipfs
+    networks:
+      - prsm-quickstart
+    tmpfs:
+      - /data/ipfs  # Use tmpfs for speed (data not persisted)
+    command: >
+      sh -c "
+        ipfs init --profile test &&
+        ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin '[\"*\"]' &&
+        ipfs daemon --migrate=true --offline
+      "
+
+# ===================================
+# Network
+# ===================================
+networks:
+  prsm-quickstart:
+    driver: bridge
+    name: prsm-quickstart-network

@@ -1,0 +1,517 @@
+name: Production Deployment Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - staging
+          - production
+      image_tag:
+        description: 'Docker image tag to deploy'
+        required: true
+        default: 'latest'
+      skip_tests:
+        description: 'Skip test execution'
+        required: false
+        default: false
+        type: boolean
+      force_deploy:
+        description: 'Force deployment even if health checks fail'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DEPLOYMENT_TIMEOUT: 600
+
+jobs:
+  pre-deployment-checks:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+      image-tag: ${{ steps.set-env.outputs.image-tag }}
+      deploy-ready: ${{ steps.checks.outputs.ready }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set environment variables
+        id: set-env
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref_type }}" == "tag" ]]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "image-tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "environment=${{ inputs.environment }}" >> $GITHUB_OUTPUT
+            echo "image-tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate deployment prerequisites
+        id: checks
+        run: |
+          echo "Validating deployment prerequisites..."
+          
+          # Check if image exists
+          IMAGE_TAG="${{ steps.set-env.outputs.image-tag }}"
+          if docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG} >/dev/null 2>&1; then
+            echo "✅ Docker image found: ${IMAGE_TAG}"
+          else
+            echo "❌ Docker image not found: ${IMAGE_TAG}"
+            exit 1
+          fi
+          
+          # Validate environment configuration
+          ENVIRONMENT="${{ steps.set-env.outputs.environment }}"
+          if [[ -d "deploy/environments/${ENVIRONMENT}" ]]; then
+            echo "✅ Environment configuration found: ${ENVIRONMENT}"
+          else
+            echo "❌ Environment configuration not found: ${ENVIRONMENT}"
+            exit 1
+          fi
+          
+          echo "ready=true" >> $GITHUB_OUTPUT
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: pre-deployment-checks
+    if: needs.pre-deployment-checks.outputs.deploy-ready == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.pre-deployment-checks.outputs.image-tag }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Check for critical vulnerabilities
+        run: |
+          echo "Checking for critical vulnerabilities..."
+          CRITICAL_COUNT=$(docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy image --severity CRITICAL --format json \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.pre-deployment-checks.outputs.image-tag }} \
+            | jq '.Results[].Vulnerabilities | length' | paste -sd+ | bc)
+          
+          if [[ ${CRITICAL_COUNT:-0} -gt 0 ]]; then
+            echo "❌ Found ${CRITICAL_COUNT} critical vulnerabilities"
+            if [[ "${{ inputs.force_deploy }}" != "true" ]]; then
+              exit 1
+            else
+              echo "⚠️ Proceeding with deployment despite vulnerabilities (force deploy enabled)"
+            fi
+          else
+            echo "✅ No critical vulnerabilities found"
+          fi
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-checks, security-scan]
+    if: needs.pre-deployment-checks.outputs.deploy-ready == 'true' && inputs.skip_tests != true
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: prsm_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/prsm_test
+          REDIS_URL: redis://localhost:6379/0
+          ENVIRONMENT: testing
+        run: |
+          echo "Running integration tests..."
+          python -m pytest tests/ -v --tb=short \
+            --cov=prsm --cov-report=xml --cov-report=term-missing \
+            --maxfail=5 --durations=10
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: test-results-${{ needs.pre-deployment-checks.outputs.environment }}
+          path: |
+            coverage.xml
+            .coverage
+
+  load-testing:
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-checks, integration-tests]
+    if: needs.pre-deployment-checks.outputs.environment == 'production'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run load tests against staging
+        run: |
+          echo "Running load tests against staging environment..."
+          python -c "
+          import asyncio
+          from prsm.performance import LoadTestSuite, LoadTestConfig
+          
+          async def run_load_test():
+              config = LoadTestConfig(
+                  test_name='pre_production_load_test',
+                  concurrent_users=50,
+                  duration_seconds=60,
+                  base_url='https://staging.prsm.org',
+                  max_response_time_ms=2000,
+                  min_success_rate=0.95
+              )
+              
+              suite = LoadTestSuite()
+              result = await suite.run_load_test(config)
+              
+              print(f'Load test completed:')
+              print(f'Success rate: {result.success_rate:.2%}')
+              print(f'Avg response time: {result.avg_response_time_ms:.1f}ms')
+              
+              if not result.passed_thresholds:
+                  print('❌ Load test failed - performance thresholds not met')
+                  exit(1)
+              else:
+                  print('✅ Load test passed')
+          
+          asyncio.run(run_load_test())
+          "
+
+  backup-current-environment:
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-checks, integration-tests]
+    if: needs.pre-deployment-checks.outputs.deploy-ready == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+          kubectl config use-context prsm-${{ needs.pre-deployment-checks.outputs.environment }}
+
+      - name: Create pre-deployment backup
+        run: |
+          echo "Creating backup before deployment..."
+          chmod +x scripts/backup-system.sh
+          ./scripts/backup-system.sh backup \
+            --environment ${{ needs.pre-deployment-checks.outputs.environment }} \
+            --type full \
+            --storage ${{ secrets.BACKUP_STORAGE_URL }} \
+            --notify ${{ secrets.NOTIFICATION_EMAIL }}
+
+      - name: Upload backup metadata
+        uses: actions/upload-artifact@v3
+        with:
+          name: backup-metadata-${{ needs.pre-deployment-checks.outputs.environment }}
+          path: backups/*/metadata/
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [pre-deployment-checks, security-scan, integration-tests, backup-current-environment]
+    if: needs.pre-deployment-checks.outputs.deploy-ready == 'true'
+    environment:
+      name: ${{ needs.pre-deployment-checks.outputs.environment }}
+      url: https://${{ needs.pre-deployment-checks.outputs.environment == 'production' && 'prsm.org' || format('staging.prsm.org') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Setup kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+          kubectl config use-context prsm-${{ needs.pre-deployment-checks.outputs.environment }}
+
+      - name: Deploy to Kubernetes
+        run: |
+          echo "Deploying to ${{ needs.pre-deployment-checks.outputs.environment }} environment..."
+          chmod +x scripts/deploy-k8s.sh
+          ./scripts/deploy-k8s.sh \
+            --environment ${{ needs.pre-deployment-checks.outputs.environment }} \
+            --tag ${{ needs.pre-deployment-checks.outputs.image-tag }} \
+            --timeout ${{ env.DEPLOYMENT_TIMEOUT }} \
+            ${{ inputs.force_deploy == true && '--force' || '' }}
+
+      - name: Wait for deployment stabilization
+        run: |
+          echo "Waiting for deployment to stabilize..."
+          kubectl rollout status deployment/prsm-api -n prsm-${{ needs.pre-deployment-checks.outputs.environment }} --timeout=600s
+          kubectl rollout status deployment/prsm-worker -n prsm-${{ needs.pre-deployment-checks.outputs.environment }} --timeout=600s
+
+      - name: Run post-deployment health checks
+        run: |
+          echo "Running post-deployment health checks..."
+          
+          # Wait for pods to be ready
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/name=prsm-api \
+            -n prsm-${{ needs.pre-deployment-checks.outputs.environment }} \
+            --timeout=300s
+          
+          # Test API health endpoint
+          API_URL="https://${{ needs.pre-deployment-checks.outputs.environment == 'production' && 'prsm.org' || 'staging.prsm.org' }}"
+          
+          echo "Testing API health at: ${API_URL}/health"
+          for i in {1..10}; do
+            if curl -f "${API_URL}/health" --max-time 10; then
+              echo "✅ Health check passed"
+              break
+            else
+              echo "❌ Health check failed (attempt $i/10)"
+              if [[ $i -eq 10 ]]; then
+                echo "All health checks failed"
+                exit 1
+              fi
+              sleep 30
+            fi
+          done
+
+  smoke-tests:
+    runs-on: ubuntu-latest
+    needs: [deploy, pre-deployment-checks]
+    if: success()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests against deployed environment..."
+          
+          API_URL="https://${{ needs.pre-deployment-checks.outputs.environment == 'production' && 'prsm.org' || 'staging.prsm.org' }}"
+          
+          # Test critical endpoints
+          echo "Testing critical API endpoints..."
+          
+          # Health check
+          curl -f "${API_URL}/health" --max-time 10
+          echo "✅ Health endpoint working"
+          
+          # API version
+          VERSION=$(curl -s "${API_URL}/version" --max-time 10 | jq -r '.version')
+          echo "✅ Version endpoint working: ${VERSION}"
+          
+          # Metrics endpoint (if available)
+          if curl -f "${API_URL}/metrics" --max-time 10 >/dev/null 2>&1; then
+            echo "✅ Metrics endpoint working"
+          else
+            echo "⚠️ Metrics endpoint not accessible (may be internal only)"
+          fi
+          
+          echo "🎉 All smoke tests passed!"
+
+  performance-monitoring:
+    runs-on: ubuntu-latest
+    needs: [deploy, pre-deployment-checks]
+    if: success() && needs.pre-deployment-checks.outputs.environment == 'production'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run post-deployment performance validation
+        run: |
+          echo "Running performance validation..."
+          python -c "
+          import asyncio
+          from prsm.performance import LoadTestSuite, LoadTestConfig
+          
+          async def validate_performance():
+              config = LoadTestConfig(
+                  test_name='post_deployment_validation',
+                  concurrent_users=25,
+                  duration_seconds=120,
+                  base_url='https://prsm.org',
+                  max_response_time_ms=1500,
+                  min_success_rate=0.98
+              )
+              
+              suite = LoadTestSuite()
+              result = await suite.run_load_test(config)
+              
+              print(f'Performance validation:')
+              print(f'Success rate: {result.success_rate:.2%}')
+              print(f'Avg response time: {result.avg_response_time_ms:.1f}ms')
+              print(f'P95 response time: {result.p95_response_time_ms:.1f}ms')
+              
+              if not result.passed_thresholds:
+                  print('⚠️ Performance validation failed - monitoring required')
+                  # Don't fail deployment for performance issues in production
+              else:
+                  print('✅ Performance validation passed')
+          
+          asyncio.run(validate_performance())
+          "
+
+  notify-deployment:
+    runs-on: ubuntu-latest
+    needs: [deploy, pre-deployment-checks, smoke-tests]
+    if: always()
+    steps:
+      - name: Notify deployment status
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#deployments'
+          message: |
+            🚀 **PRSM Deployment Update**
+            
+            **Environment:** ${{ needs.pre-deployment-checks.outputs.environment }}
+            **Image Tag:** ${{ needs.pre-deployment-checks.outputs.image-tag }}
+            **Status:** ${{ job.status == 'success' && '✅ SUCCESS' || '❌ FAILED' }}
+            **Triggered by:** ${{ github.actor }}
+            **Commit:** ${{ github.sha }}
+            
+            ${{ job.status == 'success' && format('🎉 Deployment completed successfully!\n🌐 URL: https://{0}', needs.pre-deployment-checks.outputs.environment == 'production' && 'prsm.org' || 'staging.prsm.org') || '⚠️ Deployment failed - check logs for details' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        if: always()
+
+      - name: Send email notification
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.NOTIFICATION_EMAIL }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: 'PRSM Deployment ${{ job.status == "success" && "Success" || "Failed" }} - ${{ needs.pre-deployment-checks.outputs.environment }}'
+          body: |
+            PRSM Deployment Report
+            =====================
+            
+            Environment: ${{ needs.pre-deployment-checks.outputs.environment }}
+            Image Tag: ${{ needs.pre-deployment-checks.outputs.image-tag }}
+            Status: ${{ job.status }}
+            Triggered by: ${{ github.actor }}
+            Commit: ${{ github.sha }}
+            
+            ${{ job.status == 'success' && 'Deployment completed successfully!' || 'Deployment failed - check GitHub Actions logs for details.' }}
+            
+            View deployment logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: PRSM CI/CD <${{ secrets.NOTIFICATION_EMAIL }}>
+        if: always()
+
+  rollback-on-failure:
+    runs-on: ubuntu-latest
+    needs: [deploy, pre-deployment-checks, smoke-tests]
+    if: failure() && needs.deploy.result == 'success'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+          kubectl config use-context prsm-${{ needs.pre-deployment-checks.outputs.environment }}
+
+      - name: Rollback deployment
+        run: |
+          echo "🔄 Rolling back deployment due to post-deployment failures..."
+          
+          # Rollback API deployment
+          kubectl rollout undo deployment/prsm-api -n prsm-${{ needs.pre-deployment-checks.outputs.environment }}
+          kubectl rollout status deployment/prsm-api -n prsm-${{ needs.pre-deployment-checks.outputs.environment }} --timeout=300s
+          
+          # Rollback worker deployment
+          kubectl rollout undo deployment/prsm-worker -n prsm-${{ needs.pre-deployment-checks.outputs.environment }}
+          kubectl rollout status deployment/prsm-worker -n prsm-${{ needs.pre-deployment-checks.outputs.environment }} --timeout=300s
+          
+          echo "✅ Rollback completed"
+
+      - name: Verify rollback health
+        run: |
+          echo "Verifying rollback health..."
+          
+          API_URL="https://${{ needs.pre-deployment-checks.outputs.environment == 'production' && 'prsm.org' || 'staging.prsm.org' }}"
+          
+          for i in {1..5}; do
+            if curl -f "${API_URL}/health" --max-time 10; then
+              echo "✅ Rollback health check passed"
+              break
+            else
+              echo "❌ Rollback health check failed (attempt $i/5)"
+              sleep 30
+            fi
+          done

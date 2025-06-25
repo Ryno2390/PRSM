@@ -1,0 +1,7 @@
+{
+  "host": "localhost",
+  "port": 6379,
+  "db": 1,
+  "decode_responses": true,
+  "health_check_interval": 30
+}

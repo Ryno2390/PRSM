@@ -1,0 +1,111 @@
+# PRSM Prometheus Configuration
+# Monitoring and observability for PRSM distributed system
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'prsm-production'
+    environment: 'production'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Load rules once and periodically evaluate them
+rule_files:
+  - "prometheus/alert_rules.yml"
+  - "prometheus/recording_rules.yml"
+
+# Scrape configurations
+scrape_configs:
+  # ===================================
+  # PRSM API Metrics
+  # ===================================
+  - job_name: 'prsm-api'
+    static_configs:
+      - targets: ['prsm-api:9090']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    labels:
+      service: 'prsm-api'
+      component: 'core'
+
+  # ===================================
+  # Infrastructure Metrics
+  # ===================================
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    labels:
+      service: 'postgres'
+      component: 'database'
+
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    labels:
+      service: 'redis'
+      component: 'cache'
+
+  - job_name: 'ipfs'
+    static_configs:
+      - targets: ['ipfs:5001']
+    metrics_path: '/debug/metrics/prometheus'
+    scrape_interval: 30s
+    labels:
+      service: 'ipfs'
+      component: 'storage'
+
+  # ===================================
+  # Vector Database Metrics
+  # ===================================
+  - job_name: 'weaviate'
+    static_configs:
+      - targets: ['weaviate:8080']
+    metrics_path: '/v1/meta'
+    scrape_interval: 30s
+    labels:
+      service: 'weaviate'
+      component: 'vector-db'
+
+  # ===================================
+  # System Metrics (Node Exporter)
+  # ===================================
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
+    labels:
+      service: 'node-exporter'
+      component: 'system'
+
+  # ===================================
+  # Container Metrics (cAdvisor)
+  # ===================================
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 15s
+    labels:
+      service: 'cadvisor'
+      component: 'containers'
+
+  # ===================================
+  # Self Monitoring
+  # ===================================
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 30s
+    labels:
+      service: 'prometheus'
+      component: 'monitoring'

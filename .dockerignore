@@ -1,0 +1,135 @@
+# PRSM Docker Ignore File
+# Exclude development and build artifacts from Docker context
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+env/
+ENV/
+venv.bak/
+.venv/
+
+# Testing and Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+.nyc_output
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+docs/_build/
+*.md
+!README.md
+
+# Logs and temporary files
+*.log
+*.tmp
+logs/
+tmp/
+.tmp/
+
+# Database files (use volumes instead)
+*.db
+*.sqlite
+*.sqlite3
+prsm_test*.db
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+# Development tools
+.pre-commit-config.yaml
+.flake8
+.mypy_cache/
+.isort.cfg
+
+# Node.js (if any frontend assets)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# Model files and large data (use volumes)
+*.model
+*.pkl
+*.h5
+*.onnx
+data/
+models/
+
+# OS generated files
+.DS_Store?
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# PRSM specific exclusions
+Outstanding_Items.md
+TODO.md
+CHANGELOG.md
+LICENSE
+Adversarial_Testing/
+dev-data/
+test_results/
+logos/

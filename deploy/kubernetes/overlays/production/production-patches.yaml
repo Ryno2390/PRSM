@@ -1,0 +1,44 @@
+# Production environment patches for PRSM deployments
+- op: replace
+  path: /spec/template/spec/containers/0/resources/requests/memory
+  value: "1Gi"
+- op: replace
+  path: /spec/template/spec/containers/0/resources/limits/memory
+  value: "4Gi"
+- op: replace
+  path: /spec/template/spec/containers/0/resources/requests/cpu
+  value: "500m"
+- op: replace
+  path: /spec/template/spec/containers/0/resources/limits/cpu
+  value: "2000m"
+- op: replace
+  path: /spec/template/spec/containers/0/env/0/value
+  value: "production"
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: LOG_LEVEL
+    value: "WARNING"
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: DEBUG_MODE
+    value: "false"
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: MONITORING_ENABLED
+    value: "true"
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: TRACING_SAMPLE_RATE
+    value: "0.01"
+- op: add
+  path: /spec/template/spec/securityContext
+  value:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault

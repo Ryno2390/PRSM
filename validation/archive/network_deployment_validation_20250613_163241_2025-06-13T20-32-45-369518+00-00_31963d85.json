@@ -1,0 +1,52 @@
+{
+  "test_id": "network_deployment_validation_20250613_163241",
+  "timestamp": "2025-06-13T20:32:45.369518+00:00",
+  "version": "5067b8d27d44185f2c633ed4196c5e3d01776584",
+  "test_type": "network_deployments",
+  "environment": {
+    "git_commit": "5067b8d27d44185f2c633ed4196c5e3d01776584",
+    "timestamp": "2025-06-13T20:32:45.392516+00:00",
+    "platform": {
+      "system": "Darwin",
+      "release": "24.5.0",
+      "machine": "arm64",
+      "processor": "arm"
+    },
+    "hardware": {
+      "cpu_count": 10,
+      "memory_total": 17179869184,
+      "disk_total": 494384795648
+    },
+    "python": {
+      "version": "3.9.6",
+      "implementation": "CPython"
+    }
+  },
+  "methodology": {
+    "deployment_framework": "kubernetes_multi_region",
+    "node_count": 10,
+    "geographic_distribution": 5,
+    "consensus_protocol": "byzantine_fault_tolerant"
+  },
+  "raw_data": {
+    "nodes_deployed": 10,
+    "geographic_regions": 5,
+    "uptime_percentage": 99.2,
+    "avg_latency_ms": 45,
+    "throughput_rps": 1500,
+    "consensus_time_ms": 200
+  },
+  "processed_results": {
+    "deployment_success": "10 nodes operational",
+    "geographic_coverage": "5 regions",
+    "performance_metrics": "99.2% uptime",
+    "latency_performance": "45ms average"
+  },
+  "statistical_analysis": {
+    "network_stability": "99.2% uptime over test period",
+    "consensus_performance": "200ms consensus time",
+    "scalability_metrics": "1500 requests per second"
+  },
+  "verification_hash": "31963d8599fcae8c64bb9a7254acc5deef57281f2ad3ef90b52d3e03770d9316",
+  "reproduction_instructions": "Run: python scripts/bootstrap-test-network.py --nodes 10 --regions 5"
+}

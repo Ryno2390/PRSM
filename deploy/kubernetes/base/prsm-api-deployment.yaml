@@ -1,0 +1,180 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prsm-api
+  namespace: prsm-system
+  labels:
+    app.kubernetes.io/name: prsm-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  replicas: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prsm-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prsm-api
+        app.kubernetes.io/component: api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: prsm-api
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: prsm-api
+        image: prsm-api:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        env:
+        - name: PRSM_ENV
+          value: "production"
+        - name: PRSM_LOG_LEVEL
+          value: "INFO"
+        - name: PRSM_WORKERS
+          value: "8"
+        - name: PRSM_MAX_WORKERS
+          value: "16"
+        - name: PRSM_WORKER_CONNECTIONS
+          value: "2000"
+        - name: PRSM_KEEPALIVE
+          value: "5"
+        - name: PRSM_MAX_REQUESTS
+          value: "10000"
+        - name: PRSM_MAX_REQUESTS_JITTER
+          value: "1000"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: prsm-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: prsm-secrets
+              key: redis-url
+        - name: IPFS_API_URL
+          value: "http://ipfs-service:5001"
+        - name: PROMETHEUS_MULTIPROC_DIR
+          value: "/tmp/prometheus"
+        envFrom:
+        - configMapRef:
+            name: prsm-config
+        - secretRef:
+            name: prsm-secrets
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
+        volumeMounts:
+        - name: prometheus-metrics
+          mountPath: /tmp/prometheus
+        - name: app-logs
+          mountPath: /app/logs
+        - name: app-data
+          mountPath: /app/data
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: prometheus-metrics
+        emptyDir:
+          sizeLimit: 100Mi
+      - name: app-logs
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: app-data
+        persistentVolumeClaim:
+          claimName: prsm-api-data
+      nodeSelector:
+        kubernetes.io/os: linux
+      tolerations:
+      - key: "prsm.org/workload"
+        operator: "Equal"
+        value: "api"
+        effect: "NoSchedule"
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                  - prsm-api
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prsm-api
+  namespace: prsm-system
+  labels:
+    app.kubernetes.io/name: prsm-api
+    app.kubernetes.io/component: api
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prsm-api-data
+  namespace: prsm-system
+  labels:
+    app.kubernetes.io/name: prsm-api
+    app.kubernetes.io/component: storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: ssd

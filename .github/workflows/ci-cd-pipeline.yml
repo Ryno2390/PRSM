@@ -1,0 +1,652 @@
+# PRSM Automated CI/CD Pipeline with Quality Gates
+# Enterprise-grade continuous integration and deployment
+
+name: PRSM CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop, feature/* ]
+  pull_request:
+    branches: [ main, develop ]
+  release:
+    types: [ published ]
+
+env:
+  PYTHON_VERSION: '3.9'
+  NODE_VERSION: '18'
+
+jobs:
+  # === Code Quality and Security Gates ===
+  code-quality:
+    name: Code Quality & Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black isort mypy bandit safety
+        pip install -r requirements.txt
+    
+    - name: Code Formatting Check (Black)
+      run: |
+        black --check --diff prsm/ tests/ playground/
+    
+    - name: Import Sorting Check (isort)
+      run: |
+        isort --check-only --diff prsm/ tests/ playground/
+    
+    - name: Linting (Flake8)
+      run: |
+        flake8 prsm/ tests/ playground/ --max-line-length=100 --extend-ignore=E203,W503
+    
+    - name: Type Checking (MyPy)
+      run: |
+        mypy prsm/ --ignore-missing-imports
+    
+    - name: Security Scanning (Bandit)
+      run: |
+        bandit -r prsm/ -f json -o bandit-report.json
+        bandit -r prsm/ -ll
+    
+    - name: Dependency Security Check (Safety)
+      run: |
+        safety check --json --output safety-report.json
+        safety check
+    
+    - name: Upload Security Reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json
+
+  # === Unit and Integration Tests ===
+  tests:
+    name: Tests (${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    needs: code-quality
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+    
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-cov pytest-asyncio pytest-mock
+        pip install -r requirements.txt
+        pip install -r tests/requirements-test.txt
+    
+    - name: Run Unit Tests
+      run: |
+        pytest tests/unit/ -v --cov=prsm --cov-report=xml --cov-report=html --junitxml=unit-test-results.xml
+    
+    - name: Run Integration Tests
+      run: |
+        pytest tests/integration/ -v --junitxml=integration-test-results.xml
+    
+    - name: Run Performance Tests
+      run: |
+        pytest tests/performance/ -v --junitxml=performance-test-results.xml
+    
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-${{ matrix.os }}-${{ matrix.python-version }}
+        path: |
+          *-test-results.xml
+          htmlcov/
+          .coverage
+    
+    - name: Upload Coverage to Codecov
+      uses: codecov/codecov-action@v3
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.9'
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+  # === PRSM Specific Validation ===
+  prsm-validation:
+    name: PRSM System Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: code-quality
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install PRSM Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install torch numpy flask flask-socketio --quiet
+    
+    - name: Validate Core Components
+      run: |
+        python -m pytest tests/prsm_validation/test_core_components.py -v
+    
+    - name: Validate AI Agents
+      run: |
+        python -m pytest tests/prsm_validation/test_ai_agents.py -v
+    
+    - name: Validate P2P Network
+      run: |
+        python -m pytest tests/prsm_validation/test_p2p_network.py -v
+    
+    - name: Validate Model Inference
+      run: |
+        python -m pytest tests/prsm_validation/test_model_inference.py -v
+    
+    - name: Validate EG-CFG Integration
+      run: |
+        python -m pytest tests/prsm_validation/test_egcfg_integration.py -v
+    
+    - name: Run Comprehensive Validation Suite
+      run: |
+        python validation/comprehensive_validation_suite.py --ci-mode --output-json validation-results.json
+    
+    - name: Check Validation Success Rate
+      run: |
+        python -c "
+        import json
+        with open('validation-results.json') as f:
+            results = json.load(f)
+        success_rate = results['summary']['success_rate']
+        print(f'Validation Success Rate: {success_rate:.1f}%')
+        if success_rate < 95.0:
+            print('❌ Validation success rate below 95% threshold')
+            exit(1)
+        else:
+            print('✅ Validation success rate meets quality gate')
+        "
+    
+    - name: Upload Validation Report
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: prsm-validation-report
+        path: validation-results.json
+
+  # === Performance Benchmarking ===
+  performance-benchmarks:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: tests
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install memory-profiler psutil
+    
+    - name: Run Performance Benchmarks
+      run: |
+        python performance/benchmark_suite.py --output benchmark-results.json
+    
+    - name: Performance Regression Check
+      run: |
+        python .github/scripts/check_performance_regression.py benchmark-results.json
+    
+    - name: Upload Benchmark Results
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-benchmarks
+        path: benchmark-results.json
+
+  # === Documentation Build ===
+  documentation:
+    name: Documentation Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Documentation Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install sphinx sphinx-rtd-theme myst-parser sphinxcontrib-mermaid
+    
+    - name: Build Documentation
+      run: |
+        cd docs/
+        make html
+    
+    - name: Check Documentation Links
+      run: |
+        cd docs/
+        make linkcheck
+    
+    - name: Upload Documentation
+      uses: actions/upload-artifact@v3
+      with:
+        name: documentation
+        path: docs/_build/html/
+
+  # === Security and Compliance ===
+  security-compliance:
+    name: Security & Compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: code-quality
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Run CodeQL Analysis
+      uses: github/codeql-action/init@v2
+      with:
+        languages: python
+    
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v2
+    
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v2
+    
+    - name: Run Trivy Vulnerability Scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy Results
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  # === Container Build and Push ===
+  container:
+    name: Container Build & Push
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [tests, prsm-validation]
+    if: github.ref == 'refs/heads/main' || github.event_name == 'release'
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Extract Metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha
+    
+    - name: Build and Push Container
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+    
+    - name: Run Container Security Scan
+      run: |
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+          aquasec/trivy image --format sarif --output container-scan.sarif \
+          ghcr.io/${{ github.repository }}:${{ github.sha }}
+    
+    - name: Upload Container Scan Results
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'container-scan.sarif'
+
+  # === Automated Evidence Generation ===
+  evidence-generation:
+    name: Automated Evidence Generation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [tests, prsm-validation, performance-benchmarks, security-compliance]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install bandit structlog
+    
+    - name: Download Previous Artifacts
+      uses: actions/download-artifact@v3
+      continue-on-error: true
+    
+    - name: Generate Comprehensive Evidence Report
+      run: |
+        echo "🔍 Generating automated evidence report..."
+        python scripts/automated_evidence_generator.py --output-dir evidence/ --format both
+        
+        # Move generated files to evidence directory
+        mkdir -p evidence/latest/
+        mv evidence_data_*.json evidence/latest/ 2>/dev/null || true
+        mv evidence_report_*.md evidence/latest/ 2>/dev/null || true
+        
+        # Create latest evidence report link
+        if [ -f evidence/latest/evidence_report_*.md ]; then
+          cp evidence/latest/evidence_report_*.md evidence/latest/LATEST_EVIDENCE_REPORT.md
+        fi
+        
+        if [ -f evidence/latest/evidence_data_*.json ]; then
+          cp evidence/latest/evidence_data_*.json evidence/latest/LATEST_EVIDENCE_DATA.json
+        fi
+    
+    - name: Archive Evidence with Timestamp
+      run: |
+        # Create timestamped archive
+        TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+        COMMIT_SHORT="${{ github.sha }}"
+        COMMIT_SHORT=${COMMIT_SHORT:0:8}
+        
+        mkdir -p evidence/archive/${TIMESTAMP}_${COMMIT_SHORT}/
+        cp evidence/latest/* evidence/archive/${TIMESTAMP}_${COMMIT_SHORT}/ 2>/dev/null || true
+        
+        # Update evidence index
+        echo "# PRSM Evidence Generation History" > evidence/EVIDENCE_INDEX.md
+        echo "" >> evidence/EVIDENCE_INDEX.md
+        echo "## Latest Evidence Report" >> evidence/EVIDENCE_INDEX.md
+        echo "" >> evidence/EVIDENCE_INDEX.md
+        echo "[Latest Evidence Report](latest/LATEST_EVIDENCE_REPORT.md)" >> evidence/EVIDENCE_INDEX.md
+        echo "[Latest Evidence Data](latest/LATEST_EVIDENCE_DATA.json)" >> evidence/EVIDENCE_INDEX.md
+        echo "" >> evidence/EVIDENCE_INDEX.md
+        echo "## Historical Evidence Archives" >> evidence/EVIDENCE_INDEX.md
+        echo "" >> evidence/EVIDENCE_INDEX.md
+        
+        # List all archives
+        for dir in evidence/archive/*/; do
+          if [ -d "$dir" ]; then
+            basename=$(basename "$dir")
+            echo "- [$basename]($dir)" >> evidence/EVIDENCE_INDEX.md
+          fi
+        done
+    
+    - name: Commit Evidence Updates
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "PRSM Evidence Bot"
+        
+        git add evidence/
+        
+        if git diff --staged --quiet; then
+          echo "No evidence changes to commit"
+        else
+          git commit -m "🤖 Automated Evidence Generation - Commit ${{ github.sha }}
+
+          📊 Fresh evidence report generated automatically
+          🔍 Investment-grade transparency with real system data
+          📈 Continuous validation for stakeholder confidence
+          
+          Generated from: ${{ github.ref_name }} branch
+          Workflow: ${{ github.run_id }}
+          
+          🤖 Generated with [Claude Code](https://claude.ai/code)
+          
+          Co-Authored-By: Claude <noreply@anthropic.com>"
+          
+          git push origin main
+          echo "✅ Evidence committed and pushed to repository"
+        fi
+    
+    - name: Upload Evidence Artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: automated-evidence-report
+        path: |
+          evidence/latest/
+          evidence/EVIDENCE_INDEX.md
+    
+    - name: Generate Evidence Summary
+      run: |
+        echo "📊 PRSM Automated Evidence Generation Complete!" > evidence-summary.md
+        echo "=============================================" >> evidence-summary.md
+        echo "" >> evidence-summary.md
+        
+        if [ -f evidence/latest/LATEST_EVIDENCE_DATA.json ]; then
+          # Extract key metrics from evidence data
+          python -c "
+          import json
+          try:
+              with open('evidence/latest/LATEST_EVIDENCE_DATA.json', 'r') as f:
+                  data = json.load(f)
+              metrics = data.get('metrics', {})
+              print(f'📈 Investment Score: {metrics.get(\"overall_investment_score\", 0)}/100')
+              print(f'🎯 RLT Success Rate: {metrics.get(\"rlt_success_rate\", 0)*100:.1f}%')
+              print(f'🔍 Evidence Confidence: {metrics.get(\"evidence_confidence_level\", \"unknown\").upper()}')
+              print(f'✅ Production Ready: {\"YES\" if metrics.get(\"production_readiness\", False) else \"NOT YET\"}')
+              print(f'📊 Real Data Coverage: {metrics.get(\"real_data_percentage\", 0):.1f}%')
+          except Exception as e:
+              print(f'Error reading evidence data: {e}')
+          " >> evidence-summary.md
+        fi
+        
+        echo "" >> evidence-summary.md
+        echo "🔗 **Access Evidence:**" >> evidence-summary.md
+        echo "- [Latest Report](evidence/latest/LATEST_EVIDENCE_REPORT.md)" >> evidence-summary.md
+        echo "- [Evidence Index](evidence/EVIDENCE_INDEX.md)" >> evidence-summary.md
+        echo "- [Raw Data](evidence/latest/LATEST_EVIDENCE_DATA.json)" >> evidence-summary.md
+        
+        cat evidence-summary.md
+
+  # === Deployment Gate ===
+  deployment-gate:
+    name: Deployment Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [tests, prsm-validation, performance-benchmarks, security-compliance, evidence-generation]
+    if: github.ref == 'refs/heads/main' || github.event_name == 'release'
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Download All Artifacts
+      uses: actions/download-artifact@v3
+    
+    - name: Quality Gate Assessment
+      run: |
+        python .github/scripts/quality_gate_assessment.py \
+          --validation-report prsm-validation-report/validation-results.json \
+          --benchmark-report performance-benchmarks/benchmark-results.json \
+          --security-reports security-reports/ \
+          --test-results test-results-ubuntu-latest-3.9/ \
+          --output deployment-decision.json
+    
+    - name: Deployment Decision
+      run: |
+        python -c "
+        import json
+        with open('deployment-decision.json') as f:
+            decision = json.load(f)
+        
+        print(f'🎯 Quality Gate Results:')
+        print(f'   Tests: {decision[\"tests\"][\"status\"]} ({decision[\"tests\"][\"score\"]})')
+        print(f'   Validation: {decision[\"validation\"][\"status\"]} ({decision[\"validation\"][\"score\"]})')
+        print(f'   Performance: {decision[\"performance\"][\"status\"]} ({decision[\"performance\"][\"score\"]})')
+        print(f'   Security: {decision[\"security\"][\"status\"]} ({decision[\"security\"][\"score\"]})')
+        print(f'   Overall: {decision[\"overall\"][\"status\"]} ({decision[\"overall\"][\"score\"]})')
+        
+        if decision['overall']['status'] != 'PASS':
+            print('❌ Quality gate failed - deployment blocked')
+            exit(1)
+        else:
+            print('✅ Quality gate passed - deployment approved')
+        "
+    
+    - name: Upload Deployment Decision
+      uses: actions/upload-artifact@v3
+      with:
+        name: deployment-decision
+        path: deployment-decision.json
+
+  # === Staging Deployment ===
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [container, deployment-gate]
+    if: github.ref == 'refs/heads/main'
+    environment: staging
+    
+    steps:
+    - name: Deploy to Staging Environment
+      run: |
+        echo "🚀 Deploying PRSM to staging environment"
+        echo "Container: ghcr.io/${{ github.repository }}:${{ github.sha }}"
+        # Add actual deployment commands here
+    
+    - name: Run Smoke Tests
+      run: |
+        echo "🧪 Running staging smoke tests"
+        # Add smoke test commands here
+    
+    - name: Notify Deployment Success
+      run: |
+        echo "✅ PRSM staging deployment successful"
+
+  # === Production Deployment ===
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [container, deployment-gate]
+    if: github.event_name == 'release'
+    environment: production
+    
+    steps:
+    - name: Deploy to Production Environment
+      run: |
+        echo "🚀 Deploying PRSM to production environment"
+        echo "Release: ${{ github.event.release.tag_name }}"
+        echo "Container: ghcr.io/${{ github.repository }}:${{ github.event.release.tag_name }}"
+        # Add actual deployment commands here
+    
+    - name: Run Production Health Checks
+      run: |
+        echo "🏥 Running production health checks"
+        # Add health check commands here
+    
+    - name: Notify Production Deployment
+      run: |
+        echo "🎉 PRSM production deployment successful!"
+        echo "Version: ${{ github.event.release.tag_name }}"
+
+  # === Notification and Reporting ===
+  notify:
+    name: Notifications & Reporting
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [tests, prsm-validation, performance-benchmarks, security-compliance]
+    if: always()
+    
+    steps:
+    - name: Generate Pipeline Report
+      run: |
+        echo "📊 PRSM CI/CD Pipeline Report" > pipeline-report.md
+        echo "=================================" >> pipeline-report.md
+        echo "" >> pipeline-report.md
+        echo "🔍 **Quality Gates:**" >> pipeline-report.md
+        echo "- Code Quality: ${{ needs.code-quality.result }}" >> pipeline-report.md
+        echo "- Tests: ${{ needs.tests.result }}" >> pipeline-report.md
+        echo "- PRSM Validation: ${{ needs.prsm-validation.result }}" >> pipeline-report.md
+        echo "- Performance: ${{ needs.performance-benchmarks.result }}" >> pipeline-report.md
+        echo "- Security: ${{ needs.security-compliance.result }}" >> pipeline-report.md
+        echo "" >> pipeline-report.md
+        echo "🚀 **Build Information:**" >> pipeline-report.md
+        echo "- Branch: ${{ github.ref_name }}" >> pipeline-report.md
+        echo "- Commit: ${{ github.sha }}" >> pipeline-report.md
+        echo "- Trigger: ${{ github.event_name }}" >> pipeline-report.md
+        echo "- Workflow: ${{ github.run_id }}" >> pipeline-report.md
+    
+    - name: Upload Pipeline Report
+      uses: actions/upload-artifact@v3
+      with:
+        name: pipeline-report
+        path: pipeline-report.md

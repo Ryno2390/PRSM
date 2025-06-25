@@ -1,0 +1,44 @@
+# PRSM Performance Collector for Load Testing
+# Collects real-time performance metrics during load tests
+
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app directory
+WORKDIR /app
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install prometheus-client psutil aiohttp
+
+# Copy performance collector source
+COPY scripts/performance-collector.py .
+COPY config/performance-collector.yml config.yml
+
+# Create non-root user
+RUN groupadd -r collector && useradd -r -g collector collector
+RUN chown -R collector:collector /app
+USER collector
+
+# Expose metrics port
+EXPOSE 9092
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:9092/health || exit 1
+
+# Run performance collector
+CMD ["python", "performance-collector.py"]

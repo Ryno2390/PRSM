@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prsm-production
+  labels:
+    app.kubernetes.io/name: prsm
+    app.kubernetes.io/environment: production
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+  annotations:
+    description: "PRSM production environment"
+    contact: "team@prsm.org"
+    environment: "production"
+    managed-by: "kustomize"
+    compliance: "SOC2-compliant"

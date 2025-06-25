@@ -1,0 +1,6 @@
+{
+  "database_url": "sqlite:////Users/ryneschultz/Documents/GitHub/PRSM/test_environments/test_basic/data/database/test.db",
+  "echo": true,
+  "pool_size": 5,
+  "max_overflow": 10
+}

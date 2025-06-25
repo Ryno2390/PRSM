@@ -1,0 +1,83 @@
+{
+  "metrics": {
+    "timestamp": "2025-06-25 06:58:48.203144",
+    "commit_sha": "4752eb65328640ed72e6f20293e3703bff52bdf0",
+    "branch": "main",
+    "code_quality_score": 95,
+    "security_score": 0,
+    "test_coverage": 0.8,
+    "rlt_success_rate": 1.0,
+    "performance_score": 90,
+    "regression_detected": false,
+    "system_status": "healthy",
+    "uptime_reliability": 0.95,
+    "error_rate": 0.0,
+    "deployment_ready": true,
+    "blockers_count": 0,
+    "warnings_count": 1,
+    "overall_score": 68,
+    "quality_gate_status": "conditional_pass"
+  },
+  "detailed_results": {
+    "assessment_duration": 0.13620686531066895,
+    "code_quality": {
+      "code_quality_score": 95,
+      "total_lines_of_code": 196936,
+      "test_coverage": 0.8,
+      "test_files_count": 104,
+      "status": "completed"
+    },
+    "security": {
+      "security_score": 0,
+      "high_severity_issues": 3,
+      "medium_severity_issues": 31,
+      "low_severity_issues": 357,
+      "total_issues": 391,
+      "lines_scanned": 148626,
+      "status": "completed"
+    },
+    "performance": {
+      "rlt_success_rate": 1.0,
+      "performance_score": 90,
+      "regression_detected": false,
+      "avg_component_performance": 7200,
+      "execution_time": 17.0,
+      "status": "completed"
+    },
+    "system_health": {
+      "system_status": "healthy",
+      "error_rate": 0.0,
+      "uptime_reliability": 0.95,
+      "memory_usage": 75.0,
+      "cpu_usage": 15.0,
+      "status": "completed"
+    },
+    "deployment_readiness": {
+      "deployment_ready": true,
+      "blockers_count": 0,
+      "warnings_count": 1,
+      "blockers": [],
+      "warnings": [
+        "Unstaged changes detected"
+      ],
+      "status": "completed"
+    },
+    "thresholds": {
+      "code_quality_min": 70,
+      "security_score_min": 75,
+      "test_coverage_min": 0.7,
+      "rlt_success_rate_min": 0.95,
+      "performance_score_min": 75,
+      "error_rate_max": 0.05,
+      "overall_score_min": 80,
+      "conditional_pass_min": 65
+    }
+  },
+  "recommendations": [
+    "Address security vulnerabilities before deployment"
+  ],
+  "blockers": [
+    "3 high-severity security issues"
+  ],
+  "warnings": []
+}
