@@ -1,0 +1,37 @@
+{
+  "metrics": {
+    "timestamp": "2025-06-25 07:12:15.682344",
+    "evidence_session_id": "27a7e93a-168f-4c26-a904-617271581d58",
+    "commit_sha": "f71566eca34e336182cfb753eca3b09cf4f16bf8",
+    "branch": "main",
+    "rlt_success_rate": 1.0,
+    "rlt_component_count": 11,
+    "rlt_working_components": 11,
+    "avg_component_performance": 6762.588602802262,
+    "system_uptime_hours": 0.005693918267885844,
+    "code_quality_score": 100,
+    "security_score": 0,
+    "test_coverage": 0.85,
+    "lines_of_code": 196936,
+    "test_files_count": 105,
+    "scenarios_tested": 4,
+    "scenarios_successful": 4,
+    "scenario_success_rate": 1.0,
+    "avg_scenario_completion_time": 0.04520082473754883,
+    "ci_cd_status": "operational",
+    "monitoring_status": "active",
+    "automation_coverage": 1.0,
+    "overall_investment_score": 81,
+    "evidence_confidence_level": "high",
+    "production_readiness": false,
+    "real_data_percentage": 100.0,
+    "simulated_data_percentage": 0.0,
+    "projected_data_percentage": 0.0
+  },
+  "evidence_data": {},
+  "generation_metadata": {
+    "session_id": "27a7e93a-168f-4c26-a904-617271581d58",
+    "generation_time": "2025-06-25T07:12:15.682706",
+    "total_collection_time": 20.498457670211792
+  }
+}

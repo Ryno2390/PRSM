@@ -1,0 +1,54 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: prsm-staging
+
+resources:
+  - ../../base
+  - staging-namespace.yaml
+  - staging-ingress.yaml
+
+patches:
+  - path: staging-patches.yaml
+    target:
+      kind: Deployment
+      name: prsm-api
+  - path: staging-patches.yaml
+    target:
+      kind: Deployment
+      name: prsm-worker
+
+images:
+  - name: prsm-api
+    newTag: staging-latest
+  - name: prsm-worker
+    newTag: staging-latest
+
+replicas:
+  - name: prsm-api
+    count: 2
+  - name: prsm-worker
+    count: 1
+  - name: redis
+    count: 1
+  - name: ipfs
+    count: 1
+
+configMapGenerator:
+  - name: prsm-config
+    env: staging.env
+    behavior: replace
+
+secretGenerator:
+  - name: prsm-secrets
+    env: staging-secrets.env
+    type: Opaque
+    behavior: replace
+
+commonLabels:
+  environment: staging
+  app.kubernetes.io/instance: prsm-staging
+
+commonAnnotations:
+  deployment.kubernetes.io/environment: staging
+  deployment.kubernetes.io/managed-by: kustomize

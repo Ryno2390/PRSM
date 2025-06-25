@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prsm-staging
+  labels:
+    app.kubernetes.io/name: prsm
+    app.kubernetes.io/environment: staging
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
+  annotations:
+    description: "PRSM staging environment"
+    contact: "team@prsm.org"
+    environment: "staging"
+    managed-by: "kustomize"

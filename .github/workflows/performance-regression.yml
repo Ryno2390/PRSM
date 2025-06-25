@@ -1,0 +1,344 @@
+name: 📈 Performance Regression Detection
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run performance tests twice daily
+    - cron: '0 6,18 * * *'
+
+env:
+  PYTHON_VERSION: '3.9'
+  PYTHONPATH: ${{ github.workspace }}
+
+jobs:
+  # =============================================================================
+  # Baseline Performance Measurement
+  # =============================================================================
+  performance-baseline:
+    name: 📊 Performance Baseline
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🛒 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install memory-profiler psutil
+
+      - name: 🎯 RLT Performance Benchmarks
+        id: rlt_performance
+        run: |
+          echo "🎯 Running RLT performance benchmarks..."
+          
+          # Run our comprehensive RLT integration test and capture performance
+          start_time=$(date +%s.%3N)
+          PYTHONPATH=$PWD python tests/test_rlt_system_integration.py > rlt_perf_output.log 2>&1
+          end_time=$(date +%s.%3N)
+          
+          execution_time=$(echo "$end_time - $start_time" | bc)
+          echo "RLT_EXECUTION_TIME=$execution_time" >> $GITHUB_OUTPUT
+          
+          # Extract performance metrics from the RLT integration report
+          if [ -f "rlt_system_integration_report.json" ]; then
+            # Get component performance metrics
+            python3 << 'EOF' > rlt_performance_summary.json
+import json
+import os
+
+try:
+    with open('rlt_system_integration_report.json', 'r') as f:
+        data = json.load(f)
+    
+    performance_metrics = {
+        "total_execution_time": float(os.environ.get('RLT_EXECUTION_TIME', '0')),
+        "success_rate": data.get("summary", {}).get("success_rate", 0),
+        "working_components": data.get("summary", {}).get("working_components", 0),
+        "total_components": data.get("summary", {}).get("total_components", 0),
+        "integration_gaps": data.get("summary", {}).get("gaps_found", 0),
+        "component_performance": {}
+    }
+    
+    # Extract individual component performance
+    for component, details in data.get("components", {}).items():
+        if details.get("performance", 0) > 0:
+            performance_metrics["component_performance"][component] = details["performance"]
+    
+    # Calculate average performance across working components
+    perf_values = list(performance_metrics["component_performance"].values())
+    if perf_values:
+        performance_metrics["avg_component_performance"] = sum(perf_values) / len(perf_values)
+        performance_metrics["min_component_performance"] = min(perf_values)
+        performance_metrics["max_component_performance"] = max(perf_values)
+    
+    with open('rlt_performance_summary.json', 'w') as f:
+        json.dump(performance_metrics, f, indent=2)
+    
+    print(f"📊 RLT Performance Summary Generated")
+    print(f"Success Rate: {performance_metrics['success_rate']*100:.1f}%")
+    print(f"Working Components: {performance_metrics['working_components']}/{performance_metrics['total_components']}")
+    if perf_values:
+        print(f"Avg Component Performance: {performance_metrics['avg_component_performance']:,.0f} ops/sec")
+        
+except Exception as e:
+    print(f"Error processing performance data: {e}")
+    with open('rlt_performance_summary.json', 'w') as f:
+        json.dump({"error": str(e), "total_execution_time": float(os.environ.get('RLT_EXECUTION_TIME', '0'))}, f)
+EOF
+          fi
+
+      - name: 🔧 Core System Performance
+        run: |
+          echo "🔧 Testing core system performance..."
+          
+          # Agent Framework Performance
+          python -c "
+import time
+import asyncio
+import sys
+sys.path.append('.')
+
+start_time = time.time()
+try:
+    # Import and test key components
+    from prsm.agents.base import Agent
+    from prsm.core.config import PRSMSettings
+    
+    # Basic instantiation performance
+    config = PRSMSettings()
+    
+    execution_time = time.time() - start_time
+    print(f'Core system startup time: {execution_time:.3f}s')
+    
+    with open('core_performance.json', 'w') as f:
+        import json
+        json.dump({
+            'startup_time': execution_time,
+            'status': 'success'
+        }, f)
+        
+except Exception as e:
+    execution_time = time.time() - start_time
+    print(f'Core system startup failed: {e}')
+    with open('core_performance.json', 'w') as f:
+        import json
+        json.dump({
+            'startup_time': execution_time,
+            'status': 'failed',
+            'error': str(e)
+        }, f)
+"
+
+      - name: 💾 Memory Usage Analysis
+        run: |
+          echo "💾 Analyzing memory usage patterns..."
+          
+          python -c "
+import psutil
+import json
+import time
+
+# Get current process memory info
+process = psutil.Process()
+memory_info = process.memory_info()
+
+memory_metrics = {
+    'rss_mb': memory_info.rss / 1024 / 1024,  # Resident set size
+    'vms_mb': memory_info.vms / 1024 / 1024,  # Virtual memory size
+    'cpu_percent': process.cpu_percent(),
+    'timestamp': time.time()
+}
+
+with open('memory_usage.json', 'w') as f:
+    json.dump(memory_metrics, f, indent=2)
+
+print(f'Memory usage: RSS={memory_metrics[\"rss_mb\"]:.1f}MB, VMS={memory_metrics[\"vms_mb\"]:.1f}MB')
+"
+
+      - name: 📈 Generate Performance Report
+        run: |
+          echo "📈 Generating comprehensive performance report..."
+          
+          python3 << 'EOF'
+import json
+import os
+from datetime import datetime
+
+# Combine all performance data
+performance_report = {
+    "timestamp": datetime.utcnow().isoformat(),
+    "commit_sha": os.environ.get("GITHUB_SHA", "unknown"),
+    "branch": os.environ.get("GITHUB_REF_NAME", "unknown"),
+    "execution_environment": "github_actions"
+}
+
+# Load RLT performance data
+try:
+    with open('rlt_performance_summary.json', 'r') as f:
+        performance_report["rlt_performance"] = json.load(f)
+except FileNotFoundError:
+    performance_report["rlt_performance"] = {"error": "RLT performance data not found"}
+
+# Load core performance data
+try:
+    with open('core_performance.json', 'r') as f:
+        performance_report["core_performance"] = json.load(f)
+except FileNotFoundError:
+    performance_report["core_performance"] = {"error": "Core performance data not found"}
+
+# Load memory usage data
+try:
+    with open('memory_usage.json', 'r') as f:
+        performance_report["memory_usage"] = json.load(f)
+except FileNotFoundError:
+    performance_report["memory_usage"] = {"error": "Memory usage data not found"}
+
+# Calculate overall performance score
+score = 100
+if performance_report["rlt_performance"].get("success_rate", 0) < 1.0:
+    score -= 30  # Major penalty for RLT not at 100%
+if performance_report["rlt_performance"].get("integration_gaps", 1) > 0:
+    score -= 20  # Penalty for integration gaps
+if performance_report["core_performance"].get("status") != "success":
+    score -= 25  # Penalty for core system issues
+
+performance_report["overall_performance_score"] = max(0, score)
+
+# Save comprehensive report
+with open('performance_report.json', 'w') as f:
+    json.dump(performance_report, f, indent=2)
+
+# Output summary to GitHub
+rlt_perf = performance_report.get("rlt_performance", {})
+if "success_rate" in rlt_perf:
+    print(f"## 📈 Performance Report Summary")
+    print(f"- **RLT Success Rate:** {rlt_perf['success_rate']*100:.1f}%")
+    print(f"- **Integration Gaps:** {rlt_perf.get('integration_gaps', 'unknown')}")
+    print(f"- **Overall Score:** {performance_report['overall_performance_score']}/100")
+    
+    if rlt_perf.get("avg_component_performance"):
+        print(f"- **Avg Component Performance:** {rlt_perf['avg_component_performance']:,.0f} ops/sec")
+EOF
+
+      - name: 📤 Upload Performance Artifacts
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: performance-baseline-${{ github.sha }}
+          path: |
+            performance_report.json
+            rlt_performance_summary.json
+            core_performance.json
+            memory_usage.json
+            rlt_perf_output.log
+
+  # =============================================================================
+  # Performance Regression Analysis
+  # =============================================================================
+  regression-analysis:
+    name: 📉 Regression Analysis
+    runs-on: ubuntu-latest
+    needs: performance-baseline
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: 🛒 Checkout Code
+        uses: actions/checkout@v4
+
+      - name: 📥 Download Current Performance Data
+        uses: actions/download-artifact@v3
+        with:
+          name: performance-baseline-${{ github.sha }}
+          path: ./current-performance
+
+      - name: 📥 Download Baseline Performance (if available)
+        continue-on-error: true
+        run: |
+          # Try to download baseline performance data from main branch
+          # This would typically come from a performance data store
+          echo "📊 Baseline performance comparison would go here"
+          echo "In a production setup, this would:"
+          echo "1. Download baseline performance metrics from main branch"
+          echo "2. Compare current metrics with baseline"
+          echo "3. Calculate performance regression percentages"
+          echo "4. Alert if regression exceeds thresholds"
+
+      - name: 📊 Performance Regression Check
+        run: |
+          echo "🔍 Checking for performance regressions..."
+          
+          python3 << 'EOF'
+import json
+import os
+
+# Load current performance report
+try:
+    with open('./current-performance/performance_report.json', 'r') as f:
+        current_report = json.load(f)
+    
+    # Analyze current performance
+    rlt_perf = current_report.get("rlt_performance", {})
+    overall_score = current_report.get("overall_performance_score", 0)
+    
+    print("## 📊 Performance Analysis")
+    print("")
+    
+    # RLT Performance Check
+    if rlt_perf.get("success_rate", 0) >= 1.0:
+        print("✅ **RLT Integration: 100% SUCCESS** - No regression")
+    else:
+        print(f"⚠️ **RLT Integration: {rlt_perf.get('success_rate', 0)*100:.1f}%** - Below 100% target")
+    
+    # Integration Gaps Check
+    gaps = rlt_perf.get("integration_gaps", 1)
+    if gaps == 0:
+        print("✅ **Integration Gaps: 0** - Air-tight system")
+    else:
+        print(f"⚠️ **Integration Gaps: {gaps}** - System has gaps")
+    
+    # Overall Performance Score
+    if overall_score >= 90:
+        print(f"✅ **Overall Score: {overall_score}/100** - Excellent")
+    elif overall_score >= 75:
+        print(f"⚠️ **Overall Score: {overall_score}/100** - Good")
+    else:
+        print(f"❌ **Overall Score: {overall_score}/100** - Needs improvement")
+    
+    # Component Performance
+    if "avg_component_performance" in rlt_perf:
+        avg_perf = rlt_perf["avg_component_performance"]
+        if avg_perf >= 6000:
+            print(f"✅ **Component Performance: {avg_perf:,.0f} ops/sec** - Excellent")
+        elif avg_perf >= 4000:
+            print(f"⚠️ **Component Performance: {avg_perf:,.0f} ops/sec** - Good")
+        else:
+            print(f"❌ **Component Performance: {avg_perf:,.0f} ops/sec** - Below expected")
+    
+    # Set performance status for other steps
+    if overall_score >= 90 and rlt_perf.get("success_rate", 0) >= 1.0 and gaps == 0:
+        print("")
+        print("🎉 **PERFORMANCE STATUS: EXCELLENT - NO REGRESSIONS DETECTED**")
+        exit(0)
+    else:
+        print("")
+        print("⚠️ **PERFORMANCE STATUS: REGRESSION DETECTED OR BELOW TARGETS**")
+        exit(1)
+        
+except Exception as e:
+    print(f"❌ Error analyzing performance: {e}")
+    exit(1)
+EOF
+
+      - name: 💬 Comment Performance Results
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "📊 Performance analysis would be posted as PR comment in production setup"

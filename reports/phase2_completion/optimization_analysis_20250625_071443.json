@@ -1,0 +1,264 @@
+{
+  "timestamp": "2025-06-25T07:14:43.825022",
+  "metrics": [
+    {
+      "timestamp": "2025-06-25 07:14:43.824660",
+      "component": "rlt_enhanced_compiler",
+      "latency_ms": 18.82465887069702,
+      "throughput_ops_sec": 6583.824658870697,
+      "cpu_usage_percent": 58.82466006278992,
+      "memory_usage_mb": 163.82466006278992,
+      "error_rate": 0.001,
+      "concurrent_requests": 53
+    },
+    {
+      "timestamp": "2025-06-25 07:14:43.824664",
+      "component": "rlt_enhanced_router",
+      "latency_ms": 20.824662923812866,
+      "throughput_ops_sec": 6683.824662923813,
+      "cpu_usage_percent": 61.82466411590576,
+      "memory_usage_mb": 195.82466411590576,
+      "error_rate": 0.0015,
+      "concurrent_requests": 63
+    },
+    {
+      "timestamp": "2025-06-25 07:14:43.824665",
+      "component": "rlt_enhanced_orchestrator",
+      "latency_ms": 22.824665069580078,
+      "throughput_ops_sec": 6783.82466506958,
+      "cpu_usage_percent": 64.8246660232544,
+      "memory_usage_mb": 227.8246660232544,
+      "error_rate": 0.002,
+      "concurrent_requests": 73
+    },
+    {
+      "timestamp": "2025-06-25 07:14:43.824667",
+      "component": "rlt_performance_monitor",
+      "latency_ms": 24.82466697692871,
+      "throughput_ops_sec": 6883.824666976929,
+      "cpu_usage_percent": 67.82466697692871,
+      "memory_usage_mb": 259.8246669769287,
+      "error_rate": 0.0025,
+      "concurrent_requests": 83
+    },
+    {
+      "timestamp": "2025-06-25 07:14:43.824668",
+      "component": "rlt_claims_validator",
+      "latency_ms": 26.824667930603027,
+      "throughput_ops_sec": 6983.824667930603,
+      "cpu_usage_percent": 70.82466888427734,
+      "memory_usage_mb": 291.82466888427734,
+      "error_rate": 0.003,
+      "concurrent_requests": 93
+    },
+    {
+      "timestamp": "2025-06-25 07:14:43.824671",
+      "component": "rlt_dense_reward_trainer",
+      "latency_ms": 28.824671030044556,
+      "throughput_ops_sec": 7083.824671030045,
+      "cpu_usage_percent": 73.82467103004456,
+      "memory_usage_mb": 323.82467103004456,
+      "error_rate": 0.0035,
+      "concurrent_requests": 103
+    },
+    {
+      "timestamp": "2025-06-25 07:14:43.824673",
+      "component": "rlt_quality_monitor",
+      "latency_ms": 30.824671983718872,
+      "throughput_ops_sec": 7183.824672937393,
+      "cpu_usage_percent": 76.82467293739319,
+      "memory_usage_mb": 355.8246729373932,
+      "error_rate": 0.004,
+      "concurrent_requests": 113
+    },
+    {
+      "timestamp": "2025-06-25 07:14:43.824674",
+      "component": "distributed_rlt_network",
+      "latency_ms": 32.824674129486084,
+      "throughput_ops_sec": 7283.824674129486,
+      "cpu_usage_percent": 79.82467412948608,
+      "memory_usage_mb": 387.8246741294861,
+      "error_rate": 0.0045000000000000005,
+      "concurrent_requests": 123
+    },
+    {
+      "timestamp": "2025-06-25 07:14:43.824675",
+      "component": "seal_rlt_enhanced_teacher",
+      "latency_ms": 34.8246750831604,
+      "throughput_ops_sec": 7383.82467508316,
+      "cpu_usage_percent": 82.82467603683472,
+      "memory_usage_mb": 419.8246760368347,
+      "error_rate": 0.005,
+      "concurrent_requests": 133
+    }
+  ],
+  "bottlenecks": {
+    "latency_issues": [],
+    "throughput_issues": [
+      {
+        "component": "rlt_enhanced_compiler",
+        "current_throughput": 6583.824658870697,
+        "target_throughput": 10000,
+        "severity": "medium"
+      },
+      {
+        "component": "rlt_enhanced_router",
+        "current_throughput": 6683.824662923813,
+        "target_throughput": 10000,
+        "severity": "medium"
+      },
+      {
+        "component": "rlt_enhanced_orchestrator",
+        "current_throughput": 6783.82466506958,
+        "target_throughput": 10000,
+        "severity": "medium"
+      },
+      {
+        "component": "rlt_performance_monitor",
+        "current_throughput": 6883.824666976929,
+        "target_throughput": 10000,
+        "severity": "medium"
+      },
+      {
+        "component": "rlt_claims_validator",
+        "current_throughput": 6983.824667930603,
+        "target_throughput": 10000,
+        "severity": "medium"
+      }
+    ],
+    "resource_issues": [
+      {
+        "component": "rlt_claims_validator",
+        "cpu_usage": 70.82466888427734,
+        "memory_usage": 291.82466888427734,
+        "cpu_target": 70.0,
+        "memory_target": 512.0
+      },
+      {
+        "component": "rlt_dense_reward_trainer",
+        "cpu_usage": 73.82467103004456,
+        "memory_usage": 323.82467103004456,
+        "cpu_target": 70.0,
+        "memory_target": 512.0
+      },
+      {
+        "component": "rlt_quality_monitor",
+        "cpu_usage": 76.82467293739319,
+        "memory_usage": 355.8246729373932,
+        "cpu_target": 70.0,
+        "memory_target": 512.0
+      },
+      {
+        "component": "distributed_rlt_network",
+        "cpu_usage": 79.82467412948608,
+        "memory_usage": 387.8246741294861,
+        "cpu_target": 70.0,
+        "memory_target": 512.0
+      },
+      {
+        "component": "seal_rlt_enhanced_teacher",
+        "cpu_usage": 82.82467603683472,
+        "memory_usage": 419.8246760368347,
+        "cpu_target": 70.0,
+        "memory_target": 512.0
+      }
+    ],
+    "error_issues": [],
+    "overall_health": "poor",
+    "total_issues": 10
+  },
+  "recommendations": [
+    {
+      "component": "routing_system",
+      "optimization_type": "intelligent_routing",
+      "current_value": 212.0285302720207,
+      "recommended_value": 279.79575955532493,
+      "expected_improvement": 0.3,
+      "confidence_score": 0.9,
+      "implementation_complexity": "medium",
+      "description": "Implement intelligent routing to direct more traffic to high-performing components like rlt_enhanced_compiler"
+    },
+    {
+      "component": "seal_rlt_enhanced_teacher",
+      "optimization_type": "cpu_optimization",
+      "current_value": 82.82467603683472,
+      "recommended_value": 70.0,
+      "expected_improvement": 0.15484124599691984,
+      "confidence_score": 0.7,
+      "implementation_complexity": "medium",
+      "description": "Optimize CPU usage for seal_rlt_enhanced_teacher from 82.8% to 70.0%"
+    },
+    {
+      "component": "distributed_rlt_network",
+      "optimization_type": "cpu_optimization",
+      "current_value": 79.82467412948608,
+      "recommended_value": 70.0,
+      "expected_improvement": 0.1230781614410248,
+      "confidence_score": 0.7,
+      "implementation_complexity": "medium",
+      "description": "Optimize CPU usage for distributed_rlt_network from 79.8% to 70.0%"
+    },
+    {
+      "component": "rlt_quality_monitor",
+      "optimization_type": "cpu_optimization",
+      "current_value": 76.82467293739319,
+      "recommended_value": 70.0,
+      "expected_improvement": 0.08883438974032244,
+      "confidence_score": 0.7,
+      "implementation_complexity": "medium",
+      "description": "Optimize CPU usage for rlt_quality_monitor from 76.8% to 70.0%"
+    },
+    {
+      "component": "rlt_dense_reward_trainer",
+      "optimization_type": "cpu_optimization",
+      "current_value": 73.82467103004456,
+      "recommended_value": 70.0,
+      "expected_improvement": 0.05180749167833098,
+      "confidence_score": 0.7,
+      "implementation_complexity": "medium",
+      "description": "Optimize CPU usage for rlt_dense_reward_trainer from 73.8% to 70.0%"
+    },
+    {
+      "component": "rlt_claims_validator",
+      "optimization_type": "cpu_optimization",
+      "current_value": 70.82466888427734,
+      "recommended_value": 70.0,
+      "expected_improvement": 0.011643808538304587,
+      "confidence_score": 0.7,
+      "implementation_complexity": "medium",
+      "description": "Optimize CPU usage for rlt_claims_validator from 70.8% to 70.0%"
+    }
+  ],
+  "impact_analysis": {
+    "total_recommendations": 6,
+    "expected_improvements": {
+      "intelligent_routing": {
+        "average_improvement": 0.3,
+        "max_improvement": 0.3,
+        "recommendations_count": 1
+      },
+      "cpu_optimization": {
+        "average_improvement": 0.08604101947898053,
+        "max_improvement": 0.15484124599691984,
+        "recommendations_count": 5
+      }
+    },
+    "implementation_effort": {
+      "low": 0,
+      "medium": 6,
+      "high": 0
+    },
+    "projected_performance_gains": {
+      "latency_improvement_percent": 0.0,
+      "throughput_improvement_percent": 0.0,
+      "resource_efficiency_improvement_percent": 30,
+      "overall_performance_improvement_percent": 10.038118939214396
+    },
+    "risk_assessment": {
+      "overall_risk": "low",
+      "high_complexity_recommendations": 0,
+      "low_confidence_recommendations": 0,
+      "risk_factors": []
+    }
+  }
+}

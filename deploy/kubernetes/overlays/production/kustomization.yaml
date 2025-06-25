@@ -1,0 +1,78 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: prsm-production
+
+resources:
+  - ../../base
+  - production-namespace.yaml
+  - production-ingress.yaml
+  - production-certificates.yaml
+  - production-network-policies.yaml
+  - production-service-monitor.yaml
+
+patches:
+  - path: production-patches.yaml
+    target:
+      kind: Deployment
+      name: prsm-api
+  - path: production-patches.yaml
+    target:
+      kind: Deployment
+      name: prsm-worker
+  - path: production-hpa-patches.yaml
+    target:
+      kind: HorizontalPodAutoscaler
+      name: prsm-api-hpa
+
+images:
+  - name: prsm-api
+    newName: registry.prsm.org/prsm-api
+    newTag: v1.0.0
+  - name: prsm-worker
+    newName: registry.prsm.org/prsm-worker
+    newTag: v1.0.0
+
+replicas:
+  - name: prsm-api
+    count: 5
+  - name: prsm-worker
+    count: 3
+  - name: redis
+    count: 3
+  - name: ipfs
+    count: 2
+  - name: postgres
+    count: 1
+
+configMapGenerator:
+  - name: prsm-config
+    env: production.env
+    behavior: replace
+  - name: prometheus-config
+    files:
+      - prometheus.yml
+    behavior: replace
+
+secretGenerator:
+  - name: prsm-secrets
+    env: production-secrets.env
+    type: Opaque
+    behavior: replace
+  - name: tls-certificates
+    files:
+      - tls.crt
+      - tls.key
+    type: kubernetes.io/tls
+    behavior: replace
+
+commonLabels:
+  environment: production
+  app.kubernetes.io/instance: prsm-production
+  app.kubernetes.io/version: v1.0.0
+
+commonAnnotations:
+  deployment.kubernetes.io/environment: production
+  deployment.kubernetes.io/managed-by: kustomize
+  deployment.kubernetes.io/revision: "1"
+  contact: team@prsm.org

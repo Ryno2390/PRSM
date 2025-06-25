@@ -1,0 +1,107 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "removeComments": false,
+    "preserveConstEnums": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
+    
+    // Strict checks
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": false,
+    "noImplicitOverride": true,
+    "allowUnusedLabels": false,
+    "allowUnreachableCode": false,
+    
+    // Module resolution
+    "moduleDetection": "auto",
+    "allowImportingTsExtensions": false,
+    "allowArbitraryExtensions": false,
+    "customConditions": [],
+    "resolveJsonModule": true,
+    "allowJs": false,
+    "checkJs": false,
+    
+    // Emit
+    "noEmit": false,
+    "importHelpers": true,
+    "downlevelIteration": true,
+    "sourceRoot": "",
+    "mapRoot": "",
+    "inlineSourceMap": false,
+    "inlineSources": false,
+    "emitDeclarationOnly": false,
+    "newLine": "lf",
+    "stripInternal": true,
+    
+    // Interop constraints
+    "isolatedModules": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "preserveSymlinks": false,
+    "forceConsistentCasingInFileNames": true,
+    
+    // Language and environment
+    "experimentalDecorators": false,
+    "emitDecoratorMetadata": false,
+    "useDefineForClassFields": true,
+    
+    // Output formatting
+    "noErrorTruncation": true,
+    "preserveWatchOutput": true,
+    "pretty": true,
+    
+    // Completeness
+    "skipDefaultLibCheck": false,
+    "skipLibCheck": true,
+    
+    // Path mapping
+    "baseUrl": "./",
+    "paths": {
+      "@/*": ["src/*"],
+      "@/types": ["src/types"],
+      "@/errors": ["src/errors"],
+      "@/auth": ["src/auth"],
+      "@/client": ["src/client"]
+    },
+    
+    // Type checking
+    "types": ["node", "jest"],
+    "typeRoots": ["./node_modules/@types", "./types"]
+  },
+  "include": [
+    "src/**/*",
+    "types/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "coverage",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "tests/**/*",
+    "examples/**/*",
+    "docs/**/*"
+  ],
+  "ts-node": {
+    "esm": true,
+    "experimentalSpecifierResolution": "node"
+  }
+}

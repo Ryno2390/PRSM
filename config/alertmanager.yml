@@ -1,0 +1,295 @@
+global:
+  smtp_smarthost: 'smtp.gmail.com:587'
+  smtp_from: 'alerts@prsm.org'
+  smtp_auth_username: 'alerts@prsm.org'
+  smtp_auth_password: '$SMTP_PASSWORD'
+  smtp_require_tls: true
+  slack_api_url: '$SLACK_WEBHOOK_URL'
+  resolve_timeout: 5m
+
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'web.hook'
+  routes:
+  # Critical alerts - immediate notification
+  - match:
+      severity: critical
+    receiver: 'pager-duty'
+    group_wait: 0s
+    repeat_interval: 5m
+    continue: true
+  
+  # High severity alerts - notify dev team
+  - match:
+      severity: warning
+    receiver: 'dev-team'
+    group_wait: 30s
+    repeat_interval: 30m
+    continue: true
+  
+  # Security alerts - immediate security team notification
+  - match:
+      category: security
+    receiver: 'security-team'
+    group_wait: 0s
+    repeat_interval: 15m
+    continue: true
+  
+  # Database alerts
+  - match:
+      service: database
+    receiver: 'database-team'
+    group_wait: 1m
+    repeat_interval: 1h
+  
+  # FTNS/Web3 alerts
+  - match:
+      service: web3
+    receiver: 'blockchain-team'
+    group_wait: 30s
+    repeat_interval: 20m
+  
+  # Performance alerts
+  - match:
+      category: performance
+    receiver: 'performance-team'
+    group_wait: 2m
+    repeat_interval: 1h
+
+inhibit_rules:
+- source_match:
+    severity: 'critical'
+  target_match:
+    severity: 'warning'
+  equal: ['alertname', 'instance']
+
+- source_match:
+    alertname: 'NodeDown'
+  target_match_re:
+    alertname: '^(NodeExporter|Node).*'
+  equal: ['instance']
+
+receivers:
+- name: 'web.hook'
+  webhook_configs:
+  - url: 'http://webhook-service:5000/alerts'
+    send_resolved: true
+    http_config:
+      basic_auth:
+        username: 'alertmanager'
+        password: '$WEBHOOK_PASSWORD'
+
+- name: 'pager-duty'
+  pagerduty_configs:
+  - routing_key: '$PAGERDUTY_INTEGRATION_KEY'
+    description: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+    severity: '{{ .GroupLabels.severity }}'
+    client: 'PRSM Alertmanager'
+    client_url: 'https://grafana.prsm.org'
+    details:
+      environment: '{{ .GroupLabels.environment }}'
+      cluster: '{{ .GroupLabels.cluster }}'
+      service: '{{ .GroupLabels.service }}'
+      runbook: '{{ .CommonAnnotations.runbook_url }}'
+  
+  slack_configs:
+  - api_url: '$SLACK_WEBHOOK_URL'
+    channel: '#alerts-critical'
+    username: 'PRSM AlertManager'
+    icon_emoji: ':rotating_light:'
+    title: 'CRITICAL: {{ .GroupLabels.alertname }}'
+    text: |
+      *Environment:* {{ .GroupLabels.environment | default "unknown" }}
+      *Severity:* {{ .GroupLabels.severity }}
+      *Summary:* {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+      *Details:* {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+      *Runbook:* {{ .CommonAnnotations.runbook_url | default "https://docs.prsm.org/runbooks" }}
+    send_resolved: true
+
+- name: 'dev-team'
+  email_configs:
+  - to: 'dev-team@prsm.org'
+    subject: '[{{ .Status | toUpper }}] PRSM Alert: {{ .GroupLabels.alertname }}'
+    body: |
+      {{ range .Alerts }}
+      Alert: {{ .Annotations.summary }}
+      Description: {{ .Annotations.description }}
+      Environment: {{ .Labels.environment }}
+      Service: {{ .Labels.service }}
+      Severity: {{ .Labels.severity }}
+      Started: {{ .StartsAt }}
+      {{ if .EndsAt }}Ended: {{ .EndsAt }}{{ end }}
+      Runbook: {{ .Annotations.runbook_url }}
+      Grafana: https://grafana.prsm.org/d/overview/prsm-overview
+      {{ end }}
+  
+  slack_configs:
+  - api_url: '$SLACK_WEBHOOK_URL'
+    channel: '#alerts-dev'
+    username: 'PRSM AlertManager'
+    icon_emoji: ':warning:'
+    title: '{{ .Status | toUpper }}: {{ .GroupLabels.alertname }}'
+    text: |
+      *Environment:* {{ .GroupLabels.environment | default "unknown" }}
+      *Service:* {{ .GroupLabels.service | default "unknown" }}
+      *Summary:* {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+      {{ if eq .Status "resolved" }}:white_check_mark: *Resolved*{{ end }}
+    send_resolved: true
+
+- name: 'security-team'
+  email_configs:
+  - to: 'security@prsm.org'
+    subject: '[SECURITY ALERT] {{ .GroupLabels.alertname }}'
+    body: |
+      SECURITY INCIDENT DETECTED
+      ========================
+      
+      {{ range .Alerts }}
+      Alert: {{ .Annotations.summary }}
+      Description: {{ .Annotations.description }}
+      Threat Level: {{ .Labels.threat_level | default "unknown" }}
+      Source IP: {{ .Labels.source_ip | default "unknown" }}
+      User: {{ .Labels.user | default "unknown" }}
+      Environment: {{ .Labels.environment }}
+      Started: {{ .StartsAt }}
+      
+      Immediate Actions Required:
+      1. Review security logs at https://grafana.prsm.org/d/security/security-dashboard
+      2. Check incident response playbook
+      3. Assess if immediate system isolation is needed
+      
+      Runbook: {{ .Annotations.runbook_url }}
+      {{ end }}
+  
+  slack_configs:
+  - api_url: '$SLACK_WEBHOOK_URL'
+    channel: '#security-alerts'
+    username: 'PRSM Security'
+    icon_emoji: ':shield:'
+    title: ':rotating_light: SECURITY ALERT: {{ .GroupLabels.alertname }}'
+    text: |
+      *Threat Level:* {{ .GroupLabels.threat_level | default "unknown" }}
+      *Environment:* {{ .GroupLabels.environment | default "unknown" }}
+      *Summary:* {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+      *Source IP:* {{ .GroupLabels.source_ip | default "unknown" }}
+      *Action Required:* Immediate security team response
+    send_resolved: true
+
+- name: 'database-team'
+  email_configs:
+  - to: 'database@prsm.org'
+    subject: '[DATABASE] {{ .GroupLabels.alertname }}'
+    body: |
+      Database Alert Triggered
+      =======================
+      
+      {{ range .Alerts }}
+      Alert: {{ .Annotations.summary }}
+      Description: {{ .Annotations.description }}
+      Database: {{ .Labels.database | default "unknown" }}
+      Instance: {{ .Labels.instance }}
+      Environment: {{ .Labels.environment }}
+      Started: {{ .StartsAt }}
+      
+      Database Metrics:
+      - Connection Count: {{ .Labels.connection_count | default "unknown" }}
+      - Query Performance: {{ .Labels.query_performance | default "unknown" }}
+      - Disk Usage: {{ .Labels.disk_usage | default "unknown" }}
+      
+      Runbook: {{ .Annotations.runbook_url }}
+      {{ end }}
+  
+  slack_configs:
+  - api_url: '$SLACK_WEBHOOK_URL'
+    channel: '#database-alerts'
+    username: 'PRSM Database'
+    icon_emoji: ':database:'
+    title: 'DATABASE: {{ .GroupLabels.alertname }}'
+    text: |
+      *Database:* {{ .GroupLabels.database | default "unknown" }}
+      *Environment:* {{ .GroupLabels.environment | default "unknown" }}
+      *Summary:* {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+    send_resolved: true
+
+- name: 'blockchain-team'
+  email_configs:
+  - to: 'blockchain@prsm.org'
+    subject: '[WEB3/FTNS] {{ .GroupLabels.alertname }}'
+    body: |
+      Web3/Blockchain Alert
+      ====================
+      
+      {{ range .Alerts }}
+      Alert: {{ .Annotations.summary }}
+      Description: {{ .Annotations.description }}
+      Network: {{ .Labels.network | default "unknown" }}
+      Contract: {{ .Labels.contract | default "unknown" }}
+      Transaction: {{ .Labels.transaction_hash | default "unknown" }}
+      Environment: {{ .Labels.environment }}
+      Started: {{ .StartsAt }}
+      
+      Blockchain Metrics:
+      - Gas Price: {{ .Labels.gas_price | default "unknown" }}
+      - Block Number: {{ .Labels.block_number | default "unknown" }}
+      - Network Health: {{ .Labels.network_health | default "unknown" }}
+      
+      Runbook: {{ .Annotations.runbook_url }}
+      {{ end }}
+  
+  slack_configs:
+  - api_url: '$SLACK_WEBHOOK_URL'
+    channel: '#web3-alerts'
+    username: 'PRSM Web3'
+    icon_emoji: ':link:'
+    title: 'WEB3: {{ .GroupLabels.alertname }}'
+    text: |
+      *Network:* {{ .GroupLabels.network | default "unknown" }}
+      *Contract:* {{ .GroupLabels.contract | default "unknown" }}
+      *Environment:* {{ .GroupLabels.environment | default "unknown" }}
+      *Summary:* {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+    send_resolved: true
+
+- name: 'performance-team'
+  email_configs:
+  - to: 'performance@prsm.org'
+    subject: '[PERFORMANCE] {{ .GroupLabels.alertname }}'
+    body: |
+      Performance Alert
+      ================
+      
+      {{ range .Alerts }}
+      Alert: {{ .Annotations.summary }}
+      Description: {{ .Annotations.description }}
+      Service: {{ .Labels.service }}
+      Metric: {{ .Labels.metric_name | default "unknown" }}
+      Current Value: {{ .Labels.current_value | default "unknown" }}
+      Threshold: {{ .Labels.threshold | default "unknown" }}
+      Environment: {{ .Labels.environment }}
+      Started: {{ .StartsAt }}
+      
+      Performance Impact:
+      - Response Time: {{ .Labels.response_time | default "unknown" }}
+      - Throughput: {{ .Labels.throughput | default "unknown" }}
+      - Error Rate: {{ .Labels.error_rate | default "unknown" }}
+      
+      Runbook: {{ .Annotations.runbook_url }}
+      {{ end }}
+  
+  slack_configs:
+  - api_url: '$SLACK_WEBHOOK_URL'
+    channel: '#performance-alerts'
+    username: 'PRSM Performance'
+    icon_emoji: ':chart_with_upwards_trend:'
+    title: 'PERFORMANCE: {{ .GroupLabels.alertname }}'
+    text: |
+      *Service:* {{ .GroupLabels.service | default "unknown" }}
+      *Metric:* {{ .GroupLabels.metric_name | default "unknown" }}
+      *Environment:* {{ .GroupLabels.environment | default "unknown" }}
+      *Summary:* {{ range .Alerts }}{{ .Annotations.summary }}{{ end }}
+    send_resolved: true

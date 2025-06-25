@@ -1,0 +1,401 @@
+# PRSM Enhanced Observability Stack
+# Complete monitoring, logging, and tracing for Phase 1 validation
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.observability.yml up
+
+version: '3.8'
+
+services:
+  # ===================================
+  # Distributed Tracing with Jaeger
+  # ===================================
+  jaeger:
+    image: jaegertracing/all-in-one:1.50
+    container_name: prsm-jaeger
+    restart: unless-stopped
+    ports:
+      - "14268:14268"  # Collector HTTP
+      - "16686:16686"  # Query UI
+      - "14250:14250"  # Collector gRPC
+    environment:
+      COLLECTOR_OTLP_ENABLED: true
+      COLLECTOR_ZIPKIN_HOST_PORT: 9411
+      MEMORY_MAX_TRACES: 100000
+      QUERY_MAX_CLOCK_SKEW_ADJUSTMENT: 1s
+    networks:
+      - prsm-network
+    volumes:
+      - jaeger-data:/badger
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # ===================================
+  # Log Aggregation with Loki
+  # ===================================
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: prsm-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+      - ./config/loki-config.yml:/etc/loki/local-config.yaml:ro
+    networks:
+      - prsm-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # ===================================
+  # Log Collection with Promtail
+  # ===================================
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: prsm-promtail
+    restart: unless-stopped
+    volumes:
+      - /var/log:/var/log:ro
+      - prsm-logs:/app/logs:ro
+      - ./config/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - prsm-network
+    depends_on:
+      - loki
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # ===================================
+  # High-Performance Tracing with Tempo
+  # ===================================
+  tempo:
+    image: grafana/tempo:2.2.0
+    container_name: prsm-tempo
+    restart: unless-stopped
+    ports:
+      - "3200:3200"   # Tempo query frontend
+      - "14268:14268" # Jaeger ingest
+      - "9095:9095"   # Tempo gRPC
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - tempo-data:/tmp/tempo
+      - ./config/tempo-config.yml:/etc/tempo.yaml:ro
+    networks:
+      - prsm-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # ===================================
+  # Enhanced Prometheus with Custom Metrics
+  # ===================================
+  prometheus-enhanced:
+    image: prom/prometheus:v2.47.0
+    container_name: prsm-prometheus-enhanced
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus-enhanced-data:/prometheus
+      - ./config/prometheus-enhanced.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - ./config/prometheus/recording_rules.yml:/etc/prometheus/recording_rules.yml:ro
+      - ./config/prometheus/prsm_rules.yml:/etc/prometheus/prsm_rules.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=50GB'
+      - '--query.max-concurrency=20'
+      - '--query.max-samples=50000000'
+    networks:
+      - prsm-network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+
+  # ===================================
+  # Enhanced Grafana with Custom Dashboards
+  # ===================================
+  grafana-enhanced:
+    image: grafana/grafana:10.1.0
+    container_name: prsm-grafana-enhanced
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-prsm_admin}
+      GF_FEATURE_TOGGLES_ENABLE: tracing
+      GF_INSTALL_PLUGINS: grafana-piechart-panel,grafana-worldmap-panel,grafana-clock-panel,grafana-simple-json-datasource
+      GF_ANALYTICS_REPORTING_ENABLED: false
+      GF_ANALYTICS_CHECK_FOR_UPDATES: false
+      GF_USERS_ALLOW_SIGN_UP: false
+      GF_LOG_LEVEL: info
+    volumes:
+      - grafana-enhanced-data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./config/grafana/custom-dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - prsm-network
+    depends_on:
+      - prometheus-enhanced
+      - loki
+      - tempo
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # ===================================
+  # Application Performance Monitoring (APM)
+  # ===================================
+  elastic-apm:
+    image: docker.elastic.co/apm/apm-server:8.10.0
+    container_name: prsm-apm
+    restart: unless-stopped
+    ports:
+      - "8200:8200"
+    environment:
+      - output.elasticsearch.hosts=["elasticsearch:9200"]
+      - apm-server.rum.enabled=true
+      - setup.kibana.host=kibana:5601
+      - apm-server.kibana.enabled=true
+      - apm-server.kibana.host=kibana:5601
+    command: >
+      apm-server -e
+        -E apm-server.rum.enabled=true
+        -E apm-server.host="0.0.0.0:8200"
+        -E apm-server.read_timeout=1m
+        -E apm-server.shutdown_timeout=2m
+        -E apm-server.write_timeout=1m
+        -E setup.kibana.host=kibana:5601
+        -E output.elasticsearch.hosts=["elasticsearch:9200"]
+    networks:
+      - prsm-network
+    depends_on:
+      - elasticsearch
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # ===================================
+  # Elasticsearch for APM and Logging
+  # ===================================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0
+    container_name: prsm-elasticsearch
+    restart: unless-stopped
+    ports:
+      - "9200:9200"
+    environment:
+      discovery.type: single-node
+      ES_JAVA_OPTS: "-Xms1g -Xmx1g"
+      xpack.security.enabled: false
+      xpack.monitoring.collection.enabled: true
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - prsm-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # ===================================
+  # Kibana for Log Analysis
+  # ===================================
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.10.0
+    container_name: prsm-kibana
+    restart: unless-stopped
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: elastic
+      ELASTICSEARCH_PASSWORD: ${ELASTIC_PASSWORD:-prsm_elastic}
+    networks:
+      - prsm-network
+    depends_on:
+      - elasticsearch
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # ===================================
+  # Node Exporter for System Metrics
+  # ===================================
+  node-exporter:
+    image: prom/node-exporter:v1.6.1
+    container_name: prsm-node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - prsm-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # ===================================
+  # cAdvisor for Container Metrics
+  # ===================================
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.0
+    container_name: prsm-cadvisor
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+    devices:
+      - /dev/kmsg
+    networks:
+      - prsm-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # ===================================
+  # PRSM Custom Metrics Exporter
+  # ===================================
+  prsm-metrics-exporter:
+    build:
+      context: .
+      dockerfile: Dockerfile.metrics-exporter
+    container_name: prsm-metrics-exporter
+    restart: unless-stopped
+    ports:
+      - "9091:9091"
+    environment:
+      PRSM_API_URL: http://prsm-api:8000
+      METRICS_PORT: 9091
+      COLLECTION_INTERVAL: 15s
+      DATABASE_URL: postgresql://prsm:${POSTGRES_PASSWORD:-prsm_secure_pass}@postgres:5432/prsm
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./config/metrics-exporter.yml:/app/config.yml:ro
+    networks:
+      - prsm-network
+    depends_on:
+      - prsm-api
+      - postgres
+      - redis
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # ===================================
+  # Performance Testing Metrics Collector
+  # ===================================
+  performance-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile.performance-collector
+    container_name: prsm-performance-collector
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+    environment:
+      METRICS_PORT: 9092
+      COLLECTION_INTERVAL: 5s
+      TARGET_URL: http://prsm-api:8000
+    volumes:
+      - ./config/performance-collector.yml:/app/config.yml:ro
+    networks:
+      - prsm-network
+    profiles:
+      - testing  # Only run during performance testing
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+# ===================================
+# Enhanced Volume Configuration
+# ===================================
+volumes:
+  # Monitoring data
+  prometheus-enhanced-data:
+    driver: local
+    name: prsm-prometheus-enhanced-data
+  grafana-enhanced-data:
+    driver: local
+    name: prsm-grafana-enhanced-data
+  
+  # Tracing data
+  jaeger-data:
+    driver: local
+    name: prsm-jaeger-data
+  tempo-data:
+    driver: local
+    name: prsm-tempo-data
+  
+  # Logging data
+  loki-data:
+    driver: local
+    name: prsm-loki-data
+  
+  # APM and search
+  elasticsearch-data:
+    driver: local
+    name: prsm-elasticsearch-data

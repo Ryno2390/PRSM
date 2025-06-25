@@ -1,0 +1,127 @@
+# PRSM Developer Onboarding Docker Compose
+# Minimal, fast setup for new developers getting started
+# Usage: docker-compose -f docker-compose.onboarding.yml up
+
+version: '3.8'
+
+services:
+  # ===================================
+  # Essential Services Only
+  # Fast startup, minimal requirements
+  # ===================================
+
+  # Redis for caching and task queues
+  redis:
+    image: redis:7-alpine
+    container_name: prsm-onboarding-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-onboarding-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - prsm-onboarding
+
+  # IPFS for distributed storage
+  ipfs:
+    image: ipfs/kubo:latest
+    container_name: prsm-onboarding-ipfs
+    restart: unless-stopped
+    ports:
+      - "5001:5001"     # API port (main one used by PRSM)
+      - "8080:8080"     # Gateway port (for web interface)
+    volumes:
+      - ipfs-onboarding-data:/data/ipfs
+    environment:
+      IPFS_PROFILE: server
+      IPFS_PATH: /data/ipfs
+    networks:
+      - prsm-onboarding
+    command: >
+      sh -c "
+        ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin '[\"*\"]' &&
+        ipfs config --json API.HTTPHeaders.Access-Control-Allow-Methods '[\"PUT\", \"POST\", \"GET\"]' &&
+        ipfs daemon --migrate=true
+      "
+
+  # ===================================
+  # Optional Development Tools
+  # Enable with: --profile tools
+  # ===================================
+
+  # SQLite Browser for database inspection
+  sqlitebrowser:
+    image: lscr.io/linuxserver/sqlitebrowser:latest
+    container_name: prsm-sqlite-browser
+    restart: unless-stopped
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: UTC
+    ports:
+      - "3001:3000"
+    volumes:
+      - .:/data
+    networks:
+      - prsm-onboarding
+    profiles:
+      - tools
+
+  # Redis Commander for Redis inspection
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: prsm-redis-browser
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8082:8081"
+    networks:
+      - prsm-onboarding
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles:
+      - tools
+
+  # IPFS Web UI for file management
+  ipfs-webui:
+    image: nginx:alpine
+    container_name: prsm-ipfs-webui-proxy
+    restart: unless-stopped
+    ports:
+      - "5002:80"
+    volumes:
+      - ./config/nginx/ipfs-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - prsm-onboarding
+    depends_on:
+      - ipfs
+    profiles:
+      - tools
+
+# ===================================
+# Networks
+# ===================================
+networks:
+  prsm-onboarding:
+    driver: bridge
+    name: prsm-onboarding-network
+
+# ===================================
+# Volumes
+# ===================================
+volumes:
+  redis-onboarding-data:
+    driver: local
+    name: prsm-onboarding-redis
+  ipfs-onboarding-data:
+    driver: local
+    name: prsm-onboarding-ipfs

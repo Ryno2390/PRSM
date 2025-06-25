@@ -1,0 +1,83 @@
+# Vertical Pod Autoscaler for PRSM components
+# Automatically adjusts resource requests based on usage patterns
+
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: prsm-api-vpa
+  namespace: prsm-system
+  labels:
+    app.kubernetes.io/name: prsm-api
+    app.kubernetes.io/component: autoscaling
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: prsm-api
+  updatePolicy:
+    updateMode: "Auto"  # Can be "Off", "Initial", or "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: prsm-api
+      maxAllowed:
+        cpu: 4
+        memory: 8Gi
+      minAllowed:
+        cpu: 100m
+        memory: 256Mi
+      controlledResources: ["cpu", "memory"]
+      controlledValues: RequestsAndLimits
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: prsm-worker-vpa
+  namespace: prsm-system
+  labels:
+    app.kubernetes.io/name: prsm-worker
+    app.kubernetes.io/component: autoscaling
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: prsm-worker
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: prsm-worker
+      maxAllowed:
+        cpu: 2
+        memory: 4Gi
+      minAllowed:
+        cpu: 200m
+        memory: 512Mi
+      controlledResources: ["cpu", "memory"]
+      controlledValues: RequestsAndLimits
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: redis-vpa
+  namespace: prsm-system
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: autoscaling
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: redis
+  updatePolicy:
+    updateMode: "Initial"  # Only set recommendations initially
+  resourcePolicy:
+    containerPolicies:
+    - containerName: redis
+      maxAllowed:
+        cpu: 1
+        memory: 2Gi
+      minAllowed:
+        cpu: 100m
+        memory: 128Mi
+      controlledResources: ["memory"]  # Only control memory for Redis
+      controlledValues: RequestsAndLimits

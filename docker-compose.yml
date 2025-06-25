@@ -1,0 +1,375 @@
+# PRSM Production Docker Compose Configuration
+# Complete distributed system orchestration
+
+version: '3.8'
+
+# ===================================
+# Service Definitions
+# ===================================
+services:
+  
+  # ===================================
+  # Core PRSM API Service
+  # ===================================
+  prsm-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      args:
+        BUILD_ENV: production
+        PRSM_VERSION: 0.1.0
+        BUILDKIT_INLINE_CACHE: 1
+      cache_from:
+        - prsm:latest
+    container_name: prsm-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Database configuration
+      DATABASE_URL: postgresql://prsm:${POSTGRES_PASSWORD:-prsm_secure_pass}@postgres:5432/prsm
+      REDIS_URL: redis://redis:6379/0
+      
+      # PRSM configuration
+      PRSM_ENV: production
+      PRSM_LOG_LEVEL: INFO
+      PRSM_PORT: 8000
+      PRSM_WORKERS: ${PRSM_WORKERS:-4}
+      PRSM_MAX_WORKERS: ${PRSM_MAX_WORKERS:-8}
+      PRSM_WORKER_CONNECTIONS: ${PRSM_WORKER_CONNECTIONS:-1000}
+      
+      # FTNS and tokenomics
+      FTNS_ENABLED: true
+      FTNS_INITIAL_GRANT: 1000
+      
+      # API Keys (loaded from .env file)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      HUGGINGFACE_API_KEY: ${HUGGINGFACE_API_KEY:-}
+      
+      # Vector databases
+      PINECONE_API_KEY: ${PINECONE_API_KEY:-}
+      WEAVIATE_URL: http://weaviate:8080
+      
+      # Monitoring
+      PROMETHEUS_ENABLED: true
+      METRICS_PORT: 9090
+      
+    volumes:
+      - prsm-logs:/app/logs
+      - prsm-data:/app/data
+      - ./config:/app/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ipfs:
+        condition: service_started
+    networks:
+      - prsm-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prsm-api.rule=Host(`api.prsm.local`)"
+      - "traefik.http.services.prsm-api.loadbalancer.server.port=8000"
+    healthcheck:
+      test: ["CMD", "python", "/app/healthcheck.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ===================================
+  # PostgreSQL Database
+  # ===================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: prsm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: prsm
+      POSTGRES_USER: prsm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-prsm_secure_pass}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=en_US.UTF-8"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - prsm-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prsm -d prsm"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c max_worker_processes=8
+      -c max_parallel_workers_per_gather=2
+      -c max_parallel_workers=8
+      -c max_parallel_maintenance_workers=2
+
+  # ===================================
+  # Redis Cache and Task Queue
+  # ===================================
+  redis:
+    image: redis:7-alpine
+    container_name: prsm-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      - prsm-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ===================================
+  # IPFS Distributed Storage
+  # ===================================
+  ipfs:
+    image: ipfs/kubo:latest
+    container_name: prsm-ipfs
+    restart: unless-stopped
+    ports:
+      - "4001:4001"     # P2P port
+      - "5001:5001"     # API port
+      - "8080:8080"     # Gateway port
+    volumes:
+      - ipfs-data:/data/ipfs
+      - ipfs-staging:/export
+    environment:
+      IPFS_PROFILE: server
+      IPFS_PATH: /data/ipfs
+    networks:
+      - prsm-network
+    command: >
+      sh -c "
+        ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin '[\"*\"]' &&
+        ipfs config --json API.HTTPHeaders.Access-Control-Allow-Methods '[\"PUT\", \"POST\", \"GET\"]' &&
+        ipfs daemon --migrate=true --enable-gc
+      "
+
+  # ===================================
+  # Weaviate Vector Database
+  # ===================================
+  weaviate:
+    image: semitechnologies/weaviate:latest
+    container_name: prsm-weaviate
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
+      PERSISTENCE_DATA_PATH: '/var/lib/weaviate'
+      DEFAULT_VECTORIZER_MODULE: 'none'
+      ENABLE_MODULES: 'text2vec-openai,text2vec-cohere,text2vec-huggingface,ref2vec-centroid,generative-openai,qna-openai'
+      CLUSTER_HOSTNAME: 'node1'
+    volumes:
+      - weaviate-data:/var/lib/weaviate
+    networks:
+      - prsm-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/.well-known/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ===================================
+  # Prometheus Monitoring
+  # ===================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prsm-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus-data:/prometheus
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus/alert_rules.yml:/etc/prometheus/prometheus/alert_rules.yml:ro
+      - ./config/prometheus/recording_rules.yml:/etc/prometheus/prometheus/recording_rules.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--storage.tsdb.retention.time=30d'
+    networks:
+      - prsm-network
+    depends_on:
+      - prsm-api
+
+  # ===================================
+  # Grafana Dashboards
+  # ===================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: prsm-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-prsm_admin}
+      GF_INSTALL_PLUGINS: grafana-piechart-panel,grafana-worldmap-panel
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - prsm-network
+    depends_on:
+      - prometheus
+
+  # ===================================
+  # Alertmanager for Notifications
+  # ===================================
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: prsm-alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - alertmanager-data:/alertmanager
+      - ./config/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+      - '--log.level=info'
+    networks:
+      - prsm-network
+    depends_on:
+      - prometheus
+    environment:
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      PAGERDUTY_INTEGRATION_KEY: ${PAGERDUTY_INTEGRATION_KEY:-}
+      WEBHOOK_PASSWORD: ${WEBHOOK_PASSWORD:-alertmanager_webhook}
+
+  # ===================================
+  # ChromaDB Vector Database (Alternative)
+  # ===================================
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: prsm-chromadb
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    volumes:
+      - chromadb-data:/chroma/chroma
+    environment:
+      CHROMA_SERVER_HOST: 0.0.0.0
+      CHROMA_SERVER_HTTP_PORT: 8000
+    networks:
+      - prsm-network
+    profiles:
+      - chromadb  # Optional service, enable with --profile chromadb
+
+  # ===================================
+  # Nginx Reverse Proxy & Load Balancer
+  # ===================================
+  nginx:
+    image: nginx:alpine
+    container_name: prsm-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/nginx/sites-available:/etc/nginx/sites-available:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - nginx-logs:/var/log/nginx
+    networks:
+      - prsm-network
+    depends_on:
+      - prsm-api
+    profiles:
+      - proxy  # Optional service, enable with --profile proxy
+
+# ===================================
+# Network Configuration
+# ===================================
+networks:
+  prsm-network:
+    driver: bridge
+    name: prsm-network
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ===================================
+# Volume Definitions
+# ===================================
+volumes:
+  # PRSM Application Data
+  prsm-logs:
+    driver: local
+    name: prsm-logs
+  prsm-data:
+    driver: local
+    name: prsm-data
+  
+  # Database Volumes
+  postgres-data:
+    driver: local
+    name: prsm-postgres-data
+  redis-data:
+    driver: local
+    name: prsm-redis-data
+  
+  # IPFS Storage
+  ipfs-data:
+    driver: local
+    name: prsm-ipfs-data
+  ipfs-staging:
+    driver: local
+    name: prsm-ipfs-staging
+  
+  # Vector Databases
+  weaviate-data:
+    driver: local
+    name: prsm-weaviate-data
+  chromadb-data:
+    driver: local
+    name: prsm-chromadb-data
+  
+  # Monitoring
+  prometheus-data:
+    driver: local
+    name: prsm-prometheus-data
+  grafana-data:
+    driver: local
+    name: prsm-grafana-data
+  alertmanager-data:
+    driver: local
+    name: prsm-alertmanager-data
+  
+  # Nginx
+  nginx-logs:
+    driver: local
+    name: prsm-nginx-logs

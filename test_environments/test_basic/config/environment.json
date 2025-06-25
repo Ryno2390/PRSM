@@ -1,0 +1,11 @@
+{
+  "environment_id": "test_basic",
+  "database_url": "sqlite:////Users/ryneschultz/Documents/GitHub/PRSM/test_environments/test_basic/data/database/test.db",
+  "redis_url": "redis://localhost:6379/1",
+  "vector_db_path": "/Users/ryneschultz/Documents/GitHub/PRSM/test_environments/test_basic/data/vector_db",
+  "ipfs_data_path": "/Users/ryneschultz/Documents/GitHub/PRSM/test_environments/test_basic/data/ipfs",
+  "log_level": "DEBUG",
+  "test_mode": true,
+  "persistent_data": true,
+  "created_at": "2025-06-24T20:22:58.008024+00:00"
+}

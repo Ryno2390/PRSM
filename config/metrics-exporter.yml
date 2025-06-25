@@ -1,0 +1,29 @@
+# PRSM Metrics Exporter Configuration
+
+# Collection settings
+collection_interval: 15  # seconds
+metrics_port: 9091
+
+# PRSM API endpoint
+prsm_api_url: "http://prsm-api:8000"
+
+# Database configuration
+database_url: "${DATABASE_URL}"
+redis_url: "${REDIS_URL}"
+
+# Metrics to collect
+metrics:
+  system: true
+  tokenomics: true
+  agents: true
+  federation: true
+  safety: true
+
+# HTTP client settings
+http_timeout: 10
+max_retries: 3
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "json"

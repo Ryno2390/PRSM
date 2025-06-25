@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prsm-system
+  labels:
+    app.kubernetes.io/name: prsm
+    app.kubernetes.io/part-of: prsm-platform
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+  annotations:
+    description: "PRSM - Protocol for Recursive Scientific Modeling"
+    contact: "team@prsm.org"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prsm-monitoring
+  labels:
+    app.kubernetes.io/name: prsm-monitoring
+    app.kubernetes.io/part-of: prsm-platform
+  annotations:
+    description: "PRSM Monitoring and Observability"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prsm-ingress
+  labels:
+    app.kubernetes.io/name: prsm-ingress
+    app.kubernetes.io/part-of: prsm-platform
+  annotations:
+    description: "PRSM Ingress and Load Balancing"
