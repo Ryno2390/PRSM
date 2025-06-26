@@ -170,24 +170,64 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Conversation History Sidebar Toggle ---
     const toggleHistorySidebar = (hide) => {
-        if (!historySidebar) return;
+        if (!historySidebar) {
+            console.error('History sidebar element not found');
+            return;
+        }
+        
         const shouldHide = hide ?? !historySidebar.classList.contains('hidden');
+        console.log(`Toggling history sidebar. Should hide: ${shouldHide}`);
         
         // Toggle the hidden class
-        // console.log(`Toggling history sidebar. Should hide: ${shouldHide}`); // Removed log
         historySidebar.classList.toggle('hidden', shouldHide);
         
-        // Update the toggle button icon/title
+        // Update the toggle button icon and title
         if (historyToggleBtn) {
-            historyToggleBtn.title = shouldHide ? "Show History" : "Hide History";
+            const icon = historyToggleBtn.querySelector('i');
+            if (icon) {
+                if (shouldHide) {
+                    icon.className = 'fas fa-chevron-right';
+                    historyToggleBtn.title = 'Show History';
+                    // Add tooltip to the entire sidebar when hidden
+                    historySidebar.title = 'Click to show conversation history';
+                } else {
+                    icon.className = 'fas fa-chevron-left';
+                    historyToggleBtn.title = 'Hide History';
+                    // Remove tooltip when visible
+                    historySidebar.removeAttribute('title');
+                }
+            }
         }
         
         // Save state to localStorage
         localStorage.setItem(historySidebarHiddenKey, shouldHide ? 'true' : 'false');
+        console.log(`History sidebar toggled. Hidden: ${shouldHide}`);
     };
 
     if (historyToggleBtn) {
-        historyToggleBtn.addEventListener('click', () => toggleHistorySidebar());
+        console.log('Attaching history toggle event listener');
+        historyToggleBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('History toggle button clicked');
+            toggleHistorySidebar();
+        });
+    } else {
+        console.error('History toggle button not found');
+    }
+
+    // Make the entire hidden history sidebar clickable
+    if (historySidebar) {
+        historySidebar.addEventListener('click', (e) => {
+            // Only trigger if the sidebar is hidden and click is on header area
+            if (historySidebar.classList.contains('hidden')) {
+                // Make sure we're not clicking on content that might still be visible
+                if (e.target.closest('.history-persistent-header') || e.target === historySidebar) {
+                    console.log('Hidden history sidebar clicked');
+                    toggleHistorySidebar();
+                }
+            }
+        });
     }
 
     // Apply saved history state on load, defaulting to visible
@@ -195,18 +235,33 @@ document.addEventListener('DOMContentLoaded', () => {
     if (historySidebar) {
         // Explicitly set the class based on the saved state or default (visible)
         historySidebar.classList.toggle('hidden', savedHistoryHidden);
+        // Set correct icon based on state
+        if (historyToggleBtn) {
+            const icon = historyToggleBtn.querySelector('i');
+            if (icon) {
+                icon.className = savedHistoryHidden ? 'fas fa-chevron-right' : 'fas fa-chevron-left';
+            }
+            historyToggleBtn.title = savedHistoryHidden ? 'Show History' : 'Hide History';
+        }
+        // Add tooltip to sidebar if it starts hidden
+        if (savedHistoryHidden) {
+            historySidebar.title = 'Click to show conversation history';
+        }
     }
 
 
     // --- Left Panel Toggle (UPDATED to handle history) ---
     const toggleLeftPanel = (collapse) => {
-        if (!leftPanel || !rightPanel || !resizer) return;
+        if (!leftPanel || !rightPanel || !resizer) {
+            console.error('Panel elements not found:', { leftPanel, rightPanel, resizer });
+            return;
+        }
 
         const shouldCollapse = collapse ?? !leftPanel.classList.contains('collapsed');
-        const collapsedWidth = getCssVariable('--left-panel-collapsed-width') || '50px'; // Fallback
+        const collapsedWidth = getCssVariable('--left-panel-collapsed-width') || '45px'; // Fallback
         const resizerWidth = resizer.offsetWidth;
 
-        // console.log(`Toggling left panel. Should collapse: ${shouldCollapse}`); // Removed log
+        console.log(`Toggling left panel. Should collapse: ${shouldCollapse}`);
         if (shouldCollapse) {
             // Store current width before collapsing (if not already collapsed)
             if (!leftPanel.classList.contains('collapsed')) {
@@ -216,19 +271,42 @@ document.addEventListener('DOMContentLoaded', () => {
 
             leftPanel.classList.add('collapsed');
             leftPanel.style.width = collapsedWidth;
+            leftPanel.style.minWidth = collapsedWidth;
+            leftPanel.style.maxWidth = collapsedWidth;
             rightPanel.style.width = `calc(100% - ${collapsedWidth})`;
+            rightPanel.style.minWidth = 'auto';
             resizer.style.display = 'none';
             localStorage.setItem(leftPanelCollapsedKey, 'true');
-            // Ensure history is hidden when main panel collapses
-            if (historySidebar) historySidebar.classList.add('hidden');
+            // Add helpful tooltip for collapsed state
+            leftPanel.title = 'Click to expand conversation panel';
+            // Update toggle button icon
+            if (leftPanelToggleBtn) {
+                const icon = leftPanelToggleBtn.querySelector('i');
+                if (icon) {
+                    icon.className = 'fas fa-chevron-right';
+                }
+            }
+            // Note: History sidebar maintains its own state when main panel collapses
 
         } else {
             leftPanel.classList.remove('collapsed');
             const restoredWidth = localStorage.getItem(leftPanelWidthKey) || '50%';
             leftPanel.style.width = restoredWidth;
+            leftPanel.style.minWidth = '250px'; // Restore minimum width
+            leftPanel.style.maxWidth = 'none'; // Remove max width restriction
             rightPanel.style.width = `calc(100% - ${restoredWidth} - ${resizerWidth}px)`;
+            rightPanel.style.minWidth = '350px'; // Restore minimum width
             resizer.style.display = 'block';
             localStorage.setItem(leftPanelCollapsedKey, 'false');
+            // Remove tooltip when expanded
+            leftPanel.removeAttribute('title');
+            // Update toggle button icon
+            if (leftPanelToggleBtn) {
+                const icon = leftPanelToggleBtn.querySelector('i');
+                if (icon) {
+                    icon.className = 'fas fa-chevron-left';
+                }
+            }
             // Restore history sidebar state (it might have been open before collapsing)
              if (historySidebar && localStorage.getItem(historySidebarHiddenKey) !== 'true') {
                  historySidebar.classList.remove('hidden');
@@ -237,19 +315,52 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     if (leftPanelToggleBtn) {
-        leftPanelToggleBtn.addEventListener('click', () => toggleLeftPanel());
+        console.log('Attaching left panel toggle event listener');
+        leftPanelToggleBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Left panel toggle button clicked');
+            toggleLeftPanel();
+        });
+    } else {
+        console.error('Left panel toggle button not found');
+    }
+
+    // Make the entire collapsed left panel clickable for better UX
+    if (leftPanel) {
+        leftPanel.addEventListener('click', (e) => {
+            // Only trigger if the panel is collapsed and the click is on the panel itself or header
+            if (leftPanel.classList.contains('collapsed')) {
+                // Prevent bubbling if clicked on specific interactive elements
+                if (!e.target.closest('.conversation-main-area')) {
+                    console.log('Collapsed left panel clicked');
+                    toggleLeftPanel();
+                }
+            }
+        });
     }
 
      // Apply saved collapsed state on load (UPDATED)
      const savedCollapsed = localStorage.getItem(leftPanelCollapsedKey) === 'true';
      if (savedCollapsed && leftPanel && rightPanel && resizer) {
-         const collapsedWidth = getCssVariable('--left-panel-collapsed-width') || '50px';
+         const collapsedWidth = getCssVariable('--left-panel-collapsed-width') || '45px';
          leftPanel.classList.add('collapsed');
          leftPanel.style.width = collapsedWidth;
+         leftPanel.style.minWidth = collapsedWidth;
+         leftPanel.style.maxWidth = collapsedWidth;
          rightPanel.style.width = `calc(100% - ${collapsedWidth})`;
+         rightPanel.style.minWidth = 'auto';
          resizer.style.display = 'none';
-         // Ensure history is hidden if main panel starts collapsed
-         if (historySidebar) historySidebar.classList.add('hidden');
+         // Add helpful tooltip for collapsed state
+         leftPanel.title = 'Click to expand conversation panel';
+         // Set correct icon for collapsed state
+         if (leftPanelToggleBtn) {
+             const icon = leftPanelToggleBtn.querySelector('i');
+             if (icon) {
+                 icon.className = 'fas fa-chevron-right';
+             }
+         }
+         // Note: History sidebar maintains its own state independent of main panel
      }
 
 

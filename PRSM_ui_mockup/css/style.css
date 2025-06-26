@@ -21,7 +21,7 @@
     --header-height: 120px; /* Final increase to header height */
     --panel-padding: 20px;
     --panel-header-padding: 15px;
-    --left-panel-collapsed-width: 50px; /* Width needed for the toggle button */
+    --left-panel-collapsed-width: 45px; /* Width needed for the toggle button */
 
     --font-main: 'Inter', sans-serif;
 }
@@ -177,6 +177,7 @@ body {
     transition: width 0.3s ease, padding 0.3s ease, border 0.3s ease, opacity 0.3s ease; /* Added opacity */
     overflow: hidden; /* Hide overflow during transition */
     z-index: 2; /* Reduced z-index to be much lower than the dropdown */
+    position: relative; /* Ensure positioning context for pseudo-elements */
 }
 /* Replace the history sidebar hidden state */
 .conversation-history-sidebar.hidden .history-content {
@@ -185,9 +186,41 @@ body {
 
 /* Keep the sidebar itself visible but narrow when "hidden" */
 .conversation-history-sidebar.hidden {
-    width: 40px; /* Just enough for the header with toggle */
-    min-width: 40px;
-    border-right: 1px solid var(--border-color);
+    display: flex !important; /* Override global .hidden class */
+    width: 45px !important; /* Force narrow width */
+    min-width: 45px !important;
+    max-width: 45px !important;
+    border-right: 2px solid var(--border-color); /* More prominent border like main panel */
+    background-color: var(--bg-tertiary); /* Different background to show it's interactive */
+    cursor: pointer; /* Show it's clickable */
+    transition: all 0.3s ease;
+    flex-direction: column !important; /* Maintain flex layout */
+}
+
+.conversation-history-sidebar.hidden:hover {
+    background-color: var(--border-color);
+    border-right-color: var(--text-secondary);
+}
+
+/* Add visual indicator for hidden history sidebar */
+.conversation-history-sidebar.hidden::after {
+    content: '\f0a4'; /* expand icon */
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--text-secondary);
+    font-size: 0.7em;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+
+.conversation-history-sidebar.hidden:hover::after {
+    opacity: 1;
+    color: var(--text-primary);
 }
 /* Style for the persistent header that stays visible */
 .history-persistent-header {
@@ -198,6 +231,20 @@ body {
     align-items: center;
     background-color: var(--bg-secondary);
     height: 40px; /* Fixed height for the header */
+    cursor: pointer; /* Make header clickable when hidden */
+    transition: background-color 0.2s ease;
+}
+
+/* Make the entire header area clickable when sidebar is hidden */
+.conversation-history-sidebar.hidden .history-persistent-header {
+    justify-content: center; /* Center the toggle button when hidden */
+    cursor: pointer;
+    height: 100%; /* Take full height when hidden for easier clicking */
+    border-bottom: none; /* Remove border when taking full height */
+}
+
+.conversation-history-sidebar.hidden .history-persistent-header:hover {
+    background-color: var(--bg-primary);
 }
 
 /* Style for the content container */
@@ -215,10 +262,23 @@ body {
     padding: 3px; /* Smaller padding */
 }
 
-/* Rotate the icon when sidebar is hidden */
-.conversation-history-sidebar.hidden .history-toggle-btn i {
-    transform: rotate(180deg);
+/* When hidden, make the toggle button more prominent */
+.conversation-history-sidebar.hidden .history-toggle-btn {
+    margin-right: 0; /* Center the button */
+    font-size: 1.2em; /* Larger when hidden */
+    padding: 8px; /* More padding for easier clicking */
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    background-color: transparent;
 }
+
+.conversation-history-sidebar.hidden .history-toggle-btn:hover {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    transform: scale(1.1); /* Slight scale effect on hover */
+}
+
+/* Icons are now handled by JavaScript */
 
 .history-persistent-header h4 {
     font-size: 0.9em;
@@ -876,11 +936,42 @@ button.inline-btn:hover {
 
 /* --- Collapsed State --- */
 .left-panel.collapsed {
-    width: var(--left-panel-collapsed-width);
-    min-width: var(--left-panel-collapsed-width); /* Ensure it doesn't shrink further */
+    width: var(--left-panel-collapsed-width) !important; /* Force the narrow width */
+    min-width: var(--left-panel-collapsed-width) !important; /* Ensure it doesn't shrink further */
+    max-width: var(--left-panel-collapsed-width) !important; /* Prevent expansion */
     padding: 0;
-    border-right: none;
+    border-right: 2px solid var(--border-color); /* More prominent border when collapsed */
     overflow: hidden; /* Keep content hidden */
+    background-color: var(--bg-tertiary); /* Slightly different background to indicate it's interactive */
+    cursor: pointer; /* Show it's clickable */
+    transition: all 0.3s ease;
+}
+
+/* Make the entire collapsed panel clickable and hover-responsive */
+.left-panel.collapsed:hover {
+    background-color: var(--border-color);
+    border-right-color: var(--text-secondary);
+}
+
+/* Add a subtle visual indicator when collapsed */
+.left-panel.collapsed::after {
+    content: '\f0a4'; /* fa-expand-arrows-alt or similar icon */
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--text-secondary);
+    font-size: 0.8em;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+
+.left-panel.collapsed:hover::after {
+    opacity: 1;
+    color: var(--text-primary);
 }
 
 .left-panel.collapsed .panel-header h3 {
@@ -893,18 +984,24 @@ button.inline-btn:hover {
 .left-panel.collapsed .panel-header {
     justify-content: center; /* Center the toggle button */
     padding: 0; /* Remove padding */
-}
-.left-panel.collapsed .panel-toggle-btn {
-    margin: 0; /* Remove margin */
+    height: 100%; /* Make header take full height when collapsed */
+    cursor: pointer; /* Ensure it's clickable */
 }
 
-/* Adjust toggle icon */
-.left-panel.collapsed .panel-toggle-btn i::before {
-    content: "\f054"; /* fa-chevron-right */
+.left-panel.collapsed .panel-toggle-btn {
+    margin: 0; /* Remove margin */
+    font-size: 1.3em; /* Make button larger when collapsed */
+    padding: 8px; /* Add more padding for easier clicking */
+    border-radius: 4px; /* Add slight rounding */
+    transition: all 0.2s ease;
 }
-.left-panel:not(.collapsed) .panel-toggle-btn i::before {
-    content: "\f053"; /* fa-chevron-left */
+
+.left-panel.collapsed .panel-toggle-btn:hover {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
 }
+
+/* Icons are now handled by JavaScript for proper state management */
 
 
 /* --- Responsive (Basic Example) --- */
