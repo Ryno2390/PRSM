@@ -2,10 +2,43 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Custom styles for PRSM AI Concierge */
+/* PRSM UI Mockup Color Scheme */
 @layer base {
+  :root {
+    /* Dark Theme (Monochromatic) - Default */
+    --bg-primary: #000000;      /* Black */
+    --bg-secondary: #1a1a1a;    /* Dark Grey */
+    --bg-tertiary: #333333;     /* Medium Grey */
+    --text-primary: #ffffff;    /* White */
+    --text-secondary: #b3b3b3;  /* Light Grey */
+    --accent-primary: #ffffff;  /* White accent */
+    --border-color: #4d4d4d;    /* Grey border */
+    --status-active: #ffffff;   /* Use text color for status */
+    --status-inactive: #f85149; /* Keep red for errors */
+    --font-main: 'Inter', sans-serif;
+  }
+  
+  .light-theme {
+    /* Light Theme (Monochromatic) */
+    --bg-primary: #ffffff;      /* White */
+    --bg-secondary: #f0f0f0;    /* Very Light Grey */
+    --bg-tertiary: #d9d9d9;     /* Light Grey */
+    --text-primary: #000000;    /* Black */
+    --text-secondary: #4d4d4d;  /* Dark Grey */
+    --accent-primary: #000000;  /* Black accent */
+    --border-color: #cccccc;    /* Grey border */
+    --status-active: #000000;   /* Use text color for status */
+    --status-inactive: #c0392b; /* Keep red for errors */
+  }
+
   html {
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: var(--font-main);
+  }
+
+  body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    transition: background-color 0.3s ease, color 0.3s ease;
   }
 }
 

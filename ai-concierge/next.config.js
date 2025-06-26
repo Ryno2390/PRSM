@@ -11,7 +11,19 @@ const nextConfig = {
   // Environment variables that should be available to the browser
   env: {
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
-  }
+  },
+  
+  // Webpack configuration to handle server-side modules
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.fallback = {
+        fs: false,
+        path: false,
+        os: false,
+      };
+    }
+    return config;
+  },
 }
 
 module.exports = nextConfig

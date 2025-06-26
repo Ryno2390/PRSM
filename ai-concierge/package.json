@@ -4,7 +4,8 @@
   "description": "PRSM AI Investor Concierge - 24/7 Intelligent Investor Relations Assistant",
   "scripts": {
     "dev": "next dev",
-    "build": "npm run knowledge-compile && next build",
+    "build": "next build",
+    "build-with-knowledge": "npm run knowledge-compile && next build",
     "start": "next start",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
     "type-check": "tsc --noEmit",
