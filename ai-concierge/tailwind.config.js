@@ -8,6 +8,26 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        // PRSM UI Mockup Color Scheme
+        'prsm': {
+          // Dark theme colors
+          'bg-primary': '#000000',      // Black
+          'bg-secondary': '#1a1a1a',    // Dark Grey
+          'bg-tertiary': '#333333',     // Medium Grey
+          'text-primary': '#ffffff',    // White
+          'text-secondary': '#b3b3b3',  // Light Grey
+          'border': '#4d4d4d',          // Grey border
+          'error': '#f85149',           // Red for errors
+          
+          // Light theme colors
+          'light-bg-primary': '#ffffff',    // White
+          'light-bg-secondary': '#f0f0f0',  // Very Light Grey
+          'light-bg-tertiary': '#d9d9d9',   // Light Grey
+          'light-text-primary': '#000000',  // Black
+          'light-text-secondary': '#4d4d4d', // Dark Grey
+          'light-border': '#cccccc',        // Grey border
+          'light-error': '#c0392b',         // Red for errors
+        },
         'prsm-blue': {
           50: '#eff6ff',
           100: '#dbeafe',

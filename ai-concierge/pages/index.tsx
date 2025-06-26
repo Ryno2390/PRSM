@@ -145,8 +145,8 @@ How can I assist with your PRSM evaluation today?`,
     const baseColors = {
       high: isDark ? 'text-green-400' : 'text-green-600',
       medium: isDark ? 'text-yellow-400' : 'text-yellow-600',
-      low: isDark ? 'text-red-400' : 'text-red-600',
-      default: isDark ? 'text-gray-400' : 'text-gray-600'
+      low: isDark ? 'text-prsm-error' : 'text-prsm-light-error',
+      default: isDark ? 'text-prsm-text-secondary' : 'text-prsm-light-text-secondary'
     };
     
     switch (confidence) {
@@ -162,13 +162,13 @@ How can I assist with your PRSM evaluation today?`,
     
     return (
       <div className={`mt-3 p-3 rounded-lg border-l-4 border-blue-500 ${
-        isDark ? 'bg-gray-800' : 'bg-gray-50'
+        isDark ? 'bg-prsm-bg-tertiary' : 'bg-prsm-light-bg-tertiary'
       }`}>
         <div className={`text-sm font-medium mb-1 ${
-          isDark ? 'text-gray-300' : 'text-gray-700'
+          isDark ? 'text-prsm-text-primary' : 'text-prsm-light-text-primary'
         }`}>Sources:</div>
         <ul className={`text-xs space-y-1 ${
-          isDark ? 'text-gray-400' : 'text-gray-600'
+          isDark ? 'text-prsm-text-secondary' : 'text-prsm-light-text-secondary'
         }`}>
           {sources.map((source, index) => (
             <li key={index} className="flex items-start">
@@ -192,12 +192,12 @@ How can I assist with your PRSM evaluation today?`,
 
       <div className={`min-h-screen transition-colors duration-300 ${
         isDark 
-          ? 'bg-gradient-to-br from-gray-900 to-gray-800' 
-          : 'bg-gradient-to-br from-blue-50 to-indigo-100'
+          ? 'bg-prsm-bg-primary' 
+          : 'bg-prsm-light-bg-primary light-theme'
       }`}>
         {/* Header */}
         <header className={`shadow-sm border-b transition-colors duration-300 ${
-          isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'
+          isDark ? 'bg-prsm-bg-secondary border-prsm-border' : 'bg-prsm-light-bg-primary border-prsm-light-border'
         }`}>
           <div className="max-w-4xl mx-auto px-4 py-4">
             <div className="flex items-center justify-between">
@@ -214,10 +214,10 @@ How can I assist with your PRSM evaluation today?`,
                 </div>
                 <div>
                   <h1 className={`text-xl font-bold transition-colors duration-300 ${
-                    isDark ? 'text-white' : 'text-gray-900'
+                    isDark ? 'text-prsm-text-primary' : 'text-prsm-light-text-primary'
                   }`}>PRSM AI Investor Concierge</h1>
                   <p className={`text-sm transition-colors duration-300 ${
-                    isDark ? 'text-gray-400' : 'text-gray-600'
+                    isDark ? 'text-prsm-text-secondary' : 'text-prsm-light-text-secondary'
                   }`}>24/7 Intelligent Investor Relations Assistant</p>
                 </div>
               </div>
@@ -227,8 +227,8 @@ How can I assist with your PRSM evaluation today?`,
                 onClick={toggleTheme}
                 className={`p-2 rounded-lg transition-colors duration-300 hover:bg-opacity-20 ${
                   isDark 
-                    ? 'text-gray-400 hover:bg-white hover:text-gray-300' 
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-700'
+                    ? 'text-prsm-text-secondary hover:bg-prsm-bg-tertiary hover:text-prsm-text-primary' 
+                    : 'text-prsm-light-text-secondary hover:bg-prsm-light-bg-secondary hover:text-prsm-light-text-primary'
                 }`}
                 aria-label="Toggle theme"
               >
@@ -249,7 +249,7 @@ How can I assist with your PRSM evaluation today?`,
         {/* Chat Container */}
         <div className="max-w-4xl mx-auto px-4 py-6">
           <div className={`rounded-lg shadow-lg h-[calc(100vh-200px)] flex flex-col transition-colors duration-300 ${
-            isDark ? 'bg-gray-900' : 'bg-white'
+            isDark ? 'bg-prsm-bg-secondary' : 'bg-prsm-light-bg-primary'
           }`}>
             
             {/* Messages */}
@@ -263,7 +263,7 @@ How can I assist with your PRSM evaluation today?`,
                     className={`max-w-[80%] rounded-lg px-4 py-3 transition-colors duration-300 ${
                       message.role === 'user'
                         ? 'bg-blue-600 text-white'
-                        : isDark ? 'bg-gray-800 text-gray-100' : 'bg-gray-100 text-gray-900'
+                        : isDark ? 'bg-prsm-bg-tertiary text-prsm-text-primary' : 'bg-prsm-light-bg-secondary text-prsm-light-text-primary'
                     }`}
                   >
                     <div className="whitespace-pre-wrap">{message.content}</div>
@@ -271,10 +271,10 @@ How can I assist with your PRSM evaluation today?`,
                     {/* Metadata for assistant messages */}
                     {message.role === 'assistant' && message.metadata && (
                       <div className={`mt-3 pt-3 border-t transition-colors duration-300 ${
-                        isDark ? 'border-gray-700' : 'border-gray-200'
+                        isDark ? 'border-prsm-border' : 'border-prsm-light-border'
                       }`}>
                         <div className={`flex items-center justify-between text-xs transition-colors duration-300 ${
-                          isDark ? 'text-gray-400' : 'text-gray-500'
+                          isDark ? 'text-prsm-text-secondary' : 'text-prsm-light-text-secondary'
                         }`}>
                           <span className={`font-medium ${getConfidenceColor(message.metadata.confidence)}`}>
                             {message.metadata.confidence?.toUpperCase()} CONFIDENCE
@@ -287,7 +287,7 @@ How can I assist with your PRSM evaluation today?`,
                         {message.metadata.escalationSuggested && (
                           <div className={`mt-2 p-2 border rounded text-xs transition-colors duration-300 ${
                             isDark 
-                              ? 'bg-yellow-900 border-yellow-600 text-yellow-200' 
+                              ? 'bg-prsm-bg-tertiary border-yellow-600 text-yellow-400' 
                               : 'bg-yellow-50 border-yellow-200 text-yellow-800'
                           }`}>
                             <strong>Escalation Suggested:</strong> This query may benefit from direct consultation with our team.
@@ -306,22 +306,22 @@ How can I assist with your PRSM evaluation today?`,
               {isLoading && (
                 <div className="flex justify-start">
                   <div className={`rounded-lg px-4 py-3 max-w-[80%] transition-colors duration-300 ${
-                    isDark ? 'bg-gray-800' : 'bg-gray-100'
+                    isDark ? 'bg-prsm-bg-tertiary' : 'bg-prsm-light-bg-secondary'
                   }`}>
                     <div className="flex items-center space-x-2">
                       <div className="flex space-x-1">
                         <div className={`w-2 h-2 rounded-full animate-bounce ${
-                          isDark ? 'bg-gray-500' : 'bg-gray-400'
+                          isDark ? 'bg-prsm-text-secondary' : 'bg-prsm-light-text-secondary'
                         }`}></div>
                         <div className={`w-2 h-2 rounded-full animate-bounce ${
-                          isDark ? 'bg-gray-500' : 'bg-gray-400'
+                          isDark ? 'bg-prsm-text-secondary' : 'bg-prsm-light-text-secondary'
                         }`} style={{ animationDelay: '0.1s' }}></div>
                         <div className={`w-2 h-2 rounded-full animate-bounce ${
-                          isDark ? 'bg-gray-500' : 'bg-gray-400'
+                          isDark ? 'bg-prsm-text-secondary' : 'bg-prsm-light-text-secondary'
                         }`} style={{ animationDelay: '0.2s' }}></div>
                       </div>
                       <span className={`text-sm transition-colors duration-300 ${
-                        isDark ? 'text-gray-300' : 'text-gray-600'
+                        isDark ? 'text-prsm-text-primary' : 'text-prsm-light-text-primary'
                       }`}>Analyzing your question...</span>
                     </div>
                   </div>
@@ -333,8 +333,8 @@ How can I assist with your PRSM evaluation today?`,
                 <div className="flex justify-center">
                   <div className={`border rounded-lg px-4 py-3 max-w-[80%] transition-colors duration-300 ${
                     isDark 
-                      ? 'bg-red-900 border-red-600 text-red-200' 
-                      : 'bg-red-50 border-red-200 text-red-800'
+                      ? 'bg-prsm-bg-tertiary border-prsm-error text-prsm-error' 
+                      : 'bg-red-50 border-prsm-light-error text-prsm-light-error'
                   }`}>
                     <div className="text-sm">
                       <strong>Error:</strong> {error}
@@ -349,8 +349,8 @@ How can I assist with your PRSM evaluation today?`,
             {/* Input Form */}
             <div className={`border-t p-4 transition-colors duration-300 ${
               isDark 
-                ? 'bg-gray-800 border-gray-700' 
-                : 'bg-gray-50 border-gray-200'
+                ? 'bg-prsm-bg-tertiary border-prsm-border' 
+                : 'bg-prsm-light-bg-secondary border-prsm-light-border'
             }`}>
               <form onSubmit={handleSubmit} className="flex space-x-4">
                 <input
@@ -360,8 +360,8 @@ How can I assist with your PRSM evaluation today?`,
                   placeholder="Ask me about PRSM's investment opportunity, technical architecture, or business strategy..."
                   className={`flex-1 border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors duration-300 ${
                     isDark 
-                      ? 'bg-gray-700 border-gray-600 text-gray-100 placeholder-gray-400' 
-                      : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                      ? 'bg-prsm-bg-secondary border-prsm-border text-prsm-text-primary placeholder-prsm-text-secondary' 
+                      : 'bg-prsm-light-bg-primary border-prsm-light-border text-prsm-light-text-primary placeholder-prsm-light-text-secondary'
                   }`}
                   disabled={isLoading}
                 />
@@ -375,7 +375,7 @@ How can I assist with your PRSM evaluation today?`,
               </form>
               
               <div className={`mt-2 text-xs text-center transition-colors duration-300 ${
-                isDark ? 'text-gray-400' : 'text-gray-500'
+                isDark ? 'text-prsm-text-secondary' : 'text-prsm-light-text-secondary'
               }`}>
                 Powered by PRSM's AI coordination technology • 
                 <span className="ml-1 font-medium">99/100 External Validation Score</span>
