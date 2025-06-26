@@ -58,8 +58,8 @@ async function initializeConciergeEngine(): Promise<ConciergeEngine> {
   const llmRouter = new LLMRouter(llmConfig, apiKeys);
   conciergeEngine = new ConciergeEngine(llmRouter);
 
-  // Load comprehensive knowledge base
-  const knowledgeBasePath = path.resolve(process.cwd(), 'knowledge-base', 'comprehensive-knowledge.json');
+  // Load knowledge base (using compiled version for size optimization)
+  const knowledgeBasePath = path.resolve(process.cwd(), 'knowledge-base', 'compiled-knowledge.json');
   await conciergeEngine.loadKnowledgeBase(knowledgeBasePath);
 
   // Test connections
