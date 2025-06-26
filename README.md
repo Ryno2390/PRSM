@@ -23,15 +23,33 @@ AI development today is trapped in expensive, closed, competitive silos. This cr
 - **Centralized control** that stifles innovation
 - **Resource inefficiency** that makes AI development unsustainable
 
-### Our Solution
+### ⚠️ The Looming AI Crisis
 
-PRSM transforms AI development from competition into **economically-incentivized collaboration**:
+Recent academic research reveals a critical threshold approaching by **2026**: current AI architectures are fundamentally unsustainable, requiring exponentially more energy while delivering diminishing returns. Key findings:
 
+- **Energy Crisis**: AI models consume **orders of magnitude** more power than the human brain (kilowatts vs. 20 watts) for comparable tasks
+- **Model Collapse**: AI training on AI-generated content leads to recursive degradation and "model collapse"
+- **Centralization Catastrophe**: Mathematical models predict **institutional breakdown** when AI centralization exceeds critical thresholds
+- **Efficiency Cliff**: Current scaling approaches hit thermodynamic limits, making trillion-dollar compute clusters economically unsustainable
+
+*Source: [Recent interdisciplinary research](docs/5299044.pdf) combining neuroscience, physics, and complexity theory*
+
+### Our Solution: Brain-Inspired AI Architecture
+
+PRSM addresses the looming AI crisis through **consciousness-inspired distributed intelligence** that mirrors how human brains achieve collective cognition:
+
+**🧠 Biological Intelligence Principles:**
+- **Distributed Processing**: No single massive model - intelligence emerges from agent coordination
+- **Energy Efficiency**: Network distribution reduces individual computational requirements by orders of magnitude  
+- **Collective Synchrony**: Inter-agent communication replicates the "hyper-brain" networks observed in human collaboration
+- **Quality Preservation**: Economic incentives prevent model collapse by rewarding original, high-quality contributions
+
+**💰 Economic Sustainability:**
 1. **🔬 Contribute Intelligence**: Upload models, data, or compute resources
-2. **💰 Earn FTNS Tokens**: Get compensated based on usage and quality
+2. **💰 Earn FTNS Tokens**: Get compensated based on usage and quality (8% for foundational vs. 1% for derivative content)
 3. **🌐 Access Global Network**: Tap into distributed intelligence beyond any single system
 4. **🔄 Recursive Improvement**: The network gets smarter as more participants join
-5. **🛡️ Democratic Governance**: Community-driven decisions ensure ethical development
+5. **🛡️ Democratic Governance**: Community-driven decisions prevent centralization catastrophe
 
 ---
 
@@ -66,17 +84,23 @@ Experience PRSM's user interface vision:
 ## 🧠 Core Concepts
 
 ### Economic Inevitability
-Like TCP/IP became the inevitable protocol for internet communication, PRSM becomes the inevitable protocol for AI coordination—not through force, but through **economic rationality**.
+Like TCP/IP became the inevitable protocol for internet communication, PRSM becomes the inevitable protocol for AI coordination—not through force, but through **economic necessity** as centralized AI approaches collapse.
 
-### The Efficiency Singularity
-While centralized labs race toward trillion-dollar compute clusters, PRSM targets **getting more intelligence per compute unit** rather than simply adding more units.
+### Preventing the "Gentle Technological Singularity"
+While centralized labs race toward trillion-dollar compute clusters, PRSM prevents the predicted **2026 institutional breakdown** by distributing AI power democratically rather than concentrating it catastrophically.
+
+### Consciousness-Inspired Architecture  
+PRSM's design mirrors biological intelligence:
+- **Inter-brain synchrony**: Agent coordination replicates how human teams achieve collective cognition
+- **Distributed memory**: Network-wide information storage parallels the brain's nonlocal processing
+- **Energy efficiency**: 20-watt brain vs. megawatt AI centers - our architecture targets biological efficiency levels
 
 ### FTNS Token Economy
-Our **Fungible Tokens for Node Support (FTNS)** create a self-sustaining economy where:
-- Quality contributions are rewarded automatically
-- Network participants earn from ecosystem growth
-- Democratic governance prevents monopolization
-- Economic incentives align with scientific progress
+Our **Fungible Tokens for Node Support (FTNS)** create economic incentives that prevent model collapse:
+- **8% royalties** for foundational (human-generated) content vs. **1% for derivative** work
+- Quality contributions rewarded automatically through provenance tracking
+- Democratic governance prevents centralization catastrophe
+- Economic incentives align with sustainable AI development
 
 ---
 
