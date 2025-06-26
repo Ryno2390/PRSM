@@ -21,7 +21,6 @@ const KNOWLEDGE_CATEGORIES = {
   tier1_essential: [
     'INVESTOR_MATERIALS.md',
     'INVESTMENT_READINESS_REPORT.md',
-    'docs/AI_CRISIS_INVESTOR_BRIEF.md',
     'docs/BUSINESS_CASE.md',
     'docs/GAME_THEORETIC_INVESTOR_THESIS.md',
     'docs/FUNDING_MILESTONES.md',
