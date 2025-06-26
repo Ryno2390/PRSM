@@ -1,0 +1,1067 @@
+
+--- PAGE 1 ---
+ 
+1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a  
+ 
+ 
+UNITED STATES DISTRICT COURT 
+ 
+NORTHERN DISTRICT OF CALIFORNIA 
+ 
+ 
+ANDREA BARTZ, CHARLES GRAEBER, 
+and KIRK WALLACE JOHNSON, 
+Plaintiffs, 
+v.   
+ 
+ANTHROPIC PBC, 
+Defendant.   
+ 
+ 
+ No.   C 24-05417 WHA    
+ 
+  ORDER ON FAIR USE 
+ 
+ 
+INTRODUCTION 
+An artificial intelligence firm  downloaded for free millions  of copyrighted books in 
+digital form from pirate sites on the internet.  The firm also purchased copyrighted books 
+(some overlapping with those acq uired from the pirate sites), tore off the bindings, scanned 
+every page, and stored them in digitized, searchable files.  Al l the foregoing was done to amass 
+a central library of “all the books in the world” to  retain “forever.”  Fr om this central library, 
+the AI firm selected various sets and subsets of digitized books to trai n various large language 
+models under development to pow er its AI services.  Some of these books were written by 
+plaintiff authors, who now sue for copyright infringement.  On summary judgment, the issue is 
+the extent to which any of the uses of the works in question qualify as “fair uses” under 
+Section 107 of the Copyright Act.  
+STATEMENT 
+Defendant Anthropic PBC is an AI software  firm founded by form er OpenAI employees 
+in January 2021.  Its core offe ring is an AI software servic e called Claude.  When a user Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 1 of 32
+--- PAGE 2 ---
+ 
+2 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a prompts Claude with text, Claude quickly res ponds with text — mimic king human reading and 
+writing.  Claude can do so because Anthropic trained Claude — or rather trained large 
+language models or LLMs underlying various ve rsions of Claude — using books and other 
+texts selected from a central library Anthropi c had assembled.  Claude was first released 
+publicly in March 2023.  Seven succ essive versions of Claude have  been released since.  Users 
+may ask Claude some questions for free.  Demanding users and corporate clients pay to use 
+Claude, generating over one billion dollars  in annual revenue (Opp. Exh. 18).   
+Plaintiffs Andrea Bartz, Charles Graeber, and Kirk Wallace Johnson are authors of books 
+that Anthropic copied from pirated and purchased  sources.  Anthropic a ssembled these copies 
+into a central library of its own, copied further various sets and subsets of those library copies 
+to include in various “data mixes,” and used these mixes to train various LLMs.  Anthropic 
+kept the library copies in place as a permanent,  general-purpose resource even after deciding it 
+would not use certain copies to  train LLMs or would never use them again to do so.  All of 
+Anthropic’s copying was without plaintiffs’ auth orization.   
+Author Bartz wrote four novels Anthropic copied and used:  The Lost Night: A Novel , 
+The Herd , We Were Never Here , and The Spare Room .  Author Graeber wr ote two non-fiction 
+books likewise at issue:  The Good Nurse: A True Story of  Medicine, Madness, and Murder , 
+and The Breakthrough: Immunotherapy and the Race to Cure Cancer .  And, Author Johnson 
+penned three non-fiction books also copied and used:  To Be A Friend Is Fatal: The Fight to 
+Save the Iraqis America Left Behind , The Feather Thief: Beauty, Obsession, and the Natural 
+History Heist of the Century , and The Fishermen and the Dragon:  Fear, Greed, and a Fight 
+for Justice on the Gulf Coast .  Plaintiffs Bartz Inc. and MJ + KJ  Inc. are corporate entities that 
+Author Bartz and Author Johnson respectively se t up to market their works.  Between them, 
+these five plaintiffs (“Aut hors”) own all the copyrights in  the above-listed works.   
+From the start, Anthropic “ha[d] many places  from which” it could have purchased 
+books, but it preferred to steal them to avoid “l egal/practice/business sl og,” as cofounder and 
+chief executive officer Dario Amodei put it ( see Opp. Exh. 27).  So, in January or February 
+2021, another Anthropic cofounder, Ben Mann, downloaded Books3, an online library of Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 2 of 32
+--- PAGE 3 ---
+ 
+3 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a 196,640 books that he knew had been assembled from unauthorized copi es of copyrighted 
+books — that is, pirated.  Anthropic’s next  pirated acquisitions involved downloading 
+distributed, reshared copies of other pirate libraries.  In June 2021, Mann downloaded in this 
+way at least five million copies  of books from Library Genesis, or LibGen, which he knew had 
+been pirated.  And, in July 2022, Anthropic likew ise downloaded at least two million copies of 
+books from the Pirate Library Mirror, or PiLi Mi, which Anthropic knew had been pirated 
+(Opp. Exh. 6 at 4; Opp. Expert Zhao ¶¶ 17–29; see Class Cert. (“CC”) Opp. Expert Iyyer 
+¶¶ 45–46).  Although what was downloaded and later duplicated from these sources was 
+sometimes referred to as data or datasets, at bottom they contained full-text “ebooks or scans of 
+books” saved in individual files in formats like .pdf , .txt, and .epub ( see, e.g. , Opp. Exh. 12 at -
+0391318).  For Books3, most filenames identified  the book inside.  For LibGen and PiLiMi, 
+Anthropic downloaded a separate catalog of bi bliographic metadata fo r each collection, with 
+fields like title, author, and ISBN ( see, e.g. , ibid.; Opp. Exh. 16 -0533972–73).  Anthropic 
+thereby pirated over seven million copies of books, including copi es of at least two works at 
+issue for each Author.1   
+As Anthropic trained successive LLMs, it became convinced that using books was the 
+most cost-effective means to achieve a world-class LLM.  During this time, however, Anthropic became “not so gung ho about” traini ng on pirated books “for  legal reasons” (Opp. 
+Exh. 19).  It kept them anyway ( e.g., Opp. Exh. 17 at 93–94; CC Opp. Exh. 35 at -0273474).   
+To find a new way to get books, in February 2024, Anthropic hired the former head of 
+partnerships for Google’s book-s canning project, Tom Turvey.  He was tasked with obtaining 
+“all the books in the world” while still avoidi ng as much “legal/practice/business slog” as 
+ 
+1  Specifically, those works were ( see Opp. Expert Zhao ¶ 36; CC Br . Expert Zhao ¶ 66):   
+ Author Bartz’s The Herd (five copies total) (i n LibGen and PiLiMi); 
+ Author Bartz’s The Lost Night  (three copies total) (in B ooks3, LibGen, and PiLiMi);  
+ Author Graeber’s The Breakthrough (four copies) (in Books3, LibGen, and PiLiMi); 
+ Author Graeber’s The Good Nurse (five copies total) (i n Books3 and LibGen); 
+ Author Johnson’s To Be A Friend Is Fatal (one copy) (in Books3); and 
+ Author Johnson’s The Feather Thief  (four copies total) (i n Books3, LibGen, PiLiMi). 
+Some evidence suggests Anthropic downloaded s till more copies before culling empty files, 
+duplicates, and so on to reach the numbers kept  in the central library and counted here. Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 3 of 32
+--- PAGE 4 ---
+ 
+4 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a possible (Opp. Exhs. 21, 27).  So, in spring 2024, Turvey sent an email or two to major 
+publishers to inquire into licensing books fo r training AI.  Had Turvey kept up those 
+conversations, he might have reached agreemen ts to license copies  for AI training from 
+publishers — just as another major technology company soon di d with one ma jor publisher 
+(e.g., Opp. Expert Malackowski ¶¶ 50, 64).  But Tu rvey let those conversations wither.   
+Instead, Turvey and his team emailed majo r book distributors and retailers about bulk-
+purchasing their print copies fo r the AI firm’s “research lib rary” (Opp. Exh. 22 at 145; Opp. 
+Exh. 31 at -035589).  Anthropic spent many millions  of dollars to purchase millions of print 
+books, often in used condition.  Then, its serv ice providers stripped the books from their 
+bindings, cut their pages to size, and scanned the books into digital fo rm — discarding the 
+paper originals.  Each print book resulted in a PDF copy containing images of the scanned 
+pages with machine-readable te xt (including front and back c over scans for softcover books).  
+Anthropic created its own catalog of bibliographic metadata fo r the books it was acquiring.  It 
+acquired copies of millions of  books, including of all work s at issue for all Authors.2   
+Anthropic may have copied por tions of Authors’ books on ot her occasions, too — such 
+as while copying book reviews, academic papers, in ternet blogposts, or th e like for its central 
+library.  And, Anthropic’s scanning service prov iders may have copied Authors’ print books 
+along the way to delivering the final digital copi es to Anthropic.  But neither side here 
+specifically raises legal issues implicated by any such copies.  Nor will this order. 
+From all the above sources, Anthropic cr eated a general “research library” or 
+“generalized data area.”  What was this for?  As Turvey said, this was a “way of creating 
+information that would be volum inous and that we would use fo r research,” or otherwise to 
+ 
+2   In other words, within the scanned books we re one or more copies of the following works: 
+ Author Bartz’s The Herd ; 
+ Author Bartz’s The Lost Night ; 
+ Author Bartz’s We Were Never Here ; 
+ Author Bartz’s The Spare Room ; 
+ Author Graeber’s The Breakthrough ; 
+ Author Graeber’s The Good Nurse ; 
+ Author Johnson’s To Be A Friend Is Fatal ;  
+ Author Johnson’s The Feather Thief ; and, 
+ Author Johnson’s The Fishermen . Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 4 of 32
+--- PAGE 5 ---
+ 
+5 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a “inform our — our products” (Opp. Exh. 22  at 145–46, 194).  The copies  were kept in the 
+original “version of the underl ying” book files Anthropic had “ obtained or created,” that is, 
+pirated or scanned (Opp. Exh. 30 at 3, 4).  Anthro pic planned to “store everything forever; we 
+might separate out books into categories[, but t]here [wa]s no compelling reason to delete a 
+book” — even if not used for training LLMs.  Ov er time, Anthropic inve sted in building more 
+tools for searching its “general  purpose” library and for accessi ng books or sets of books for 
+further uses ( see CC Br. Exh. 12 at -0144509; CC Reply Exh. 45 at -0365931–32, -0365939–
+42 (reviewing and seeking to  improve “[w]hat [ ] researchers do  today if they want to search 
+for a book,” including improving bibl iographic metadata and conso lidating varied resources)). 
+One further use  was training LLMs.  As a prelimina ry step towards training, engineers 
+browsed books and bibliographic metadata to lear n what languages the books were written in, 
+what subjects they concerned, whether they we re by famous authors or not, and so on — 
+sometimes by “open[ing] any of the books” and sometimes using software .  From the library 
+copies, engineers copied the sets or subsets of books they believed  best for training and 
+“iterate[d]” on those selections over time.  For instan ce, two different subsets of print-sourced 
+books were included in “data mixe s” for training two different LL Ms.  Each was just a fraction 
+of all the print-sourced books.  Similarly, differen t sets or “subsets” or “parts of” or “portions” 
+of the collections sourced from Books3, LibGen, and PiLiMi we re used to train different 
+LLMs.  Anthropic analyzed the consequences  of using more books, fewer books, different 
+books.  The goal was to improve the “data mix “ to improve each LLM and, ultimately, 
+Claude’s performance for paying customers.3     
+ 
+3   (See, e.g. , Opp. Exh. 12 at -0391318 (engineers were  able to “open any of the books”); CC 
+Reply Exh. 45 at -0365941 (some engineers “want[ed ] to search for a book”  and get its “scanned 
+book file[ ]”); Opp. Exh. 30 at 3 (made copies of “each such dataset or portions thereof” for 
+training); Opp. Exh. 6 at 3–4 (trained  on “portions of datasets,” w ith at least two such portions 
+from LibGen and four from PiLiMi); Opp. E xpert Zhao ¶¶ 27–28, 30–31 (plus two more from 
+PiLiMi, and at least three from scanned books);  CC Opp. Exh. 35 at -0273477–82 (tested subsets 
+of pirated and purchased-and-sca nned books to see consequences fo r training); CC Br. Exh. 12 at -
+0144508–09 (“iterate[d]” selections from library and “train[ed] new mo dels on the best data”); Br. 
+Expert Kaplan ¶¶ 42–45 (explained goals of improving data mixes ); Br. Expert Peterson ¶ 14 
+(similar)). Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 5 of 32
+--- PAGE 6 ---
+ 
+6 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a Over time, Anthropic came to value most highly for its data mixes books like the ones 
+Authors had written, and it valued them because of the creative expressions they contained.  
+Claude’s customers wanted Claude  to write as accurately and as  compellingly as Authors.  So, 
+it was best to train the LLMs underlying Claude  on works just like the ones Authors had 
+written, with well-curated facts, well-org anized analyses, and captivating fictional 
+narratives — above all with “good writing” of  the kind “an editor would approve of” (Opp. 
+Exh. 3 at -03433).  Anthropic could have trai ned its LLMs without using such books or any 
+books at all.  That would have required sp ending more on, say, staff writers to create 
+competing exemplars of good writin g, engineers to revise bad ex emplars into better ones, 
+energy bills to power more r ounds of training and fine-tuning, and so on.  Having canonical 
+texts to draw upon helped ( e.g., Opp. Expert Zhao ¶ 81). 
+Each work selected for training any given LLM  was copied in four main ways — and in 
+fact so many times that Anthropic admits it would be impractical even to estimate.   
+First , each work selected was copied from the ce ntral library to create a working copy for 
+the training set.   
+Second , each work was cleaned to remove a sm all amount of lower-v alued or repeating 
+text (like headers, footers, or  page numbers), with a “cleaned”  copy resulting.  If the same book 
+appeared twice, or if while looking across the entire provisional traini ng set it became clear 
+there was some other reason to cull a book or cat egory, Anthropic had the capability to delete 
+relevant copy(ies) from the set at this step ( see CC Br. Expert Zhao ¶¶ 71–72).   
+Third , each cleaned copy was translated into  a “tokenized” copy.  Some words were 
+“stemmed” or “lemmati zed” into simpler forms (e.g., “stu dying” to “study”).  And, all 
+characters were grouped into  short sequences and translated into corresponding number 
+sequences or “tokens” according to an Anthropi c-made dictionary.  Th e resulting tokenized 
+copies were then copied repeat edly during training.  By one acc ount, this process involved the 
+iterative, trial-and-error discove ry of contingent statistical relationships between each word 
+fragment and all other word fragments both with in any work and across trillions of word Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 6 of 32
+--- PAGE 7 ---
+ 
+7 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a fragments from other copied books , copied websites, and the like.   Other steps in training are 
+not at issue here ( id. ¶¶ 73–76; see Opp. Expert Zhao ¶ 38 & n.6).   
+Fourth , each fully trained LLM itself retained “compressed” copies of the works it had 
+trained upon, or so Authors cont end and this order takes for gr anted.  In essence, each LLM’s 
+mapping of contingent relationshi ps was so complete it mapped or indeed simply “memorized” 
+the works it trained upon almost verbatim.  So, if each completed LLM had been asked to 
+recite works it had trained upon, it could have done so ( e.g., Opp. Expert Zhao ¶ 74).  Further 
+steps refining the LLM are not at issue here. 
+However, that was as far as the training c opies propagated toward s the outside world.  
+When each LLM was put into a public-facing vers ion of Claude, it was complemented by other 
+software that filtered user i nputs to the LLM and filtered ou tputs from the LLM back to the 
+user ( id. ¶¶ 75–77).  As a result, Aut hors do not allege that any infringing copy of their works 
+was or would ever be provided to users by the Cl aude service.  Yes, Claude could help less 
+capable writers create works as well-written as Au thors’ and competing in the same categories.  
+But Claude created no exact copy, nor any subs tantial knock-off.  No thing traceable to 
+Authors’ works.  Such allegations are simply no t part of plaintiffs’ amended complaint, nor in 
+our record.   
+Neither side puts directly at issue any copies of any works that might  have been used for 
+the filtering software.  Nor will this order. 
+In sum , the copies of books pirated or purchas ed-and-destructively-scanned were placed 
+into a central “research library” or “generalized data area,” sets or subsets were copied again to 
+create training copies for data mixes, the trai ning copies were successively copied to be 
+cleaned, tokenized, and compressed into any gi ven trained LLM, and once trained an LLM did 
+not output through Claude to the public any furt her copies.  Finally, once Anthropic decided a 
+copy of a pirated or scanned book in the library w ould not be used for tr aining at all or ever 
+again, Anthropic still retained that work as a “har d resource” for other uses or future uses.  At 
+least one work from each Author was present in every phase described above.   
+*  *  * Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 7 of 32
+--- PAGE 8 ---
+ 
+8 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a In August 2024, the three i ndividual authors brought th is putative class action 
+complaining that Anthropic had infringed its fe deral copyrights by pira ting copies for its 
+library and by reproducing them to  train its LLMs (Compl. ¶¶ 45–46, 71; see Amd. Compl. 
+¶¶ 47–48, 75).  In October 2024, a scheduling or der required that any motion for class 
+certification be brought by Ma rch 6, 2025 (Dkt. No. 49).   
+The individual authors soon amended their co mplaint to include af filiated corporate 
+entities as named plaintiffs, with consent.  A nd, Anthropic chose not to move to dismiss the 
+amended complaint, as it earlier had planned ( see Dkt. No. 37).  Instead, Anthropic moved to 
+allow an early motion for summ ary judgment on fair use, even  before class certification 
+(Dkt. No. 88; see Feb. 25, 2025 Tr. 15).  Permission was granted.  
+Anthropic now moves for summary judgment on  fair use only.  Fair use is a legal 
+question for the judge with underl ying fact questions, if any, fo r the jury.  To prevail on 
+summary judgment, Anthropic must  rely on undisputed facts and/or  factual inferences favoring 
+the opposing side.  Anthropic t hus bears the burdens of prod uction and persuasion in this 
+motion.  See Google LLC v. Oracle Am., Inc. , 593 U.S. 1, 23–24 (2021); Andy Warhol Found. 
+for the Visual Arts, Inc. v. Goldsmith , 598 U.S. 508, 547 n.21 (2023); Campbell v. Acuff-Rose 
+Music, Inc. , 510 U.S. 569, 590 & n.20, 594 (1994); see also Nissan Fire & Marine Ins. Co. v. 
+Fritz Cos. , 210 F.3d 1099, 1102–03 (9th Cir. 2000). 
+Notably, in its motion, Anthropic argues that pirating initial copies of Authors’ books and 
+millions of other books was justified because a ll those copies were at least reasonably 
+necessary for training LLMs — and yet Anthropic has resisted putting into the record what 
+copies or even sets of copies were in fact used for training LLMs.  For example, at oral 
+argument, Anthropic asserted that  if a purported fair us er had retained pirated copies for uses 
+beyond the fair use, then her piracy would not be excused by the fair use (Tr. 53, 56).  But 
+when Authors earlier interrogate d Anthropic in discovery abou t what library copies (the 
+original copies “obtained or cr eated” by Anthropic) Anthropic had recopied for further uses, 
+Anthropic responded that providing informati on about any copies made for uses beyond 
+training commercially released LLMs would be ove rbroad, and that it coul d not count up all its Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 8 of 32
+--- PAGE 9 ---
+ 
+9 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a copying even for LLMs in any case ( e.g., Opp Exh. 30 at 3).  We know that Anthropic has 
+more information about what it in fact copied  for training LLMs (or not).  Anthropic earlier 
+produced a spreadsheet that showed the composition of various data mixes used for training 
+various LLMs — yet it clawed back that spread sheet in April (Opp. Fredricks Decl. ¶¶ 2–3).  A 
+discovery dispute regarding that spreadsheet re mains pending.  But Anthropic did not need a 
+court order to offer up what it possessed in support  of its motion.  All defi ciencies must be held 
+against Anthropic and no t the other way around.   
+This is the first substantive order in this  case.  A contemporaneous motion for class 
+certification remains pending.  It  proposes one class related to works that were pirated 
+(whether or not used to train LLMs), and a second class related to works that were purchased, 
+scanned, and used in training LLMs.  This  order follows full br iefing, a hearing, and 
+supplemental briefing. 
+To summarize the analysis that now follows, the use of the books  at issue to train Claude 
+and its precursors was exceedingly transformative and was a fair use under Section 107 of the Copyright Act.  And, the digiti zation of the books purchased in  print form by Anthropic was 
+also a fair use but not for the same reason as applies to the training co pies.  Instead, it was a 
+fair use because all Anthropic did was replace th e print copies it had pu rchased for its central 
+library with more convenient space-saving and searchable digital copies for its central 
+library — without adding new c opies, creating new works, or re distributing existing copies.  
+However, Anthropic had no entitlement to use pira ted copies for its cent ral library.  Creating a 
+permanent, general-purpose libra ry was not itself a fair use ex cusing Anthropic’s piracy.   
+ANALYSIS 
+Section 107 of the Copyright Ac t identifies four factors for determining whether a given 
+use of a copyrighted work is a fair use: 
+ 
+[T]he fair use of a copyrighted work . . . for purposes such as criticism, comment, news reporti ng, teaching (including multiple 
+copies for classroom use), scholar ship, or research, is not an 
+infringement of copyright.  In determining whether the use made 
+of a work in any particular case is a fair use the factors to be 
+considered shall include —   Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 9 of 32
+--- PAGE 10 ---
+ 
+10 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a  
+(1) the purpose and character of the use, including whether such 
+use is of a commercial nature or is for nonprofit educational 
+purposes; 
+(2) the nature of the copyrighted work; (3) the amount and substantiality of the portion used in relation to 
+the copyrighted work as a whole; and  
+(4) the effect of the use upon the potential market for or value of 
+the copyrighted work.  
+These factors presuppose a “use.”  So, at th e threshold, a court must decide whether a 
+“copyrighted [work] has been used in multiple ways,” then evaluate each.  Warhol , 598 U.S. at 
+533.  Uses do not turn on “the subjective intent of the user” but on “an objective inquiry into 
+what use was made, i.e., what the user d[id] with  the original work.”  Id. at 544–45.  A “use” 
+should be construed narrowly enough to not “swa llow” distinguishable infringing uses, much 
+less categories of exclusive rights  in toto .  Id. at 541, 543 n.18, 546–48.  Sometimes, the 
+challenged copying involves just one use:  In Perfect 10, Inc. v. Amazon.com, Inc. , Google 
+visited websites having full-sized  images, made only reduced-si zed copies, and incorporated 
+those directly into its search e ngine — the sole use of the thum bnails being as “pointer[s]” to 
+the images themselves.  508 F.3d 1146, 1157, 1160, 1165 (9th Cir. 2007).  Sometimes, the 
+copying involves many uses:  In the Google Books cases, Google borrowed books from 
+libraries, made both full-image a nd text-only copies, and incorpor ated different copies into 
+different tools — one use bei ng to reveal information “ about those books ,” another use being 
+to provide the books to print-disabled patrons, and still another being to back up the print 
+books if lost.  Authors Guild v. Google, Inc. , 804 F.3d 202, 217 (2d Cir. 2015) (quoted); 
+Authors Guild, Inc. v. HathiTrust , 755 F.3d 87, 97, 101, 103 (2d Cir. 2014) (other cited uses).   
+Our parties debate an instructive decision.  In American Geophysical Union v. Texaco 
+Inc., Texaco employees used scient ific articles in a central library, used copies of them in 
+personal desk libraries, and used selected copies  again in the scientific laboratory — the first 
+use paid for, the second infringing, and the third pl ausibly fair but in fact  a rare occurrence.  
+802 F. Supp. 1, 4–5, 14 (S.D.N.Y. 1992) (Judge Pierre Leval), aff’d , 60 F.3d 913, 918–19, 926 
+(2d Cir. 1994).   Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 10 of 32
+--- PAGE 11 ---
+ 
+11 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a Here, our parties contest what use or uses ar e at issue.  Anthropic contends it copied 
+Authors’ books only for one use:  Only to train LLMs.  By contrast , Authors contend it did so 
+for at least two uses:  First to build a vast, central library of  potentially useful content, and 
+second to train specific LLMs using shifting sets and subsets of that content — over time 
+selecting the more well-organ ized and well-expressed works for training.  Authors also 
+complain that the print-to-digital format change  was itself an infringeme nt not abridged as a 
+fair use (Opp. 15, 25).  Authors do not allege , however, that any LLM outputs infringing upon 
+their works ever reached users of th e public-facing Claude service.   
+This order addresses each of th e four factors in turn, pointi ng out how each applies to the 
+training copies and to the purchased  and pirated library copies.  It  concludes with an integrated 
+analysis.   
+1. THE PURPOSE AND CHARACTER OF THE USE. 
+For a given use at issue, the fi rst factor addresses “the purpose and character of th[at] use, 
+including whether [it] is of a co mmercial nature or is for nonpr ofit educational purposes.”  17 
+U.S.C. § 107(1). 
+A. THE COPIES USED TO TRAIN SPECIFIC LLM S. 
+All agree that one use at issue was training LLM s to receive text inputs and return text 
+outputs.  More specifically, Anth ropic used copies of Authors’ copyrighted works to iteratively 
+map statistical relationships between every text -fragment and every sequ ence of text-fragments 
+so that a completed LLM could receive new text i nputs and return new text outputs as if it were 
+a human reading prompts and writing responses.  Authors further argue — and this order takes 
+for granted — that such trai ning entailed “memoriz[ing]” work s by “compress[ing]” copies of 
+those works into the LLM (Opp. 16–17; see Opp. Expert Zhao ¶ 74).  The LLMs “memorize[d] 
+A LOT, like A LOT” (Opp. Exh. 35 at -029109).  Re gardless, the “purpose and character” of 
+using works to train LLMs was tran sformative — spectacularly so. 
+To repeat and be clear:  Au thors do not allege that any LLM output provided to users 
+infringed upon Authors’ works.  Our record s hows the opposite.  Users interacted only with the 
+Claude service, which placed additional softwa re between the user and the underlying LLM to Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 11 of 32
+--- PAGE 12 ---
+ 
+12 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a ensure that no infringing output ever reached th e users.  This was akin to the limits Google 
+imposed on how many snippets of text from any one book could be seen by any one user 
+through its Google Books service, preventing its sear ch tool from devolving into a reading tool.  
+Google , 804 F.2d at 222.  Here, if the outputs s een by users had been infringing, Authors 
+would have a different case.  And, if the outpu ts were ever to beco me infringing, Authors 
+could bring such a case.  But that is not this case.   
+Instead, Authors challenge only the inputs, not the outputs, of these LLMs.  They point to 
+the fully trained LLMs and the Claude service only to shed light on how training itself uses 
+copies of their works and the ways the Claude service could be used to produce still other works that would compete with their works.  This order does the same.  Authors’ arguments 
+that the training use is not transformative ar e unavailing.  
+First , Authors argue that using works to tr ain Claude’s underlying LLMs was like using 
+works to train any person to r ead and write, so Aut hors should be able to exclude Anthropic 
+from this use (Opp. 16).  But Authors cannot righ tly exclude anyone from using their works for 
+training or learning as su ch.  Everyone reads texts, too, then  writes new texts.  They may need 
+to pay for getting their hands on a text in the first instance.  But to make anyone pay 
+specifically for the use of a book each time they r ead it, each time they  recall it from memory, 
+each time they later draw upon it when writing new things in ne w ways would be unthinkable.  
+For centuries, we have read and re-read books.  We have admired, memori zed, and internalized 
+their sweeping themes, their substantive points, a nd their stylistic solutions to recurring writing 
+problems.   
+Second , to that last point, Authors further ar gue that the training was intended to 
+memorize their works’ creative elements — not just thei r works’ non-protectable ones (Opp. 
+17).  But this is the same argument.  Agai n, Anthropic’s LLMs have not reproduced to the 
+public a given work’s creative elements, nor even  one author’s identifi able expressive style 
+(assuming arguendo that these are even copyrightab le).  Yes, Claude has outputted grammar, 
+composition, and style that the underlying LLM distilled from thousands of works.  But if 
+someone were to read all the modern-day clas sics because of their exceptional expression, Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 12 of 32
+--- PAGE 13 ---
+ 
+13 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a memorize them, and then emulat e a blend of their best writ ing, would that violate the 
+Copyright Act?  Of course not.  Copyright does not extend to “m ethod[s] of operation, 
+concept[s], [or] principle[s]” “i llustrated[ ] or embodied in [a ] work.”  17 U.S.C. § 102(b); see, 
+e.g., Nichols v. Universal Pictures Corp. , 45 F.2d 119, 120–22 (2d Cir. 1930) (Judge Learned 
+Hand) (stage properties a nd storytelling elements); Apple Comput., Inc. v. Microsoft Corp. , 35 
+F.3d 1435, 1445 (9th Cir. 1994) (“user-friendl y” design principles  and elements); Swirsky v. 
+Carey , 376 F.3d 841, 848 (9th Cir. 2004) (music theo ry principles and ch ord progressions).  
+Third , Authors next argue that computers noneth eless should not be allowed to do what 
+people do.  
+Authors cite a decision seemi ng to say as much (Opp. 16–17).  But the judge there twice 
+emphasized while discussing “purpos e and character” of the use th at what was tr ained was “not 
+generative AI (AI that writes new content its elf).”  Rather, what was trained — using a 
+proprietary system for finding court opinions in response to a given legal topic — was a 
+competing AI tool for finding cour t opinions in response to a give n legal topic.  That was not 
+transformative.  Thomson Reuters Enter. Cent re GmbH v. Ross Intell. Inc. , 765 F. Supp. 3d 
+382, 398 (D. Del. 2025) (Judge Stephanos Bibas), appeal docketed , No. 25-8018 (3d Cir. Apr. 
+14, 2025). 
+A better analogue to our facts would be an AI tool trained — us ing court opinions, and 
+briefs, law review articles, and the like — to receive legal prompts and respond with fresh legal 
+writing.  And, on facts much like those, a differen t court came out the ot her way.  It found fair 
+use.  White v. W. Pub. Corp. , 29 F. Supp. 3d 396, 400 (S.D.N.Y. 2014) (Judge Jed Rakoff). 
+The latter use stood sufficiently “orthogona l” to anything that any copyright owner 
+rightly could expect to control.  See Warhol , 598 U.S. at 538–40.  It could thus be freed up for 
+the copyist to use, “promot[ing] th e progress of science and the arts, without  diminishing the 
+incentive to create.”  Id. at 531 (emphasis added); see U.S.  CONST . art. I, § 8, cl. 8 .       
+In short, the purpose and character of using copyrighted works to train LLMs to generate 
+new text was quintessentially transformative.  Like any reader aspi ring to be a writer, 
+Anthropic’s LLMs trained upon works not to race ahead and replicate or supplant them — but Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 13 of 32
+--- PAGE 14 ---
+ 
+14 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a to turn a hard corner and create something different.  If this trai ning process reasonably 
+required making copies within the LLM or ot herwise, those copies  were engaged in a 
+transformative use. 
+The first factor favors  fair use for the training copies. 
+B. THE COPIES USED TO BUILD A CENTRAL LIBRARY . 
+But that is not the only use at issue.  R ecall that Anthropic purchased millions of print 
+books for its central library and pirated millions of  digital books for its central library, too.  It 
+used specific sets and subsets of  books for training specific LLMs.  And, it then retained all the 
+copies in its central library fo r other uses that might arise even after deciding it would not use 
+them to train any LLM (at all or ever again) .  Anthropic seems to believe that because some of 
+the works it copied were sometimes used in tr aining LLMs, Anthropic wa s entitled to take for 
+free all the works in the world and keep them fo rever with no further accounting.  There is no 
+carveout, however, from the Copyrig ht Act for AI companies.   
+Because the legal issues di ffer between the library copies Anthropic purchased and 
+pirated, this order take s them in turn.   
+(i) The Purchased Library Copies Con verted from Print to Digital. 
+Anthropic purchased  millions of print copies to “bu ild a research library” (Opp. Exh. 22 
+at 145, 148).  It destroyed each print copy while re placing it with a digital copy for use in its 
+library (not for sharing nor sale outside the company).  As to thes e copies, Authors do not 
+complain that Anthropic failed to pay to acqui re a library copy.  Aut hors only complain that 
+Anthropic changed each copy’s format from print to digital ( see Opp. 15, 25 & n.14).  On the 
+facts here, that format cha nge itself added no new copies , eased storage and enabled 
+searchability, and was not done for purposes trenching upon the copyright owner’s rightful 
+interests — it was transformative. 
+Anthropic purchased its print copies fair  and square.  With each purchase came 
+entitlement for Anthropic to “d ispose[ ]” each copy as it saw fit.  17 U.S.C. § 109(a).  So, 
+Anthropic was entitled to keep the copies in its central library for all th e ordinary uses.  Yes, Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 14 of 32
+--- PAGE 15 ---
+ 
+15 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a Anthropic changed the format of these library copies from print to digital — giving rise to the 
+issue here.   
+All agree on the facts of  the format change.  Anthropic “destructively scan[ned]” the 
+print copies to create the digi tal ones.  Anthropic or its vendor s stripped the bindings from the 
+print books, cut the pages to workable dimensio ns, and scanned those pages — discarding each 
+print copy while creating a digital one in its pl ace.  The digital copy was then housed in the 
+“research library” or “generalized data ar ea” in place of the print copy (Opp. Exh. 22 at 145–
+46, 193–94).  Authors do not allege and our record  does not show that Anthropic provided its 
+converted digital copies of print boo ks to anyone outside Anthropic.   
+The parties disagree about the legal consequences of the format change .  Was scanning 
+the print copies to create digi tal replacements transformative?  Anthropic argues it was because 
+it was reasonably necessary to training LLMs.  Authors argue it was a distinguishable step 
+requiring independent ju stification.      
+Here , for reasons narrower than Anthropic offers, th e mere format change was a fair use.    
+Storage and searchability are not creative pr operties of the copyrighted work itself but 
+physical properties of the frame around the work or informational properties about  the work.  
+See Texaco , 802 F. Supp. at 14 (physical), aff’d , 60 F.3d at 919; Google , 804 F.3d at 225 
+(informational); Sony Corp. of Am. v. Universal City Studios, Inc.  (“Sony Betamax ”), 464 U.S. 
+417, 447 (1984) (rightful interests).  In Texaco , the court reasoned that if a purchased scientific 
+journal article had been copied  “onto microfilm to conserve sp ace, this might [have been] a 
+persuasive transformative use.”  802 F. Supp. at 14 (Judge Pierre Leval), aff’d , 60 F.3d at 919 
+(reducing “bulk[ ]” “might  suffice to tilt the firs t fair use factor in fa vor of Texaco if these 
+purposes were dominant“).  In Google Books , the court reasoned that a print-to-digital change 
+to expose information about th e work was transformative.  Google , 804 F.3d at 225 (Judge 
+Pierre Leval).  And, in Sony Betamax , the Supreme Court held that making a recording of a 
+television show in order to instead watch it at a later time was copyi ng but did not usurp any 
+rightful interest of the copyri ght owner.  464 U.S. at 447, 455.  Important to the Supreme 
+Court’s reasoning was the expect ation that most such copier s would not distribute the Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 15 of 32
+--- PAGE 16 ---
+ 
+16 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a permanent copies of th e work.  Finally, in A&M Records, Inc. v. Napster, Inc. , our court of 
+appeals recognized the reasoning just explained, and therefor e rejected by contrast a 
+digitization effort that was touted  as space-shifting but in fact re sulted in the multiplication of 
+copies shared with outsiders through a file -sharing service.  239 F.3d 1004, 1019 (9th Cir. 
+2001), aff’g in this part 114 F. Supp. 2d 896, 912–13, 915–16 (N.D. Cal. 2000) (Judge Marilyn 
+Hall Patel) (citing Sony Betamax and Texaco ).   
+Here, every purchased print copy was copied in order to save storage space and to enable 
+searchability as a digital copy.  The print origin al was destroyed.  One replaced the other.  And, 
+there is no evidence that the new,  digital copy was shown, shared, or sold outside the company.  
+This use was even more clearl y transformative than those in Texaco , Google , and Sony 
+Betamax (where the number of copies went up by  at least one), a nd, of course, more 
+transformative than those uses rejected in Napster (where the number went up by “millions” of 
+copies shared for free with others).  
+Yes, Anthropic is a commercial outfit.  And, th is order takes for gran ted that Anthropic in 
+fact benefited from the print-to-d igital format change  — or it would not have gone to all the 
+trouble.  But the crux of the first fair use factor ’s concern for “commercial ” use is in protecting 
+the copyright owners and their entitlements to ex ploit their copyright as they see fit (or not).  
+See, e.g. , Harper & Row, Publishers, Inc. v. Nation Enters. , 471 U.S. 539, 562 (1985).  That 
+the accused is a commercial entity is indicative, not dispositive.  That the accused stands to 
+benefit is likewise indicative.  But what matters  most is whether the fo rmat change exploits 
+anything the Copyright Act reserv es to the copyright owner.  Anthropic already had purchased 
+permanent library copies (print ones).  It did no t create new copies to share or sell outside.   
+Yes, Authors also might have wished to char ge Anthropic more for digital than for print 
+copies.  And, this order takes for granted that  Authors could have succeeded if Anthropic had 
+been barred from the format change.  “But th e Constitution’s language [in Clause 8] nowhere 
+suggests that [the copyright ow ner’s] limited exclusive right shoul d include a right to divide 
+markets or a concomitant right to charge different purchasers different prices for the same 
+book, [merely] say to increas e or to maximize gain.”  See Kirtsaeng v. John Wiley & Sons, Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 16 of 32
+--- PAGE 17 ---
+ 
+17 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a Inc., 568 U.S. 519, 552 (2013); see also U.S.  CONST . art. I., § 8, cl. 8.  Nor does the Copyright 
+Act itself.  Section 106 sets out exclusive right s that fair uses under Section 107 abridge.  
+Section 106(1) reserves to the copyright owner the right to ma ke reproductions.  But on our 
+facts we face the unusual situation where one copy entirely replaced the another.  And, 
+Section 106(2) reserves to the c opyright owner the righ t to make derivative works that add or 
+subtract creative material — as occurs in a “translation, musical arra ngement, dramatization, 
+fictionalization, motion picture version, sound recording, art reproduction, abridgment, [or] 
+condensation” of a book, 17 U.S.C.  § 101 (definitions).  For some “o ther modification[ ]” of a 
+book to constitute a “derivative work,” it must  itself “represent an  original work of 
+authorship.”  Ibid.  But on our facts the format was changed but no content was added or 
+subtracted.  See Mirage Editions, Inc. v. Albuquerque A.R.T. Co. , 856 F.2d 1341, 1342, 1343–
+44 (9th Cir. 1988) (yes where elements added to create ne w decorative ceramic).4  
+Section 106(3) further reserves to  the copyright owner the right to distribute copies.  But again, 
+the replacement copy here was kept in the central library, not distributed.  Cf. Fox News 
+Network, LLC v. TVEyes, Inc. , 883 F.3d 169, 176–78 (2d Cir. 2018) (enabling searching for 
+“information about the material” can  be transformative use, even if some distribution results);  
+Lewis Galoob Toys, Inc. v. Nintendo of Am., Inc. , 964 F.2d 965, 968, 971 (9th Cir. 1992) 
+(using nifty converter to “merel y enhance[ ]” audiovisual di splays emitted from purchased 
+videogame cartridge was fair us e of those displays partly because no surplus copies of 
+cartridge or displays were ever created). 
+As a result , Anthropic’s format-change from print libra ry copies to digital library copies 
+was transformative under fair use factor one.  Anthropic was entitled to retain a copy of these 
+works in a print format.  It retained them in stead in a digital form at, easing storage and 
+ 
+4   Even if print-to-digital format change did infringe the right to prepare derivative works, 
+Authors have conceded that “Plaintiffs’ infr ingement claims are pr edicated on Anthropic’s 
+unauthorized reproduction (17 U.S.C. § 106(1)); Plaintiffs are not alleging infringement by 
+Anthropic of any right to prepare derivative works ( id. at § 106(2))” (Dkt. No. 203 at 2 (citations 
+original)).  Whether this concessi on had consequence for copies tokenized and used for training or 
+“compressed” into the trained LLMs is not reached by this order because Anthropic does not rely 
+on Authors’ concession and those copies were here used transformatively. Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 17 of 32
+--- PAGE 18 ---
+ 
+18 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a searchability.  And, the furthe r copies made therefrom for purposes of training LLMs were 
+themselves transformative for th at further reason, as above.  
+To be clear, this print-to-d igital conversion involved a diff erent and narrower form of 
+transformative use than the broader one advan ced by Anthropic.  Anthropic argues that the 
+central library use was part and parcel of the LLM training use and therefore transformative.  
+This order disagrees.  However, this order holds  that the mere conversio n of a print book to a 
+digital file to save space and enable searchab ility was transformative for that reason alone.  
+Therefore, the digital copy should be treated just as if  the purchased print copy had been placed 
+in the central library. 
+In sum, the first fair use factor favors fair use for the digital lib rary copies converted from 
+purchased print library copies — but these do not excuse the pira ted library copies. 
+(ii) The Pirated Library Copies. 
+Before buying books for its central library, Anthropic downloaded over seven million 
+pirated copies of books, paid nothing, and kept th ese pirated copies in its library even after 
+deciding it would not use them to train its AI (at all or ever ag ain).  Authors argue Anthropic 
+should have paid for these pirated library copies ( e.g., Tr. 24–25, 65; Opp. 7, 12–13).  This 
+order agrees. 
+The basic problem here was we ll-stated by Anthropic at oral  argument:  “You can’t just 
+bless yourself by saying I have a research pur pose and, therefore, go and take any textbook you 
+want.  That would destroy the academic publishing ma rket if that were the case” (Tr. 53).  Of 
+course, the person who purchases the textbook owes no further accounting for keeping the copy.  But the person who copies the textbook fr om a pirate site ha s infringed already, full 
+stop.  This order further rejects Anthropic’s assumption that the us e of the copies for a central 
+library can be excused as fair use merely because  some will eventually be used to train LLMs. 
+This order doubts that any accused infringer could ever meet its burden of explaining 
+why downloading source copies from pirate sites that it could have purchased or otherwise 
+accessed lawfully  was itself reasonably necessary to a ny subsequent fair use.  There is no 
+decision holding or requiring that  pirating a book that could have been bought at a bookstore Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 18 of 32
+--- PAGE 19 ---
+ 
+19 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a was reasonably necessary to writing a book re view, conducting research on facts in the book, 
+or creating an LLM.  Such piracy  of otherwise available copies  is inherently, irredeemably 
+infringing even if the pirated copies are immediately used fo r the transformative use and 
+immediately discarded.  
+But this order need not decide this case on th at rule.  Anthropic did not use these copies 
+only for training its LLM.  Indeed, it retained pirated copies even af ter deciding it would not 
+use them or copies from them  for training its LLMs ever ag ain.  They were acquired and 
+retained, as a central library of  all the books in the world.   
+Building a central library of works to be av ailable for any number of further uses was 
+itself the use for which Anthr opic acquired these copies.  One further use  was making further 
+copies for training LLMs.  But not every book An thropic pirated was used to train LLMs.  
+And, every pirated library copy was retained even if  it was determined it w ould not be so used.   
+Pirating copies to build a research  library without paying for it, a nd to retain copies should they 
+prove useful for one thing or  another, was its own use — and not a transformative one ( see 
+Tr. 24–25, 35, 65;  Opp. 4–10, 12 n.6; CC Br. Exh. 12 at - 0144509 (“everything forever”)).  
+Napster , 239 F.3d at 1015; BMG Music v. Gonzalez , 430 F.3d 888, 890 (7th Cir. 2005).   
+Anthropic’s briefing contains other reasons why it believes it s pirated library copies are 
+irrelevant to our fair use anal ysis, notwithstanding its own stat ements at our oral argument. 
+First , Anthropic accepts in this posture that it  acted in bad faith but  argues that its bad 
+faith in pirating copies cannot “somehow short- circuit[ ]” the fair use analysis (Reply 6 
+(downplaying Atari Games Corp. v. Nintendo of Am., Inc. , 975 F.2d 832, 843 (Fed. Cir. 1992) 
+(applying law of Ninth Circuit))).  But its bad faith is not the basi s for this decision.  Each use 
+of a work must be analyzed objectively.  Warhol , 598 U.S. at 544–45.  The objective analysis 
+here shows the initial copies we re pirated to create a central , general-purpose library, as a 
+substitute for paid copies to do the same thing.  (Of course, if  infringement is found, bad faith 
+would matter for determining willfulness.  17 U.S.C. § 504(c)(2).) 
+Second , Anthropic argues that its goal to put  the copies eventu ally “to a highly 
+transformative use” requires th at each copy and use along the wa y be justified as having a Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 19 of 32
+--- PAGE 20 ---
+ 
+20 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a transformative use, too (Reply 14).  But now An thropic seeks to take the shortcut Anthropic 
+just said cannot be taken.  Again, the Supreme C ourt tasks us with looking past the “subjective 
+intent  of the user” to the objective use made of each copy.  Warhol , 598 U.S. at 544–45 
+(emphasis added).  Put another way, what  a copyist says or thinks or feels  matters only to the 
+extent it shows what  a copyist in fact does with the work.  Indeed, the same copy can be used 
+one way, then another, each with a different result.  Id. at 533.  Here, what Anthropic said 
+about its acquisitions at the time — that they we re made to “build[ ] a research library” while 
+avoiding a “huge legal/practice/bus iness slog” — are relevant in this regard.  And, Anthropic’s 
+actual use of these pirated copies was to create  its central library of  texts that, like any 
+university or corporate library, stored the works’  well-organized facts, an alyses, and expressive 
+examples for various continge nt uses, one being training.5   
+Third , Anthropic argues that Texaco  — the case involving copi es used in a central 
+library, copies used in desk libraries , and copies used in the laboratory —  is inapposite.  
+Anthropic argues that the disputed copies in Texaco  were never  used in the laboratory but 
+instead in personal desk libraries for a use “iden tical to the original pu rpose and use” of the 
+central library copies, and so not for a tran sformative use (Reply 8 (summarizing 60 F.3d at 
+922–23)).  By contrast, says Anthropic, here it did use  copies in the la boratory to train 
+LLMs — a very transformative use.  But this is a fast glide over thin ice.  Like Texaco, Anthropic possessed copies it did not put into use in  the laboratory and it kept those copies in a 
+central library even after its transformative use had been completed.  But, unlike Texaco, 
+which bought those copies, Anthropi c never paid for the central lib rary copies stolen off the 
+ 
+5   Our court of appeals has not  yet reappraised how bad faith (o r good faith) figures in fair use 
+after Warhol .  Its prior appraisal app lied the Supreme Court’s st atement that “[f]air use 
+presupposes good faith and fair dealing,” Harper & Row , 471 U.S. at 562 (cleaned up).  See 
+Perfect 10 , 508 F.3d at1164 n.8.  Since then, the Supreme Court has renewed its  “skepticism about 
+whether bad faith has any role.”  Oracle , 593 U.S. at 32–33 (reiterating doubts of Campbell , 510 
+U.S. at 585 n.18).  And, recently, the Supreme Court has held squarely that it is not the “subjective 
+intent” of a copyist that  counts, but the “objectiv e . . . use” of the copy.  Warhol , 598 U.S. at 544–
+45.  This order applies this  most recent analysis.  Miller v. Gammie , 335 F.3d 889, 900 (9th Cir. 
+2003) (en banc). Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 20 of 32
+--- PAGE 21 ---
+ 
+21 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a internet.  Texaco  also shows why Anthropic is wrong to suppose that so long as you create an 
+exciting end product, every “back-end step, invisi ble to the public,” is excused (Br. 10).   
+Notably, this is not a case where source copies  were unavailable for separate purchase or 
+loan.  See, e.g. , NXIVM Corp. v. Ross Inst. , 364 F.3d 471, 475–76, 478–79 (2d Cir. 2004) 
+(using selections of training ma nual — otherwise available only to cult’s trainees subject to 
+NDAs — to expose cult in critical review); Time Inc. v. Bernard Geis Assocs. , 293 F. Supp. 
+130, 135–36, 138, 146 (S.D.N.Y. 1968) (Judge Inzer Bass Wyatt) (making charcoal drawings 
+of photographs taken of originals otherwise not on sale or loan out to illustrate a history 
+book).6  Nor were the copies made only incidentally and necessarily from pirated copies.  See, 
+e.g., Perfect 10 , 508 F.3d at 1164 n.8 (copies of images th at had been pirated by third-party 
+websites were used to index those same websites  while indexing the entire web).  Here, piracy 
+was the point:  To build a central library that one  could have paid for, just as Anthropic later 
+did, but without paying for it. 
+Nor were the initial copies made immediatel y transformed into a significantly altered 
+form.  In Perfect 10 , images were copied by the search engine in thumbnail form only and 
+deployed immediately into the transformative use of identifying the full-sized images and the 
+pages from which they came.  508 F.3d at 1160, 1165, 1167.  And, in Kelly v. Arriba Software 
+Corp. , images were copied at full size and then in to thumbnails for immediate use in building a 
+search engine, after which the full-sized copi es were immediately deleted.  336 F.3d 811, 815 
+(9th Cir. 2003).  Not here.  The full-text copies  of books were downloaded and maintained 
+“forever.”   
+Nor does the initial copying here even resemble the full-t ext copying in the Google Books 
+cases.  There, libraries of authorized copies already  had been assembled, and all copies 
+ 
+6   Anthropic repeats the misleading char acterization of the co pyright holder in Oracle  that the 
+initial copies were there purloined (Reply 5) .  Not so.  “All agree[d] that Google was and 
+remain[ed] free to use the Java language itself.  All agree[d] th at Google’s virtual machine [wa]s 
+free of any copyright issues.  A ll agree[d] that the six-thousa nd-plus method implementations by 
+Google [we]re free of copyr ight issues.  The copyright issue, rather,” was the use of Java for 
+purposes of creating competing software havi ng the same familiar,  functional schema.  Oracle 
+Am., Inc. v. Google Inc. , 872 F. Supp. 2d 974, 978 (N.D. Cal. 2012), aff’d and rev’d in part , 750 
+F.3d 1339 (Fed. Cir. 2014). Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 21 of 32
+--- PAGE 22 ---
+ 
+22 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a therefrom were made for direct  employment in a one-to-one fu rther fair use — whether the 
+transformative use of pointing to the works th emselves, the use of providing the works in 
+formats for print-disabled patrons, or the use of  insuring against going out of print, getting lost, 
+and becoming otherwise unavailable.  HathiTrust , 755 F.3d at 97, 101, 103; Google , 804 F.3d 
+at 206, 216–18, 228 (further distinguishing search  and snippet uses, which “test[ed] the 
+boundaries of fair use”).  Not so here concerni ng the pirated copies.  No authorized copies 
+existed from which Anthropic made its first c opies.  No full-text copy therefrom was put 
+immediately into use training LLMs.  Not every copy was even necessary nor used for training 
+LLMs.  No initial copy was ever deleted, even if never used or no longer used.7  The university 
+libraries and Google went to exceedingly great le ngths to ensure that a ll copies were secured 
+against unauthorized uses — both through techni cal measures and through legal agreements 
+among all participants.  Not so here.  The library  copies lacked internal  controls limiting access 
+and use. 
+Nor do the decisions on intermediate copying require anything less than the analysis 
+applied here.  Anthropic argues that our court of appeals in Sega Enterprises Ltd. v. Accolade, 
+Inc. looked only at the “ultimate use” and “did not analyze a series of atomized acts of 
+‘infringement’ distinct fr om that overall purpose” (Reply 3).  To the contrary, the appeals court 
+examined the initial,  intermediate, and ultimate copies used by the copyist.  The court 
+explained that the copyist initially purchas ed commercially available copies of game 
+cartridges  and then made further copies necessari ly and “solely in order to discover the 
+functional requirements for co mpatibility.”  977 F.2d 1510, 1522 (9th Cir. 1992).  Thus, it 
+reached only one result because on those fact s there was only one “overall purpose” for the 
+unauthorized copies.  Indeed, th e court reaffirmed prior case law holding that “intermediate 
+ 
+7   Training LLMs was not a use where perpetually maintaining a lib rary copy was intrinsic to the 
+proffered fair use (e.g., for a plagia rism-checker service).  Nor is this an instance where retaining 
+at least one copy was authorized  by contract with the copyright  owners (e.g., by agreement to 
+express terms upon submission to a plagiarism-ch ecker service, notwithstanding proposed terms 
+scrawled on a paper prior to submission).   A.V. ex rel. Vanderhye v. iParadigms, LLC , 562 F.3d 
+630, 635–36 & n.5, 645 n.8 (4th Cir. 2009), aff’g in relevant parts  544 F. Supp. 2d 473, 480 (E.D. 
+Va. 2008) (Judge Claude Hilton).  Anth ropic mischaracterizes this case. Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 22 of 32
+--- PAGE 23 ---
+ 
+23 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a copying of [a work] may infringe the exclusiv e rights granted to the copyright owner in 
+[S]ection 106 of the Copyright Act regardless of whether the end produc t of the copying also 
+infringes those rights.”  Id. at 1518–19 (reaffirming Walker v. Univ. Books , 602 F.2d 859, 864 
+(9th Cir. 1979)).   
+Similarly, in Sony Computer Entertainment, Inc. v. Connectix Corp. , our appeals court 
+applied the same law to similarly focused conduc t.  Another copyist allegedly had purchased 
+an authorized copy and then made further copies  solely and necessarily  to reverse-engineer 
+compatibility requirements.  203 F.3d 596, 601, 602–03 (9th Cir. 2000).   
+Both Sega and Sony avoided imposing an “artificial hurd le” to fair use by generously 
+construing the intermediate c opying necessary to the fair use.  As one example, Sega stated 
+that an engineer should be permitted to re boot her computer while undertaking to reverse-
+engineer software loaded onto it — even if doing so creates anothe r digital copy of the 
+software and is not strictly nece ssary to reverse-engineering.  Id. at 605.  But neither Sega nor 
+Sony fathomed gifting an “artificial head start” to a fair user, either, by treating even the initial 
+copy as an intermediate one.   
+And, yes, some courts have “not inquire[d]” into intermediate or initial copying at all 
+(Reply 2 (citing Campbell  as not inquiring into surplus copies in the studio)).  But if a “close 
+reading of those cases [ ] reveals that in none of  them was the legality  of the [initial or] 
+intermediate copying at issue,” then it wa s not raised and not necessarily decided.  Sega , 977 
+F.2d at 1519; see Webster v. Fall , 266 U.S. 507, 511 (1925).  It  was expressly decided 
+elsewhere:  Our analysis must attend to differen t uses of different copies , and even to different 
+uses of the same copies.  Warhol , 598 U.S. at 533.    
+Finally , Anthropic argues that even if the initia l copies served a di fferent use than the 
+intermediate and ultimate copi es, it was not a use for which An thropic necessarily would have 
+needed to pay Authors for a copy.  In theory, argues Anthropic, it could have done as Google 
+did in Google Books  — find an existing reference library wi lling to loan its copies for free as 
+source copies.  Or, in theory, it could have done as Anthropic did later — go buy used copies 
+without having to pay Authors at all.  See 17 U.S.C. § 109(a).  But Anthropic did not do those Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 23 of 32
+--- PAGE 24 ---
+ 
+24 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a things — instead it stole the works for its cen tral library by downloading them from pirated 
+libraries.   
+In sum, the first factor points against fair use for the central library copies made from 
+pirated sources — and no damages from pirati ng copies could be undone by later paying for 
+copies of the same works.  
+2. THE NATURE OF THE COPYRIGHTED WORK. 
+The second fair use factor is “the nature of the copyrighted work.”  17 U.S.C. § 107(2).  
+This factor “calls for recogniti on that some works are closer to  the core of intended copyright 
+protection than others, with  the consequence that fair use is mo re difficult to establish when the 
+former works are copied.”  Campbell , 510 U.S. at 586.  For one th ing, less protection is due 
+published works than unpublished ones.  For anothe r, less protection is due “factual works than 
+works of fiction or fantasy.”  Harper & Row , 471 U.S. at 563.  But less protection is not no 
+protection.  Even the arrangement of otherwise unprotectable facts surp asses the low bar for a 
+protectable original work of authorship.  Google , 804 F.3d at 220.     
+Here, Anthropic accepts that all of Author s’ books — all published, whether non-fiction 
+or fiction — contained expressi ve elements (Reply 9).  And, as set out above, this order 
+accepts Authors’ view of the evidence that th eir works were chosen for their expressive 
+qualities in building a central library and then in training specific LLMs (Opp. 11, 17 (citing, 
+e.g., Opp. Exh. 3 at -03433)).   
+The main function of the second factor is to help assess the other fa ctors:  to reveal 
+differences between the nature of the works at  issue and the nature of their secondary use 
+(above), and to reveal any rela tion between the amount and substa ntiality of each work taken 
+and the secondary use (next).  E.g., Campbell , 510 U.S. at 586; Kelly , 336 F.3d at 820; Google , 
+804 F.3d at 220; HathiTrust , 755 F.3d at 98; Bill Graham Archives v. Dorling Kindersley Ltd. , 
+448 F.3d 605, 612–13 (2d Cir. 2006).      
+The second factor points against  fair use for a ll copies alike. 
+ 
+ Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 24 of 32
+--- PAGE 25 ---
+ 
+25 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a  
+3. THE AMOUNT AND SUBSTANTIALITY OF THE PORTION USED. 
+The third fair use factor is “the amount and substantiality of the portion” of the 
+copyrighted work used by the accused.  17 U.S.C. § 107(3).  The crux of this factor is whether 
+the amount was “reasonable in relati on to the purpose of the copying.”  Campbell , 510 U.S. at 
+586.  Thus, the amount of copying is considered first against the work itself, then more 
+importantly against the proposed  transformative purpose.  See Warhol , 598 U.S. at 543 & n.18.   
+A. THE COPIES USED TO TRAIN SPECIFIC LLM S. 
+Copies selected for inclusion in training sets  were selected because they were complete 
+and because they contained rich protectible e xpression, or so this or der accepts the record 
+shows for Authors.  Was all this copying reason ably necessary to the transformative use?   
+Yes.   “What matters [ ] is not so much ‘the amount and substa ntiality of the portion used’ in 
+making a copy , but rather the amount and substantiality of what is thereby made accessible to a 
+public [in the purported secondary use] for whic h it may serve as a competing substitute [for 
+the primary use].”  Google , 804 F.3d at 222.  Here, once again, there is no allegation of any 
+traceable connection between th e Claude service’s outputs and Authors’ works.  The copying 
+used to train the LLMs underlying Cla ude was thus especially reasonable. 
+In response, Authors object primarily th at the copying used in training was both 
+extremely extensive and not  strictly necessary.   
+As to extensive copying , it is true that enti re works were copied.  And, “copying [ ] entire 
+work[s] ‘militate[s] against a finding of fair use.’”  Worldwide Church of God v. Philadelphia 
+Church of God, Inc. , 227 F.3d 1110, 1118 (9th Cir. 2000) (quoting Hustler Mag. Inc. v. Moral 
+Majority Inc. , 796 F.2d 1148, 1155 (9th Cir. 1986)); see Campbell , 510 U.S. at 587.  But we 
+just addressed why Authors’ argum ent is misdirected.  The copies that count for this factor are 
+those that would merely serve th e same use as the work’s ordina ry one.  Authors do not allege 
+such copying.  The accused use here of the in cremental copies is as orthogonal as can be 
+imagined to the ordinary use of a book.   Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 25 of 32
+--- PAGE 26 ---
+ 
+26 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a As to strict necessity , Authors make a stronger point.  When a productive use is made 
+possible only by borrowing from a specific work, fa ir use climbs towards its zenith.  When a 
+productive use is possible wit hout that borrowing, fair use falls to its nadir — and the 
+borrowing deserves a particular ly compelling ju stification.  See Warhol , 598 U.S. at 543 & 
+n.18, 547.  Here, it is true that Anthropic could ha ve used some other bo oks or no books at all 
+for training its LLMs — or so this order accepts the record shows for Authors.  But Anthropic 
+has presented a compelling expl anation for why it was reason ably necessary to use them 
+anyway.   
+For one thing, all agree Anthropic needed bi llions of words to train any given LLM.  If 
+using only books, Anthropic woul d have needed millions of books  per model.  If using a set 
+comprising only a small fraction of  books and a larger fraction of other texts, Anthropic still 
+would have needed hundreds of thousands of boo ks.  Authors contend th at because Anthropic 
+showed it could use such smaller sets of books, it surely could have used no books at all — or 
+at least not their  books (Opp. 23).  But Authors forget that “reasonably necessary” does not 
+mean “strictly necessary.”  Authors do not contest that the volume of text required to train an 
+LLM is monumental.  Because using so many works was reasonably necessary, using any one 
+work for actually training  LLMs was about as re asonable as the next. 
+For another thing, no output to the public was even alleged to be infringing.  So, yes, 
+Authors’ works were chosen as the strongest ex amples of writing.  But the compelling benefits 
+of training the LLMs on strong exam ples were not offset by reve lations to the public of any 
+portion of the works themselves.  What was copied was therefore especially reasonable and compelling.  
+The third factor thus favors  fair use for the training copies.  
+B. T
+HE COPIES USED TO BUILD A CENTRAL LIBRARY . 
+But again, there was a separate use — a distin ction that makes some difference as to 
+whether the amount and substant iality of the copying was “rea sonable in relation to the 
+purpose of the copying” for the library copies.  Campbell , 510 U.S. at 586. 
+ Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 26 of 32
+--- PAGE 27 ---
+ 
+27 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a  
+(i) The Purchased Library Copies Con verted from Print to Digital. 
+For the print library copies that Anthropic purchased and then converted into digital 
+library copies, Anthropic already enjoyed entitleme nt to keep the copies  in its library.  The 
+purpose of the copying was to keep  them in its library but with  more favorable storage and 
+searchability properties.   Copying the entire work was exact ly what this purpose required.  
+There was no surplus copying.  Th e source copy was destroyed.   
+The third fair use factor favors fair use for the purchased li brary copies converted from 
+print to digital. 
+(ii) The Pirated Library Copies. 
+For the pirated library copies , however, Anthropic lacked an y entitlement to hold copies 
+of the books at all.  Its purpose, it says, was to train LLMs.  But its objective conduct was to 
+seek “all the books in the world” and then retain them even af ter deciding it would not make 
+further copies from them for training — indicati ng there were other further uses.  Against the 
+purpose of acquiring all the books one could on the chance some might prove useful for 
+training LLMs and maybe other stuff too, almost  any unauthorized copying would have been 
+too much.  Anthropic copied millions of books in toto , Authors’ works among them. 
+The third factor points against  fair use for the pi rated library copies. 
+4. THE EFFECT OF THE USE UPON THE MARKET FOR OR VALUE OF THE 
+COPYRIGHTED WORK. 
+The final factor is “the eff ect of the use upon the potential market for or value of the 
+copyrighted work.”  17 U.S.C. § 107(4).  This factor points ag ainst fair use when a copyist 
+makes copies available that displace demand fo r copies the copyright owner already makes 
+available or readily could.  Texaco , 60 F.3d at 926–28 (reproduced copies); Dr. Seuss Enters., 
+L.P. v. ComicMix LLC , 983 F.3d 443, 461 (9th Cir. 2020) (deriv ative copies). “While the first 
+factor considers whether and to what exte nt an original work and secondary use [ in principle 
+could] have substitutable purposes , the fourth factor focuses on actual or potential  market 
+substitution.”  Warhol , 598 U.S. at 536 n.12 (emphasis added).   
+ Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 27 of 32
+--- PAGE 28 ---
+ 
+28 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a  
+A. THE COPIES USED TO TRAIN SPECIFIC LLM S. 
+The copies used to train specific LLMs did not and will not displace demand for copies 
+of Authors’ works, or not in the way th at counts under the Copyright Act.   
+Again, Authors concede that tr aining LLMs did not result in any exact copies nor even 
+infringing knockoffs of their works being provided  to the public.  If that were not so, this 
+would be a different case.  Authors remain free to bring that case in th e future should such 
+facts develop.   
+Instead, Authors contend generica lly that training LLMs will result in an explosion of 
+works competing with their works — such as by creating alternative summaries of factual 
+events, alternative examples of  compelling writing about ficti onal events, and so on.  This 
+order assumes that is so (Opp. 22–23 (citing, e.g.,  Opp. Exh. 38)).  But Authors’ complaint is 
+no different than it would be if they compla ined that training school children to write well 
+would result in an explosion of competing works.  This is not the kind of competitive or creative displacement that conc erns the Copyright Act.  The Act seeks to advance original 
+works of authorship, not to protect  authors against competition.  Sega , 977 F.2d at 1523–24.    
+Authors next contend that tr aining LLMs displaced (or will ) an emerging market for 
+licensing their works for the narrow purpose of trai ning LLMs (Opp. 21–22).  Anthropic 
+argues that transactional costs would exceed Anthropic’s expected benefit from any such 
+bargain, prompting it to cease dealing with any ri ghtsholders or else to  cease developing such 
+technology altogether (Br. 22–23).  Our record could support either account — so this order 
+must assume Authors are correct.  A market could develop (Opp. 19–21 (citing record)).  Even 
+so, such a market for that use is not one the Copyright Act entitles Au thors to exploit.   
+None of the cases cited by Authors requires a different result.  All contemplated losses of 
+something the Copyright Act properly protected — not the kinds of fair uses for which a 
+copyright owner cannot rightly  expect to control.  See TVEyes, Inc. , 883 F.3d at 181 (use of a 
+right legally reserved to a nd factually already being li censed by copyright owner); Texaco , 60 
+F.3d 931 (same); Ringgold v. BET, Inc. , 126 F.3d 70, 80–81 (2d Cir. 1997) (use of a right 
+legally reserved to and factually likely to be  marketable by copyright owner — displaying Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 28 of 32
+--- PAGE 29 ---
+ 
+29 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a images of her artistic wo rk in television shows); cf. Seltzer v. Green Day, Inc. , 725 F.3d 1170, 
+1179 (9th Cir. 2013) (no evidence use could be  or “was likely to” be marketable). 
+The fourth factor thus favors  fair use for the training copies. 
+B. THE COPIES USED TO BUILD A CENTRAL LIBRARY . 
+(i) The Purchased Library Copies Con verted from Print to Digital. 
+For these copies, this order assumes Anthropic’s format change from print to digital 
+displaced purchases of new dig ital copies that Anthropic woul d have made directly from 
+Authors (had it not been able to  purchase print copies in us ed condition).  But for reasons 
+stated under the first factor, such losses did not relate to something the Copyright Act reserves 
+for Authors to exploit.  It  was a format change.   
+Authors’ next argument, it seem s, is that the format cha nge nonetheless exposed it to 
+usurpation of the opportunity to sell  rightful copies because Anthropic might transmit 
+additional unauthorized digital copies more r eadily than it could have transmitted additional 
+unauthorized print copies — and that the same  would be true for al l format converters ( cf. Opp. 
+25 n.14; Opp. Expert Malackowski ¶ 52).  But afte r much discovery, there is no inkling in our 
+record of intent to redistribut e library copies once acquired nor of inability to secure that 
+valuable library against outside actors.  And, if the internal, central libra ry copies did or do in 
+fact lead to further reproduc tion or distribution, those furthe r copies remain  redressable 
+separately by Authors.  The format change  did not itself usurp the Authors’ rightful 
+entitlements. 
+This factor is thus neutral  for the purchased libra ry copies converted fro m print to digital. 
+(ii) The Pirated Library Copies. 
+The copies used to build a central library and that were obtained from pirated sources 
+plainly displaced demand for Authors’ books — copy for copy.  Not every person who merely 
+intends to make a fair use of a work is thereby entitled to a full copy in  the meantime, nor even 
+to steal a copy so that achieving this fair use is  especially simple or co st-effective.  Here, the 
+copies employed in training LLMs were one th ing, but the copies acquired to assemble a Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 29 of 32
+--- PAGE 30 ---
+ 
+30 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a convenient, general-purpose library of works for various uses for which the company might 
+have of them, if any, was a different use altogether.   
+Anthropic has almost no rebuttal on these points.  First , Anthropic argues that “Claude’s 
+services do not reduce [or usurp] the value of  Plaintiffs’ works through substitution in their 
+traditional markets” ( see Br. Expert Peterson ¶ 33).  But st ealing pirated copies of Authors’ 
+works plainly did.  Second , Anthropic argues that it may have  been able to purchase some 
+books on the open market (and some other te xts), but not other texts it copied ( cf. id.  ¶ 48 (re 
+licensing)).  But this case does not concern those other texts it could not have purchased.  It 
+could have purchased Authors’ books (and ma ny others).  In f act it later did.  Finally , 
+Anthropic argues that the effect on these text s from one book foregone was too small to be 
+considered ( see id. ¶ 77).  But the test requi res that we contemplate the likely result were the 
+conduct to be condoned as a fair use — namely to steal a work you could otherwise buy (a 
+book, millions of books) so long as you at least loosel y intend to make further copies for a 
+purportedly transformative use (writing a book revi ew with excerpts, training LLMs, etc.), 
+without any accountability.  As Anthropic itself suggested, “Tha t would destroy the [entire] 
+publishing market if that were the case” ( see Tr. 53; see also Tr. 32, 41; Opp. Expert 
+Malackowski ¶¶ 31–34, 38). 
+The fourth factor points against fair use for the pira ted library copies. 
+5. OVERALL ANALYSIS . 
+After the four factors and any others deemed relevant are “ex plored, [ ] the results [are] 
+weighed together, in light of the purposes of copyright.”  Campbell , 510 U.S. at 578. 
+The copies used to train specific LLMs were justified as a fair us e.  Every factor but the 
+nature of the copyrighted work favors this re sult.  The technology at issue was among the most 
+transformative many of us will see in our lifetimes.     
+The copies used to convert purchased print library copies into digital library copies were 
+justified, too, though for a different fair use.  The first factor strongly favo rs this result, and the 
+third favors it, too.  The fourth is neutral.  Only the second slightly  disfavors it.  On balance, as Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 30 of 32
+--- PAGE 31 ---
+ 
+31 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a the purchased print copy was destroyed and its di gital replacement not re distributed, this was a 
+fair use. 
+The downloaded pirated copies used  to build a central library were not justified by a fair 
+use.  Every factor points agains t fair use.  Anthropic employees said copies of works (pirated 
+ones, too) would be retained “forever” for “gen eral purpose” even after Anthropic determined 
+they would never be used for training LLMs.  A separate justificati on was required for each 
+use.  None is even offered here except  for Anthropic’s pocke tbook and convenience. 
+And, as for any copies made from central library copies but not used for training, this 
+order does not grant summary judgm ent for Anthropic.  On this record in this posture, the 
+central library copies were retained even when no longer serving as sources for training copies, 
+“hundreds of engineers” could acc ess them to make copies for other uses, and engineers did 
+make other copies.  Anthropic ha s dodged discovery on these points ( e.g., Opp. Exh. 17 at 93–
+94 (retained); Opp. Exh. 22 at 196 (no limits ); Opp. Exh. 30 at 3, 4 (no accounting); see also 
+Opp. 15).  We cannot determine the right answer concerning such copies because the record is 
+too poorly developed as to them.  Anthropic is not entitled to an or der blessing all copying 
+“that Anthropic has ever made af ter obtaining the data,” to use its words (Opp. Exh. 30 at 3, 4). 
+CONCLUSION 
+With respect to the training copi es and the print-to-digital co nverted copies, this order has 
+drawn all ambiguities and inferenc es in favor of the opposing si de, namely Authors.  With 
+respect to the pirated copies, this order has al so accepted the Authors’ version of the facts.  
+Authors did not move for summ ary judgment but if they had, then we would have been 
+obligated to accept all reasonable views given the evidence in defendant’s favor instead.  
+This order grants summary judgment for Anthro pic that the training use was a fair use.  
+And, it grants that the pr int-to-digital format chan ge was a fair use for a different reason.  But it 
+denies summary judgment for Anth ropic that the pirated library copies must be treated as 
+training copies.   
+We will have a trial on the pirated copies used  to create Anthropic’s central library and 
+the resulting damages, actual or  statutory (including for willfu lness).  That Anthropic later Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 31 of 32
+--- PAGE 32 ---
+ 
+32 1 
+2 3 4 5 6 7 8 9 
+10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 United States District Court 
+Northern District of Californi a bought a copy of a book it earlier st ole off the internet will not ab solve it of liab ility for the 
+theft but it may affect the extent  of statutory damages.  Nothing is foreclosed as to any other 
+copies flowing from library copies fo r uses other than for training LLMs. 
+IT IS SO ORDERED.    
+ Dated:  June 23, 2025.  
+  
+WILLIAM ALSUP 
+UNITED STATES DISTRICT JUDGE  
+Case 3:24-cv-05417-WHA     Document 231     Filed 06/23/25     Page 32 of 32
