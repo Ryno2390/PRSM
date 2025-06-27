@@ -144,10 +144,10 @@ export default async function handler(
     const engine = await initializeConciergeEngine();
     console.log('Concierge engine initialized successfully');
 
-    // Process the query
+    // Process the query (reduced context docs for performance)
     const response = await engine.processInvestorQuery(message, {
       includeHistory: !!conversationHistory,
-      maxContextDocs: 10
+      maxContextDocs: 5
     });
 
     console.log('Query processed successfully');
