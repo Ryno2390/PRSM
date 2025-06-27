@@ -88,11 +88,17 @@ export class ConciergeEngine {
       throw new Error('Knowledge base not loaded. Call loadKnowledgeBase() first.');
     }
 
-    // Find relevant documents
-    const relevantDocs = this.findRelevantDocuments(query, options?.maxContextDocs || 10);
-    
-    // Build system prompt with knowledge context
-    const systemPrompt = this.buildSystemPrompt(relevantDocs);
+    console.log(`Processing investor query: "${query}"`);
+    const startTime = Date.now();
+
+    try {
+      // Find relevant documents (reduced default for performance)
+      const maxDocs = Math.min(options?.maxContextDocs || 5, 8); // Cap at 8 docs max
+      const relevantDocs = this.findRelevantDocuments(query, maxDocs);
+      
+      // Build system prompt with knowledge context
+      const systemPrompt = this.buildSystemPrompt(relevantDocs);
+      console.log(`Built system prompt with ${relevantDocs.length} documents`);
     
     // Prepare conversation messages
     const messages: ChatMessage[] = [];
@@ -122,6 +128,9 @@ export class ConciergeEngine {
         { role: 'assistant', content: llmResponse.content }
       );
 
+      const totalTime = Date.now() - startTime;
+      console.log(`Query processed successfully in ${totalTime}ms`);
+
       return {
         content: llmResponse.content,
         sourceReferences,
@@ -145,111 +154,66 @@ export class ConciergeEngine {
   private findRelevantDocuments(query: string, maxDocs: number): KnowledgeDocument[] {
     if (!this.knowledgeBase) return [];
 
+    console.log(`Finding relevant documents for query: "${query}" (max: ${maxDocs})`);
+    const startTime = Date.now();
+    
     const queryLower = query.toLowerCase();
     const documents = Object.values(this.knowledgeBase.documents);
     
-    // Enhanced scoring for comprehensive knowledge base
+    console.log(`Processing ${documents.length} documents...`);
+    
+    // Simplified and optimized scoring
     const scoredDocs = documents.map(doc => {
       let score = 0;
-      const content = doc.content.toLowerCase();
       const title = (doc.title || doc.filename || '').toLowerCase();
       const filepath = doc.path.toLowerCase();
       
-      // Keyword matching with enhanced weights
-      const investmentKeywords = [
-        'investment', 'funding', 'series a', 'revenue', 'business model',
-        'valuation', 'financial', 'roi', 'market', 'strategy'
-      ];
-      const technicalKeywords = [
-        'security', 'technical', 'architecture', 'performance', 'scalability',
-        'api', 'code', 'implementation', 'algorithm', 'system'
-      ];
-      const evidenceKeywords = [
-        'team', 'execution', 'validation', 'evidence', 'metrics',
-        'test', 'result', 'proof', 'benchmark', 'audit'
-      ];
-      const partnershipKeywords = [
-        'partnership', 'apple', 'collaboration', 'integration', 'alliance'
-      ];
-      
-      // Score by keyword categories
-      [investmentKeywords, technicalKeywords, evidenceKeywords, partnershipKeywords].forEach((keywords, idx) => {
-        const categoryWeight = [25, 20, 15, 10][idx]; // Investment gets highest weight
-        keywords.forEach(keyword => {
-          if (queryLower.includes(keyword)) {
-            if (title.includes(keyword)) score += categoryWeight;
-            if (filepath.includes(keyword)) score += categoryWeight * 0.8;
-            if (content.includes(keyword)) score += categoryWeight * 0.6;
-          }
-        });
-      });
-      
-      // Enhanced category-based scoring for comprehensive knowledge
+      // Quick category-based base scoring
       const categoryScores: { [key: string]: number } = {
-        'documentation': 15,
         'tier1_essential': 20,
         'tier2_supporting': 12,
-        'tier3_detailed': 8,
-        'source_code': 10,
-        'tests': 8,
-        'evidence': 15,
-        'configuration': 5,
-        'contracts': 12,
-        'scripts': 5,
-        'infrastructure': 6
+        'tier3_detailed': 8
       };
       score += categoryScores[doc.category] || 5;
       
-      // Boost for specific file types based on query intent
-      if (queryLower.includes('code') || queryLower.includes('implementation')) {
-        if (doc.category === 'source_code') score += 15;
-      }
-      if (queryLower.includes('test') || queryLower.includes('validation')) {
-        if (doc.category === 'tests' || doc.category === 'evidence') score += 15;
-      }
-      if (queryLower.includes('config') || queryLower.includes('deployment')) {
-        if (doc.category === 'configuration' || doc.category === 'infrastructure') score += 15;
-      }
-      
-      // Text similarity scoring
-      const queryWords = queryLower.split(/\s+/).filter(w => w.length > 3);
-      queryWords.forEach(word => {
-        const titleMatches = (title.match(new RegExp(word, 'g')) || []).length;
-        const contentMatches = Math.min((content.match(new RegExp(word, 'g')) || []).length, 10);
-        score += titleMatches * 5 + contentMatches * 2;
+      // Fast keyword matching - only check key terms
+      const keyTerms = ['prsm', 'investment', 'funding', 'technical', 'business', 'model'];
+      keyTerms.forEach(term => {
+        if (queryLower.includes(term)) {
+          if (title.includes(term)) score += 15;
+          if (filepath.includes(term)) score += 10;
+          // Simple content check - just indexOf, no regex
+          if (doc.content.toLowerCase().indexOf(term) !== -1) score += 5;
+        }
       });
       
-      // Boost recent or important files
-      if (filepath.includes('readme') || filepath.includes('investment') || filepath.includes('business')) {
-        score += 10;
+      // General PRSM queries get investment docs
+      if (queryLower.includes('prsm') || queryLower.includes('tell me about')) {
+        if (filepath.includes('investment') || title.includes('investment')) score += 25;
+        if (filepath.includes('readme') || title.includes('overview')) score += 20;
+      }
+      
+      // Boost important files
+      if (filepath.includes('investment_materials') || 
+          filepath.includes('investment_readiness') ||
+          filepath.includes('business_case')) {
+        score += 15;
       }
 
       return { doc, score };
     });
 
-    // Sort by score and return top documents, ensuring diversity
-    const sortedDocs = scoredDocs.sort((a, b) => b.score - a.score);
-    const selectedDocs = [];
-    const categoriesUsed = new Set();
-    
-    // First pass: get top docs ensuring category diversity
-    for (const item of sortedDocs) {
-      if (selectedDocs.length >= maxDocs) break;
-      if (!categoriesUsed.has(item.doc.category) || selectedDocs.length < maxDocs / 2) {
-        selectedDocs.push(item.doc);
-        categoriesUsed.add(item.doc.category);
-      }
-    }
-    
-    // Second pass: fill remaining slots with highest scoring docs
-    for (const item of sortedDocs) {
-      if (selectedDocs.length >= maxDocs) break;
-      if (!selectedDocs.find(d => d.id === item.doc.id)) {
-        selectedDocs.push(item.doc);
-      }
-    }
+    // Simple sort and take top results
+    const sortedDocs = scoredDocs
+      .filter(item => item.score > 5) // Only include docs with some relevance
+      .sort((a, b) => b.score - a.score)
+      .slice(0, maxDocs)
+      .map(item => item.doc);
 
-    return selectedDocs.slice(0, maxDocs);
+    const elapsed = Date.now() - startTime;
+    console.log(`Found ${sortedDocs.length} relevant documents in ${elapsed}ms`);
+    
+    return sortedDocs;
   }
 
   private buildSystemPrompt(relevantDocs: KnowledgeDocument[]): string {
