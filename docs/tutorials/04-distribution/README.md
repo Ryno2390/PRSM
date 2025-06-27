@@ -290,7 +290,7 @@ async for metric_update in monitor.stream():
 
 After completing the Distribution Path:
 
-1. **Deploy Production Network** → Move to [Production Path](../05-production/)
+1. **Deploy Production Network** → Move to [Production Path](../../PRODUCTION_OPERATIONS_MANUAL.md)
 2. **Contribute to Protocol** → Join PRSM development
 3. **Research Applications** → Explore novel distributed AI patterns
 

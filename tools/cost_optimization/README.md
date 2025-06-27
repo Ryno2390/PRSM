@@ -357,7 +357,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 For support and questions:
 
-- **Documentation**: [PRSM Docs](../docs/)
+- **Documentation**: [PRSM Docs](../../docs/)
 - **GitHub Issues**: [Report Issues](https://github.com/Ryno2390/PRSM/issues)
 - **Community**: [Join Discord](https://discord.gg/prsm)
 

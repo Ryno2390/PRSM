@@ -241,4 +241,4 @@ Subscribe to cost-related events:
 
 - [Model Inference API](./model-inference.md)
 - [Performance Tuning Guide](./performance-tuning.md)
-- [Budget Management Tutorial](../tutorials/02-foundation/budget-management.md)
+- [Budget Management Tutorial](../tutorials/02-foundation/configuration.md)

@@ -472,6 +472,33 @@ def test_config_validation():
 
 ## Next Steps
 
-- [Query Processing](./query-processing.md) - Learn about request processing
-- [Hands-On Exercises](./exercises.md) - Practice configuration scenarios
+- [Query Processing](#query-processing) - Learn about request processing
+- [Hands-On Exercises](#hands-on-exercises) - Practice configuration scenarios
 - [API Fundamentals](./api-fundamentals.md) - Core API concepts
+
+## Query Processing
+
+Advanced query handling, context management, and response optimization are key components of PRSM's architecture:
+
+### Context Management
+- Maintain conversation context across requests
+- Handle memory and context limits efficiently  
+- Optimize context for performance
+
+### Response Optimization
+- Stream responses for better user experience
+- Handle rate limiting and retries
+- Optimize response formatting
+
+## Hands-On Exercises
+
+Practice these configuration scenarios to reinforce your learning:
+
+### Exercise 1: Environment Setup
+Configure your development environment with proper API keys and settings.
+
+### Exercise 2: Advanced Configuration
+Set up multiple environments (dev, staging, production) with different configurations.
+
+### Exercise 3: Performance Tuning
+Optimize configuration settings for your specific use case and performance requirements.

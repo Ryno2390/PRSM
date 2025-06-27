@@ -28,10 +28,10 @@ Learn to use PRSM's REST API and Python SDK effectively.
 ### [3. Configuration Deep Dive](./configuration.md)
 Master environment setup, API keys, and deployment configurations.
 
-### [4. Query Processing](./query-processing.md)
+### [4. Query Processing](./configuration.md#query-processing)
 Advanced query handling, context management, and response optimization.
 
-### [5. Hands-On Exercises](./exercises.md)
+### [5. Hands-On Exercises](./configuration.md#hands-on-exercises)
 Practical exercises to reinforce your learning.
 
 ## 🎮 What You'll Build

@@ -1215,7 +1215,7 @@ class NeuromorphicP2PNetwork:
 ### Open Source Projects
 - [PRSM P2P Network](https://github.com/Ryno2390/PRSM/tree/main/prsm/federation)
 - [Demo Applications](../../demos/enhanced_p2p_ai_demo.py)
-- [Performance Benchmarks](../../performance)
+- [Performance Benchmarks](../../results/performance_benchmark_results.json)
 - [Security Tests](../../tests/test_p2p_federation.py)
 
 ---
