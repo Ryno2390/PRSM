@@ -1,0 +1,44 @@
+{
+  "generated_at": "2025-06-13T20:32:05.566439+00:00",
+  "environment": {
+    "git_commit": "5067b8d27d44185f2c633ed4196c5e3d01776584",
+    "timestamp": "2025-06-13T20:32:05.578967+00:00",
+    "platform": {
+      "system": "Darwin",
+      "release": "24.5.0",
+      "machine": "arm64",
+      "processor": "arm"
+    },
+    "hardware": {
+      "cpu_count": 10,
+      "memory_total": 17179869184,
+      "disk_total": 494384795648
+    },
+    "python": {
+      "version": "3.9.6",
+      "implementation": "CPython"
+    }
+  },
+  "evidence_summary": {
+    "benchmarks": {
+      "total_evidence_files": 0,
+      "latest_evidence": {},
+      "integrity_status": {}
+    },
+    "economic_simulations": {
+      "total_evidence_files": 0,
+      "latest_evidence": {},
+      "integrity_status": {}
+    },
+    "safety_tests": {
+      "total_evidence_files": 0,
+      "latest_evidence": {},
+      "integrity_status": {}
+    },
+    "network_deployments": {
+      "total_evidence_files": 0,
+      "latest_evidence": {},
+      "integrity_status": {}
+    }
+  }
+}

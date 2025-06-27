@@ -1,0 +1,34 @@
+# PRSM Demo Dependencies
+# Required packages for P2P Network and Tokenomics demonstrations
+
+# Core Python packages (built-in, listed for reference)
+# asyncio - async programming for P2P simulation
+# hashlib - cryptographic hashing for message signatures
+# uuid - unique identifiers for nodes and messages
+# json - data serialization
+# time - timing and timestamps
+# datetime - date/time handling
+# pathlib - file path operations
+# dataclasses - structured data classes
+# enum - enumeration types
+# decimal - high-precision financial calculations
+# typing - type hints
+# logging - structured logging
+
+# External dependencies for interactive dashboards
+streamlit>=1.28.0              # Interactive web dashboards
+plotly>=5.17.0                 # Interactive plotting and charts
+pandas>=2.1.0                  # Data manipulation and analysis
+numpy>=1.24.0                  # Numerical computing
+
+# Optional: Advanced economic simulation (if Mesa available)
+mesa>=2.1.0                    # Agent-based modeling framework
+networkx>=3.1                  # Network analysis and graph algorithms
+
+# Optional: Enhanced visualization
+matplotlib>=3.7.0              # Static plotting (fallback for Plotly)
+seaborn>=0.12.0               # Statistical visualization
+
+# Development and testing
+pytest>=7.4.0                 # Testing framework
+pytest-asyncio>=0.21.0        # Async testing support

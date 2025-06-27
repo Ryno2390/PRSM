@@ -79,6 +79,16 @@ export default async function handler(
   }
 
   try {
+    // Add detailed logging for debugging
+    console.log('Chat API called with method:', req.method);
+    console.log('Environment:', process.env.NODE_ENV);
+    console.log('Available env vars:', {
+      hasAnthropicKey: !!process.env.ANTHROPIC_API_KEY,
+      hasGoogleKey: !!process.env.GOOGLE_API_KEY,
+      hasOpenAIKey: !!process.env.OPENAI_API_KEY,
+      defaultProvider: process.env.DEFAULT_LLM_PROVIDER
+    });
+
     // Validate request body
     const { message, conversationHistory }: ChatRequest = req.body;
     
@@ -96,8 +106,11 @@ export default async function handler(
       });
     }
 
+    console.log('Processing message:', message.substring(0, 100) + '...');
+
     // Initialize concierge engine
     const engine = await initializeConciergeEngine();
+    console.log('Concierge engine initialized successfully');
 
     // Process the query
     const response = await engine.processInvestorQuery(message, {
@@ -105,11 +118,13 @@ export default async function handler(
       maxContextDocs: 10
     });
 
+    console.log('Query processed successfully');
     // Return successful response
     res.status(200).json(response);
 
   } catch (error) {
-    console.error('Chat API Error:', error);
+    console.error('Chat API Error (full details):', error);
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack available');
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
@@ -135,10 +150,12 @@ export default async function handler(
       });
     }
 
-    // Generic error response
+    // Generic error response with more details in development
     return res.status(500).json({ 
       error: 'Internal server error',
-      details: process.env.NODE_ENV === 'development' ? errorMessage : 'An unexpected error occurred. Please try again.' 
+      details: process.env.NODE_ENV === 'development' ? 
+        `${errorMessage}\n\nStack: ${error instanceof Error ? error.stack : 'No stack'}` : 
+        'An unexpected error occurred. Please try again.'
     });
   }
 }
