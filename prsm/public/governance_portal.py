@@ -132,7 +132,7 @@ class GovernanceStats:
 @dataclass
 class GovernanceConfig:
     """Governance portal configuration"""
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"  # Security: localhost binding by default
     port: int = 8095
     title: str = "PRSM Governance Portal"
     voting_period_days: int = 7
@@ -1439,7 +1439,7 @@ async def main():
     import argparse
     
     parser = argparse.ArgumentParser(description="PRSM Governance Portal")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (use 0.0.0.0 for production with proper security)")
     parser.add_argument("--port", type=int, default=8095, help="Port to bind to")
     
     args = parser.parse_args()

@@ -1,10 +1,10 @@
 # PRSM Repository Link Validation Report
-**Generated**: Fri Jun 27 11:25:53 EDT 2025
+**Generated**: Fri Jun 27 11:42:47 EDT 2025
 
 ## 📊 Summary
 - **Total files scanned**: 312
-- **Total links found**: 1153
-- **Valid internal links**: 792
+- **Total links found**: 1159
+- **Valid internal links**: 798
 - **Broken internal links**: 0
 - **External links**: 361
 - **Files with issues**: 0
