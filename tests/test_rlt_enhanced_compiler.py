@@ -7,6 +7,7 @@ including explanation quality assessment, logical coherence evaluation,
 and quality-weighted compilation strategies.
 """
 
+import pytest
 import asyncio
 import json
 import time
@@ -14,11 +15,41 @@ import numpy as np
 from datetime import datetime, timezone
 from uuid import uuid4
 
-def test_rlt_quality_assessment():
-    """Test RLT Quality Assessment functionality"""
-    print("🎯 Testing RLT Quality Assessment...")
+
+class TestRLTQualityAssessment:
+    """Test suite for RLT Quality Assessment functionality"""
     
-    try:
+    @pytest.fixture
+    def mock_rlt_quality_assessment(self):
+        """Fixture providing a mock RLT Quality Assessment class"""
+        class MockRLTQualityAssessment:
+            def __init__(self, explanation_id, teacher_id, **kwargs):
+                self.explanation_id = explanation_id
+                self.teacher_id = teacher_id
+                self.explanation_quality = max(0.0, min(1.0, kwargs.get('explanation_quality', 0.0)))
+                self.logical_coherence = max(0.0, min(1.0, kwargs.get('logical_coherence', 0.0)))
+                self.concept_coverage = max(0.0, min(1.0, kwargs.get('concept_coverage', 0.0)))
+                self.student_comprehension_prediction = max(0.0, min(1.0, kwargs.get('student_comprehension_prediction', 0.0)))
+                self.dense_reward_score = max(0.0, min(1.0, kwargs.get('dense_reward_score', 0.0)))
+                self.teaching_effectiveness = max(0.0, min(1.0, kwargs.get('teaching_effectiveness', 0.0)))
+                self.timestamp = datetime.now(timezone.utc)
+            
+            def calculate_overall_quality(self):
+                return (
+                    self.explanation_quality * 0.25 +
+                    self.logical_coherence * 0.20 +
+                    self.concept_coverage * 0.15 +
+                    self.student_comprehension_prediction * 0.20 +
+                    self.dense_reward_score * 0.15 +
+                    self.teaching_effectiveness * 0.05
+                )
+            
+            def get_quality_breakdown(self):
+                return {
+                    "explanation_quality": self.explanation_quality,
+                    "logical_coherence": self.logical_coherence,
+                    "concept_coverage": self.concept_coverage,
+                    "student_comprehension_prediction": self.student_comprehension_prediction,
         # Mock the RLTQualityAssessment class
         class MockRLTQualityAssessment:
             def __init__(self, explanation_id, teacher_id, **kwargs):
