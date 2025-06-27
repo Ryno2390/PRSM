@@ -9,4 +9,4 @@
 
 Archives are automatically created by the CI/CD pipeline on every commit to main branch.
 
-- [20250625_110247_e6d2382](archive/20250625_110247_e6d2382/)
+- [20250625_110247_e6d2382](latest/) - Latest evidence available

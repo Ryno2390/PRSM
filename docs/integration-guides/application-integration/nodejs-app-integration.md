@@ -731,10 +731,10 @@ async function cachedQuery(prompt, userId) {
 
 ## 🔗 Next Steps
 
-- [Express.js Advanced Patterns](./express-advanced-integration.md)
-- [Next.js Production Deployment](./nextjs-production-integration.md)
-- [TypeScript Type Definitions](./typescript-integration.md)
-- [Performance Optimization](../devops-integration/performance-optimization.md)
+- [Express.js Advanced Patterns](../../API_REFERENCE.md#express-integration)
+- [Next.js Production Deployment](../../PRODUCTION_OPERATIONS_MANUAL.md#deployment)
+- [TypeScript Type Definitions](../../SDK_DOCUMENTATION.md#typescript)
+- [Performance Optimization](../../performance/PERFORMANCE_ASSESSMENT.md)
 
 ## 🆘 Troubleshooting
 

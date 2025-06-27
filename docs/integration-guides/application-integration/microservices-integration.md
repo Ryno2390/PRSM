@@ -1211,7 +1211,7 @@ export default PRSMCircuitBreaker;
 ## 📋 Next Steps
 
 - [Kubernetes Production Deployment](../platform-integration/kubernetes-integration.md)
-- [Service Mesh Configuration](./service-mesh-integration.md)
+- [Service Mesh Configuration](../../PRODUCTION_OPERATIONS_MANUAL.md#service-mesh)
 - [Distributed Tracing Setup](../devops-integration/monitoring-integration.md)
 - [Performance Testing](../devops-integration/testing-integration.md)
 

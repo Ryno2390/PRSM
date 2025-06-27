@@ -168,7 +168,7 @@ PRSM represents the infrastructure for AI coordination - positioned at the conve
 **Investment Team**
 - Email: funding@prsm.ai
 - Phone: +1 (555) 123-PRSM
-- Investment Deck: [Download PDF](../docs/PRSM_Investment_Deck.pdf)
+- Investment Deck: [Download PDF](./PRSM_Investment_Deck.pdf)
 
 **Leadership Team**
 - CEO: ceo@prsm.ai

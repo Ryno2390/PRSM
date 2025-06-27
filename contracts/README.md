@@ -348,7 +348,7 @@ const accountInfo = await ftnsToken.getAccountInfo(userAddress);
 
 ## 📝 License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](../LICENSE) file for details.
 
 ## 🤝 Contributing
 

@@ -44,7 +44,7 @@ Build custom teachers, tools, and integrations.
 ### [Distribution](./04-distribution/)
 Deploy across distributed networks and marketplaces.
 
-### [Production](./05-production/)
+### [Production](../PRODUCTION_OPERATIONS_MANUAL.md)
 Enterprise-grade deployment and operations.
 
 ## 🎮 Interactive Examples
@@ -88,7 +88,7 @@ Before starting:
 | 30 minutes | [Foundation Path](./02-foundation/) | Developers |
 | 2 hours | [Development Path](./03-development/) | Contributors |
 | 1 day | [Distribution Path](./04-distribution/) | Network operators |
-| 3 days | [Production Path](./05-production/) | Enterprise teams |
+| 3 days | [Production Path](../PRODUCTION_OPERATIONS_MANUAL.md) | Enterprise teams |
 
 ---
 
