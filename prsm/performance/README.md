@@ -253,7 +253,7 @@ result = await suite.run_benchmark(config)
 ### Component Documentation
 - [Scaling Test Controller](./README_scaling.md)
 - [Dashboard Usage Guide](../dashboard/README.md)
-- [Post-Quantum Cryptography](../cryptography/README.md)
+- [Post-Quantum Cryptography](../../PRSM_ui_mockup/README.md)
 - [PRSM Architecture](../../README.md)
 
 ### API Reference

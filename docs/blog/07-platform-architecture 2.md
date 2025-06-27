@@ -1867,8 +1867,8 @@ class QuantumReadyArchitecture:
 - **Prometheus Monitoring** - Observability Best Practices
 
 ### PRSM Specific Resources
-- [Agent Framework Documentation](../../prsm/agents/README.md)
-- [Federation Network Guide](../../prsm/federation/README.md)
+- [Agent Framework Documentation](../../PRSM_ui_mockup/README.md)
+- [Federation Network Guide](../../PRSM_ui_mockup/README.md)
 - [Enterprise Authentication](../ENTERPRISE_AUTHENTICATION_GUIDE.md)
 - [Performance Benchmarks](../PERFORMANCE_CLAIMS_AUDIT.md)
 
