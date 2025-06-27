@@ -25,7 +25,7 @@
 class PRSMClient {
     constructor(options = {}) {
         this.apiKey = options.apiKey || process.env.PRSM_API_KEY || 'demo_key';
-        this.baseUrl = options.baseUrl || 'https://api.prsm.network';
+        this.baseUrl = options.baseUrl || 'https://api.prsm.ai';
         this.agents = new AgentManager(this);
         this.models = new ModelManager(this);
         this.p2p = new P2PManager(this);
@@ -332,7 +332,7 @@ async function example2RealTimeStreaming() {
 
     // Also demonstrate WebSocket connection
     console.log('\n🔌 Establishing WebSocket connection...');
-    const ws = client.websocket.connect('wss://ws.prsm.network/stream');
+    const ws = client.websocket.connect('wss://ws.prsm.ai/stream');
     
     return new Promise((resolve) => {
         ws.onMessage((message) => {

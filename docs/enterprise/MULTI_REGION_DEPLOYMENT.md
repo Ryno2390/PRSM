@@ -231,7 +231,7 @@ curl -X POST "https://api.cloudflare.com/client/v4/zones/{zone_id}/load_balancer
   -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
   -H "Content-Type: application/json" \
   --data '{
-    "name": "api.prsm.network",
+    "name": "api.prsm.ai",
     "fallback_pool": "us-west-2-pool",
     "default_pools": ["us-west-2-pool", "us-east-1-pool", "eu-west-1-pool"],
     "description": "PRSM API Global Load Balancer",
@@ -941,7 +941,7 @@ Cross-Region:
 ```bash
 # Run distributed load test
 k6 run --vus 1000 --duration 10m \
-  --env API_BASE_URL=https://api.prsm.network \
+  --env API_BASE_URL=https://api.prsm.ai \
   --env REGIONS="us-west-2,us-east-1,eu-west-1" \
   scripts/load-test-enterprise.js
 

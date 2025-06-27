@@ -1,7 +1,7 @@
 # PRSM Development Makefile
 # Provides common development tasks
 
-.PHONY: help install install-dev test lint format clean run docker docker-optimized docs nwtn-test nwtn-stress load-test
+.PHONY: help install install-dev test test-cov lint format clean run docker docker-optimized docs nwtn-test nwtn-stress load-test
 
 # Default target
 help:
@@ -9,6 +9,7 @@ help:
 	@echo "  install      Install production dependencies"
 	@echo "  install-dev  Install development dependencies"
 	@echo "  test         Run tests"
+	@echo "  test-cov     Run tests with coverage reporting"
 	@echo "  lint         Run linting checks"
 	@echo "  format       Format code with black and isort"
 	@echo "  clean        Clean up generated files"

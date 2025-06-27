@@ -50,7 +50,7 @@ import prsm
 # Initialize PRSM client
 client = prsm.Client(
     api_key="your_api_key",
-    base_url="https://api.prsm.network"
+    base_url="https://api.prsm.ai"
 )
 
 # Create an AI agent
@@ -75,12 +75,12 @@ print(f"Confidence: {result.confidence}")
 ## 🌐 Base URLs
 
 ### Production
-- **Main API**: `https://api.prsm.network`
+- **Main API**: `https://api.prsm.ai`
 - **P2P Gateway**: `https://p2p.prsm.network`
-- **WebSocket**: `wss://ws.prsm.network`
+- **WebSocket**: `wss://ws.prsm.ai`
 
 ### Development
-- **Staging API**: `https://staging-api.prsm.network`
+- **Staging API**: `https://staging-api.prsm.ai`
 - **Local Development**: `http://localhost:8000`
 
 ## 🔐 Authentication
@@ -90,19 +90,19 @@ PRSM supports multiple authentication methods:
 ### API Key Authentication
 ```bash
 curl -H "Authorization: Bearer your_api_key" \
-     https://api.prsm.network/v1/agents
+     https://api.prsm.ai/v1/agents
 ```
 
 ### JWT Token Authentication
 ```bash
 curl -H "Authorization: Bearer your_jwt_token" \
-     https://api.prsm.network/v1/agents
+     https://api.prsm.ai/v1/agents
 ```
 
 ### FTNS Token Authentication
 ```bash
 curl -H "X-FTNS-Token: your_ftns_token" \
-     https://api.prsm.network/v1/agents
+     https://api.prsm.ai/v1/agents
 ```
 
 ## 📖 Interactive API Explorer

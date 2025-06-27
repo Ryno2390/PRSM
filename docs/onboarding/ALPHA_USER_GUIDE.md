@@ -34,7 +34,7 @@ curl -X POST https://alpha.prsm.network/register \
 
 # You'll receive an email with your alpha credentials
 # Alpha API Key: prsm_alpha_[32-character-string]
-# Alpha Endpoint: https://alpha-api.prsm.network
+# Alpha Endpoint: https://alpha-api.prsm.ai
 ```
 
 ### 2. Install PRSM CLI
@@ -56,10 +56,10 @@ prsm --version
 ```bash
 # Set up authentication
 export PRSM_API_KEY="your_alpha_api_key"
-export PRSM_ENDPOINT="https://alpha-api.prsm.network"
+export PRSM_ENDPOINT="https://alpha-api.prsm.ai"
 
 # Or configure via CLI
-prsm configure --api-key your_alpha_api_key --endpoint https://alpha-api.prsm.network
+prsm configure --api-key your_alpha_api_key --endpoint https://alpha-api.prsm.ai
 
 # Test connection
 prsm status

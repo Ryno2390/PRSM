@@ -98,7 +98,7 @@ All SDKs support configuration via environment variables:
 
 ```bash
 export PRSM_API_KEY="your-api-key"
-export PRSM_BASE_URL="https://api.prsm.network"
+export PRSM_BASE_URL="https://api.prsm.ai"
 export PRSM_TIMEOUT="30"
 export PRSM_MAX_RETRIES="3"
 ```
@@ -111,7 +111,7 @@ from prsm_sdk import PRSMClient, Config
 
 config = Config(
     api_key="your-api-key",
-    base_url="https://api.prsm.network",
+    base_url="https://api.prsm.ai",
     timeout=30.0,
     max_retries=3
 )
@@ -123,7 +123,7 @@ client = PRSMClient(config=config)
 ```typescript
 const client = new PRSMClient({
   apiKey: 'your-api-key',
-  baseURL: 'https://api.prsm.network',
+  baseURL: 'https://api.prsm.ai',
   timeout: 30000,
   maxRetries: 3
 });
@@ -133,7 +133,7 @@ const client = new PRSMClient({
 ```go
 config := prsm.Config{
     APIKey:     "your-api-key",
-    BaseURL:    "https://api.prsm.network",
+    BaseURL:    "https://api.prsm.ai",
     Timeout:    30 * time.Second,
     MaxRetries: 3,
 }

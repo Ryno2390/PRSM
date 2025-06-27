@@ -8,10 +8,10 @@ The Agent Management API allows you to create sophisticated AI agents, configure
 
 ## 📋 Base Information
 
-- **Base URL**: `https://api.prsm.network/v1/agents`
+- **Base URL**: `https://api.prsm.ai/v1/agents`
 - **Authentication**: Bearer token or FTNS token required
 - **Rate Limits**: 1000 requests/hour (Free), 10,000/hour (Pro)
-- **WebSocket**: `wss://ws.prsm.network/agents` (real-time updates)
+- **WebSocket**: `wss://ws.prsm.ai/agents` (real-time updates)
 
 ## 🤖 Agent Types
 
@@ -191,7 +191,7 @@ console.log(`Analyst agent created: ${analystAgent.id}`);
 <summary><strong>cURL Example</strong></summary>
 
 ```bash
-curl -X POST https://api.prsm.network/v1/agents \
+curl -X POST https://api.prsm.ai/v1/agents \
   -H "Authorization: Bearer your_api_key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -521,7 +521,7 @@ Stream real-time updates for a running execution.
 #### WebSocket Connection
 
 ```javascript
-const ws = new WebSocket('wss://ws.prsm.network/agents/agent_abc123/executions/exec_def456/stream');
+const ws = new WebSocket('wss://ws.prsm.ai/agents/agent_abc123/executions/exec_def456/stream');
 
 ws.onmessage = (event) => {
     const update = JSON.parse(event.data);

@@ -30,7 +30,7 @@ class PRSMClient:
     
     def __init__(self, api_key: str = None, base_url: str = None):
         self.api_key = api_key or os.getenv("PRSM_API_KEY", "demo_key")
-        self.base_url = base_url or "https://api.prsm.network"
+        self.base_url = base_url or "https://api.prsm.ai"
         self.agents = AgentManager(self)
         self.models = ModelManager(self)
         self.p2p = P2PManager(self)
