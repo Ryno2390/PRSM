@@ -45,8 +45,10 @@ api-keys.txt
 test-results/
 *.log
 
-# Knowledge base cache
+# Knowledge base cache (but include compiled files)
 knowledge-base/
+!knowledge-base/compiled-knowledge.json
+!knowledge-base/comprehensive-knowledge.json
 
 # IDE
 .vscode/
