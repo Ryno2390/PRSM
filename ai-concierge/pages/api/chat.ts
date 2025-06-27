@@ -29,76 +29,88 @@ interface ErrorResponse {
   details?: string;
 }
 
-// Initialize the concierge engine (singleton pattern)
+// Initialize the concierge engine (singleton pattern with Netlify optimizations)
 let conciergeEngine: ConciergeEngine | null = null;
+let knowledgeBaseCache: any = null;
+let initPromise: Promise<ConciergeEngine> | null = null;
 
 async function initializeConciergeEngine(): Promise<ConciergeEngine> {
+  // If already initializing, wait for that to complete
+  if (initPromise) {
+    return initPromise;
+  }
+
+  // If already initialized, return immediately
   if (conciergeEngine) {
     return conciergeEngine;
   }
 
-  // Configure LLM router with available API keys
-  const llmConfig = {
-    provider: (process.env.DEFAULT_LLM_PROVIDER as LLMProvider) || 'claude',
-    fallback: (['gemini', 'claude'] as LLMProvider[]).filter(p => p !== process.env.DEFAULT_LLM_PROVIDER)
-  };
+  console.log('Initializing concierge engine with Netlify optimizations...');
+  const startTime = Date.now();
 
-  const apiKeys = {
-    claude: process.env.ANTHROPIC_API_KEY,
-    gemini: process.env.GOOGLE_API_KEY,
-    openai: process.env.OPENAI_API_KEY
-  };
+  initPromise = (async () => {
+    // Configure LLM router with available API keys
+    const llmConfig = {
+      provider: (process.env.DEFAULT_LLM_PROVIDER as LLMProvider) || 'claude',
+      fallback: (['gemini', 'claude'] as LLMProvider[]).filter(p => p !== process.env.DEFAULT_LLM_PROVIDER)
+    };
 
-  // Validate that at least one API key is available
-  const availableKeys = Object.entries(apiKeys).filter(([_, key]) => !!key);
-  if (availableKeys.length === 0) {
-    throw new Error('No LLM API keys configured. Please set ANTHROPIC_API_KEY, GOOGLE_API_KEY, or OPENAI_API_KEY.');
-  }
+    const apiKeys = {
+      claude: process.env.ANTHROPIC_API_KEY,
+      gemini: process.env.GOOGLE_API_KEY,
+      openai: process.env.OPENAI_API_KEY
+    };
 
-  const llmRouter = new LLMRouter(llmConfig, apiKeys);
-  conciergeEngine = new ConciergeEngine(llmRouter);
-
-  // Load knowledge base (using compiled version for size optimization)
-  // Try multiple path resolutions for different deployment environments
-  const possiblePaths = [
-    path.resolve(process.cwd(), 'knowledge-base', 'compiled-knowledge.json'),
-    path.resolve(process.cwd(), 'ai-concierge', 'knowledge-base', 'compiled-knowledge.json'),
-    path.resolve(__dirname, '..', '..', 'knowledge-base', 'compiled-knowledge.json'),
-    path.resolve(__dirname, '..', '..', '..', 'knowledge-base', 'compiled-knowledge.json')
-  ];
-
-  console.log('Current working directory:', process.cwd());
-  console.log('__dirname:', __dirname);
-  console.log('Trying knowledge base paths:', possiblePaths);
-
-  let knowledgeBasePath = null;
-  for (const tryPath of possiblePaths) {
-    try {
-      // Check if file exists
-      const fs = require('fs');
-      if (fs.existsSync(tryPath)) {
-        knowledgeBasePath = tryPath;
-        console.log('Found knowledge base at:', tryPath);
-        break;
-      } else {
-        console.log('Knowledge base not found at:', tryPath);
-      }
-    } catch (error) {
-      console.log('Error checking path:', tryPath, error);
+    // Validate that at least one API key is available
+    const availableKeys = Object.entries(apiKeys).filter(([_, key]) => !!key);
+    if (availableKeys.length === 0) {
+      throw new Error('No LLM API keys configured. Please set ANTHROPIC_API_KEY, GOOGLE_API_KEY, or OPENAI_API_KEY.');
     }
-  }
 
-  if (!knowledgeBasePath) {
-    throw new Error('Knowledge base file not found in any expected location');
-  }
+    const llmRouter = new LLMRouter(llmConfig, apiKeys);
+    conciergeEngine = new ConciergeEngine(llmRouter);
 
-  await conciergeEngine.loadKnowledgeBase(knowledgeBasePath);
+    // Fast knowledge base loading with caching
+    if (!knowledgeBaseCache) {
+      const possiblePaths = [
+        path.resolve(process.cwd(), 'knowledge-base', 'compiled-knowledge.json'),
+        path.resolve(process.cwd(), 'ai-concierge', 'knowledge-base', 'compiled-knowledge.json'),
+        path.resolve(__dirname, '..', '..', 'knowledge-base', 'compiled-knowledge.json'),
+        path.resolve(__dirname, '..', '..', '..', 'knowledge-base', 'compiled-knowledge.json')
+      ];
 
-  // Test connections
-  const connectionTests = await llmRouter.testConnections();
-  console.log('LLM Connection Tests:', connectionTests);
+      console.log('Loading knowledge base...');
+      let knowledgeBasePath = null;
+      for (const tryPath of possiblePaths) {
+        try {
+          const fs = require('fs');
+          if (fs.existsSync(tryPath)) {
+            knowledgeBasePath = tryPath;
+            console.log('Found knowledge base at:', tryPath);
+            break;
+          }
+        } catch (error) {
+          // Continue to next path
+        }
+      }
 
-  return conciergeEngine;
+      if (!knowledgeBasePath) {
+        throw new Error('Knowledge base file not found in any expected location');
+      }
+
+      await conciergeEngine.loadKnowledgeBase(knowledgeBasePath);
+      knowledgeBaseCache = true; // Mark as loaded
+    }
+
+    const elapsed = Date.now() - startTime;
+    console.log(`Concierge engine initialized in ${elapsed}ms`);
+
+    return conciergeEngine!;
+  })();
+
+  const result = await initPromise;
+  initPromise = null; // Reset for next time
+  return result;
 }
 
 export default async function handler(
@@ -144,11 +156,23 @@ export default async function handler(
     const engine = await initializeConciergeEngine();
     console.log('Concierge engine initialized successfully');
 
-    // Process the query (reduced context docs for performance)
-    const response = await engine.processInvestorQuery(message, {
-      includeHistory: !!conversationHistory,
-      maxContextDocs: 5
-    });
+    // Process the query with Netlify optimizations
+    console.log('Starting query processing...');
+    const queryStartTime = Date.now();
+    
+    // NETLIFY OPTIMIZATION: Reduced context and timeout handling
+    const response = await Promise.race([
+      engine.processInvestorQuery(message, {
+        includeHistory: false, // Disable history for speed
+        maxContextDocs: 2 // Reduce to 2 docs for Netlify
+      }),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Query processing timeout after 8 seconds')), 8000)
+      )
+    ]);
+    
+    const queryElapsed = Date.now() - queryStartTime;
+    console.log(`Query processed in ${queryElapsed}ms`);
 
     console.log('Query processed successfully');
     // Return successful response
