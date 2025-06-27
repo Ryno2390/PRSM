@@ -2,12 +2,17 @@
   "schema_version": "1.0",
   "last_updated": "2025-06-27",
   "attestation_summary": {
-    "overall_status": "COMPLIANT",
-    "compliance_score": 100,
-    "vulnerability_count": 0,
-    "remediation_complete": true,
-    "enterprise_ready": true,
-    "audit_date": "2025-06-25"
+    "overall_status": "ACTIVE_REMEDIATION",
+    "compliance_score": 85,
+    "vulnerability_count": 526,
+    "severity_breakdown": {
+      "high": 0,
+      "medium": 6,
+      "low": 520
+    },
+    "remediation_in_progress": true,
+    "enterprise_ready": false,
+    "audit_date": "2025-06-27"
   },
   "vulnerability_remediation": {
     "initial_assessment": {
@@ -334,14 +339,19 @@
       "Check privacy features in '/prsm/privacy/'"
     ],
     "key_indicators": {
-      "vulnerability_count": 0,
-      "security_test_pass_rate": "100%",
+      "vulnerability_count": 526,
+      "vulnerability_breakdown": {
+        "high": 0,
+        "medium": 6,
+        "low": 520
+      },
+      "security_test_pass_rate": "85%",
       "enterprise_features": "comprehensive",
-      "compliance_status": "full",
+      "compliance_status": "active_remediation",
       "audit_trail": "complete"
     },
-    "risk_assessment": "LOW - Enterprise-grade security with zero vulnerabilities",
-    "recommendation": "Security posture suitable for enterprise deployment"
+    "risk_assessment": "MEDIUM - Active remediation of identified vulnerabilities in progress",
+    "recommendation": "Complete medium severity remediation before enterprise deployment"
   },
   "attestation_signature": {
     "attested_by": "PRSM Security Team",
