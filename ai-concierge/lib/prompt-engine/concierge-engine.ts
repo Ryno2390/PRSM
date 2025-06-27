@@ -156,63 +156,50 @@ export class ConciergeEngine {
     console.log(`Finding relevant documents for query: "${query}" (max: ${maxDocs})`);
     const startTime = Date.now();
     
-    const queryLower = query.toLowerCase();
-    const documents = Object.values(this.knowledgeBase.documents);
-    
-    console.log(`Processing ${documents.length} documents...`);
-    
-    // Simplified and optimized scoring
-    const scoredDocs = documents.map(doc => {
-      let score = 0;
-      const title = (doc.title || doc.filename || '').toLowerCase();
-      const filepath = doc.path.toLowerCase();
+    try {
+      const documents = Object.values(this.knowledgeBase.documents);
+      console.log(`Processing ${documents.length} documents...`);
       
-      // Quick category-based base scoring
-      const categoryScores: { [key: string]: number } = {
-        'tier1_essential': 20,
-        'tier2_supporting': 12,
-        'tier3_detailed': 8
-      };
-      score += categoryScores[doc.category] || 5;
+      // For general PRSM queries, return key investment documents
+      if (query.toLowerCase().includes('prsm') || 
+          query.toLowerCase().includes('tell me about') ||
+          query.toLowerCase().includes('what is')) {
+        
+        const keyDocs = documents.filter(doc => 
+          doc.id === 'INVESTOR_MATERIALS' ||
+          doc.id === 'INVESTMENT_READINESS_REPORT' ||
+          doc.id === 'docs_AI_CRISIS_INVESTOR_BRIEF' ||
+          doc.category === 'tier1_essential'
+        );
+        
+        const elapsed = Date.now() - startTime;
+        console.log(`Found ${keyDocs.slice(0, maxDocs).length} key documents in ${elapsed}ms`);
+        return keyDocs.slice(0, maxDocs);
+      }
       
-      // Fast keyword matching - only check key terms
-      const keyTerms = ['prsm', 'investment', 'funding', 'technical', 'business', 'model'];
-      keyTerms.forEach(term => {
-        if (queryLower.includes(term)) {
-          if (title.includes(term)) score += 15;
-          if (filepath.includes(term)) score += 10;
-          // Simple content check - just indexOf, no regex
-          if (doc.content.toLowerCase().indexOf(term) !== -1) score += 5;
-        }
+      // For other queries, do simple title/path matching
+      const queryLower = query.toLowerCase();
+      const relevantDocs = documents.filter(doc => {
+        const title = (doc.title || '').toLowerCase();
+        const path = doc.path.toLowerCase();
+        return title.includes(queryLower) || path.includes(queryLower);
       });
       
-      // General PRSM queries get investment docs
-      if (queryLower.includes('prsm') || queryLower.includes('tell me about')) {
-        if (filepath.includes('investment') || title.includes('investment')) score += 25;
-        if (filepath.includes('readme') || title.includes('overview')) score += 20;
-      }
+      const elapsed = Date.now() - startTime;
+      console.log(`Found ${relevantDocs.slice(0, maxDocs).length} relevant documents in ${elapsed}ms`);
+      return relevantDocs.slice(0, maxDocs);
       
-      // Boost important files
-      if (filepath.includes('investment_materials') || 
-          filepath.includes('investment_readiness') ||
-          filepath.includes('business_case')) {
-        score += 15;
-      }
-
-      return { doc, score };
-    });
-
-    // Simple sort and take top results
-    const sortedDocs = scoredDocs
-      .filter(item => item.score > 5) // Only include docs with some relevance
-      .sort((a, b) => b.score - a.score)
-      .slice(0, maxDocs)
-      .map(item => item.doc);
-
-    const elapsed = Date.now() - startTime;
-    console.log(`Found ${sortedDocs.length} relevant documents in ${elapsed}ms`);
-    
-    return sortedDocs;
+    } catch (error) {
+      console.error('Error in findRelevantDocuments:', error);
+      // Fallback: return first few tier1 documents
+      const documents = Object.values(this.knowledgeBase.documents);
+      const fallbackDocs = documents
+        .filter(doc => doc.category === 'tier1_essential')
+        .slice(0, 3);
+      
+      console.log(`Fallback: returning ${fallbackDocs.length} tier1 documents`);
+      return fallbackDocs;
+    }
   }
 
   private buildSystemPrompt(relevantDocs: KnowledgeDocument[]): string {
