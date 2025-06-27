@@ -37,12 +37,27 @@ export default async function handler(
     try {
       const fs = require('fs');
       const path = require('path');
-      const knowledgeBasePath = path.resolve(process.cwd(), 'knowledge-base', 'compiled-knowledge.json');
       
-      if (fs.existsSync(knowledgeBasePath)) {
-        const stats = fs.statSync(knowledgeBasePath);
-        knowledgeBase = true;
-        knowledgeBaseSize = stats.size;
+      const possiblePaths = [
+        path.resolve(process.cwd(), 'knowledge-base', 'compiled-knowledge.json'),
+        path.resolve(process.cwd(), 'ai-concierge', 'knowledge-base', 'compiled-knowledge.json'),
+        path.resolve(__dirname, '..', '..', 'knowledge-base', 'compiled-knowledge.json'),
+        path.resolve(__dirname, '..', '..', '..', 'knowledge-base', 'compiled-knowledge.json')
+      ];
+
+      console.log('Health check - Current working directory:', process.cwd());
+      console.log('Health check - Trying knowledge base paths:', possiblePaths);
+      
+      for (const tryPath of possiblePaths) {
+        if (fs.existsSync(tryPath)) {
+          const stats = fs.statSync(tryPath);
+          knowledgeBase = true;
+          knowledgeBaseSize = stats.size;
+          console.log('Health check - Found knowledge base at:', tryPath, 'Size:', stats.size);
+          break;
+        } else {
+          console.log('Health check - Knowledge base not found at:', tryPath);
+        }
       }
     } catch (err) {
       console.log('Knowledge base check failed:', err);

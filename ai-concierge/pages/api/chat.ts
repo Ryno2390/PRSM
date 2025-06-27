@@ -59,7 +59,39 @@ async function initializeConciergeEngine(): Promise<ConciergeEngine> {
   conciergeEngine = new ConciergeEngine(llmRouter);
 
   // Load knowledge base (using compiled version for size optimization)
-  const knowledgeBasePath = path.resolve(process.cwd(), 'knowledge-base', 'compiled-knowledge.json');
+  // Try multiple path resolutions for different deployment environments
+  const possiblePaths = [
+    path.resolve(process.cwd(), 'knowledge-base', 'compiled-knowledge.json'),
+    path.resolve(process.cwd(), 'ai-concierge', 'knowledge-base', 'compiled-knowledge.json'),
+    path.resolve(__dirname, '..', '..', 'knowledge-base', 'compiled-knowledge.json'),
+    path.resolve(__dirname, '..', '..', '..', 'knowledge-base', 'compiled-knowledge.json')
+  ];
+
+  console.log('Current working directory:', process.cwd());
+  console.log('__dirname:', __dirname);
+  console.log('Trying knowledge base paths:', possiblePaths);
+
+  let knowledgeBasePath = null;
+  for (const tryPath of possiblePaths) {
+    try {
+      // Check if file exists
+      const fs = require('fs');
+      if (fs.existsSync(tryPath)) {
+        knowledgeBasePath = tryPath;
+        console.log('Found knowledge base at:', tryPath);
+        break;
+      } else {
+        console.log('Knowledge base not found at:', tryPath);
+      }
+    } catch (error) {
+      console.log('Error checking path:', tryPath, error);
+    }
+  }
+
+  if (!knowledgeBasePath) {
+    throw new Error('Knowledge base file not found in any expected location');
+  }
+
   await conciergeEngine.loadKnowledgeBase(knowledgeBasePath);
 
   // Test connections
