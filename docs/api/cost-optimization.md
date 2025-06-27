@@ -18,7 +18,7 @@ All API endpoints require authentication using PRSM API keys:
 ```bash
 curl -H "Authorization: Bearer YOUR_API_KEY" \
      -H "Content-Type: application/json" \
-     https://api.prsm.network/v1/cost-optimization/budget
+     https://api.prsm.ai/v1/cost-optimization/budget
 ```
 
 ## Endpoints

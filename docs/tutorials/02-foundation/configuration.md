@@ -17,7 +17,7 @@ PRSM supports multiple configuration methods:
 ```bash
 # API Configuration
 export PRSM_API_KEY="your-api-key"
-export PRSM_BASE_URL="https://api.prsm.network"
+export PRSM_BASE_URL="https://api.prsm.ai"
 export PRSM_API_VERSION="v1"
 
 # Performance Configuration
@@ -59,7 +59,7 @@ Create `prsm.yaml`:
 
 ```yaml
 api:
-  base_url: "https://api.prsm.network"
+  base_url: "https://api.prsm.ai"
   version: "v1"
   timeout: 30
   max_retries: 3
@@ -105,7 +105,7 @@ Create `prsm.json`:
 ```json
 {
   "api": {
-    "base_url": "https://api.prsm.network",
+    "base_url": "https://api.prsm.ai",
     "version": "v1",
     "timeout": 30,
     "max_retries": 3
@@ -136,7 +136,7 @@ from prsm_sdk import PRSMClient, Config
 # Basic configuration
 config = Config(
     api_key="your-api-key",
-    base_url="https://api.prsm.network",
+    base_url="https://api.prsm.ai",
     timeout=30.0,
     max_retries=3
 )
@@ -182,7 +182,7 @@ import { PRSMClient } from '@prsm/sdk';
 
 const client = new PRSMClient({
   apiKey: 'your-api-key',
-  baseURL: 'https://api.prsm.network',
+  baseURL: 'https://api.prsm.ai',
   
   // Performance settings
   timeout: 30000,
@@ -222,7 +222,7 @@ def create_client():
     if env == 'development':
         config = Config(
             api_key=os.getenv('PRSM_API_KEY'),
-            base_url="https://dev-api.prsm.network",
+            base_url="https://dev-api.prsm.ai",
             timeout=60.0,  # Longer timeout for dev
             debug=True,
             cache_enabled=False
@@ -230,7 +230,7 @@ def create_client():
     elif env == 'staging':
         config = Config(
             api_key=os.getenv('PRSM_API_KEY'),
-            base_url="https://staging-api.prsm.network",
+            base_url="https://staging-api.prsm.ai",
             timeout=30.0,
             cache_enabled=True,
             cache_ttl=1800  # 30 minutes
@@ -238,7 +238,7 @@ def create_client():
     else:  # production
         config = Config(
             api_key=os.getenv('PRSM_API_KEY'),
-            base_url="https://api.prsm.network",
+            base_url="https://api.prsm.ai",
             timeout=30.0,
             max_retries=5,
             cache_enabled=True,

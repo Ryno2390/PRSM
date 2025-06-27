@@ -18,13 +18,13 @@ export PRSM_API_KEY="your_api_key_here"
 ### Bearer Token
 ```bash
 curl -H "Authorization: Bearer $PRSM_API_KEY" \
-     https://api.prsm.network/v1/agents
+     https://api.prsm.ai/v1/agents
 ```
 
 ### FTNS Token Authentication
 ```bash
 curl -H "X-FTNS-Token: your_ftns_token" \
-     https://api.prsm.network/v1/agents
+     https://api.prsm.ai/v1/agents
 ```
 
 ## 🤖 Agent Management Examples
@@ -33,7 +33,7 @@ curl -H "X-FTNS-Token: your_ftns_token" \
 
 **Request:**
 ```bash
-curl -X POST https://api.prsm.network/v1/agents \
+curl -X POST https://api.prsm.ai/v1/agents \
   -H "Authorization: Bearer $PRSM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -102,7 +102,7 @@ curl -X POST https://api.prsm.network/v1/agents \
 
 **Request:**
 ```bash
-curl -X POST https://api.prsm.network/v1/agents/agent_bio_research_001/execute \
+curl -X POST https://api.prsm.ai/v1/agents/agent_bio_research_001/execute \
   -H "Authorization: Bearer $PRSM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -181,7 +181,7 @@ curl -X POST https://api.prsm.network/v1/agents/agent_bio_research_001/execute \
 
 **Request:**
 ```bash
-curl -X GET "https://api.prsm.network/v1/agents?limit=10&sort_by=created_at&sort_order=desc" \
+curl -X GET "https://api.prsm.ai/v1/agents?limit=10&sort_by=created_at&sort_order=desc" \
   -H "Authorization: Bearer $PRSM_API_KEY"
 ```
 
@@ -233,7 +233,7 @@ curl -X GET "https://api.prsm.network/v1/agents?limit=10&sort_by=created_at&sort
 
 **Request:**
 ```bash
-curl -X POST https://api.prsm.network/v1/p2p/nodes \
+curl -X POST https://api.prsm.ai/v1/p2p/nodes \
   -H "Authorization: Bearer $PRSM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -309,7 +309,7 @@ curl -X POST https://api.prsm.network/v1/p2p/nodes \
 
 **Request:**
 ```bash
-curl -X GET "https://api.prsm.network/v1/p2p/peers?capability=llama2-7b&max_latency=100&min_reputation=0.8" \
+curl -X GET "https://api.prsm.ai/v1/p2p/peers?capability=llama2-7b&max_latency=100&min_reputation=0.8" \
   -H "Authorization: Bearer $PRSM_API_KEY"
 ```
 
@@ -364,7 +364,7 @@ curl -X GET "https://api.prsm.network/v1/p2p/peers?capability=llama2-7b&max_late
 
 **Request:**
 ```bash
-curl -X POST https://api.prsm.network/v1/p2p/inference \
+curl -X POST https://api.prsm.ai/v1/p2p/inference \
   -H "Authorization: Bearer $PRSM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -424,7 +424,7 @@ curl -X POST https://api.prsm.network/v1/p2p/inference \
 
 **Request:**
 ```bash
-curl -X POST https://api.prsm.network/v1/workflows \
+curl -X POST https://api.prsm.ai/v1/workflows \
   -H "Authorization: Bearer $PRSM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -568,7 +568,7 @@ curl -X POST https://api.prsm.network/v1/workflows \
 
 **Request:**
 ```bash
-curl -X POST https://api.prsm.network/v1/workflows/wf_drug_discovery_001/execute \
+curl -X POST https://api.prsm.ai/v1/workflows/wf_drug_discovery_001/execute \
   -H "Authorization: Bearer $PRSM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -650,7 +650,7 @@ curl -X POST https://api.prsm.network/v1/workflows/wf_drug_discovery_001/execute
 
 **Request:**
 ```bash
-curl -X GET "https://api.prsm.network/v1/cost/usage?start_date=2024-12-01&end_date=2024-12-21&granularity=day" \
+curl -X GET "https://api.prsm.ai/v1/cost/usage?start_date=2024-12-01&end_date=2024-12-21&granularity=day" \
   -H "Authorization: Bearer $PRSM_API_KEY"
 ```
 
@@ -737,7 +737,7 @@ curl -X GET "https://api.prsm.network/v1/cost/usage?start_date=2024-12-01&end_da
 
 **Request:**
 ```bash
-curl -X POST https://api.prsm.network/v1/cost/alerts \
+curl -X POST https://api.prsm.ai/v1/cost/alerts \
   -H "Authorization: Bearer $PRSM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -821,7 +821,7 @@ curl -X POST https://api.prsm.network/v1/cost/alerts \
 **WebSocket Connection:**
 ```javascript
 // JavaScript WebSocket example
-const ws = new WebSocket('wss://ws.prsm.network/agents/agent_bio_research_001/executions/exec_cart_analysis_001/stream');
+const ws = new WebSocket('wss://ws.prsm.ai/agents/agent_bio_research_001/executions/exec_cart_analysis_001/stream');
 
 ws.onopen = function() {
     console.log('Connected to execution stream');
@@ -860,14 +860,14 @@ curl -i -N \
   -H "Sec-WebSocket-Version: 13" \
   -H "Sec-WebSocket-Key: your-websocket-key" \
   -H "Authorization: Bearer $PRSM_API_KEY" \
-  "wss://ws.prsm.network/agents/agent_bio_research_001/executions/exec_cart_analysis_001/stream"
+  "wss://ws.prsm.ai/agents/agent_bio_research_001/executions/exec_cart_analysis_001/stream"
 ```
 
 ### Subscribe to System Events
 
 **Request:**
 ```bash
-curl -X POST https://api.prsm.network/v1/events/subscriptions \
+curl -X POST https://api.prsm.ai/v1/events/subscriptions \
   -H "Authorization: Bearer $PRSM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -940,7 +940,7 @@ curl -X POST https://api.prsm.network/v1/events/subscriptions \
 
 **Request:**
 ```bash
-curl -X POST https://api.prsm.network/v1/agents/batch \
+curl -X POST https://api.prsm.ai/v1/agents/batch \
   -H "Authorization: Bearer $PRSM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -1017,7 +1017,7 @@ curl -X POST https://api.prsm.network/v1/agents/batch \
 
 **Request:**
 ```bash
-curl -X GET https://api.prsm.network/v1/health \
+curl -X GET https://api.prsm.ai/v1/health \
   -H "Authorization: Bearer $PRSM_API_KEY"
 ```
 
@@ -1172,9 +1172,9 @@ curl -X GET https://api.prsm.network/v1/health \
 - `503` - Service Unavailable
 
 ### Base URLs
-- **Production**: `https://api.prsm.network`
-- **Staging**: `https://staging-api.prsm.network`
-- **WebSocket**: `wss://ws.prsm.network`
+- **Production**: `https://api.prsm.ai`
+- **Staging**: `https://staging-api.prsm.ai`
+- **WebSocket**: `wss://ws.prsm.ai`
 
 ### Authentication Headers
 ```bash

@@ -53,7 +53,7 @@ POST /v1/custom-models/deploy
   "deployment_id": "deploy_12345",
   "model_id": "custom_legal_analyzer_v2",
   "status": "deploying",
-  "endpoint_url": "https://api.prsm.network/v1/models/custom_legal_analyzer_v2/infer",
+  "endpoint_url": "https://api.prsm.ai/v1/models/custom_legal_analyzer_v2/infer",
   "estimated_deployment_time": "5-10 minutes",
   "resource_allocation": {
     "cpu": "2",
