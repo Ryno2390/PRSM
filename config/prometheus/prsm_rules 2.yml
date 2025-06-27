@@ -1,0 +1,236 @@
+# PRSM-Specific Prometheus Rules for Phase 1 Validation
+
+groups:
+# =============================================================================
+# PRSM Performance Recording Rules
+# =============================================================================
+- name: prsm.performance.recording
+  interval: 30s
+  rules:
+  # Query processing performance
+  - record: prsm:query_latency_p95_5m
+    expr: histogram_quantile(0.95, rate(prsm_query_processing_duration_seconds_bucket[5m]))
+    labels:
+      metric_type: "latency"
+      
+  - record: prsm:query_latency_p99_5m
+    expr: histogram_quantile(0.99, rate(prsm_query_processing_duration_seconds_bucket[5m]))
+    labels:
+      metric_type: "latency"
+      
+  - record: prsm:query_throughput_5m
+    expr: rate(prsm_query_processing_duration_seconds_count[5m])
+    labels:
+      metric_type: "throughput"
+      
+  # FTNS token performance
+  - record: ftns:cost_calculation_latency_p99_5m
+    expr: histogram_quantile(0.99, rate(ftns_cost_calculation_duration_seconds_bucket[5m]))
+    labels:
+      metric_type: "latency"
+      system: "tokenomics"
+      
+  - record: ftns:transaction_rate_5m
+    expr: rate(ftns_transactions_per_second[5m])
+    labels:
+      metric_type: "rate"
+      system: "tokenomics"
+      
+  # Agent framework performance
+  - record: agent:pipeline_latency_p95_5m
+    expr: histogram_quantile(0.95, rate(prsm_agent_pipeline_execution_seconds_bucket[5m]))
+    labels:
+      metric_type: "latency"
+      system: "agents"
+      
+  - record: agent:queue_depth_max
+    expr: max(agent_task_queue_depth) by (agent_type)
+    labels:
+      metric_type: "queue"
+      system: "agents"
+
+# =============================================================================
+# PRSM Phase 1 Validation Alerts
+# =============================================================================
+- name: prsm.phase1.validation
+  rules:
+  # Core requirement: 1000 concurrent requests with <2s latency
+  - alert: Phase1LatencyRequirementFailed
+    expr: prsm:query_latency_p95_5m > 2.0
+    for: 5m
+    labels:
+      severity: critical
+      phase: "phase1"
+      requirement: "latency"
+      category: "performance"
+    annotations:
+      summary: "PRSM Phase 1 latency requirement failed"
+      description: "95th percentile query latency is {{ $value }}s, exceeding 2s requirement."
+      runbook_url: "https://docs.prsm.org/runbooks/phase1-latency"
+      
+  - alert: Phase1ConcurrencyRequirementFailed
+    expr: prsm_concurrent_sessions_total < 1000
+    for: 10m
+    labels:
+      severity: critical
+      phase: "phase1"
+      requirement: "concurrency"
+      category: "capacity"
+    annotations:
+      summary: "PRSM Phase 1 concurrency requirement failed"
+      description: "Current concurrent sessions {{ $value }} is below 1000 requirement."
+      runbook_url: "https://docs.prsm.org/runbooks/phase1-concurrency"
+      
+  # FTNS microsecond precision requirement
+  - alert: FTNSPrecisionRequirementFailed
+    expr: ftns:cost_calculation_latency_p99_5m > 0.001
+    for: 2m
+    labels:
+      severity: critical
+      phase: "phase1"
+      requirement: "ftns-precision"
+      category: "performance"
+    annotations:
+      summary: "FTNS cost calculation precision requirement failed"
+      description: "99th percentile FTNS calculation time is {{ $value }}s, exceeding 1ms requirement."
+      runbook_url: "https://docs.prsm.org/runbooks/ftns-precision"
+      
+  # Agent pipeline performance
+  - alert: AgentPipelinePerformanceDegraded
+    expr: agent:pipeline_latency_p95_5m > 1.0
+    for: 5m
+    labels:
+      severity: warning
+      phase: "phase1"
+      requirement: "agent-performance"
+      category: "performance"
+    annotations:
+      summary: "Agent pipeline performance degraded"
+      description: "Agent pipeline 95th percentile latency is {{ $value }}s."
+      runbook_url: "https://docs.prsm.org/runbooks/agent-performance"
+
+# =============================================================================
+# PRSM System Health Alerts
+# =============================================================================
+- name: prsm.system.health
+  rules:
+  - alert: PRSMServiceUnavailable
+    expr: up{service=~"prsm-.*"} == 0
+    for: 1m
+    labels:
+      severity: critical
+      category: "availability"
+    annotations:
+      summary: "PRSM service {{ $labels.service }} is unavailable"
+      description: "Service {{ $labels.service }} has been down for more than 1 minute."
+      
+  - alert: PRSMHighErrorRate
+    expr: rate(http_requests_total{service="prsm-api", status=~"5.."}[5m]) / rate(http_requests_total{service="prsm-api"}[5m]) > 0.05
+    for: 5m
+    labels:
+      severity: warning
+      category: "reliability"
+    annotations:
+      summary: "High error rate in PRSM API"
+      description: "Error rate is {{ $value | humanizePercentage }}."
+      
+  - alert: PRSMResourceExhaustion
+    expr: (
+      node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.1
+      or
+      100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 95
+    )
+    for: 5m
+    labels:
+      severity: critical
+      category: "resource"
+    annotations:
+      summary: "PRSM system resource exhaustion"
+      description: "System is running critically low on resources."
+
+# =============================================================================
+# PRSM Business Logic Alerts
+# =============================================================================
+- name: prsm.business.logic
+  rules:
+  - alert: FTNSTransactionFailureSpike
+    expr: increase(ftns_transfer_failures_total[10m]) > 10
+    for: 2m
+    labels:
+      severity: warning
+      system: "tokenomics"
+      category: "business"
+    annotations:
+      summary: "High FTNS transaction failure rate"
+      description: "{{ $value }} FTNS transaction failures in the last 10 minutes."
+      
+  - alert: ModelRegistrySyncDelayed
+    expr: model_registry_sync_duration_seconds > 60
+    for: 5m
+    labels:
+      severity: warning
+      system: "federation"
+      category: "business"
+    annotations:
+      summary: "Model registry synchronization delayed"
+      description: "Model registry sync taking {{ $value }}s, indicating network issues."
+      
+  - alert: CircuitBreakerActivated
+    expr: increase(circuit_breaker_activations_total[5m]) > 0
+    for: 0s
+    labels:
+      severity: critical
+      system: "safety"
+      category: "security"
+    annotations:
+      summary: "Safety circuit breaker activated"
+      description: "{{ $value }} circuit breaker activations in the last 5 minutes."
+
+# =============================================================================
+# PRSM Load Testing Alerts
+# =============================================================================
+- name: prsm.load.testing
+  rules:
+  - alert: LoadTestPerformanceRegression
+    expr: (
+      histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="load-test"}[5m])) > 2.0
+      and
+      rate(http_requests_total{job="load-test"}[5m]) > 100
+    )
+    for: 2m
+    labels:
+      severity: warning
+      category: "testing"
+    annotations:
+      summary: "Performance regression detected in load test"
+      description: "95th percentile response time {{ $value }}s under load."
+      
+  - alert: LoadTestThroughputLow
+    expr: rate(http_requests_total{job="load-test"}[5m]) < 50
+    for: 5m
+    labels:
+      severity: warning
+      category: "testing"
+    annotations:
+      summary: "Load test throughput below target"
+      description: "Current throughput {{ $value }} RPS is below target."
+
+# =============================================================================
+# Infrastructure Performance Rules
+# =============================================================================
+- name: infrastructure.performance
+  rules:
+  - record: node:cpu_utilisation:rate5m
+    expr: 1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) by (instance)
+    
+  - record: node:memory_utilisation:ratio
+    expr: 1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+    
+  - record: node:disk_utilisation:ratio
+    expr: 1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)
+    
+  - record: instance:node_network_receive_bytes:rate5m
+    expr: rate(node_network_receive_bytes_total[5m])
+    
+  - record: instance:node_network_transmit_bytes:rate5m
+    expr: rate(node_network_transmit_bytes_total[5m])
