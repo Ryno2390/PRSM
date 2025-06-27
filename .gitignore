@@ -12,6 +12,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+# Allow ai-concierge lib directory (TypeScript modules)
+!ai-concierge/lib/
 parts/
 sdist/
 var/
