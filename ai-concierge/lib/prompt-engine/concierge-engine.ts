@@ -99,17 +99,16 @@ export class ConciergeEngine {
       // Build system prompt with knowledge context
       const systemPrompt = this.buildSystemPrompt(relevantDocs);
       console.log(`Built system prompt with ${relevantDocs.length} documents`);
-    
-    // Prepare conversation messages
-    const messages: ChatMessage[] = [];
-    
-    if (options?.includeHistory && this.conversationHistory.length > 0) {
-      messages.push(...this.conversationHistory.slice(-6)); // Last 3 exchanges
-    }
-    
-    messages.push({ role: 'user', content: query });
+      
+      // Prepare conversation messages
+      const messages: ChatMessage[] = [];
+      
+      if (options?.includeHistory && this.conversationHistory.length > 0) {
+        messages.push(...this.conversationHistory.slice(-6)); // Last 3 exchanges
+      }
+      
+      messages.push({ role: 'user', content: query });
 
-    try {
       // Generate response using LLM
       const llmResponse = await this.llmRouter.generateResponse(messages, systemPrompt);
       
