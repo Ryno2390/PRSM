@@ -27,7 +27,7 @@
 - Architecture patterns in `/prsm/` with inline documentation
 - Business model validation in `/docs/business/`
 
-**🧹 Repository Status**: **CLEAN & PROFESSIONAL** - Repository fully organized for production-ready presentation: moved security scan files to `reports/security/`, moved netlify.toml to proper location in `ai-concierge/`, eliminated duplicate files, organized root directory with only critical files, and maintained comprehensive AI Concierge with complete repository knowledge.
+**🧹 Repository Status**: **CLEAN & PROFESSIONAL** - Repository fully organized for production-ready presentation: moved security scan files to `reports/security/`, relocated netlify.toml to proper location in `ai-concierge/` with optimized configuration, eliminated duplicate files, organized root directory with only critical files, and maintained comprehensive AI Concierge with complete repository knowledge. **Netlify deployments verified working** at prsm-concierge.netlify.app and prsm-ui-mockup.netlify.app.
 
 ## 🚀 **Recent Major Achievements**
 
@@ -189,7 +189,7 @@ PRSM/
 │   │   ├── package.json                   # Next.js application configuration
 │   │   ├── next.config.js                 # Next.js build configuration
 │   │   ├── tailwind.config.js             # Tailwind CSS styling
-│   │   └── netlify.toml                   # Netlify deployment configuration
+│   │   └── netlify.toml                   # Netlify deployment configuration (OPTIMIZED for ai-concierge/ location)
 │   ├── 📄 Frontend Pages
 │   │   ├── pages/                         # Next.js pages directory
 │   │   │   ├── index.tsx                  # Main chat interface with dark/light mode
@@ -299,7 +299,7 @@ The `docs/` directory is organized by documentation type and audience:
   - **🧠 AI Engine**: Claude, Gemini, OpenAI with intelligent routing
   - **📚 Knowledge Base**: 29 PRSM documents compiled (45,000+ words)
   - **✅ Validation**: 81.2% accuracy testing, production-ready deployment
-  - **🌐 Deployment**: Netlify-ready with environment configuration
+  - **🌐 Deployment**: Live at prsm-concierge.netlify.app (optimized configuration verified working)
 
 ### Architecture Documentation (`docs/architecture/`)
 - **architecture.md** - Main system architecture overview
