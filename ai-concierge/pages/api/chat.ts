@@ -157,8 +157,11 @@ export default async function handler(
   } catch (error) {
     console.error('Chat API Error (full details):', error);
     console.error('Error stack:', error instanceof Error ? error.stack : 'No stack available');
+    console.error('Error name:', error instanceof Error ? error.name : 'Unknown');
+    console.error('Error cause:', error instanceof Error ? error.cause : 'No cause');
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Processed error message:', errorMessage);
     
     // Handle different types of errors
     if (errorMessage.includes('Knowledge base not loaded')) {
