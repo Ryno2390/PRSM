@@ -1,21 +1,14 @@
 [build]
-  command = "npm run build-with-knowledge"
-  publish = ".next"
+  command = "cd ai-concierge && npm install && npm run build-with-knowledge"
+  publish = "ai-concierge/.next"
 
 [build.environment]
   NODE_VERSION = "18"
-  NPM_FLAGS = "--prefix=/opt/buildhome/.nodejs/bin/npm"
   DEFAULT_LLM_PROVIDER = "claude"
 
 # Functions configuration for better performance
 [functions]
   node_bundler = "esbuild"
-
-# Redirects for SPA behavior
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
