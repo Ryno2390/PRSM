@@ -4,6 +4,12 @@ Marketplace Service
 
 Core service for managing the PRSM AI model marketplace.
 Handles model listings, search, discovery, and marketplace operations.
+
+⚠️  WARNING: This service currently contains MOCK IMPLEMENTATIONS
+    Database operations use placeholder code instead of real SQLAlchemy queries.
+    The marketplace API is disabled until these are replaced with production code.
+    
+    See docs/architecture/marketplace-status.md for details.
 """
 
 import structlog

@@ -38,6 +38,9 @@ from prsm.api.security_status_api import router as security_router
 from prsm.api.security_logging_api import router as security_logging_router
 from prsm.api.payment_api import router as payment_router
 from prsm.api.cryptography_api import router as crypto_router
+# MARKETPLACE API DISABLED: Contains mock database implementations
+# Re-enable after completing real SQLAlchemy operations in marketplace_service.py
+# See docs/architecture/marketplace-status.md for details
 # from prsm.api.marketplace_api import router as marketplace_router
 from prsm.api.marketplace_launch_api import router as marketplace_launch_router
 from prsm.api.governance_api import router as governance_router
@@ -3259,6 +3262,7 @@ app.include_router(security_router, tags=["Security"])
 app.include_router(security_logging_router, tags=["Security Logging"])
 app.include_router(payment_router, tags=["Payments"])
 app.include_router(crypto_router, tags=["Cryptography"])
+# MARKETPLACE API DISABLED: See docs/architecture/marketplace-status.md
 # app.include_router(marketplace_router, tags=["Marketplace"])
 app.include_router(marketplace_launch_router, tags=["Marketplace Launch"])
 app.include_router(governance_router, tags=["Governance"])
