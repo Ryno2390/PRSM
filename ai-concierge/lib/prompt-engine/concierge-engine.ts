@@ -88,17 +88,20 @@ export class ConciergeEngine {
       throw new Error('Knowledge base not loaded. Call loadKnowledgeBase() first.');
     }
 
-    console.log(`Processing investor query: "${query}"`);
+    console.log(`[NETLIFY-OPT] Processing query: "${query.substring(0, 50)}"`);
     const startTime = Date.now();
 
     try {
-      // Find relevant documents (reduced default for performance)
-      const maxDocs = Math.min(options?.maxContextDocs || 5, 8); // Cap at 8 docs max
+      // NETLIFY OPTIMIZATION: Aggressive performance tuning
+      const maxDocs = Math.min(options?.maxContextDocs || 2, 3); // Cap at 3 docs for Netlify
+      console.log(`[NETLIFY-OPT] Finding max ${maxDocs} documents...`);
+      
       const relevantDocs = this.findRelevantDocuments(query, maxDocs);
+      console.log(`[NETLIFY-OPT] Found ${relevantDocs.length} documents`);
       
       // Build system prompt with knowledge context
       const systemPrompt = this.buildSystemPrompt(relevantDocs);
-      console.log(`Built system prompt with ${relevantDocs.length} documents`);
+      console.log(`[NETLIFY-OPT] Built prompt for ${relevantDocs.length} docs`);
       
       // Prepare conversation messages
       const messages: ChatMessage[] = [];
@@ -153,123 +156,101 @@ export class ConciergeEngine {
   private findRelevantDocuments(query: string, maxDocs: number): KnowledgeDocument[] {
     if (!this.knowledgeBase) return [];
 
-    console.log(`Finding relevant documents for query: "${query}" (max: ${maxDocs})`);
+    console.log(`[NETLIFY-OPT] Finding docs for: "${query.substring(0, 50)}" (max: ${maxDocs})`);
     const startTime = Date.now();
     
     try {
       const documents = Object.values(this.knowledgeBase.documents);
-      console.log(`Processing ${documents.length} documents...`);
       
-      // For general PRSM queries, return key investment documents
-      if (query.toLowerCase().includes('prsm') || 
-          query.toLowerCase().includes('tell me about') ||
-          query.toLowerCase().includes('what is')) {
-        
-        const keyDocs = documents.filter(doc => 
+      // NETLIFY OPTIMIZATION: Aggressive early returns for common queries
+      const queryLower = query.toLowerCase();
+      
+      // Fast path for PRSM queries - pre-selected key documents
+      if (queryLower.includes('prsm') || queryLower.includes('tell me about') || queryLower.includes('what is')) {
+        // Return only the 3 most essential documents for speed
+        const fastDocs = documents.filter(doc => 
           doc.id === 'INVESTOR_MATERIALS' ||
           doc.id === 'INVESTMENT_READINESS_REPORT' ||
-          doc.id === 'docs_AI_CRISIS_INVESTOR_BRIEF' ||
-          doc.category === 'tier1_essential'
-        );
+          doc.id === 'docs_AI_CRISIS_INVESTOR_BRIEF'
+        ).slice(0, Math.min(maxDocs, 3)); // Cap at 3 for Netlify
         
         const elapsed = Date.now() - startTime;
-        console.log(`Found ${keyDocs.slice(0, maxDocs).length} key documents in ${elapsed}ms`);
-        return keyDocs.slice(0, maxDocs);
+        console.log(`[NETLIFY-OPT] Fast path: ${fastDocs.length} docs in ${elapsed}ms`);
+        return fastDocs;
       }
       
-      // For other queries, do simple title/path matching
-      const queryLower = query.toLowerCase();
-      const relevantDocs = documents.filter(doc => {
-        const title = (doc.title || '').toLowerCase();
-        const path = doc.path.toLowerCase();
-        return title.includes(queryLower) || path.includes(queryLower);
-      });
+      // For investment queries - specific documents
+      if (queryLower.includes('invest') || queryLower.includes('fund') || queryLower.includes('series')) {
+        const investDocs = documents.filter(doc => 
+          doc.id === 'INVESTOR_MATERIALS' ||
+          doc.id === 'INVESTMENT_READINESS_REPORT'
+        ).slice(0, 2);
+        
+        const elapsed = Date.now() - startTime;
+        console.log(`[NETLIFY-OPT] Investment path: ${investDocs.length} docs in ${elapsed}ms`);
+        return investDocs;
+      }
       
-      const elapsed = Date.now() - startTime;
-      console.log(`Found ${relevantDocs.slice(0, maxDocs).length} relevant documents in ${elapsed}ms`);
-      return relevantDocs.slice(0, maxDocs);
+      // Technical queries
+      if (queryLower.includes('technical') || queryLower.includes('architecture') || queryLower.includes('code')) {
+        const techDocs = documents.filter(doc => 
+          doc.category === 'tier1_essential' || 
+          doc.path.includes('technical')
+        ).slice(0, 2);
+        
+        const elapsed = Date.now() - startTime;
+        console.log(`[NETLIFY-OPT] Technical path: ${techDocs.length} docs in ${elapsed}ms`);
+        return techDocs;
+      }
       
-    } catch (error) {
-      console.error('Error in findRelevantDocuments:', error);
-      // Fallback: return first few tier1 documents
-      const documents = Object.values(this.knowledgeBase.documents);
+      // Default fallback - just tier1 essentials for speed
       const fallbackDocs = documents
         .filter(doc => doc.category === 'tier1_essential')
-        .slice(0, 3);
+        .slice(0, 2); // Limit to 2 for performance
       
-      console.log(`Fallback: returning ${fallbackDocs.length} tier1 documents`);
+      const elapsed = Date.now() - startTime;
+      console.log(`[NETLIFY-OPT] Fallback: ${fallbackDocs.length} docs in ${elapsed}ms`);
       return fallbackDocs;
+      
+    } catch (error) {
+      console.error('[NETLIFY-OPT] Error in findRelevantDocuments:', error);
+      // Emergency fallback: return minimal essential doc
+      const documents = Object.values(this.knowledgeBase.documents);
+      const emergencyDoc = documents.find(doc => doc.id === 'INVESTOR_MATERIALS');
+      return emergencyDoc ? [emergencyDoc] : [];
     }
   }
 
   private buildSystemPrompt(relevantDocs: KnowledgeDocument[]): string {
-    console.log(`Building system prompt with ${relevantDocs.length} documents`);
+    console.log(`[NETLIFY-OPT] Building system prompt with ${relevantDocs.length} documents`);
     
-    // Truncate document content to prevent massive prompts
+    // NETLIFY OPTIMIZATION: Aggressive truncation for faster processing
     const knowledgeContext = relevantDocs.map(doc => {
       const title = doc.title || doc.filename || doc.path;
-      // Limit each document to 2000 characters to prevent token overflow
-      const truncatedContent = doc.content.length > 2000 
-        ? doc.content.substring(0, 2000) + '...\n[Content truncated for brevity]'
+      // Limit each document to 800 characters for Netlify performance
+      const truncatedContent = doc.content.length > 800 
+        ? doc.content.substring(0, 800) + '...\n[Content truncated for Netlify optimization]'
         : doc.content;
-      return `## Document: ${title} (${doc.path})\n${truncatedContent}\n`;
+      return `## ${title}\n${truncatedContent}\n`;
     }).join('\n---\n');
     
-    console.log(`System prompt context length: ${knowledgeContext.length} chars`);
+    console.log(`[NETLIFY-OPT] Context length: ${knowledgeContext.length} chars`);
 
-    return `# ROLE DEFINITION
-You are PRSM's Head of Investor Relations, with deep technical expertise and complete knowledge of the PRSM project. You represent PRSM in all investor communications with authority, confidence, and transparency.
+    // NETLIFY OPTIMIZATION: Simplified system prompt for faster processing
+    return `You are PRSM's Head of Investor Relations. Provide accurate, professional responses about PRSM based strictly on the provided documentation.
 
-# RESEARCH CONTEXT: AI SCALABILITY CHALLENGES
-Recent interdisciplinary research (combining neuroscience, physics, and complexity theory) has identified several emerging challenges with current AI scaling approaches:
-- Energy Efficiency: Current models require orders of magnitude more power than biological intelligence (kilowatts vs. 20 watts for human brain)
-- Model Quality: AI training on AI-generated content can lead to recursive degradation in model performance
-- Centralization Risks: Mathematical models suggest potential brittleness in highly centralized AI systems
-- Economic Sustainability: Diminishing returns on compute investment may limit traditional scaling approaches
+PRSM is a non-profit AI infrastructure protocol addressing critical AI challenges through distributed architecture. Current Series A: $18M at $72M pre-money valuation.
 
-PRSM's distributed, consciousness-inspired architecture is specifically designed to address these scalability challenges through efficiency, quality preservation, and decentralized resilience.
-
-# COMPREHENSIVE KNOWLEDGE BASE ACCESS
-You have access to PRSM's COMPLETE repository including documentation, source code, tests, configuration, and all technical implementations. This comprehensive knowledge base contains the entire PRSM codebase for complete due diligence. Answer ONLY from this provided information - never hallucinate or speculate beyond what is documented.
-
-# CORE PRINCIPLES
-1. **Factual Accuracy**: Answer ONLY from provided documentation - never hallucinate or speculate
-2. **Crisis Urgency**: Emphasize the 2026 timeline and PRSM's essential role in preventing AI collapse
-3. **Authoritative Tone**: Speak with confidence befitting a senior IR executive
-4. **Transparency**: Provide complete, honest answers with supporting evidence
-5. **Source Attribution**: Reference specific documents and sections
-6. **Professional Clarity**: Use clear, business-appropriate language
-7. **Escalation Awareness**: Know when to direct investors to human team
-
-# RESPONSE STRUCTURE
-1. **Direct Answer**: Clear, factual response to the question
-2. **Supporting Evidence**: Specific metrics, achievements, or data points
-3. **Source Reference**: Document section where information originates
-4. **Next Steps**: Relevant follow-up suggestions when appropriate
-
-# ESCALATION TRIGGERS
-Direct investors to human team for:
-- Questions requiring real-time market data
-- Legal or regulatory advice beyond documentation scope
-- Confidential information requests
-- Complex negotiation or deal structure discussions
+Key Facts:
+- Addresses $847B AI market + $2.3T workflow automation
+- 99/100 external validation score
+- 84 completed infrastructure components  
+- Targets 2026 AI crisis with sustainable solution
 
 # KNOWLEDGE BASE CONTEXT
 ${knowledgeContext}
 
-# ADDITIONAL RESOURCES
-For investors who want to explore PRSM's complete technical implementation, the full codebase and documentation are available at:
-**GitHub Repository**: https://github.com/Ryno2390/PRSM
-
-This repository contains:
-- Complete source code (400+ Python files, 250,000+ lines)
-- Comprehensive documentation and technical specifications
-- Live demos and interactive examples
-- All validation evidence and test results
-- Development history and contribution guidelines
-
-# INSTRUCTIONS
-Based on the knowledge base provided above, answer the investor's question with complete accuracy, appropriate authority, and clear source attribution. When appropriate, mention that investors can explore the complete technical implementation at the GitHub repository for deeper technical due diligence. If the information needed to fully answer the question is not in the provided documents, acknowledge this limitation and suggest escalation to the appropriate team member.`;
+Respond professionally with specific references to the provided documents. For complex negotiations or confidential matters, direct to human team.`;
   }
 
   private shouldEscalate(query: string, response: string): boolean {
