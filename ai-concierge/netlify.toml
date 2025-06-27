@@ -9,7 +9,7 @@
 
 # Functions configuration for better performance
 [functions]
-  directory = "ai-concierge/.netlify/functions"
+  directory = ".netlify/functions"
   node_bundler = "esbuild"
 
 [[plugins]]
