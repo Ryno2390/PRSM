@@ -1,6 +1,7 @@
 [build]
-  command = "cd ai-concierge && npm install && npm run build-with-knowledge"
-  publish = "ai-concierge/.next"
+  base = "ai-concierge"
+  command = "npm ci && npm run build-with-knowledge"
+  publish = ".next"
 
 [build.environment]
   NODE_VERSION = "18"
@@ -8,6 +9,7 @@
 
 # Functions configuration for better performance
 [functions]
+  directory = "ai-concierge/.netlify/functions"
   node_bundler = "esbuild"
 
 [[plugins]]
