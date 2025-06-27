@@ -134,10 +134,10 @@ python run_demos.py
 ## 🚀 **Next Steps**
 
 ### **Interested? Complete Evaluation Package**
-1. **[Full Business Case](docs/BUSINESS_CASE.md)** (20 minutes) - Market analysis and financial projections
-2. **[Live Demo Session](demos/INVESTOR_DEMO.md)** (30 minutes) - Structured technical demonstration
-3. **[Technical Architecture](docs/architecture.md)** (45 minutes) - Complete system design review
-4. **[Funding Details](docs/FUNDING_MILESTONES.md)** (30 minutes) - Investment structure and milestones
+1. **[Full Business Case](../BUSINESS_CASE.md)** (20 minutes) - Market analysis and financial projections
+2. **[Live Demo Session](../../demos/INVESTOR_DEMO.md)** (30 minutes) - Structured technical demonstration
+3. **[Technical Architecture](../architecture.md)** (45 minutes) - Complete system design review
+4. **[Funding Details](../FUNDING_MILESTONES.md)** (30 minutes) - Investment structure and milestones
 
 ### **Schedule Demo & Discussion**
 - **Email**: [funding@prsm.ai](mailto:funding@prsm.ai)

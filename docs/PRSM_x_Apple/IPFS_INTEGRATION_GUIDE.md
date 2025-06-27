@@ -528,9 +528,9 @@ spec:
 ## 📚 Additional Resources
 
 ### Documentation
-- [IPFS Production Optimization Guide](./IPFS_PRODUCTION_OPTIMIZATION.md)
-- [PRSM Architecture Documentation](./architecture.md)
-- [API Documentation](../prsm/api/README.md)
+- [IPFS Production Optimization Guide](../IPFS_PRODUCTION_OPTIMIZATION.md)
+- [PRSM Architecture Documentation](../architecture.md)
+- [API Documentation](../../PRSM_ui_mockup/README.md)
 
 ### External Resources
 - [IPFS Documentation](https://docs.ipfs.io/)
@@ -539,7 +539,7 @@ spec:
 
 ### Support
 - GitHub Issues: [PRSM Repository](https://github.com/Ryno2390/PRSM/issues)
-- Documentation: [PRSM Docs](../docs/)
+- Documentation: [PRSM Docs](../)
 - Community: [PRSM Discord](https://discord.gg/prsm)
 
 ---

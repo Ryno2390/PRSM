@@ -335,7 +335,7 @@ dashboard.load_scaling_results(result)
 ## 🔗 Related Documentation
 - [Performance Benchmarking](./README.md)
 - [Streamlit Dashboard](../dashboard/README.md)
-- [Post-Quantum Cryptography](../cryptography/README.md)
+- [Post-Quantum Cryptography](../../PRSM_ui_mockup/README.md)
 - [PRSM Architecture](../../README.md)
 
 ## 📄 License

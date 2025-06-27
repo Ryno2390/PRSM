@@ -712,7 +712,7 @@ Our EG-CFG implementation contributes to the broader community:
 
 ### Technical Documentation
 - [PRSM Platform Architecture](../architecture/ARCHITECTURE_DEPENDENCIES.md)
-- [Agent Framework Documentation](../../prsm/agents/README.md)
+- [Agent Framework Documentation](../../PRSM_ui_mockup/README.md)
 - [Performance Benchmarking Guide](../PERFORMANCE_CLAIMS_AUDIT.md)
 
 ### Open Source Repositories

@@ -482,4 +482,4 @@ Planned improvements for the WebSocket API:
 
 ---
 
-For more information, see the [PRSM API Documentation](docs/api/) and [Web Interface Guide](PRSM_ui_mockup/README.md).
+For more information, see the [PRSM API Documentation](api/) and [Web Interface Guide](../PRSM_ui_mockup/README.md).

@@ -240,7 +240,7 @@ Open your browser to: http://localhost:8501
 ## 🔗 Related Documentation
 - [Performance Benchmarking Guide](../performance/README.md)
 - [PRSM Architecture Overview](../../README.md)
-- [Post-Quantum Cryptography](../cryptography/README.md)
+- [Post-Quantum Cryptography](../../PRSM_ui_mockup/README.md)
 
 ## 📄 License
 This dashboard is part of the PRSM project and follows the same licensing terms.

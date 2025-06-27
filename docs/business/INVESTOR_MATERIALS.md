@@ -132,16 +132,16 @@ PRSM represents the infrastructure for AI coordination - positioned at the conve
 ## 📋 Due Diligence Materials
 
 ### Technical Documentation
-- [Complete Architecture Guide](docs/architecture.md)
-- [API Reference Documentation](docs/API_REFERENCE.md)
-- [Security and Compliance Guide](docs/SECURITY_HARDENING.md)
-- [Production Operations Manual](docs/PRODUCTION_OPERATIONS_MANUAL.md)
+- [Complete Architecture Guide](../architecture.md)
+- [API Reference Documentation](../API_REFERENCE.md)
+- [Security and Compliance Guide](../SECURITY_HARDENING.md)
+- [Production Operations Manual](../PRODUCTION_OPERATIONS_MANUAL.md)
 
 ### Business Documentation
-- [Game-Theoretic Investment Thesis](docs/GAME_THEORETIC_INVESTOR_THESIS.md)
-- [Risk Assessment and Mitigation](docs/RISK_MITIGATION_ROADMAP.md)
-- [Phase Implementation Summary](docs/PHASE_IMPLEMENTATION_SUMMARY.md)
-- [Token Economics Model](docs/tokenomics.md)
+- [Game-Theoretic Investment Thesis](../GAME_THEORETIC_INVESTOR_THESIS.md)
+- [Risk Assessment and Mitigation](../../archive/completed_roadmaps/RISK_MITIGATION_ROADMAP.md)
+- [Phase Implementation Summary](../PHASE_IMPLEMENTATION_SUMMARY.md)
+- [Token Economics Model](../tokenomics.md)
 
 ### Financial Materials
 - Financial projections and modeling
@@ -168,7 +168,7 @@ PRSM represents the infrastructure for AI coordination - positioned at the conve
 **Investment Team**
 - Email: funding@prsm.ai
 - Phone: +1 (555) 123-PRSM
-- Investment Deck: [Download PDF](docs/PRSM_Investment_Deck.pdf)
+- Investment Deck: [Download PDF](../docs/PRSM_Investment_Deck.pdf)
 
 **Leadership Team**
 - CEO: ceo@prsm.ai
