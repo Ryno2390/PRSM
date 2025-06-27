@@ -5,6 +5,7 @@
 [build.environment]
   NODE_VERSION = "18"
   NPM_FLAGS = "--prefix=/opt/buildhome/.nodejs/bin/npm"
+  DEFAULT_LLM_PROVIDER = "claude"
 
 # Functions configuration for better performance
 [functions]
@@ -19,9 +20,5 @@
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# Environment variable template (actual values should be set in Netlify UI)
-[build.environment]
-  # ANTHROPIC_API_KEY = ""
-  # GOOGLE_API_KEY = ""
-  # OPENAI_API_KEY = ""
-  DEFAULT_LLM_PROVIDER = "claude"
+# Note: Environment variables should be set in Netlify UI:
+# ANTHROPIC_API_KEY, GOOGLE_API_KEY, OPENAI_API_KEY
