@@ -138,6 +138,8 @@ I'm evaluating PRSM for investment. Please analyze this repository and provide:
 Focus on: /docs/business/, /docs/ai-auditor/, /prsm/ core architecture, and /tests/ coverage.
 ```
 
+*Here's the result of a recent run of this prompt using Gemini 2.5 Pro: [PRSM Investment Analysis: Final Report](docs/external-audits/Gemini-2.5-Pro-Investment-Analysis.md)*
+
 **For Developers:**
 ```
 I'm a developer interested in PRSM's architecture. Please analyze:

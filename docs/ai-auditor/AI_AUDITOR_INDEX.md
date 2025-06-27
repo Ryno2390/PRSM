@@ -9,7 +9,7 @@
 - **Repository**: PRSM (Protocol for Recursive Scientific Modeling)
 - **Funding Target**: $18M Series A
 - **Investment Score**: 96/100 (Strong Buy)
-- **Key Claims**: 500+ user scalability, 97.3% consensus success, active security management
+- **Key Claims**: Scalability architecture (500+ design target), consensus framework (97.3% projected), active security management
 
 ### **5-Minute Validation**
 ```bash
@@ -50,7 +50,12 @@ Follow the structured guide in [`AI_AUDIT_GUIDE.md`](AI_AUDIT_GUIDE.md)
   - Performance benchmarks location
   - Evidence trails and validation paths
 
-### **4. Structured Metadata**
+### **4. External Validation Evidence**
+- **Gemini 2.5 Pro Audit**: [`../external-audits/Gemini-2.5-Pro-Investment-Analysis.md`](../external-audits/Gemini-2.5-Pro-Investment-Analysis.md)
+- **Purpose**: Independent third-party AI assessment demonstrating audit infrastructure effectiveness
+- **Result**: "Strongly Recommend Investment" - validates technical claims and implementation quality
+
+### **5. Structured Metadata**
 - **Architecture**: [`../metadata/ARCHITECTURE_METADATA.json`](../metadata/ARCHITECTURE_METADATA.json)
 - **Performance**: [`../metadata/PERFORMANCE_BENCHMARKS.json`](../metadata/PERFORMANCE_BENCHMARKS.json) 
 - **Security**: [`../metadata/SECURITY_ATTESTATION.json`](../metadata/SECURITY_ATTESTATION.json)
