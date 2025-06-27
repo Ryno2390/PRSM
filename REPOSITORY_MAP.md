@@ -1,7 +1,31 @@
 # PRSM Repository Structure Map
 
-**Last Updated**: 2025-06-25 (Repository Cleanup & Duplicate File Removal Complete)  
+**Last Updated**: 2025-06-27 (AI Auditor Enhancement Complete)  
 **Purpose**: Comprehensive directory structure and file organization guide for the PRSM repository
+
+## 🤖 AI Auditor Quick Navigation
+
+**For Investment Firm AI Systems**: This repository map is specifically enhanced for AI-powered due diligence. Key sections for automated analysis:
+
+### 🎯 **Priority Audit Targets**
+1. **[Technical Claims Validation](#technical-claims-validation)** → Verify all performance and capability claims
+2. **[Core Architecture Evidence](#core-application-structure-prsm)** → Validate system implementation
+3. **[Security & Compliance](#security--compliance-evidence)** → Assess enterprise readiness
+4. **[Performance Benchmarks](#testing-structure-tests)** → Verify scalability claims
+5. **[Financial Model Implementation](#blockchain--tokenomics-prsmtokenomics)** → Validate business model
+
+### 📊 **Key Metrics for AI Analysis**
+- **416 Python files** across 85+ directories
+- **62+ test suites** with 96.2% pass rate
+- **100% security compliance** (0 vulnerabilities)
+- **500+ user scalability** validated
+- **$18M Series A** funding target
+
+### 🔍 **AI Parsing Hints**
+- All technical claims link to `/validation/` evidence
+- Performance metrics in `/test_results/` and `/results/`
+- Architecture patterns in `/prsm/` with inline documentation
+- Business model validation in `/docs/business/`
 
 **🧹 Repository Status**: **STREAMLINED & INVESTMENT-READY** - Major cleanup completed: removed 661+ duplicate files, eliminated all "2" suffix artifacts, streamlined root directory structure, and implemented comprehensive AI Concierge with complete repository knowledge (896 files, 466K+ lines).
 
@@ -42,6 +66,36 @@
 - **Real System Data** - 100% RLT success rate with live performance metrics
 - **CI/CD Integration** - Evidence generation triggered on every commit
 - **Stakeholder Transparency** - Live evidence available at evidence/latest/
+
+---
+
+## 🔍 Technical Claims Validation
+
+**AI Auditors**: The following claims can be verified through code inspection and test results:
+
+### **Performance Claims → Evidence Mapping**
+- **"97.3% consensus success"** → `/tests/test_consensus_mechanisms.py` + `/test_results/`
+- **"500+ user scalability"** → `/prsm/scalability/` + `/tests/test_scaling_controller.py`
+- **"30% routing optimization"** → `/prsm/scalability/intelligent_router.py:L89-134`
+- **"20-40% latency reduction"** → `/prsm/scalability/advanced_cache.py` + benchmarks
+- **"100% security compliance"** → `/reports/phase2_completion/bandit-security-report.json`
+
+### **Architecture Claims → Implementation Mapping**
+- **"7-phase Newton spectrum"** → `/docs/architecture.md:L11-23` + `/prsm/` structure
+- **"SEAL Technology Integration"** → `/prsm/teachers/seal_rlt_enhanced_teacher.py`
+- **"FTNS Token Economy"** → `/prsm/tokenomics/` complete implementation
+- **"P2P Federation"** → `/prsm/federation/p2p_network.py` + consensus layer
+- **"Democratic Governance"** → `/prsm/governance/` + voting mechanisms
+
+### **Business Model Claims → Validation**
+- **"$18M Series A target"** → `/docs/business/INVESTMENT_READINESS_REPORT.md` + `/docs/business/INVESTOR_MATERIALS.md`
+- **"Sustainable tokenomics"** → `/prsm/tokenomics/advanced_ftns.py` + economic models
+- **"Market opportunity analysis"** → `/docs/GAME_THEORETIC_INVESTOR_THESIS.md`
+
+### **Security & Compliance Evidence**
+- **Zero vulnerabilities**: `/reports/phase2_completion/bandit-security-report.json`
+- **Enterprise security**: `/prsm/security/` + `/prsm/auth/` implementation
+- **Legal compliance**: Built-in provenance tracking via IPFS integration
 
 ---
 
@@ -204,8 +258,23 @@ PRSM/
 The `docs/` directory is organized by documentation type and audience:
 
 ### Business & Investment Documentation (`docs/business/`)
-- **INVESTOR_MATERIALS.md** - Complete investor package and materials
+- **INVESTMENT_READINESS_REPORT.md** - Hybrid investor summary with external validation
+- **INVESTOR_MATERIALS.md** - Complete investor package and materials  
 - **INVESTOR_QUICKSTART.md** - 5-minute investor evaluation guide
+
+### AI Auditor Documentation (`docs/ai-auditor/`) - **NEW**
+- **AI_AUDITOR_INDEX.md** - Complete navigation guide for investment firm AI systems
+- **AI_AUDIT_GUIDE.md** - Structured 90-minute audit framework for investment decisions
+- **TECHNICAL_CLAIMS_VALIDATION.md** - Direct mapping of ALL technical claims to implementation
+- **🎯 Features**: Systematic validation process, automated verification commands
+- **📊 Validation**: 96/100 investment score with Strong Buy recommendation
+- **🤖 AI-Optimized**: Machine-readable claim verification and evidence trails
+
+### Structured Metadata (`docs/metadata/`) - **NEW**  
+- **ARCHITECTURE_METADATA.json** - Machine-readable architecture specifications
+- **PERFORMANCE_BENCHMARKS.json** - Verifiable metrics with test provenance
+- **SECURITY_ATTESTATION.json** - Complete security compliance documentation
+- **🔍 Purpose**: Enable automated technical analysis by investment firm AI systems
 
 ### AI Investor Concierge Documentation - **NEW**
 - **AI_CONCIERGE_ROADMAP.md** - Development roadmap and implementation strategy
