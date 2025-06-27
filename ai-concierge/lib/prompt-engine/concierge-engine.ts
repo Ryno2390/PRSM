@@ -203,10 +203,19 @@ export class ConciergeEngine {
   }
 
   private buildSystemPrompt(relevantDocs: KnowledgeDocument[]): string {
+    console.log(`Building system prompt with ${relevantDocs.length} documents`);
+    
+    // Truncate document content to prevent massive prompts
     const knowledgeContext = relevantDocs.map(doc => {
       const title = doc.title || doc.filename || doc.path;
-      return `## Document: ${title} (${doc.path})\n${doc.content}\n`;
+      // Limit each document to 2000 characters to prevent token overflow
+      const truncatedContent = doc.content.length > 2000 
+        ? doc.content.substring(0, 2000) + '...\n[Content truncated for brevity]'
+        : doc.content;
+      return `## Document: ${title} (${doc.path})\n${truncatedContent}\n`;
     }).join('\n---\n');
+    
+    console.log(`System prompt context length: ${knowledgeContext.length} chars`);
 
     return `# ROLE DEFINITION
 You are PRSM's Head of Investor Relations, with deep technical expertise and complete knowledge of the PRSM project. You represent PRSM in all investor communications with authority, confidence, and transparency.
