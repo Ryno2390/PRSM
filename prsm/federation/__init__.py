@@ -21,7 +21,32 @@ from .distributed_rlt_network import (
     CollaborationCoordinator
 )
 
+# DGM Federated Evolution System
+from .distributed_evolution import (
+    FederatedEvolutionSystem,
+    DistributedArchiveManager,
+    FederatedEvolutionCoordinator,
+    SynchronizationStrategy,
+    NetworkEvolutionRole,
+    NetworkEvolutionResult,
+    SolutionSyncRequest,
+    SolutionSyncResponse,
+    NetworkEvolutionTask
+)
+
+from .knowledge_transfer import (
+    CrossDomainKnowledgeTransferSystem,
+    KnowledgeTransferRequest,
+    KnowledgeTransferResult,
+    KnowledgeTransferType,
+    DomainType,
+    AdaptedSolution,
+    DomainKnowledgeExtractor,
+    KnowledgeAdaptationEngine
+)
+
 __all__ = [
+    # RLT Network Components
     "DistributedRLTNetwork",
     "TeacherNodeInfo",
     "NetworkQualityMetrics", 
@@ -34,5 +59,26 @@ __all__ = [
     "NetworkLoadBalancer",
     "ReputationTracker", 
     "ConsensusManager",
-    "CollaborationCoordinator"
+    "CollaborationCoordinator",
+    
+    # DGM Federated Evolution Components
+    "FederatedEvolutionSystem",
+    "DistributedArchiveManager",
+    "FederatedEvolutionCoordinator",
+    "SynchronizationStrategy",
+    "NetworkEvolutionRole",
+    "NetworkEvolutionResult",
+    "SolutionSyncRequest",
+    "SolutionSyncResponse",
+    "NetworkEvolutionTask",
+    
+    # Cross-Domain Knowledge Transfer Components
+    "CrossDomainKnowledgeTransferSystem",
+    "KnowledgeTransferRequest",
+    "KnowledgeTransferResult",
+    "KnowledgeTransferType",
+    "DomainType",
+    "AdaptedSolution",
+    "DomainKnowledgeExtractor",
+    "KnowledgeAdaptationEngine"
 ]
