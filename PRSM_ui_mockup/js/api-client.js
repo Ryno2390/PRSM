@@ -16,8 +16,22 @@ class PRSMAPIClient {
         this.globalWS = null;
         this.conversationWS = null;
         this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = 5;
+        this.maxReconnectAttempts = 10; // Increased from 5
         this.reconnectDelay = 1000; // Start with 1 second
+        this.maxReconnectDelay = 60000; // Max 1 minute
+        
+        // Connection state management
+        this.isReconnecting = false;
+        this.lastConnectionAttempt = 0;
+        this.connectionId = 'conn_' + Date.now();
+        this.wsConnectionState = {
+            global: 'disconnected',
+            conversation: 'disconnected'
+        };
+        
+        // Message queue for offline scenarios
+        this.messageQueue = [];
+        this.maxQueueSize = 100;
         
         // Event handlers for WebSocket messages
         this.messageHandlers = {
@@ -60,14 +74,85 @@ class PRSMAPIClient {
         // Display connection status in UI
         const statusElement = document.getElementById('api-status');
         if (statusElement) {
-            statusElement.textContent = connected ? 'API Connected' : 'API Offline (Mock Mode)';
-            statusElement.className = connected ? 'api-status connected' : 'api-status disconnected';
+            if (connected) {
+                if (this.isReconnecting) {
+                    statusElement.textContent = 'Reconnecting...';
+                    statusElement.className = 'api-status reconnecting';
+                } else {
+                    statusElement.textContent = 'API Connected';
+                    statusElement.className = 'api-status connected';
+                }
+            } else {
+                statusElement.textContent = 'API Offline (Mock Mode)';
+                statusElement.className = 'api-status disconnected';
+            }
         }
         
+        // Update detailed connection status
+        this.updateDetailedConnectionStatus();
+        
+        // Update connection status widget
+        this.updateConnectionStatusWidget();
+        
         // Initialize WebSocket connections if API is available
-        if (connected) {
+        if (connected && !this.isReconnecting) {
             this.initializeWebSockets();
         }
+    }
+    
+    updateDetailedConnectionStatus() {
+        // Create or update detailed status indicator
+        let detailStatusElement = document.getElementById('connection-details');
+        if (!detailStatusElement) {
+            detailStatusElement = document.createElement('div');
+            detailStatusElement.id = 'connection-details';
+            detailStatusElement.style.cssText = `
+                position: fixed;
+                bottom: 20px;
+                left: 20px;
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-color);
+                border-radius: 6px;
+                padding: 12px;
+                font-size: 12px;
+                color: var(--text-secondary);
+                z-index: 1000;
+                max-width: 300px;
+                display: none;
+            `;
+            document.body.appendChild(detailStatusElement);
+        }
+        
+        const status = this.getConnectionStatus();
+        detailStatusElement.innerHTML = `
+            <div><strong>Connection Status</strong></div>
+            <div>API: ${status.api_connected ? '✅' : '❌'}</div>
+            <div>Global WS: ${this.getWebSocketStatusText(status.global_ws_status)}</div>
+            <div>Conv WS: ${this.getWebSocketStatusText(status.conversation_ws_status)}</div>
+            <div>Reconnect attempts: ${status.reconnect_attempts}/${this.maxReconnectAttempts}</div>
+            <div>Queue: ${this.messageQueue.length} messages</div>
+        `;
+        
+        // Auto-hide after 10 seconds
+        if (this.connected || this.isReconnecting) {
+            detailStatusElement.style.display = 'block';
+            setTimeout(() => {
+                if (detailStatusElement) {
+                    detailStatusElement.style.display = 'none';
+                }
+            }, 10000);
+        }
+    }
+    
+    getWebSocketStatusText(readyState) {
+        const states = {
+            0: '🟡 Connecting',
+            1: '✅ Open',
+            2: '🟠 Closing',
+            3: '❌ Closed',
+            'not_connected': '⚫ Not Connected'
+        };
+        return states[readyState] || '❓ Unknown';
     }
 
     // --- WebSocket Management ---
@@ -81,42 +166,109 @@ class PRSMAPIClient {
 
     connectGlobalWebSocket() {
         if (this.globalWS && this.globalWS.readyState === WebSocket.OPEN) {
-            return; // Already connected
+            console.log('🔌 Global WebSocket already connected');
+            return Promise.resolve();
         }
 
-        try {
-            this.globalWS = new WebSocket(`${this.wsBaseURL}/ws/${this.currentUserId}`);
-            
-            this.globalWS.onopen = () => {
-                console.log('🔌 Global WebSocket connected');
-                this.reconnectAttempts = 0;
-                this.reconnectDelay = 1000;
+        // Prevent multiple simultaneous connection attempts
+        if (this.isReconnecting) {
+            console.log('🔄 Already attempting to reconnect global WebSocket');
+            return Promise.reject(new Error('Reconnection in progress'));
+        }
+
+        return new Promise((resolve, reject) => {
+            try {
+                this.isReconnecting = true;
+                this.lastConnectionAttempt = Date.now();
+                this.wsConnectionState.global = 'connecting';
                 
-                // Send initial connection message
-                this.sendWebSocketMessage(this.globalWS, {
-                    type: 'connection',
-                    user_id: this.currentUserId,
-                    client_type: 'web_ui'
-                });
-            };
+                console.log(`🔌 Attempting global WebSocket connection (attempt ${this.reconnectAttempts + 1})`);
+                
+                this.globalWS = new WebSocket(`${this.wsBaseURL}/ws/${this.currentUserId}?connection_id=${this.connectionId}`);
+                
+                const connectionTimeout = setTimeout(() => {
+                    if (this.globalWS && this.globalWS.readyState === WebSocket.CONNECTING) {
+                        console.warn('⏰ Global WebSocket connection timeout');
+                        this.globalWS.close();
+                        reject(new Error('Connection timeout'));
+                    }
+                }, 10000); // 10 second timeout
+                
+                this.globalWS.onopen = () => {
+                    clearTimeout(connectionTimeout);
+                    console.log('✅ Global WebSocket connected successfully');
+                    
+                    this.reconnectAttempts = 0;
+                    this.reconnectDelay = 1000;
+                    this.isReconnecting = false;
+                    this.wsConnectionState.global = 'connected';
+                    
+                    // Send initial connection message
+                    this.sendWebSocketMessage(this.globalWS, {
+                        type: 'connection',
+                        user_id: this.currentUserId,
+                        client_type: 'web_ui',
+                        connection_id: this.connectionId,
+                        timestamp: Date.now()
+                    });
+                    
+                    // Process queued messages
+                    this.processMessageQueue();
+                    
+                    // Update UI
+                    this.displayConnectionStatus(true);
+                    
+                    resolve();
+                };
 
-            this.globalWS.onmessage = (event) => {
-                this.handleWebSocketMessage(JSON.parse(event.data));
-            };
+                this.globalWS.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        this.handleWebSocketMessage(data);
+                    } catch (error) {
+                        console.error('❌ Failed to parse WebSocket message:', error);
+                    }
+                };
 
-            this.globalWS.onclose = (event) => {
-                console.log('❌ Global WebSocket disconnected:', event.code);
+                this.globalWS.onclose = (event) => {
+                    clearTimeout(connectionTimeout);
+                    this.wsConnectionState.global = 'disconnected';
+                    this.isReconnecting = false;
+                    
+                    console.log(`❌ Global WebSocket disconnected (code: ${event.code}, reason: ${event.reason})`);
+                    
+                    // Don't reconnect if it was a clean close
+                    if (event.code !== 1000 && event.code !== 1001) {
+                        this.scheduleReconnect('global');
+                    }
+                    
+                    reject(new Error(`WebSocket closed: ${event.code}`));
+                };
+
+                this.globalWS.onerror = (error) => {
+                    clearTimeout(connectionTimeout);
+                    console.error('🚨 Global WebSocket error:', error);
+                    
+                    this.wsConnectionState.global = 'error';
+                    this.isReconnecting = false;
+                    
+                    // Show user-friendly error notification
+                    this.showNotification(
+                        'Connection Error',
+                        'Lost connection to PRSM server. Attempting to reconnect...',
+                        'error'
+                    );
+                    
+                    reject(error);
+                };
+
+            } catch (error) {
+                console.error('❌ Failed to create global WebSocket:', error);
+                this.isReconnecting = false;
                 this.scheduleReconnect('global');
-            };
-
-            this.globalWS.onerror = (error) => {
-                console.error('🚨 Global WebSocket error:', error);
-            };
-
-        } catch (error) {
-            console.error('Failed to create global WebSocket:', error);
-            this.scheduleReconnect('global');
-        }
+                reject(error);
+            }
+        });
     }
 
     connectConversationWebSocket(conversationId) {
@@ -162,29 +314,116 @@ class PRSMAPIClient {
 
     scheduleReconnect(type) {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.warn(`Max reconnection attempts reached for ${type} WebSocket`);
+            console.warn(`❌ Max reconnection attempts (${this.maxReconnectAttempts}) reached for ${type} WebSocket`);
+            
+            // Show persistent error to user
+            this.showNotification(
+                'Connection Failed',
+                `Unable to connect to PRSM server after ${this.maxReconnectAttempts} attempts. Please check your connection and refresh the page.`,
+                'error'
+            );
+            
+            // Switch to offline mode
+            this.connected = false;
+            this.displayConnectionStatus(false);
+            return;
+        }
+
+        // Prevent scheduling if already reconnecting
+        if (this.isReconnecting) {
+            console.log(`🔄 Reconnection already scheduled for ${type} WebSocket`);
             return;
         }
 
         this.reconnectAttempts++;
-        console.log(`Reconnecting ${type} WebSocket in ${this.reconnectDelay}ms (attempt ${this.reconnectAttempts})`);
+        const delay = Math.min(this.reconnectDelay, this.maxReconnectDelay);
+        
+        console.log(`🔄 Scheduling ${type} WebSocket reconnection in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+
+        // Update UI to show reconnecting status
+        this.displayConnectionStatus(this.connected);
 
         setTimeout(() => {
-            if (type === 'global') {
-                this.connectGlobalWebSocket();
+            // Check if we should still try to reconnect
+            if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                if (type === 'global') {
+                    this.connectGlobalWebSocket().catch(error => {
+                        console.error('🚨 Global WebSocket reconnection failed:', error);
+                        // Schedule another attempt
+                        setTimeout(() => this.scheduleReconnect('global'), 2000);
+                    });
+                } else if (type === 'conversation' && this.currentConversationId) {
+                    this.connectConversationWebSocket(this.currentConversationId);
+                }
             }
-            // Conversation reconnection handled when creating new conversations
-        }, this.reconnectDelay);
+        }, delay);
 
-        // Exponential backoff
-        this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
+        // Exponential backoff with jitter to prevent thundering herd
+        const jitter = Math.random() * 1000; // 0-1 second jitter
+        this.reconnectDelay = Math.min(this.reconnectDelay * 1.5 + jitter, this.maxReconnectDelay);
+    }
+    
+    // Add message queuing for offline scenarios
+    queueMessage(message) {
+        if (this.messageQueue.length >= this.maxQueueSize) {
+            // Remove oldest message to make room
+            this.messageQueue.shift();
+            console.warn('⚠️ Message queue full, removing oldest message');
+        }
+        
+        this.messageQueue.push({
+            message: message,
+            timestamp: Date.now(),
+            attempts: 0
+        });
+        
+        console.log(`📥 Queued message (queue size: ${this.messageQueue.length})`);
+    }
+    
+    processMessageQueue() {
+        if (this.messageQueue.length === 0) return;
+        
+        console.log(`📤 Processing ${this.messageQueue.length} queued messages`);
+        
+        const messagesToProcess = [...this.messageQueue];
+        this.messageQueue = [];
+        
+        messagesToProcess.forEach((queuedItem, index) => {
+            setTimeout(() => {
+                if (this.globalWS && this.globalWS.readyState === WebSocket.OPEN) {
+                    this.sendWebSocketMessage(this.globalWS, queuedItem.message);
+                    console.log(`📤 Sent queued message ${index + 1}/${messagesToProcess.length}`);
+                } else {
+                    // Re-queue if connection is lost again
+                    this.queueMessage(queuedItem.message);
+                }
+            }, index * 100); // Stagger sends by 100ms
+        });
     }
 
     sendWebSocketMessage(ws, message) {
         if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(message));
+            try {
+                ws.send(JSON.stringify(message));
+                console.log('📤 WebSocket message sent:', message.type);
+                return true;
+            } catch (error) {
+                console.error('❌ Failed to send WebSocket message:', error);
+                return false;
+            }
         } else {
-            console.warn('WebSocket not ready, message not sent:', message);
+            console.warn('⚠️ WebSocket not ready, queueing message:', message.type);
+            
+            // Queue message for later sending
+            this.queueMessage(message);
+            
+            // Try to reconnect if not already attempting
+            if (!this.isReconnecting && ws === this.globalWS) {
+                console.log('🔄 Attempting to reconnect global WebSocket due to send failure');
+                this.scheduleReconnect('global');
+            }
+            
+            return false;
         }
     }
 
@@ -258,6 +497,9 @@ class PRSMAPIClient {
     handleAIResponseComplete(data) {
         const { conversation_id, message_id, complete_content, metadata } = data;
         
+        // Clear response timeout
+        this.clearResponseTimeout();
+        
         // Update final message content and metadata
         const responseElement = document.querySelector(`[data-message-id="${message_id}"]`);
         if (responseElement) {
@@ -270,8 +512,9 @@ class PRSMAPIClient {
             const metadataElement = responseElement.querySelector('.message-metadata');
             if (metadataElement && metadata) {
                 metadataElement.innerHTML = `
-                    <span class="model-tag">${metadata.model_used}</span>
-                    <span class="tokens-used">${metadata.tokens_used} tokens</span>
+                    <span class="model-tag">${metadata.model_used || 'nwtn-v1'}</span>
+                    <span class="tokens-used">${metadata.tokens_used || 0} tokens</span>
+                    ${metadata.processing_time ? `<span class="processing-time">${metadata.processing_time}ms</span>` : ''}
                 `;
             }
         }
@@ -281,6 +524,8 @@ class PRSMAPIClient {
         
         // Re-enable message input
         this.enableMessageInput();
+        
+        console.log('✅ AI response completed successfully');
     }
 
     updateContextDisplay(metadata) {
@@ -591,39 +836,125 @@ class PRSMAPIClient {
     // --- Real-time Message Sending ---
 
     async sendMessageWithStreaming(content) {
-        if (!this.currentConversationId) {
-            await this.createConversation();
-        }
+        try {
+            if (!this.currentConversationId) {
+                const convResponse = await this.createConversation();
+                if (!convResponse.success) {
+                    throw new Error('Failed to create conversation');
+                }
+            }
 
-        // Ensure conversation WebSocket is connected
-        if (!this.conversationWS || this.conversationWS.readyState !== WebSocket.OPEN) {
-            this.connectConversationWebSocket(this.currentConversationId);
-            
-            // Wait a moment for connection to establish
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
+            // Disable input during processing
+            this.disableMessageInput();
 
-        // Disable input during processing
-        this.disableMessageInput();
+            // Try WebSocket first for real-time streaming
+            if (this.connected && this.globalWS && this.globalWS.readyState === WebSocket.OPEN) {
+                
+                const messageSent = this.sendWebSocketMessage(this.globalWS, {
+                    type: 'send_message',
+                    content: content,
+                    conversation_id: this.currentConversationId,
+                    streaming: true,
+                    timestamp: Date.now()
+                });
 
-        // Send message via WebSocket for real-time response
-        if (this.conversationWS && this.conversationWS.readyState === WebSocket.OPEN) {
-            this.sendWebSocketMessage(this.conversationWS, {
-                type: 'send_message',
-                content: content,
-                conversation_id: this.currentConversationId,
-                streaming: true
-            });
+                if (messageSent) {
+                    // Add user message to UI immediately
+                    this.addUserMessageToUI(content);
+                    
+                    // Start timeout for response
+                    this.startResponseTimeout();
+                    
+                    return { success: true, streaming: true, method: 'websocket' };
+                }
+            }
 
-            // Add user message to UI immediately
-            this.addUserMessageToUI(content);
-            
-            return { success: true, streaming: true };
-        } else {
             // Fallback to REST API if WebSocket not available
+            console.log('🔄 WebSocket unavailable, falling back to REST API');
             this.enableMessageInput();
-            return await this.sendMessage(content);
+            
+            const restResponse = await this.sendMessage(content);
+            if (restResponse.success) {
+                // Add both user and AI messages to UI
+                this.addUserMessageToUI(content);
+                if (restResponse.ai_response) {
+                    this.addAIMessageToUI(restResponse.ai_response);
+                }
+            }
+            
+            return { 
+                ...restResponse, 
+                method: 'rest_api',
+                fallback: true 
+            };
+            
+        } catch (error) {
+            console.error('❌ Failed to send message:', error);
+            this.enableMessageInput();
+            
+            this.showNotification(
+                'Message Failed',
+                'Unable to send message. Please try again.',
+                'error'
+            );
+            
+            return { 
+                success: false, 
+                error: error.message,
+                method: 'failed'
+            };
         }
+    }
+    
+    startResponseTimeout() {
+        // Clear any existing timeout
+        if (this.responseTimeout) {
+            clearTimeout(this.responseTimeout);
+        }
+        
+        // Set 30 second timeout for AI response
+        this.responseTimeout = setTimeout(() => {
+            console.warn('⏰ AI response timeout');
+            this.enableMessageInput();
+            
+            this.showNotification(
+                'Response Timeout',
+                'AI response is taking longer than expected. You can try sending another message.',
+                'warning'
+            );
+        }, 30000);
+    }
+    
+    clearResponseTimeout() {
+        if (this.responseTimeout) {
+            clearTimeout(this.responseTimeout);
+            this.responseTimeout = null;
+        }
+    }
+    
+    addAIMessageToUI(aiResponse) {
+        const responseArea = document.querySelector('.response-area');
+        if (!responseArea) return;
+
+        const messageElement = document.createElement('div');
+        messageElement.className = 'message message-assistant';
+        messageElement.setAttribute('data-message-id', aiResponse.message_id || 'ai_' + Date.now());
+        messageElement.innerHTML = `
+            <div class="message-header">
+                <span class="message-role">PRSM</span>
+                <span class="message-time">${new Date().toLocaleTimeString()}</span>
+                <div class="message-metadata">
+                    ${aiResponse.model_used ? `<span class="model-tag">${aiResponse.model_used}</span>` : ''}
+                </div>
+            </div>
+            <div class="message-content">${aiResponse.content}</div>
+        `;
+
+        responseArea.appendChild(messageElement);
+        messageElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        
+        // Re-enable input
+        this.enableMessageInput();
     }
 
     addUserMessageToUI(content) {
@@ -708,7 +1039,7 @@ class PRSMAPIClient {
             content: content
         };
 
-        const response = await this.makeRequest(
+        const response = await this.makeRequestWithRetry(
             `/ui/conversations/${this.currentConversationId}/messages`,
             {
                 method: 'POST',
