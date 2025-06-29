@@ -18,6 +18,7 @@ from .models import (
 )
 from .wallet_manager import MultiSigWalletManager
 from .exchange_router import ExchangeRouter
+from .hub_spoke_router import HubSpokeRouter
 from ..core.ipfs_client import IPFSClient
 
 
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class ChronosEngine:
-    """Main clearing engine for CHRONOS protocol."""
+    """Main clearing engine for CHRONOS protocol with hub-and-spoke routing."""
     
     def __init__(
         self,
@@ -37,17 +38,22 @@ class ChronosEngine:
         self.exchange_router = exchange_router
         self.ipfs_client = ipfs_client
         
+        # Initialize hub-and-spoke router
+        self.hub_spoke_router = HubSpokeRouter(exchange_router)
+        
         # Mock liquidity pools for proof-of-concept
         self.liquidity_pools = self._initialize_mock_pools()
         
         # Active transactions
         self.active_transactions: Dict[str, ClearingTransaction] = {}
         
-        # Fee structure
+        # Enhanced fee structure for multi-hop routing
         self.base_fees = {
-            "clearing_fee": Decimal("0.001"),  # 0.1%
-            "network_fee": Decimal("0.0005"),  # 0.05%
-            "liquidity_fee": Decimal("0.003")  # 0.3%
+            "clearing_fee": Decimal("0.001"),    # 0.1%
+            "network_fee": Decimal("0.0005"),    # 0.05%
+            "liquidity_fee": Decimal("0.003"),   # 0.3%
+            "hub_routing_fee": Decimal("0.0005"), # 0.05% per hub hop
+            "compliance_fee": Decimal("0.002")   # 0.2% for regulated conversions
         }
     
     def _initialize_mock_pools(self) -> Dict[str, LiquidityPool]:

@@ -16,19 +16,39 @@ import uuid
 class AssetType(str, Enum):
     """Supported asset types for clearing operations."""
     FTNS = "FTNS"
-    BTC = "BTC"
+    BTC = "BTC"  # Primary reserve currency (hub)
     USD = "USD"
+    USDC = "USDC"  # Primary stable coin for USD conversion
+    USDT = "USDT"  # Secondary stable coin
     ETH = "ETH"
+    # Add other major cryptos as spokes
+    ADA = "ADA"
+    SOL = "SOL"
+    DOT = "DOT"
 
 
 class SwapType(str, Enum):
-    """Types of swap operations."""
+    """Types of swap operations with hub-and-spoke routing."""
+    # Direct FTNS operations
     FTNS_TO_BTC = "FTNS_TO_BTC"
     BTC_TO_FTNS = "BTC_TO_FTNS"
-    FTNS_TO_USD = "FTNS_TO_USD"
-    USD_TO_FTNS = "USD_TO_FTNS"
-    BTC_TO_USD = "BTC_TO_USD"
-    USD_TO_BTC = "USD_TO_BTC"
+    
+    # Hub-routed USD operations (FTNS -> BTC -> USDC -> USD)
+    FTNS_TO_USD = "FTNS_TO_USD"  # Multi-hop: FTNS->BTC->USDC->USD
+    USD_TO_FTNS = "USD_TO_FTNS"  # Multi-hop: USD->USDC->BTC->FTNS
+    
+    # Bitcoin hub operations
+    BTC_TO_USD = "BTC_TO_USD"    # BTC->USDC->USD
+    USD_TO_BTC = "USD_TO_BTC"    # USD->USDC->BTC
+    BTC_TO_USDC = "BTC_TO_USDC"
+    USDC_TO_BTC = "USDC_TO_BTC"
+    
+    # Stablecoin operations
+    USDC_TO_USD = "USDC_TO_USD"  # Direct fiat conversion
+    USD_TO_USDC = "USD_TO_USDC"  # Direct fiat conversion
+    
+    # Cross-crypto via Bitcoin hub
+    CRYPTO_TO_CRYPTO = "CRYPTO_TO_CRYPTO"  # Any crypto -> BTC -> target crypto
 
 
 class TransactionStatus(str, Enum):
@@ -307,19 +327,25 @@ class CHRONOSStakingRequest(BaseModel):
     program_id: str
     staker_address: str
     
-    # Multi-currency staking
+    # Multi-currency staking with hub-and-spoke routing
     stake_amount: Decimal
     stake_currency: AssetType  # Currency user wants to stake in
     target_currency: AssetType = AssetType.FTNS  # Always FTNS for programs
     
-    # Conversion details
+    # Enhanced conversion details for multi-hop routing
     max_slippage: Decimal = Field(default=Decimal("0.01"))  # 1%
-    conversion_quote: Optional[Dict[str, Any]] = None
-    swap_transaction_id: Optional[str] = None
+    conversion_route: Optional[List[str]] = None  # e.g., ["USD", "USDC", "BTC", "FTNS"]
+    conversion_quotes: Optional[List[Dict[str, Any]]] = None  # Quote for each hop
+    swap_transaction_ids: List[str] = Field(default_factory=list)  # Multiple TX IDs
+    
+    # Hub routing preferences
+    preferred_hub: AssetType = AssetType.BTC  # Default to Bitcoin hub
+    preferred_stablecoin: AssetType = AssetType.USDC  # Default to USDC for USD ops
     
     # Resulting stake position
     final_ftns_amount: Optional[Decimal] = None
     stake_position_id: Optional[str] = None
+    total_conversion_fees: Optional[Decimal] = None
     
     status: TransactionStatus = TransactionStatus.PENDING
     created_at: datetime = Field(default_factory=datetime.utcnow)
