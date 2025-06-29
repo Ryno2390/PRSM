@@ -1388,10 +1388,2622 @@ async function updateConnectorHealth() {
     }
 }
 
+// --- Simple Tab Navigation ---
+function initializeTabNavigation() {
+    const tabsContainer = document.getElementById('tabs-container');
+    const leftBtn = document.getElementById('scroll-left');
+    const rightBtn = document.getElementById('scroll-right');
+    
+    if (!tabsContainer || !leftBtn || !rightBtn) {
+        return;
+    }
+    
+    let scrollPosition = 0;
+    const scrollAmount = 200; // pixels to scroll
+    
+    // Scroll left
+    leftBtn.addEventListener('click', () => {
+        scrollPosition = Math.min(scrollPosition + scrollAmount, 0);
+        tabsContainer.style.transform = `translateX(${scrollPosition}px)`;
+    });
+    
+    // Scroll right
+    rightBtn.addEventListener('click', () => {
+        const containerWidth = tabsContainer.parentElement.offsetWidth;
+        const contentWidth = tabsContainer.scrollWidth;
+        const maxScroll = containerWidth - contentWidth;
+        
+        scrollPosition = Math.max(scrollPosition - scrollAmount, maxScroll);
+        tabsContainer.style.transform = `translateX(${scrollPosition}px)`;
+    });
+    
+    // Tab clicking functionality
+    const tabs = tabsContainer.querySelectorAll('.tab');
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            // Remove active class from all tabs
+            tabs.forEach(t => t.classList.remove('active'));
+            // Add active class to clicked tab
+            tab.classList.add('active');
+            
+            // Switch content sections
+            const targetId = tab.getAttribute('data-target');
+            if (targetId) {
+                // Hide all content sections
+                const allSections = document.querySelectorAll('.content-section');
+                allSections.forEach(section => {
+                    section.classList.remove('active');
+                });
+                
+                // Show target content section
+                const targetSection = document.getElementById(targetId);
+                if (targetSection) {
+                    targetSection.classList.add('active');
+                }
+            }
+        });
+    });
+}
+
+// Initialize tab navigation
+initializeTabNavigation();
+
+// --- Cloud Storage Integration Functions ---
+function connectCloudService(serviceName) {
+    console.log(`Connecting to ${serviceName}...`);
+    
+    // In a real implementation, this would:
+    // 1. Open OAuth flow for the service
+    // 2. Handle authentication
+    // 3. Store access tokens
+    // 4. Update UI to show connected state
+    
+    // For demo purposes, simulate connection after delay
+    const button = event.target;
+    const card = button.closest('.cloud-service-card');
+    const statusElement = card.querySelector('.connection-status');
+    
+    // Show loading state
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connecting...';
+    button.disabled = true;
+    
+    setTimeout(() => {
+        // Update connection status
+        statusElement.textContent = 'Connected';
+        statusElement.className = 'connection-status connected';
+        
+        // Update button to disconnect
+        button.innerHTML = '<i class="fas fa-unlink"></i> Disconnect';
+        button.className = 'disconnect-btn';
+        button.onclick = () => disconnectCloudService(serviceName);
+        button.disabled = false;
+        
+        // Show success message
+        showNotification(`Successfully connected to ${serviceName}!`, 'success');
+        
+    }, 2000);
+}
+
+function disconnectCloudService(serviceName) {
+    console.log(`Disconnecting from ${serviceName}...`);
+    
+    const button = event.target;
+    const card = button.closest('.cloud-service-card');
+    const statusElement = card.querySelector('.connection-status');
+    
+    // Show loading state
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Disconnecting...';
+    button.disabled = true;
+    
+    setTimeout(() => {
+        // Update connection status
+        statusElement.textContent = 'Not Connected';
+        statusElement.className = 'connection-status disconnected';
+        
+        // Update button to connect
+        button.innerHTML = '<i class="fas fa-plug"></i> Connect';
+        button.className = 'connect-btn';
+        button.onclick = () => connectCloudService(serviceName);
+        button.disabled = false;
+        
+        // Show success message
+        showNotification(`Disconnected from ${serviceName}`, 'info');
+        
+    }, 1500);
+}
+
+function uploadFile() {
+    console.log('Opening file upload dialog...');
+    
+    // Create a file input element
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.multiple = true;
+    fileInput.accept = '*/*';
+    
+    fileInput.onchange = function(event) {
+        const files = event.target.files;
+        if (files.length > 0) {
+            console.log(`Selected ${files.length} file(s):`, files);
+            
+            // In a real implementation, this would upload the files
+            // For demo, just show a notification
+            const fileNames = Array.from(files).map(f => f.name).join(', ');
+            showNotification(`Would upload: ${fileNames}`, 'info');
+        }
+    };
+    
+    // Trigger file selection
+    fileInput.click();
+}
+
+function createFolder() {
+    console.log('Creating new folder...');
+    
+    const folderName = prompt('Enter folder name:');
+    if (folderName && folderName.trim()) {
+        console.log(`Creating folder: ${folderName}`);
+        showNotification(`Would create folder: ${folderName}`, 'info');
+    }
+}
+
+function showNotification(message, type = 'info') {
+    // Simple notification system
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    notification.textContent = message;
+    
+    // Style the notification
+    Object.assign(notification.style, {
+        position: 'fixed',
+        top: '20px',
+        right: '20px',
+        padding: '12px 16px',
+        backgroundColor: type === 'success' ? '#27ae60' : type === 'error' ? '#e74c3c' : '#3498db',
+        color: 'white',
+        borderRadius: '6px',
+        zIndex: '10000',
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+        transform: 'translateX(100%)',
+        transition: 'transform 0.3s ease'
+    });
+    
+    document.body.appendChild(notification);
+    
+    // Animate in
+    setTimeout(() => {
+        notification.style.transform = 'translateX(0)';
+    }, 100);
+    
+    // Remove after delay
+    setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+            if (notification.parentNode) {
+                document.body.removeChild(notification);
+            }
+        }, 300);
+    }, 3000);
+}
+
 // Make functions available globally for onclick handlers
 window.connectPlatform = connectPlatform;
 window.disconnectPlatform = disconnectPlatform;
+window.connectCloudService = connectCloudService;
+window.disconnectCloudService = disconnectCloudService;
+window.uploadFile = uploadFile;
+window.createFolder = createFolder;
+
+// --- Task Management Functions ---
+function acceptAISuggestion(suggestionType) {
+    console.log(`Accepting AI suggestion: ${suggestionType}`);
+    
+    const suggestionItem = event.target.closest('.suggestion-item');
+    const button = event.target;
+    
+    // Show loading state
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+    button.disabled = true;
+    
+    setTimeout(() => {
+        // Update button to show accepted
+        button.innerHTML = '<i class="fas fa-check"></i> Accepted';
+        button.style.background = '#27ae60';
+        button.style.color = 'white';
+        button.disabled = true;
+        
+        // Show notification
+        showNotification(`AI suggestion applied: ${suggestionType}`, 'success');
+        
+        // In a real implementation, this would actually execute the suggestion
+        if (suggestionType === 'analysis-template') {
+            showNotification('Created structured analysis template for research papers', 'info');
+        } else if (suggestionType === 'prioritize-tasks') {
+            showNotification('Tasks have been re-prioritized based on deadlines', 'info');
+        }
+        
+    }, 1500);
+}
+
+function generateTasks() {
+    console.log('Generating smart tasks with AI...');
+    
+    const button = event.target;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+    button.disabled = true;
+    
+    setTimeout(() => {
+        button.innerHTML = '<i class="fas fa-magic"></i> Generate Smart Tasks';
+        button.disabled = false;
+        
+        showNotification('Generated 3 new AI-optimized tasks based on your workflow', 'success');
+        
+        // In a real implementation, this would add new tasks to the task list
+        console.log('Would add new AI-generated tasks to the task list');
+        
+    }, 2500);
+}
+
+function optimizeWorkflow() {
+    console.log('Optimizing workflow with AI...');
+    
+    const button = event.target;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Optimizing...';
+    button.disabled = true;
+    
+    setTimeout(() => {
+        button.innerHTML = '<i class="fas fa-route"></i> Optimize Workflow';
+        button.disabled = false;
+        
+        showNotification('Workflow optimized! Task dependencies and timelines updated', 'success');
+        
+        // In a real implementation, this would reorder and optimize the task workflow
+        console.log('Would optimize task workflow and dependencies');
+        
+    }, 3000);
+}
+
+function createTask(taskType) {
+    console.log(`Creating new ${taskType} task...`);
+    
+    const taskTemplates = {
+        'research': 'Research Task: Literature review and analysis',
+        'analysis': 'Data Analysis: Process and visualize dataset',
+        'meeting': 'Team Meeting: Schedule sync with stakeholders',
+        'review': 'Document Review: Review and provide feedback'
+    };
+    
+    const taskTitle = taskTemplates[taskType] || 'New Task';
+    showNotification(`Created new task: ${taskTitle}`, 'success');
+    
+    // In a real implementation, this would add the task to the task list
+    console.log(`Would create new ${taskType} task with title: ${taskTitle}`);
+}
+
+function useTemplate(templateType) {
+    console.log(`Using template: ${templateType}`);
+    
+    const templateInfo = {
+        'research-workflow': { name: 'Research Workflow', tasks: 8 },
+        'data-analysis': { name: 'Data Analysis Pipeline', tasks: 6 },
+        'ml-experiment': { name: 'ML Experiment', tasks: 10 }
+    };
+    
+    const template = templateInfo[templateType];
+    if (template) {
+        showNotification(`Created ${template.tasks} tasks from ${template.name} template`, 'success');
+        
+        // In a real implementation, this would create all tasks from the template
+        console.log(`Would create ${template.tasks} tasks from ${template.name} template`);
+    }
+}
+
+function showTaskCreator() {
+    console.log('Opening task creator...');
+    
+    // Simple task creator simulation
+    const taskTitle = prompt('Enter task title:');
+    if (taskTitle && taskTitle.trim()) {
+        showNotification(`Created new task: ${taskTitle}`, 'success');
+        console.log(`Would create new task: ${taskTitle}`);
+    }
+}
+
+// Task category filtering
+function initializeTaskCategories() {
+    const categoryTabs = document.querySelectorAll('.category-tab');
+    
+    categoryTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            // Remove active class from all tabs
+            categoryTabs.forEach(t => t.classList.remove('active'));
+            // Add active class to clicked tab
+            tab.classList.add('active');
+            
+            const category = tab.getAttribute('data-category');
+            console.log(`Filtering tasks by category: ${category}`);
+            
+            // In a real implementation, this would filter the task list
+            showNotification(`Filtered tasks by: ${category}`, 'info');
+        });
+    });
+}
+
+// Task completion handling
+function initializeTaskCheckboxes() {
+    const taskCheckboxes = document.querySelectorAll('.task-checkbox input[type="checkbox"]');
+    
+    taskCheckboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', (event) => {
+            const taskItem = event.target.closest('.task-item');
+            const taskTitle = taskItem.querySelector('.task-title').textContent;
+            
+            if (event.target.checked) {
+                taskItem.classList.add('completed');
+                showNotification(`Task completed: ${taskTitle}`, 'success');
+            } else {
+                taskItem.classList.remove('completed');
+                showNotification(`Task reopened: ${taskTitle}`, 'info');
+            }
+        });
+    });
+}
+
+// Task filtering and sorting
+function initializeTaskControls() {
+    const filterSelect = document.querySelector('.task-filter-select');
+    const sortSelect = document.querySelector('.task-sort-select');
+    
+    if (filterSelect) {
+        filterSelect.addEventListener('change', (event) => {
+            const filterValue = event.target.value;
+            console.log(`Filtering tasks by: ${filterValue}`);
+            showNotification(`Filtered tasks: ${filterValue}`, 'info');
+        });
+    }
+    
+    if (sortSelect) {
+        sortSelect.addEventListener('change', (event) => {
+            const sortValue = event.target.value;
+            console.log(`Sorting tasks by: ${sortValue}`);
+            showNotification(`Tasks sorted by: ${sortValue}`, 'info');
+        });
+    }
+}
+
+// Initialize task management when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    // Add delay to ensure task elements are loaded
+    setTimeout(() => {
+        initializeTaskCategories();
+        initializeTaskCheckboxes();
+        initializeTaskControls();
+    }, 500);
+});
+
+// ============================================
+// ANALYTICS DASHBOARD FUNCTIONALITY
+// ============================================
+
+// Analytics chart timeframe handling
+function initializeAnalyticsCharts() {
+    const timeframeSelects = document.querySelectorAll('.chart-timeframe');
+    
+    timeframeSelects.forEach(select => {
+        select.addEventListener('change', (event) => {
+            const timeframe = event.target.value;
+            updateChartData(timeframe);
+            showNotification(`Chart updated to show ${timeframe}`, 'info');
+        });
+    });
+}
+
+// Update chart data based on timeframe
+function updateChartData(timeframe) {
+    const chartBars = document.querySelectorAll('.chart-bar');
+    
+    // Mock data for different timeframes
+    const mockData = {
+        '24h': [60, 80, 45, 90, 75, 65, 85],
+        '7d': [70, 85, 60, 95, 80, 70, 90],
+        '30d': [55, 75, 40, 85, 70, 60, 80],
+        '90d': [65, 90, 55, 100, 85, 75, 95]
+    };
+    
+    const data = mockData[timeframe] || mockData['7d'];
+    
+    chartBars.forEach((bar, index) => {
+        if (data[index]) {
+            bar.style.height = `${data[index]}%`;
+        }
+    });
+}
+
+// Cost optimization insights
+function applyOptimization(type) {
+    let message = '';
+    
+    switch(type) {
+        case 'model-switch':
+            message = 'AI model optimization settings have been updated. Estimated savings: ₦ 380/month';
+            break;
+        case 'batch-requests':
+            message = 'Request batching configuration enabled. Review your API calls for optimization opportunities.';
+            break;
+        default:
+            message = 'Optimization applied successfully.';
+    }
+    
+    showNotification(message, 'success');
+}
+
+// Export functionality
+function exportAnalyticsData(format) {
+    let message = '';
+    
+    switch(format) {
+        case 'pdf':
+            message = 'Weekly usage report PDF is being generated...';
+            break;
+        case 'csv':
+            message = 'Raw analytics data is being exported to CSV...';
+            break;
+        case 'insights':
+            message = 'Cost optimization report is being prepared...';
+            break;
+        default:
+            message = 'Export started...';
+    }
+    
+    showNotification(message, 'info');
+    
+    // Simulate export processing
+    setTimeout(() => {
+        showNotification('Export completed successfully!', 'success');
+    }, 2000);
+}
+
+// Scheduled reports management
+function scheduleNewReport() {
+    showNotification('Report scheduling interface would open here', 'info');
+}
+
+function editScheduledReport(reportId) {
+    showNotification(`Editing report: ${reportId}`, 'info');
+}
+
+function disableScheduledReport(reportId) {
+    showNotification(`Report disabled: ${reportId}`, 'info');
+}
+
+// Analytics dashboard initialization
+function initializeAnalyticsDashboard() {
+    initializeAnalyticsCharts();
+    
+    // Add click handlers for optimization insights
+    const insightButtons = document.querySelectorAll('.insight-action-btn');
+    insightButtons.forEach(button => {
+        button.addEventListener('click', (event) => {
+            const insightItem = event.target.closest('.insight-item');
+            const insightText = insightItem.querySelector('strong').textContent;
+            
+            if (insightText.includes('smaller models')) {
+                applyOptimization('model-switch');
+            } else if (insightText.includes('Batch')) {
+                applyOptimization('batch-requests');
+            } else {
+                applyOptimization('default');
+            }
+        });
+    });
+    
+    // Add click handlers for export buttons
+    const exportButtons = document.querySelectorAll('.export-btn');
+    exportButtons.forEach(button => {
+        button.addEventListener('click', (event) => {
+            const exportCard = event.target.closest('.export-card');
+            const exportTitle = exportCard.querySelector('h6').textContent;
+            
+            if (exportTitle.includes('PDF')) {
+                exportAnalyticsData('pdf');
+            } else if (exportTitle.includes('CSV')) {
+                exportAnalyticsData('csv');
+            } else if (exportTitle.includes('Optimization')) {
+                exportAnalyticsData('insights');
+            }
+        });
+    });
+    
+    // Add click handlers for scheduled reports
+    const addReportBtn = document.querySelector('.add-report-btn');
+    if (addReportBtn) {
+        addReportBtn.addEventListener('click', scheduleNewReport);
+    }
+    
+    const reportActionBtns = document.querySelectorAll('.report-action-btn');
+    reportActionBtns.forEach(button => {
+        button.addEventListener('click', (event) => {
+            const action = event.target.textContent.toLowerCase();
+            const reportItem = event.target.closest('.scheduled-report-item');
+            const reportName = reportItem.querySelector('.report-name').textContent;
+            
+            if (action === 'edit') {
+                editScheduledReport(reportName);
+            } else if (action === 'disable') {
+                disableScheduledReport(reportName);
+            }
+        });
+    });
+}
+
+// Initialize analytics when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    // Add delay to ensure analytics elements are loaded
+    setTimeout(() => {
+        initializeAnalyticsDashboard();
+    }, 600);
+});
+
+// Make task functions available globally
+window.acceptAISuggestion = acceptAISuggestion;
+window.generateTasks = generateTasks;
+window.optimizeWorkflow = optimizeWorkflow;
+window.createTask = createTask;
+window.useTemplate = useTemplate;
+window.showTaskCreator = showTaskCreator;
 window.searchContent = searchContent;
 window.startImport = startImport;
 window.refreshImportHistory = refreshImportHistory;
 window.checkSystemHealth = checkSystemHealth;
+
+// Make analytics functions available globally
+window.exportAnalyticsData = exportAnalyticsData;
+window.applyOptimization = applyOptimization;
+window.scheduleNewReport = scheduleNewReport;
+window.updateChartData = updateChartData;
+
+// ============================================
+// INFORMATION SPACE FUNCTIONALITY
+// ============================================
+
+// Research subject presets
+const researchPresets = {
+    'apm': {
+        name: 'Atomically Precise Manufacturing',
+        nodes: [
+            { id: 'apm-core', label: 'Atomically Precise Manufacturing', type: 'central-node', icon: 'fas fa-atom', x: 50, y: 50 },
+            { id: 'molecular-assembly', label: 'Molecular Assembly', type: 'high-opportunity', icon: 'fas fa-puzzle-piece', x: 25, y: 30 },
+            { id: 'scanning-probe', label: 'Scanning Probe Techniques', type: 'medium-opportunity', icon: 'fas fa-microscope', x: 75, y: 25 },
+            { id: 'quantum-control', label: 'Quantum Control Systems', type: 'high-complexity', icon: 'fas fa-atom', x: 20, y: 70 },
+            { id: 'ai-materials', label: 'AI-Driven Materials Discovery', type: 'emerging-field', icon: 'fas fa-brain', x: 80, y: 75 },
+            { id: 'surface-chemistry', label: 'Surface Chemistry', type: 'established-field', icon: 'fas fa-layer-group', x: 45, y: 15 },
+            { id: 'computational-modeling', label: 'Computational Modeling', type: 'medium-opportunity', icon: 'fas fa-calculator', x: 15, y: 50 }
+        ]
+    },
+    'quantum': {
+        name: 'Quantum Computing',
+        nodes: [
+            { id: 'quantum-core', label: 'Quantum Computing', type: 'central-node', icon: 'fas fa-microchip', x: 50, y: 50 },
+            { id: 'quantum-algorithms', label: 'Quantum Algorithms', type: 'high-opportunity', icon: 'fas fa-code', x: 30, y: 25 },
+            { id: 'quantum-hardware', label: 'Quantum Hardware', type: 'high-complexity', icon: 'fas fa-server', x: 70, y: 30 },
+            { id: 'quantum-error-correction', label: 'Quantum Error Correction', type: 'high-complexity', icon: 'fas fa-shield-alt', x: 25, y: 75 },
+            { id: 'quantum-networking', label: 'Quantum Networking', type: 'emerging-field', icon: 'fas fa-network-wired', x: 75, y: 70 },
+            { id: 'quantum-software', label: 'Quantum Software', type: 'medium-opportunity', icon: 'fas fa-laptop-code', x: 15, y: 45 }
+        ]
+    },
+    'fusion': {
+        name: 'Nuclear Fusion',
+        nodes: [
+            { id: 'fusion-core', label: 'Nuclear Fusion', type: 'central-node', icon: 'fas fa-sun', x: 50, y: 50 },
+            { id: 'plasma-physics', label: 'Plasma Physics', type: 'established-field', icon: 'fas fa-fire', x: 30, y: 30 },
+            { id: 'magnetic-confinement', label: 'Magnetic Confinement', type: 'high-complexity', icon: 'fas fa-magnet', x: 70, y: 25 },
+            { id: 'inertial-confinement', label: 'Inertial Confinement', type: 'high-opportunity', icon: 'fas fa-compress-arrows-alt', x: 25, y: 70 },
+            { id: 'tritium-breeding', label: 'Tritium Breeding', type: 'medium-opportunity', icon: 'fas fa-atom', x: 75, y: 75 },
+            { id: 'fusion-materials', label: 'Fusion Materials', type: 'high-complexity', icon: 'fas fa-industry', x: 15, y: 50 }
+        ]
+    },
+    'longevity': {
+        name: 'Longevity Research',
+        nodes: [
+            { id: 'longevity-core', label: 'Longevity Research', type: 'central-node', icon: 'fas fa-dna', x: 50, y: 50 },
+            { id: 'cellular-reprogramming', label: 'Cellular Reprogramming', type: 'high-opportunity', icon: 'fas fa-redo', x: 25, y: 25 },
+            { id: 'senescence', label: 'Cellular Senescence', type: 'established-field', icon: 'fas fa-clock', x: 75, y: 30 },
+            { id: 'stem-cells', label: 'Stem Cell Therapy', type: 'medium-opportunity', icon: 'fas fa-seedling', x: 20, y: 75 },
+            { id: 'genetic-engineering', label: 'Genetic Engineering', type: 'emerging-field', icon: 'fas fa-cut', x: 80, y: 70 },
+            { id: 'biomarkers', label: 'Aging Biomarkers', type: 'medium-opportunity', icon: 'fas fa-chart-line', x: 15, y: 45 }
+        ]
+    }
+};
+
+// Load subject preset
+function loadSubjectPreset(presetId) {
+    const preset = researchPresets[presetId];
+    if (!preset) return;
+    
+    const subjectInput = document.getElementById('research-subject-input');
+    if (subjectInput) {
+        subjectInput.value = preset.name;
+    }
+    
+    updateVisualization(preset);
+    showNotification(`Loaded preset: ${preset.name}`, 'info');
+}
+
+// Update visualization with new data
+function updateVisualization(preset) {
+    const canvas = document.getElementById('info-space-canvas');
+    if (!canvas) return;
+    
+    // Clear existing nodes
+    const existingNodes = canvas.querySelectorAll('.research-node');
+    existingNodes.forEach(node => node.remove());
+    
+    // Add new nodes
+    preset.nodes.forEach(nodeData => {
+        createResearchNode(nodeData, canvas);
+    });
+    
+    // Update connections
+    updateConnectionLines(preset.nodes);
+}
+
+// Create research node element
+function createResearchNode(nodeData, container) {
+    const node = document.createElement('div');
+    node.className = `research-node ${nodeData.type}`;
+    node.setAttribute('data-domain', nodeData.id);
+    node.style.left = `${nodeData.x}%`;
+    node.style.top = `${nodeData.y}%`;
+    
+    node.innerHTML = `
+        <div class="node-content">
+            <div class="node-icon">
+                <i class="${nodeData.icon}"></i>
+            </div>
+            <div class="node-label">${nodeData.label}</div>
+            <div class="node-complexity">${getComplexityLabel(nodeData.type)}</div>
+        </div>
+    `;
+    
+    node.addEventListener('click', () => {
+        showNodeDetails(nodeData);
+    });
+    
+    container.querySelector('.space-network').appendChild(node);
+}
+
+// Get complexity label for node type
+function getComplexityLabel(type) {
+    const labels = {
+        'central-node': 'Core Subject',
+        'high-opportunity': 'High Opportunity',
+        'medium-opportunity': 'Medium Opportunity',
+        'high-complexity': 'High Complexity',
+        'emerging-field': 'Emerging Field',
+        'established-field': 'Established Field'
+    };
+    return labels[type] || 'Unknown';
+}
+
+// Update connection lines between nodes
+function updateConnectionLines(nodes) {
+    const svg = document.querySelector('.connection-lines');
+    if (!svg) return;
+    
+    // Clear existing lines
+    svg.innerHTML = '';
+    
+    // Create connections (simplified - in real app would be data-driven)
+    const connections = [
+        { from: 0, to: 1, strength: 'strong' },
+        { from: 0, to: 2, strength: 'medium' },
+        { from: 0, to: 3, strength: 'weak' },
+        { from: 0, to: 4, strength: 'medium' },
+        { from: 0, to: 5, strength: 'strong' },
+        { from: 0, to: 6, strength: 'medium' },
+        { from: 1, to: 5, strength: 'weak' },
+        { from: 2, to: 5, strength: 'weak' },
+        { from: 4, to: 6, strength: 'medium' }
+    ];
+    
+    connections.forEach(conn => {
+        if (nodes[conn.from] && nodes[conn.to]) {
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('class', `connection-line ${conn.strength}`);
+            line.setAttribute('x1', `${nodes[conn.from].x}%`);
+            line.setAttribute('y1', `${nodes[conn.from].y}%`);
+            line.setAttribute('x2', `${nodes[conn.to].x}%`);
+            line.setAttribute('y2', `${nodes[conn.to].y}%`);
+            svg.appendChild(line);
+        }
+    });
+}
+
+// Show node details
+function showNodeDetails(nodeData) {
+    showNotification(`Exploring: ${nodeData.label}`, 'info');
+    // In a real implementation, this would open a detailed view or sidebar
+}
+
+// Analyze subject with NWTN
+function analyzeSubjectWithNWTN() {
+    const subjectInput = document.getElementById('research-subject-input');
+    const subject = subjectInput ? subjectInput.value : '';
+    
+    if (!subject.trim()) {
+        showNotification('Please enter a research subject to analyze', 'warning');
+        return;
+    }
+    
+    showNotification(`Analyzing "${subject}" with NWTN AI...`, 'info');
+    
+    // Simulate analysis processing
+    setTimeout(() => {
+        showNotification('NWTN analysis complete! Information space updated.', 'success');
+        // In real implementation, would update visualization with AI-generated insights
+    }, 3000);
+}
+
+// View mode change handler
+function handleViewModeChange(mode) {
+    const canvas = document.querySelector('.information-space-canvas');
+    if (!canvas) return;
+    
+    // Remove existing mode classes
+    canvas.classList.remove('opportunity-view', 'complexity-view', 'connections-view', 'timeline-view');
+    
+    // Add new mode class
+    canvas.classList.add(`${mode}-view`);
+    
+    showNotification(`Switched to ${mode} view`, 'info');
+}
+
+// Focus area change handler
+function handleFocusAreaChange(area) {
+    const nodes = document.querySelectorAll('.research-node');
+    
+    nodes.forEach(node => {
+        if (area === 'all') {
+            node.style.opacity = '1';
+        } else {
+            // In real implementation, would filter based on domain categories
+            const shouldShow = Math.random() > 0.3; // Mock filtering
+            node.style.opacity = shouldShow ? '1' : '0.3';
+        }
+    });
+    
+    showNotification(`Focused on: ${area}`, 'info');
+}
+
+// Explore opportunity
+function exploreOpportunity(opportunityId) {
+    const opportunities = {
+        'molecular-assembly': 'Molecular Assembly Automation research path would involve: 1) Advanced AFM positioning systems, 2) Machine learning for molecular recognition, 3) Automated feedback control systems',
+        'quantum-control': 'Quantum-Enhanced Precision Control path: 1) Quantum sensing integration, 2) Coherent control protocols, 3) Error correction for manufacturing',
+        'ai-molecular-tools': 'AI-Designed Molecular Tools path: 1) Generative models for molecular design, 2) Physics-informed neural networks, 3) High-throughput virtual screening'
+    };
+    
+    const message = opportunities[opportunityId] || 'Research path details would be generated by NWTN AI';
+    showNotification(message, 'info');
+}
+
+// Generate research path
+function generateResearchPath() {
+    const fromSelect = document.getElementById('path-from-select');
+    const toSelect = document.getElementById('path-to-select');
+    
+    if (!fromSelect || !toSelect) return;
+    
+    const from = fromSelect.value;
+    const to = toSelect.value;
+    
+    showNotification(`Generating research path from "${from}" to "${to}"...`, 'info');
+    
+    // Simulate path generation
+    setTimeout(() => {
+        showNotification('Research path generated successfully!', 'success');
+        // In real implementation, would update the timeline with AI-generated path
+    }, 2000);
+}
+
+// Recenter view
+function recenterView() {
+    const canvas = document.querySelector('.information-space-canvas');
+    if (canvas) {
+        canvas.scrollTo({
+            left: canvas.scrollWidth / 2 - canvas.clientWidth / 2,
+            top: canvas.scrollHeight / 2 - canvas.clientHeight / 2,
+            behavior: 'smooth'
+        });
+    }
+    showNotification('View recentered', 'info');
+}
+
+// Toggle fullscreen
+function toggleFullscreen() {
+    const canvas = document.querySelector('.information-space-canvas');
+    if (!canvas) return;
+    
+    if (!document.fullscreenElement) {
+        canvas.requestFullscreen().then(() => {
+            showNotification('Entered fullscreen mode', 'info');
+        }).catch(() => {
+            showNotification('Fullscreen not supported', 'warning');
+        });
+    } else {
+        document.exitFullscreen().then(() => {
+            showNotification('Exited fullscreen mode', 'info');
+        });
+    }
+}
+
+// Initialize Information Space
+function initializeInformationSpace() {
+    // Load default preset
+    loadSubjectPreset('apm');
+    
+    // Set up event listeners
+    const analyzeBtn = document.getElementById('analyze-subject-btn');
+    if (analyzeBtn) {
+        analyzeBtn.addEventListener('click', analyzeSubjectWithNWTN);
+    }
+    
+    const viewModeSelect = document.getElementById('view-mode-select');
+    if (viewModeSelect) {
+        viewModeSelect.addEventListener('change', (e) => {
+            handleViewModeChange(e.target.value);
+        });
+    }
+    
+    const focusAreaSelect = document.getElementById('focus-area-select');
+    if (focusAreaSelect) {
+        focusAreaSelect.addEventListener('change', (e) => {
+            handleFocusAreaChange(e.target.value);
+        });
+    }
+    
+    const recenterBtn = document.getElementById('recenter-view-btn');
+    if (recenterBtn) {
+        recenterBtn.addEventListener('click', recenterView);
+    }
+    
+    const fullscreenBtn = document.getElementById('fullscreen-btn');
+    if (fullscreenBtn) {
+        fullscreenBtn.addEventListener('click', toggleFullscreen);
+    }
+    
+    const generatePathBtn = document.getElementById('generate-path-btn');
+    if (generatePathBtn) {
+        generatePathBtn.addEventListener('click', generateResearchPath);
+    }
+}
+
+// Initialize Information Space when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+        initializeInformationSpace();
+    }, 700);
+});
+
+// Make Information Space functions available globally
+window.loadSubjectPreset = loadSubjectPreset;
+window.exploreOpportunity = exploreOpportunity;
+window.generateResearchPath = generateResearchPath;
+window.analyzeSubjectWithNWTN = analyzeSubjectWithNWTN;
+
+// ============================================
+// COLLABORATION FUNCTIONALITY
+// ============================================
+
+// Collaboration Tab Management
+function switchCollabTab(tabName) {
+    // Remove active class from all tabs and content
+    document.querySelectorAll('.collab-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    document.querySelectorAll('.collab-tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    
+    // Add active class to selected tab and content
+    const selectedTab = document.querySelector(`[data-tab="${tabName}"]`);
+    const selectedContent = document.getElementById(`${tabName}-tab-content`);
+    
+    if (selectedTab && selectedContent) {
+        selectedTab.classList.add('active');
+        selectedContent.classList.add('active');
+    }
+}
+
+// Team Switching
+function switchTeam(teamId) {
+    console.log(`Switching to team: ${teamId}`);
+    
+    // Update channels based on team
+    const channelsData = {
+        'quantum-research': [
+            { name: 'general', icon: 'hashtag', unread: 3 },
+            { name: 'quantum-theory', icon: 'atom', unread: 0 },
+            { name: 'experiments', icon: 'flask', unread: 1 },
+            { name: 'publications', icon: 'file-alt', unread: 0 }
+        ],
+        'ai-ethics': [
+            { name: 'general', icon: 'hashtag', unread: 2 },
+            { name: 'policy-review', icon: 'gavel', unread: 0 },
+            { name: 'community-feedback', icon: 'users', unread: 3 },
+            { name: 'documentation', icon: 'file-alt', unread: 1 }
+        ],
+        'apm-project': [
+            { name: 'general', icon: 'hashtag', unread: 3 },
+            { name: 'research', icon: 'flask', unread: 0 },
+            { name: 'publications', icon: 'file-alt', unread: 1 },
+            { name: 'code-review', icon: 'code', unread: 0 }
+        ]
+    };
+    
+    const channelsList = document.querySelector('.channels-list');
+    if (channelsList && channelsData[teamId]) {
+        channelsList.innerHTML = channelsData[teamId].map(channel => `
+            <div class="channel-item ${channel.name === 'general' ? 'active' : ''}" data-channel="${channel.name}">
+                <i class="fas fa-${channel.icon}"></i>
+                <span>${channel.name}</span>
+                ${channel.unread > 0 ? `<span class="unread-count">${channel.unread}</span>` : ''}
+            </div>
+        `).join('');
+        
+        // Add click handlers to new channels
+        channelsList.querySelectorAll('.channel-item').forEach(item => {
+            item.addEventListener('click', () => switchChannel(item.dataset.channel));
+        });
+    }
+}
+
+// Channel Switching
+function switchChannel(channelName) {
+    // Update active channel
+    document.querySelectorAll('.channel-item').forEach(item => {
+        item.classList.remove('active');
+    });
+    
+    const selectedChannel = document.querySelector(`[data-channel="${channelName}"]`);
+    if (selectedChannel) {
+        selectedChannel.classList.add('active');
+        
+        // Remove unread count
+        const unreadCount = selectedChannel.querySelector('.unread-count');
+        if (unreadCount) {
+            unreadCount.remove();
+        }
+    }
+    
+    // Update chat header
+    const channelInfo = document.querySelector('.channel-info h5');
+    if (channelInfo) {
+        channelInfo.innerHTML = `<i class="fas fa-hashtag"></i> ${channelName}`;
+    }
+    
+    // Load channel messages (mock)
+    loadChannelMessages(channelName);
+}
+
+// Load Channel Messages
+function loadChannelMessages(channelName) {
+    const messagesData = {
+        'general': [
+            {
+                user: 'Dr. Sarah Chen',
+                avatar: 'SC',
+                time: 'Today at 2:30 PM',
+                content: 'Just finished reviewing the latest APM simulation results. The precision improvements are impressive! 📊',
+                reactions: ['👍 3', '🚀 2']
+            },
+            {
+                user: 'Alex Rodriguez',
+                avatar: 'AR',
+                time: 'Today at 2:35 PM',
+                content: 'Agreed! Should we schedule a team meeting to discuss the next phase? I\'ve been working on the quantum control algorithms.'
+            }
+        ],
+        'research': [
+            {
+                user: 'Dr. Maria Thompson',
+                avatar: 'MT',
+                time: 'Today at 1:15 PM',
+                content: 'I\'ve uploaded the latest ethics review documents to the shared folder. Please review by Friday.',
+                reactions: ['✅ 4']
+            }
+        ],
+        'publications': [
+            {
+                user: 'Dr. Sarah Chen',
+                avatar: 'SC',
+                time: 'Today at 11:00 AM',
+                content: 'The peer review feedback is mostly positive. We need to address the methodology section concerns.',
+                reactions: ['📝 2']
+            }
+        ]
+    };
+    
+    const chatMessages = document.querySelector('.chat-messages');
+    const messages = messagesData[channelName] || messagesData['general'];
+    
+    if (chatMessages) {
+        chatMessages.innerHTML = messages.map(msg => `
+            <div class="message-group">
+                <div class="message">
+                    <div class="message-header">
+                        <div class="user-avatar">
+                            <img src="data:image/svg+xml;base64,${generateAvatarSVG(msg.avatar)}" alt="${msg.avatar}">
+                        </div>
+                        <span class="username">${msg.user}</span>
+                        <span class="timestamp">${msg.time}</span>
+                    </div>
+                    <div class="message-content">${msg.content}</div>
+                    ${msg.reactions ? `<div class="message-reactions">
+                        ${msg.reactions.map(reaction => `<span class="reaction">${reaction}</span>`).join('')}
+                    </div>` : ''}
+                </div>
+            </div>
+        `).join('');
+    }
+}
+
+// Generate Avatar SVG
+function generateAvatarSVG(initials) {
+    const colors = ['#4F76DF', '#FF787C', '#9CA3AF', '#6B7380'];
+    const color = colors[initials.charCodeAt(0) % colors.length];
+    
+    const svg = `<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="16" cy="16" r="16" fill="${color}"/>
+        <text x="16" y="21" text-anchor="middle" fill="white" font-family="Inter" font-size="12" font-weight="600">${initials}</text>
+    </svg>`;
+    
+    return btoa(svg);
+}
+
+// Send Message
+function sendMessage() {
+    const chatInput = document.getElementById('chat-input');
+    const message = chatInput.value.trim();
+    
+    if (message) {
+        // Add message to chat
+        const chatMessages = document.querySelector('.chat-messages');
+        const newMessage = document.createElement('div');
+        newMessage.className = 'message-group';
+        newMessage.innerHTML = `
+            <div class="message">
+                <div class="message-header">
+                    <div class="user-avatar">
+                        <img src="data:image/svg+xml;base64,${generateAvatarSVG('YOU')}" alt="YOU">
+                    </div>
+                    <span class="username">You</span>
+                    <span class="timestamp">Just now</span>
+                </div>
+                <div class="message-content">${message}</div>
+            </div>
+        `;
+        
+        chatMessages.appendChild(newMessage);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        
+        // Clear input
+        chatInput.value = '';
+    }
+}
+
+// Channel Management
+function createChannel() {
+    const channelName = prompt('Enter channel name:');
+    if (channelName) {
+        console.log(`Creating channel: ${channelName}`);
+        // In a real app, this would create the channel via API
+    }
+}
+
+// Task Management
+function createTask() {
+    console.log('Creating new task...');
+    // In a real app, this would open a task creation modal
+    alert('Task creation feature would open here in a real application.');
+}
+
+// Kanban Management
+function addKanbanColumn() {
+    const columnName = prompt('Enter column name:');
+    if (columnName) {
+        console.log(`Adding Kanban column: ${columnName}`);
+        // In a real app, this would add the column to the board
+    }
+}
+
+function kanbanSettings() {
+    console.log('Opening Kanban settings...');
+    // In a real app, this would open settings modal
+    alert('Kanban settings would open here in a real application.');
+}
+
+// File Management
+function uploadFile() {
+    console.log('Uploading file...');
+    // In a real app, this would open file upload dialog
+    alert('File upload dialog would open here in a real application.');
+}
+
+function createFolder() {
+    const folderName = prompt('Enter folder name:');
+    if (folderName) {
+        console.log(`Creating folder: ${folderName}`);
+        // In a real app, this would create the folder
+    }
+}
+
+// Team Management
+function inviteTeamMember() {
+    const email = prompt('Enter team member email:');
+    if (email) {
+        console.log(`Inviting team member: ${email}`);
+        // In a real app, this would send an invitation
+        alert(`Invitation would be sent to ${email} in a real application.`);
+    }
+}
+
+function createProject() {
+    const projectName = prompt('Enter project name:');
+    if (projectName) {
+        console.log(`Creating project: ${projectName}`);
+        // In a real app, this would create the project
+        alert(`Project "${projectName}" would be created in a real application.`);
+    }
+}
+
+// Quick Actions
+function scheduleTeamMeeting() {
+    console.log('Scheduling team meeting...');
+    alert('Meeting scheduling interface would open here in a real application.');
+}
+
+function shareScreen() {
+    console.log('Starting screen share...');
+    alert('Screen sharing would start here in a real application.');
+}
+
+function createPoll() {
+    console.log('Creating poll...');
+    alert('Poll creation interface would open here in a real application.');
+}
+
+function sendAnnouncement() {
+    const announcement = prompt('Enter announcement message:');
+    if (announcement) {
+        console.log(`Sending announcement: ${announcement}`);
+        alert(`Announcement would be sent to all team members in a real application.`);
+    }
+}
+
+// Initialize Collaboration Features
+function initializeCollaborationFeatures() {
+    // Add enter key handler for chat input
+    const chatInput = document.getElementById('chat-input');
+    if (chatInput) {
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    }
+    
+    // Add click handlers for channel items
+    document.querySelectorAll('.channel-item').forEach(item => {
+        item.addEventListener('click', () => {
+            switchChannel(item.dataset.channel);
+        });
+    });
+    
+    // Add click handlers for collaboration tabs
+    document.querySelectorAll('.collab-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            switchCollabTab(tab.dataset.tab);
+        });
+    });
+    
+    // Initialize with general channel messages
+    loadChannelMessages('general');
+    
+    // Set up task checkbox handlers
+    document.querySelectorAll('.task-checkbox input').forEach(checkbox => {
+        checkbox.addEventListener('change', (e) => {
+            const taskItem = e.target.closest('.task-item');
+            if (taskItem) {
+                taskItem.classList.toggle('completed', e.target.checked);
+            }
+        });
+    });
+    
+    // Set up file view toggle
+    document.querySelectorAll('.view-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            const view = btn.dataset.view;
+            const filesGrid = document.querySelector('.files-grid');
+            if (filesGrid) {
+                filesGrid.className = view === 'list' ? 'files-list' : 'files-grid';
+            }
+        });
+    });
+    
+    console.log('Collaboration features initialized');
+}
+
+// Make collaboration functions available globally
+window.switchCollabTab = switchCollabTab;
+window.switchTeam = switchTeam;
+window.switchChannel = switchChannel;
+window.sendMessage = sendMessage;
+window.createChannel = createChannel;
+window.createTask = createTask;
+window.addKanbanColumn = addKanbanColumn;
+window.kanbanSettings = kanbanSettings;
+window.uploadFile = uploadFile;
+window.createFolder = createFolder;
+window.inviteTeamMember = inviteTeamMember;
+window.createProject = createProject;
+window.scheduleTeamMeeting = scheduleTeamMeeting;
+window.shareScreen = shareScreen;
+window.createPoll = createPoll;
+window.sendAnnouncement = sendAnnouncement;
+
+// Initialize collaboration features when collaboration content is ready
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+        initializeCollaborationFeatures();
+        initializeGovernanceFeatures();
+    }, 800);
+});
+
+// ===============================================
+// GOVERNANCE FUNCTIONALITY
+// ===============================================
+
+function initializeGovernanceFeatures() {
+    // Initialize governance navigation
+    initializeGovernanceNavigation();
+    
+    // Initialize voting features
+    initializeVotingSystem();
+    
+    // Initialize treasury management
+    initializeTreasuryFeatures();
+    
+    // Initialize proposal creation
+    initializeProposalCreation();
+    
+    // Initialize analytics interactions
+    initializeGovernanceAnalytics();
+    
+    // Initialize action center
+    initializeActionCenter();
+    
+    console.log('Governance features initialized successfully');
+}
+
+function initializeGovernanceNavigation() {
+    const navButtons = document.querySelectorAll('.governance-nav-btn');
+    const tabContents = document.querySelectorAll('.governance-tab-content');
+    
+    navButtons.forEach(button => {
+        button.addEventListener('click', (e) => {
+            e.preventDefault();
+            
+            // Remove active class from all buttons and tabs
+            navButtons.forEach(btn => btn.classList.remove('active'));
+            tabContents.forEach(tab => tab.classList.remove('active'));
+            
+            // Add active class to clicked button
+            button.classList.add('active');
+            
+            // Show corresponding tab content
+            const targetTab = button.getAttribute('data-tab');
+            const targetContent = document.getElementById(targetTab);
+            
+            if (targetContent) {
+                targetContent.classList.add('active');
+            }
+            
+            // Update analytics based on tab switch
+            updateGovernanceAnalytics(targetTab);
+        });
+    });
+}
+
+function initializeVotingSystem() {
+    // Initialize proposal voting
+    initializeProposalVoting();
+    
+    // Initialize quadratic voting
+    initializeQuadraticVoting();
+    
+    // Initialize voting power display
+    updateVotingPowerDisplay();
+}
+
+function initializeProposalVoting() {
+    const voteButtons = document.querySelectorAll('.vote-btn');
+    
+    voteButtons.forEach(button => {
+        button.addEventListener('click', (e) => {
+            e.preventDefault();
+            
+            const proposalCard = button.closest('.proposal-card');
+            const proposalId = proposalCard.getAttribute('data-proposal-id');
+            const voteType = button.classList.contains('yes') ? 'yes' : 'no';
+            
+            // Show voting confirmation
+            showVotingConfirmation(proposalId, voteType, button);
+        });
+    });
+}
+
+function showVotingConfirmation(proposalId, voteType, button) {
+    const votingPower = getCurrentVotingPower();
+    const confirmation = confirm(
+        `Confirm your ${voteType.toUpperCase()} vote?\n\n` +
+        `Proposal ID: ${proposalId}\n` +
+        `Your Voting Power: ${votingPower} FTNS\n` +
+        `This action cannot be undone.`
+    );
+    
+    if (confirmation) {
+        castVote(proposalId, voteType, votingPower, button);
+    }
+}
+
+function castVote(proposalId, voteType, votingPower, button) {
+    // Simulate API call
+    const proposalCard = button.closest('.proposal-card');
+    const votingProgress = proposalCard.querySelector('.voting-progress');
+    
+    // Update button states
+    const allVoteButtons = proposalCard.querySelectorAll('.vote-btn');
+    allVoteButtons.forEach(btn => {
+        btn.disabled = true;
+        btn.textContent = btn === button ? 'Voted!' : 'Disabled';
+    });
+    
+    // Update voting bars (simulate vote counting)
+    updateVotingBars(proposalCard, voteType, votingPower);
+    
+    // Show success message
+    showNotification(`Vote cast successfully! Your ${voteType.toUpperCase()} vote has been recorded.`, 'success');
+    
+    // Update governance analytics
+    updateVoteParticipationMetrics();
+}
+
+function updateVotingBars(proposalCard, voteType, votingPower) {
+    const votingBar = proposalCard.querySelector('.voting-bar');
+    const yesBar = votingBar.querySelector('.vote-yes');
+    const noBar = votingBar.querySelector('.vote-no');
+    const votingStats = proposalCard.querySelector('.voting-stats');
+    
+    // Get current percentages (simulated)
+    let yesPercentage = parseFloat(yesBar.style.width) || 45;
+    let noPercentage = parseFloat(noBar.style.width) || 35;
+    
+    // Add vote influence based on voting power (simplified)
+    const influence = Math.min(votingPower / 1000 * 5, 10); // Max 10% influence
+    
+    if (voteType === 'yes') {
+        yesPercentage += influence;
+    } else {
+        noPercentage += influence;
+    }
+    
+    // Normalize to ensure total doesn't exceed 100%
+    const total = yesPercentage + noPercentage;
+    if (total > 80) {
+        const factor = 80 / total;
+        yesPercentage *= factor;
+        noPercentage *= factor;
+    }
+    
+    // Update visual bars
+    yesBar.style.width = `${yesPercentage}%`;
+    noBar.style.width = `${noPercentage}%`;
+    
+    // Update stats text
+    if (votingStats) {
+        votingStats.innerHTML = `
+            <span>Yes: ${yesPercentage.toFixed(1)}%</span>
+            <span>No: ${noPercentage.toFixed(1)}%</span>
+        `;
+    }
+}
+
+function initializeQuadraticVoting() {
+    const allocationSliders = document.querySelectorAll('.allocation-slider input[type="range"]');
+    
+    allocationSliders.forEach(slider => {
+        slider.addEventListener('input', (e) => {
+            updateQuadraticVotingDisplay(slider);
+        });
+        
+        // Initialize display
+        updateQuadraticVotingDisplay(slider);
+    });
+}
+
+function updateQuadraticVotingDisplay(slider) {
+    const allocationDisplay = slider.closest('.quadratic-voting').querySelector('.allocation-display');
+    const tokensAllocated = parseInt(slider.value);
+    
+    // Calculate quadratic voting power
+    const votingPower = Math.sqrt(tokensAllocated);
+    
+    // Update display
+    const tokensSpan = allocationDisplay.querySelector('.tokens-allocated');
+    const powerSpan = allocationDisplay.querySelector('.voting-power');
+    
+    if (tokensSpan) tokensSpan.textContent = `${tokensAllocated} FTNS`;
+    if (powerSpan) powerSpan.textContent = `${votingPower.toFixed(2)} Voting Power`;
+    
+    // Update slider background color based on allocation
+    const percentage = (tokensAllocated / slider.max) * 100;
+    slider.style.background = `linear-gradient(to right, var(--primary-color) 0%, var(--primary-color) ${percentage}%, var(--border-color) ${percentage}%, var(--border-color) 100%)`;
+}
+
+function getCurrentVotingPower() {
+    // Simulate getting user's current voting power
+    const userStake = 2500; // Example stake
+    return Math.sqrt(userStake).toFixed(2);
+}
+
+function updateVotingPowerDisplay() {
+    const votingPowerElements = document.querySelectorAll('.voting-power .power-amount');
+    const currentPower = getCurrentVotingPower();
+    
+    votingPowerElements.forEach(element => {
+        element.textContent = currentPower;
+    });
+}
+
+function initializeTreasuryFeatures() {
+    // Initialize fund allocation visualization
+    initializeFundAllocation();
+    
+    // Initialize funding proposal interactions
+    initializeFundingProposals();
+    
+    // Update treasury displays
+    updateTreasuryDisplays();
+}
+
+function initializeFundAllocation() {
+    const allocationBars = document.querySelectorAll('.allocation-fill');
+    
+    // Animate allocation bars on load
+    setTimeout(() => {
+        allocationBars.forEach(bar => {
+            const targetWidth = bar.getAttribute('data-percentage') || '0';
+            bar.style.width = `${targetWidth}%`;
+        });
+    }, 500);
+}
+
+function initializeFundingProposals() {
+    const fundingCards = document.querySelectorAll('.funding-proposal-card');
+    
+    fundingCards.forEach(card => {
+        const fundingBar = card.querySelector('.funding-fill');
+        const targetPercentage = parseFloat(card.getAttribute('data-funding-progress')) || 0;
+        
+        // Animate funding progress
+        setTimeout(() => {
+            fundingBar.style.width = `${targetPercentage}%`;
+        }, 300);
+        
+        // Add click handler for funding details
+        card.addEventListener('click', () => {
+            showFundingProposalDetails(card);
+        });
+    });
+}
+
+function showFundingProposalDetails(card) {
+    const proposalTitle = card.querySelector('.proposal-title').textContent;
+    const fundingAmount = card.querySelector('.funding-amount').textContent;
+    const fundingPurpose = card.querySelector('.funding-purpose').textContent;
+    
+    // Create modal content (simplified)
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <h3>${proposalTitle}</h3>
+            <p><strong>Requested Amount:</strong> ${fundingAmount}</p>
+            <p><strong>Purpose:</strong> ${fundingPurpose}</p>
+            <div class="modal-actions">
+                <button class="btn btn-primary" onclick="supportFundingProposal()">Support Proposal</button>
+                <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+}
+
+function supportFundingProposal() {
+    showNotification('Funding proposal support recorded! Your vote has been added.', 'success');
+    closeModal();
+}
+
+function closeModal() {
+    const modal = document.querySelector('.modal-overlay');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function updateTreasuryDisplays() {
+    // Simulate real-time treasury updates
+    const treasuryAmounts = document.querySelectorAll('.treasury-amount');
+    
+    treasuryAmounts.forEach(amount => {
+        // Add subtle animation to show data is live
+        amount.style.transition = 'color 0.3s ease';
+        amount.addEventListener('mouseenter', () => {
+            amount.style.color = 'var(--accent-color)';
+        });
+        amount.addEventListener('mouseleave', () => {
+            amount.style.color = 'var(--primary-color)';
+        });
+    });
+}
+
+function initializeProposalCreation() {
+    const createProposalBtn = document.querySelector('[data-action="create-proposal"]');
+    
+    if (createProposalBtn) {
+        createProposalBtn.addEventListener('click', () => {
+            showProposalCreationForm();
+        });
+    }
+}
+
+function showProposalCreationForm() {
+    const formHTML = `
+        <div class="modal-overlay">
+            <div class="modal-content proposal-form">
+                <h3><i class="fas fa-plus-circle"></i> Create New Proposal</h3>
+                <form id="proposal-form">
+                    <div class="form-group">
+                        <label for="proposal-title">Proposal Title</label>
+                        <input type="text" id="proposal-title" required placeholder="Enter proposal title...">
+                    </div>
+                    <div class="form-group">
+                        <label for="proposal-description">Description</label>
+                        <textarea id="proposal-description" rows="4" required placeholder="Describe your proposal in detail..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="proposal-type">Proposal Type</label>
+                        <select id="proposal-type" required>
+                            <option value="">Select type...</option>
+                            <option value="governance">Governance Change</option>
+                            <option value="funding">Funding Request</option>
+                            <option value="technical">Technical Improvement</option>
+                            <option value="community">Community Initiative</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="funding-amount">Funding Amount (if applicable)</label>
+                        <input type="number" id="funding-amount" placeholder="0" min="0" step="100">
+                        <small>Amount in FTNS tokens</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="voting-duration">Voting Duration</label>
+                        <select id="voting-duration" required>
+                            <option value="7">7 Days</option>
+                            <option value="14">14 Days</option>
+                            <option value="30">30 Days</option>
+                        </select>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-rocket"></i> Submit Proposal
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', formHTML);
+    
+    // Handle form submission
+    document.getElementById('proposal-form').addEventListener('submit', handleProposalSubmission);
+}
+
+function handleProposalSubmission(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const proposalData = {
+        title: formData.get('proposal-title') || document.getElementById('proposal-title').value,
+        description: formData.get('proposal-description') || document.getElementById('proposal-description').value,
+        type: formData.get('proposal-type') || document.getElementById('proposal-type').value,
+        fundingAmount: formData.get('funding-amount') || document.getElementById('funding-amount').value,
+        votingDuration: formData.get('voting-duration') || document.getElementById('voting-duration').value
+    };
+    
+    // Validate required fields
+    if (!proposalData.title || !proposalData.description || !proposalData.type) {
+        showNotification('Please fill in all required fields.', 'error');
+        return;
+    }
+    
+    // Simulate proposal submission
+    submitProposal(proposalData);
+}
+
+function submitProposal(proposalData) {
+    // Show loading state
+    const submitBtn = document.querySelector('#proposal-form button[type="submit"]');
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Submitting...';
+    submitBtn.disabled = true;
+    
+    // Simulate API call
+    setTimeout(() => {
+        // Success
+        showNotification('Proposal submitted successfully! It will appear in the proposals list shortly.', 'success');
+        closeModal();
+        
+        // Add proposal to the list (simplified)
+        addProposalToList(proposalData);
+        
+        // Update governance metrics
+        updateGovernanceMetrics();
+    }, 2000);
+}
+
+function addProposalToList(proposalData) {
+    const proposalsList = document.querySelector('.featured-proposals') || document.querySelector('#proposals-content');
+    
+    if (!proposalsList) return;
+    
+    const proposalHTML = `
+        <div class="proposal-card" data-proposal-id="prop_${Date.now()}">
+            <div class="proposal-header">
+                <div>
+                    <h4 class="proposal-title">${proposalData.title}</h4>
+                    <div class="proposal-meta">
+                        <span>Submitted by: You</span> • 
+                        <span>Just now</span> • 
+                        <span>Type: ${proposalData.type}</span>
+                    </div>
+                </div>
+                <span class="proposal-status active">Active</span>
+            </div>
+            <p class="proposal-description">${proposalData.description}</p>
+            ${proposalData.fundingAmount ? `<p><strong>Funding Requested:</strong> ${proposalData.fundingAmount} FTNS</p>` : ''}
+            <div class="proposal-voting">
+                <div class="voting-progress">
+                    <div class="voting-bar">
+                        <div class="vote-yes" style="width: 0%"></div>
+                        <div class="vote-no" style="width: 0%"></div>
+                    </div>
+                    <div class="voting-stats">
+                        <span>Yes: 0%</span>
+                        <span>No: 0%</span>
+                    </div>
+                </div>
+                <div class="voting-power">
+                    <span class="power-amount">${getCurrentVotingPower()}</span>
+                    <span class="power-label">Your Power</span>
+                </div>
+                <div class="voting-buttons">
+                    <button class="vote-btn yes">Yes</button>
+                    <button class="vote-btn no">No</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    proposalsList.insertAdjacentHTML('afterbegin', proposalHTML);
+    
+    // Reinitialize voting for new proposal
+    initializeProposalVoting();
+}
+
+function initializeGovernanceAnalytics() {
+    // Initialize health indicators
+    initializeHealthIndicators();
+    
+    // Initialize concentration monitoring
+    initializeConcentrationMonitoring();
+    
+    // Update analytics displays
+    updateAnalyticsDisplays();
+}
+
+function initializeHealthIndicators() {
+    const healthIndicators = document.querySelectorAll('.health-indicator');
+    
+    healthIndicators.forEach(indicator => {
+        const score = indicator.querySelector('.health-score');
+        const value = parseFloat(score.textContent);
+        
+        // Add color class based on value
+        if (value >= 85) {
+            score.classList.add('excellent');
+        } else if (value >= 70) {
+            score.classList.add('good');
+        } else if (value >= 50) {
+            score.classList.add('warning');
+        } else {
+            score.classList.add('critical');
+        }
+        
+        // Add hover effects
+        indicator.addEventListener('mouseenter', () => {
+            indicator.style.transform = 'translateY(-2px)';
+        });
+        
+        indicator.addEventListener('mouseleave', () => {
+            indicator.style.transform = 'translateY(0)';
+        });
+    });
+}
+
+function initializeConcentrationMonitoring() {
+    const concentrationCards = document.querySelectorAll('.concentration-card');
+    
+    concentrationCards.forEach(card => {
+        const score = card.querySelector('.concentration-score');
+        const value = parseFloat(score.textContent);
+        
+        // Add color class based on concentration level
+        if (value <= 0.3) {
+            score.classList.add('safe');
+        } else if (value <= 0.5) {
+            score.classList.add('moderate');
+        } else if (value <= 0.7) {
+            score.classList.add('high');
+        } else {
+            score.classList.add('critical');
+        }
+    });
+}
+
+function updateAnalyticsDisplays() {
+    // Simulate real-time updates
+    const metricValues = document.querySelectorAll('.metric-value');
+    
+    metricValues.forEach(value => {
+        value.addEventListener('mouseenter', () => {
+            value.style.fontWeight = '600';
+            value.style.color = 'var(--primary-color)';
+        });
+        
+        value.addEventListener('mouseleave', () => {
+            value.style.fontWeight = '500';
+            value.style.color = 'var(--text-primary)';
+        });
+    });
+}
+
+function initializeActionCenter() {
+    const actionButtons = document.querySelectorAll('.action-btn');
+    
+    actionButtons.forEach(button => {
+        button.addEventListener('click', (e) => {
+            e.preventDefault();
+            
+            const action = button.getAttribute('data-action') || button.textContent.toLowerCase().trim();
+            handleGovernanceAction(action, button);
+        });
+    });
+}
+
+function handleGovernanceAction(action, button) {
+    const originalText = button.innerHTML;
+    
+    switch (action) {
+        case 'create-proposal':
+        case 'create proposal':
+            showProposalCreationForm();
+            break;
+            
+        case 'treasury-access':
+        case 'access treasury':
+            showTreasuryAccess();
+            break;
+            
+        case 'delegate-vote':
+        case 'delegate voting power':
+            showDelegationForm();
+            break;
+            
+        case 'governance-settings':
+        case 'governance settings':
+            showGovernanceSettings();
+            break;
+            
+        case 'export-data':
+        case 'export governance data':
+            exportGovernanceData(button);
+            break;
+            
+        default:
+            showNotification(`Action "${action}" is not yet implemented.`, 'info');
+    }
+}
+
+function showTreasuryAccess() {
+    const accessHTML = `
+        <div class="modal-overlay">
+            <div class="modal-content">
+                <h3><i class="fas fa-university"></i> Treasury Access</h3>
+                <p>Current treasury balance: <strong>1,234,567 FTNS</strong></p>
+                <div class="treasury-actions">
+                    <button class="btn btn-primary" onclick="showFundingRequestForm()">Request Funding</button>
+                    <button class="btn btn-secondary" onclick="showTreasuryHistory()">View History</button>
+                    <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', accessHTML);
+}
+
+function showDelegationForm() {
+    const delegationHTML = `
+        <div class="modal-overlay">
+            <div class="modal-content">
+                <h3><i class="fas fa-user-friends"></i> Delegate Voting Power</h3>
+                <form id="delegation-form">
+                    <div class="form-group">
+                        <label for="delegate-address">Delegate Address</label>
+                        <input type="text" id="delegate-address" placeholder="Enter delegate's wallet address..." required>
+                    </div>
+                    <div class="form-group">
+                        <label for="delegation-amount">Amount to Delegate</label>
+                        <input type="number" id="delegation-amount" placeholder="Enter FTNS amount..." min="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="delegation-duration">Delegation Duration</label>
+                        <select id="delegation-duration" required>
+                            <option value="30">30 Days</option>
+                            <option value="90">90 Days</option>
+                            <option value="180">180 Days</option>
+                            <option value="365">1 Year</option>
+                        </select>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Delegate</button>
+                        <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', delegationHTML);
+    
+    document.getElementById('delegation-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        showNotification('Voting power delegated successfully!', 'success');
+        closeModal();
+    });
+}
+
+function showGovernanceSettings() {
+    const settingsHTML = `
+        <div class="modal-overlay">
+            <div class="modal-content">
+                <h3><i class="fas fa-cog"></i> Governance Settings</h3>
+                <div class="settings-group">
+                    <h4>Notification Preferences</h4>
+                    <label><input type="checkbox" checked> New proposals</label>
+                    <label><input type="checkbox" checked> Voting reminders</label>
+                    <label><input type="checkbox"> Treasury updates</label>
+                </div>
+                <div class="settings-group">
+                    <h4>Voting Preferences</h4>
+                    <label><input type="checkbox"> Auto-delegate when offline</label>
+                    <label><input type="checkbox" checked> Require confirmation for votes</label>
+                </div>
+                <div class="form-actions">
+                    <button class="btn btn-primary" onclick="saveGovernanceSettings()">Save Settings</button>
+                    <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', settingsHTML);
+}
+
+function saveGovernanceSettings() {
+    showNotification('Governance settings saved successfully!', 'success');
+    closeModal();
+}
+
+function exportGovernanceData(button) {
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exporting...';
+    button.disabled = true;
+    
+    setTimeout(() => {
+        // Simulate data export
+        const data = {
+            proposals: 'governance_proposals.json',
+            votes: 'voting_history.json',
+            treasury: 'treasury_transactions.json',
+            analytics: 'governance_analytics.json'
+        };
+        
+        showNotification('Governance data exported successfully! Check your downloads folder.', 'success');
+        
+        button.innerHTML = originalText;
+        button.disabled = false;
+    }, 2000);
+}
+
+// Update functions for metrics and analytics
+
+function updateGovernanceAnalytics(activeTab) {
+    // Update analytics based on current tab
+    console.log(`Updating analytics for tab: ${activeTab}`);
+    
+    // Simulate analytics updates
+    const metricValues = document.querySelectorAll('.metric-value');
+    metricValues.forEach(value => {
+        // Add subtle flash to show data update
+        value.style.transition = 'background-color 0.3s ease';
+        value.style.backgroundColor = 'rgba(0, 123, 255, 0.1)';
+        setTimeout(() => {
+            value.style.backgroundColor = 'transparent';
+        }, 300);
+    });
+}
+
+function updateVoteParticipationMetrics() {
+    // Update participation metrics after voting
+    const participationMetric = document.querySelector('[data-metric="participation"] .metric-value');
+    if (participationMetric) {
+        const currentValue = parseFloat(participationMetric.textContent);
+        participationMetric.textContent = `${(currentValue + 0.1).toFixed(1)}%`;
+    }
+}
+
+function updateGovernanceMetrics() {
+    // Update overall governance metrics
+    const proposalCountMetric = document.querySelector('[data-metric="proposals"] .stat-value');
+    if (proposalCountMetric) {
+        const currentCount = parseInt(proposalCountMetric.textContent);
+        proposalCountMetric.textContent = currentCount + 1;
+    }
+}
+
+// Utility function for notifications
+function showNotification(message, type = 'info') {
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.innerHTML = `
+        <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+        <span>${message}</span>
+        <button class="notification-close" onclick="this.parentElement.remove()">×</button>
+    `;
+    
+    // Add styles
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-left: 4px solid ${type === 'success' ? '#28a745' : type === 'error' ? '#dc3545' : '#007bff'};
+        border-radius: 6px;
+        padding: 12px 16px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        z-index: 10000;
+        max-width: 400px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.9rem;
+        animation: slideIn 0.3s ease;
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        if (notification.parentElement) {
+            notification.style.animation = 'slideOut 0.3s ease';
+            setTimeout(() => notification.remove(), 300);
+        }
+    }, 5000);
+}
+
+// Add CSS animations for notifications
+const notificationStyles = document.createElement('style');
+notificationStyles.textContent = `
+    @keyframes slideIn {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+    }
+    
+    @keyframes slideOut {
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(100%); opacity: 0; }
+    }
+    
+    .notification-close {
+        background: none;
+        border: none;
+        font-size: 1.2rem;
+        cursor: pointer;
+        color: var(--text-secondary);
+        padding: 0;
+        margin-left: auto;
+    }
+    
+    .notification-close:hover {
+        color: var(--text-primary);
+    }
+    
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+    }
+    
+    .modal-content {
+        background: var(--card-bg);
+        border-radius: 8px;
+        padding: 24px;
+        max-width: 500px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+    
+    .modal-content h3 {
+        margin-top: 0;
+        margin-bottom: 20px;
+        color: var(--text-primary);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .form-group {
+        margin-bottom: 16px;
+    }
+    
+    .form-group label {
+        display: block;
+        margin-bottom: 4px;
+        font-weight: 500;
+        color: var(--text-primary);
+    }
+    
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--panel-bg);
+        color: var(--text-primary);
+        font-size: 0.9rem;
+        box-sizing: border-box;
+    }
+    
+    .form-group small {
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+    }
+    
+    .form-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+        margin-top: 20px;
+    }
+    
+    .btn {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+    
+    .btn-primary {
+        background: var(--primary-color);
+        color: white;
+    }
+    
+    .btn-primary:hover {
+        background: var(--primary-color-dark);
+    }
+    
+    .btn-secondary {
+        background: var(--card-bg);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+    }
+    
+    .btn-secondary:hover {
+        background: var(--border-color);
+    }
+    
+    .settings-group {
+        margin-bottom: 20px;
+    }
+    
+    .settings-group h4 {
+        margin-bottom: 12px;
+        color: var(--text-primary);
+    }
+    
+    .settings-group label {
+        display: block;
+        margin-bottom: 8px;
+        cursor: pointer;
+        color: var(--text-primary);
+    }
+    
+    .settings-group input[type="checkbox"] {
+        margin-right: 8px;
+    }
+    
+    .treasury-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        margin-top: 20px;
+    }
+`;
+
+document.head.appendChild(notificationStyles);
+
+    // === Tokenomics Tab Functionality ===
+    
+    // Tokenomics Tab Navigation
+    function setupTokenomicsNavigation() {
+        const tokenomicsNavTabs = document.querySelectorAll('.tokenomics-nav-tab');
+        const tokenomicsTabContents = document.querySelectorAll('.tokenomics-tab-content');
+        
+        if (tokenomicsNavTabs.length === 0) return;
+        
+        tokenomicsNavTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const targetTab = tab.dataset.tab;
+                
+                // Update active tab
+                tokenomicsNavTabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                
+                // Update active content
+                tokenomicsTabContents.forEach(content => {
+                    content.classList.remove('active');
+                    if (content.id === targetTab + '-content') {
+                        content.classList.add('active');
+                    }
+                });
+            });
+        });
+        
+        // Set first tab as active by default
+        if (tokenomicsNavTabs[0]) {
+            tokenomicsNavTabs[0].click();
+        }
+    }
+    
+    // Budget Allocation Sliders
+    function setupBudgetSliders() {
+        const sliders = document.querySelectorAll('.slider-input');
+        const totalBudget = 50000; // Example total FTNS budget
+        
+        sliders.forEach(slider => {
+            slider.addEventListener('input', (e) => {
+                const value = e.target.value;
+                const category = e.target.dataset.category;
+                const valueDisplay = e.target.parentElement.querySelector('.slider-value');
+                const allocatedAmount = Math.round((value / 100) * totalBudget);
+                
+                if (valueDisplay) {
+                    valueDisplay.textContent = `${value}% (${allocatedAmount.toLocaleString()} FTNS)`;
+                }
+                
+                // Update donut chart visualization
+                updateAllocationChart();
+            });
+            
+            // Initialize slider values
+            slider.dispatchEvent(new Event('input'));
+        });
+    }
+    
+    // Update Allocation Donut Chart
+    function updateAllocationChart() {
+        const sliders = document.querySelectorAll('.slider-input');
+        const donutChart = document.querySelector('.donut-chart');
+        const chartTotal = document.querySelector('.chart-total');
+        const legend = document.querySelector('.allocation-legend');
+        
+        if (!donutChart || !sliders.length) return;
+        
+        const categories = [];
+        const colors = ['#ffffff', '#cccccc', '#999999', '#666666', '#333333'];
+        let total = 0;
+        
+        sliders.forEach((slider, index) => {
+            const value = parseInt(slider.value);
+            const category = slider.dataset.category || `Category ${index + 1}`;
+            categories.push({
+                name: category,
+                value: value,
+                color: colors[index % colors.length]
+            });
+            total += value;
+        });
+        
+        // Update chart
+        let cumulativePercentage = 0;
+        let segments = '';
+        
+        categories.forEach(category => {
+            const percentage = category.value;
+            const startAngle = (cumulativePercentage / 100) * 360;
+            const endAngle = ((cumulativePercentage + percentage) / 100) * 360;
+            
+            const x1 = 50 + 40 * Math.cos((startAngle * Math.PI) / 180);
+            const y1 = 50 + 40 * Math.sin((startAngle * Math.PI) / 180);
+            const x2 = 50 + 40 * Math.cos((endAngle * Math.PI) / 180);
+            const y2 = 50 + 40 * Math.sin((endAngle * Math.PI) / 180);
+            
+            const largeArcFlag = percentage > 50 ? 1 : 0;
+            
+            segments += `
+                <path d="M 50,50 L ${x1},${y1} A 40,40 0 ${largeArcFlag},1 ${x2},${y2} Z"
+                      fill="${category.color}" stroke="var(--bg-primary)" stroke-width="1"/>
+            `;
+            
+            cumulativePercentage += percentage;
+        });
+        
+        donutChart.innerHTML = `
+            <svg viewBox="0 0 100 100">
+                ${segments}
+                <circle cx="50" cy="50" r="25" fill="var(--bg-primary)"/>
+            </svg>
+        `;
+        
+        // Update center text
+        if (chartTotal) {
+            chartTotal.textContent = `${total}%`;
+        }
+        
+        // Update legend
+        if (legend) {
+            legend.innerHTML = categories.map(category => `
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: ${category.color}"></div>
+                    <span class="legend-text">${category.name}: ${category.value}%</span>
+                </div>
+            `).join('');
+        }
+    }
+    
+    // Budget Scenario Planning
+    function setupScenarioPlanning() {
+        const scenarioBtns = document.querySelectorAll('.scenario-btn');
+        const forecastChart = document.querySelector('.forecast-chart');
+        
+        scenarioBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                // Update active scenario
+                scenarioBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                
+                const scenario = btn.dataset.scenario;
+                updateForecastChart(scenario);
+            });
+        });
+        
+        // Set first scenario as active by default
+        if (scenarioBtns[0]) {
+            scenarioBtns[0].click();
+        }
+    }
+    
+    // Update Forecast Chart based on scenario
+    function updateForecastChart(scenario) {
+        const forecastChart = document.querySelector('.forecast-chart');
+        if (!forecastChart) return;
+        
+        const scenarios = {
+            conservative: 'Conservative: 5% monthly growth, 18 months runway',
+            optimistic: 'Optimistic: 15% monthly growth, 12 months runway',
+            aggressive: 'Aggressive: 25% monthly growth, 8 months runway'
+        };
+        
+        forecastChart.textContent = scenarios[scenario] || 'Forecast visualization placeholder';
+    }
+    
+    // Budget Comparison Progress Bars
+    function setupBudgetComparison() {
+        const comparisonItems = document.querySelectorAll('.comparison-item');
+        
+        comparisonItems.forEach(item => {
+            const progressBar = item.querySelector('.comparison-progress');
+            const budgetValue = item.querySelector('.budget-value');
+            const actualValue = item.querySelector('.actual-value');
+            
+            if (progressBar && budgetValue && actualValue) {
+                const budget = parseFloat(budgetValue.textContent.replace(/[^\d.]/g, ''));
+                const actual = parseFloat(actualValue.textContent.replace(/[^\d.]/g, ''));
+                const percentage = Math.min((actual / budget) * 100, 100);
+                
+                progressBar.style.width = `${percentage}%`;
+                
+                // Add color coding
+                if (percentage > 90) {
+                    progressBar.style.backgroundColor = '#ef4444'; // Red for over budget
+                } else if (percentage > 70) {
+                    progressBar.style.backgroundColor = '#f59e0b'; // Orange for approaching budget
+                } else {
+                    progressBar.style.backgroundColor = 'var(--accent-primary)'; // Normal color
+                }
+            }
+        });
+    }
+    
+    // Expense Filtering
+    function setupExpenseFiltering() {
+        const filterSelects = document.querySelectorAll('.filter-select');
+        const expenseItems = document.querySelectorAll('.expense-item');
+        
+        filterSelects.forEach(select => {
+            select.addEventListener('change', () => {
+                filterExpenses();
+            });
+        });
+        
+        function filterExpenses() {
+            const categoryFilter = document.querySelector('.filter-select[data-filter="category"]')?.value || 'all';
+            const timeFilter = document.querySelector('.filter-select[data-filter="time"]')?.value || 'all';
+            
+            expenseItems.forEach(item => {
+                let show = true;
+                
+                // Apply category filter
+                if (categoryFilter !== 'all') {
+                    const itemCategory = item.dataset.category;
+                    if (itemCategory !== categoryFilter) {
+                        show = false;
+                    }
+                }
+                
+                // Apply time filter
+                if (timeFilter !== 'all') {
+                    const itemDate = new Date(item.dataset.date);
+                    const now = new Date();
+                    const daysDiff = Math.floor((now - itemDate) / (1000 * 60 * 60 * 24));
+                    
+                    if (timeFilter === 'week' && daysDiff > 7) show = false;
+                    if (timeFilter === 'month' && daysDiff > 30) show = false;
+                    if (timeFilter === 'quarter' && daysDiff > 90) show = false;
+                }
+                
+                item.style.display = show ? 'flex' : 'none';
+            });
+        }
+    }
+    
+    // Budget Alert Management
+    function setupBudgetAlerts() {
+        const alertItems = document.querySelectorAll('.alert-item');
+        
+        alertItems.forEach(alert => {
+            alert.addEventListener('click', () => {
+                // Mark alert as read or expand details
+                alert.style.opacity = '0.7';
+                
+                // Could implement alert dismissal or detailed view
+                showNotification('Alert acknowledged', 'info');
+            });
+        });
+    }
+    
+    // Cost Savings Tracking
+    function setupCostSavings() {
+        const savingsItems = document.querySelectorAll('.savings-item');
+        
+        savingsItems.forEach(item => {
+            item.addEventListener('click', () => {
+                const title = item.querySelector('.savings-title')?.textContent;
+                const amount = item.querySelector('.savings-amount')?.textContent;
+                
+                showNotification(`${title}: ${amount} potential savings`, 'success');
+            });
+        });
+    }
+    
+    // Budget Export Functionality
+    function setupBudgetExport() {
+        const exportBtn = document.querySelector('.tokenomics-actions .btn[data-action="export"]');
+        
+        if (exportBtn) {
+            exportBtn.addEventListener('click', () => {
+                // Simulate budget data export
+                const budgetData = {
+                    overview: {
+                        availableFTNS: 45000,
+                        allocatedFTNS: 35000,
+                        monthlyBurn: 5000,
+                        monthsRunway: 9
+                    },
+                    allocation: {
+                        research: 40,
+                        development: 30,
+                        marketing: 15,
+                        operations: 10,
+                        reserve: 5
+                    },
+                    exportDate: new Date().toISOString()
+                };
+                
+                // Create and download JSON file
+                const dataStr = JSON.stringify(budgetData, null, 2);
+                const dataBlob = new Blob([dataStr], {type: 'application/json'});
+                const url = URL.createObjectURL(dataBlob);
+                
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `prsm_budget_${new Date().toISOString().split('T')[0]}.json`;
+                link.click();
+                
+                URL.revokeObjectURL(url);
+                showNotification('Budget data exported successfully', 'success');
+            });
+        }
+    }
+    
+    // Budget Creation Modal
+    function setupBudgetCreation() {
+        const createBtn = document.querySelector('.tokenomics-actions .btn[data-action="buy-ftns"]');
+        
+        if (createBtn) {
+            createBtn.addEventListener('click', () => {
+                showFTNSPurchaseModal();
+            });
+        }
+    }
+    
+    function showFTNSPurchaseModal() {
+        const modal = createModal('Purchase FTNS Tokens', `
+            <div class="ftns-purchase-form">
+                <div class="form-group">
+                    <label for="ftns-amount">FTNS Amount</label>
+                    <input type="number" id="ftns-amount" placeholder="1000" min="100">
+                    <small>Minimum purchase: 100 FTNS</small>
+                </div>
+                <div class="form-group">
+                    <label for="payment-method">Payment Method</label>
+                    <select id="payment-method">
+                        <option value="credit-card">Credit Card</option>
+                        <option value="crypto">Cryptocurrency</option>
+                        <option value="bank-transfer">Bank Transfer</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="purchase-purpose">Purpose (Optional)</label>
+                    <select id="purchase-purpose">
+                        <option value="">Select purpose...</option>
+                        <option value="research">Research & Development</option>
+                        <option value="staking">Token Staking</option>
+                        <option value="marketplace">Marketplace Transactions</option>
+                        <option value="governance">Governance Participation</option>
+                    </select>
+                </div>
+                <div class="purchase-summary">
+                    <div class="summary-line">
+                        <span>FTNS Rate:</span>
+                        <span>$2.00 USD per FTNS</span>
+                    </div>
+                    <div class="summary-line total">
+                        <span>Total Cost:</span>
+                        <span id="total-cost">$2,000.00 USD</span>
+                    </div>
+                </div>
+            </div>
+        `, [
+            {
+                text: 'Purchase FTNS',
+                class: 'primary',
+                action: () => {
+                    const amount = document.getElementById('ftns-amount').value;
+                    const paymentMethod = document.getElementById('payment-method').value;
+                    const purpose = document.getElementById('purchase-purpose').value;
+                    
+                    if (amount && paymentMethod) {
+                        // Simulate FTNS purchase
+                        showNotification(`Successfully purchased ${amount} FTNS tokens`, 'success');
+                        closeModal();
+                    } else {
+                        showNotification('Please fill in required fields', 'error');
+                    }
+                }
+            },
+            {
+                text: 'Cancel',
+                class: 'secondary',
+                action: closeModal
+            }
+        ]);
+        
+        // Add real-time cost calculation
+        const amountInput = document.getElementById('ftns-amount');
+        const totalCostSpan = document.getElementById('total-cost');
+        if (amountInput && totalCostSpan) {
+            amountInput.addEventListener('input', () => {
+                const amount = parseFloat(amountInput.value) || 0;
+                const cost = amount * 2.00; // $2.00 per FTNS
+                totalCostSpan.textContent = `$${cost.toLocaleString('en-US', {minimumFractionDigits: 2})} USD`;
+            });
+        }
+    }
+    
+    // Initialize Tokenomics Management functionality
+    function initializeTokenomicsManagement() {
+        // Set up tokenomics tab functionality when tokenomics nav button is clicked
+        const tokenomicsNavBtn = document.querySelector('[data-target="tokenomics-content"]');
+        if (tokenomicsNavBtn) {
+            tokenomicsNavBtn.addEventListener('click', () => {
+                // Delay initialization to ensure DOM is ready
+                setTimeout(() => {
+                    setupTokenomicsNavigation();
+                    setupBudgetSliders();
+                    setupScenarioPlanning();
+                    setupBudgetComparison();
+                    setupExpenseFiltering();
+                    setupBudgetAlerts();
+                    setupCostSavings();
+                    setupBudgetExport();
+                    setupBudgetCreation();
+                }, 100);
+            });
+        }
+    }
+    
+    // Initialize tokenomics management when DOM is loaded
+    initializeTokenomicsManagement();
