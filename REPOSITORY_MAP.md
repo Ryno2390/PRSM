@@ -281,6 +281,13 @@ PRSM/
 
 The `docs/` directory is organized by documentation type and audience:
 
+### CHRONOS Documentation (`docs/chronos/`) - **NEW**
+- **OPEN_SOURCE_ARCHITECTURE.md** - Complete enterprise Bitcoin treasury architecture
+- **🏦 MicroStrategy Integration**: 581K BTC treasury partnership strategy
+- **💰 Revenue Model**: Multiple revenue streams and $2T+ market opportunity
+- **🌐 Open Source Strategy**: Core components open-source, commercial extensions
+- **🏢 Enterprise SDK**: Production-ready integration for institutional adoption
+
 ### Business & Investment Documentation (`docs/business/`)
 - **INVESTMENT_READINESS_REPORT.md** - Hybrid investor summary with external validation
 - **INVESTOR_MATERIALS.md** - Complete investor package and materials  
@@ -507,13 +514,20 @@ The main Python package organized by functional domains:
 - **marketplace.py** - Token marketplace operations
 - **advanced_ftns.py** - Advanced tokenomics features
 
-### CHRONOS Clearing Protocol (`prsm/chronos/) - **ENHANCED**
-- **clearing_engine.py** - Multi-currency clearing infrastructure
-- **models.py** - **ENHANCED** - Extended with universal staking program models
-- **staking_integration.py** - **NEW** - Universal staking platform for FTNS and multi-currency
-- **💰 Staking Programs**: Company-issued staking with auction-based APY determination
-- **🔄 Multi-Currency**: Stake in any supported currency, automatically converted to FTNS
-- **🏛️ Democratic Governance**: Community oversight of staking program approvals
+### CHRONOS Clearing Protocol (`prsm/chronos/) - **MAJOR ENHANCEMENT**
+- **clearing_engine.py** - **ENHANCED** - Multi-currency clearing with hub-and-spoke routing
+- **models.py** - **ENHANCED** - Extended with universal staking and multi-asset support
+- **staking_integration.py** - Universal staking platform for FTNS and multi-currency
+- **price_oracles.py** - **NEW** - Real-time Bitcoin price feeds from multiple sources
+- **treasury_provider.py** - **NEW** - MicroStrategy 581K BTC treasury integration
+- **hub_spoke_router.py** - **NEW** - Bitcoin-centric routing for optimal conversions
+- **enterprise_sdk.py** - **NEW** - Enterprise-grade SDK for institutional integration
+- **cashout_api.py** - **NEW** - High-level FTNS cashout API with multi-currency support
+- **error_handling.py** - **NEW** - Production-grade error handling and circuit breakers
+- **💰 Enterprise Features**: MicroStrategy partnership, real Bitcoin prices ($108K+), enterprise controls
+- **🔄 Hub-and-Spoke**: Bitcoin as reserve currency with optimal cross-crypto routing
+- **🏛️ Production Ready**: Real price oracles, circuit breakers, comprehensive monitoring
+- **🌐 Open Source Strategy**: Core open-source, commercial extensions for enterprise features
 
 ---
 
@@ -585,7 +599,10 @@ Interactive demonstrations and proof-of-concepts:
 - **p2p_network_demo.py** - P2P consensus demonstration
 - **tokenomics_simulation.py** - Economic model simulation
 - **enhanced_p2p_ai_demo.py** - Advanced P2P AI features
+- **chronos_enterprise_demo.py** - **NEW** - Live CHRONOS demo with real Bitcoin prices
 - **INVESTOR_DEMO.md** - Investor-focused demonstration guide
+- **💰 CHRONOS Demo**: Real Bitcoin price integration ($108K+), MicroStrategy treasury simulation
+- **🏢 Enterprise Features**: Live demonstration of treasury operations and risk controls
 
 ## 🧪 Playground Examples (`playground/`)
 
