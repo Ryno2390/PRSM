@@ -31,7 +31,7 @@ Current AI architectures are built on a fundamental misconception: that to under
 
 Close your eyes and imagine a chair. You probably see a simplified sketch, not a photorealistic masterpiece. That's your brain's world model at work—efficient, focused on what matters, discarding irrelevant details. When you see a car approaching an icy intersection, your brain doesn't calculate every molecular friction coefficient. It predicts: "car might skid, I should slow down." That's intelligent prediction without wasteful generation.
 
-Yet current AI systems try to predict every pixel, every minute detail, believing that perfect reproduction equals comprehension. It's like trying to swat a fly with a cannonball—massive overkill that misses the point entirely. Meta's Joint Embedding Predictive Architectures (JEPAs) prove this with models under 2 billion parameters that outperform systems hundreds of times larger by focusing on abstract representations rather than pixel-perfect generation².
+Yet current AI systems try to predict every pixel, every minute detail, believing that perfect reproduction equals comprehension. It's like trying to kill a rat with a artillery round—massive overkill that misses the point entirely. Joint Embedding Predictive Architectures (JEPAs) and distilled LLM models prove this with models under 2 billion parameters that outperform systems hundreds of times larger by focusing on efficiency anda abstract representations rather than pixel-perfect generation².
 
 A bicycle recognition system that generates every spoke and gear tooth won't generalize to mountain bikes versus road bikes. But a system that understands "two wheels, handlebars, pedals, seat" can recognize any bicycle, even partially hidden behind a wall. This is what intelligence really is: extracting key patterns to make accurate predictions about the world, not memorizing every possible variation.
 
@@ -47,14 +47,14 @@ When you don't compensate creators, you destroy the incentive to create the very
 - **"Forever Libraries" Rejected**: Retaining copyrighted works beyond specific training use ruled **not fair use**
 - **Fair Use Validation**: Court confirmed AI training itself is fair use - but **only with legally obtained content**
 
+Meanwhile, proprietary AI labs guard their models jealously, creating artificial scarcity around what should be abundant: access to intelligence itself. This concentration of AI capabilities in the hands of a few corporations creates dangerous dependencies and stifles the open innovation that could solve AI's fundamental problems.
+
 ---
 
 **References:**
 ¹ [AI Models Are Not Conscious and Are Massively Inefficient, Causing Complexity and Scalability Bottlenecks to Artificial General Superintelligence](docs/5299044.pdf) - Trevor Nestor (2025)  
 ² [Yann LeCun on a vision to make AI systems learn and reason like animals and humans](docs/Yann%20LeCun%20on%20a%20vision%20to%20make%20AI%20systems%20learn%20and%20reason%20like%20animals%20and%20humans.pdf) - Meta AI (2022)  
 ³ [Bartz v. Anthropic Order on Fair Use](docs/Bartz-v-Anthropic-Order-on-Fair-Use-6-23-25.pdf) - U.S. District Court (June 2025)
-
-Meanwhile, proprietary AI labs guard their models jealously, creating artificial scarcity around what should be abundant: access to intelligence itself. This concentration of AI capabilities in the hands of a few corporations creates dangerous dependencies and stifles the open innovation that could solve AI's fundamental problems.
 
 ## The Monopolization Risk: Betting Everything on Brittleness
 
@@ -70,13 +70,13 @@ PRSM addresses all dimensions of this crisis simultaneously through a fundamenta
 
 ### Technical Diversity Over Monolithic Betting
 
-PRSM doesn't bet on any single architecture or approach. Whether the future lies with LeCun's world models, neuromorphic computing inspired by the brain, quantum-biological hybrid systems, consciousness-inspired architectures, or approaches we haven't imagined yet, our distributed marketplace allows the most efficient and capable solutions to emerge naturally.
+PRSM doesn't bet on any single architecture or approach. Whether the future lies with "world models", neuromorphic computing inspired by the brain, quantum-biological hybrid systems, consciousness-inspired architectures, or approaches we haven't yet imagined, PRSM's distributed marketplace allows the most efficient and capable solutions to emerge naturally.
 
 Unlike platforms that lock users into specific paradigms (transformer-based models, particular cloud providers, proprietary APIs), PRSM enables experimentation and competition between radically different approaches. When the industry realizes that simpler, more efficient models might be the path to true intelligence, PRSM will be the platform where these breakthrough architectures emerge and prove themselves.
 
 ### Economic Alignment Through Provenance Royalties
 
-Through FTNS tokens and our innovative provenance royalty system, PRSM compensates all contributors to the AI ecosystem: data providers receive ongoing royalties when their contributions are used, compute providers earn for processing, storage providers earn for hosting, and model creators receive attribution and compensation for their innovations.
+Through FTNS (Fungible Tokens for Node Support, pronounced "photons") tokens and our innovative provenance royalty system, PRSM compensates all contributors to the AI ecosystem: data providers receive ongoing royalties when their contributions are used, compute providers earn for processing, storage providers earn for hosting, and model creators receive attribution and compensation for their innovations.
 
 This isn't charity—it's sustainable economics. By aligning incentives properly, we create a virtuous cycle where contributors are motivated to provide high-quality data and resources, leading to better models, which generate more value that can be shared back to contributors. This is the opposite of the extractive model that dominates today's AI industry.
 
@@ -99,7 +99,7 @@ This model doesn't just solve AI's technical problems—it solves the economic a
 
 ## The Strategic Imperative: Act Before the Tipping Point
 
-The convergence of technical inefficiency, economic unsustainability, and ethical bankruptcy in current AI approaches is creating what complexity theorists call a "critical transition point." Multiple trend lines suggest this crisis will reach a tipping point around 2026:
+The convergence of technical inefficiency, economic unsustainability, and ethical bankruptcy in current AI approaches is creating what complexity theorists call a "critical transition point." Multiple trend lines suggest this crisis will soon reach a tipping point
 
 - Energy costs of training and running large models will exceed their economic value
 - Institutional dependencies on brittle AI systems will reach dangerous thresholds
@@ -110,7 +110,7 @@ Organizations that position themselves ahead of this transition will thrive. Tho
 
 PRSM offers more than an alternative—it offers the infrastructure for AI's necessary evolution toward sustainability, efficiency, and alignment with human values. We're not just building a better AI platform; we're building the foundation for an AI industry that serves humanity rather than extracting from it.
 
-**🧠 Biological Intelligence Principles:**
+**🧠 Intelligence Principles:**
 - **Distributed Processing**: No single massive model - intelligence emerges from agent coordination
 - **Energy Efficiency**: Network distribution reduces individual computational requirements by orders of magnitude  
 - **Collective Synchrony**: Inter-agent communication replicates the "hyper-brain" networks observed in human collaboration
@@ -128,7 +128,7 @@ PRSM offers more than an alternative—it offers the infrastructure for AI's nec
 2. **💰 Earn FTNS Tokens**: Get compensated based on usage and quality with transparent provenance
 3. **🌐 Access Global Network**: Tap into distributed intelligence with guaranteed clean data sources
 4. **🔄 Recursive Improvement**: The network gets smarter while maintaining legal compliance
-5. **🛡️ Democratic Governance**: Community-driven decisions prevent both centralization catastrophe and legal liability
+5. **🛡️ Democratic Governance**: Community-driven decisions prevent both centralization and legal liability
 
 ---
 
@@ -405,7 +405,7 @@ Every model and output in the PRSM network undergoes rigorous validation:
 
 ### Economic Engine Implementation
 
-#### FTNS Token Mechanics and Smart Contracts
+#### Fungible Token for Node Support (FTNS) - Mechanics and Smart Contracts
 The FTNS token system creates sustainable economic incentives aligned with network value:
 
 **Token Distribution Mechanisms:**
