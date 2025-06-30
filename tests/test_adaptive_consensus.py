@@ -117,15 +117,15 @@ async def test_adaptive_consensus():
         accuracy = strategy_predictions / len(results) if results else 0
         success_rate = successful_tests / len(results) if results else 0
         
-        if success_rate >= 0.8 and accuracy >= 0.6:
-            print(f"\n✅ ADAPTIVE CONSENSUS: IMPLEMENTATION SUCCESSFUL!")
-            print(f"🚀 Strategy selection accuracy: {accuracy:.1%}")
-            print(f"🚀 Consensus success rate: {success_rate:.1%}")
-            print(f"🚀 Ready for production deployment with intelligent adaptation")
-        else:
-            print(f"\n⚠️ Adaptive consensus needs refinement:")
-            print(f"   - Strategy accuracy: {accuracy:.1%} (target: >60%)")
-            print(f"   - Success rate: {success_rate:.1%} (target: >80%)")
+        # Assert test requirements
+        assert success_rate >= 0.8, f"Consensus success rate {success_rate:.1%} below 80% threshold"
+        assert accuracy >= 0.6, f"Strategy selection accuracy {accuracy:.1%} below 60% threshold"
+        assert adaptation_results, "Dynamic adaptation tests failed"
+        
+        print(f"\n✅ ADAPTIVE CONSENSUS: IMPLEMENTATION SUCCESSFUL!")
+        print(f"🚀 Strategy selection accuracy: {accuracy:.1%}")
+        print(f"🚀 Consensus success rate: {success_rate:.1%}")
+        print(f"🚀 Ready for production deployment with intelligent adaptation")
         
         return results
         

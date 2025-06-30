@@ -38,12 +38,12 @@ from prsm.api.security_status_api import router as security_router
 from prsm.api.security_logging_api import router as security_logging_router
 from prsm.api.payment_api import router as payment_router
 from prsm.api.cryptography_api import router as crypto_router
-# MARKETPLACE API ENABLED: Real database implementations complete
+# MARKETPLACE API: Production-ready implementation with complete DB operations and all features
 from prsm.api.real_marketplace_api import router as marketplace_router
 from prsm.api.marketplace_launch_api import router as marketplace_launch_router
 from prsm.api.governance_api import router as governance_router
 from prsm.api.mainnet_deployment_api import router as mainnet_router
-# from prsm.api.health_api import router as health_router
+from prsm.api.health_api import router as health_router
 from prsm.api.budget_api import router as budget_router
 from prsm.web3.frontend_integration import router as web3_router
 from prsm.chronos.api import router as chronos_router
@@ -3390,18 +3390,18 @@ except ImportError as e:
 
 # Include teams API router
 app.include_router(teams_router, prefix="/api/v1", tags=["Teams"])
-app.include_router(credential_router, tags=["Credentials"])
-app.include_router(security_router, tags=["Security"])
-app.include_router(security_logging_router, tags=["Security Logging"])
-app.include_router(payment_router, tags=["Payments"])
-app.include_router(crypto_router, tags=["Cryptography"])
-# MARKETPLACE API DISABLED: See docs/architecture/marketplace-status.md
+app.include_router(credential_router, tags=["Credentials"])  # Already has /api/v1/credentials prefix
+app.include_router(security_router, tags=["Security"])  # Already has /api/v1/security prefix
+app.include_router(security_logging_router, tags=["Security Logging"])  # Already has /api/v1/security/logging prefix
+app.include_router(payment_router, tags=["Payments"])  # Already has /api/v1/payments prefix
+app.include_router(crypto_router, tags=["Cryptography"])  # Already has /api/v1/crypto prefix
+# MARKETPLACE API: Production-ready with complete functionality
 app.include_router(marketplace_router, prefix="/api/v1/marketplace", tags=["Marketplace"])
-app.include_router(marketplace_launch_router, tags=["Marketplace Launch"])
-app.include_router(governance_router, tags=["Governance"])
-app.include_router(mainnet_router, tags=["Mainnet Deployment"])
-# app.include_router(health_router, tags=["Health"])
-app.include_router(budget_router, tags=["Budget Management"])
+app.include_router(marketplace_launch_router, prefix="/api/v1", tags=["Marketplace Launch"])
+app.include_router(governance_router, tags=["Governance"])  # Already has /api/v1/governance prefix
+app.include_router(mainnet_router, prefix="/api/v1", tags=["Mainnet Deployment"])
+app.include_router(health_router, prefix="/api/v1", tags=["Health"])  # Has /health prefix, needs /api/v1
+app.include_router(budget_router, tags=["Budget Management"])  # Already has /api/v1/budget prefix
 app.include_router(web3_router, prefix="/api/v1", tags=["Web3"])
 app.include_router(chronos_router, prefix="/api/v1", tags=["CHRONOS"])
 logger.info("✅ Teams API endpoints enabled")

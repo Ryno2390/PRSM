@@ -522,9 +522,25 @@ class MarketplaceIntegration:
         try:
             cached_data = await self.redis_client.get(cache_key)
             if cached_data:
-                # Would deserialize from JSON/pickle
-                # For now, return None to always fetch fresh
-                pass
+                # Deserialize models from JSON
+                import json
+                models_data = json.loads(cached_data)
+                models = []
+                for model_data in models_data:
+                    model = MarketplaceModel(
+                        model_id=model_data["model_id"],
+                        name=model_data["name"],
+                        provider=MarketplaceProvider(model_data["provider"]),
+                        specialization=model_data["specialization"],
+                        performance_score=model_data["performance_score"],
+                        cost_per_token=model_data["cost_per_token"],
+                        estimated_latency=model_data["estimated_latency"],
+                        context_length=model_data["context_length"],
+                        availability_score=model_data["availability_score"],
+                        provider_reputation=model_data["provider_reputation"]
+                    )
+                    models.append(model)
+                return models
         except Exception as e:
             logger.warning("Cache read error", error=str(e))
             
@@ -536,9 +552,27 @@ class MarketplaceIntegration:
             return
             
         try:
-            # Would serialize models to JSON/pickle
-            # For now, skip caching due to serialization complexity
-            pass
+            # Serialize models to JSON
+            import json
+            models_data = []
+            for model in models:
+                model_data = {
+                    "model_id": model.model_id,
+                    "name": model.name,
+                    "provider": model.provider.value,
+                    "specialization": model.specialization,
+                    "performance_score": model.performance_score,
+                    "cost_per_token": model.cost_per_token,
+                    "estimated_latency": model.estimated_latency,
+                    "context_length": model.context_length,
+                    "availability_score": model.availability_score,
+                    "provider_reputation": model.provider_reputation
+                }
+                models_data.append(model_data)
+            
+            # Cache for 1 hour
+            await self.redis_client.setex(cache_key, 3600, json.dumps(models_data))
+            logger.debug("Models cached successfully", cache_key=cache_key, count=len(models))
         except Exception as e:
             logger.warning("Cache write error", error=str(e))
 

@@ -3,20 +3,21 @@
 PRSM FTNS Token Marketplace
 ===========================
 
-Real-money FTNS token marketplace ecosystem enabling:
-- Token purchasing with fiat and cryptocurrency
-- Model provider revenue sharing
-- Staking and yield generation
-- Governance token functionality
-- Liquidity pool management
+⚠️ SIMULATION ONLY - NOT REAL FINANCIAL TRANSACTIONS
 
-🎯 MARKETPLACE FEATURES:
-✅ Fiat-to-FTNS token purchases (Stripe/PayPal)
-✅ Crypto-to-FTNS exchanges (DEX integration)
-✅ Model provider revenue sharing
-✅ Staking rewards and yield farming
-✅ Governance voting mechanisms
-✅ Liquidity incentives and bonuses
+This module contains development simulations of FTNS token marketplace functionality.
+NO REAL MONEY TRANSACTIONS ARE PROCESSED. All payment processing, exchanges, and 
+financial operations are in-memory simulations for development and testing purposes.
+
+🚧 SIMULATED FEATURES (NOT PRODUCTION):
+🧪 Fiat-to-FTNS token simulation (no real Stripe/PayPal integration)
+🧪 Crypto exchange simulation (no real DEX integration)  
+🧪 Revenue sharing simulation (no real payments)
+🧪 Staking rewards simulation (no real yield)
+🧪 Governance simulation (no real voting power)
+🧪 Liquidity simulation (no real funds)
+
+See marketplace-status.md for production implementation roadmap.
 """
 
 import asyncio

@@ -1,15 +1,16 @@
 """
-Marketplace Service
-==================
+Legacy Marketplace Service (DEPRECATED)
+=======================================
 
-Core service for managing the PRSM AI model marketplace.
-Handles model listings, search, discovery, and marketplace operations.
+⚠️  DEPRECATED: This file contains legacy mock implementations and should NOT be used.
 
-⚠️  WARNING: This service currently contains MOCK IMPLEMENTATIONS
-    Database operations use placeholder code instead of real SQLAlchemy queries.
-    The marketplace API is disabled until these are replaced with production code.
-    
-    See docs/architecture/marketplace-status.md for details.
+Use real_marketplace_service.py instead - it contains production-ready implementations
+with real SQLAlchemy database operations, comprehensive error handling, and all features.
+
+This file is kept only for backwards compatibility with existing tests and will be
+removed in a future version.
+
+See docs/architecture/marketplace-status.md for current implementation details.
 """
 
 import structlog

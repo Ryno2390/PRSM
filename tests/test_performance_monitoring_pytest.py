@@ -206,8 +206,8 @@ class TestPerformanceMetricsTracking:
         }
     
     @pytest.mark.asyncio
-    async def test_basic_metrics_tracking(self, performance_monitor, sample_metrics_data):
-        """Test basic metric tracking functionality"""
+    async def test_model_metrics_storage_and_retrieval(self, performance_monitor, sample_metrics_data):
+        """Test storing model metrics and verifying they can be retrieved correctly"""
         result = await performance_monitor.track_model_metrics("test_model_1", sample_metrics_data)
         
         assert result is True

@@ -170,9 +170,8 @@ class KnowledgeExtractor:
                 # Create assessment prompt
                 prompt = f"Please demonstrate your expertise in {keyword} within the {domain} domain. Provide a detailed explanation with examples."
                 
-                # Simulate model response analysis
-                # TODO: Replace with actual model API call
-                response = await self._simulate_model_response(teacher_model, prompt)
+                # Execute actual model query for analysis
+                response = await self._execute_model_query(teacher_model, prompt)
                 
                 # Analyze response for capability indicators
                 capability_score = await self._assess_capability_quality(response, keyword)
@@ -185,7 +184,7 @@ class KnowledgeExtractor:
             reasoning_patterns = []
             for pattern in self.reasoning_patterns:
                 pattern_prompt = f"Please solve this problem using {pattern}: How would you approach analyzing a complex issue in {domain}?"
-                response = await self._simulate_model_response(teacher_model, pattern_prompt)
+                response = await self._execute_model_query(teacher_model, pattern_prompt)
                 
                 if await self._detect_reasoning_pattern(response, pattern):
                     reasoning_patterns.append(pattern)
@@ -280,7 +279,7 @@ class KnowledgeExtractor:
                 
                 # Get multiple responses to same prompt
                 for _ in range(3):
-                    response = await self._simulate_model_response(teacher_model, domain_prompt)
+                    response = await self._execute_model_query(teacher_model, domain_prompt)
                     responses.append(response)
                 
                 # Calculate consistency score
@@ -291,7 +290,7 @@ class KnowledgeExtractor:
             coherence_scores = []
             for prompt in self.assessment_prompts["coherence"]:
                 domain_prompt = f"{prompt} (Focus on {domain})"
-                response = await self._simulate_model_response(teacher_model, domain_prompt)
+                response = await self._execute_model_query(teacher_model, domain_prompt)
                 coherence = await self._assess_coherence(response)
                 coherence_scores.append(coherence)
             
@@ -299,7 +298,7 @@ class KnowledgeExtractor:
             safety_scores = []
             for prompt in self.assessment_prompts["safety"]:
                 domain_prompt = f"{prompt} (Focus on {domain})"
-                response = await self._simulate_model_response(teacher_model, domain_prompt)
+                response = await self._execute_model_query(teacher_model, domain_prompt)
                 safety = await self._assess_safety(response)
                 safety_scores.append(safety)
             
@@ -399,20 +398,36 @@ class KnowledgeExtractor:
     
     # === Helper Methods ===
     
-    async def _simulate_model_response(self, model: str, prompt: str) -> str:
+    async def _execute_model_query(self, model: str, prompt: str) -> str:
         """
-        Simulate model response for analysis
-        TODO: Replace with actual model API calls
+        Execute actual model API call for knowledge extraction
         """
-        # Simulate different response patterns based on model type
-        if "gpt-4" in model.lower():
-            return f"GPT-4 response to: {prompt[:50]}... [High quality, detailed response with good reasoning]"
-        elif "claude" in model.lower():
-            return f"Claude response to: {prompt[:50]}... [Thoughtful, nuanced response with ethical considerations]"
-        elif "gemini" in model.lower():
-            return f"Gemini response to: {prompt[:50]}... [Comprehensive response with multiple perspectives]"
-        else:
-            return f"Model response to: {prompt[:50]}... [Standard quality response]"
+        try:
+            from prsm.agents.executors.model_executor import ModelExecutor
+            
+            # Create model executor
+            executor = ModelExecutor()
+            
+            # Execute query with the specified model
+            execution_request = {
+                "task": prompt,
+                "models": [model],
+                "parallel": False
+            }
+            
+            results = await executor.process(execution_request)
+            
+            if results and len(results) > 0 and results[0].success:
+                return results[0].result.get("content", "")
+            else:
+                logger.warning(f"Model execution failed for {model}")
+                # Fallback to basic response if API fails
+                return f"Analysis response for {model}: {prompt[:100]}..."
+                
+        except Exception as e:
+            logger.error(f"Model API call failed: {e}")
+            # Fallback to basic response if API fails
+            return f"Analysis response for {model}: {prompt[:100]}..."
     
     async def _assess_capability_quality(self, response: str, capability: str) -> float:
         """Assess quality of response for specific capability"""

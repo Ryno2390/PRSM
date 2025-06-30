@@ -337,66 +337,6 @@ class ModelExecutor(BaseAgent):
                 error=str(e)
             )
     
-    async def _simulate_model_execution(self, task: str, model_id: str) -> Dict[str, Any]:
-        """Simulate model execution for testing purposes"""
-        # TODO: Replace with actual model execution
-        
-        # Generate a simulated response based on task characteristics
-        task_lower = task.lower()
-        
-        if "research" in task_lower:
-            result = {
-                "type": "research_findings",
-                "summary": f"Research results for: {task[:100]}...",
-                "key_points": [
-                    "Finding 1: Relevant information discovered",
-                    "Finding 2: Additional context provided",
-                    "Finding 3: Conclusions drawn"
-                ],
-                "confidence": 0.85,
-                "sources": ["source_1", "source_2", "source_3"]
-            }
-        elif "analyze" in task_lower:
-            result = {
-                "type": "analysis_result",
-                "summary": f"Analysis of: {task[:100]}...",
-                "insights": [
-                    "Pattern 1: Significant trend identified",
-                    "Pattern 2: Correlation discovered",
-                    "Pattern 3: Anomaly detected"
-                ],
-                "confidence": 0.92,
-                "methodology": "Statistical analysis with ML techniques"
-            }
-        elif "explain" in task_lower:
-            result = {
-                "type": "explanation",
-                "explanation": f"Explanation for: {task[:100]}...",
-                "key_concepts": [
-                    "Concept 1: Fundamental principle",
-                    "Concept 2: Related mechanism",
-                    "Concept 3: Practical application"
-                ],
-                "confidence": 0.88,
-                "clarity_score": 0.9
-            }
-        else:
-            result = {
-                "type": "general_response",
-                "content": f"Response to: {task[:100]}...",
-                "details": "Processed using general-purpose model",
-                "confidence": 0.75
-            }
-        
-        # Add model-specific information
-        result["model_id"] = model_id
-        result["processing_metadata"] = {
-            "task_length": len(task),
-            "processing_approach": "simulated_execution",
-            "version": "1.0"
-        }
-        
-        return result
     
     def _initialize_providers(self):
         """
@@ -408,19 +348,32 @@ class ModelExecutor(BaseAgent):
         - Configure rate limits and timeouts
         - Set up fallback strategies with secure fallbacks
         """
-        # This method is kept for backward compatibility but now uses secure credentials
-        # Actual secure initialization happens in _initialize_secure_providers
-        asyncio.create_task(self._initialize_secure_providers())
-        
-        # 📂 Local Models Configuration (no credentials needed)
-        import os
-        local_models_path = os.getenv('PRSM_LOCAL_MODELS_PATH', '/models')
-        self.client_registry.register_provider(ModelProvider.LOCAL, {
-            'model_path': local_models_path
-        })
-        
-        # 🎯 Default Model Provider Mappings
-        self._setup_default_model_mappings()
+        try:
+            # This method is kept for backward compatibility but now uses secure credentials
+            # Actual secure initialization happens in _initialize_secure_providers
+            asyncio.create_task(self._initialize_secure_providers())
+            
+            # 📂 Local Models Configuration (no credentials needed)
+            import os
+            local_models_path = os.getenv('PRSM_LOCAL_MODELS_PATH', '/models')
+            self.client_registry.register_provider(ModelProvider.LOCAL, {
+                'model_path': local_models_path
+            })
+            
+            # 🎯 Default Model Provider Mappings
+            self._setup_default_model_mappings()
+            
+        except Exception as e:
+            logger.error("Failed to initialize model providers", error=str(e))
+            # Ensure basic local provider is available even if others fail
+            try:
+                import os
+                local_models_path = os.getenv('PRSM_LOCAL_MODELS_PATH', '/models')
+                self.client_registry.register_provider(ModelProvider.LOCAL, {
+                    'model_path': local_models_path
+                })
+            except Exception as fallback_error:
+                logger.critical("Failed to initialize even local provider", error=str(fallback_error))
     
     async def _initialize_secure_providers(self):
         """
@@ -670,9 +623,12 @@ class ModelExecutor(BaseAgent):
             tokens = response.token_usage.get('total_tokens', 0)
             self.execution_stats["tokens_used"] += tokens
         
+        total_executions = self.execution_stats["total_executions"]
+        successful_executions = self.execution_stats["successful_executions"]
+        
         logger.debug("Updated execution statistics",
-                    total_executions=self.execution_stats["total_executions"],
-                    success_rate=self.execution_stats["successful_executions"] / self.execution_stats["total_executions"],
+                    total_executions=total_executions,
+                    success_rate=successful_executions / total_executions,
                     avg_time=self.execution_stats["average_execution_time"])
     
     async def cleanup(self):

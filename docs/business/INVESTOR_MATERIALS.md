@@ -1,15 +1,21 @@
 # PRSM Investment Materials
 
+## ⚠️ INVESTMENT STATUS DISCLAIMER
+
+**PRSM is currently an advanced prototype seeking Series A funding to complete production-ready implementation.** While the core architecture is innovative and foundational components are operational, key systems including marketplace, financial transactions, and production infrastructure require 18-24 months of development to reach full production readiness.
+
+**Investment Opportunity**: Series A funding to transform promising prototype into production-ready AI coordination platform.
+
 ## 🎯 Executive Summary
 
-PRSM represents the infrastructure for AI coordination - positioned at the convergence of three unstoppable trends: AI proliferation, coordination complexity, and economic rationality. This is not a bet on technology adoption; it's a bet on mathematical inevitability.
+PRSM represents the infrastructure for AI coordination - positioned at the convergence of three unstoppable trends: AI proliferation, coordination complexity, and economic rationality. This is an investment in completing the technological foundation for AI coordination infrastructure.
 
 ## 📊 Investment Opportunity
 
 **Series A: $18M**
 - **Valuation**: $72M pre-money
-- **Use of funds**: Scale to 1M+ agents, enterprise deployment, team expansion
-- **Timeline**: 18-month runway to profitability
+- **Use of funds**: Complete marketplace implementation, production infrastructure, enterprise security
+- **Timeline**: 18-24 months to production-ready platform, 36 months to profitability
 - **Exit strategy**: Strategic acquisition or IPO within 5-7 years
 
 ## 🎮 Market Positioning
@@ -45,7 +51,7 @@ PRSM represents the infrastructure for AI coordination - positioned at the conve
 
 ## 🛠 Technical Implementation
 
-### Completed Infrastructure (84 Components)
+### Development Progress (84 Components in Various Stages)
 - **Phase 1**: Core Architecture & Foundation
 - **Phase 2**: Advanced Agent Communication
 - **Phase 3**: Consensus Mechanisms

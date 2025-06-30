@@ -140,21 +140,46 @@ class HierarchicalArchitect(BaseAgent):
         Returns:
             float: Complexity score (0.0 = simple, 1.0 = very complex)
         """
-        # TODO: Implement LLM-based complexity assessment
-        # Factors to consider:
-        # - Task length and detail
-        # - Domain expertise required
-        # - Number of concepts involved
-        # - Interdisciplinary nature
-        # - Research depth required
-        
-        # Placeholder: base complexity on task length
+        # Heuristic-based complexity assessment considering multiple factors
         task_str = str(task) if not isinstance(task, str) else task
-        base_complexity = min(len(task_str) / 1000, 1.0)
+        task_lower = task_str.lower()
         
-        # TODO: Add semantic complexity analysis
+        # Base complexity from length (longer tasks often more complex)
+        length_factor = min(len(task_str) / 2000, 0.4)  # Cap at 40% of total score
         
-        return base_complexity
+        # Technical domain complexity indicators
+        domain_complexity = 0.0
+        technical_domains = ['quantum', 'neural', 'blockchain', 'cryptography', 'genomics', 'bioinformatics']
+        advanced_domains = ['machine learning', 'artificial intelligence', 'distributed systems', 'optimization']
+        
+        for domain in technical_domains:
+            if domain in task_lower:
+                domain_complexity += 0.2
+        for domain in advanced_domains:
+            if domain in task_lower:
+                domain_complexity += 0.15
+                
+        domain_complexity = min(domain_complexity, 0.3)  # Cap at 30%
+        
+        # Multi-step process indicators
+        process_complexity = 0.0
+        process_indicators = ['analyze and', 'first', 'then', 'finally', 'step by step', 'multiple', 'coordinate']
+        for indicator in process_indicators:
+            if indicator in task_lower:
+                process_complexity += 0.05
+        process_complexity = min(process_complexity, 0.2)  # Cap at 20%
+        
+        # Research depth indicators
+        research_complexity = 0.0
+        research_indicators = ['research', 'investigate', 'comprehensive', 'thorough', 'detailed analysis']
+        for indicator in research_indicators:
+            if indicator in task_lower:
+                research_complexity += 0.02
+        research_complexity = min(research_complexity, 0.1)  # Cap at 10%
+        
+        # Combine all factors
+        total_complexity = length_factor + domain_complexity + process_complexity + research_complexity
+        return min(total_complexity, 1.0)
     
     async def identify_dependencies(self, subtasks: List[str]) -> Dict[str, List[str]]:
         """
@@ -166,22 +191,36 @@ class HierarchicalArchitect(BaseAgent):
         Returns:
             Dict mapping task indices to their dependencies
         """
-        # TODO: Implement dependency analysis
-        # This should:
-        # 1. Analyze task descriptions for dependencies
-        # 2. Identify which tasks must complete before others
-        # 3. Build dependency graph
-        # 4. Detect circular dependencies
-        
+        # Analyze task descriptions for dependencies using keyword detection
         dependencies = {}
         
-        # Placeholder: assume sequential dependencies
         for i, task in enumerate(subtasks):
-            if i > 0:
-                dependencies[str(i)] = [str(i-1)]
-            else:
-                dependencies[str(i)] = []
-        
+            task_deps = []
+            task_lower = task.lower()
+            
+            # Look for explicit references to other tasks
+            for j, other_task in enumerate(subtasks):
+                if i != j:
+                    other_lower = other_task.lower()
+                    
+                    # Check for explicit ordering keywords
+                    if any(keyword in task_lower for keyword in ['after', 'once', 'when', 'following']):
+                        # Look for concepts from the other task
+                        other_words = set(other_lower.split())
+                        task_words = set(task_lower.split())
+                        common_words = other_words.intersection(task_words)
+                        
+                        # If significant overlap in keywords, likely dependency
+                        if len(common_words) >= 2:
+                            task_deps.append(str(j))
+                    
+                    # Check for data flow dependencies (output -> input)
+                    output_keywords = ['results from', 'output of', 'data from', 'using the']
+                    if any(keyword in task_lower for keyword in output_keywords):
+                        if any(word in task_lower for word in other_lower.split() if len(word) > 3):
+                            task_deps.append(str(j))
+            
+            dependencies[str(i)] = task_deps
         return dependencies
     
     async def _should_decompose(self, task: ArchitectTask, depth: int) -> bool:
@@ -224,16 +263,66 @@ class HierarchicalArchitect(BaseAgent):
         Returns:
             List of subtask descriptions
         """
-        # TODO: Implement LLM-based task decomposition
-        # This should use prompt engineering to break down complex tasks
-        # into manageable subtasks while preserving intent and context
-        
         logger.info("Decomposing task", task_id=task.task_id, 
                    complexity=task.complexity_score)
         
-        # Placeholder: simple rule-based decomposition
+        # Use LLM-based task decomposition for complex tasks
         instruction = task.instruction
         
+        if task.complexity_score > 0.7:
+            return await self._llm_based_decomposition(instruction)
+        else:
+            return await self._rule_based_decomposition(instruction)
+    
+    async def _llm_based_decomposition(self, instruction: str) -> List[str]:
+        """Use LLM to decompose complex tasks intelligently"""
+        try:
+            from prsm.agents.executors.model_executor import ModelExecutor
+            
+            # Create decomposition prompt
+            decomposition_prompt = f"""
+Break down the following complex task into 3-5 manageable subtasks. Each subtask should be:
+- Specific and actionable
+- Logically ordered (earlier tasks enable later ones)
+- Focused on a single aspect of the overall goal
+
+Task to decompose: {instruction}
+
+Provide subtasks in this format:
+1. [First subtask]
+2. [Second subtask]
+3. [Third subtask]
+etc.
+
+Focus on logical workflow and dependencies.
+"""
+            
+            # Execute LLM decomposition
+            executor = ModelExecutor()
+            execution_request = {
+                "task": decomposition_prompt,
+                "models": ["gpt-3.5-turbo"],  # Use efficient model for decomposition
+                "parallel": False
+            }
+            
+            results = await executor.process(execution_request)
+            
+            if results and len(results) > 0 and results[0].success:
+                response = results[0].result.get("content", "")
+                subtasks = self._parse_llm_subtasks(response)
+                if subtasks:
+                    return subtasks
+            
+            # Fallback to rule-based if LLM fails
+            logger.warning("LLM decomposition failed, falling back to rule-based")
+            return await self._rule_based_decomposition(instruction)
+            
+        except Exception as e:
+            logger.error(f"LLM decomposition error: {e}")
+            return await self._rule_based_decomposition(instruction)
+    
+    async def _rule_based_decomposition(self, instruction: str) -> List[str]:
+        """Rule-based task decomposition as fallback"""
         if "analyze" in instruction.lower():
             return [
                 f"Gather relevant data for: {instruction}",
@@ -248,6 +337,20 @@ class HierarchicalArchitect(BaseAgent):
                 f"Synthesize information for: {instruction}",
                 f"Draw conclusions for: {instruction}"
             ]
+        elif "implement" in instruction.lower() or "build" in instruction.lower():
+            return [
+                f"Design architecture for: {instruction}",
+                f"Implement core functionality for: {instruction}",
+                f"Test and validate: {instruction}",
+                f"Document and finalize: {instruction}"
+            ]
+        elif "compare" in instruction.lower() or "evaluate" in instruction.lower():
+            return [
+                f"Identify comparison criteria for: {instruction}",
+                f"Collect comparison data for: {instruction}",
+                f"Perform comparative analysis for: {instruction}",
+                f"Summarize evaluation results for: {instruction}"
+            ]
         else:
             # Generic decomposition
             return [
@@ -255,6 +358,30 @@ class HierarchicalArchitect(BaseAgent):
                 f"Execute main work for: {instruction}",
                 f"Review and refine: {instruction}"
             ]
+    
+    def _parse_llm_subtasks(self, response: str) -> List[str]:
+        """Parse subtasks from LLM response"""
+        subtasks = []
+        lines = response.strip().split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            # Look for numbered list items
+            if line and (line[0].isdigit() or line.startswith('-')):
+                # Remove numbering and clean up
+                task = line
+                if '. ' in task:
+                    task = task.split('. ', 1)[1]
+                elif '- ' in task:
+                    task = task.split('- ', 1)[1]
+                
+                # Remove brackets if present
+                task = task.strip('[]')
+                
+                if task and len(task) > 10:  # Valid subtask
+                    subtasks.append(task)
+        
+        return subtasks if len(subtasks) >= 2 else []
 
 
 # Factory function for creating architects at different levels
