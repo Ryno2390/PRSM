@@ -1459,18 +1459,25 @@ Our current implementation includes:
 - ✅ **105 test suites** covering critical components
 - ✅ **Enterprise patterns** implemented for future scaling
 
-### Path to Production
-| Milestone | Timeline | Requirements |
-|-----------|----------|--------------|
-| **Technical Validation** | 2-3 months | Performance benchmarking, security audit |
-| **Limited Testnet** | 4-6 months | 3-5 node deployment, partner onboarding |
-| **Production Beta** | 8-12 months | Multi-region deployment, compliance |
-| **Global Launch** | 12-18 months | Enterprise adoption, ecosystem growth |
+### PRSM Foundation Development Timeline
+| Phase | Timeline | Investment | Objectives |
+|-------|----------|------------|------------|
+| **1A: Infrastructure Hardening** | Months 1-6 | $6M | 50+ federation nodes, enterprise security, 1K users |
+| **1B: University Partnerships** | Months 7-12 | $6M | Academic partnerships, provenance revenue flows |
+| **1C: FTNS Economics & Governance** | Months 13-18 | $6M | Token launch, marketplace activation, governance |
 
-### Funding Requirements
-- **$18M Series A**: Core infrastructure and team expansion
-- **Milestone-based tranches**: Risk-mitigated deployment strategy
-- **Return mechanism**: Platform transaction fees + FTNS token appreciation
+### Phase 1 Success Metrics (18 Months)
+- **Network**: 50+ federation nodes with 99.9% uptime
+- **Users**: 1,000+ active users, 10,000 TPS capacity
+- **Revenue**: $100k+ monthly provenance revenue
+- **Security**: SOC2 Type II, ISO27001, GDPR compliance
+- **Governance**: Live FTNS token economics and decentralized decision-making
+
+### Series A Funding: $18M
+- **Technical Infrastructure**: Production-grade P2P network, security, compliance
+- **Team Expansion**: 9-person specialized team across 7 technical domains
+- **University Partnerships**: Academic content integration and collaboration framework
+- **Market Validation**: Live marketplace with proven economic models
 
 ---
 
