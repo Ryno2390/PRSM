@@ -4007,3 +4007,397 @@ document.head.appendChild(notificationStyles);
     
     // Initialize tokenomics management when DOM is loaded
     initializeTokenomicsManagement();
+
+// ============================================================================
+// MARKETPLACE ASSET TYPE SWITCHING FUNCTIONALITY
+// ============================================================================
+
+function initializeMarketplaceAssetSwitching() {
+    /**
+     * Initialize marketplace asset type navigation and filtering
+     * Enables interactive switching between different marketplace asset types
+     */
+    const assetTypeCards = document.querySelectorAll('.asset-type-card');
+    const assetCards = document.querySelectorAll('.asset-card');
+    
+    if (assetTypeCards.length === 0) return;
+    
+    // Add click handlers to asset type cards
+    assetTypeCards.forEach(card => {
+        card.addEventListener('click', () => {
+            const selectedType = card.getAttribute('data-type');
+            
+            // Update active state
+            assetTypeCards.forEach(c => c.classList.remove('active'));
+            card.classList.add('active');
+            
+            // Filter asset cards based on selected type
+            filterAssetCards(selectedType);
+            
+            // Update marketplace stats based on selection
+            updateMarketplaceStats(selectedType, card);
+            
+            // Smooth scroll to assets if needed
+            const assetsSection = document.querySelector('.marketplace-assets');
+            if (assetsSection) {
+                assetsSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        });
+        
+        // Add hover effect
+        card.addEventListener('mouseenter', () => {
+            if (!card.classList.contains('active')) {
+                card.style.transform = 'translateY(-2px)';
+            }
+        });
+        
+        card.addEventListener('mouseleave', () => {
+            if (!card.classList.contains('active')) {
+                card.style.transform = 'translateY(0)';
+            }
+        });
+    });
+    
+    // Initialize with default selection (AI Models)
+    const defaultCard = document.querySelector('.asset-type-card.active');
+    if (defaultCard) {
+        const defaultType = defaultCard.getAttribute('data-type');
+        filterAssetCards(defaultType);
+    }
+}
+
+function filterAssetCards(selectedType) {
+    /**
+     * Filter and display asset cards based on selected type
+     * @param {string} selectedType - The selected asset type to filter by
+     */
+    const assetCards = document.querySelectorAll('.asset-card');
+    const allAssetsContainer = document.querySelector('.marketplace-assets');
+    
+    if (!assetCards.length || !allAssetsContainer) return;
+    
+    // Show loading state
+    showMarketplaceLoading(true);
+    
+    setTimeout(() => {
+        assetCards.forEach(card => {
+            const cardType = card.getAttribute('data-asset-type');
+            
+            if (!cardType || cardType === selectedType || selectedType === 'all') {
+                card.style.display = 'block';
+                card.style.opacity = '0';
+                card.style.transform = 'translateY(20px)';
+                
+                // Animate in
+                setTimeout(() => {
+                    card.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+                    card.style.opacity = '1';
+                    card.style.transform = 'translateY(0)';
+                }, Math.random() * 100);
+            } else {
+                card.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+                card.style.opacity = '0';
+                card.style.transform = 'translateY(-20px)';
+                
+                setTimeout(() => {
+                    card.style.display = 'none';
+                }, 200);
+            }
+        });
+        
+        // Hide loading state
+        setTimeout(() => {
+            showMarketplaceLoading(false);
+        }, 300);
+    }, 100);
+}
+
+function updateMarketplaceStats(selectedType, selectedCard) {
+    /**
+     * Update marketplace statistics display based on selected asset type
+     * @param {string} selectedType - The selected asset type
+     * @param {Element} selectedCard - The selected asset type card element
+     */
+    const statsElement = document.querySelector('.marketplace-stats');
+    const headerStatsElement = document.querySelector('.section-header .stats');
+    
+    if (!selectedCard) return;
+    
+    const assetCount = selectedCard.querySelector('.asset-count')?.textContent || '0';
+    const assetName = selectedCard.querySelector('h6')?.textContent || 'Assets';
+    
+    // Update header stats
+    if (headerStatsElement) {
+        if (selectedType === 'all' || !selectedType) {
+            headerStatsElement.textContent = '8,847 Total Assets • 9 Asset Types';
+        } else {
+            headerStatsElement.textContent = `${assetCount} ${assetName} • Active Category`;
+        }
+    }
+    
+    // Update detailed stats if available
+    if (statsElement) {
+        const statCards = statsElement.querySelectorAll('.stat-card');
+        statCards.forEach(statCard => {
+            const statTitle = statCard.querySelector('.stat-title');
+            const statValue = statCard.querySelector('.stat-value');
+            
+            if (statTitle && statValue) {
+                // Update stats based on selected type
+                if (statTitle.textContent.includes('Assets')) {
+                    statValue.textContent = assetCount;
+                } else if (statTitle.textContent.includes('Category')) {
+                    statValue.textContent = assetName;
+                }
+            }
+        });
+    }
+}
+
+function showMarketplaceLoading(show) {
+    /**
+     * Show or hide marketplace loading state
+     * @param {boolean} show - Whether to show loading state
+     */
+    let loadingElement = document.querySelector('.marketplace-loading');
+    
+    if (show && !loadingElement) {
+        loadingElement = document.createElement('div');
+        loadingElement.className = 'marketplace-loading';
+        loadingElement.innerHTML = `
+            <div class="loading-spinner">
+                <i class="fas fa-spinner fa-spin"></i>
+                <span>Loading assets...</span>
+            </div>
+        `;
+        
+        const assetsContainer = document.querySelector('.marketplace-assets');
+        if (assetsContainer) {
+            assetsContainer.style.position = 'relative';
+            assetsContainer.appendChild(loadingElement);
+        }
+    } else if (!show && loadingElement) {
+        loadingElement.remove();
+    }
+}
+
+function initializeAssetCardInteractions() {
+    /**
+     * Initialize interactions for individual asset cards
+     */
+    const assetCards = document.querySelectorAll('.asset-card');
+    
+    assetCards.forEach(card => {
+        // Add hover effects
+        card.addEventListener('mouseenter', () => {
+            card.style.transform = 'translateY(-4px)';
+            card.style.boxShadow = '0 8px 25px rgba(255, 255, 255, 0.1)';
+        });
+        
+        card.addEventListener('mouseleave', () => {
+            card.style.transform = 'translateY(0)';
+            card.style.boxShadow = '0 2px 10px rgba(255, 255, 255, 0.05)';
+        });
+        
+        // Add click handlers for asset cards
+        card.addEventListener('click', (e) => {
+            // Don't trigger if clicking on buttons
+            if (e.target.closest('.asset-actions')) return;
+            
+            const assetName = card.querySelector('.asset-title')?.textContent || 'Unknown Asset';
+            const assetType = card.getAttribute('data-asset-type') || 'unknown';
+            
+            showAssetDetails(assetName, assetType, card);
+        });
+        
+        // Add click handlers for asset action buttons
+        const actionButtons = card.querySelectorAll('.asset-actions .action-btn');
+        actionButtons.forEach(button => {
+            button.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const action = button.getAttribute('data-action') || button.textContent.toLowerCase();
+                const assetName = card.querySelector('.asset-title')?.textContent || 'Unknown Asset';
+                
+                handleAssetAction(action, assetName, card);
+            });
+        });
+    });
+}
+
+function showAssetDetails(assetName, assetType, cardElement) {
+    /**
+     * Show detailed view of a marketplace asset
+     * @param {string} assetName - Name of the asset
+     * @param {string} assetType - Type of the asset
+     * @param {Element} cardElement - The asset card element
+     */
+    console.log(`Opening details for ${assetType}: ${assetName}`);
+    
+    // Create modal or navigate to detail view
+    const modal = document.createElement('div');
+    modal.className = 'asset-detail-modal';
+    modal.innerHTML = `
+        <div class="modal-overlay" onclick="this.parentElement.remove()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-info-circle"></i> ${assetName}</h3>
+                <button class="modal-close" onclick="this.closest('.asset-detail-modal').remove()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="asset-detail-info">
+                    <p><strong>Type:</strong> ${assetType.replace('_', ' ').toUpperCase()}</p>
+                    <p><strong>Status:</strong> Available</p>
+                    <p><strong>Category:</strong> ${getAssetCategory(assetType)}</p>
+                    <p>This is a detailed view of the selected marketplace asset. In a production environment, this would show comprehensive information including specifications, pricing, reviews, and usage examples.</p>
+                </div>
+                <div class="asset-detail-actions">
+                    <button class="btn btn-primary" onclick="handleAssetAction('view', '${assetName}')">
+                        <i class="fas fa-eye"></i> View Details
+                    </button>
+                    <button class="btn btn-secondary" onclick="handleAssetAction('download', '${assetName}')">
+                        <i class="fas fa-download"></i> Download
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Animate in
+    setTimeout(() => {
+        modal.style.opacity = '1';
+        modal.querySelector('.modal-content').style.transform = 'scale(1)';
+    }, 10);
+}
+
+function handleAssetAction(action, assetName, cardElement) {
+    /**
+     * Handle actions performed on marketplace assets
+     * @param {string} action - The action to perform
+     * @param {string} assetName - Name of the asset
+     * @param {Element} cardElement - The asset card element
+     */
+    console.log(`Performing action "${action}" on asset: ${assetName}`);
+    
+    // Show action feedback
+    showActionFeedback(action, assetName);
+    
+    switch (action) {
+        case 'download':
+        case 'get':
+            handleAssetDownload(assetName);
+            break;
+        case 'view':
+        case 'details':
+            handleAssetView(assetName);
+            break;
+        case 'favorite':
+        case 'bookmark':
+            handleAssetFavorite(assetName, cardElement);
+            break;
+        case 'share':
+            handleAssetShare(assetName);
+            break;
+        default:
+            console.log(`Unknown action: ${action}`);
+    }
+}
+
+function getAssetCategory(assetType) {
+    /**
+     * Get human-readable category name for asset type
+     * @param {string} assetType - The asset type identifier
+     * @returns {string} - Human-readable category name
+     */
+    const categories = {
+        'ai_model': 'Artificial Intelligence Models',
+        'dataset': 'Data & Datasets',
+        'agent_workflow': 'AI Agents & Workflows',
+        'mcp_tool': 'Model Context Protocol Tools',
+        'compute_resource': 'Computational Resources',
+        'knowledge_resource': 'Knowledge Resources',
+        'evaluation_service': 'Evaluation Services',
+        'training_service': 'Training Services',
+        'safety_tool': 'Safety & Governance Tools'
+    };
+    
+    return categories[assetType] || 'Unknown Category';
+}
+
+function showActionFeedback(action, assetName) {
+    /**
+     * Show user feedback for performed actions
+     * @param {string} action - The performed action
+     * @param {string} assetName - Name of the asset
+     */
+    const feedback = document.createElement('div');
+    feedback.className = 'action-feedback';
+    feedback.innerHTML = `
+        <div class="feedback-content">
+            <i class="fas fa-check-circle"></i>
+            <span>Action "${action}" performed on "${assetName}"</span>
+        </div>
+    `;
+    
+    document.body.appendChild(feedback);
+    
+    // Auto-remove after 3 seconds
+    setTimeout(() => {
+        feedback.remove();
+    }, 3000);
+}
+
+function handleAssetDownload(assetName) {
+    console.log(`Downloading asset: ${assetName}`);
+    // Implement actual download logic
+}
+
+function handleAssetView(assetName) {
+    console.log(`Viewing asset details: ${assetName}`);
+    // Implement detailed view logic
+}
+
+function handleAssetFavorite(assetName, cardElement) {
+    console.log(`Favoriting asset: ${assetName}`);
+    
+    // Toggle favorite state
+    const favoriteBtn = cardElement.querySelector('.action-btn[data-action="favorite"]');
+    if (favoriteBtn) {
+        favoriteBtn.classList.toggle('favorited');
+        const icon = favoriteBtn.querySelector('i');
+        if (icon) {
+            icon.className = favoriteBtn.classList.contains('favorited') 
+                ? 'fas fa-heart' 
+                : 'far fa-heart';
+        }
+    }
+}
+
+function handleAssetShare(assetName) {
+    console.log(`Sharing asset: ${assetName}`);
+    
+    if (navigator.share) {
+        navigator.share({
+            title: `PRSM Marketplace - ${assetName}`,
+            text: `Check out this asset on PRSM Marketplace: ${assetName}`,
+            url: window.location.href
+        });
+    } else {
+        // Fallback: copy to clipboard
+        navigator.clipboard.writeText(window.location.href).then(() => {
+            showActionFeedback('copied link', assetName);
+        });
+    }
+}
+
+// Initialize marketplace functionality when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    // Add delay to ensure marketplace elements are loaded
+    setTimeout(() => {
+        initializeMarketplaceAssetSwitching();
+        initializeAssetCardInteractions();
+    }, 700);
+});

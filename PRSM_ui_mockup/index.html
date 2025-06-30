@@ -1213,7 +1213,7 @@
 
                 <!-- Marketplace Section -->
                 <section id="marketplace-content" class="content-section">
-                    <h4>AI Model Marketplace</h4>
+                    <h4>PRSM AI Marketplace</h4>
                     <div class="marketplace-container">
                         
                         <!-- Marketplace Header with Stats -->
@@ -1222,8 +1222,15 @@
                                 <div class="stat-card">
                                     <i class="fas fa-cubes"></i>
                                     <div class="stat-info">
-                                        <span class="stat-value">2,847</span>
-                                        <span class="stat-label">Available Models</span>
+                                        <span class="stat-value">8,847</span>
+                                        <span class="stat-label">Total Assets</span>
+                                    </div>
+                                </div>
+                                <div class="stat-card">
+                                    <i class="fas fa-layer-group"></i>
+                                    <div class="stat-info">
+                                        <span class="stat-value">9</span>
+                                        <span class="stat-label">Asset Types</span>
                                     </div>
                                 </div>
                                 <div class="stat-card">
@@ -1243,28 +1250,111 @@
                                 <div class="stat-card">
                                     <i class="fas fa-chart-line"></i>
                                     <div class="stat-info">
-                                        <span class="stat-value">847</span>
+                                        <span class="stat-value">1,247</span>
                                         <span class="stat-label">Today's Sales</span>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Model Discovery Interface -->
+                        <!-- Asset Type Navigation -->
                         <div class="marketplace-section">
-                            <h5><i class="fas fa-search"></i> Model Discovery</h5>
+                            <h5><i class="fas fa-layer-group"></i> Asset Categories</h5>
+                            <div class="asset-type-grid">
+                                <div class="asset-type-card active" data-type="ai_model">
+                                    <i class="fas fa-brain"></i>
+                                    <h6>AI Models</h6>
+                                    <span class="asset-count">2,847</span>
+                                    <p>Language models, fine-tuned models, multimodal AI</p>
+                                </div>
+                                <div class="asset-type-card" data-type="dataset">
+                                    <i class="fas fa-database"></i>
+                                    <h6>Datasets</h6>
+                                    <span class="asset-count">1,523</span>
+                                    <p>Training data, benchmarks, research datasets</p>
+                                </div>
+                                <div class="asset-type-card" data-type="agent_workflow">
+                                    <i class="fas fa-robot"></i>
+                                    <h6>AI Agents</h6>
+                                    <span class="asset-count">892</span>
+                                    <p>Autonomous agents, workflows, automation</p>
+                                </div>
+                                <div class="asset-type-card" data-type="mcp_tool">
+                                    <i class="fas fa-tools"></i>
+                                    <h6>MCP Tools</h6>
+                                    <span class="asset-count">1,247</span>
+                                    <p>Model Context Protocol tools, integrations</p>
+                                </div>
+                                <div class="asset-type-card" data-type="compute_resource">
+                                    <i class="fas fa-server"></i>
+                                    <h6>Compute</h6>
+                                    <span class="asset-count">456</span>
+                                    <p>GPU clusters, TPUs, computational infrastructure</p>
+                                </div>
+                                <div class="asset-type-card" data-type="knowledge_resource">
+                                    <i class="fas fa-network-wired"></i>
+                                    <h6>Knowledge</h6>
+                                    <span class="asset-count">734</span>
+                                    <p>Knowledge graphs, ontologies, semantic data</p>
+                                </div>
+                                <div class="asset-type-card" data-type="evaluation_service">
+                                    <i class="fas fa-chart-bar"></i>
+                                    <h6>Evaluation</h6>
+                                    <span class="asset-count">298</span>
+                                    <p>Benchmarking, safety testing, performance evaluation</p>
+                                </div>
+                                <div class="asset-type-card" data-type="training_service">
+                                    <i class="fas fa-graduation-cap"></i>
+                                    <h6>Training</h6>
+                                    <span class="asset-count">412</span>
+                                    <p>Fine-tuning, distillation, optimization services</p>
+                                </div>
+                                <div class="asset-type-card" data-type="safety_tool">
+                                    <i class="fas fa-shield-alt"></i>
+                                    <h6>Safety Tools</h6>
+                                    <span class="asset-count">438</span>
+                                    <p>Alignment, bias detection, safety validation</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Asset Discovery Interface -->
+                        <div class="marketplace-section">
+                            <h5><i class="fas fa-search"></i> <span id="discovery-title">AI Model Discovery</span></h5>
                             <div class="model-discovery">
                                 <div class="discovery-filters">
                                     <div class="filter-row">
-                                        <input type="text" id="marketplace-search" placeholder="Search models, creators, categories..." class="marketplace-search-input">
+                                        <input type="text" id="marketplace-search" placeholder="Search assets, creators, categories..." class="marketplace-search-input">
                                         <select id="category-filter" class="filter-select">
                                             <option value="">All Categories</option>
-                                            <option value="language_model">Language Models</option>
-                                            <option value="image_generation">Image Generation</option>
-                                            <option value="code_generation">Code Generation</option>
-                                            <option value="multimodal">Multimodal</option>
-                                            <option value="embedding">Embeddings</option>
-                                            <option value="fine_tuned">Fine-tuned</option>
+                                            <!-- Dynamic options based on selected asset type -->
+                                            <optgroup label="AI Models" id="ai-model-categories">
+                                                <option value="language_model">Language Models</option>
+                                                <option value="image_generation">Image Generation</option>
+                                                <option value="code_generation">Code Generation</option>
+                                                <option value="multimodal">Multimodal</option>
+                                                <option value="embedding">Embeddings</option>
+                                                <option value="fine_tuned">Fine-tuned</option>
+                                            </optgroup>
+                                            <optgroup label="Datasets" id="dataset-categories" style="display: none;">
+                                                <option value="training_data">Training Data</option>
+                                                <option value="fine_tuning">Fine-tuning</option>
+                                                <option value="evaluation_benchmarks">Evaluation Benchmarks</option>
+                                                <option value="scientific_research">Scientific Research</option>
+                                                <option value="multimodal">Multimodal</option>
+                                            </optgroup>
+                                            <optgroup label="AI Agents" id="agent-categories" style="display: none;">
+                                                <option value="research_agent">Research Agent</option>
+                                                <option value="code_generation">Code Generation</option>
+                                                <option value="data_analysis">Data Analysis</option>
+                                                <option value="automation">Automation</option>
+                                            </optgroup>
+                                            <optgroup label="MCP Tools" id="tool-categories" style="display: none;">
+                                                <option value="data_processing">Data Processing</option>
+                                                <option value="api_integration">API Integration</option>
+                                                <option value="file_operations">File Operations</option>
+                                                <option value="web_scraping">Web Scraping</option>
+                                            </optgroup>
                                         </select>
                                         <select id="pricing-filter" class="filter-select">
                                             <option value="">All Pricing</option>
@@ -1439,6 +1529,181 @@
                                         <div class="model-actions">
                                             <button class="btn-primary model-action-btn">Try Model</button>
                                             <button class="btn-secondary model-action-btn">View Details</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Dataset Card -->
+                                    <div class="model-card dataset-card" data-type="dataset" style="display: none;">
+                                        <div class="model-header">
+                                            <div class="model-badge dataset-badge">Dataset</div>
+                                            <div class="model-badge verified-badge">✓ Verified</div>
+                                        </div>
+                                        <div class="model-info">
+                                            <h6 class="model-name">Scientific Papers Corpus</h6>
+                                            <p class="model-creator">by ArXiv Collective</p>
+                                            <div class="model-rating">
+                                                <span class="stars">★★★★★</span>
+                                                <span class="rating-count">(423 reviews)</span>
+                                            </div>
+                                            <p class="model-description">2.1M scientific papers from physics, chemistry, and biology with metadata and abstracts.</p>
+                                            <div class="model-tags">
+                                                <span class="tag">Training Data</span>
+                                                <span class="tag">Scientific</span>
+                                                <span class="tag">2.1M Records</span>
+                                            </div>
+                                        </div>
+                                        <div class="model-pricing">
+                                            <div class="price-info">
+                                                <span class="price">₦ 89</span>
+                                                <span class="price-unit">/ download</span>
+                                            </div>
+                                            <div class="usage-stats">
+                                                <span class="usage-count">156 downloads</span>
+                                            </div>
+                                        </div>
+                                        <div class="model-actions">
+                                            <button class="btn-primary model-action-btn">Download</button>
+                                            <button class="btn-secondary model-action-btn">Preview</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Agent Card -->
+                                    <div class="model-card agent-card" data-type="agent_workflow" style="display: none;">
+                                        <div class="model-header">
+                                            <div class="model-badge agent-badge">AI Agent</div>
+                                            <div class="model-badge featured-badge">Featured</div>
+                                        </div>
+                                        <div class="model-info">
+                                            <h6 class="model-name">Research Assistant Pro</h6>
+                                            <p class="model-creator">by AutoResearch Labs</p>
+                                            <div class="model-rating">
+                                                <span class="stars">★★★★★</span>
+                                                <span class="rating-count">(678 reviews)</span>
+                                            </div>
+                                            <p class="model-description">Autonomous research agent that can search papers, summarize findings, and generate insights.</p>
+                                            <div class="model-tags">
+                                                <span class="tag">Research</span>
+                                                <span class="tag">Multi-step</span>
+                                                <span class="tag">Autonomous</span>
+                                            </div>
+                                        </div>
+                                        <div class="model-pricing">
+                                            <div class="price-info">
+                                                <span class="price">₦ 2.50</span>
+                                                <span class="price-unit">/ task</span>
+                                            </div>
+                                            <div class="usage-stats">
+                                                <span class="usage-count">1.2K tasks today</span>
+                                            </div>
+                                        </div>
+                                        <div class="model-actions">
+                                            <button class="btn-primary model-action-btn">Deploy</button>
+                                            <button class="btn-secondary model-action-btn">Test Run</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- MCP Tool Card -->
+                                    <div class="model-card tool-card" data-type="mcp_tool" style="display: none;">
+                                        <div class="model-header">
+                                            <div class="model-badge tool-badge">MCP Tool</div>
+                                            <div class="model-badge free-badge">Free</div>
+                                        </div>
+                                        <div class="model-info">
+                                            <h6 class="model-name">PDF Data Extractor</h6>
+                                            <p class="model-creator">by DataTools Inc</p>
+                                            <div class="model-rating">
+                                                <span class="stars">★★★★☆</span>
+                                                <span class="rating-count">(892 reviews)</span>
+                                            </div>
+                                            <p class="model-description">Extract structured data from PDF documents with tables, forms, and text recognition.</p>
+                                            <div class="model-tags">
+                                                <span class="tag">PDF Processing</span>
+                                                <span class="tag">OCR</span>
+                                                <span class="tag">Data Extraction</span>
+                                            </div>
+                                        </div>
+                                        <div class="model-pricing">
+                                            <div class="price-info">
+                                                <span class="price">Free</span>
+                                                <span class="price-unit">open source</span>
+                                            </div>
+                                            <div class="usage-stats">
+                                                <span class="usage-count">8.9K uses today</span>
+                                            </div>
+                                        </div>
+                                        <div class="model-actions">
+                                            <button class="btn-primary model-action-btn">Install</button>
+                                            <button class="btn-secondary model-action-btn">Docs</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Compute Resource Card -->
+                                    <div class="model-card compute-card" data-type="compute_resource" style="display: none;">
+                                        <div class="model-header">
+                                            <div class="model-badge compute-badge">Compute</div>
+                                            <div class="model-badge premium-badge">Premium</div>
+                                        </div>
+                                        <div class="model-info">
+                                            <h6 class="model-name">A100 GPU Cluster</h6>
+                                            <p class="model-creator">by CloudCompute Pro</p>
+                                            <div class="model-rating">
+                                                <span class="stars">★★★★★</span>
+                                                <span class="rating-count">(234 reviews)</span>
+                                            </div>
+                                            <p class="model-description">8x NVIDIA A100 80GB cluster with high-speed interconnect for large model training.</p>
+                                            <div class="model-tags">
+                                                <span class="tag">8x A100</span>
+                                                <span class="tag">640GB VRAM</span>
+                                                <span class="tag">Training</span>
+                                            </div>
+                                        </div>
+                                        <div class="model-pricing">
+                                            <div class="price-info">
+                                                <span class="price">₦ 45.00</span>
+                                                <span class="price-unit">/ hour</span>
+                                            </div>
+                                            <div class="usage-stats">
+                                                <span class="usage-count">92% uptime</span>
+                                            </div>
+                                        </div>
+                                        <div class="model-actions">
+                                            <button class="btn-primary model-action-btn">Reserve</button>
+                                            <button class="btn-secondary model-action-btn">Specs</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Safety Tool Card -->
+                                    <div class="model-card safety-card" data-type="safety_tool" style="display: none;">
+                                        <div class="model-header">
+                                            <div class="model-badge safety-badge">Safety Tool</div>
+                                            <div class="model-badge verified-badge">✓ Verified</div>
+                                        </div>
+                                        <div class="model-info">
+                                            <h6 class="model-name">Bias Detection Suite</h6>
+                                            <p class="model-creator">by FairAI Labs</p>
+                                            <div class="model-rating">
+                                                <span class="stars">★★★★★</span>
+                                                <span class="rating-count">(567 reviews)</span>
+                                            </div>
+                                            <p class="model-description">Comprehensive bias detection and fairness testing for AI models across protected attributes.</p>
+                                            <div class="model-tags">
+                                                <span class="tag">Bias Detection</span>
+                                                <span class="tag">Fairness</span>
+                                                <span class="tag">Compliance</span>
+                                            </div>
+                                        </div>
+                                        <div class="model-pricing">
+                                            <div class="price-info">
+                                                <span class="price">₦ 15.00</span>
+                                                <span class="price-unit">/ scan</span>
+                                            </div>
+                                            <div class="usage-stats">
+                                                <span class="usage-count">445 scans today</span>
+                                            </div>
+                                        </div>
+                                        <div class="model-actions">
+                                            <button class="btn-primary model-action-btn">Run Scan</button>
+                                            <button class="btn-secondary model-action-btn">Report</button>
                                         </div>
                                     </div>
                                 </div>

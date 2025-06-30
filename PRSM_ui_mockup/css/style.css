@@ -1948,6 +1948,91 @@ button.inline-btn:hover {
     color: white;
 }
 
+/* Asset Type Badges */
+.dataset-badge {
+    background: linear-gradient(135deg, #8e44ad, #6d3785);
+    color: white;
+}
+
+.agent-badge {
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+    color: white;
+}
+
+.tool-badge {
+    background: linear-gradient(135deg, #f39c12, #d68910);
+    color: white;
+}
+
+.compute-badge {
+    background: linear-gradient(135deg, #34495e, #2c3e50);
+    color: white;
+}
+
+.safety-badge {
+    background: linear-gradient(135deg, #16a085, #138d75);
+    color: white;
+}
+
+/* Asset Type Grid */
+.asset-type-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.asset-type-card {
+    background: var(--background-secondary);
+    border: 2px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.asset-type-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent-primary);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.asset-type-card.active {
+    border-color: var(--accent-primary);
+    background: rgba(74, 144, 226, 0.1);
+    transform: translateY(-2px);
+}
+
+.asset-type-card i {
+    font-size: 28px;
+    margin-bottom: 12px;
+    color: var(--accent-primary);
+}
+
+.asset-type-card h6 {
+    margin: 8px 0 4px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.asset-type-card .asset-count {
+    display: block;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent-primary);
+    margin: 4px 0 8px 0;
+}
+
+.asset-type-card p {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 0;
+    line-height: 1.4;
+}
+
 .community-badge {
     background: #9b59b6;
     color: white;
@@ -10256,5 +10341,376 @@ button.inline-btn:hover {
         flex-direction: column;
         align-items: flex-start;
         gap: 15px;
+    }
+}
+
+/* ============================================================================
+   MARKETPLACE INTERACTIVE FUNCTIONALITY STYLES
+   ============================================================================ */
+
+/* Asset Type Card Interactive States */
+.asset-type-card {
+    transition: all 0.3s ease;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+}
+
+.asset-type-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(255, 255, 255, 0.1);
+}
+
+.asset-type-card.active {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 30px rgba(255, 255, 255, 0.15);
+    border-color: var(--accent-primary);
+}
+
+.asset-type-card.active::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+}
+
+/* Asset Card Interactive States */
+.asset-card {
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.asset-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 25px rgba(255, 255, 255, 0.1);
+}
+
+/* Marketplace Loading State */
+.marketplace-loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10;
+    background: rgba(0, 0, 0, 0.8);
+    padding: 20px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.loading-spinner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--text-primary);
+}
+
+.loading-spinner i {
+    font-size: 18px;
+    color: var(--accent-primary);
+}
+
+.loading-spinner span {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+/* Asset Detail Modal */
+.asset-detail-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.modal-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(4px);
+}
+
+.modal-content {
+    position: relative;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    overflow: hidden;
+    transform: scale(0.9);
+    transition: transform 0.3s ease;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 16px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.modal-close:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: 20px;
+}
+
+.asset-detail-info {
+    margin-bottom: 20px;
+}
+
+.asset-detail-info p {
+    margin: 8px 0;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.asset-detail-info p strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.asset-detail-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+.asset-detail-actions .btn {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: none;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.asset-detail-actions .btn-primary {
+    background: var(--accent-primary);
+    color: var(--bg-primary);
+}
+
+.asset-detail-actions .btn-primary:hover {
+    background: var(--text-primary);
+}
+
+.asset-detail-actions .btn-secondary {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+
+.asset-detail-actions .btn-secondary:hover {
+    background: var(--bg-primary);
+}
+
+/* Action Feedback Toast */
+.action-feedback {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1100;
+    background: var(--bg-tertiary);
+    border: 1px solid rgba(74, 222, 128, 0.3);
+    border-radius: 8px;
+    padding: 12px 16px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    animation: slideInFromRight 0.3s ease;
+}
+
+.feedback-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.feedback-content i {
+    color: #4ade80;
+    font-size: 16px;
+}
+
+@keyframes slideInFromRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Asset Action Button States */
+.action-btn.favorited {
+    color: #e74c3c !important;
+    background: rgba(231, 76, 60, 0.1) !important;
+}
+
+.action-btn.favorited:hover {
+    background: rgba(231, 76, 60, 0.2) !important;
+}
+
+/* Enhanced Asset Type Card Hover Effects */
+.asset-type-card .asset-count {
+    transition: all 0.3s ease;
+}
+
+.asset-type-card:hover .asset-count {
+    color: var(--accent-primary);
+    transform: scale(1.05);
+}
+
+.asset-type-card.active .asset-count {
+    color: var(--accent-primary);
+    font-weight: 700;
+}
+
+/* Smooth transitions for asset filtering */
+.asset-card {
+    transition: opacity 0.3s ease, transform 0.3s ease, display 0.3s ease;
+}
+
+/* Asset Type Badge Enhancement */
+.asset-type-card i {
+    transition: all 0.3s ease;
+}
+
+.asset-type-card:hover i {
+    transform: scale(1.1);
+    color: var(--accent-primary);
+}
+
+.asset-type-card.active i {
+    color: var(--accent-primary);
+    transform: scale(1.1);
+}
+
+/* Mobile Responsiveness for Marketplace */
+@media (max-width: 768px) {
+    .asset-type-grid {
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 12px;
+    }
+    
+    .asset-type-card {
+        padding: 16px;
+    }
+    
+    .asset-type-card h6 {
+        font-size: 14px;
+    }
+    
+    .asset-type-card .asset-count {
+        font-size: 18px;
+    }
+    
+    .asset-type-card p {
+        font-size: 12px;
+    }
+    
+    .modal-content {
+        width: 95%;
+        margin: 10px;
+    }
+    
+    .modal-header {
+        padding: 16px;
+    }
+    
+    .modal-body {
+        padding: 16px;
+    }
+    
+    .asset-detail-actions {
+        flex-direction: column;
+    }
+    
+    .action-feedback {
+        top: 10px;
+        right: 10px;
+        left: 10px;
+        width: auto;
+    }
+}
+
+@media (max-width: 480px) {
+    .asset-type-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+    
+    .asset-type-card {
+        padding: 12px;
+        text-align: center;
+    }
+    
+    .asset-type-card i {
+        font-size: 20px;
+        margin-bottom: 4px;
+    }
+    
+    .asset-type-card h6 {
+        font-size: 12px;
+        margin: 4px 0;
+    }
+    
+    .asset-type-card .asset-count {
+        font-size: 16px;
+        margin: 2px 0;
+    }
+    
+    .asset-type-card p {
+        font-size: 10px;
+        line-height: 1.3;
+        margin: 0;
     }
 }
