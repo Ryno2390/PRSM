@@ -1,5 +1,20 @@
-# PRSM Enterprise-Scale Multi-Cloud Infrastructure
-# Terraform configuration for global production deployment
+# PRSM Enterprise-Scale AWS Infrastructure
+# Terraform configuration for production deployment on AWS
+# 
+# STRATEGIC APPROACH: AWS-First for Phase 1
+# =========================================
+# Phase 1 (Months 1-18): Focus on single-cloud excellence
+# - Operational simplicity and expertise building
+# - Reduced complexity for Series A stage
+# - Cost optimization through single-vendor relationship
+# - Faster deployment and troubleshooting
+# 
+# Multi-cloud expansion planned for Phase 2+ when:
+# - Team has proven operational excellence on single cloud
+# - Customer requirements demand multi-cloud
+# - Operational complexity can be properly managed
+# 
+# See: PRSM_PRODUCTION_ROADMAP.md for detailed timeline
 
 terraform {
   required_version = ">= 1.0"
@@ -7,14 +22,6 @@ terraform {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
-    }
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 4.0"
-    }
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 3.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
@@ -42,49 +49,16 @@ variable "environment" {
   default     = "production"
 }
 
-variable "regions" {
-  description = "List of regions for global deployment"
-  type = object({
-    primary = object({
-      aws    = string
-      gcp    = string
-      azure  = string
-    })
-    secondary = list(object({
-      aws    = string
-      gcp    = string
-      azure  = string
-    }))
-  })
-  default = {
-    primary = {
-      aws   = "us-west-2"
-      gcp   = "us-west1"
-      azure = "West US 2"
-    }
-    secondary = [
-      {
-        aws   = "us-east-1"
-        gcp   = "us-east1"
-        azure = "East US"
-      },
-      {
-        aws   = "eu-west-1"
-        gcp   = "europe-west1"
-        azure = "West Europe"
-      },
-      {
-        aws   = "ap-southeast-1"
-        gcp   = "asia-southeast1"
-        azure = "Southeast Asia"
-      },
-      {
-        aws   = "ap-northeast-1"
-        gcp   = "asia-northeast1"
-        azure = "Japan East"
-      }
-    ]
-  }
+variable "aws_region" {
+  description = "Primary AWS region for deployment"
+  type        = string
+  default     = "us-west-2"
+}
+
+variable "aws_secondary_regions" {
+  description = "Secondary AWS regions for multi-region deployment (Phase 2+)"
+  type        = list(string)
+  default     = ["us-east-1", "eu-west-1"]
 }
 
 variable "cluster_config" {
@@ -131,10 +105,12 @@ variable "prsm_config" {
 locals {
   name_prefix = "prsm-${var.environment}"
   common_tags = {
-    Environment = var.environment
-    Project     = "PRSM"
-    ManagedBy   = "Terraform"
-    Owner       = "PRSM-Team"
+    Environment   = var.environment
+    Project       = "PRSM"
+    ManagedBy     = "Terraform"
+    Owner         = "PRSM-Team"
+    CloudStrategy = "AWS-First"
+    Phase         = "Phase-1-Production-Core"
   }
 }
 
@@ -145,22 +121,11 @@ data "aws_availability_zones" "available" {
 
 # AWS Provider configuration
 provider "aws" {
-  region = var.regions.primary.aws
+  region = var.aws_region
   
   default_tags {
     tags = local.common_tags
   }
-}
-
-# GCP Provider configuration
-provider "google" {
-  project = "prsm-enterprise"
-  region  = var.regions.primary.gcp
-}
-
-# Azure Provider configuration
-provider "azurerm" {
-  features {}
 }
 
 # ==========================================

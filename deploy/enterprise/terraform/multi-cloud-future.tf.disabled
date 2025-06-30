@@ -1,0 +1,77 @@
+# PRSM Multi-Cloud Infrastructure (Future Phase 2+)
+# This file contains multi-cloud configuration for future implementation
+# Currently disabled (.disabled extension) to focus on AWS-first strategy
+#
+# WHEN TO ENABLE:
+# - Phase 2+ (Month 19+) when AWS infrastructure is proven
+# - Customer requirements demand multi-cloud
+# - Team has operational expertise for multi-cloud complexity
+# - Compliance requirements demand geographic data sovereignty
+
+terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 4.0"
+    }
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 3.0"
+    }
+  }
+}
+
+# Multi-cloud region configuration (for future use)
+variable "multi_cloud_regions" {
+  description = "Multi-cloud regions for Phase 2+ global deployment"
+  type = object({
+    primary = object({
+      aws   = string
+      gcp   = string
+      azure = string
+    })
+    secondary = list(object({
+      aws   = string
+      gcp   = string
+      azure = string
+    }))
+  })
+  default = {
+    primary = {
+      aws   = "us-west-2"
+      gcp   = "us-west1"
+      azure = "West US 2"
+    }
+    secondary = [
+      {
+        aws   = "us-east-1"
+        gcp   = "us-east1"
+        azure = "East US"
+      },
+      {
+        aws   = "eu-west-1"
+        gcp   = "europe-west1"
+        azure = "West Europe"
+      },
+      {
+        aws   = "ap-southeast-1"
+        gcp   = "asia-southeast1"
+        azure = "Southeast Asia"
+      }
+    ]
+  }
+}
+
+# GCP Provider configuration (disabled for Phase 1)
+# provider "google" {
+#   project = "prsm-enterprise"
+#   region  = var.multi_cloud_regions.primary.gcp
+# }
+
+# Azure Provider configuration (disabled for Phase 1)
+# provider "azurerm" {
+#   features {}
+# }
+
+# Multi-cloud resources would be defined here
+# Currently focusing on AWS-first approach for operational simplicity
