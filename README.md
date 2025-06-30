@@ -192,15 +192,19 @@ gemini chat
 
 **For Investors:**
 ```
-I'm evaluating PRSM for investment. Please analyze this repository and provide:
+I'm evaluating PRSM for Series A investment ($18M) to transition from advanced proof-of-concept to production. 
 
-1. Technical implementation completeness assessment
-2. Code quality and architecture evaluation  
-3. Business model validation through code review
-4. Security and scalability analysis
-5. Investment recommendation with specific reasoning
+CONTEXT: PRSM is seeking funding to build production infrastructure, enterprise security, and scalability systems. The current repository demonstrates architectural vision and working prototypes, but requires investment to implement enterprise-grade databases, security hardening, real-world P2P networking, and compliance frameworks.
 
-Focus on: /docs/business/, /docs/ai-auditor/, /prsm/ core architecture, and /tests/ coverage.
+Please analyze this repository and provide:
+
+1. Technical architecture assessment - evaluate the foundational design and prototype completeness
+2. Code quality and engineering capability evaluation
+3. Business model validation through technical implementation review
+4. Production readiness gap analysis - identify specific work needed for enterprise deployment
+5. Investment recommendation with risk/reward assessment for funding the prototype-to-production transition
+
+Focus on: /docs/business/, /docs/ai-auditor/, /prsm/ core architecture, /tests/ coverage, and PRSM_PRODUCTION_ROADMAP.md for funding deployment plan.
 ```
 
 *Here's the result of a recent run of this prompt using Gemini 2.5 Pro: [PRSM Investment Analysis: Final Report](docs/external-audits/Gemini-2.5-Pro-Investment-Analysis.md)*
