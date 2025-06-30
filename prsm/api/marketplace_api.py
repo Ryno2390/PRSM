@@ -1,9 +1,13 @@
 """
-Marketplace API
-===============
+Legacy Marketplace API (DEPRECATED)
+===================================
 
-REST API endpoints for the PRSM AI model marketplace.
-Provides model discovery, listing management, and rental operations.
+⚠️  DEPRECATED: This file contains legacy API implementations and should NOT be used.
+
+Use real_marketplace_api.py instead - it contains production-ready API endpoints
+with complete functionality, real database operations, and comprehensive features.
+
+This file is kept only for backwards compatibility and will be removed in a future version.
 """
 
 import structlog

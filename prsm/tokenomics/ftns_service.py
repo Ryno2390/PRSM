@@ -218,21 +218,48 @@ class FTNSService:
             
         Returns:
             True if allocation successful
+            
+        Raises:
+            ValueError: Invalid context parameters
+            RuntimeError: Context allocation system failure
         """
-        # Check if user has pre-allocated enough context
-        if session.nwtn_context_allocation >= required_context:
-            return True
-        
-        # Calculate additional context needed
-        additional_context = required_context - session.nwtn_context_allocation
-        
-        # Charge for additional context
-        success = await self.charge_context_access(session.user_id, additional_context)
-        
-        if success:
-            session.nwtn_context_allocation = required_context
-        
-        return success
+        try:
+            # Validate inputs
+            if required_context <= 0:
+                raise ValueError(f"Invalid required_context: {required_context}")
+            if not session or not session.user_id:
+                raise ValueError("Invalid session or missing user_id")
+            
+            # Check if user has pre-allocated enough context
+            if session.nwtn_context_allocation >= required_context:
+                return True
+            
+            # Calculate additional context needed
+            additional_context = required_context - session.nwtn_context_allocation
+            
+            # Charge for additional context
+            success = await self.charge_context_access(session.user_id, additional_context)
+            
+            if success:
+                session.nwtn_context_allocation = required_context
+                logger.info("Context allocated successfully",
+                           session_id=session.session_id,
+                           user_id=session.user_id,
+                           allocated_context=required_context)
+            else:
+                logger.warning("Context allocation failed - insufficient funds",
+                              session_id=session.session_id,
+                              user_id=session.user_id,
+                              required_context=required_context)
+            
+            return success
+            
+        except Exception as e:
+            logger.error("Context allocation system error",
+                        session_id=getattr(session, 'session_id', 'unknown'),
+                        user_id=getattr(session, 'user_id', 'unknown'),
+                        error=str(e))
+            raise RuntimeError(f"Context allocation failed: {str(e)}") from e
     
     # === Reward Distribution ===
     

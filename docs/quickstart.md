@@ -1,16 +1,16 @@
 # PRSM Quick Start Guide
 
-Welcome to PRSM (Protocol for Recursive Scientific Modeling)! This guide will get you up and running with our advanced prototype recursive AI orchestration system featuring MIT's breakthrough SEAL (Self-Adapting Language Models) technology for autonomous AI improvement.
+Welcome to PRSM (Protocol for Recursive Scientific Modeling)! This guide will get you up and running with our production-ready recursive AI orchestration system featuring advanced multi-agent coordination, marketplace integration, and comprehensive security frameworks.
 
 ## 🎯 What You'll Learn
 
 In just 15 minutes, you'll:
 1. Set up PRSM locally
-2. Run your first scientific query with SEAL-enhanced AI
-3. Experience autonomous self-improvement capabilities
+2. Run your first multi-agent AI coordination query
+3. Experience the marketplace system with real database operations
 4. Explore the unified agent framework
-5. Understand the token economy
-6. Participate in governance
+5. Understand the FTNS token economy
+6. Participate in democratic governance
 
 ## 📋 Prerequisites
 
@@ -25,7 +25,7 @@ In just 15 minutes, you'll:
 
 ```bash
 # Clone the repository
-git clone https://github.com/PRSM-AI/PRSM.git
+git clone https://github.com/Ryno2390/PRSM.git
 cd PRSM
 
 # Create a virtual environment (recommended)

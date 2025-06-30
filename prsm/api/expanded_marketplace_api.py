@@ -1,14 +1,15 @@
 """
-PRSM Expanded Marketplace API
-=============================
+PRSM Expanded Marketplace API (DEPRECATED)
+==========================================
 
-Comprehensive REST API for all marketplace resource types:
-- Datasets, Agent Workflows, Compute Resources
-- Knowledge Resources, Evaluation Services
-- Training Services, Safety Tools
+⚠️  DEPRECATED: This API has been superseded by real_marketplace_api.py
 
-Provides unified endpoints for discovery, transactions, reviews,
-and marketplace management across the complete PRSM AI ecosystem.
+The real_marketplace_api.py provides all functionality from this file and more:
+- Universal resource management for all 9 asset types
+- Complete database operations with real SQLAlchemy
+- Production-ready implementation with comprehensive features
+
+This file is kept for backwards compatibility and will be removed in a future version.
 """
 
 from typing import Dict, List, Optional, Any, Union

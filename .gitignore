@@ -349,3 +349,6 @@ TODO.md
 NOTES.md
 # Local Netlify folder
 .netlify
+ai-concierge/.next*/
+ai-concierge/out/
+ai-concierge/build/

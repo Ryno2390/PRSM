@@ -219,8 +219,8 @@ class EnhancedNWTNOrchestrator:
             logger.error("Session budget creation failed",
                         session_id=session.session_id,
                         error=str(e))
-            # Continue without budget if creation fails
-            return None
+            # Budget creation is critical for cost control - don't continue without it
+            raise RuntimeError(f"Failed to create session budget: {str(e)}") from e
     
     async def _create_persistent_session(self, user_input: UserInput) -> PRSMSession:
         """Create session with database persistence"""

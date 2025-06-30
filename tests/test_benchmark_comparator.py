@@ -221,6 +221,11 @@ def test_benchmark_comparator_components():
         print()
         print("🚀 Ready for production benchmark monitoring!")
         
+        # Assert all components work
+        assert len(stored_ids) == len(mock_results), "All benchmark results should be stored"
+        assert len(queried_results) > 0, "Should be able to query stored results"
+        assert comparator is not None, "Comparator should initialize successfully"
+        
         return True
         
     except Exception as e:
