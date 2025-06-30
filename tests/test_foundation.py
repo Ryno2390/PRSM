@@ -348,12 +348,11 @@ def run_all_tests():
     
     print(f"\n📈 Results: {passed} passed, {failed} failed")
     
-    if failed == 0:
-        print("🎉 All foundation tests PASSED! Ready for Phase 1 / Week 2")
-    else:
-        print("⚠️  Some tests failed. Please review and fix issues before proceeding.")
+    # Assert all tests pass
+    assert failed == 0, f"{failed} foundation tests failed. All must pass before proceeding."
     
-    return failed == 0
+    print("🎉 All foundation tests PASSED! Ready for Phase 1 / Week 2")
+    return True
 
 if __name__ == "__main__":
     success_overall = run_all_tests()

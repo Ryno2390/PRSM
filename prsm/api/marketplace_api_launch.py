@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-PRSM FTNS Marketplace Launch API
-===============================
+PRSM FTNS Marketplace Launch API (SIMULATION ONLY)
+==================================================
 
-RESTful API for the real-money FTNS token marketplace, enabling:
-- Token purchases with fiat and cryptocurrency
-- Staking and yield generation
-- Liquidity provision and rewards
-- Portfolio management
-- Market analytics and reporting
+⚠️ SIMULATION ONLY - NOT FOR PRODUCTION USE
 
-🎯 MARKETPLACE API FEATURES:
-✅ Fiat and crypto token purchases
-✅ Staking position management
-✅ Liquidity pool operations
-✅ Real-time market data
-✅ Portfolio analytics
-✅ Transaction history
+This API provides simulated FTNS token marketplace functionality for development 
+and testing purposes only. NO REAL FINANCIAL TRANSACTIONS are processed.
+
+🧪 SIMULATED FEATURES (NOT PRODUCTION):
+🧪 Fiat and crypto token purchases (simulated only)
+🧪 Staking position management (no real yields)
+🧪 Liquidity pool operations (no real funds)
+🧪 Market data (simulated prices)
+🧪 Portfolio analytics (simulated balances)
+🧪 Transaction history (in-memory only)
+
+This API is NOT included in production deployment.
 """
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
