@@ -28,7 +28,7 @@ try:
     from prsm.agents.compilers.enhanced_compiler import EnhancedCompiler
     from prsm.rlt.dense_reward_trainer import DenseRewardTrainer
     from prsm.rlt.quality_monitor import QualityMonitor
-    from prsm.safety.seal.seal_service import SEALService
+    from prsm.teachers.seal import SEALService
     from prsm.performance.performance_monitor import PerformanceMonitor
 except ImportError as e:
     print(f"Note: Some PRSM components not available for testing: {e}")

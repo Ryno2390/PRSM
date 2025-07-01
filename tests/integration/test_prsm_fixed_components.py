@@ -43,7 +43,7 @@ except ImportError:
 
 if AIOFILES_AVAILABLE:
     try:
-        from prsm.teachers.seal_service import SEALService
+        from prsm.teachers.seal import SEALService
         RLT_TEACHER_AVAILABLE = True
         print("✅ RLT Teacher components available")
     except ImportError as e:
