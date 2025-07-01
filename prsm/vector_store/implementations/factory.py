@@ -5,6 +5,7 @@ Provides a unified way to create different vector store implementations
 based on configuration, with graceful handling of missing dependencies.
 """
 
+import os
 from typing import Type
 from ..base import PRSMVectorStore, VectorStoreConfig, VectorStoreType
 
@@ -123,7 +124,7 @@ def create_development_store(database_url: str = None) -> PRSMVectorStore:
                 port=parsed.port or 5432,
                 database=parsed.path[1:] if parsed.path else "prsm_dev",
                 username=parsed.username or "postgres",
-                password=parsed.password or "postgres",
+                password=parsed.password or os.environ.get("POSTGRES_PASSWORD", "postgres"),
                 collection_name="dev_vectors"
             )
         else:
@@ -134,7 +135,7 @@ def create_development_store(database_url: str = None) -> PRSMVectorStore:
                 port=5432,
                 database="prsm_dev",
                 username="postgres",
-                password="postgres",
+                password=os.environ.get("POSTGRES_PASSWORD", "postgres"),
                 collection_name="dev_vectors"
             )
         

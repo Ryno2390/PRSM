@@ -29,6 +29,7 @@ Quick Start with Docker:
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 import numpy as np
@@ -88,7 +89,7 @@ class PgVectorStore(PRSMVectorStore):
         try:
             # Build connection string with proper defaults
             username = self.config.username or "postgres"
-            password = self.config.password or "postgres"
+            password = self.config.password or os.environ.get("POSTGRES_PASSWORD", "postgres")
             host = self.config.host or "localhost"
             port = self.config.port or 5432
             database = self.config.database or "prsm_vector_dev"
@@ -587,7 +588,7 @@ async def create_development_pgvector_store(host: str = "localhost", port: int =
         port=port,
         database="prsm_vector_dev",
         username="postgres",
-        password="postgres",
+        password=os.environ.get("POSTGRES_PASSWORD", "postgres"),
         collection_name="prsm_vectors",
         vector_dimension=384,
         max_connections=10
