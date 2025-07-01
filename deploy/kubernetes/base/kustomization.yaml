@@ -25,6 +25,7 @@ resources:
   - cluster-autoscaler.yaml
   - custom-metrics-config.yaml
   - network-policies.yaml
+  - pod-disruption-budgets.yaml
 
 commonLabels:
   app.kubernetes.io/name: prsm
@@ -34,9 +35,9 @@ namespace: prsm-system
 
 images:
   - name: prsm-api
-    newTag: latest
+    newTag: v0.1.0-sha-${GIT_SHA}
   - name: prsm-worker
-    newTag: latest
+    newTag: v0.1.0-sha-${GIT_SHA}
 
 replicas:
   - name: prsm-api

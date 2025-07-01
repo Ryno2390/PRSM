@@ -45,12 +45,22 @@ spec:
       port: 5001
     - protocol: TCP
       port: 8080
-  - to: []
+  # DNS egress restricted to kube-dns only for security
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
     ports:
     - protocol: TCP
       port: 53
     - protocol: UDP
       port: 53
+  # HTTPS egress for external API calls (can be further restricted)
+  - to: []
+    ports:
     - protocol: TCP
       port: 443
 ---

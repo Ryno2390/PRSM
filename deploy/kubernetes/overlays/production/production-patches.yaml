@@ -1,4 +1,11 @@
 # Production environment patches for PRSM deployments
+# Image tag patch - use immutable Git SHA tags in production
+- op: replace
+  path: /spec/template/spec/containers/0/image
+  value: "prsm-api:v0.1.0-sha-PLACEHOLDER_GIT_SHA"
+- op: replace
+  path: /spec/template/spec/containers/0/imagePullPolicy
+  value: "IfNotPresent"
 - op: replace
   path: /spec/template/spec/containers/0/resources/requests/memory
   value: "1Gi"

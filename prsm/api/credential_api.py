@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, SecretStr
 
 from prsm.auth import get_current_user, require_auth
 from prsm.auth.models import UserRole
+from prsm.security.enhanced_authorization import get_enhanced_auth_manager
 from prsm.integrations.security.secure_api_client_factory import SecureClientType, secure_client_factory
 from prsm.integrations.security.secure_config_manager import secure_config_manager
 from prsm.integrations.security.audit_logger import audit_logger
@@ -339,8 +340,20 @@ async def get_system_credential_status(
     - Used for system monitoring and maintenance
     """
     try:
-        # TODO: Add proper admin permission check
-        # For now, allow all authenticated users
+        # Check admin permissions for credential system access
+        auth_manager = get_enhanced_auth_manager()
+        has_permission = await auth_manager.check_permission(
+            user_id=current_user,
+            user_role=UserRole.ADMIN,  # Would fetch actual role from database
+            resource_type="system_credentials",
+            action="read"
+        )
+        
+        if not has_permission:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin role required for credential system access"
+            )
         
         # Get secure configuration status
         status = await secure_config_manager.get_secure_configuration_status()
@@ -385,8 +398,20 @@ async def initialize_secure_configuration_endpoint(
     - Sets up secure configuration templates
     """
     try:
-        # TODO: Add proper admin permission check
-        # For now, allow all authenticated users
+        # Check admin permissions for secure configuration initialization
+        auth_manager = get_enhanced_auth_manager()
+        has_permission = await auth_manager.check_permission(
+            user_id=current_user,
+            user_role=UserRole.ADMIN,  # Would fetch actual role from database
+            resource_type="secure_configuration",
+            action="create"
+        )
+        
+        if not has_permission:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin role required for secure configuration initialization"
+            )
         
         # Initialize secure configuration
         success = await secure_config_manager.initialize_secure_configuration()
