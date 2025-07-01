@@ -31,6 +31,10 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 2.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 
   backend "s3" {
@@ -498,6 +502,272 @@ resource "aws_security_group" "alb" {
 }
 
 # ==========================================
+# RDS PostgreSQL Database (Production Grade)
+# ==========================================
+
+# DB Subnet Group
+resource "aws_db_subnet_group" "main" {
+  name       = "${local.name_prefix}-db-subnet-group"
+  subnet_ids = aws_subnet.private[*].id
+
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-db-subnet-group"
+  })
+}
+
+# Database Security Group
+resource "aws_security_group" "rds" {
+  name_prefix = "${local.name_prefix}-rds"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.eks_node.id]
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-rds-sg"
+  })
+}
+
+# KMS Key for RDS encryption
+resource "aws_kms_key" "rds" {
+  description             = "RDS PostgreSQL Encryption Key"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-rds-encryption-key"
+  })
+}
+
+resource "aws_kms_alias" "rds" {
+  name          = "alias/${local.name_prefix}-rds-encryption-key"
+  target_key_id = aws_kms_key.rds.key_id
+}
+
+# RDS PostgreSQL Instance
+resource "aws_db_instance" "main" {
+  identifier = "${local.name_prefix}-postgresql"
+
+  # Engine configuration
+  engine         = "postgres"
+  engine_version = "14.9"
+  instance_class = var.environment == "production" ? "db.r5.xlarge" : "db.t3.medium"
+
+  # Storage configuration
+  allocated_storage     = var.environment == "production" ? 100 : 20
+  max_allocated_storage = var.environment == "production" ? 1000 : 100
+  storage_type          = "gp3"
+  storage_encrypted     = true
+  kms_key_id           = aws_kms_key.rds.arn
+
+  # Database configuration
+  db_name  = "prsm_production"
+  username = "prsm_admin"
+  password = random_password.db_password.result
+  port     = 5432
+
+  # High Availability
+  multi_az               = var.environment == "production"
+  publicly_accessible    = false
+  vpc_security_group_ids = [aws_security_group.rds.id]
+  db_subnet_group_name   = aws_db_subnet_group.main.name
+
+  # Backup configuration
+  backup_retention_period = var.environment == "production" ? 30 : 7
+  backup_window          = "03:00-04:00"
+  maintenance_window     = "sun:04:00-sun:05:00"
+
+  # Performance and monitoring
+  enabled_cloudwatch_logs_exports = ["postgresql"]
+  monitoring_interval             = var.environment == "production" ? 60 : 0
+  monitoring_role_arn            = var.environment == "production" ? aws_iam_role.rds_monitoring[0].arn : null
+  performance_insights_enabled    = var.environment == "production"
+  performance_insights_retention_period = var.environment == "production" ? 7 : null
+
+  # Security
+  deletion_protection = var.environment == "production"
+  skip_final_snapshot = var.environment != "production"
+  final_snapshot_identifier = var.environment == "production" ? "${local.name_prefix}-final-snapshot-${formatdate("YYYY-MM-DD-hhmm", timestamp())}" : null
+
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-postgresql"
+  })
+}
+
+# Random password for database
+resource "random_password" "db_password" {
+  length  = 32
+  special = true
+}
+
+# Store database password in AWS Secrets Manager
+resource "aws_secretsmanager_secret" "db_password" {
+  name = "${local.name_prefix}-db-password"
+  
+  tags = local.common_tags
+}
+
+resource "aws_secretsmanager_secret_version" "db_password" {
+  secret_id = aws_secretsmanager_secret.db_password.id
+  secret_string = jsonencode({
+    username = aws_db_instance.main.username
+    password = random_password.db_password.result
+    engine   = "postgres"
+    host     = aws_db_instance.main.endpoint
+    port     = aws_db_instance.main.port
+    dbname   = aws_db_instance.main.db_name
+  })
+}
+
+# RDS Monitoring Role (for production)
+resource "aws_iam_role" "rds_monitoring" {
+  count = var.environment == "production" ? 1 : 0
+  name  = "${local.name_prefix}-rds-monitoring-role"
+
+  assume_role_policy = jsonencode({
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "monitoring.rds.amazonaws.com"
+      }
+    }]
+    Version = "2012-10-17"
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "rds_monitoring" {
+  count      = var.environment == "production" ? 1 : 0
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+  role       = aws_iam_role.rds_monitoring[0].name
+}
+
+# ==========================================
+# ElastiCache Redis (Production Grade)
+# ==========================================
+
+# ElastiCache Subnet Group
+resource "aws_elasticache_subnet_group" "main" {
+  name       = "${local.name_prefix}-cache-subnet-group"
+  subnet_ids = aws_subnet.private[*].id
+
+  tags = local.common_tags
+}
+
+# ElastiCache Security Group
+resource "aws_security_group" "elasticache" {
+  name_prefix = "${local.name_prefix}-elasticache"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port       = 6379
+    to_port         = 6379
+    protocol        = "tcp"
+    security_groups = [aws_security_group.eks_node.id]
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-elasticache-sg"
+  })
+}
+
+# ElastiCache Redis Replication Group
+resource "aws_elasticache_replication_group" "main" {
+  replication_group_id         = "${local.name_prefix}-redis"
+  description                  = "PRSM Redis cluster for caching and session storage"
+
+  # Node configuration
+  node_type                    = var.environment == "production" ? "cache.r6g.large" : "cache.t3.micro"
+  port                         = 6379
+  parameter_group_name         = var.environment == "production" ? aws_elasticache_parameter_group.redis[0].name : "default.redis7"
+
+  # Cluster configuration
+  num_cache_clusters           = var.environment == "production" ? 3 : 1
+  preferred_cache_cluster_azs  = var.environment == "production" ? slice(data.aws_availability_zones.available.names, 0, 3) : null
+
+  # Security
+  at_rest_encryption_enabled   = true
+  transit_encryption_enabled   = true
+  auth_token                   = random_password.redis_auth_token.result
+  security_group_ids           = [aws_security_group.elasticache.id]
+  subnet_group_name            = aws_elasticache_subnet_group.main.name
+
+  # Backup configuration
+  snapshot_retention_limit     = var.environment == "production" ? 7 : 1
+  snapshot_window              = "03:00-05:00"
+  maintenance_window           = "sun:05:00-sun:07:00"
+
+  # Automatic failover for production
+  automatic_failover_enabled   = var.environment == "production"
+  multi_az_enabled            = var.environment == "production"
+
+  # Logging
+  log_delivery_configuration {
+    destination      = aws_cloudwatch_log_group.elasticache.name
+    destination_type = "cloudwatch-logs"
+    log_format       = "text"
+    log_type         = "slow-log"
+  }
+
+  tags = local.common_tags
+}
+
+# Redis parameter group for production tuning
+resource "aws_elasticache_parameter_group" "redis" {
+  count  = var.environment == "production" ? 1 : 0
+  family = "redis7"
+  name   = "${local.name_prefix}-redis-params"
+
+  parameter {
+    name  = "maxmemory-policy"
+    value = "allkeys-lru"
+  }
+
+  parameter {
+    name  = "timeout"
+    value = "300"
+  }
+
+  tags = local.common_tags
+}
+
+# Random auth token for Redis
+resource "random_password" "redis_auth_token" {
+  length  = 32
+  special = false  # Redis auth tokens cannot contain special characters
+}
+
+# Store Redis auth token in AWS Secrets Manager
+resource "aws_secretsmanager_secret" "redis_auth_token" {
+  name = "${local.name_prefix}-redis-auth-token"
+  
+  tags = local.common_tags
+}
+
+resource "aws_secretsmanager_secret_version" "redis_auth_token" {
+  secret_id = aws_secretsmanager_secret.redis_auth_token.id
+  secret_string = jsonencode({
+    auth_token = random_password.redis_auth_token.result
+    host       = aws_elasticache_replication_group.main.primary_endpoint_address
+    port       = aws_elasticache_replication_group.main.port
+  })
+}
+
+# CloudWatch Log Group for ElastiCache
+resource "aws_cloudwatch_log_group" "elasticache" {
+  name              = "/aws/elasticache/${local.name_prefix}-redis"
+  retention_in_days = var.environment == "production" ? 30 : 7
+
+  tags = local.common_tags
+}
+
+# ==========================================
 # Outputs
 # ==========================================
 
@@ -549,4 +819,43 @@ output "private_subnets" {
 output "public_subnets" {
   description = "List of IDs of public subnets"
   value       = aws_subnet.public[*].id
+}
+
+# Database outputs
+output "database_endpoint" {
+  description = "RDS PostgreSQL instance endpoint"
+  value       = aws_db_instance.main.endpoint
+  sensitive   = true
+}
+
+output "database_name" {
+  description = "Database name"
+  value       = aws_db_instance.main.db_name
+}
+
+output "database_port" {
+  description = "Database port"
+  value       = aws_db_instance.main.port
+}
+
+output "database_secret_arn" {
+  description = "ARN of the secret containing database credentials"
+  value       = aws_secretsmanager_secret.db_password.arn
+}
+
+# Redis outputs
+output "redis_endpoint" {
+  description = "ElastiCache Redis primary endpoint"
+  value       = aws_elasticache_replication_group.main.primary_endpoint_address
+  sensitive   = true
+}
+
+output "redis_port" {
+  description = "ElastiCache Redis port"
+  value       = aws_elasticache_replication_group.main.port
+}
+
+output "redis_auth_token_secret_arn" {
+  description = "ARN of the secret containing Redis auth token"
+  value       = aws_secretsmanager_secret.redis_auth_token.arn
 }
