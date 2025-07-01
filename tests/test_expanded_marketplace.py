@@ -33,7 +33,7 @@ from prsm.marketplace.expanded_models import (
     SafetyToolListing, SafetyToolType, ComplianceStandard,
     UnifiedSearchFilters
 )
-from prsm.marketplace.expanded_marketplace_service import ExpandedMarketplaceService
+from prsm.marketplace.real_marketplace_service import RealMarketplaceService
 
 
 class TestExpandedMarketplace:
@@ -42,7 +42,7 @@ class TestExpandedMarketplace:
     @pytest.fixture
     def marketplace_service(self):
         """Create marketplace service for testing"""
-        return ExpandedMarketplaceService()
+        return RealMarketplaceService()
     
     @pytest.fixture
     def test_user_id(self):
@@ -562,7 +562,7 @@ async def run_expanded_marketplace_tests():
     print("=" * 60)
     
     test_suite = TestExpandedMarketplace()
-    marketplace_service = ExpandedMarketplaceService()
+    marketplace_service = RealMarketplaceService()
     test_user_id = uuid4()
     
     try:

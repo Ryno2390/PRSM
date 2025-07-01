@@ -15,7 +15,6 @@ from typing import Dict, Any
 
 # Import the real marketplace services
 from prsm.marketplace.real_marketplace_service import RealMarketplaceService
-from prsm.marketplace.real_expanded_marketplace_service import RealExpandedMarketplaceService
 from prsm.marketplace.models import (
     CreateModelListingRequest, ModelCategory, ModelProvider, PricingTier
 )
@@ -30,7 +29,7 @@ async def marketplace_service():
 @pytest.fixture
 async def expanded_service():
     """Initialize expanded marketplace service for testing"""
-    return RealExpandedMarketplaceService()
+    return RealMarketplaceService()
 
 
 @pytest.fixture
@@ -344,7 +343,7 @@ async def run_comprehensive_tests():
     
     # Initialize services
     marketplace_service = RealMarketplaceService()
-    expanded_service = RealExpandedMarketplaceService()
+    expanded_service = RealMarketplaceService()
     sample_user_id = uuid.uuid4()
     
     print(f"🔧 Initialized services with test user: {sample_user_id}")

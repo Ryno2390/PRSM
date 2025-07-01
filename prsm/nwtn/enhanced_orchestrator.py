@@ -52,7 +52,7 @@ from prsm.agents.prompters.prompt_optimizer import PromptOptimizer
 from prsm.agents.executors.model_executor import ModelExecutor
 from prsm.agents.compilers.hierarchical_compiler import HierarchicalCompiler
 from prsm.agents.routers.tool_router import ToolRouter, ToolRequest, ToolExecutionRequest
-from prsm.marketplace.legacy.tool_marketplace import tool_marketplace
+from prsm.marketplace.real_marketplace_service import RealMarketplaceService
 from prsm.nwtn.advanced_intent_engine import AdvancedIntentEngine, get_advanced_intent_engine
 
 logger = structlog.get_logger(__name__)
@@ -104,7 +104,7 @@ class EnhancedNWTNOrchestrator:
         
         # MCP Tool Integration
         self.tool_router = ToolRouter(agent_id="tool_router_001")
-        self.tool_marketplace = tool_marketplace
+        self.tool_marketplace = RealMarketplaceService()
         self.tool_enabled_models = set()  # Track which models have tool access
         
         # Advanced LLM-based Intent Engine
@@ -1924,7 +1924,7 @@ class EnhancedNWTNOrchestrator:
             },
             "tool_router_analytics": self.tool_router.get_tool_analytics(),
             "model_router_analytics": self.router.get_tool_usage_analytics(),
-            "marketplace_stats": self.tool_marketplace.get_marketplace_stats()
+            "marketplace_stats": {"status": "marketplace_service_available", "service": "RealMarketplaceService"}
         }
 
 # Global enhanced orchestrator instance

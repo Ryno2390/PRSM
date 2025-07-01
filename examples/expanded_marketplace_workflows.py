@@ -30,7 +30,7 @@ from prsm.marketplace.expanded_models import (
     SafetyToolListing, SafetyToolType, ComplianceStandard,
     UnifiedSearchFilters
 )
-from prsm.marketplace.expanded_marketplace_service import ExpandedMarketplaceService
+from prsm.marketplace.real_marketplace_service import RealMarketplaceService
 
 
 async def scientific_research_workflow():
@@ -46,7 +46,7 @@ async def scientific_research_workflow():
     print("🔬 SCIENTIFIC RESEARCH WORKFLOW")
     print("=" * 60)
     
-    marketplace = ExpandedMarketplaceService()
+    marketplace = RealMarketplaceService()
     researcher_id = uuid4()
     
     # Step 1: Discover research datasets
@@ -225,7 +225,7 @@ async def ai_development_pipeline():
     print("\n🤖 AI DEVELOPMENT PIPELINE WORKFLOW")
     print("=" * 60)
     
-    marketplace = ExpandedMarketplaceService()
+    marketplace = RealMarketplaceService()
     developer_id = uuid4()
     
     # Step 1: Custom model training service
@@ -390,7 +390,7 @@ async def enterprise_ai_deployment():
     print("\n🏢 ENTERPRISE AI DEPLOYMENT WORKFLOW")
     print("=" * 60)
     
-    marketplace = ExpandedMarketplaceService()
+    marketplace = RealMarketplaceService()
     enterprise_id = uuid4()
     
     # Step 1: Compliance and governance
@@ -565,7 +565,7 @@ async def community_collaboration_workflow():
     print("\n🌐 COMMUNITY COLLABORATION WORKFLOW")
     print("=" * 60)
     
-    marketplace = ExpandedMarketplaceService()
+    marketplace = RealMarketplaceService()
     
     # Simulate multiple community members
     contributors = {

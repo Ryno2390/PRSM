@@ -37,7 +37,7 @@ from prsm.core.config import get_settings
 from prsm.nwtn.orchestrator import NWTNOrchestrator
 
 # Service imports
-from prsm.marketplace.real_expanded_marketplace_service import RealExpandedMarketplaceService
+from prsm.marketplace.real_marketplace_service import RealMarketplaceService
 from prsm.tokenomics.database_ftns_service import DatabaseFTNSService
 from prsm.api.main import app
 
@@ -56,7 +56,7 @@ class TestSystemResilienceIntegration:
     @pytest.fixture(scope="class")
     def marketplace_service(self):
         """Initialize marketplace service"""
-        return RealExpandedMarketplaceService()
+        return RealMarketplaceService()
     
     @pytest.fixture(scope="class")
     def ftns_service(self):
@@ -533,7 +533,7 @@ class TestSystemResilienceIntegration:
             
             # Simulate service restart by creating new instances
             new_orchestrator = NWTNOrchestrator()
-            new_marketplace = RealExpandedMarketplaceService()
+            new_marketplace = RealMarketplaceService()
             
             # Test operation with new instances
             restart_response = await new_orchestrator.process_query(UserInput(
@@ -638,7 +638,7 @@ async def run_system_resilience_tests():
     try:
         # Initialize services
         orchestrator = NWTNOrchestrator()
-        marketplace_service = RealExpandedMarketplaceService()
+        marketplace_service = RealMarketplaceService()
         ftns_service = DatabaseFTNSService()
         api_client = TestClient(app)
         

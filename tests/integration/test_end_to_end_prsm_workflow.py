@@ -38,7 +38,7 @@ from prsm.agents.executors.model_executor import ModelExecutor
 from prsm.agents.compilers.hierarchical_compiler import HierarchicalCompiler
 
 # Marketplace and tokenomics
-from prsm.marketplace.real_expanded_marketplace_service import RealExpandedMarketplaceService
+from prsm.marketplace.real_marketplace_service import RealMarketplaceService
 from prsm.tokenomics.database_ftns_service import DatabaseFTNSService
 from prsm.tokenomics.ftns_budget_manager import FTNSBudgetManager
 
@@ -57,7 +57,7 @@ class TestEndToEndPRSMWorkflow:
     @pytest.fixture(scope="class")
     async def marketplace_service(self):
         """Initialize marketplace service"""
-        return RealExpandedMarketplaceService()
+        return RealMarketplaceService()
     
     @pytest.fixture(scope="class")
     async def ftns_service(self):
@@ -469,7 +469,7 @@ async def run_end_to_end_integration_tests():
     try:
         # Initialize services
         orchestrator = NWTNOrchestrator()
-        marketplace_service = RealExpandedMarketplaceService()
+        marketplace_service = RealMarketplaceService()
         ftns_service = DatabaseFTNSService()
         budget_manager = FTNSBudgetManager()
         safety_framework = AdvancedSafetyQualityFramework()
