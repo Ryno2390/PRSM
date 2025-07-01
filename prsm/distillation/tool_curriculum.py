@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field
 from ..core.config import get_settings
 from ..core.models import TimestampMixin
 from ..agents.routers.tool_router import ToolRouter, ToolType, ToolCapability, ToolSecurityLevel
-from ..marketplace.tool_marketplace import tool_marketplace
+from ..marketplace.legacy.tool_marketplace import tool_marketplace
 from .tool_aware_training import ToolTrainingStrategy, ToolUsagePattern, ToolTrainingExample
 
 logger = structlog.get_logger(__name__)

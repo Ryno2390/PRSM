@@ -26,7 +26,7 @@ from typing import Dict, List, Optional, Any
 from decimal import Decimal
 from datetime import datetime
 
-from ..marketplace.ftns_marketplace import (
+from ..marketplace.legacy.ftns_marketplace import (
     FTNSMarketplace, PaymentMethod, TransactionType,
     get_ftns_marketplace
 )
