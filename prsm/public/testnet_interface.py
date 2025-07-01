@@ -285,7 +285,7 @@ class PRSMTestnetInterface:
         components_used = []
         
         if query_request.query_type == "coding":
-            components_used = ["seal_rlt_enhanced_teacher", "rlt_enhanced_compiler", "distributed_rlt_network"]
+            components_used = ["seal_service", "rlt_enhanced_compiler", "distributed_rlt_network"]
             response = f"""
 **PRSM AI Coordination Response** 🤖
 
@@ -359,7 +359,7 @@ Your analysis query has been processed using PRSM's distributed AI reasoning:
 """
         
         elif query_request.query_type == "creative":
-            components_used = ["seal_rlt_enhanced_teacher", "rlt_enhanced_compiler"]
+            components_used = ["seal_service", "rlt_enhanced_compiler"]
             response = f"""
 **PRSM AI Coordination Response** 🤖
 
@@ -398,7 +398,7 @@ In minutes, they had created something neither could have built alone—a soluti
 """
         
         else:  # general
-            components_used = ["seal_rlt_enhanced_teacher", "distributed_rlt_network", "rlt_quality_monitor"]
+            components_used = ["seal_service", "distributed_rlt_network", "rlt_quality_monitor"]
             response = f"""
 **PRSM AI Coordination Response** 🤖
 

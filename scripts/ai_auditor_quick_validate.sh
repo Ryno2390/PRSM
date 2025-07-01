@@ -106,7 +106,7 @@ echo ""
 echo "🧠 5. AI Technology Validation"
 echo "   Checking AI implementations..."
 
-if [ -f "prsm/teachers/seal_rlt_enhanced_teacher.py" ]; then
+if [ -f "prsm/teachers/seal_service.py" ]; then
     echo "   ✅ SEAL Technology: IMPLEMENTED"
 else
     echo "   ❌ SEAL Technology: MISSING"
@@ -230,7 +230,7 @@ PASSED_CHECKS=0
 [ -f "prsm/scalability/intelligent_router.py" ] && PASSED_CHECKS=$((PASSED_CHECKS + 1))
 [ -f "prsm/scalability/advanced_cache.py" ] && PASSED_CHECKS=$((PASSED_CHECKS + 1))
 [ -f "prsm/scalability/auto_scaler.py" ] && PASSED_CHECKS=$((PASSED_CHECKS + 1))
-[ -f "prsm/teachers/seal_rlt_enhanced_teacher.py" ] && PASSED_CHECKS=$((PASSED_CHECKS + 1))
+[ -f "prsm/teachers/seal_service.py" ] && PASSED_CHECKS=$((PASSED_CHECKS + 1))
 [ -f "prsm/nwtn/enhanced_orchestrator.py" ] && PASSED_CHECKS=$((PASSED_CHECKS + 1))
 [ -d "prsm/agents" ] && PASSED_CHECKS=$((PASSED_CHECKS + 1))
 [ -d "prsm/tokenomics" ] && PASSED_CHECKS=$((PASSED_CHECKS + 1))

@@ -31,7 +31,7 @@ import random
 
 import structlog
 
-from ..teachers.seal_rlt_enhanced_teacher import SEALRLTEnhancedTeacher
+from ..teachers.seal import SEALService
 from ..teachers.rlt.quality_monitor import QualityMetrics, QualityMonitor
 from ..monitoring.rlt_performance_monitor import RLTPerformanceMonitor, RLTMetrics
 from ..benchmarking.rlt_evaluation_benchmark import EvaluationProblem, TeachingEvaluationResult

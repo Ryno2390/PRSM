@@ -28,7 +28,7 @@ try:
     from prsm.agents.compilers.enhanced_compiler import EnhancedCompiler
     from prsm.rlt.dense_reward_trainer import DenseRewardTrainer
     from prsm.rlt.quality_monitor import QualityMonitor
-    from prsm.safety.seal.seal_rlt_enhanced_teacher import SEALRLTEnhancedTeacher
+    from prsm.safety.seal.seal_service import SEALService
     from prsm.performance.performance_monitor import PerformanceMonitor
 except ImportError as e:
     print(f"Note: Some PRSM components not available for testing: {e}")
@@ -67,7 +67,7 @@ class RealWorldScenarioTest:
             # Initialize RLT components
             self.rlt_trainer = DenseRewardTrainer()
             self.quality_monitor = QualityMonitor()
-            self.seal_teacher = SEALRLTEnhancedTeacher()
+            self.seal_teacher = SEALService()
             
             # Initialize performance monitoring
             self.performance_monitor = PerformanceMonitor()
@@ -100,7 +100,7 @@ class RealWorldScenarioTest:
         self.compiler = self.compiler or MockComponent("EnhancedCompiler")
         self.rlt_trainer = self.rlt_trainer or MockComponent("DenseRewardTrainer")
         self.quality_monitor = self.quality_monitor or MockComponent("QualityMonitor")
-        self.seal_teacher = self.seal_teacher or MockComponent("SEALRLTEnhancedTeacher")
+        self.seal_teacher = self.seal_teacher or MockComponent("SEALService")
         self.performance_monitor = self.performance_monitor or MockComponent("PerformanceMonitor")
     
     async def run_mathematical_reasoning_scenario(self) -> Dict[str, Any]:

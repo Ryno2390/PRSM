@@ -35,7 +35,7 @@ except ImportError as e:
 
 # Test additional components
 try:
-    from prsm.teachers.seal_rlt_enhanced_teacher import SEALRLTEnhancedTeacher
+    from prsm.teachers.seal_service import SEALService
     RLT_TEACHER_AVAILABLE = True
     print("✅ RLT Teacher components available")
 except ImportError:
@@ -300,7 +300,7 @@ class PRSMCoreIntegrationTester:
             
             # Create real RLT teacher
             print("  🚀 Instantiating real RLT teacher...")
-            teacher = SEALRLTEnhancedTeacher()
+            teacher = SEALService()
             
             # Test real teacher methods and attributes
             teacher_methods = [method for method in dir(teacher) if not method.startswith('_')]
@@ -309,7 +309,7 @@ class PRSMCoreIntegrationTester:
             # Test teacher initialization
             success = (
                 teacher is not None and
-                isinstance(teacher, SEALRLTEnhancedTeacher) and
+                isinstance(teacher, SEALService) and
                 len(teacher_methods) > 5  # Should have meaningful methods
             )
             
@@ -320,7 +320,7 @@ class PRSMCoreIntegrationTester:
                 "teacher_type": teacher_type,
                 "methods_available": len(teacher_methods),
                 "instantiation_time": execution_time,
-                "is_seal_rlt": isinstance(teacher, SEALRLTEnhancedTeacher),
+                "is_seal_rlt": isinstance(teacher, SEALService),
                 "session_id": self.session_id
             }
             
@@ -332,7 +332,7 @@ class PRSMCoreIntegrationTester:
                 "validation_method": "isinstance_and_method_inspection"
             }
             
-            components_tested = ["SEALRLTEnhancedTeacher", "RLT Integration", "Teacher Framework"]
+            components_tested = ["SEALService", "RLT Integration", "Teacher Framework"]
             
             if success:
                 print(f"  ✅ {test_name}: PASSED")
@@ -361,7 +361,7 @@ class PRSMCoreIntegrationTester:
                 test_name=test_name,
                 success=False,
                 execution_time=execution_time,
-                components_tested=["SEALRLTEnhancedTeacher"],
+                components_tested=["SEALService"],
                 real_metrics={"execution_time": execution_time},
                 evidence={"error_type": type(e).__name__},
                 error_details=error_msg

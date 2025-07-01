@@ -27,7 +27,7 @@ from .model_router import (
     ModelRouter, RoutingStrategy, ModelCandidate, RoutingDecision, 
     ModelSource, TeacherSelection
 )
-from ...teachers.seal_rlt_enhanced_teacher import SEALRLTEnhancedTeacher, SEALRLTConfig
+from ...teachers.seal import SEALService, SEALConfig
 from ...teachers.rlt.dense_reward_trainer import RLTTrainingConfig
 from ...teachers.rlt.student_comprehension_evaluator import ComprehensionMetrics
 from ...core.models import TeacherModel, ModelType, AgentType

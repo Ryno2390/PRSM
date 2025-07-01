@@ -67,7 +67,7 @@ Before diving into queries, let's understand PRSM's revolutionary SEAL (Self-Ada
 **Autonomous Self-Improvement**: Unlike traditional AI that remains static, SEAL-enhanced models continuously improve themselves:
 
 ```python
-from prsm.teachers.seal_enhanced_teacher import SEALEnhancedTeacher
+from prsm.teachers.seal_service import SEALEnhancedTeacher
 
 # SEAL in action - self-improving AI
 seal_teacher = SEALEnhancedTeacher()

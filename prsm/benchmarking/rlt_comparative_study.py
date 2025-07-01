@@ -33,7 +33,7 @@ from .rlt_evaluation_benchmark import (
     BenchmarkSummary, AIVEBenchmarkDataset, MATHBenchmarkDataset,
     GPQABenchmarkDataset, PRSMReasoningBenchmark
 )
-from ..teachers.seal_rlt_enhanced_teacher import SEALRLTEnhancedTeacher, SEALRLTConfig
+from ..teachers.seal import SEALService, SEALConfig
 from ..teachers.rlt.quality_monitor import QualityMetrics, QualityMonitor
 from ..monitoring.rlt_performance_monitor import RLTPerformanceMonitor, RLTMetrics
 
@@ -197,7 +197,7 @@ class ZeroShotTransferEvaluator:
     
     async def evaluate_zero_shot_transfer(
         self,
-        teacher_model: Union[SEALRLTEnhancedTeacher, TraditionalTeacherSimulator],
+        teacher_model: Union[SEALService, TraditionalTeacherSimulator],
         source_domain: str,
         target_domain: str,
         test_problems: List[EvaluationProblem]
@@ -477,7 +477,7 @@ class RLTComparativeStudy:
     
     def __init__(
         self,
-        rlt_teacher: SEALRLTEnhancedTeacher,
+        rlt_teacher: SEALService,
         performance_monitor: Optional[RLTPerformanceMonitor] = None
     ):
         self.rlt_teacher = rlt_teacher
@@ -811,7 +811,7 @@ class RLTComparativeStudy:
     
     async def _evaluate_transfer_capabilities(
         self,
-        teacher_model: Union[SEALRLTEnhancedTeacher, TraditionalTeacherSimulator],
+        teacher_model: Union[SEALService, TraditionalTeacherSimulator],
         problems: List[EvaluationProblem],
         is_rlt: bool
     ) -> Dict[str, float]:
@@ -1043,7 +1043,7 @@ _comparative_study: Optional[RLTComparativeStudy] = None
 
 
 def get_comparative_study(
-    rlt_teacher: SEALRLTEnhancedTeacher,
+    rlt_teacher: SEALService,
     performance_monitor: Optional[RLTPerformanceMonitor] = None
 ) -> RLTComparativeStudy:
     """Get or create the global comparative study instance"""

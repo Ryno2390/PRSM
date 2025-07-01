@@ -3,7 +3,7 @@
 PRSM CPU Optimization Engine
 
 Optimizes CPU usage for the 5 identified bottleneck components:
-- seal_rlt_enhanced_teacher (82.8% CPU → target <70%)
+- seal_service (82.8% CPU → target <70%)
 - distributed_rlt_network (79.8% CPU → target <70%)  
 - rlt_quality_monitor (76.8% CPU → target <70%)
 - rlt_dense_reward_trainer (73.8% CPU → target <70%)
@@ -64,8 +64,8 @@ class CPUOptimizer:
         
         # Component-specific optimization configurations
         self.component_configs = {
-            "seal_rlt_enhanced_teacher": CPUOptimizationConfig(
-                component_id="seal_rlt_enhanced_teacher",
+            "seal_service": CPUOptimizationConfig(
+                component_id="seal_service",
                 target_cpu_percent=65.0,  # Most CPU-intensive, aggressive optimization
                 optimization_strategies=["async_processing", "thread_pooling", "batching", "caching", "lazy_loading"],
                 batch_size=16,  # Smaller batches for complex operations
@@ -204,7 +204,7 @@ class CPUOptimizer:
             )
         
         # For CPU-intensive components, also create process pool
-        if component_id in ["seal_rlt_enhanced_teacher", "rlt_dense_reward_trainer"]:
+        if component_id in ["seal_service", "rlt_dense_reward_trainer"]:
             if component_id not in self.process_pools:
                 self.process_pools[component_id] = ProcessPoolExecutor(
                     max_workers=config.process_pool_size
@@ -269,7 +269,7 @@ class CPUOptimizer:
         
         # Component-specific cache configurations
         cache_configs = {
-            "seal_rlt_enhanced_teacher": {
+            "seal_service": {
                 "max_size": 1000,
                 "ttl_seconds": 300,  # 5 minutes
                 "cache_types": ["computation_results", "model_outputs", "validation_results"]
@@ -314,10 +314,10 @@ class CPUOptimizer:
         }
     
     async def _enable_lazy_loading(self, component_id: str, config: CPUOptimizationConfig) -> Dict[str, Any]:
-        """Enable lazy loading for seal_rlt_enhanced_teacher"""
+        """Enable lazy loading for seal_service"""
         
-        if component_id != "seal_rlt_enhanced_teacher":
-            return {"success": False, "error": "Lazy loading only for seal_rlt_enhanced_teacher"}
+        if component_id != "seal_service":
+            return {"success": False, "error": "Lazy loading only for seal_service"}
         
         # Implement lazy loading strategies
         lazy_strategies = {

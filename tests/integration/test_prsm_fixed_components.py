@@ -43,7 +43,7 @@ except ImportError:
 
 if AIOFILES_AVAILABLE:
     try:
-        from prsm.teachers.seal_rlt_enhanced_teacher import SEALRLTEnhancedTeacher
+        from prsm.teachers.seal_service import SEALService
         RLT_TEACHER_AVAILABLE = True
         print("✅ RLT Teacher components available")
     except ImportError as e:
@@ -191,7 +191,7 @@ class PRSMFixedComponentsTester:
         if not was_broken:
             # Component is already working
             try:
-                teacher = SEALRLTEnhancedTeacher()
+                teacher = SEALService()
                 return FixedComponentResult(
                     component_name="RLT Teacher System",
                     was_broken=False,
@@ -228,7 +228,7 @@ class PRSMFixedComponentsTester:
             
             evidence = {
                 "root_cause": "aiofiles dependency missing",
-                "import_chain": "SEALRLTEnhancedTeacher → ipfs_client → aiofiles",
+                "import_chain": "SEALService → ipfs_client → aiofiles",
                 "dependency_status": {
                     "declared_in_requirements": True,
                     "actually_installed": False
@@ -253,7 +253,7 @@ class PRSMFixedComponentsTester:
         
         # If aiofiles is available, test the component
         try:
-            teacher = SEALRLTEnhancedTeacher()
+            teacher = SEALService()
             test_passed = teacher is not None
             fix_successful = test_passed
             

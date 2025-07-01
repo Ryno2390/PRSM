@@ -99,7 +99,7 @@ class AdvancedPerformanceOptimizer:
             "rlt_dense_reward_trainer",
             "rlt_quality_monitor",
             "distributed_rlt_network",
-            "seal_rlt_enhanced_teacher"
+            "seal_service"
         ]
         
         metrics = []

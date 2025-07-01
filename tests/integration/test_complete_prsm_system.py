@@ -426,7 +426,7 @@ class CompletePRSMSystemTester:
         
         # RLT Teacher
         try:
-            from prsm.teachers.seal_rlt_enhanced_teacher import SEALRLTEnhancedTeacher
+            from prsm.teachers.seal_service import SEALService
             from uuid import uuid4
             
             class MockTeacherModel:
@@ -434,11 +434,11 @@ class CompletePRSMSystemTester:
                     self.teacher_id = uuid4()
                     self.model_name = "system_test_teacher"
             
-            teacher = SEALRLTEnhancedTeacher(teacher_model=MockTeacherModel())
+            teacher = SEALService(teacher_model=MockTeacherModel())
             
             result = SystemComponentResult(
                 subsystem_name="Teacher Framework",
-                component_name="SEALRLTEnhancedTeacher",
+                component_name="SEALService",
                 import_success=True,
                 instantiation_success=teacher is not None,
                 integration_success=hasattr(teacher, 'teacher_model'),
@@ -453,7 +453,7 @@ class CompletePRSMSystemTester:
         except Exception as e:
             result = SystemComponentResult(
                 subsystem_name="Teacher Framework",
-                component_name="SEALRLTEnhancedTeacher",
+                component_name="SEALService",
                 import_success=False,
                 instantiation_success=False,
                 integration_success=False,
@@ -503,14 +503,14 @@ class CompletePRSMSystemTester:
         # Federation Network
         try:
             from prsm.federation.distributed_rlt_network import DistributedRLTNetwork
-            from prsm.teachers.seal_rlt_enhanced_teacher import SEALRLTEnhancedTeacher
+            from prsm.teachers.seal_service import SEALService
             from uuid import uuid4
             
             class MockTeacherModel:
                 def __init__(self):
                     self.teacher_id = uuid4()
             
-            local_teacher = SEALRLTEnhancedTeacher(teacher_model=MockTeacherModel())
+            local_teacher = SEALService(teacher_model=MockTeacherModel())
             network = DistributedRLTNetwork(
                 node_id=f"system_test_{self.session_id[:8]}",
                 local_teacher=local_teacher
