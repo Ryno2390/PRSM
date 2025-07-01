@@ -1,0 +1,925 @@
+{
+  "establishment_timestamp": "2025-07-01T22:38:08.879221+00:00",
+  "environment": "production",
+  "version": "1.0.0",
+  "baselines": {
+    "api_health_check": {
+      "component": "api",
+      "operation": "health_check",
+      "metrics": {
+        "response_time": {
+          "name": "response_time",
+          "unit": "milliseconds",
+          "baseline_value": 50.0,
+          "target_p50": 50.0,
+          "target_p95": 100.0,
+          "target_p99": 200.0,
+          "sla_threshold": 500.0,
+          "critical_threshold": 1000.0,
+          "description": "API health check endpoint response time",
+          "measurement_method": "HTTP request timing"
+        },
+        "throughput": {
+          "name": "throughput",
+          "unit": "requests_per_second",
+          "baseline_value": 1000.0,
+          "target_p50": 1000.0,
+          "target_p95": 800.0,
+          "target_p99": 500.0,
+          "sla_threshold": 100.0,
+          "critical_threshold": 50.0,
+          "description": "API requests processed per second",
+          "measurement_method": "Load testing measurement"
+        }
+      },
+      "test_conditions": {
+        "concurrent_users": 100,
+        "test_duration": "5 minutes",
+        "request_rate": "sustained load"
+      },
+      "established_date": "2025-07-01T22:38:08.878988+00:00",
+      "environment": "production",
+      "version": "1.0.0"
+    },
+    "database_query": {
+      "component": "database",
+      "operation": "standard_query",
+      "metrics": {
+        "query_time": {
+          "name": "query_time",
+          "unit": "milliseconds",
+          "baseline_value": 25.0,
+          "target_p50": 25.0,
+          "target_p95": 50.0,
+          "target_p99": 100.0,
+          "sla_threshold": 200.0,
+          "critical_threshold": 500.0,
+          "description": "Standard database query execution time",
+          "measurement_method": "Database timing instrumentation"
+        },
+        "connection_pool_usage": {
+          "name": "connection_pool_usage",
+          "unit": "percentage",
+          "baseline_value": 60.0,
+          "target_p50": 60.0,
+          "target_p95": 80.0,
+          "target_p99": 90.0,
+          "sla_threshold": 95.0,
+          "critical_threshold": 98.0,
+          "description": "Database connection pool utilization",
+          "measurement_method": "Connection pool monitoring"
+        }
+      },
+      "test_conditions": {
+        "concurrent_connections": 50,
+        "query_complexity": "standard SELECT with JOIN",
+        "dataset_size": "production_scale"
+      },
+      "established_date": "2025-07-01T22:38:08.879094+00:00",
+      "environment": "production",
+      "version": "1.0.0"
+    },
+    "cache_operations": {
+      "component": "cache",
+      "operation": "get_set_operations",
+      "metrics": {
+        "hit_ratio": {
+          "name": "hit_ratio",
+          "unit": "percentage",
+          "baseline_value": 85.0,
+          "target_p50": 85.0,
+          "target_p95": 80.0,
+          "target_p99": 75.0,
+          "sla_threshold": 70.0,
+          "critical_threshold": 60.0,
+          "description": "Cache hit ratio for GET operations",
+          "measurement_method": "Cache statistics monitoring"
+        },
+        "response_time": {
+          "name": "response_time",
+          "unit": "milliseconds",
+          "baseline_value": 2.0,
+          "target_p50": 2.0,
+          "target_p95": 5.0,
+          "target_p99": 10.0,
+          "sla_threshold": 20.0,
+          "critical_threshold": 50.0,
+          "description": "Cache operation response time",
+          "measurement_method": "Cache timing instrumentation"
+        }
+      },
+      "test_conditions": {
+        "cache_size": "1GB",
+        "key_distribution": "production_pattern",
+        "operation_mix": "80% GET, 20% SET"
+      },
+      "established_date": "2025-07-01T22:38:08.879097+00:00",
+      "environment": "production",
+      "version": "1.0.0"
+    },
+    "ftns_transaction": {
+      "component": "ftns",
+      "operation": "transaction_processing",
+      "metrics": {
+        "processing_time": {
+          "name": "processing_time",
+          "unit": "milliseconds",
+          "baseline_value": 150.0,
+          "target_p50": 150.0,
+          "target_p95": 300.0,
+          "target_p99": 500.0,
+          "sla_threshold": 1000.0,
+          "critical_threshold": 2000.0,
+          "description": "FTNS transaction end-to-end processing time",
+          "measurement_method": "Transaction timing measurement"
+        },
+        "throughput": {
+          "name": "throughput",
+          "unit": "transactions_per_second",
+          "baseline_value": 100.0,
+          "target_p50": 100.0,
+          "target_p95": 80.0,
+          "target_p99": 50.0,
+          "sla_threshold": 20.0,
+          "critical_threshold": 10.0,
+          "description": "FTNS transactions processed per second",
+          "measurement_method": "Transaction rate monitoring"
+        }
+      },
+      "test_conditions": {
+        "transaction_size": "standard",
+        "concurrent_transactions": 50,
+        "ledger_size": "production_scale"
+      },
+      "established_date": "2025-07-01T22:38:08.879100+00:00",
+      "environment": "production",
+      "version": "1.0.0"
+    },
+    "marketplace_search": {
+      "component": "marketplace",
+      "operation": "resource_search",
+      "metrics": {
+        "search_time": {
+          "name": "search_time",
+          "unit": "milliseconds",
+          "baseline_value": 100.0,
+          "target_p50": 100.0,
+          "target_p95": 200.0,
+          "target_p99": 400.0,
+          "sla_threshold": 800.0,
+          "critical_threshold": 1500.0,
+          "description": "Marketplace resource search response time",
+          "measurement_method": "Search API timing"
+        },
+        "result_relevance": {
+          "name": "result_relevance",
+          "unit": "score",
+          "baseline_value": 0.85,
+          "target_p50": 0.85,
+          "target_p95": 0.8,
+          "target_p99": 0.75,
+          "sla_threshold": 0.7,
+          "critical_threshold": 0.6,
+          "description": "Search result relevance score",
+          "measurement_method": "Relevance algorithm scoring"
+        }
+      },
+      "test_conditions": {
+        "catalog_size": "10000 resources",
+        "query_complexity": "multi-faceted search",
+        "concurrent_searches": 20
+      },
+      "established_date": "2025-07-01T22:38:08.879102+00:00",
+      "environment": "production",
+      "version": "1.0.0"
+    },
+    "system_resources": {
+      "component": "system",
+      "operation": "resource_utilization",
+      "metrics": {
+        "cpu_utilization": {
+          "name": "cpu_utilization",
+          "unit": "percentage",
+          "baseline_value": 45.0,
+          "target_p50": 45.0,
+          "target_p95": 70.0,
+          "target_p99": 85.0,
+          "sla_threshold": 90.0,
+          "critical_threshold": 95.0,
+          "description": "System CPU utilization under normal load",
+          "measurement_method": "System monitoring"
+        },
+        "memory_utilization": {
+          "name": "memory_utilization",
+          "unit": "percentage",
+          "baseline_value": 62.0,
+          "target_p50": 62.0,
+          "target_p95": 80.0,
+          "target_p99": 90.0,
+          "sla_threshold": 95.0,
+          "critical_threshold": 98.0,
+          "description": "System memory utilization under normal load",
+          "measurement_method": "System monitoring"
+        }
+      },
+      "test_conditions": {
+        "load_level": "normal_production",
+        "measurement_duration": "1 hour",
+        "monitoring_interval": "30 seconds"
+      },
+      "established_date": "2025-07-01T22:38:08.879104+00:00",
+      "environment": "production",
+      "version": "1.0.0"
+    }
+  },
+  "benchmark_results": [
+    "BenchmarkResult(timestamp='2025-07-01T22:38:08.879241+00:00', component='api', operation='health_check', metric_name='response_time', value=45.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:08.890293+00:00', component='api', operation='health_check', metric_name='response_time', value=47.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:08.901326+00:00', component='api', operation='health_check', metric_name='response_time', value=50.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:08.912390+00:00', component='api', operation='health_check', metric_name='response_time', value=52.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:08.923424+00:00', component='api', operation='health_check', metric_name='response_time', value=55.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:08.934503+00:00', component='api', operation='health_check', metric_name='response_time', value=57.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:08.945541+00:00', component='api', operation='health_check', metric_name='response_time', value=60.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:08.956566+00:00', component='api', operation='health_check', metric_name='response_time', value=62.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:08.967641+00:00', component='api', operation='health_check', metric_name='response_time', value=65.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:08.978700+00:00', component='api', operation='health_check', metric_name='response_time', value=67.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:08.989764+00:00', component='api', operation='health_check', metric_name='response_time', value=45.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.000796+00:00', component='api', operation='health_check', metric_name='response_time', value=47.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.011832+00:00', component='api', operation='health_check', metric_name='response_time', value=50.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.022889+00:00', component='api', operation='health_check', metric_name='response_time', value=52.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.033947+00:00', component='api', operation='health_check', metric_name='response_time', value=55.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.044990+00:00', component='api', operation='health_check', metric_name='response_time', value=57.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.056103+00:00', component='api', operation='health_check', metric_name='response_time', value=60.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.067251+00:00', component='api', operation='health_check', metric_name='response_time', value=62.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.077921+00:00', component='api', operation='health_check', metric_name='response_time', value=65.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.089196+00:00', component='api', operation='health_check', metric_name='response_time', value=67.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.099549+00:00', component='api', operation='health_check', metric_name='response_time', value=45.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.110757+00:00', component='api', operation='health_check', metric_name='response_time', value=47.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.121135+00:00', component='api', operation='health_check', metric_name='response_time', value=50.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.131372+00:00', component='api', operation='health_check', metric_name='response_time', value=52.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.142447+00:00', component='api', operation='health_check', metric_name='response_time', value=55.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.153590+00:00', component='api', operation='health_check', metric_name='response_time', value=57.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.164788+00:00', component='api', operation='health_check', metric_name='response_time', value=60.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.175952+00:00', component='api', operation='health_check', metric_name='response_time', value=62.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.187109+00:00', component='api', operation='health_check', metric_name='response_time', value=65.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.198228+00:00', component='api', operation='health_check', metric_name='response_time', value=67.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.209350+00:00', component='api', operation='health_check', metric_name='response_time', value=45.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.220468+00:00', component='api', operation='health_check', metric_name='response_time', value=47.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.231270+00:00', component='api', operation='health_check', metric_name='response_time', value=50.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.242230+00:00', component='api', operation='health_check', metric_name='response_time', value=52.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.253024+00:00', component='api', operation='health_check', metric_name='response_time', value=55.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.264146+00:00', component='api', operation='health_check', metric_name='response_time', value=57.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.275274+00:00', component='api', operation='health_check', metric_name='response_time', value=60.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.286374+00:00', component='api', operation='health_check', metric_name='response_time', value=62.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.297491+00:00', component='api', operation='health_check', metric_name='response_time', value=65.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.308605+00:00', component='api', operation='health_check', metric_name='response_time', value=67.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.319715+00:00', component='api', operation='health_check', metric_name='response_time', value=45.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.330250+00:00', component='api', operation='health_check', metric_name='response_time', value=47.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.341373+00:00', component='api', operation='health_check', metric_name='response_time', value=50.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.352481+00:00', component='api', operation='health_check', metric_name='response_time', value=52.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.363616+00:00', component='api', operation='health_check', metric_name='response_time', value=55.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.374754+00:00', component='api', operation='health_check', metric_name='response_time', value=57.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.385457+00:00', component='api', operation='health_check', metric_name='response_time', value=60.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.396555+00:00', component='api', operation='health_check', metric_name='response_time', value=62.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.407120+00:00', component='api', operation='health_check', metric_name='response_time', value=65.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.417544+00:00', component='api', operation='health_check', metric_name='response_time', value=67.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.428331+00:00', component='api', operation='health_check', metric_name='response_time', value=45.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.439432+00:00', component='api', operation='health_check', metric_name='response_time', value=47.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.450546+00:00', component='api', operation='health_check', metric_name='response_time', value=50.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.461653+00:00', component='api', operation='health_check', metric_name='response_time', value=52.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.472757+00:00', component='api', operation='health_check', metric_name='response_time', value=55.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.483247+00:00', component='api', operation='health_check', metric_name='response_time', value=57.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.493426+00:00', component='api', operation='health_check', metric_name='response_time', value=60.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.504543+00:00', component='api', operation='health_check', metric_name='response_time', value=62.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.515654+00:00', component='api', operation='health_check', metric_name='response_time', value=65.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.525842+00:00', component='api', operation='health_check', metric_name='response_time', value=67.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.536947+00:00', component='api', operation='health_check', metric_name='response_time', value=45.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.547675+00:00', component='api', operation='health_check', metric_name='response_time', value=47.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.558797+00:00', component='api', operation='health_check', metric_name='response_time', value=50.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.569907+00:00', component='api', operation='health_check', metric_name='response_time', value=52.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.581007+00:00', component='api', operation='health_check', metric_name='response_time', value=55.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.591523+00:00', component='api', operation='health_check', metric_name='response_time', value=57.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.602661+00:00', component='api', operation='health_check', metric_name='response_time', value=60.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.613784+00:00', component='api', operation='health_check', metric_name='response_time', value=62.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.624927+00:00', component='api', operation='health_check', metric_name='response_time', value=65.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.636045+00:00', component='api', operation='health_check', metric_name='response_time', value=67.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.646501+00:00', component='api', operation='health_check', metric_name='response_time', value=45.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.657657+00:00', component='api', operation='health_check', metric_name='response_time', value=47.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.668209+00:00', component='api', operation='health_check', metric_name='response_time', value=50.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.679366+00:00', component='api', operation='health_check', metric_name='response_time', value=52.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.690489+00:00', component='api', operation='health_check', metric_name='response_time', value=55.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.701594+00:00', component='api', operation='health_check', metric_name='response_time', value=57.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.712688+00:00', component='api', operation='health_check', metric_name='response_time', value=60.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.723745+00:00', component='api', operation='health_check', metric_name='response_time', value=62.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.734491+00:00', component='api', operation='health_check', metric_name='response_time', value=65.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.745610+00:00', component='api', operation='health_check', metric_name='response_time', value=67.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.755994+00:00', component='api', operation='health_check', metric_name='response_time', value=45.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.767097+00:00', component='api', operation='health_check', metric_name='response_time', value=47.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.777226+00:00', component='api', operation='health_check', metric_name='response_time', value=50.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.788133+00:00', component='api', operation='health_check', metric_name='response_time', value=52.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.799234+00:00', component='api', operation='health_check', metric_name='response_time', value=55.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.810103+00:00', component='api', operation='health_check', metric_name='response_time', value=57.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.821226+00:00', component='api', operation='health_check', metric_name='response_time', value=60.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.832330+00:00', component='api', operation='health_check', metric_name='response_time', value=62.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.843435+00:00', component='api', operation='health_check', metric_name='response_time', value=65.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.854529+00:00', component='api', operation='health_check', metric_name='response_time', value=67.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.865636+00:00', component='api', operation='health_check', metric_name='response_time', value=45.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.876652+00:00', component='api', operation='health_check', metric_name='response_time', value=47.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.887780+00:00', component='api', operation='health_check', metric_name='response_time', value=50.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.898047+00:00', component='api', operation='health_check', metric_name='response_time', value=52.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.909182+00:00', component='api', operation='health_check', metric_name='response_time', value=55.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.920287+00:00', component='api', operation='health_check', metric_name='response_time', value=57.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.931399+00:00', component='api', operation='health_check', metric_name='response_time', value=60.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.942311+00:00', component='api', operation='health_check', metric_name='response_time', value=62.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.953455+00:00', component='api', operation='health_check', metric_name='response_time', value=65.0, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.964545+00:00', component='api', operation='health_check', metric_name='response_time', value=67.5, unit='milliseconds', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.975672+00:00', component='api', operation='health_check', metric_name='throughput', value=950.0, unit='requests_per_second', test_conditions={'concurrent_users': 100, 'test_duration': '5 minutes', 'request_rate': 'sustained load'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.976441+00:00', component='database', operation='standard_query', metric_name='query_time', value=22.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:09.997546+00:00', component='database', operation='standard_query', metric_name='query_time', value=25.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.018697+00:00', component='database', operation='standard_query', metric_name='query_time', value=28.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.039909+00:00', component='database', operation='standard_query', metric_name='query_time', value=31.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.061043+00:00', component='database', operation='standard_query', metric_name='query_time', value=34.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.082133+00:00', component='database', operation='standard_query', metric_name='query_time', value=22.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.103276+00:00', component='database', operation='standard_query', metric_name='query_time', value=25.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.123498+00:00', component='database', operation='standard_query', metric_name='query_time', value=28.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.144043+00:00', component='database', operation='standard_query', metric_name='query_time', value=31.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.164620+00:00', component='database', operation='standard_query', metric_name='query_time', value=34.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.185647+00:00', component='database', operation='standard_query', metric_name='query_time', value=22.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.206774+00:00', component='database', operation='standard_query', metric_name='query_time', value=25.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.227884+00:00', component='database', operation='standard_query', metric_name='query_time', value=28.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.248052+00:00', component='database', operation='standard_query', metric_name='query_time', value=31.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.269193+00:00', component='database', operation='standard_query', metric_name='query_time', value=34.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.290298+00:00', component='database', operation='standard_query', metric_name='query_time', value=22.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.311396+00:00', component='database', operation='standard_query', metric_name='query_time', value=25.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.332468+00:00', component='database', operation='standard_query', metric_name='query_time', value=28.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.353380+00:00', component='database', operation='standard_query', metric_name='query_time', value=31.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.374587+00:00', component='database', operation='standard_query', metric_name='query_time', value=34.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.395809+00:00', component='database', operation='standard_query', metric_name='query_time', value=22.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.417090+00:00', component='database', operation='standard_query', metric_name='query_time', value=25.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.438357+00:00', component='database', operation='standard_query', metric_name='query_time', value=28.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.459641+00:00', component='database', operation='standard_query', metric_name='query_time', value=31.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.480787+00:00', component='database', operation='standard_query', metric_name='query_time', value=34.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.502037+00:00', component='database', operation='standard_query', metric_name='query_time', value=22.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.523128+00:00', component='database', operation='standard_query', metric_name='query_time', value=25.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.544378+00:00', component='database', operation='standard_query', metric_name='query_time', value=28.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.564772+00:00', component='database', operation='standard_query', metric_name='query_time', value=31.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.585965+00:00', component='database', operation='standard_query', metric_name='query_time', value=34.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.606971+00:00', component='database', operation='standard_query', metric_name='query_time', value=22.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.628158+00:00', component='database', operation='standard_query', metric_name='query_time', value=25.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.649368+00:00', component='database', operation='standard_query', metric_name='query_time', value=28.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.670592+00:00', component='database', operation='standard_query', metric_name='query_time', value=31.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.691768+00:00', component='database', operation='standard_query', metric_name='query_time', value=34.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.712600+00:00', component='database', operation='standard_query', metric_name='query_time', value=22.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.733746+00:00', component='database', operation='standard_query', metric_name='query_time', value=25.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.754258+00:00', component='database', operation='standard_query', metric_name='query_time', value=28.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.774977+00:00', component='database', operation='standard_query', metric_name='query_time', value=31.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.796146+00:00', component='database', operation='standard_query', metric_name='query_time', value=34.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.817338+00:00', component='database', operation='standard_query', metric_name='query_time', value=22.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.837844+00:00', component='database', operation='standard_query', metric_name='query_time', value=25.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.859021+00:00', component='database', operation='standard_query', metric_name='query_time', value=28.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.879591+00:00', component='database', operation='standard_query', metric_name='query_time', value=31.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.900433+00:00', component='database', operation='standard_query', metric_name='query_time', value=34.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.920600+00:00', component='database', operation='standard_query', metric_name='query_time', value=22.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.941740+00:00', component='database', operation='standard_query', metric_name='query_time', value=25.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.962920+00:00', component='database', operation='standard_query', metric_name='query_time', value=28.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:10.984056+00:00', component='database', operation='standard_query', metric_name='query_time', value=31.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.005215+00:00', component='database', operation='standard_query', metric_name='query_time', value=34.0, unit='milliseconds', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.025787+00:00', component='database', operation='standard_query', metric_name='connection_pool_usage', value=58.5, unit='percentage', test_conditions={'concurrent_connections': 50, 'query_complexity': 'standard SELECT with JOIN', 'dataset_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.026115+00:00', component='cache', operation='get_set_operations', metric_name='hit_ratio', value=87.5, unit='percentage', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.026125+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=1.8, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.031883+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.1, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.037415+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.4, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.042664+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.7, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.048408+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.0, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.053578+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.3, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.059354+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.5999999999999996, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.064573+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.9000000000000004, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.070346+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=1.8, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.076176+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.1, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.081980+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.4, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.087792+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.7, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.093528+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.0, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.098752+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.3, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.104515+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.5999999999999996, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.110260+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.9000000000000004, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.116042+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=1.8, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.121913+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.1, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.127688+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.4, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.133461+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.7, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.139230+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.0, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.144982+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.3, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.150773+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.5999999999999996, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.156504+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.9000000000000004, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.162279+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=1.8, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.168037+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.1, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.173786+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.4, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.179542+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.7, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.185282+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.0, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.191134+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.3, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.197021+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.5999999999999996, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.202605+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.9000000000000004, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.208451+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=1.8, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.214420+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.1, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.220221+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.4, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.225975+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.7, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.231215+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.0, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.236978+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.3, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.242723+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.5999999999999996, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.248474+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.9000000000000004, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.253774+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=1.8, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.259541+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.1, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.264987+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.4, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.270748+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.7, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.276502+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.0, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.281918+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.3, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.287302+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.5999999999999996, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.293112+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.9000000000000004, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.299025+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=1.8, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.305015+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.1, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.310919+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.4, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.316816+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.7, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.322164+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.0, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.328095+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.3, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.333917+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.5999999999999996, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.339796+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.9000000000000004, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.345654+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=1.8, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.351537+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.1, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.357420+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.4, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.362708+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.7, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.368500+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.0, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.383751+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.3, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.389498+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.5999999999999996, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.395224+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.9000000000000004, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.400724+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=1.8, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.406488+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.1, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.412289+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.4, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.418043+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.7, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.423213+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.0, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.428964+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.3, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.434725+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.5999999999999996, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.439942+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.9000000000000004, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.445739+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=1.8, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.451484+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.1, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.457251+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.4, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.462999+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.7, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.468542+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.0, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.474287+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.3, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.480042+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.5999999999999996, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.485794+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.9000000000000004, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.491540+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=1.8, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.497327+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.1, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.503049+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.4, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.508486+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.7, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.514215+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.0, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.519933+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.3, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.525660+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.5999999999999996, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.531397+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.9000000000000004, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.537122+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=1.8, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.542843+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.1, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.548580+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.4, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.554330+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.7, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.560063+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.0, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.565352+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.3, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.571086+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.5999999999999996, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.576215+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=3.9000000000000004, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.582001+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=1.8, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.587727+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.1, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.593434+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.4, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.598765+00:00', component='cache', operation='get_set_operations', metric_name='response_time', value=2.7, unit='milliseconds', test_conditions={'cache_size': '1GB', 'key_distribution': 'production_pattern', 'operation_mix': '80% GET, 20% SET'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.604807+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=140.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.655442+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=148.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.706566+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=156.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.757805+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=164.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.808945+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=172.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.860051+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=180.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.911190+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=188.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:11.962362+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=196.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.013639+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=204.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.064809+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=212.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.115009+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=220.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.166266+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=228.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.217561+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=140.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.268746+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=148.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.319012+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=156.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.370241+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=164.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.421453+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=172.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.472651+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=180.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.523924+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=188.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.575172+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=196.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.625504+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=204.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.687145+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=212.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.738796+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=220.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.797945+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=228.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.849972+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=140.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.902053+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=148.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:12.954180+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=156.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.006292+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=164.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.058381+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=172.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.110452+00:00', component='ftns', operation='transaction_processing', metric_name='processing_time', value=180.0, unit='milliseconds', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.162524+00:00', component='ftns', operation='transaction_processing', metric_name='throughput', value=105.0, unit='transactions_per_second', test_conditions={'transaction_size': 'standard', 'concurrent_transactions': 50, 'ledger_size': 'production_scale'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.162681+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=95.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.192837+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=100.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.224945+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=105.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.257170+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=110.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.289294+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=115.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.319782+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=120.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.351906+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=125.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.384067+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=130.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.416472+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=135.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.448049+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=140.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.480176+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=145.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.510318+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=150.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.540673+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=155.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.572868+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=160.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.605038+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=165.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.637210+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=95.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.669387+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=100.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.701523+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=105.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.731915+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=110.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.764056+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=115.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.796204+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=120.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.828455+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=125.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.860692+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=130.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.891366+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=135.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.923554+00:00', component='marketplace', operation='resource_search', metric_name='search_time', value=140.0, unit='milliseconds', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.954396+00:00', component='marketplace', operation='resource_search', metric_name='result_relevance', value=0.87, unit='score', test_conditions={'catalog_size': '10000 resources', 'query_complexity': 'multi-faceted search', 'concurrent_searches': 20}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.955368+00:00', component='system', operation='resource_utilization', metric_name='cpu_utilization', value=43.2, unit='percentage', test_conditions={'load_level': 'normal_production', 'measurement_duration': '1 hour', 'monitoring_interval': '30 seconds'}, environment='production')",
+    "BenchmarkResult(timestamp='2025-07-01T22:38:13.955379+00:00', component='system', operation='resource_utilization', metric_name='memory_utilization', value=59.8, unit='percentage', test_conditions={'load_level': 'normal_production', 'measurement_duration': '1 hour', 'monitoring_interval': '30 seconds'}, environment='production')"
+  ],
+  "validation_status": {
+    "api_health_check": {
+      "status": "FAIL",
+      "metrics_validated": {
+        "response_time": {
+          "p50": {
+            "value": 56.25,
+            "target": 50.0,
+            "pass": false
+          },
+          "p95": {
+            "value": 67.5,
+            "target": 100.0,
+            "pass": true
+          },
+          "p99": {
+            "value": 67.5,
+            "target": 200.0,
+            "pass": true
+          },
+          "sla": {
+            "value": 67.5,
+            "threshold": 500.0,
+            "pass": true
+          }
+        },
+        "throughput": {
+          "p50": {
+            "value": 950.0,
+            "target": 1000.0,
+            "pass": true
+          },
+          "p95": {
+            "value": 950.0,
+            "target": 800.0,
+            "pass": false
+          },
+          "p99": {
+            "value": 950.0,
+            "target": 500.0,
+            "pass": false
+          },
+          "sla": {
+            "value": 950.0,
+            "threshold": 100.0,
+            "pass": false
+          }
+        }
+      },
+      "issues": [
+        "response_time failed performance targets",
+        "throughput failed performance targets"
+      ]
+    },
+    "database_query": {
+      "status": "FAIL",
+      "metrics_validated": {
+        "query_time": {
+          "p50": {
+            "value": 28.0,
+            "target": 25.0,
+            "pass": false
+          },
+          "p95": {
+            "value": 34.0,
+            "target": 50.0,
+            "pass": true
+          },
+          "p99": {
+            "value": 34.0,
+            "target": 100.0,
+            "pass": true
+          },
+          "sla": {
+            "value": 34.0,
+            "threshold": 200.0,
+            "pass": true
+          }
+        },
+        "connection_pool_usage": {
+          "p50": {
+            "value": 58.5,
+            "target": 60.0,
+            "pass": true
+          },
+          "p95": {
+            "value": 58.5,
+            "target": 80.0,
+            "pass": true
+          },
+          "p99": {
+            "value": 58.5,
+            "target": 90.0,
+            "pass": true
+          },
+          "sla": {
+            "value": 58.5,
+            "threshold": 95.0,
+            "pass": true
+          }
+        }
+      },
+      "issues": [
+        "query_time failed performance targets"
+      ]
+    },
+    "cache_operations": {
+      "status": "FAIL",
+      "metrics_validated": {
+        "hit_ratio": {
+          "p50": {
+            "value": 87.5,
+            "target": 85.0,
+            "pass": false
+          },
+          "p95": {
+            "value": 87.5,
+            "target": 80.0,
+            "pass": false
+          },
+          "p99": {
+            "value": 87.5,
+            "target": 75.0,
+            "pass": false
+          },
+          "sla": {
+            "value": 87.5,
+            "threshold": 70.0,
+            "pass": false
+          }
+        },
+        "response_time": {
+          "p50": {
+            "value": 2.7,
+            "target": 2.0,
+            "pass": false
+          },
+          "p95": {
+            "value": 3.900000000000001,
+            "target": 5.0,
+            "pass": true
+          },
+          "p99": {
+            "value": 3.9,
+            "target": 10.0,
+            "pass": true
+          },
+          "sla": {
+            "value": 3.9000000000000004,
+            "threshold": 20.0,
+            "pass": true
+          }
+        }
+      },
+      "issues": [
+        "hit_ratio failed performance targets",
+        "response_time failed performance targets"
+      ]
+    },
+    "ftns_transaction": {
+      "status": "FAIL",
+      "metrics_validated": {
+        "processing_time": {
+          "p50": {
+            "value": 176.0,
+            "target": 150.0,
+            "pass": false
+          },
+          "p95": {
+            "value": 228.0,
+            "target": 300.0,
+            "pass": true
+          },
+          "p99": {
+            "value": 228.0,
+            "target": 500.0,
+            "pass": true
+          },
+          "sla": {
+            "value": 228.0,
+            "threshold": 1000.0,
+            "pass": true
+          }
+        },
+        "throughput": {
+          "p50": {
+            "value": 105.0,
+            "target": 100.0,
+            "pass": false
+          },
+          "p95": {
+            "value": 105.0,
+            "target": 80.0,
+            "pass": false
+          },
+          "p99": {
+            "value": 105.0,
+            "target": 50.0,
+            "pass": false
+          },
+          "sla": {
+            "value": 105.0,
+            "threshold": 20.0,
+            "pass": false
+          }
+        }
+      },
+      "issues": [
+        "processing_time failed performance targets",
+        "throughput failed performance targets"
+      ]
+    },
+    "marketplace_search": {
+      "status": "FAIL",
+      "metrics_validated": {
+        "search_time": {
+          "p50": {
+            "value": 125.0,
+            "target": 100.0,
+            "pass": false
+          },
+          "p95": {
+            "value": 163.5,
+            "target": 200.0,
+            "pass": true
+          },
+          "p99": {
+            "value": 165.0,
+            "target": 400.0,
+            "pass": true
+          },
+          "sla": {
+            "value": 165.0,
+            "threshold": 800.0,
+            "pass": true
+          }
+        },
+        "result_relevance": {
+          "p50": {
+            "value": 0.87,
+            "target": 0.85,
+            "pass": false
+          },
+          "p95": {
+            "value": 0.87,
+            "target": 0.8,
+            "pass": false
+          },
+          "p99": {
+            "value": 0.87,
+            "target": 0.75,
+            "pass": false
+          },
+          "sla": {
+            "value": 0.87,
+            "threshold": 0.7,
+            "pass": false
+          }
+        }
+      },
+      "issues": [
+        "search_time failed performance targets",
+        "result_relevance failed performance targets"
+      ]
+    },
+    "system_resources": {
+      "status": "PASS",
+      "metrics_validated": {
+        "cpu_utilization": {
+          "p50": {
+            "value": 43.2,
+            "target": 45.0,
+            "pass": true
+          },
+          "p95": {
+            "value": 43.2,
+            "target": 70.0,
+            "pass": true
+          },
+          "p99": {
+            "value": 43.2,
+            "target": 85.0,
+            "pass": true
+          },
+          "sla": {
+            "value": 43.2,
+            "threshold": 90.0,
+            "pass": true
+          }
+        },
+        "memory_utilization": {
+          "p50": {
+            "value": 59.8,
+            "target": 62.0,
+            "pass": true
+          },
+          "p95": {
+            "value": 59.8,
+            "target": 80.0,
+            "pass": true
+          },
+          "p99": {
+            "value": 59.8,
+            "target": 90.0,
+            "pass": true
+          },
+          "sla": {
+            "value": 59.8,
+            "threshold": 95.0,
+            "pass": true
+          }
+        }
+      },
+      "issues": []
+    }
+  },
+  "sla_compliance": {
+    "api_health_check": {
+      "compliant": false,
+      "violations": [
+        {
+          "metric": "throughput",
+          "value": 950.0,
+          "threshold": 100.0,
+          "timestamp": "2025-07-01T22:38:09.975672+00:00"
+        }
+      ],
+      "compliance_percentage": 99.00990099009901
+    },
+    "database_query": {
+      "compliant": true,
+      "violations": [],
+      "compliance_percentage": 100.0
+    },
+    "cache_operations": {
+      "compliant": false,
+      "violations": [
+        {
+          "metric": "hit_ratio",
+          "value": 87.5,
+          "threshold": 70.0,
+          "timestamp": "2025-07-01T22:38:11.026115+00:00"
+        }
+      ],
+      "compliance_percentage": 99.00990099009901
+    },
+    "ftns_transaction": {
+      "compliant": false,
+      "violations": [
+        {
+          "metric": "throughput",
+          "value": 105.0,
+          "threshold": 20.0,
+          "timestamp": "2025-07-01T22:38:13.162524+00:00"
+        }
+      ],
+      "compliance_percentage": 96.7741935483871
+    },
+    "marketplace_search": {
+      "compliant": false,
+      "violations": [
+        {
+          "metric": "result_relevance",
+          "value": 0.87,
+          "threshold": 0.7,
+          "timestamp": "2025-07-01T22:38:13.954396+00:00"
+        }
+      ],
+      "compliance_percentage": 96.15384615384616
+    },
+    "system_resources": {
+      "compliant": true,
+      "violations": [],
+      "compliance_percentage": 100.0
+    }
+  }
+}

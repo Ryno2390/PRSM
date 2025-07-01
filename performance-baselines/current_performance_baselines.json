@@ -1,0 +1,234 @@
+{
+  "baselines": {
+    "api_health_check": {
+      "component": "api",
+      "operation": "health_check",
+      "metrics": {
+        "response_time": {
+          "name": "response_time",
+          "unit": "milliseconds",
+          "baseline_value": 50.0,
+          "target_p50": 50.0,
+          "target_p95": 100.0,
+          "target_p99": 200.0,
+          "sla_threshold": 500.0,
+          "critical_threshold": 1000.0,
+          "description": "API health check endpoint response time",
+          "measurement_method": "HTTP request timing"
+        },
+        "throughput": {
+          "name": "throughput",
+          "unit": "requests_per_second",
+          "baseline_value": 1000.0,
+          "target_p50": 1000.0,
+          "target_p95": 800.0,
+          "target_p99": 500.0,
+          "sla_threshold": 100.0,
+          "critical_threshold": 50.0,
+          "description": "API requests processed per second",
+          "measurement_method": "Load testing measurement"
+        }
+      },
+      "test_conditions": {
+        "concurrent_users": 100,
+        "test_duration": "5 minutes",
+        "request_rate": "sustained load"
+      },
+      "established_date": "2025-07-01T22:38:08.878988+00:00",
+      "environment": "production",
+      "version": "1.0.0"
+    },
+    "database_query": {
+      "component": "database",
+      "operation": "standard_query",
+      "metrics": {
+        "query_time": {
+          "name": "query_time",
+          "unit": "milliseconds",
+          "baseline_value": 25.0,
+          "target_p50": 25.0,
+          "target_p95": 50.0,
+          "target_p99": 100.0,
+          "sla_threshold": 200.0,
+          "critical_threshold": 500.0,
+          "description": "Standard database query execution time",
+          "measurement_method": "Database timing instrumentation"
+        },
+        "connection_pool_usage": {
+          "name": "connection_pool_usage",
+          "unit": "percentage",
+          "baseline_value": 60.0,
+          "target_p50": 60.0,
+          "target_p95": 80.0,
+          "target_p99": 90.0,
+          "sla_threshold": 95.0,
+          "critical_threshold": 98.0,
+          "description": "Database connection pool utilization",
+          "measurement_method": "Connection pool monitoring"
+        }
+      },
+      "test_conditions": {
+        "concurrent_connections": 50,
+        "query_complexity": "standard SELECT with JOIN",
+        "dataset_size": "production_scale"
+      },
+      "established_date": "2025-07-01T22:38:08.879094+00:00",
+      "environment": "production",
+      "version": "1.0.0"
+    },
+    "cache_operations": {
+      "component": "cache",
+      "operation": "get_set_operations",
+      "metrics": {
+        "hit_ratio": {
+          "name": "hit_ratio",
+          "unit": "percentage",
+          "baseline_value": 85.0,
+          "target_p50": 85.0,
+          "target_p95": 80.0,
+          "target_p99": 75.0,
+          "sla_threshold": 70.0,
+          "critical_threshold": 60.0,
+          "description": "Cache hit ratio for GET operations",
+          "measurement_method": "Cache statistics monitoring"
+        },
+        "response_time": {
+          "name": "response_time",
+          "unit": "milliseconds",
+          "baseline_value": 2.0,
+          "target_p50": 2.0,
+          "target_p95": 5.0,
+          "target_p99": 10.0,
+          "sla_threshold": 20.0,
+          "critical_threshold": 50.0,
+          "description": "Cache operation response time",
+          "measurement_method": "Cache timing instrumentation"
+        }
+      },
+      "test_conditions": {
+        "cache_size": "1GB",
+        "key_distribution": "production_pattern",
+        "operation_mix": "80% GET, 20% SET"
+      },
+      "established_date": "2025-07-01T22:38:08.879097+00:00",
+      "environment": "production",
+      "version": "1.0.0"
+    },
+    "ftns_transaction": {
+      "component": "ftns",
+      "operation": "transaction_processing",
+      "metrics": {
+        "processing_time": {
+          "name": "processing_time",
+          "unit": "milliseconds",
+          "baseline_value": 150.0,
+          "target_p50": 150.0,
+          "target_p95": 300.0,
+          "target_p99": 500.0,
+          "sla_threshold": 1000.0,
+          "critical_threshold": 2000.0,
+          "description": "FTNS transaction end-to-end processing time",
+          "measurement_method": "Transaction timing measurement"
+        },
+        "throughput": {
+          "name": "throughput",
+          "unit": "transactions_per_second",
+          "baseline_value": 100.0,
+          "target_p50": 100.0,
+          "target_p95": 80.0,
+          "target_p99": 50.0,
+          "sla_threshold": 20.0,
+          "critical_threshold": 10.0,
+          "description": "FTNS transactions processed per second",
+          "measurement_method": "Transaction rate monitoring"
+        }
+      },
+      "test_conditions": {
+        "transaction_size": "standard",
+        "concurrent_transactions": 50,
+        "ledger_size": "production_scale"
+      },
+      "established_date": "2025-07-01T22:38:08.879100+00:00",
+      "environment": "production",
+      "version": "1.0.0"
+    },
+    "marketplace_search": {
+      "component": "marketplace",
+      "operation": "resource_search",
+      "metrics": {
+        "search_time": {
+          "name": "search_time",
+          "unit": "milliseconds",
+          "baseline_value": 100.0,
+          "target_p50": 100.0,
+          "target_p95": 200.0,
+          "target_p99": 400.0,
+          "sla_threshold": 800.0,
+          "critical_threshold": 1500.0,
+          "description": "Marketplace resource search response time",
+          "measurement_method": "Search API timing"
+        },
+        "result_relevance": {
+          "name": "result_relevance",
+          "unit": "score",
+          "baseline_value": 0.85,
+          "target_p50": 0.85,
+          "target_p95": 0.8,
+          "target_p99": 0.75,
+          "sla_threshold": 0.7,
+          "critical_threshold": 0.6,
+          "description": "Search result relevance score",
+          "measurement_method": "Relevance algorithm scoring"
+        }
+      },
+      "test_conditions": {
+        "catalog_size": "10000 resources",
+        "query_complexity": "multi-faceted search",
+        "concurrent_searches": 20
+      },
+      "established_date": "2025-07-01T22:38:08.879102+00:00",
+      "environment": "production",
+      "version": "1.0.0"
+    },
+    "system_resources": {
+      "component": "system",
+      "operation": "resource_utilization",
+      "metrics": {
+        "cpu_utilization": {
+          "name": "cpu_utilization",
+          "unit": "percentage",
+          "baseline_value": 45.0,
+          "target_p50": 45.0,
+          "target_p95": 70.0,
+          "target_p99": 85.0,
+          "sla_threshold": 90.0,
+          "critical_threshold": 95.0,
+          "description": "System CPU utilization under normal load",
+          "measurement_method": "System monitoring"
+        },
+        "memory_utilization": {
+          "name": "memory_utilization",
+          "unit": "percentage",
+          "baseline_value": 62.0,
+          "target_p50": 62.0,
+          "target_p95": 80.0,
+          "target_p99": 90.0,
+          "sla_threshold": 95.0,
+          "critical_threshold": 98.0,
+          "description": "System memory utilization under normal load",
+          "measurement_method": "System monitoring"
+        }
+      },
+      "test_conditions": {
+        "load_level": "normal_production",
+        "measurement_duration": "1 hour",
+        "monitoring_interval": "30 seconds"
+      },
+      "established_date": "2025-07-01T22:38:08.879104+00:00",
+      "environment": "production",
+      "version": "1.0.0"
+    }
+  },
+  "last_updated": "2025-07-01T22:38:08.879221+00:00",
+  "version": "1.0.0"
+}
