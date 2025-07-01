@@ -22,8 +22,21 @@ from dataclasses import dataclass
 from enum import Enum
 
 import structlog
-from openai import AsyncOpenAI
-from anthropic import AsyncAnthropic
+
+# Optional LLM client imports - graceful degradation if not available
+try:
+    from openai import AsyncOpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    AsyncOpenAI = None
+    OPENAI_AVAILABLE = False
+
+try:
+    from anthropic import AsyncAnthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    AsyncAnthropic = None
+    ANTHROPIC_AVAILABLE = False
 
 from prsm.core.models import ClarifiedPrompt, PRSMSession
 from prsm.core.database_service import get_database_service
@@ -79,9 +92,24 @@ class AdvancedIntentEngine:
         self.settings = get_settings()
         self.database_service = get_database_service()
         
-        # Initialize LLM clients
-        self.openai_client = AsyncOpenAI(api_key=self.settings.openai_api_key)
-        self.anthropic_client = AsyncAnthropic(api_key=self.settings.anthropic_api_key)
+        # Initialize LLM clients with graceful fallback
+        self.openai_client = None
+        self.anthropic_client = None
+        
+        if OPENAI_AVAILABLE and hasattr(self.settings, 'openai_api_key') and self.settings.openai_api_key:
+            try:
+                self.openai_client = AsyncOpenAI(api_key=self.settings.openai_api_key)
+            except Exception as e:
+                logger.warning("OpenAI client initialization failed", error=str(e))
+        
+        if ANTHROPIC_AVAILABLE and hasattr(self.settings, 'anthropic_api_key') and self.settings.anthropic_api_key:
+            try:
+                self.anthropic_client = AsyncAnthropic(api_key=self.settings.anthropic_api_key)
+            except Exception as e:
+                logger.warning("Anthropic client initialization failed", error=str(e))
+        
+        # Flag for fallback mode
+        self.llm_available = (self.openai_client is not None) or (self.anthropic_client is not None)
         
         # Intent classification prompt templates
         self.classification_prompt = self._load_classification_prompt()
@@ -223,6 +251,11 @@ Provide detailed complexity assessment in JSON format:
                        session_id=session.session_id,
                        prompt_length=len(prompt))
             
+            # Check if LLM clients are available, use fallback if not
+            if not self.llm_available:
+                logger.info("LLM clients not available, using fallback analysis")
+                return await self._fallback_analysis(prompt)
+            
             # Stage 1: Initial classification with GPT-4
             classification = await self._classify_intent_gpt4(prompt, user_context)
             
@@ -277,6 +310,10 @@ Provide detailed complexity assessment in JSON format:
         user_context: Optional[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Stage 1: Initial classification using GPT-4"""
+        if not self.openai_client:
+            logger.warning("OpenAI client not available for intent classification")
+            return {"category": "general", "confidence": 0.5, "reasoning": "Fallback classification"}
+        
         try:
             response = await self.openai_client.chat.completions.create(
                 model="gpt-4-turbo-preview",
@@ -307,6 +344,10 @@ Provide detailed complexity assessment in JSON format:
         user_context: Optional[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Stage 2: Refinement using Claude"""
+        if not self.anthropic_client:
+            logger.warning("Anthropic client not available for intent refinement")
+            return initial_classification  # Return original classification as fallback
+        
         try:
             refinement_prompt = f"""
             Initial GPT-4 Analysis: {json.dumps(initial_classification, indent=2)}
