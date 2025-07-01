@@ -41,7 +41,7 @@ from pydantic import BaseModel, Field
 from ..core.config import settings
 from ..core.models import PRSMSession, FTNSTransaction, UserInput
 from ..tokenomics.ftns_service import FTNSService
-from ..marketplace.legacy.ftns_marketplace import FTNSMarketplace, ResourceType
+# Legacy FTNS marketplace import removed - not used in current implementation
 
 # Set high precision for financial calculations
 getcontext().prec = 28
@@ -237,12 +237,10 @@ class FTNSBudgetManager:
     
     def __init__(
         self,
-        ftns_service: Optional[FTNSService] = None,
-        marketplace: Optional[FTNSMarketplace] = None
+        ftns_service: Optional[FTNSService] = None
     ):
         # Core services
         self.ftns_service = ftns_service or FTNSService()
-        self.marketplace = marketplace
         
         # Budget storage
         self.active_budgets: Dict[UUID, FTNSBudget] = {}

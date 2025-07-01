@@ -39,7 +39,7 @@ except ImportError as e:
 try:
     # Import marketplace components  
     from prsm.marketplace.expanded_models import ResourceType, DatasetListing, AgentWorkflowListing
-    from prsm.marketplace.expanded_marketplace_service import ExpandedMarketplaceService
+    from prsm.marketplace.real_marketplace_service import RealMarketplaceService
     MARKETPLACE_AVAILABLE = True
 except ImportError as e:
     print(f"⚠️ Marketplace components not available: {e}")
@@ -209,9 +209,9 @@ class PRSMActualIntegrationTest:
         
         try:
             # Test marketplace service creation
-            marketplace_service = ExpandedMarketplaceService()
+            marketplace_service = RealMarketplaceService()
             
-            print(f"   ✅ ExpandedMarketplaceService created")
+            print(f"   ✅ RealMarketplaceService created")
             
             # Test resource types
             resource_types = list(ResourceType)
@@ -334,7 +334,7 @@ class PRSMActualIntegrationTest:
         if BUDGET_AVAILABLE and MARKETPLACE_AVAILABLE:
             try:
                 budget_manager = FTNSBudgetManager()
-                marketplace_service = ExpandedMarketplaceService()
+                marketplace_service = RealMarketplaceService()
                 
                 print(f"   ✅ Budget + Marketplace integration working")
                 integration_score += 1
@@ -356,7 +356,7 @@ class PRSMActualIntegrationTest:
                 
                 session = PRSMSession(user_id=user_input.user_id)
                 budget_manager = FTNSBudgetManager()
-                marketplace_service = ExpandedMarketplaceService()
+                marketplace_service = RealMarketplaceService()
                 
                 print(f"   ✅ Full system integration working")
                 integration_score += 1
