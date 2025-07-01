@@ -1,0 +1,15 @@
+{
+  "scenario": "high_load",
+  "max_concurrent_users": 250,
+  "total_requests": 5553,
+  "error_rate": 100,
+  "avg_response_time": 0,
+  "p95_response_time": 0,
+  "requests_per_second": 16.823690561276035,
+  "performance_grade": {
+    "concurrent_users": 250,
+    "error_rate_pct": 100,
+    "p95_response_ms": 0,
+    "rps": 16.823690561276035
+  }
+}

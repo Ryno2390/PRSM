@@ -1,0 +1,15 @@
+{
+  "scenario": "moderate_load",
+  "max_concurrent_users": 100,
+  "total_requests": 1113,
+  "error_rate": 100,
+  "avg_response_time": 2905.241671578948,
+  "p95_response_time": 0,
+  "requests_per_second": 5.053488422126888,
+  "performance_grade": {
+    "concurrent_users": 100,
+    "error_rate_pct": 100,
+    "p95_response_ms": 0,
+    "rps": 5.053488422126888
+  }
+}
