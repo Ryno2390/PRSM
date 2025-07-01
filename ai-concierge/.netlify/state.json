@@ -1,0 +1,21 @@
+{
+	"siteId": "65fcba58-6230-4a2f-9147-96efdf6a020b",
+	"geolocation": {
+		"data": {
+			"city": "Durham",
+			"country": {
+				"code": "US",
+				"name": "United States"
+			},
+			"subdivision": {
+				"code": "NC",
+				"name": "North Carolina"
+			},
+			"timezone": "America/New_York",
+			"latitude": 35.9806,
+			"longitude": -78.8426,
+			"postalCode": "27703"
+		},
+		"timestamp": 1750993435442
+	}
+}

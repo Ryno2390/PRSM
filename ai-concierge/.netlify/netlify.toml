@@ -1,0 +1,75 @@
+functionsDirectory = "/Users/ryneschultz/Documents/GitHub/PRSM/ai-concierge/.netlify/functions"
+functionsDirectoryOrigin = "config"
+headersOrigin = "inline"
+redirectsOrigin = "inline"
+
+[functions]
+
+[functions."*"]
+node_bundler = "esbuild"
+
+[[plugins]]
+origin = "config"
+package = "@netlify/plugin-nextjs"
+
+[plugins.inputs]
+
+[build]
+publish = "/Users/ryneschultz/Documents/GitHub/PRSM/ai-concierge/.next"
+publishOrigin = "config"
+commandOrigin = "config"
+base = "/Users/ryneschultz/Documents/GitHub/PRSM/ai-concierge"
+command = "npm ci && npm run build-with-knowledge"
+functions = "/Users/ryneschultz/Documents/GitHub/PRSM/ai-concierge/.netlify/functions"
+
+[build.environment]
+NODE_VERSION = "18"
+DEFAULT_LLM_PROVIDER = "claude"
+
+[build.processing]
+
+[build.processing.css]
+
+[build.processing.html]
+
+[build.processing.images]
+
+[build.processing.js]
+
+[build.services]
+
+[[headers]]
+for = "/_next/static/*"
+
+[headers.values]
+Cache-Control = "public, max-age=31536000, immutable"
+
+[[redirects]]
+from = "/_next/image"
+to = "/.netlify/images?url=:url&w=:width&q=:quality"
+status = 200.0
+force = false
+
+[redirects.query]
+url = ":url"
+w = ":width"
+q = ":quality"
+
+[redirects.conditions]
+
+[redirects.headers]
+
+[[redirects]]
+from = "/_ipx/*"
+to = "/.netlify/images?url=:url&w=:width&q=:quality"
+status = 200.0
+force = false
+
+[redirects.query]
+url = ":url"
+w = ":width"
+q = ":quality"
+
+[redirects.conditions]
+
+[redirects.headers]
