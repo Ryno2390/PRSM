@@ -1,0 +1,108 @@
+{
+  "pipeline_version": "1.0.0",
+  "collection_timestamp": "2025-07-01T21:19:40.498186+00:00",
+  "evidence_items": [
+    {
+      "category": "security_controls",
+      "storage_file": "/Users/ryneschultz/Documents/GitHub/PRSM/compliance-evidence-vault/immutable/security_controls_20250701_171940.json",
+      "package_hash": "73a4addee2518cb2ade1086c1a8113392e7056ef683350e33b2bfa8f04b94fbc",
+      "timestamp": "2025-07-01T21:19:40.500987+00:00"
+    },
+    {
+      "category": "access_management",
+      "storage_file": "/Users/ryneschultz/Documents/GitHub/PRSM/compliance-evidence-vault/immutable/access_management_20250701_171940.json",
+      "package_hash": "c7094ce6daf2a70df7645d18894b17d7d54f1302594528f6992aedd3bebe3905",
+      "timestamp": "2025-07-01T21:19:40.502245+00:00"
+    },
+    {
+      "category": "data_protection",
+      "storage_file": "/Users/ryneschultz/Documents/GitHub/PRSM/compliance-evidence-vault/immutable/data_protection_20250701_171940.json",
+      "package_hash": "c93bca32801ab634dbd529c21d9b22ef4b6f28f8762029b8d284c81f5df5ad9d",
+      "timestamp": "2025-07-01T21:19:40.502912+00:00"
+    },
+    {
+      "category": "system_monitoring",
+      "storage_file": "/Users/ryneschultz/Documents/GitHub/PRSM/compliance-evidence-vault/immutable/system_monitoring_20250701_171940.json",
+      "package_hash": "20a875031acd24bea80fc8bbbb9ebfd6500dcb21c5af414b0a9f6740448cce83",
+      "timestamp": "2025-07-01T21:19:40.503969+00:00"
+    },
+    {
+      "category": "change_management",
+      "storage_file": "/Users/ryneschultz/Documents/GitHub/PRSM/compliance-evidence-vault/immutable/change_management_20250701_171940.json",
+      "package_hash": "4a481e61d343961d3023e98f119f41a0803053bbfd3578cd7c911051820785d3",
+      "timestamp": "2025-07-01T21:19:40.504736+00:00"
+    },
+    {
+      "category": "incident_response",
+      "storage_file": "/Users/ryneschultz/Documents/GitHub/PRSM/compliance-evidence-vault/immutable/incident_response_20250701_171940.json",
+      "package_hash": "ea90086044c74400c1556f6f96c2fa351361fb84729b84b94310379644ad388a",
+      "timestamp": "2025-07-01T21:19:40.505234+00:00"
+    }
+  ],
+  "integrity_hashes": {
+    "security_controls": "73a4addee2518cb2ade1086c1a8113392e7056ef683350e33b2bfa8f04b94fbc",
+    "access_management": "c7094ce6daf2a70df7645d18894b17d7d54f1302594528f6992aedd3bebe3905",
+    "data_protection": "c93bca32801ab634dbd529c21d9b22ef4b6f28f8762029b8d284c81f5df5ad9d",
+    "system_monitoring": "20a875031acd24bea80fc8bbbb9ebfd6500dcb21c5af414b0a9f6740448cce83",
+    "change_management": "4a481e61d343961d3023e98f119f41a0803053bbfd3578cd7c911051820785d3",
+    "incident_response": "ea90086044c74400c1556f6f96c2fa351361fb84729b84b94310379644ad388a"
+  },
+  "compliance_status": {},
+  "collection_results": {
+    "pipeline_execution": "PRSM Automated Evidence Collection",
+    "timestamp": "2025-07-01T21:19:40.498320+00:00",
+    "collection_scope": "SOC2_Type_II_ISO27001_Evidence",
+    "evidence_categories": [
+      {
+        "category": "security_controls",
+        "status": "collected",
+        "execution_time": 0.002476930618286133,
+        "evidence_items": 13,
+        "immutable_hash": "73a4addee2518cb2ade1086c1a8113392e7056ef683350e33b2bfa8f04b94fbc",
+        "timestamp": "2025-07-01T21:19:40.500991+00:00"
+      },
+      {
+        "category": "access_management",
+        "status": "collected",
+        "execution_time": 0.0011262893676757812,
+        "evidence_items": 12,
+        "immutable_hash": "c7094ce6daf2a70df7645d18894b17d7d54f1302594528f6992aedd3bebe3905",
+        "timestamp": "2025-07-01T21:19:40.502248+00:00"
+      },
+      {
+        "category": "data_protection",
+        "status": "collected",
+        "execution_time": 0.0005340576171875,
+        "evidence_items": 14,
+        "immutable_hash": "c93bca32801ab634dbd529c21d9b22ef4b6f28f8762029b8d284c81f5df5ad9d",
+        "timestamp": "2025-07-01T21:19:40.502915+00:00"
+      },
+      {
+        "category": "system_monitoring",
+        "status": "collected",
+        "execution_time": 0.000942230224609375,
+        "evidence_items": 11,
+        "immutable_hash": "20a875031acd24bea80fc8bbbb9ebfd6500dcb21c5af414b0a9f6740448cce83",
+        "timestamp": "2025-07-01T21:19:40.503971+00:00"
+      },
+      {
+        "category": "change_management",
+        "status": "collected",
+        "execution_time": 0.0006642341613769531,
+        "evidence_items": 8,
+        "immutable_hash": "4a481e61d343961d3023e98f119f41a0803053bbfd3578cd7c911051820785d3",
+        "timestamp": "2025-07-01T21:19:40.504738+00:00"
+      },
+      {
+        "category": "incident_response",
+        "status": "collected",
+        "execution_time": 0.00038909912109375,
+        "evidence_items": 11,
+        "immutable_hash": "ea90086044c74400c1556f6f96c2fa351361fb84729b84b94310379644ad388a",
+        "timestamp": "2025-07-01T21:19:40.505237+00:00"
+      }
+    ]
+  },
+  "finalization_timestamp": "2025-07-01T21:19:40.505405+00:00",
+  "manifest_integrity_hash": "f324a07e2c3364cfa7a2c9efe26bdfc6f2bc8e9d3b28c068d5782e537434f419"
+}

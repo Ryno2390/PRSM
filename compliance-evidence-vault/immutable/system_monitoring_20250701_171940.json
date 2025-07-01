@@ -1,0 +1,48 @@
+{
+  "category": "system_monitoring",
+  "collection_timestamp": "2025-07-01T21:19:40.503863+00:00",
+  "evidence_data": {
+    "category": "system_monitoring",
+    "description": "System monitoring, logging, and alerting evidence",
+    "evidence_files": [
+      "/Users/ryneschultz/Documents/GitHub/PRSM/prsm/monitoring/alerts.py",
+      "/Users/ryneschultz/Documents/GitHub/PRSM/prsm/monitoring/metrics.py",
+      "/Users/ryneschultz/Documents/GitHub/PRSM/prsm/monitoring/health.py",
+      "/Users/ryneschultz/Documents/GitHub/PRSM/prsm/monitoring/validators.py",
+      "/Users/ryneschultz/Documents/GitHub/PRSM/prsm/monitoring/enterprise_monitoring.py",
+      "/Users/ryneschultz/Documents/GitHub/PRSM/prsm/monitoring/__init__.py",
+      "/Users/ryneschultz/Documents/GitHub/PRSM/prsm/monitoring/dashboard.py",
+      "/Users/ryneschultz/Documents/GitHub/PRSM/prsm/monitoring/logs.py",
+      "/Users/ryneschultz/Documents/GitHub/PRSM/prsm/monitoring/rlt_performance_monitor.py",
+      "/Users/ryneschultz/Documents/GitHub/PRSM/config/prometheus.yml",
+      "/Users/ryneschultz/Documents/GitHub/PRSM/config/alertmanager.yml"
+    ],
+    "metadata": {
+      "prsm/monitoring/": {
+        "type": "directory",
+        "file_count": 11
+      },
+      "config/prometheus.yml": {
+        "size_bytes": 2729,
+        "hash": "be6cfdc44727707d1fc76bfb9926992acf44507313374037baf7e0a57a44c2a6"
+      },
+      "config/grafana/": {
+        "type": "directory",
+        "file_count": 2
+      },
+      "logs/": {
+        "type": "directory",
+        "file_count": 1
+      },
+      "config/alertmanager.yml": {
+        "size_bytes": 9665,
+        "hash": "2a78ff3f55e306df9d38832ed82d724975fab497b4ff499b915a6d00e13279d1"
+      }
+    }
+  },
+  "integrity_metadata": {
+    "collector_version": "1.0.0",
+    "evidence_count": 11,
+    "collection_hash": "2b046c030d06d402393b127990a7f633afdb3ac06e8778373f2263a78f193a5c"
+  }
+}
