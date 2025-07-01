@@ -35,8 +35,8 @@ spec:
         fsGroup: 1000
       containers:
       - name: prsm-api
-        image: prsm-api:latest
-        imagePullPolicy: Always
+        image: prsm-api:v0.1.0-sha-${GIT_SHA}
+        imagePullPolicy: IfNotPresent
         ports:
         - name: http
           containerPort: 8000

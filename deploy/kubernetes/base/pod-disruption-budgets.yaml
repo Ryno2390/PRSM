@@ -1,0 +1,69 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: prsm-api-pdb
+  namespace: prsm-system
+  labels:
+    app.kubernetes.io/name: prsm-api
+    app.kubernetes.io/component: api
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prsm-api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: prsm-nwtn-pdb
+  namespace: prsm-system
+  labels:
+    app.kubernetes.io/name: prsm-nwtn
+    app.kubernetes.io/component: orchestrator
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prsm-nwtn
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: prsm-marketplace-pdb
+  namespace: prsm-system
+  labels:
+    app.kubernetes.io/name: prsm-marketplace
+    app.kubernetes.io/component: marketplace
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prsm-marketplace
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: prsm-monitoring-pdb
+  namespace: prsm-system
+  labels:
+    app.kubernetes.io/name: prsm-monitoring
+    app.kubernetes.io/component: monitoring
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prsm-monitoring
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: prsm-compliance-pdb
+  namespace: prsm-system
+  labels:
+    app.kubernetes.io/name: prsm-compliance
+    app.kubernetes.io/component: compliance
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prsm-compliance
