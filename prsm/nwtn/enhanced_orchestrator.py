@@ -53,6 +53,7 @@ from prsm.agents.executors.model_executor import ModelExecutor
 from prsm.agents.compilers.hierarchical_compiler import HierarchicalCompiler
 from prsm.agents.routers.tool_router import ToolRouter, ToolRequest, ToolExecutionRequest
 from prsm.marketplace.legacy.tool_marketplace import tool_marketplace
+from prsm.nwtn.advanced_intent_engine import AdvancedIntentEngine, get_advanced_intent_engine
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -106,6 +107,9 @@ class EnhancedNWTNOrchestrator:
         self.tool_marketplace = tool_marketplace
         self.tool_enabled_models = set()  # Track which models have tool access
         
+        # Advanced LLM-based Intent Engine
+        self.advanced_intent_engine = get_advanced_intent_engine()
+        
         # Performance tracking with MCP tool metrics
         self.session_metrics = {}
         self.performance_stats = {
@@ -124,16 +128,19 @@ class EnhancedNWTNOrchestrator:
             }
         }
         
-        logger.info("Enhanced NWTN Orchestrator initialized with real agent coordination")
+        logger.info("Enhanced NWTN Orchestrator initialized with LLM-based intent analysis and real agent coordination",
+                   advanced_intent_engine="v2.0", 
+                   llm_engines=["gpt-4-turbo", "claude-3-sonnet"],
+                   production_ready=True)
     
     async def process_query(self, user_input: UserInput) -> PRSMResponse:
         """
-        Process user query with enhanced production-ready pipeline
+        Process user query with LLM-enhanced production-ready pipeline
         
-        Enhanced Flow:
+        Enhanced Flow with Advanced LLM Intent Analysis:
         1. Create session with database persistence
         2. Validate FTNS balance and allocate context
-        3. Intent clarification with LLM-enhanced analysis
+        3. Sophisticated LLM-based intent clarification (GPT-4 + Claude validation)
         4. Real agent coordination with safety monitoring
         5. Execute pipeline with actual model APIs
         6. Compile results with reasoning trace persistence
@@ -163,15 +170,15 @@ class EnhancedNWTNOrchestrator:
             if not await self._validate_enhanced_context_allocation(session):
                 raise ValueError("Insufficient FTNS context allocation")
             
-            # Step 4: Enhanced intent clarification
+            # Step 4: Advanced LLM-based intent clarification with multi-stage analysis
             clarified = await self._enhanced_intent_clarification(user_input.prompt, session)
             
             # Step 5: Check circuit breaker status before proceeding
             if not await self._check_circuit_breaker_status(session):
                 raise RuntimeError("Circuit breaker activated - system in safe mode")
             
-            # Step 6: Real agent coordination with safety monitoring
-            pipeline_config = await self._coordinate_real_agents(clarified, session)
+            # Step 6: Advanced agent coordination leveraging LLM intent analysis
+            pipeline_config = await self._coordinate_advanced_agents(clarified, session)
             
             # Step 7: Execute pipeline with actual APIs and budget tracking
             final_response = await self._execute_enhanced_pipeline(pipeline_config, session, session_budget)
@@ -304,88 +311,123 @@ class EnhancedNWTNOrchestrator:
         prompt: str, 
         session: PRSMSession
     ) -> ClarifiedPrompt:
-        """Enhanced intent clarification with LLM analysis and database integration"""
+        """Production-ready LLM-based intent clarification with sophisticated analysis"""
         try:
-            logger.info("Starting enhanced intent clarification",
+            logger.info("Starting advanced LLM-based intent clarification",
                        session_id=session.session_id,
                        prompt_length=len(prompt))
             
-            # Step 1: Use PromptOptimizer for enhanced analysis
-            optimization_result = await self.prompt_optimizer.optimize_prompt(
+            # Step 1: Advanced multi-stage LLM intent analysis
+            user_context = {
+                "session_id": session.session_id,
+                "user_preferences": session.metadata.get("preferences", {}),
+                "previous_context": getattr(session, 'context_history', [])
+            }
+            
+            # Use sophisticated LLM-based intent analysis (GPT-4 + Claude validation)
+            intent_analysis = await self.advanced_intent_engine.analyze_intent(
                 prompt=prompt,
-                domain="general",
-                task_type="clarification",
-                context_requirements={
-                    "session_id": session.session_id,
-                    "user_preferences": session.metadata.get("preferences", {})
-                }
+                session=session,
+                user_context=user_context
             )
             
-            # Step 2: Extract clarification from optimization
-            clarified_prompt = optimization_result.optimized_prompt
-            complexity_estimate = optimization_result.confidence_score
-            
-            # Step 3: Use HierarchicalArchitect for task complexity assessment
-            complexity_analysis = await self.architect.assess_complexity(prompt)
-            final_complexity = (complexity_estimate + complexity_analysis.complexity_score) / 2
-            
-            # Step 4: Calculate enhanced context requirements
+            # Step 2: Calculate enhanced context requirements based on LLM analysis
             context_required = await self.context_manager.calculate_context_cost(
-                prompt_complexity=final_complexity,
-                depth=complexity_analysis.estimated_depth,
-                intent_category=complexity_analysis.primary_domain,
-                estimated_agents=len(complexity_analysis.required_capabilities)
+                prompt_complexity=intent_analysis.complexity.value / 5.0,  # Normalize to 0-1
+                depth=2 if intent_analysis.complexity.value >= 3 else 1,
+                intent_category=intent_analysis.category.value,
+                estimated_agents=len(intent_analysis.required_capabilities)
             )
             
-            # Step 5: Store reasoning step in database
+            # Step 3: Generate enhanced clarified prompt if disambiguation is needed
+            clarified_prompt = prompt
+            if intent_analysis.disambiguation_questions:
+                # For now, use original prompt but mark for potential user clarification
+                # Future enhancement: Interactive disambiguation with user
+                clarified_prompt = f"{prompt}\n\n[System Note: Complex request detected - may benefit from clarification]"
+            
+            # Step 4: Store comprehensive reasoning step with LLM analysis details
             step_id = await self.database_service.create_reasoning_step(
                 session_id=session.session_id,
                 step_data={
-                    "agent_type": "intent_clarification",
-                    "agent_id": "orchestrator",
-                    "input_data": {"original_prompt": prompt},
+                    "agent_type": "advanced_intent_clarification",
+                    "agent_id": "advanced_intent_engine_v2",
+                    "input_data": {"original_prompt": prompt, "user_context": user_context},
                     "output_data": {
                         "clarified_prompt": clarified_prompt,
-                        "complexity_estimate": final_complexity,
-                        "context_required": context_required,
-                        "primary_domain": complexity_analysis.primary_domain
+                        "intent_category": intent_analysis.category.value,
+                        "complexity_level": intent_analysis.complexity.value,
+                        "confidence_score": intent_analysis.confidence,
+                        "reasoning_chain": intent_analysis.reasoning_chain,
+                        "required_capabilities": intent_analysis.required_capabilities,
+                        "suggested_models": intent_analysis.suggested_models,
+                        "risk_factors": intent_analysis.risk_factors,
+                        "disambiguation_questions": intent_analysis.disambiguation_questions,
+                        "estimated_tokens": intent_analysis.estimated_tokens
                     },
-                    "execution_time": 0.5,  # Typical clarification time
-                    "confidence_score": optimization_result.confidence_score
+                    "execution_time": 1.5,  # Multi-stage LLM analysis time
+                    "confidence_score": intent_analysis.confidence,
+                    "metadata": {
+                        "llm_engines_used": ["gpt-4-turbo", "claude-3-sonnet"],
+                        "analysis_stages": ["classification", "refinement", "complexity", "disambiguation"],
+                        "production_ready": True
+                    }
                 }
             )
             
-            # Step 6: Create enhanced clarified prompt
+            # Step 5: Map LLM analysis to agent requirements
+            suggested_agents = self._map_capabilities_to_agents(intent_analysis.required_capabilities)
+            
+            # Step 6: Create production-ready clarified prompt
             clarified = ClarifiedPrompt(
                 original_prompt=prompt,
                 clarified_prompt=clarified_prompt,
-                intent_category=complexity_analysis.primary_domain,
-                complexity_estimate=final_complexity,
+                intent_category=intent_analysis.category.value,
+                complexity_estimate=intent_analysis.complexity.value / 5.0,  # Normalize to 0-1
                 context_required=context_required,
-                suggested_agents=self._determine_agent_requirements(complexity_analysis),
+                suggested_agents=suggested_agents,
                 metadata={
                     "step_id": step_id,
-                    "optimization_score": optimization_result.confidence_score,
-                    "required_capabilities": complexity_analysis.required_capabilities,
-                    "estimated_depth": complexity_analysis.estimated_depth
+                    "advanced_analysis": True,
+                    "confidence": intent_analysis.confidence,
+                    "reasoning_chain": intent_analysis.reasoning_chain,
+                    "suggested_models": intent_analysis.suggested_models,
+                    "risk_factors": intent_analysis.risk_factors,
+                    "disambiguation_questions": intent_analysis.disambiguation_questions,
+                    "estimated_tokens": intent_analysis.estimated_tokens,
+                    "llm_analysis_complete": True,
+                    "production_intent_engine": "v2.0"
                 }
             )
             
-            logger.info("Enhanced intent clarification completed",
+            logger.info("Advanced LLM-based intent clarification completed",
                        session_id=session.session_id,
-                       category=clarified.intent_category,
-                       complexity=final_complexity,
+                       category=intent_analysis.category.value,
+                       complexity_level=intent_analysis.complexity.value,
+                       confidence=intent_analysis.confidence,
                        context_required=context_required,
                        step_id=step_id)
             
             return clarified
             
         except Exception as e:
-            logger.error("Enhanced intent clarification failed",
+            logger.error("Advanced LLM-based intent clarification failed",
                         session_id=session.session_id,
                         error=str(e))
-            # Fallback to basic clarification
-            return await self._basic_intent_clarification(prompt)
+            
+            # Fallback to the advanced intent engine's built-in fallback
+            try:
+                fallback_analysis = await self.advanced_intent_engine._fallback_analysis(prompt)
+                clarified_prompt = await self.advanced_intent_engine.clarify_prompt_advanced(
+                    prompt, session, user_context={"fallback": True}
+                )
+                return clarified_prompt
+            except Exception as fallback_error:
+                logger.error("Advanced intent engine fallback also failed",
+                            session_id=session.session_id,
+                            fallback_error=str(fallback_error))
+                # Final fallback to basic clarification
+                return await self._basic_intent_clarification(prompt)
     
     async def _check_circuit_breaker_status(self, session: PRSMSession) -> bool:
         """Check circuit breaker status before processing"""
@@ -517,6 +559,135 @@ class EnhancedNWTNOrchestrator:
                         error=str(e))
             raise
     
+    async def _coordinate_advanced_agents(
+        self, 
+        clarified_prompt: ClarifiedPrompt, 
+        session: PRSMSession
+    ) -> Dict[str, Any]:
+        """
+        Advanced agent coordination leveraging sophisticated LLM intent analysis
+        
+        This method enhances the traditional coordination with LLM-derived insights:
+        - Uses detailed reasoning chains from LLM analysis for agent selection
+        - Implements dynamic execution strategies based on intent complexity
+        - Leverages suggested models from multi-stage LLM evaluation
+        - Incorporates risk factor assessment into safety constraints
+        - Creates sophisticated agent interaction patterns
+        """
+        try:
+            logger.info("Starting advanced agent coordination with LLM-enhanced planning",
+                       session_id=session.session_id,
+                       intent=clarified_prompt.intent_category,
+                       llm_confidence=clarified_prompt.metadata.get("confidence", 0.7),
+                       risk_factors=clarified_prompt.metadata.get("risk_factors", []))
+            
+            # Step 1: Extract LLM analysis metadata for coordination
+            llm_metadata = clarified_prompt.metadata
+            reasoning_chain = llm_metadata.get("reasoning_chain", [])
+            suggested_models = llm_metadata.get("suggested_models", [])
+            risk_factors = llm_metadata.get("risk_factors", [])
+            estimated_tokens = llm_metadata.get("estimated_tokens", 1000)
+            
+            # Step 2: Enhanced context allocation based on LLM token estimation
+            allocation_success = await self.context_manager.allocate_context(
+                session, max(clarified_prompt.context_required, estimated_tokens)
+            )
+            
+            if not allocation_success:
+                raise ValueError("Failed to allocate LLM-estimated context for advanced coordination")
+            
+            # Step 3: Advanced model routing with LLM suggestions
+            routing_result = await self._advanced_model_routing(
+                clarified_prompt, suggested_models, reasoning_chain
+            )
+            
+            # Step 4: Dynamic execution strategy based on LLM complexity analysis
+            execution_strategy = await self._determine_advanced_execution_strategy(
+                clarified_prompt, reasoning_chain, risk_factors
+            )
+            
+            # Step 5: Sophisticated agent assignments with LLM-guided prioritization
+            agent_assignments = await self._create_advanced_agent_assignments(
+                clarified_prompt, routing_result, reasoning_chain
+            )
+            
+            # Step 6: Enhanced safety constraints incorporating LLM risk assessment
+            safety_constraints = await self._determine_enhanced_safety_constraints(
+                session, risk_factors, clarified_prompt.intent_category
+            )
+            
+            # Step 7: Create comprehensive pipeline configuration
+            pipeline_config = {
+                "session_id": session.session_id,
+                "clarified_prompt": clarified_prompt,
+                "routing_result": routing_result,
+                "agent_assignments": agent_assignments,
+                "safety_constraints": safety_constraints,
+                "context_allocation": max(clarified_prompt.context_required, estimated_tokens),
+                "execution_strategy": execution_strategy,
+                "llm_guidance": {
+                    "reasoning_chain": reasoning_chain,
+                    "suggested_models": suggested_models,
+                    "risk_factors": risk_factors,
+                    "confidence_score": llm_metadata.get("confidence", 0.7),
+                    "disambiguation_questions": llm_metadata.get("disambiguation_questions", [])
+                },
+                "monitoring_config": {
+                    "track_performance": True,
+                    "validate_safety": True,
+                    "charge_ftns": settings.ftns_enabled,
+                    "persist_reasoning": True,
+                    "llm_enhanced": True,
+                    "confidence_threshold": 0.8,
+                    "risk_monitoring": len(risk_factors) > 0
+                }
+            }
+            
+            # Step 8: Store advanced pipeline configuration with LLM metadata
+            await self.database_service.create_architect_task(
+                session_id=session.session_id,
+                task_data={
+                    "level": 0,
+                    "instruction": "Advanced LLM-guided agent coordination and pipeline configuration",
+                    "complexity_score": clarified_prompt.complexity_estimate,
+                    "dependencies": [],
+                    "status": "configured",
+                    "assigned_agent": "enhanced_orchestrator_v2",
+                    "metadata": {
+                        "pipeline_config": {
+                            "agent_count": len(agent_assignments),
+                            "routing_confidence": routing_result.confidence,
+                            "execution_strategy": execution_strategy["strategy_type"],
+                            "llm_enhanced": True
+                        },
+                        "llm_analysis": {
+                            "reasoning_steps": len(reasoning_chain),
+                            "suggested_models": len(suggested_models),
+                            "risk_factors": len(risk_factors),
+                            "confidence": llm_metadata.get("confidence", 0.7)
+                        }
+                    }
+                }
+            )
+            
+            logger.info("Advanced agent coordination completed with LLM guidance",
+                       session_id=session.session_id,
+                       agents_assigned=len(agent_assignments),
+                       routing_confidence=routing_result.confidence,
+                       execution_strategy=execution_strategy["strategy_type"],
+                       llm_confidence=llm_metadata.get("confidence", 0.7),
+                       risk_factors_detected=len(risk_factors))
+            
+            return pipeline_config
+            
+        except Exception as e:
+            logger.error("Advanced agent coordination failed",
+                        session_id=session.session_id,
+                        error=str(e))
+            # Fallback to standard coordination
+            logger.info("Falling back to standard agent coordination")
+            return await self._coordinate_real_agents(clarified_prompt, session)
+    
     def _determine_agent_requirements(self, complexity_analysis) -> List[AgentType]:
         """Determine required agents based on complexity analysis"""
         agents = [AgentType.ARCHITECT]  # Always need architect
@@ -535,6 +706,47 @@ class EnhancedNWTNOrchestrator:
         if complexity_analysis.complexity_score > 0.6:
             agents.append(AgentType.COMPILER)
         
+        return agents
+    
+    def _map_capabilities_to_agents(self, required_capabilities: List[str]) -> List[AgentType]:
+        """Map LLM-identified capabilities to specific PRSM agent types"""
+        agents = [AgentType.ARCHITECT]  # Always need architect for coordination
+        
+        # Map sophisticated LLM analysis capabilities to agents
+        capability_mapping = {
+            "reasoning": AgentType.ARCHITECT,
+            "chain_of_thought": AgentType.ARCHITECT,
+            "analysis": AgentType.ARCHITECT,
+            "model_selection": AgentType.ROUTER,
+            "routing": AgentType.ROUTER,
+            "optimization": AgentType.PROMPTER,
+            "prompt_engineering": AgentType.PROMPTER,
+            "execution": AgentType.EXECUTOR,
+            "api_calls": AgentType.EXECUTOR,
+            "model_execution": AgentType.EXECUTOR,
+            "compilation": AgentType.COMPILER,
+            "synthesis": AgentType.COMPILER,
+            "response_formatting": AgentType.COMPILER,
+            "multi_modal": AgentType.EXECUTOR,
+            "code_generation": AgentType.EXECUTOR,
+            "data_processing": AgentType.EXECUTOR,
+            "creative_writing": AgentType.EXECUTOR,
+            "research": AgentType.EXECUTOR
+        }
+        
+        # Add agents based on LLM-identified capabilities
+        for capability in required_capabilities:
+            capability_lower = capability.lower()
+            for cap_key, agent_type in capability_mapping.items():
+                if cap_key in capability_lower and agent_type not in agents:
+                    agents.append(agent_type)
+        
+        # Ensure we always have executor and compiler for production execution
+        if AgentType.EXECUTOR not in agents:
+            agents.append(AgentType.EXECUTOR)
+        if AgentType.COMPILER not in agents:
+            agents.append(AgentType.COMPILER)
+            
         return agents
     
     def _create_agent_assignments(self, clarified_prompt, routing_result) -> Dict[str, Any]:
@@ -568,6 +780,119 @@ class EnhancedNWTNOrchestrator:
                 "priority": 5
             }
         }
+    
+    async def _advanced_model_routing(
+        self, 
+        clarified_prompt: ClarifiedPrompt, 
+        suggested_models: List[str], 
+        reasoning_chain: List[str]
+    ):
+        """Enhanced model routing using LLM suggestions and reasoning analysis"""
+        # Enhanced routing that considers LLM suggestions
+        routing_context = {
+            "complexity": clarified_prompt.complexity_estimate,
+            "domain": clarified_prompt.intent_category,
+            "llm_suggestions": suggested_models,
+            "reasoning_depth": len(reasoning_chain),
+            "confidence_threshold": 0.8
+        }
+        
+        # Use the standard router but with enhanced context
+        return await self.router.route_to_models(
+            query=clarified_prompt.clarified_prompt,
+            context=routing_context,
+            required_capabilities=clarified_prompt.metadata.get("required_capabilities", [])
+        )
+    
+    async def _determine_advanced_execution_strategy(
+        self, 
+        clarified_prompt: ClarifiedPrompt, 
+        reasoning_chain: List[str], 
+        risk_factors: List[str]
+    ) -> Dict[str, Any]:
+        """Determine execution strategy based on LLM analysis"""
+        complexity = clarified_prompt.complexity_estimate
+        intent_category = clarified_prompt.intent_category
+        
+        # Determine strategy based on LLM insights
+        if len(risk_factors) > 2:
+            strategy_type = "cautious_sequential"
+            parallelization = False
+        elif complexity > 0.8 or len(reasoning_chain) > 5:
+            strategy_type = "parallel_complex"
+            parallelization = True
+        elif intent_category in ["research", "analytical", "problem_solving"]:
+            strategy_type = "staged_analysis"
+            parallelization = False
+        else:
+            strategy_type = "optimized_parallel"
+            parallelization = True
+        
+        return {
+            "strategy_type": strategy_type,
+            "parallelization": parallelization,
+            "risk_mitigation": len(risk_factors) > 0,
+            "complexity_aware": True,
+            "llm_guided": True,
+            "reasoning_stages": min(len(reasoning_chain), 5),
+            "safety_priority": len(risk_factors) > 1
+        }
+    
+    async def _create_advanced_agent_assignments(
+        self, 
+        clarified_prompt: ClarifiedPrompt, 
+        routing_result, 
+        reasoning_chain: List[str]
+    ) -> Dict[str, Any]:
+        """Create sophisticated agent assignments with LLM-guided prioritization"""
+        base_assignments = self._create_agent_assignments(clarified_prompt, routing_result)
+        
+        # Enhance assignments with LLM insights
+        for agent_name, assignment in base_assignments.items():
+            assignment["llm_enhanced"] = True
+            assignment["reasoning_context"] = reasoning_chain[:3]  # First 3 reasoning steps
+            assignment["confidence_threshold"] = 0.8
+            
+            # Adjust priorities based on LLM analysis
+            if clarified_prompt.intent_category == "research" and agent_name == "architect":
+                assignment["priority"] = 0  # Higher priority for research tasks
+            elif clarified_prompt.complexity_estimate > 0.8 and agent_name == "prompt_optimizer":
+                assignment["priority"] = 1.5  # Higher priority for complex optimization
+        
+        return base_assignments
+    
+    async def _determine_enhanced_safety_constraints(
+        self, 
+        session: PRSMSession, 
+        risk_factors: List[str], 
+        intent_category: str
+    ) -> Dict[str, Any]:
+        """Enhanced safety constraints incorporating LLM risk assessment"""
+        base_constraints = await self._determine_safety_constraints(session)
+        
+        # Enhance with LLM risk factors
+        enhanced_constraints = base_constraints.copy()
+        enhanced_constraints.update({
+            "llm_risk_factors": risk_factors,
+            "risk_level": "high" if len(risk_factors) > 2 else "medium" if len(risk_factors) > 0 else "low",
+            "enhanced_monitoring": len(risk_factors) > 0,
+            "intent_based_limits": self._get_intent_safety_limits(intent_category),
+            "confidence_gating": True,
+            "escalation_threshold": 0.3 if len(risk_factors) > 1 else 0.5
+        })
+        
+        return enhanced_constraints
+    
+    def _get_intent_safety_limits(self, intent_category: str) -> Dict[str, Any]:
+        """Get safety limits based on intent category"""
+        limits = {
+            "research": {"max_depth": 5, "verification_required": True},
+            "creative": {"content_filter": True, "originality_check": True},
+            "technical": {"code_review": True, "security_scan": True},
+            "analytical": {"data_validation": True, "bias_check": True},
+            "conversational": {"tone_monitoring": True, "context_awareness": True}
+        }
+        return limits.get(intent_category, {"standard_monitoring": True})
     
     async def _execute_enhanced_pipeline(
         self, 

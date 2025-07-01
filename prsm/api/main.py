@@ -53,6 +53,11 @@ from prsm.api.task_api import router as task_router
 from prsm.auth.auth_manager import auth_manager
 from prsm.auth import get_current_user
 from prsm.auth.middleware import AuthMiddleware, SecurityHeadersMiddleware
+from prsm.security.middleware import (
+    get_security_middleware_stack, configure_cors,
+    SecurityHeadersMiddleware as EnhancedSecurityHeaders,
+    RateLimitingMiddleware, RequestValidationMiddleware
+)
 
 
 # Configure structured logging
@@ -354,12 +359,21 @@ app = FastAPI(
     redoc_url="/redoc" if settings.is_development else None,
     lifespan=lifespan
 )
-# Add security middleware (order matters - most specific first)
+# Add enhanced security middleware stack (order matters - most specific first)
 from prsm.security import RequestLimitsMiddleware, request_limits_config
 
+# Original middleware for compatibility
 app.add_middleware(RequestLimitsMiddleware, config=request_limits_config)
-app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(AuthMiddleware, rate_limit_requests=100, rate_limit_window=60)
+
+# Enhanced security middleware stack
+app.add_middleware(RequestValidationMiddleware)
+app.add_middleware(RateLimitingMiddleware) 
+app.add_middleware(EnhancedSecurityHeaders)
+
+logger.info("Enhanced security middleware stack initialized",
+           middleware_count=3,
+           features=["request_validation", "rate_limiting", "security_headers"])
 
 # Initialize auth manager
 @app.on_event("startup")
@@ -375,14 +389,21 @@ async def initialize_auth():
 app.include_router(auth_router)
 
 
-# Add CORS middleware
+# Add secure CORS middleware
+cors_middleware = configure_cors()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.is_development else [],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=cors_middleware.allow_origins if not settings.is_development else ["*"],
+    allow_credentials=cors_middleware.allow_credentials,
+    allow_methods=cors_middleware.allow_methods,
+    allow_headers=cors_middleware.allow_headers,
+    expose_headers=cors_middleware.expose_headers,
+    max_age=cors_middleware.max_age
 )
+
+logger.info("Secure CORS configuration applied",
+           development_mode=settings.is_development,
+           origins_count=len(cors_middleware.allow_origins) if not settings.is_development else "all")
 
 
 @app.exception_handler(Exception)
