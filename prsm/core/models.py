@@ -121,6 +121,15 @@ class AgentType(str, Enum):
     COMPILER = "compiler"
 
 
+class UserRole(str, Enum):
+    """User roles for RBAC system"""
+    ADMIN = "admin"
+    USER = "user"
+    PREMIUM = "premium"
+    DEVELOPER = "developer"
+    MODERATOR = "moderator"
+
+
 class SafetyLevel(str, Enum):
     """Safety levels for circuit breaker system
     
@@ -475,6 +484,19 @@ class ModelShard(TimestampMixin):
     hosted_by: List[str] = Field(default_factory=list)  # Node IDs
     verification_hash: str
     size_bytes: int
+
+
+class User(PRSMBaseModel):
+    """User model for authentication and authorization"""
+    user_id: str = Field(..., description="Unique user identifier")
+    username: str = Field(..., description="User display name")
+    email: Optional[str] = Field(None, description="User email address")
+    role: UserRole = Field(default=UserRole.USER, description="User role for RBAC")
+    is_active: bool = Field(default=True, description="Whether user account is active")
+    is_premium: bool = Field(default=False, description="Whether user has premium access")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_login: Optional[datetime] = Field(None, description="Last login timestamp")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional user metadata")
 
 
 # === Request/Response Models ===
