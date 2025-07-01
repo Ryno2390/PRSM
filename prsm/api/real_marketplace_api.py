@@ -17,7 +17,7 @@ a truly scalable, enterprise-ready interface.
 
 from typing import List, Optional, Dict, Any
 from uuid import UUID
-from fastapi import APIRouter, HTTPException, Depends, Query, Body, status
+from fastapi import APIRouter, HTTPException, Depends, Query, Body, status, Request
 from pydantic import BaseModel, Field
 import structlog
 
@@ -26,6 +26,10 @@ from ..marketplace.models import (
     CreateModelListingRequest, MarketplaceSearchFilters, MarketplaceStatsResponse
 )
 from ..auth import get_current_user
+from ..core.models import UserRole
+from ..security.enhanced_authorization import (
+    require_permission, get_enhanced_auth_manager, sanitize_request_data
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -140,9 +144,12 @@ class OrderResponse(BaseModel):
 # ============================================================================
 
 @router.post("/resources", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
+@require_permission("*", "create")
 async def create_resource(
     request: CreateResourceRequest,
-    current_user: str = Depends(get_current_user)
+    http_request: Request,
+    current_user: str = Depends(get_current_user),
+    auth_manager = Depends(get_enhanced_auth_manager)
 ) -> Dict[str, Any]:
     """
     Create any type of marketplace resource using universal endpoint
@@ -165,19 +172,53 @@ async def create_resource(
     - safety_dataset: AI safety and alignment datasets
     """
     try:
+        # Enhanced security logging and validation
         logger.info("Creating marketplace resource via universal endpoint",
                    resource_type=request.resource_type,
                    user_id=current_user,
-                   name=request.name)
+                   name=request.name,
+                   ip_address=http_request.client.host)
         
-        # Validate resource type
+        # Input sanitization
+        sanitized_request = auth_manager.sanitize_input(request.dict())
+        request = CreateResourceRequest(**sanitized_request)
+        
+        # Enhanced resource type validation with security checks
         valid_types = {
             "ai_model", "dataset", "agent_workflow", "tool", 
             "compute_resource", "knowledge_base", "evaluation_metric", 
             "training_dataset", "safety_dataset"
         }
         if request.resource_type not in valid_types:
+            await auth_manager.audit_action(
+                user_id=current_user,
+                action="invalid_resource_type",
+                resource_type="marketplace",
+                metadata={"attempted_type": request.resource_type},
+                request=http_request
+            )
             raise ValueError(f"Invalid resource_type. Must be one of: {valid_types}")
+        
+        # Enhanced permission check for specific resource type
+        has_permission = await auth_manager.check_permission(
+            user_id=current_user,
+            user_role=UserRole.USER,  # Would fetch actual role from DB
+            resource_type=request.resource_type,
+            action="create"
+        )
+        
+        if not has_permission:
+            await auth_manager.audit_action(
+                user_id=current_user,
+                action="permission_denied",
+                resource_type=request.resource_type,
+                metadata={"action": "create"},
+                request=http_request
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Insufficient permissions to create {request.resource_type}"
+            )
         
         # Create resource using the unified service
         resource = await marketplace_service.create_resource(
@@ -199,10 +240,25 @@ async def create_resource(
             specific_data=request.specific_data
         )
         
-        logger.info("Resource created successfully",
+        # Audit successful resource creation
+        await auth_manager.audit_action(
+            user_id=current_user,
+            action="create",
+            resource_type=request.resource_type,
+            resource_id=resource["id"],
+            metadata={
+                "resource_name": request.name,
+                "quality_grade": request.quality_grade,
+                "pricing_model": request.pricing_model
+            },
+            request=http_request
+        )
+        
+        logger.info("Resource created successfully with security audit",
                    resource_id=resource["id"],
                    resource_type=request.resource_type,
-                   user_id=current_user)
+                   user_id=current_user,
+                   ip_address=http_request.client.host)
         
         return {
             "success": True,
