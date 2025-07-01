@@ -35,7 +35,7 @@ from ..benchmarking.rlt_evaluation_benchmark import (
     RLTBenchmarkSuite, EvaluationProblem, TeachingEvaluationResult,
     BenchmarkSummary
 )
-from ..teachers.seal_rlt_enhanced_teacher import SEALRLTEnhancedTeacher, SEALRLTConfig
+from ..teachers.seal import SEALService, SEALConfig
 from ..teachers.rlt.quality_monitor import QualityMetrics, QualityMonitor
 from ..monitoring.rlt_performance_monitor import RLTPerformanceMonitor, RLTMetrics
 
@@ -140,7 +140,7 @@ class RLTClaimsValidationSuite:
 class DenseRewardEffectivenessValidator:
     """Validates dense reward training effectiveness claims"""
     
-    def __init__(self, rlt_teacher: SEALRLTEnhancedTeacher):
+    def __init__(self, rlt_teacher: SEALService):
         self.rlt_teacher = rlt_teacher
         self.baseline_results = {}
         self.rlt_results = {}
@@ -343,7 +343,7 @@ class StudentDistillationValidator:
     
     async def validate_student_distillation_quality(
         self,
-        rlt_teacher: SEALRLTEnhancedTeacher,
+        rlt_teacher: SEALService,
         traditional_teacher: Any,
         student_models: List[Any],
         problems: List[EvaluationProblem]
@@ -517,7 +517,7 @@ class ZeroShotTransferValidator:
     
     async def validate_zero_shot_transfer_capabilities(
         self,
-        rlt_teacher: SEALRLTEnhancedTeacher,
+        rlt_teacher: SEALService,
         traditional_teacher: Any,
         domain_problems: Dict[str, List[EvaluationProblem]]
     ) -> ZeroShotTransferValidation:
@@ -911,13 +911,13 @@ class RLTClaimsValidator:
     
     def __init__(
         self,
-        rlt_teacher: Optional[SEALRLTEnhancedTeacher] = None,
+        rlt_teacher: Optional[SEALService] = None,
         performance_monitor: Optional[RLTPerformanceMonitor] = None
     ):
         # Create default SEAL RLT teacher if none provided
         if rlt_teacher is None:
-            from ..safety.seal.seal_rlt_enhanced_teacher import SEALRLTEnhancedTeacher
-            self.rlt_teacher = SEALRLTEnhancedTeacher()
+            from ..teachers.seal import SEALService
+            self.rlt_teacher = SEALService()
         else:
             self.rlt_teacher = rlt_teacher
         self.performance_monitor = performance_monitor

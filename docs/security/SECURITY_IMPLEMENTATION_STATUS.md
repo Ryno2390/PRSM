@@ -43,7 +43,7 @@
 | Real-time Safety Monitoring | ✅ Complete | `prsm/safety/monitor.py` |
 | Governance Controls | ✅ Complete | `prsm/safety/governance.py` |
 | Recursive Improvement Safeguards | ✅ Complete | `prsm/safety/recursive_improvement_safeguards.py` |
-| SEAL Enhanced Teacher Safety | ✅ Complete | `prsm/safety/seal/seal_rlt_enhanced_teacher.py` |
+| SEAL Enhanced Teacher Safety | ✅ Complete | `prsm/safety/seal/seal_service.py` |
 
 #### Audit & Logging (95/100)
 | Component | Status | Evidence |

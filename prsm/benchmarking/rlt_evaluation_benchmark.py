@@ -29,7 +29,7 @@ from collections import defaultdict, namedtuple
 
 import structlog
 
-from ..teachers.seal_rlt_enhanced_teacher import SEALRLTEnhancedTeacher, SEALRLTConfig
+from ..teachers.seal import SEALService, SEALConfig
 from ..teachers.rlt.student_comprehension_evaluator import ComprehensionMetrics, StudentComprehensionEvaluator
 from ..teachers.rlt.quality_monitor import QualityMetrics, QualityMonitor
 from ..monitoring.rlt_performance_monitor import RLTPerformanceMonitor, RLTMetrics
@@ -428,7 +428,7 @@ class RLTTeachingEffectivenessEvaluator:
     
     def __init__(
         self,
-        rlt_teacher: SEALRLTEnhancedTeacher,
+        rlt_teacher: SEALService,
         comprehension_evaluator: StudentComprehensionEvaluator,
         quality_monitor: QualityMonitor
     ):
@@ -735,7 +735,7 @@ class RLTBenchmarkSuite:
     
     def __init__(
         self,
-        rlt_teacher: SEALRLTEnhancedTeacher,
+        rlt_teacher: SEALService,
         performance_monitor: Optional[RLTPerformanceMonitor] = None
     ):
         self.rlt_teacher = rlt_teacher
