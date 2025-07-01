@@ -1,0 +1,55 @@
+{
+  "dashboard_generation": "2025-07-01T21:19:40.505241+00:00",
+  "compliance_overview": {
+    "total_evidence_categories": 6,
+    "successful_collections": 6,
+    "total_evidence_items": 69
+  },
+  "evidence_coverage": {
+    "security_controls": {
+      "status": "complete",
+      "evidence_items": 13,
+      "last_updated": "2025-07-01T21:19:40.500991+00:00"
+    },
+    "access_management": {
+      "status": "complete",
+      "evidence_items": 12,
+      "last_updated": "2025-07-01T21:19:40.502248+00:00"
+    },
+    "data_protection": {
+      "status": "complete",
+      "evidence_items": 14,
+      "last_updated": "2025-07-01T21:19:40.502915+00:00"
+    },
+    "system_monitoring": {
+      "status": "complete",
+      "evidence_items": 11,
+      "last_updated": "2025-07-01T21:19:40.503971+00:00"
+    },
+    "change_management": {
+      "status": "complete",
+      "evidence_items": 8,
+      "last_updated": "2025-07-01T21:19:40.504738+00:00"
+    },
+    "incident_response": {
+      "status": "complete",
+      "evidence_items": 11,
+      "last_updated": "2025-07-01T21:19:40.505237+00:00"
+    }
+  },
+  "compliance_trends": {
+    "trend_period": "last_30_days",
+    "evidence_collection_frequency": "daily",
+    "compliance_score_trend": "stable",
+    "control_effectiveness": "improving",
+    "audit_readiness_score": 85
+  },
+  "audit_readiness": {
+    "readiness_percentage": 100.0,
+    "readiness_level": "High",
+    "audit_recommendation": "Ready for SOC2 Type II audit",
+    "evidence_categories_complete": 6,
+    "total_evidence_categories": 6,
+    "gaps_to_address": []
+  }
+}
