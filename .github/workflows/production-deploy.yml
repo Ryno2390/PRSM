@@ -1,0 +1,441 @@
+name: Production CI/CD Pipeline
+
+# Trigger on:
+# 1. Push to main branch (production deployment)
+# 2. Pull requests to main (staging validation)
+# 3. Manual dispatch for emergency deployments
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+      force_deploy:
+        description: 'Force deployment (skip some checks)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  AWS_REGION: us-west-2
+  EKS_CLUSTER_NAME: prsm-production-cluster
+  DOCKER_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-west-2.amazonaws.com
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+
+jobs:
+  # ==========================================
+  # Code Quality & Security Analysis
+  # ==========================================
+  security-analysis:
+    name: Security & Code Quality Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install bandit safety semgrep
+
+    - name: Run PRSM AI Auditor Quick Validation
+      run: |
+        bash scripts/ai_auditor_quick_validate.sh
+        
+    - name: Security scan with Bandit
+      run: |
+        bandit -r prsm/ -f json -o bandit-report.json || true
+        
+    - name: Dependency vulnerability scan with Safety
+      run: |
+        safety check --json --output safety-report.json || true
+        
+    - name: Static analysis with Semgrep
+      run: |
+        semgrep --config=auto prsm/ --json --output=semgrep-report.json || true
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json
+          semgrep-report.json
+          audit_reports/
+
+    - name: Fail on critical security issues
+      run: |
+        # Parse reports and fail if critical issues found
+        python scripts/ci/check_security_reports.py
+
+  # ==========================================
+  # Unit & Integration Testing
+  # ==========================================
+  testing:
+    name: Comprehensive Testing Suite
+    runs-on: ubuntu-latest
+    needs: security-analysis
+    
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: prsm_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y postgresql-client redis-tools
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-test.txt
+        
+    - name: Set up test environment
+      env:
+        DATABASE_URL: postgresql://postgres:test_password@localhost/prsm_test
+        REDIS_URL: redis://localhost:6379/0
+      run: |
+        python scripts/setup_test_environment.py
+
+    - name: Run unit tests with coverage
+      env:
+        DATABASE_URL: postgresql://postgres:test_password@localhost/prsm_test
+        REDIS_URL: redis://localhost:6379/0
+      run: |
+        python -m pytest tests/unit/ -v --cov=prsm --cov-report=xml --cov-report=html
+
+    - name: Run integration tests
+      env:
+        DATABASE_URL: postgresql://postgres:test_password@localhost/prsm_test
+        REDIS_URL: redis://localhost:6379/0
+      run: |
+        python -m pytest tests/integration/ -v --tb=short
+
+    - name: Run SEAL ML component tests
+      env:
+        DATABASE_URL: postgresql://postgres:test_password@localhost/prsm_test
+        REDIS_URL: redis://localhost:6379/0
+      run: |
+        python -m pytest tests/test_seal.py -v
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-reports
+        path: |
+          htmlcov/
+          coverage.xml
+          pytest-report.xml
+
+  # ==========================================
+  # Performance & Load Testing
+  # ==========================================
+  performance-testing:
+    name: Performance & Load Testing
+    runs-on: ubuntu-latest
+    needs: testing
+    if: github.event_name == 'push' || github.event.inputs.environment == 'production'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install k6
+      run: |
+        sudo gpg -k
+        sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+        echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+        sudo apt-get update
+        sudo apt-get install k6
+
+    - name: Run performance baseline tests
+      run: |
+        python scripts/setup_test_server.py &
+        sleep 10
+        k6 run tests/performance/baseline_performance.js
+        k6 run tests/performance/load_test_1000_users.js
+        
+    - name: Upload performance reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-reports
+        path: |
+          performance-results/
+
+  # ==========================================
+  # Build & Package Application
+  # ==========================================
+  build:
+    name: Build Application Images
+    runs-on: ubuntu-latest
+    needs: [security-analysis, testing]
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.DOCKER_REGISTRY }}/prsm
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build and push Docker image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  # ==========================================
+  # Infrastructure Validation
+  # ==========================================
+  infrastructure-validation:
+    name: Terraform Infrastructure Validation
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: "~1.0"
+
+    - name: Terraform Init
+      run: |
+        cd deploy/enterprise/terraform
+        terraform init
+
+    - name: Terraform Validate
+      run: |
+        cd deploy/enterprise/terraform
+        terraform validate
+
+    - name: Terraform Plan
+      run: |
+        cd deploy/enterprise/terraform
+        terraform plan -var="environment=staging" -out=tfplan
+
+    - name: Upload Terraform plan
+      uses: actions/upload-artifact@v3
+      with:
+        name: terraform-plan
+        path: deploy/enterprise/terraform/tfplan
+
+  # ==========================================
+  # Staging Deployment
+  # ==========================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build, infrastructure-validation]
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    environment: staging
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Deploy infrastructure
+      run: |
+        cd deploy/enterprise/terraform
+        terraform init
+        terraform apply -var="environment=staging" -auto-approve
+
+    - name: Update EKS kubeconfig
+      run: |
+        aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name prsm-staging-cluster
+
+    - name: Deploy application to staging
+      run: |
+        kubectl set image deployment/prsm-api prsm-api=${{ needs.build.outputs.image-tag }} -n prsm-staging
+        kubectl rollout status deployment/prsm-api -n prsm-staging --timeout=600s
+
+    - name: Run staging smoke tests
+      run: |
+        python scripts/run_staging_smoke_tests.py
+
+  # ==========================================
+  # Production Deployment
+  # ==========================================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, infrastructure-validation, deploy-staging, performance-testing]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Deploy infrastructure
+      run: |
+        cd deploy/enterprise/terraform
+        terraform init
+        terraform apply -var="environment=production" -auto-approve
+
+    - name: Update EKS kubeconfig
+      run: |
+        aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+    - name: Blue-Green deployment
+      run: |
+        python scripts/blue_green_deployment.py --image ${{ needs.build.outputs.image-tag }}
+
+    - name: Post-deployment validation
+      run: |
+        python scripts/production_health_checks.py
+
+    - name: Notify deployment success
+      uses: 8398a7/action-slack@v3
+      with:
+        status: success
+        channel: '#deployments'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  # ==========================================
+  # Post-Deployment Monitoring
+  # ==========================================
+  post-deployment-monitoring:
+    name: Post-Deployment Monitoring Setup
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Setup monitoring alerts
+      run: |
+        python scripts/setup_cloudwatch_alarms.py
+        
+    - name: Configure log aggregation
+      run: |
+        python scripts/setup_log_aggregation.py
+        
+    - name: Initialize performance baselines
+      run: |
+        python scripts/set_performance_baselines.py
+
+  # ==========================================
+  # Failure Notification
+  # ==========================================
+  notify-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [security-analysis, testing, build, deploy-staging, deploy-production]
+    if: failure()
+    
+    steps:
+    - name: Notify deployment failure
+      uses: 8398a7/action-slack@v3
+      with:
+        status: failure
+        channel: '#alerts'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
