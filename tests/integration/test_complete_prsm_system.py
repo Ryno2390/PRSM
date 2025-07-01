@@ -426,7 +426,7 @@ class CompletePRSMSystemTester:
         
         # RLT Teacher
         try:
-            from prsm.teachers.seal_service import SEALService
+            from prsm.teachers.seal import SEALService
             from uuid import uuid4
             
             class MockTeacherModel:
@@ -503,7 +503,7 @@ class CompletePRSMSystemTester:
         # Federation Network
         try:
             from prsm.federation.distributed_rlt_network import DistributedRLTNetwork
-            from prsm.teachers.seal_service import SEALService
+            from prsm.teachers.seal import SEALService
             from uuid import uuid4
             
             class MockTeacherModel:
