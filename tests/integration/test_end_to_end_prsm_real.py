@@ -39,7 +39,7 @@ try:
     
     # Try to import RLT teacher components
     try:
-        from prsm.teachers.seal_rlt_enhanced_teacher import SEALRLTEnhancedTeacher
+        from prsm.teachers.seal_service import SEALService
         RLT_AVAILABLE = True
     except ImportError:
         print("⚠️  RLT components not available - will test without RLT integration")
@@ -464,8 +464,8 @@ class RealPRSMIntegrationTester:
             print(f"🧑‍🏫 Testing {test_name}...")
             
             # Create real RLT teacher
-            rlt_teacher = SEALRLTEnhancedTeacher()
-            print(f"  ✅ Real SEALRLTEnhancedTeacher instantiated")
+            rlt_teacher = SEALService()
+            print(f"  ✅ Real SEALService instantiated")
             
             # Test real teaching capability
             teaching_input = {
@@ -506,7 +506,7 @@ class RealPRSMIntegrationTester:
             }
             
             components_tested = [
-                "SEALRLTEnhancedTeacher",
+                "SEALService",
                 "RLT Integration",
                 "Teaching Generation"
             ]
@@ -537,7 +537,7 @@ class RealPRSMIntegrationTester:
                 test_name=test_name,
                 success=False,
                 execution_time_seconds=execution_time,
-                components_tested=["SEALRLTEnhancedTeacher"] if RLT_AVAILABLE else [],
+                components_tested=["SEALService"] if RLT_AVAILABLE else [],
                 actual_metrics={"execution_time": execution_time},
                 error_details=error_msg
             )

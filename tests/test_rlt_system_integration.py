@@ -66,7 +66,7 @@ class RLTSystemIntegrationTest:
             "rlt_evaluation_benchmark": {"status": "pending", "errors": [], "performance": 0},
             "rlt_comparative_study": {"status": "pending", "errors": [], "performance": 0},
             "distributed_rlt_network": {"status": "pending", "errors": [], "performance": 0},
-            "seal_rlt_enhanced_teacher": {"status": "pending", "errors": [], "performance": 0}
+            "seal_service": {"status": "pending", "errors": [], "performance": 0}
         }
     
     async def run_comprehensive_integration_tests(self) -> Dict[str, Any]:
@@ -178,9 +178,9 @@ class RLTSystemIntegrationTest:
         )
         
         await self._test_import_component(
-            "seal_rlt_enhanced_teacher",
-            "prsm.safety.seal.seal_rlt_enhanced_teacher",
-            "SEALRLTEnhancedTeacher",
+            "seal_service",
+            "prsm.safety.seal.seal_service",
+            "SEALService",
             lambda: {}
         )
         

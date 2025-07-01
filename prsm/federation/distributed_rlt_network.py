@@ -30,7 +30,7 @@ from statistics import mean, stdev
 
 import structlog
 
-from ..teachers.seal_rlt_enhanced_teacher import SEALRLTEnhancedTeacher, SEALRLTConfig
+from ..teachers.seal import SEALService, SEALConfig
 from ..teachers.rlt.quality_monitor import QualityMetrics, QualityMonitor
 from ..monitoring.rlt_performance_monitor import RLTPerformanceMonitor, RLTMetrics
 from ..benchmarking.rlt_evaluation_benchmark import EvaluationProblem, TeachingEvaluationResult
@@ -180,7 +180,7 @@ class DistributedRLTNetwork:
     def __init__(
         self,
         node_id: str,
-        local_teacher: SEALRLTEnhancedTeacher,
+        local_teacher: SEALService,
         network_address: str = "localhost",
         network_port: int = 8000,
         max_network_size: int = 100,

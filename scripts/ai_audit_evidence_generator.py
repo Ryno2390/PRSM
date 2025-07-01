@@ -373,8 +373,8 @@ class AIAuditEvidenceGenerator:
         claims = [
             {
                 "claim": "SEAL Technology Integration",
-                "implementation_file": "prsm/teachers/seal_rlt_enhanced_teacher.py",
-                "verified": await self._file_exists("prsm/teachers/seal_rlt_enhanced_teacher.py"),
+                "implementation_file": "prsm/teachers/seal_service.py",
+                "verified": await self._file_exists("prsm/teachers/seal_service.py"),
                 "evidence": "MIT SEAL methodology implementation"
             },
             {

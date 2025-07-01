@@ -25,7 +25,7 @@ import structlog
 
 from .enhanced_orchestrator import EnhancedNWTNOrchestrator
 from ..agents.routers.rlt_enhanced_router import RLTEnhancedRouter, RLTTeacherSelection
-from ..teachers.seal_rlt_enhanced_teacher import SEALRLTEnhancedTeacher, SEALRLTConfig, SEALRLTTeachingSession
+from ..teachers.seal import SEALService, SEALConfig
 from ..teachers.rlt.dense_reward_trainer import RLTTrainingConfig
 from ..teachers.rlt.student_comprehension_evaluator import ComprehensionMetrics, EvaluationConfig
 from ..teachers.rlt.quality_monitor import QualityMetrics, MonitoringConfig
@@ -143,10 +143,10 @@ class RLTEnhancedOrchestrator(EnhancedNWTNOrchestrator):
         self.rlt_teacher_coordinator = None  # Initialized on first use
         self.student_profiles: Dict[str, StudentCapabilityProfile] = {}
         self.teaching_evaluations: List[RLTTeachingEvaluation] = []
-        self.active_teaching_sessions: Dict[str, SEALRLTTeachingSession] = {}
+        self.active_teaching_sessions: Dict[str, SEALTeachingSession] = {}
         
         # RLT configuration
-        self.rlt_config = SEALRLTConfig(
+        self.rlt_config = SEALConfig(
             seal_enabled=True,
             rlt_enabled=True,
             quality_threshold=0.75,
@@ -734,7 +734,7 @@ class RLTEnhancedOrchestrator(EnhancedNWTNOrchestrator):
         question: str, 
         solution: str, 
         learning_objectives: List[str]
-    ) -> SEALRLTTeachingSession:
+    ) -> SEALTeachingSession:
         """Create RLT teaching session"""
         
         if not teacher_selection.selected_rlt_teacher:
@@ -742,7 +742,7 @@ class RLTEnhancedOrchestrator(EnhancedNWTNOrchestrator):
         
         # Initialize RLT teacher coordinator if needed
         if not self.rlt_teacher_coordinator:
-            self.rlt_teacher_coordinator = SEALRLTEnhancedTeacher(
+            self.rlt_teacher_coordinator = SEALService(
                 teacher_model=None,  # Mock teacher model
                 config=self.rlt_config
             )
@@ -770,7 +770,7 @@ class RLTEnhancedOrchestrator(EnhancedNWTNOrchestrator):
     
     async def _execute_rlt_teaching(
         self, 
-        teaching_session: SEALRLTTeachingSession, 
+        teaching_session: SEALTeachingSession, 
         teacher_selection: RLTTeacherSelection, 
         student_profile: StudentCapabilityProfile
     ) -> Dict[str, Any]:
@@ -835,7 +835,7 @@ class RLTEnhancedOrchestrator(EnhancedNWTNOrchestrator):
     
     async def _evaluate_teaching_effectiveness(
         self, 
-        teaching_session: SEALRLTTeachingSession, 
+        teaching_session: SEALTeachingSession, 
         teaching_result: Dict[str, Any], 
         student_profile: StudentCapabilityProfile
     ) -> RLTTeachingEvaluation:
@@ -1019,7 +1019,7 @@ class RLTEnhancedOrchestrator(EnhancedNWTNOrchestrator):
     
     async def _finalize_teaching_session(
         self, 
-        teaching_session: SEALRLTTeachingSession, 
+        teaching_session: SEALTeachingSession, 
         evaluation: RLTTeachingEvaluation
     ):
         """Finalize teaching session and update metrics"""
@@ -1083,7 +1083,7 @@ class RLTEnhancedOrchestrator(EnhancedNWTNOrchestrator):
     async def _handle_teaching_error(
         self, 
         session: PRSMSession, 
-        teaching_session: Optional[SEALRLTTeachingSession], 
+        teaching_session: Optional[SEALTeachingSession], 
         error: Exception, 
         execution_time: float
     ):

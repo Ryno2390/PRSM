@@ -49,9 +49,9 @@ The documented architecture is world-class in its vision and demonstrates profou
 ### Weaknesses
 
 *   **Mock Implementations:** The most innovative and heavily marketed features are not fully implemented.
-    *   **SEAL:** The core logic in [`prsm/teachers/seal_rlt_enhanced_teacher.py`](prsm/teachers/seal_rlt_enhanced_teacher.py:349-394) is a placeholder (`# Mock SEAL enhancement`). The "safety" version in [`prsm/safety/seal/seal_rlt_enhanced_teacher.py`](prsm/safety/seal/seal_rlt_enhanced_teacher.py) is a simulation that relies on simple regex pattern matching, not autonomous learning. It is a safety checker, but it is not the self-improving AI described in the architectural vision.
+    *   **SEAL:** The core logic in [`prsm/teachers/seal_service.py`](prsm/teachers/seal_service.py:349-394) is a placeholder (`# Mock SEAL enhancement`). The "safety" version in [`prsm/safety/seal/seal_service.py`](prsm/safety/seal/seal_service.py) is a simulation that relies on simple regex pattern matching, not autonomous learning. It is a safety checker, but it is not the self-improving AI described in the architectural vision.
     *   **Red Team Safety:** The `RedTeamSafetyMonitor` uses predefined lists of keywords and prompts to simulate safety checks, rather than a dynamic, model-driven adversarial system.
-*   **Code Duplication:** The presence of two identical files, `seal_rlt_enhanced_teacher.py`, in both the `/prsm/safety/seal` and `/prsm/teachers` directories is a code quality red flag. It suggests a lack of disciplined refactoring and can lead to maintenance issues.
+*   **Code Duplication:** The presence of two identical files, `seal_service.py`, in both the `/prsm/safety/seal` and `/prsm/teachers` directories is a code quality red flag. It suggests a lack of disciplined refactoring and can lead to maintenance issues.
 *   **Misleading Validation Claims:** The `AI AUDITOR VALIDATION` comments inside the code are highly misleading. They point to mocked features and non-existent test files (e.g., `tests/test_seal_rlt_integration.py` is not present) as "EVIDENCE". This overstatement of progress is a significant concern regarding transparency.
 
 ---

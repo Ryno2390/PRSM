@@ -74,7 +74,7 @@ class ScalabilityOrchestrator:
             "rlt_dense_reward_trainer",
             "rlt_quality_monitor",
             "distributed_rlt_network",
-            "seal_rlt_enhanced_teacher"
+            "seal_service"
         ]
         
         # Load thresholds for optimization triggers
@@ -215,7 +215,7 @@ class ScalabilityOrchestrator:
             "training": "rlt_dense_reward_trainer",
             "quality": "rlt_quality_monitor",
             "network": "distributed_rlt_network",
-            "teaching": "seal_rlt_enhanced_teacher"
+            "teaching": "seal_service"
         }
         
         return type_mapping.get(request_type.lower())
@@ -258,7 +258,7 @@ class ScalabilityOrchestrator:
         
         # Simulate processing time based on component and load
         base_processing_time = {
-            "seal_rlt_enhanced_teacher": 0.08,
+            "seal_service": 0.08,
             "distributed_rlt_network": 0.06,
             "rlt_quality_monitor": 0.04,
             "rlt_dense_reward_trainer": 0.07,
@@ -333,7 +333,7 @@ class ScalabilityOrchestrator:
         
         # Base CPU usage from Phase 3 analysis
         base_cpu = {
-            "seal_rlt_enhanced_teacher": 82.8,
+            "seal_service": 82.8,
             "distributed_rlt_network": 79.8,
             "rlt_quality_monitor": 76.8,
             "rlt_dense_reward_trainer": 73.8,
@@ -356,7 +356,7 @@ class ScalabilityOrchestrator:
         """Estimate memory usage for component"""
         
         base_memory = {
-            "seal_rlt_enhanced_teacher": 350,
+            "seal_service": 350,
             "distributed_rlt_network": 320,
             "rlt_quality_monitor": 290,
             "rlt_dense_reward_trainer": 380,
