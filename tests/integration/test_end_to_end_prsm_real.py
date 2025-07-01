@@ -39,7 +39,7 @@ try:
     
     # Try to import RLT teacher components
     try:
-        from prsm.teachers.seal_service import SEALService
+        from prsm.teachers.seal import SEALService
         RLT_AVAILABLE = True
     except ImportError:
         print("⚠️  RLT components not available - will test without RLT integration")
