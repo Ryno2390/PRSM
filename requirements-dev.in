@@ -1,0 +1,64 @@
+# PRSM Development Dependencies
+# This file contains development, testing, and CI tools.
+# Run `pip-compile requirements-dev.in` to generate requirements-dev.txt with exact versions.
+
+# Development requirements only (scipy etc. will come from main requirements.txt)
+# Note: We skip including requirements.in here to avoid complex build dependencies
+
+# Testing Framework
+pytest
+pytest-asyncio
+pytest-cov
+pytest-xdist
+pytest-benchmark
+pytest-mock
+pytest-httpx
+
+# Test Data & Factories
+factory-boy
+faker
+
+# Code Quality & Linting
+black
+isort
+flake8
+mypy
+pre-commit
+
+# Security & Vulnerability Scanning
+bandit
+safety
+pip-audit
+
+# Documentation
+sphinx
+sphinx-rtd-theme
+mkdocs
+mkdocs-material
+
+# Performance & Load Testing
+locust
+memory-profiler
+
+# Development Tools
+ipython
+jupyter
+notebook
+
+# Database Testing
+pytest-postgresql
+pytest-redis
+
+# API Testing
+httpx
+respx
+
+# Type Checking
+types-redis
+types-requests
+
+# Dependency Management
+pip-tools
+
+# Development Server
+watchdog

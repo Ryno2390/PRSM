@@ -41,7 +41,7 @@ from pydantic import BaseModel, Field
 from ..core.config import settings
 from ..core.models import PRSMSession, FTNSTransaction, UserInput
 from ..tokenomics.ftns_service import FTNSService
-from ..marketplace.ftns_marketplace import FTNSMarketplace, ResourceType
+from ..marketplace.legacy.ftns_marketplace import FTNSMarketplace, ResourceType
 
 # Set high precision for financial calculations
 getcontext().prec = 28

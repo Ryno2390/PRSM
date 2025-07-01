@@ -40,7 +40,7 @@ from pydantic import BaseModel, Field
 from ..core.config import get_settings
 from ..core.models import TeacherModel, ModelType, TimestampMixin
 from ..agents.routers.tool_router import ToolRouter, ToolRequest, MCPToolSpec, ToolType, ToolCapability
-from ..marketplace.tool_marketplace import tool_marketplace, ToolListing
+from ..marketplace.legacy.tool_marketplace import tool_marketplace, ToolListing
 from ..integrations.security.sandbox_manager import SandboxManager, ToolExecutionRequest
 from ..tokenomics.ftns_service import FTNSService
 from .production_training_pipeline import ProductionTrainingPipeline, TeacherModelConnector, TrainingConfig

@@ -52,7 +52,7 @@ from prsm.agents.prompters.prompt_optimizer import PromptOptimizer
 from prsm.agents.executors.model_executor import ModelExecutor
 from prsm.agents.compilers.hierarchical_compiler import HierarchicalCompiler
 from prsm.agents.routers.tool_router import ToolRouter, ToolRequest, ToolExecutionRequest
-from prsm.marketplace.tool_marketplace import tool_marketplace
+from prsm.marketplace.legacy.tool_marketplace import tool_marketplace
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()

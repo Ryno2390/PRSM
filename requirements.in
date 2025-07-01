@@ -1,0 +1,94 @@
+# PRSM Core Dependencies
+# This file contains the high-level dependencies without version pins.
+# Run `pip-compile requirements.in` to generate requirements.txt with exact versions.
+
+# Core Web Framework
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+
+# Async & Concurrency
+asyncio-mqtt
+aiofiles
+aiohttp
+
+# Database & Storage
+sqlalchemy[asyncio]
+asyncpg
+aiosqlite
+alembic
+redis
+psycopg2-binary
+
+# IPFS & Distributed Storage
+ipfshttpclient
+py-multiaddr
+py-multicodec
+
+# Web3 & Blockchain
+web3
+eth-account
+py-ecc
+eth-keys
+
+# Cryptography & Security
+cryptography
+passlib[bcrypt]
+python-jose[cryptography]
+bcrypt
+
+# AI/ML & Data Processing
+openai
+anthropic
+huggingface-hub
+transformers
+torch
+numpy
+pandas
+scikit-learn
+sentence-transformers
+
+# HTTP & API Clients
+httpx
+requests
+
+# Configuration & Environment
+python-dotenv
+toml
+
+# Validation & Schemas
+jsonschema
+email-validator
+
+# Date & Time
+python-dateutil
+
+# File Processing
+python-multipart
+PyPDF2
+
+# Networking
+websockets
+
+# Task Queue & Background Jobs
+celery
+kombu
+
+# Monitoring & Observability
+structlog
+prometheus-client
+
+# Rate Limiting
+slowapi
+
+# Template Engine
+jinja2
+
+# CLI Tools
+click
+rich
+
+# Utilities
+uuid
+pathlib
