@@ -36,6 +36,9 @@ from prsm.core.models import (
 from prsm.context.selective_parallelism_engine import (
     ExecutionStrategy, TaskDefinition, ParallelismDecision, SelectiveParallelismEngine
 )
+from prsm.scheduling.critical_path_calculator import (
+    CriticalPathCalculator, ResourceConstraint
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -200,12 +203,86 @@ class ScheduledWorkflow(PRSMBaseModel):
     
     def get_critical_path_duration(self) -> timedelta:
         """Calculate critical path duration through workflow steps"""
-        # Build dependency graph and find longest path
+        if not self.steps:
+            return timedelta()
+        
+        # Use the critical path calculator for accurate dependency-aware calculation
+        try:
+            # Create a temporary calculator instance for this workflow
+            from prsm.scheduling.critical_path_calculator import CriticalPathCalculator
+            calculator = CriticalPathCalculator()
+            
+            # Run critical path analysis synchronously (simplified for this context)
+            import asyncio
+            
+            async def calculate_critical_path():
+                result = await calculator.calculate_critical_path(self.steps)
+                return result.critical_path_duration
+            
+            # Run in event loop if available, otherwise create one
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If we're already in an async context, we can't await
+                    # Fall back to simplified calculation
+                    return self._calculate_simplified_critical_path()
+                else:
+                    return loop.run_until_complete(calculate_critical_path())
+            except RuntimeError:
+                # No event loop available, create one
+                return asyncio.run(calculate_critical_path())
+                
+        except Exception as e:
+            # Fallback to simplified calculation if critical path analysis fails
+            logger.warning("Critical path calculation failed, using fallback", error=str(e))
+            return self._calculate_simplified_critical_path()
+    
+    def _calculate_simplified_critical_path(self) -> timedelta:
+        """Simplified critical path calculation for fallback scenarios"""
+        if not self.steps:
+            return timedelta()
+        
+        # Build a simple dependency graph
         step_map = {step.step_id: step for step in self.steps}
         
-        # Simple approach: sum all durations (assumes sequential for now)
-        # TODO: Implement proper critical path calculation with dependencies
-        return sum((step.estimated_duration for step in self.steps), timedelta())
+        # Find steps with no dependencies (start points)
+        start_steps = [step for step in self.steps if not step.depends_on]
+        
+        if not start_steps:
+            # If no clear start point, assume sequential execution
+            return sum((step.estimated_duration for step in self.steps), timedelta())
+        
+        # Calculate longest path from each start step
+        def calculate_longest_path(step_id: UUID, visited: set) -> timedelta:
+            if step_id in visited:
+                return timedelta()  # Cycle detection
+            
+            visited.add(step_id)
+            step = step_map.get(step_id)
+            if not step:
+                return timedelta()
+            
+            # Find all steps that depend on this one
+            dependent_steps = [s for s in self.steps if step_id in s.depends_on]
+            
+            if not dependent_steps:
+                # Terminal step
+                return step.estimated_duration
+            
+            # Calculate maximum path through dependents
+            max_dependent_path = max(
+                (calculate_longest_path(dep_step.step_id, visited.copy()) 
+                 for dep_step in dependent_steps),
+                default=timedelta()
+            )
+            
+            return step.estimated_duration + max_dependent_path
+        
+        # Return the longest path from any start step
+        return max(
+            (calculate_longest_path(step.step_id, set()) for step in start_steps),
+            default=timedelta()
+        )
     
     def is_deadline_feasible(self) -> bool:
         """Check if workflow can complete within execution window"""
@@ -318,6 +395,7 @@ class WorkflowScheduler(TimestampMixin):
         
         # Scheduling algorithms
         self.parallelism_engine: Optional[SelectiveParallelismEngine] = None
+        self.critical_path_calculator = CriticalPathCalculator()
         
         # Performance tracking
         self.scheduling_statistics: Dict[str, Any] = defaultdict(int)
@@ -989,6 +1067,291 @@ class WorkflowScheduler(TimestampMixin):
         except Exception as e:
             logger.error("Error executing workflow step", step_id=str(step.step_id), error=str(e))
             return {"success": False, "error": str(e)}
+    
+    async def optimize_workflow_with_critical_path(
+        self,
+        workflow: ScheduledWorkflow,
+        optimization_goals: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Optimize workflow scheduling using advanced critical path analysis
+        
+        Args:
+            workflow: Workflow to optimize
+            optimization_goals: Goals like 'minimize_duration', 'minimize_cost', 'balance_resources'
+            
+        Returns:
+            Comprehensive optimization result with critical path insights
+        """
+        try:
+            self.logger.info("Starting critical path optimization",
+                           workflow_id=str(workflow.workflow_id))
+            
+            # Set default optimization goals
+            goals = optimization_goals or {
+                "minimize_duration": 0.4,
+                "minimize_cost": 0.4,
+                "balance_resources": 0.2
+            }
+            
+            # Build resource constraints from current pools
+            resource_constraints = {}
+            for resource_type, pool in self.resource_pools.items():
+                resource_constraints[resource_type.value] = ResourceConstraint(
+                    resource_type=resource_type.value,
+                    max_concurrent_usage=pool.available_capacity,
+                    availability_windows=[(timedelta(), timedelta(days=7))]  # Assume week availability
+                )
+            
+            # Perform comprehensive critical path analysis
+            critical_path_result = await self.critical_path_calculator.calculate_critical_path(
+                workflow.steps,
+                resource_constraints
+            )
+            
+            # Generate optimization recommendations
+            optimization_recommendations = []
+            
+            # Critical path optimization
+            if critical_path_result.critical_path_steps:
+                critical_steps = [
+                    step for step in workflow.steps 
+                    if step.step_id in critical_path_result.critical_path_steps
+                ]
+                
+                optimization_recommendations.extend([
+                    f"Focus optimization on {len(critical_steps)} critical path steps",
+                    f"Critical path duration: {critical_path_result.critical_path_duration.total_seconds():.1f} seconds",
+                    f"Project efficiency: {critical_path_result.project_efficiency:.2%}"
+                ])
+                
+                # Suggest resource allocation for critical steps
+                for step in critical_steps:
+                    if step.resource_requirements:
+                        optimization_recommendations.append(
+                            f"Consider increasing resources for critical step '{step.step_name}'"
+                        )
+            
+            # Parallelization opportunities
+            if critical_path_result.parallelizable_groups:
+                total_parallelizable = sum(len(group) for group in critical_path_result.parallelizable_groups)
+                optimization_recommendations.extend([
+                    f"Found {len(critical_path_result.parallelizable_groups)} parallelization opportunities",
+                    f"{total_parallelizable} steps can be executed in parallel",
+                    f"Potential time savings: {critical_path_result.parallelization_potential:.1f}%"
+                ])
+            
+            # Resource conflict resolution
+            if critical_path_result.resource_conflicts:
+                high_severity_conflicts = [
+                    c for c in critical_path_result.resource_conflicts 
+                    if c.get("severity") == "high"
+                ]
+                
+                if high_severity_conflicts:
+                    optimization_recommendations.append(
+                        f"Resolve {len(high_severity_conflicts)} high-severity resource conflicts"
+                    )
+                
+                # Suggest resource reallocation
+                for conflict in critical_path_result.resource_conflicts[:3]:  # Top 3 conflicts
+                    optimization_recommendations.append(
+                        f"Resource conflict: {conflict['resource_type']} needs "
+                        f"{conflict['overflow']:.1f} additional units at "
+                        f"{conflict['time']}"
+                    )
+            
+            # Calculate optimized schedule
+            optimized_schedule = await self._generate_optimized_schedule(
+                workflow, critical_path_result, goals
+            )
+            
+            # Calculate improvement metrics
+            original_duration = workflow.get_critical_path_duration()
+            optimized_duration = critical_path_result.critical_path_duration
+            time_improvement = ((original_duration - optimized_duration).total_seconds() / 
+                              original_duration.total_seconds()) * 100 if original_duration.total_seconds() > 0 else 0
+            
+            optimization_result = {
+                "success": True,
+                "workflow_id": str(workflow.workflow_id),
+                "critical_path_analysis": {
+                    "critical_path_duration": critical_path_result.critical_path_duration.total_seconds(),
+                    "critical_path_steps": [str(step_id) for step_id in critical_path_result.critical_path_steps],
+                    "total_critical_paths": len(critical_path_result.critical_paths),
+                    "project_efficiency": critical_path_result.project_efficiency,
+                    "parallelization_potential": critical_path_result.parallelization_potential,
+                    "resource_utilization_score": critical_path_result.resource_utilization_score
+                },
+                "optimization_opportunities": {
+                    "parallelizable_groups": [
+                        [str(step_id) for step_id in group] 
+                        for group in critical_path_result.parallelizable_groups
+                    ],
+                    "resource_conflicts": critical_path_result.resource_conflicts,
+                    "recommendations": optimization_recommendations
+                },
+                "optimized_schedule": optimized_schedule,
+                "improvement_metrics": {
+                    "time_improvement_percentage": time_improvement,
+                    "estimated_cost_reduction": optimized_schedule.get("cost_reduction", 0),
+                    "resource_efficiency_gain": optimized_schedule.get("efficiency_gain", 0)
+                },
+                "scheduling_recommendations": critical_path_result.scheduling_recommendations
+            }
+            
+            # Update workflow with optimized execution strategy if requested
+            if optimization_goals and optimization_goals.get("apply_optimizations", False):
+                await self._apply_optimizations_to_workflow(workflow, critical_path_result)
+                optimization_result["optimizations_applied"] = True
+            
+            self.logger.info("Critical path optimization completed",
+                           workflow_id=str(workflow.workflow_id),
+                           time_improvement=time_improvement,
+                           parallelizable_groups=len(critical_path_result.parallelizable_groups))
+            
+            return optimization_result
+            
+        except Exception as e:
+            self.logger.error("Error in critical path optimization",
+                            workflow_id=str(workflow.workflow_id),
+                            error=str(e))
+            return {
+                "success": False,
+                "error": str(e),
+                "workflow_id": str(workflow.workflow_id)
+            }
+    
+    async def _generate_optimized_schedule(
+        self,
+        workflow: ScheduledWorkflow,
+        critical_path_result,
+        optimization_goals: Dict[str, float]
+    ) -> Dict[str, Any]:
+        """Generate optimized execution schedule based on critical path analysis"""
+        try:
+            # Calculate current costs
+            current_rates = self._get_current_ftns_rates()
+            current_cost = workflow.calculate_total_estimated_cost(current_rates)
+            
+            # Optimize based on parallelizable groups
+            optimized_duration = critical_path_result.critical_path_duration
+            
+            # Estimate cost reduction from parallel execution
+            if critical_path_result.parallelizable_groups:
+                # Assume parallel execution reduces overall cost due to shorter duration
+                parallelization_factor = min(0.3, critical_path_result.parallelization_potential / 100)
+                estimated_cost_reduction = current_cost * parallelization_factor
+            else:
+                estimated_cost_reduction = 0
+            
+            # Resource efficiency improvements
+            efficiency_gain = critical_path_result.resource_utilization_score / 100 * 0.1  # Up to 10% gain
+            
+            # Generate step-by-step optimized schedule
+            optimized_steps_schedule = []
+            current_time = timedelta()
+            
+            # Process parallelizable groups
+            processed_steps = set()
+            
+            for group in critical_path_result.parallelizable_groups:
+                if len(group) > 1:
+                    # Parallel execution group
+                    group_steps = [
+                        step for step in workflow.steps 
+                        if step.step_id in group and step.step_id not in processed_steps
+                    ]
+                    
+                    if group_steps:
+                        max_duration = max(step.estimated_duration for step in group_steps)
+                        
+                        for step in group_steps:
+                            optimized_steps_schedule.append({
+                                "step_id": str(step.step_id),
+                                "step_name": step.step_name,
+                                "start_time": current_time.total_seconds(),
+                                "duration": step.estimated_duration.total_seconds(),
+                                "execution_mode": "parallel",
+                                "parallel_group": len(optimized_steps_schedule)
+                            })
+                            processed_steps.add(step.step_id)
+                        
+                        current_time += max_duration
+            
+            # Process remaining steps sequentially
+            remaining_steps = [
+                step for step in workflow.steps 
+                if step.step_id not in processed_steps
+            ]
+            
+            for step in remaining_steps:
+                optimized_steps_schedule.append({
+                    "step_id": str(step.step_id),
+                    "step_name": step.step_name,
+                    "start_time": current_time.total_seconds(),
+                    "duration": step.estimated_duration.total_seconds(),
+                    "execution_mode": "sequential"
+                })
+                current_time += step.estimated_duration
+            
+            return {
+                "optimized_duration": optimized_duration.total_seconds(),
+                "cost_reduction": estimated_cost_reduction,
+                "efficiency_gain": efficiency_gain,
+                "optimized_steps_schedule": optimized_steps_schedule,
+                "execution_strategy": "hybrid_parallel_sequential",
+                "optimization_applied": True
+            }
+            
+        except Exception as e:
+            self.logger.error("Error generating optimized schedule", error=str(e))
+            return {
+                "optimized_duration": workflow.get_critical_path_duration().total_seconds(),
+                "cost_reduction": 0,
+                "efficiency_gain": 0,
+                "optimization_applied": False,
+                "error": str(e)
+            }
+    
+    async def _apply_optimizations_to_workflow(
+        self,
+        workflow: ScheduledWorkflow,
+        critical_path_result
+    ):
+        """Apply optimizations to the workflow configuration"""
+        try:
+            # Update execution strategy based on parallelization opportunities
+            if critical_path_result.parallelizable_groups:
+                workflow.execution_strategy = ExecutionStrategy.HYBRID
+                
+                # Store parallelization information in workflow metadata
+                if not hasattr(workflow, 'optimization_metadata'):
+                    workflow.optimization_metadata = {}
+                
+                workflow.optimization_metadata.update({
+                    "critical_path_optimized": True,
+                    "parallelizable_groups": [
+                        [str(step_id) for step_id in group] 
+                        for group in critical_path_result.parallelizable_groups
+                    ],
+                    "optimization_timestamp": datetime.now(timezone.utc).isoformat(),
+                    "expected_improvement": critical_path_result.parallelization_potential
+                })
+            
+            # Adjust resource requirements for critical path steps
+            critical_step_ids = set(critical_path_result.critical_path_steps)
+            for step in workflow.steps:
+                if step.step_id in critical_step_ids:
+                    # Increase priority multiplier for critical steps
+                    for req in step.resource_requirements:
+                        req.priority_multiplier = min(req.priority_multiplier * 1.2, 10.0)
+            
+            self.logger.info("Optimizations applied to workflow",
+                           workflow_id=str(workflow.workflow_id))
+            
+        except Exception as e:
+            self.logger.error("Error applying optimizations", error=str(e))
     
     def get_scheduling_statistics(self) -> Dict[str, Any]:
         """Get comprehensive scheduling statistics"""
