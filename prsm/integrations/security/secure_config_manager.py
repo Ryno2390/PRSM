@@ -348,9 +348,21 @@ class SecureConfigManager:
                 # Generate a secure secret
                 secure_secret = secrets.token_urlsafe(64)
                 
-                # TODO: Update settings with secure secret
-                # This would require updating the configuration system
-                logger.info("Secure JWT secret generated (update settings.secret_key)")
+                # Update settings with secure secret through secure configuration system
+                secret_update_result = await self._update_system_secret("jwt_secret_key", secure_secret)
+                
+                if secret_update_result:
+                    logger.info("Secure JWT secret generated and applied to configuration system")
+                    
+                    # Store backup in secure storage
+                    await self._backup_secure_secret("jwt_secret_key", secure_secret)
+                    
+                    # Update runtime configuration if possible
+                    await self._update_runtime_configuration("secret_key", secure_secret)
+                else:
+                    logger.warning("Secure JWT secret generated but configuration update failed - manual update required")
+                    logger.info("Secure JWT secret generated (manual configuration update required)",
+                               secret_length=len(secure_secret))
             
             return True
             
@@ -508,3 +520,98 @@ async def get_secure_configuration_status() -> Dict[str, Any]:
     Get the current status of secure configuration
     """
     return await secure_config_manager.get_secure_configuration_status()
+
+
+# Add secure secret management helper methods to SecureConfigManager class
+class SecureConfigManagerExtensions:
+    """Extension methods for secure secret management"""
+    
+    async def _update_system_secret(self, secret_key: str, secret_value: str) -> bool:
+        """Update system secret in secure configuration"""
+        try:
+            # Store in encrypted configuration
+            encrypted_secret = self.fernet.encrypt(secret_value.encode())
+            
+            # Create or update secure secrets file
+            secrets_file = self._get_config_file_path("secrets")
+            secrets_data = {}
+            
+            if os.path.exists(secrets_file):
+                try:
+                    with open(secrets_file, 'r') as f:
+                        secrets_data = json.load(f)
+                except:
+                    secrets_data = {}
+            
+            secrets_data[secret_key] = {
+                "value": encrypted_secret.decode(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "key_length": len(secret_value),
+                "algorithm": "fernet"
+            }
+            
+            with open(secrets_file, 'w') as f:
+                json.dump(secrets_data, f, indent=2)
+            
+            logger.info("System secret updated in secure configuration",
+                       secret_key=secret_key)
+            return True
+            
+        except Exception as e:
+            logger.error("Failed to update system secret",
+                        secret_key=secret_key,
+                        error=str(e))
+            return False
+    
+    async def _backup_secure_secret(self, secret_key: str, secret_value: str):
+        """Create backup of secure secret"""
+        try:
+            backup_dir = Path("secure_backups")
+            backup_dir.mkdir(exist_ok=True)
+            
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            backup_file = backup_dir / f"{secret_key}_backup_{timestamp}.enc"
+            
+            # Encrypt and store backup
+            encrypted_backup = self.fernet.encrypt(secret_value.encode())
+            
+            with open(backup_file, 'wb') as f:
+                f.write(encrypted_backup)
+            
+            logger.info("Secure secret backup created",
+                       secret_key=secret_key,
+                       backup_file=str(backup_file))
+            
+        except Exception as e:
+            logger.error("Failed to create secure secret backup",
+                        secret_key=secret_key,
+                        error=str(e))
+    
+    async def _update_runtime_configuration(self, config_key: str, config_value: str):
+        """Update runtime configuration if possible"""
+        try:
+            # Attempt to update runtime settings
+            from prsm.core.config import get_settings
+            
+            settings = get_settings()
+            if hasattr(settings, config_key):
+                # Update the setting if it's mutable
+                setattr(settings, config_key, config_value)
+                logger.info("Runtime configuration updated",
+                           config_key=config_key)
+            else:
+                logger.warning("Runtime configuration key not found or not mutable",
+                             config_key=config_key)
+                
+        except Exception as e:
+            logger.warning("Failed to update runtime configuration",
+                          config_key=config_key,
+                          error=str(e))
+
+
+# Extend SecureConfigManager with new methods
+for method_name in dir(SecureConfigManagerExtensions):
+    if not method_name.startswith('_') or method_name.startswith('_update') or method_name.startswith('_backup'):
+        method = getattr(SecureConfigManagerExtensions, method_name)
+        if callable(method):
+            setattr(SecureConfigManager, method_name, method)

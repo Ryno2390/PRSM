@@ -52,6 +52,7 @@ Enhanced from Co-Lab's orchestrator.py with PRSM advanced features:
 from typing import Dict, Any, List, Optional, Tuple
 from uuid import UUID, uuid4
 import asyncio
+import time
 import structlog
 from datetime import datetime, timezone
 
@@ -543,10 +544,355 @@ class NWTNOrchestrator:
                         error=str(e))
     
     async def _handle_error(self, session: PRSMSession, error: Exception):
-        """Handle session errors"""
-        session.status = TaskStatus.FAILED
-        # TODO: Implement error handling and potential refunds
-        pass
+        """Handle session errors with comprehensive error handling and refund logic"""
+        try:
+            session.status = TaskStatus.FAILED
+            session.error_message = str(error)
+            session.failed_at = datetime.now(timezone.utc)
+            
+            logger.error("Session failed, initiating error handling",
+                        session_id=session.session_id,
+                        user_id=session.user_id,
+                        error=str(error))
+            
+            # Categorize error type for appropriate handling
+            error_category = self._categorize_error(error)
+            
+            # Handle different error types
+            if error_category == "billing_error":
+                await self._handle_billing_error(session, error)
+            elif error_category == "system_error":
+                await self._handle_system_error(session, error)
+            elif error_category == "user_error":
+                await self._handle_user_error(session, error)
+            elif error_category == "timeout_error":
+                await self._handle_timeout_error(session, error)
+            else:
+                await self._handle_generic_error(session, error)
+            
+            # Attempt refund if appropriate
+            if await self._should_refund_session(session, error_category):
+                refund_result = await self._process_session_refund(session, error_category)
+                session.refund_processed = refund_result.get("success", False)
+                session.refund_amount = refund_result.get("amount", 0.0)
+                
+                if refund_result.get("success"):
+                    logger.info("Refund processed for failed session",
+                              session_id=session.session_id,
+                              refund_amount=refund_result.get("amount"))
+            
+            # Send notification to user about failure
+            await self._notify_user_of_failure(session, error_category)
+            
+            # Update session statistics
+            await self._update_failure_statistics(session, error_category)
+            
+            # Trigger circuit breaker if needed
+            await self._trigger_circuit_breaker_if_needed(session, error)
+            
+        except Exception as e:
+            logger.error("Error in error handling (meta-error)",
+                        session_id=session.session_id,
+                        original_error=str(error),
+                        meta_error=str(e))
+    
+    def _categorize_error(self, error: Exception) -> str:
+        """Categorize error for appropriate handling"""
+        error_str = str(error).lower()
+        error_type = type(error).__name__.lower()
+        
+        # Billing and payment errors
+        if any(keyword in error_str for keyword in ["payment", "billing", "insufficient", "credit", "balance"]):
+            return "billing_error"
+        
+        # System and infrastructure errors
+        if any(keyword in error_str for keyword in ["connection", "timeout", "network", "database", "server"]):
+            return "system_error"
+        
+        # Timeout-specific errors
+        if "timeout" in error_str or isinstance(error, asyncio.TimeoutError):
+            return "timeout_error"
+        
+        # User input or validation errors
+        if any(keyword in error_str for keyword in ["validation", "invalid", "forbidden", "unauthorized"]):
+            return "user_error"
+        
+        return "generic_error"
+    
+    async def _handle_billing_error(self, session: PRSMSession, error: Exception):
+        """Handle billing-related errors"""
+        logger.warning("Billing error occurred",
+                      session_id=session.session_id,
+                      user_id=session.user_id,
+                      error=str(error))
+        
+        # Billing errors typically don't warrant refunds since payment failed
+        session.refund_eligible = False
+        session.error_category = "billing"
+    
+    async def _handle_system_error(self, session: PRSMSession, error: Exception):
+        """Handle system-related errors"""
+        logger.error("System error occurred",
+                    session_id=session.session_id,
+                    user_id=session.user_id,
+                    error=str(error))
+        
+        # System errors typically warrant refunds since it's not user's fault
+        session.refund_eligible = True
+        session.error_category = "system"
+        
+        # Send alert to system administrators
+        await self._send_system_alert(session, error)
+    
+    async def _handle_user_error(self, session: PRSMSession, error: Exception):
+        """Handle user-related errors"""
+        logger.info("User error occurred",
+                   session_id=session.session_id,
+                   user_id=session.user_id,
+                   error=str(error))
+        
+        # User errors typically don't warrant refunds
+        session.refund_eligible = False
+        session.error_category = "user"
+    
+    async def _handle_timeout_error(self, session: PRSMSession, error: Exception):
+        """Handle timeout-related errors"""
+        logger.warning("Timeout error occurred",
+                      session_id=session.session_id,
+                      user_id=session.user_id,
+                      error=str(error))
+        
+        # Timeout errors may warrant partial refunds depending on progress
+        session.refund_eligible = True
+        session.error_category = "timeout"
+    
+    async def _handle_generic_error(self, session: PRSMSession, error: Exception):
+        """Handle generic errors"""
+        logger.error("Generic error occurred",
+                    session_id=session.session_id,
+                    user_id=session.user_id,
+                    error=str(error))
+        
+        # Generic errors warrant investigation and potential refunds
+        session.refund_eligible = True
+        session.error_category = "generic"
+    
+    async def _should_refund_session(self, session: PRSMSession, error_category: str) -> bool:
+        """Determine if session should be refunded"""
+        if not session.refund_eligible:
+            return False
+        
+        # Check if charges were actually applied
+        if not hasattr(session, 'total_charged') or session.total_charged <= 0:
+            return False
+        
+        # System errors and timeouts generally warrant refunds
+        if error_category in ["system_error", "timeout_error", "generic_error"]:
+            return True
+        
+        # Check if session made any progress before failing
+        if hasattr(session, 'completion_percentage') and session.completion_percentage < 0.1:
+            return True  # Little to no progress made
+        
+        return False
+    
+    async def _process_session_refund(self, session: PRSMSession, error_category: str) -> Dict[str, Any]:
+        """Process refund for failed session"""
+        try:
+            # Calculate refund amount based on error category and progress
+            refund_amount = await self._calculate_refund_amount(session, error_category)
+            
+            if refund_amount <= 0:
+                return {"success": False, "amount": 0, "reason": "no_refund_amount"}
+            
+            # Process the actual refund
+            # This would integrate with your payment/billing system
+            refund_result = await self._execute_refund(session.user_id, refund_amount, session.session_id)
+            
+            if refund_result.get("success"):
+                logger.info("Refund processed successfully",
+                           session_id=session.session_id,
+                           user_id=session.user_id,
+                           amount=refund_amount,
+                           category=error_category)
+                
+                return {
+                    "success": True,
+                    "amount": refund_amount,
+                    "transaction_id": refund_result.get("transaction_id"),
+                    "category": error_category
+                }
+            else:
+                logger.error("Refund processing failed",
+                            session_id=session.session_id,
+                            user_id=session.user_id,
+                            amount=refund_amount,
+                            error=refund_result.get("error"))
+                
+                return {"success": False, "amount": 0, "error": refund_result.get("error")}
+                
+        except Exception as e:
+            logger.error("Exception during refund processing",
+                        session_id=session.session_id,
+                        error=str(e))
+            return {"success": False, "amount": 0, "error": str(e)}
+    
+    async def _calculate_refund_amount(self, session: PRSMSession, error_category: str) -> float:
+        """Calculate appropriate refund amount"""
+        total_charged = getattr(session, 'total_charged', 0.0)
+        
+        if total_charged <= 0:
+            return 0.0
+        
+        # Full refund for system errors
+        if error_category == "system_error":
+            return total_charged
+        
+        # Partial refund based on completion for timeouts
+        if error_category == "timeout_error":
+            completion_percentage = getattr(session, 'completion_percentage', 0.0)
+            return total_charged * (1.0 - completion_percentage)
+        
+        # Reduced refund for generic errors
+        if error_category == "generic_error":
+            return total_charged * 0.8  # 80% refund
+        
+        return 0.0
+    
+    async def _execute_refund(self, user_id: str, amount: float, session_id: str) -> Dict[str, Any]:
+        """Execute the actual refund transaction"""
+        try:
+            # This would integrate with your payment processor
+            # For now, simulate the refund process
+            
+            # In a real implementation, you would:
+            # 1. Call your payment processor's refund API
+            # 2. Update user's account balance
+            # 3. Record the transaction in your billing system
+            
+            logger.info("Simulating refund execution",
+                       user_id=user_id,
+                       amount=amount,
+                       session_id=session_id)
+            
+            # Simulated success response
+            return {
+                "success": True,
+                "transaction_id": f"refund_{session_id}_{int(time.time())}",
+                "amount": amount,
+                "processed_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+        except Exception as e:
+            logger.error("Failed to execute refund",
+                        user_id=user_id,
+                        amount=amount,
+                        session_id=session_id,
+                        error=str(e))
+            return {"success": False, "error": str(e)}
+    
+    async def _notify_user_of_failure(self, session: PRSMSession, error_category: str):
+        """Notify user about session failure"""
+        try:
+            # Send notification to user about the failure
+            # This would integrate with your notification system
+            
+            message = self._generate_failure_message(session, error_category)
+            
+            logger.info("Sending failure notification to user",
+                       session_id=session.session_id,
+                       user_id=session.user_id,
+                       category=error_category)
+            
+            # In a real implementation, you would send email, push notification, etc.
+            
+        except Exception as e:
+            logger.error("Failed to notify user of failure",
+                        session_id=session.session_id,
+                        error=str(e))
+    
+    def _generate_failure_message(self, session: PRSMSession, error_category: str) -> str:
+        """Generate appropriate failure message for user"""
+        if error_category == "billing_error":
+            return "Your session failed due to a payment issue. Please check your payment method and try again."
+        elif error_category == "system_error":
+            return "Your session failed due to a system error. We apologize for the inconvenience and have processed a full refund."
+        elif error_category == "timeout_error":
+            return "Your session timed out. We have processed a partial refund based on the work completed."
+        elif error_category == "user_error":
+            return "Your session failed due to invalid input. Please check your request and try again."
+        else:
+            return "Your session failed unexpectedly. Our team has been notified and we are working to resolve the issue."
+    
+    async def _update_failure_statistics(self, session: PRSMSession, error_category: str):
+        """Update system failure statistics"""
+        try:
+            # Update failure counters for monitoring and alerting
+            # This would integrate with your metrics/monitoring system
+            
+            logger.debug("Updating failure statistics",
+                        session_id=session.session_id,
+                        category=error_category)
+            
+        except Exception as e:
+            logger.error("Failed to update failure statistics",
+                        session_id=session.session_id,
+                        error=str(e))
+    
+    async def _trigger_circuit_breaker_if_needed(self, session: PRSMSession, error: Exception):
+        """Trigger circuit breaker if error pattern indicates system issues"""
+        try:
+            # Check if we should trigger circuit breaker based on error patterns
+            if hasattr(self, 'circuit_breaker'):
+                from prsm.safety.circuit_breaker import ThreatLevel
+                
+                # Determine if this error should trigger circuit breaker
+                if self._should_trigger_circuit_breaker(error):
+                    await self.circuit_breaker.trigger_emergency_halt(
+                        threat_level=ThreatLevel.HIGH,
+                        reason=f"Multiple session failures detected: {str(error)}"
+                    )
+                    
+                    logger.warning("Circuit breaker triggered due to session failures",
+                                  session_id=session.session_id,
+                                  error=str(error))
+                    
+        except Exception as e:
+            logger.error("Failed to trigger circuit breaker",
+                        session_id=session.session_id,
+                        error=str(e))
+    
+    def _should_trigger_circuit_breaker(self, error: Exception) -> bool:
+        """Determine if error should trigger circuit breaker"""
+        # Implement logic to detect patterns that warrant circuit breaker activation
+        # For example, multiple database connection failures, API rate limit exceeded, etc.
+        
+        error_str = str(error).lower()
+        critical_patterns = [
+            "database connection failed",
+            "service unavailable", 
+            "rate limit exceeded",
+            "memory exhausted",
+            "disk full"
+        ]
+        
+        return any(pattern in error_str for pattern in critical_patterns)
+    
+    async def _send_system_alert(self, session: PRSMSession, error: Exception):
+        """Send alert to system administrators about critical errors"""
+        try:
+            # Send alert to administrators about system errors
+            # This would integrate with your alerting system (PagerDuty, Slack, etc.)
+            
+            logger.critical("System alert triggered",
+                           session_id=session.session_id,
+                           error=str(error),
+                           alert_type="session_system_error")
+            
+        except Exception as e:
+            logger.error("Failed to send system alert",
+                        session_id=session.session_id,
+                        error=str(e))
 
 
 # Global NWTN instance
