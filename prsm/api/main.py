@@ -50,6 +50,7 @@ from prsm.api.ui_api import router as ui_router
 from prsm.api.ipfs_api import router as ipfs_router
 from prsm.api.session_api import router as session_router
 from prsm.api.task_api import router as task_router
+from prsm.api.recommendation_api import router as recommendation_router
 from prsm.auth.auth_manager import auth_manager
 from prsm.auth import get_current_user
 from prsm.auth.middleware import AuthMiddleware, SecurityHeadersMiddleware
@@ -1969,6 +1970,7 @@ app.include_router(payment_router, tags=["Payments"])  # Already has /api/v1/pay
 app.include_router(crypto_router, tags=["Cryptography"])  # Already has /api/v1/crypto prefix
 # MARKETPLACE API: Universal endpoints with complete consolidation
 app.include_router(marketplace_router, prefix="/api/v1/marketplace", tags=["Marketplace"])  # Universal /resources endpoints
+app.include_router(recommendation_router, prefix="/api/v1/marketplace", tags=["Recommendations"])  # AI-powered recommendations
 app.include_router(governance_router, tags=["Governance"])  # Already has /api/v1/governance prefix
 app.include_router(mainnet_router, prefix="/api/v1", tags=["Mainnet Deployment"])
 app.include_router(health_router, prefix="/api/v1", tags=["Health"])  # Has /health prefix, needs /api/v1
