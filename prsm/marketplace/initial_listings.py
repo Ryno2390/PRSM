@@ -17,7 +17,10 @@ from .models import (
     ModelCategory, PricingTier, ModelProvider, ModelStatus,
     CreateModelListingRequest, ModelMetadata
 )
-from .marketplace_service import marketplace_service
+from .real_marketplace_service import RealMarketplaceService
+
+# Initialize service
+marketplace_service = RealMarketplaceService()
 from ..integrations.security.audit_logger import audit_logger
 
 logger = structlog.get_logger(__name__)

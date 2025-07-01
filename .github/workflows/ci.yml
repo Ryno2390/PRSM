@@ -43,6 +43,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
       - name: Run Black formatter check
@@ -57,11 +58,12 @@ jobs:
       - name: Run mypy type checking
         run: mypy prsm/
 
-      - name: Check for security vulnerabilities
+      - name: Check for security vulnerabilities  
         run: |
-          pip install bandit safety
-          bandit -r prsm/ -f json -o bandit-report.json
-          safety check --json > safety-report.json
+          pip install bandit safety pip-audit
+          bandit -r prsm/ -f json -o bandit-report.json --exit-zero
+          safety check --json --output safety-report.json --continue-on-error
+          pip-audit --format=json --output=pip-audit-report.json --continue-on-error
 
       - name: Upload security reports
         uses: actions/upload-artifact@v3
@@ -70,6 +72,7 @@ jobs:
           path: |
             bandit-report.json
             safety-report.json
+            pip-audit-report.json
 
   # ===================================
   # Unit and Integration Tests

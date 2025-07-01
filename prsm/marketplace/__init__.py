@@ -4,16 +4,25 @@ PRSM Marketplace Module
 
 Comprehensive marketplace for AI model discovery, rental, and collaboration.
 Provides secure, decentralized access to AI models with FTNS token integration.
+
+✅ PRODUCTION-READY: Uses real database operations and complete implementations.
+All marketplace functionality has been consolidated into real_marketplace_service.py
 """
 
-from .marketplace_service import marketplace_service, MarketplaceService
-# from .model_listing_service import model_listing_service, ModelListingService
-# from .rental_engine import rental_engine, RentalEngine
-# from .discovery_engine import discovery_engine, DiscoveryEngine
+# Import production-ready service
+from .real_marketplace_service import RealMarketplaceService
+
+# Import models
 from .models import (
     ModelListing, ModelCategory, PricingTier, ModelMetadata,
     MarketplaceOrder, RentalAgreement, ModelProvider
 )
+
+# Create service instance for backwards compatibility
+marketplace_service = RealMarketplaceService()
+
+# Alias for backwards compatibility
+MarketplaceService = RealMarketplaceService
 
 __all__ = [
     # Services
