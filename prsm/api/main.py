@@ -52,6 +52,7 @@ from prsm.api.session_api import router as session_router
 from prsm.api.task_api import router as task_router
 from prsm.api.recommendation_api import router as recommendation_router
 from prsm.api.reputation_api import router as reputation_router
+from prsm.api.distillation_api import router as distillation_router
 from prsm.auth.auth_manager import auth_manager
 from prsm.auth import get_current_user
 from prsm.auth.middleware import AuthMiddleware, SecurityHeadersMiddleware
@@ -1973,6 +1974,7 @@ app.include_router(crypto_router, tags=["Cryptography"])  # Already has /api/v1/
 app.include_router(marketplace_router, prefix="/api/v1/marketplace", tags=["Marketplace"])  # Universal /resources endpoints
 app.include_router(recommendation_router, prefix="/api/v1/marketplace", tags=["Recommendations"])  # AI-powered recommendations
 app.include_router(reputation_router, prefix="/api/v1", tags=["Reputation"])  # User reputation and trust system
+app.include_router(distillation_router, prefix="/api/v1", tags=["Distillation"])  # Automated knowledge distillation
 app.include_router(governance_router, tags=["Governance"])  # Already has /api/v1/governance prefix
 app.include_router(mainnet_router, prefix="/api/v1", tags=["Mainnet Deployment"])
 app.include_router(health_router, prefix="/api/v1", tags=["Health"])  # Has /health prefix, needs /api/v1
