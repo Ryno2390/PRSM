@@ -1,0 +1,115 @@
+# Auto-labeling configuration for GitHub Labeler action
+# This file defines which labels to apply based on file paths in PRs
+
+# Documentation
+documentation:
+  - 'docs/**/*'
+  - '*.md'
+  - '**/README.md'
+  - '**/CONTRIBUTING.md'
+  - '**/CODE_OF_CONDUCT.md'
+
+# SDK Components
+python-sdk:
+  - 'sdks/python/**/*'
+  - 'prsm/**/*.py'
+
+javascript-sdk:
+  - 'sdks/javascript/**/*'
+  - '**/*.js'
+  - '**/*.jsx'
+  - '**/*.ts'
+  - '**/*.tsx'
+
+go-sdk:
+  - 'sdks/go/**/*'
+  - '**/*.go'
+
+# Core Components
+component: core:
+  - 'prsm/core/**/*'
+  - 'prsm/__init__.py'
+
+component: api:
+  - 'prsm/api/**/*'
+  - 'api/**/*'
+
+component: auth:
+  - 'prsm/auth/**/*'
+  - 'auth/**/*'
+
+component: ui:
+  - 'prsm/ui/**/*'
+  - 'ui/**/*'
+  - 'frontend/**/*'
+  - 'web/**/*'
+
+component: marketplace:
+  - 'prsm/marketplace/**/*'
+  - 'marketplace/**/*'
+
+component: agents:
+  - 'prsm/agents/**/*'
+  - 'agents/**/*'
+
+component: security:
+  - 'prsm/security/**/*'
+  - 'prsm/cryptography/**/*'
+  - 'security/**/*'
+
+# Infrastructure
+infrastructure:
+  - '.github/**/*'
+  - 'docker/**/*'
+  - 'k8s/**/*'
+  - 'kubernetes/**/*'
+  - 'Dockerfile*'
+  - 'docker-compose*.yml'
+  - '.dockerignore'
+
+ci/cd:
+  - '.github/workflows/**/*'
+  - '.github/actions/**/*'
+  - 'scripts/**/*'
+
+# Testing
+testing:
+  - 'tests/**/*'
+  - '**/*test*.py'
+  - '**/*test*.js'
+  - '**/*test*.go'
+  - 'pytest.ini'
+  - 'jest.config.js'
+
+# Configuration
+config:
+  - '*.toml'
+  - '*.yaml'
+  - '*.yml'
+  - '*.json'
+  - '.env*'
+  - 'requirements*.txt'
+  - 'package*.json'
+  - 'go.mod'
+  - 'go.sum'
+
+# Dependencies
+dependencies:
+  - 'requirements*.txt'
+  - 'package*.json'
+  - 'go.mod'
+  - 'pyproject.toml'
+  - 'Pipfile'
+
+# Examples and Tutorials
+examples:
+  - 'examples/**/*'
+  - 'tutorials/**/*'
+  - 'demos/**/*'
+
+# Research and Academic
+research:
+  - 'research/**/*'
+  - 'papers/**/*'
+  - '**/*benchmark*'
+  - '**/*evaluation*'
