@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 import structlog
 
+from ...config.model_config_manager import get_model_config_manager
+
 logger = structlog.get_logger(__name__)
 
 class ClaudeModel(Enum):
@@ -105,15 +107,6 @@ class EnhancedAnthropicClient:
     - Integration with PRSM safety monitoring
     """
     
-    # Claude pricing per 1K tokens (as of 2024)
-    PRICING = {
-        ClaudeModel.CLAUDE_3_OPUS: {"input": 0.015, "output": 0.075},
-        ClaudeModel.CLAUDE_3_SONNET: {"input": 0.003, "output": 0.015},
-        ClaudeModel.CLAUDE_3_HAIKU: {"input": 0.00025, "output": 0.00125},
-        ClaudeModel.CLAUDE_2_1: {"input": 0.008, "output": 0.024},
-        ClaudeModel.CLAUDE_2_0: {"input": 0.008, "output": 0.024},
-        ClaudeModel.CLAUDE_INSTANT: {"input": 0.0008, "output": 0.0024}
-    }
     
     def __init__(self, 
                  api_key: str,
@@ -191,13 +184,28 @@ class EnhancedAnthropicClient:
             logger.warning(f"Claude API connection test failed: {e}")
     
     def _calculate_cost(self, usage: Dict[str, int], model: ClaudeModel) -> float:
-        """Calculate request cost based on token usage"""
-        if model not in self.PRICING:
+        """Calculate request cost based on token usage using ModelConfigManager"""
+        config_manager = get_model_config_manager()
+        
+        # Map ClaudeModel enum to model ID
+        model_id_map = {
+            ClaudeModel.CLAUDE_3_OPUS: "claude-3-opus",
+            ClaudeModel.CLAUDE_3_SONNET: "claude-3-sonnet", 
+            ClaudeModel.CLAUDE_3_HAIKU: "claude-3-haiku",
+            ClaudeModel.CLAUDE_2_1: "claude-2.1",
+            ClaudeModel.CLAUDE_2_0: "claude-2.0",
+            ClaudeModel.CLAUDE_INSTANT: "claude-instant"
+        }
+        
+        model_id = model_id_map.get(model, model.value)
+        model_pricing = config_manager.get_model_pricing(model_id, "anthropic")
+        
+        if not model_pricing:
+            logger.warning(f"Pricing not found for model {model_id}, using default")
             return 0.0
             
-        pricing = self.PRICING[model]
-        input_cost = (usage.get("input_tokens", 0) / 1000) * pricing["input"]
-        output_cost = (usage.get("output_tokens", 0) / 1000) * pricing["output"]
+        input_cost = (usage.get("input_tokens", 0) / 1000) * float(model_pricing.input_cost_per_1k)
+        output_cost = (usage.get("output_tokens", 0) / 1000) * float(model_pricing.output_cost_per_1k)
         
         return input_cost + output_cost
     
@@ -235,7 +243,25 @@ class EnhancedAnthropicClient:
         
         # Estimate cost for budget check
         estimated_tokens = len(str(request.messages)) * 0.75  # Rough estimate
-        estimated_cost = estimated_tokens / 1000 * self.PRICING[request.model]["input"]
+        config_manager = get_model_config_manager()
+        
+        # Map ClaudeModel enum to model ID for pricing lookup
+        model_id_map = {
+            ClaudeModel.CLAUDE_3_OPUS: "claude-3-opus",
+            ClaudeModel.CLAUDE_3_SONNET: "claude-3-sonnet", 
+            ClaudeModel.CLAUDE_3_HAIKU: "claude-3-haiku",
+            ClaudeModel.CLAUDE_2_1: "claude-2.1",
+            ClaudeModel.CLAUDE_2_0: "claude-2.0",
+            ClaudeModel.CLAUDE_INSTANT: "claude-instant"
+        }
+        
+        model_id = model_id_map.get(request.model, request.model.value)
+        model_pricing = config_manager.get_model_pricing(model_id, "anthropic")
+        
+        if model_pricing:
+            estimated_cost = estimated_tokens / 1000 * float(model_pricing.input_cost_per_1k)
+        else:
+            estimated_cost = estimated_tokens / 1000 * 0.003  # Default to Sonnet pricing
         
         if not self._check_budget(estimated_cost):
             raise RuntimeError(f"Request would exceed budget limit of ${self.budget_limit}")

@@ -1,0 +1,172 @@
+# PRSM Model Catalog Configuration
+# Centralized model specifications replacing hardcoded configurations
+
+models:
+  # OpenAI Models
+  gpt-4:
+    name: "GPT-4"
+    provider: "openai"
+    tier: "premium"
+    pricing:
+      input: 0.03
+      output: 0.06
+      currency: "USD"
+    context_length: 8192
+    max_tokens: 4096
+    capabilities:
+      - "text_generation"
+      - "code_generation"
+      - "reasoning"
+      - "analysis"
+    quality_score: 0.95
+    latency_score: 0.7
+    cost_score: 0.3
+    supports_streaming: true
+    supports_tools: true
+    model_family: "gpt-4"
+    
+  gpt-4-turbo:
+    name: "GPT-4 Turbo"
+    provider: "openai"
+    tier: "premium"
+    pricing:
+      input: 0.01
+      output: 0.03
+      currency: "USD"
+    context_length: 128000
+    max_tokens: 4096
+    capabilities:
+      - "text_generation"
+      - "code_generation"
+      - "reasoning"
+      - "analysis"
+      - "vision"
+    quality_score: 0.92
+    latency_score: 0.8
+    cost_score: 0.6
+    supports_streaming: true
+    supports_tools: true
+    supports_vision: true
+    model_family: "gpt-4"
+    
+  gpt-3.5-turbo:
+    name: "GPT-3.5 Turbo"
+    provider: "openai"
+    tier: "basic"
+    pricing:
+      input: 0.0005
+      output: 0.0015
+      currency: "USD"
+    context_length: 16385
+    max_tokens: 4096
+    capabilities:
+      - "text_generation"
+      - "code_generation"
+    quality_score: 0.85
+    latency_score: 0.9
+    cost_score: 0.95
+    supports_streaming: true
+    supports_tools: true
+    model_family: "gpt-3.5"
+
+  # Anthropic Models
+  claude-3-opus:
+    name: "Claude 3 Opus"
+    provider: "anthropic"
+    tier: "premium"
+    pricing:
+      input: 0.015
+      output: 0.075
+      currency: "USD"
+    context_length: 200000
+    max_tokens: 4096
+    capabilities:
+      - "text_generation"
+      - "reasoning"
+      - "analysis"
+      - "creative_writing"
+    quality_score: 0.95
+    latency_score: 0.7
+    cost_score: 0.2
+    supports_streaming: true
+    supports_tools: true
+    model_family: "claude-3"
+    
+  claude-3-sonnet:
+    name: "Claude 3 Sonnet"
+    provider: "anthropic"
+    tier: "premium"
+    pricing:
+      input: 0.003
+      output: 0.015
+      currency: "USD"
+    context_length: 200000
+    max_tokens: 4096
+    capabilities:
+      - "text_generation"
+      - "reasoning"
+      - "analysis"
+      - "creative_writing"
+    quality_score: 0.90
+    latency_score: 0.8
+    cost_score: 0.7
+    supports_streaming: true
+    supports_tools: true
+    model_family: "claude-3"
+    
+  claude-3-haiku:
+    name: "Claude 3 Haiku"
+    provider: "anthropic"
+    tier: "basic"
+    pricing:
+      input: 0.00025
+      output: 0.00125
+      currency: "USD"
+    context_length: 200000
+    max_tokens: 4096
+    capabilities:
+      - "text_generation"
+      - "reasoning"
+    quality_score: 0.82
+    latency_score: 0.95
+    cost_score: 0.98
+    supports_streaming: true
+    model_family: "claude-3"
+
+  # Local Models
+  llama2-7b-chat:
+    name: "Llama 2 7B Chat"
+    provider: "ollama"
+    tier: "free"
+    pricing:
+      input: 0
+      output: 0
+      currency: "USD"
+    context_length: 4096
+    max_tokens: 2048
+    capabilities:
+      - "text_generation"
+    quality_score: 0.75
+    latency_score: 0.6
+    cost_score: 1.0
+    supports_streaming: true
+    model_family: "llama2"
+    
+  codellama-13b:
+    name: "Code Llama 13B"
+    provider: "ollama"
+    tier: "free"
+    pricing:
+      input: 0
+      output: 0
+      currency: "USD"
+    context_length: 16384
+    max_tokens: 4096
+    capabilities:
+      - "code_generation"
+      - "text_generation"
+    quality_score: 0.78
+    latency_score: 0.5
+    cost_score: 1.0
+    supports_streaming: true
+    model_family: "codellama"
