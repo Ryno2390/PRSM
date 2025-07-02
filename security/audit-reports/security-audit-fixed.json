@@ -1,0 +1,34 @@
+{
+  "timestamp": "2025-07-02T14:59:22.473772",
+  "project": "PRSM",
+  "audit_tool": "pip-audit",
+  "status": "vulnerabilities_found",
+  "summary": {
+    "total_vulnerabilities": 1,
+    "critical_count": 0,
+    "high_count": 0,
+    "medium_count": 1,
+    "low_count": 0
+  },
+  "vulnerabilities": [
+    {
+      "package": "torch",
+      "version": "2.7.1",
+      "vulnerability_id": "GHSA-887c-mr87-cxwp",
+      "severity": "medium",
+      "description": "A vulnerability, which was classified as problematic, was found in PyTorch 2.6.0. Affected is the function torch.nn.functional.ctc_loss of the file aten/src/ATen/native/LossCTC.cpp. The manipulation leads to denial of service. An attack has to be approached locally. The exploit has been disclosed to the public and may be used. The name of the patch is 46fc5d8e360127361211cb237d5f9eef0223e567. It is recommended to apply a patch to fix this issue.",
+      "fix_versions": [],
+      "aliases": [
+        "CVE-2025-3730"
+      ]
+    }
+  ],
+  "recommendations": [
+    "\ud83d\udea8 Found 1 vulnerabilities that require attention",
+    "\u26a0\ufe0f  No fix available for torch 2.7.1 (ID: GHSA-887c-mr87-cxwp). Monitor for updates.",
+    "\ud83d\udd12 Implement automated dependency scanning in CI/CD pipeline",
+    "\ud83d\udcc5 Schedule weekly security audits",
+    "\ud83d\udd04 Keep dependencies updated regularly",
+    "\ud83d\udccb Document security review process for new dependencies"
+  ]
+}
