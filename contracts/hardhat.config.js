@@ -64,6 +64,11 @@ module.exports = {
     coinmarketcap: process.env.COINMARKETCAP_API_KEY
   },
   
+  // Solidity coverage configuration
+  solidity_coverage: {
+    skipFiles: ['Migrations.sol']
+  },
+  
   // Path configuration
   paths: {
     sources: "./contracts",
