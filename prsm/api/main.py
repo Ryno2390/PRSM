@@ -360,9 +360,24 @@ app = FastAPI(
     title="PRSM API",
     description="Protocol for Recursive Scientific Modeling - API for decentralized AI collaboration",
     version="0.1.0",
-    docs_url="/docs" if settings.is_development else None,
-    redoc_url="/redoc" if settings.is_development else None,
-    lifespan=lifespan
+    docs_url="/docs",  # Always available for developer experience
+    redoc_url="/redoc",  # Always available for developer experience
+    lifespan=lifespan,
+    # Enhanced OpenAPI configuration for better documentation
+    contact={
+        "name": "PRSM API Support",
+        "email": "api-support@prsm.org",
+        "url": "https://developers.prsm.org"
+    },
+    license_info={
+        "name": "MIT License",
+        "url": "https://opensource.org/licenses/MIT"
+    },
+    servers=[
+        {"url": "https://api.prsm.org", "description": "Production server"},
+        {"url": "https://staging-api.prsm.org", "description": "Staging server"},
+        {"url": "http://localhost:8000", "description": "Development server"}
+    ]
 )
 # Add enhanced security middleware stack (order matters - most specific first)
 from prsm.security import RequestLimitsMiddleware, request_limits_config
@@ -391,7 +406,7 @@ async def initialize_auth():
         logger.error("Failed to initialize auth system", error=str(e))
 
 # Include authentication router
-app.include_router(auth_router)
+app.include_router(auth_router)  # Has /api/v1/auth prefix internally
 
 
 # Add secure CORS middleware
@@ -1993,30 +2008,42 @@ try:
 except ImportError as e:
     logger.warning(f"⚠️ Integration layer not available: {e}")
 
-# Include teams API router
-app.include_router(teams_router, prefix="/api/v1", tags=["Teams"])
-app.include_router(credential_router, tags=["Credentials"])  # Already has /api/v1/credentials prefix
-app.include_router(security_router, tags=["Security"])  # Already has /api/v1/security prefix
-app.include_router(security_logging_router, tags=["Security Logging"])  # Already has /api/v1/security/logging prefix
-app.include_router(payment_router, tags=["Payments"])  # Already has /api/v1/payments prefix
-app.include_router(crypto_router, tags=["Cryptography"])  # Already has /api/v1/crypto prefix
-# MARKETPLACE API: Universal endpoints with complete consolidation
-app.include_router(marketplace_router, prefix="/api/v1/marketplace", tags=["Marketplace"])  # Universal /resources endpoints
-app.include_router(recommendation_router, prefix="/api/v1/marketplace", tags=["Recommendations"])  # AI-powered recommendations
-app.include_router(reputation_router, prefix="/api/v1", tags=["Reputation"])  # User reputation and trust system
-app.include_router(distillation_router, prefix="/api/v1", tags=["Distillation"])  # Automated knowledge distillation
-app.include_router(monitoring_router, prefix="/api/v1", tags=["Monitoring"])  # Enterprise monitoring and observability
-app.include_router(compliance_router, prefix="/api/v1", tags=["Compliance"])  # SOC2/ISO27001 compliance framework
-app.include_router(governance_router, tags=["Governance"])  # Already has /api/v1/governance prefix
+# === API V1 Router Configuration ===
+# All API endpoints standardized to /api/v1/* pattern for consistency
+
+# Core API routers
+app.include_router(teams_router, tags=["Teams"])  # Has /api/v1/teams prefix internally
+app.include_router(credential_router, tags=["Credentials"])  # Has /api/v1/credentials prefix internally
+app.include_router(security_router, tags=["Security"])  # Has /api/v1/security prefix internally
+app.include_router(security_logging_router, tags=["Security Logging"])  # Has /api/v1/security/logging prefix internally
+app.include_router(payment_router, tags=["Payments"])  # Has /api/v1/payments prefix internally
+app.include_router(crypto_router, tags=["Cryptography"])  # Has /api/v1/crypto prefix internally
+app.include_router(governance_router, tags=["Governance"])  # Has /api/v1/governance prefix internally
+app.include_router(budget_router, tags=["Budget Management"])  # Has /api/v1/budget prefix internally
+
+# Marketplace API routers
+app.include_router(marketplace_router, prefix="/api/v1/marketplace", tags=["Marketplace"])
+app.include_router(recommendation_router, prefix="/api/v1/marketplace", tags=["Recommendations"])
+app.include_router(reputation_router, prefix="/api/v1", tags=["Reputation"])
+
+# Advanced feature routers
+app.include_router(distillation_router, prefix="/api/v1", tags=["Distillation"])
+app.include_router(monitoring_router, prefix="/api/v1", tags=["Monitoring"])
+app.include_router(compliance_router, prefix="/api/v1", tags=["Compliance"])
 app.include_router(mainnet_router, prefix="/api/v1", tags=["Mainnet Deployment"])
-app.include_router(health_router, prefix="/api/v1", tags=["Health"])  # Has /health prefix, needs /api/v1
-app.include_router(budget_router, tags=["Budget Management"])  # Already has /api/v1/budget prefix
 app.include_router(web3_router, prefix="/api/v1", tags=["Web3"])
 app.include_router(chronos_router, prefix="/api/v1", tags=["CHRONOS"])
-app.include_router(ui_router, prefix="/ui", tags=["UI"])
-app.include_router(ipfs_router, prefix="/ipfs", tags=["IPFS"])
-app.include_router(session_router, prefix="/sessions", tags=["Sessions"])
-app.include_router(task_router, prefix="/tasks", tags=["Tasks"])
+
+# Health and monitoring (follows /api/v1 pattern but health also available at /health)
+app.include_router(health_router, prefix="/api/v1", tags=["Health"])
+
+# Session and task management (/api/v1 standardization)
+app.include_router(session_router, prefix="/api/v1", tags=["Sessions"])
+app.include_router(task_router, prefix="/api/v1", tags=["Tasks"])
+
+# Specialized service endpoints (non-API routes)
+app.include_router(ui_router, prefix="/ui", tags=["UI"])  # Frontend UI endpoints
+app.include_router(ipfs_router, prefix="/ipfs", tags=["IPFS"])  # IPFS gateway endpoints
 logger.info("✅ IPFS API endpoints enabled")
 logger.info("✅ Session API endpoints enabled")
 logger.info("✅ Task API endpoints enabled")

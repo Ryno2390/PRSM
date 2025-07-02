@@ -20,7 +20,7 @@ logger = structlog.get_logger(__name__)
 security = HTTPBearer()
 
 # Create auth router
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
 
 
 def get_client_info(request: Request) -> Dict[str, Any]:
