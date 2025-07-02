@@ -208,6 +208,11 @@ omit = [
 ]
 
 [tool.coverage.report]
+# Minimum coverage threshold for production readiness
+fail_under = 50
+precision = 2
+show_missing = true
+skip_covered = false
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
@@ -219,4 +224,21 @@ exclude_lines = [
     "if __name__ .__main__.:",
     "class .*\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+title = "PRSM Test Coverage Report"
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+# Component-specific coverage requirements
+# Critical Security Components: 80% minimum
+# Core Framework: 60% minimum  
+# Supporting Systems: 40% minimum
+[tool.coverage.paths]
+source = [
+    "prsm/",
+    "*/site-packages/prsm/",
 ]
