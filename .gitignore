@@ -161,6 +161,7 @@ performance-validation/
 infrastructure-test-reports/
 multi-cloud-reports/
 security-validation-results/
+reports/
 
 # Performance and monitoring data  
 quick_*_summary.json

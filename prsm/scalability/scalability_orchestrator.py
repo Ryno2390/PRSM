@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import structlog
 
-from .intelligent_router import IntelligentRouter
+from ..agents.executors.unified_router import UnifiedModelRouter
 from .cpu_optimizer import CPUOptimizer
 from .auto_scaler import AutoScaler
 from .advanced_cache import CacheManager
