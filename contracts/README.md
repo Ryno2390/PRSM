@@ -1,6 +1,6 @@
 # PRSM FTNS Smart Contracts
 
-Production-ready smart contracts for the PRSM Federated Token Network System (FTNS) deployed on Polygon.
+Production-ready smart contracts for the PRSM Fungible Tokens for Node Support (FTNS) deployed on Polygon.
 
 ## 🏗️ Architecture
 
