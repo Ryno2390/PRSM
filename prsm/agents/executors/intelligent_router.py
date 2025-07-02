@@ -277,44 +277,37 @@ class IntelligentRouter:
                                    strategy: RoutingStrategy,
                                    constraints: RoutingConstraints,
                                    task_type: Optional[TaskType]) -> RoutingDecision:
-        """Make intelligent routing decision"""
+        """
+        Make intelligent routing decision - simplified orchestrator method
         
-        # Get available providers
+        This method coordinates the routing process by delegating to specialized methods.
+        """
+        
+        # Step 1: Get available providers that meet constraints
         available_providers = self._get_available_providers(constraints)
         
         if not available_providers:
             raise RuntimeError("No available providers match constraints")
         
-        # Score each provider
-        provider_scores = {}
-        decision_factors = {}
+        # Step 2: Score all available providers
+        provider_scores, decision_factors = await self._score_all_providers(
+            available_providers, request, strategy, constraints, task_type
+        )
         
-        for provider_name in available_providers:
-            score, factors = await self._score_provider(
-                provider_name, request, strategy, constraints, task_type
-            )
-            provider_scores[provider_name] = score
-            decision_factors[provider_name] = factors
-        
-        # Select best provider
-        best_provider = max(provider_scores, key=provider_scores.get)
-        best_score = provider_scores[best_provider]
-        
-        # Select model for provider
+        # Step 3: Select the best provider and model
+        best_provider, best_score = self._select_best_provider(provider_scores)
         selected_model = await self._select_model_for_provider(
             best_provider, request, strategy, constraints
         )
         
-        # Calculate estimates
+        # Step 4: Calculate cost and latency estimates
         estimated_cost = self._estimate_cost(best_provider, selected_model, request)
         estimated_latency = self._estimate_latency(best_provider, request)
         
-        # Prepare alternatives and fallbacks
-        alternatives = list(provider_scores.keys())
-        alternatives.remove(best_provider)
-        alternatives.sort(key=lambda p: provider_scores[p], reverse=True)
-        
-        fallback_providers = [p for p in alternatives if provider_scores[p] > 0.5][:3]
+        # Step 5: Prepare alternatives and fallbacks
+        alternatives, fallback_providers = self._prepare_alternatives_and_fallbacks(
+            provider_scores, best_provider
+        )
         
         return RoutingDecision(
             selected_provider=best_provider,
@@ -327,6 +320,57 @@ class IntelligentRouter:
             alternatives_considered=alternatives,
             fallback_providers=fallback_providers
         )
+    
+    async def _score_all_providers(self,
+                                 available_providers: List[str],
+                                 request: ModelExecutionRequest,
+                                 strategy: RoutingStrategy,
+                                 constraints: RoutingConstraints,
+                                 task_type: Optional[TaskType]) -> Tuple[Dict[str, float], Dict[str, Dict[str, float]]]:
+        """Score all available providers based on strategy and constraints"""
+        provider_scores = {}
+        decision_factors = {}
+        
+        for provider_name in available_providers:
+            score, factors = await self._score_provider(
+                provider_name, request, strategy, constraints, task_type
+            )
+            provider_scores[provider_name] = score
+            decision_factors[provider_name] = factors
+        
+        logger.debug("Provider scoring completed", 
+                    scored_providers=len(provider_scores),
+                    top_provider=max(provider_scores, key=provider_scores.get))
+        
+        return provider_scores, decision_factors
+    
+    def _select_best_provider(self, provider_scores: Dict[str, float]) -> Tuple[str, float]:
+        """Select the provider with the highest score"""
+        best_provider = max(provider_scores, key=provider_scores.get)
+        best_score = provider_scores[best_provider]
+        
+        logger.info("Best provider selected", 
+                   provider=best_provider, 
+                   score=f"{best_score:.3f}")
+        
+        return best_provider, best_score
+    
+    def _prepare_alternatives_and_fallbacks(self, 
+                                          provider_scores: Dict[str, float], 
+                                          best_provider: str) -> Tuple[List[str], List[str]]:
+        """Prepare ordered alternatives and fallback providers"""
+        alternatives = list(provider_scores.keys())
+        alternatives.remove(best_provider)
+        alternatives.sort(key=lambda p: provider_scores[p], reverse=True)
+        
+        # Select fallback providers with score > 0.5, limit to top 3
+        fallback_providers = [p for p in alternatives if provider_scores[p] > 0.5][:3]
+        
+        logger.debug("Alternatives prepared", 
+                    alternatives_count=len(alternatives),
+                    fallbacks_count=len(fallback_providers))
+        
+        return alternatives, fallback_providers
     
     def _get_available_providers(self, constraints: RoutingConstraints) -> List[str]:
         """Get providers that meet constraints"""
@@ -360,8 +404,29 @@ class IntelligentRouter:
                             strategy: RoutingStrategy,
                             constraints: RoutingConstraints,
                             task_type: Optional[TaskType]) -> Tuple[float, Dict[str, float]]:
-        """Score provider based on strategy and constraints"""
+        """Score provider based on strategy and constraints - simplified coordinator"""
         
+        # Calculate all scoring factors
+        factors = self._calculate_provider_factors(provider_name, request, constraints, task_type)
+        
+        # Handle special case for local preference
+        if strategy == RoutingStrategy.LOCAL_PREFERRED and provider_name == "ollama":
+            return 0.95, factors  # Strong preference for local
+        
+        # Get strategy-based weights
+        weights = self._get_strategy_weights(strategy)
+        
+        # Calculate final weighted score
+        total_score = self._calculate_weighted_score(factors, weights)
+        
+        return min(1.0, total_score), factors
+    
+    def _calculate_provider_factors(self,
+                                  provider_name: str,
+                                  request: ModelExecutionRequest,
+                                  constraints: RoutingConstraints,
+                                  task_type: Optional[TaskType]) -> Dict[str, float]:
+        """Calculate all scoring factors for a provider"""
         metrics = self.provider_metrics[provider_name]
         
         # Base scoring factors
@@ -370,16 +435,9 @@ class IntelligentRouter:
         quality_score = self._calculate_quality_score(provider_name, request)
         availability_score = metrics.availability
         reliability_score = metrics.success_rate
+        task_preference_score = self._calculate_task_preference_score(provider_name, task_type)
         
-        # Task-specific preference
-        task_preference_score = 1.0
-        if task_type and task_type in self.task_preferences:
-            preferred_providers = self.task_preferences[task_type]
-            if provider_name in preferred_providers:
-                position = preferred_providers.index(provider_name)
-                task_preference_score = 1.0 - (position * 0.1)
-        
-        factors = {
+        return {
             "cost": cost_score,
             "latency": latency_score,
             "quality": quality_score,
@@ -387,30 +445,54 @@ class IntelligentRouter:
             "reliability": reliability_score,
             "task_preference": task_preference_score
         }
+    
+    def _calculate_task_preference_score(self, provider_name: str, task_type: Optional[TaskType]) -> float:
+        """Calculate task-specific preference score for provider"""
+        if not task_type or task_type not in self.task_preferences:
+            return 1.0
+            
+        preferred_providers = self.task_preferences[task_type]
+        if provider_name not in preferred_providers:
+            return 1.0
+            
+        position = preferred_providers.index(provider_name)
+        return 1.0 - (position * 0.1)
+    
+    def _get_strategy_weights(self, strategy: RoutingStrategy) -> Dict[str, float]:
+        """Get weighting factors based on routing strategy"""
+        strategy_weights = {
+            RoutingStrategy.COST_OPTIMIZED: {
+                "cost": 0.5, "availability": 0.2, "reliability": 0.15, "quality": 0.1, "latency": 0.05
+            },
+            RoutingStrategy.LATENCY_OPTIMIZED: {
+                "latency": 0.4, "availability": 0.25, "reliability": 0.2, "cost": 0.1, "quality": 0.05
+            },
+            RoutingStrategy.QUALITY_OPTIMIZED: {
+                "quality": 0.4, "reliability": 0.25, "availability": 0.2, "cost": 0.1, "latency": 0.05
+            },
+            RoutingStrategy.AVAILABILITY_FIRST: {
+                "availability": 0.4, "reliability": 0.3, "latency": 0.15, "cost": 0.1, "quality": 0.05
+            },
+            RoutingStrategy.LOCAL_PREFERRED: {
+                "cost": 0.3, "availability": 0.25, "reliability": 0.2, "quality": 0.15, "latency": 0.1
+            },
+            RoutingStrategy.BALANCED: {
+                "cost": 0.2, "latency": 0.2, "quality": 0.2, "availability": 0.2, 
+                "reliability": 0.15, "task_preference": 0.05
+            }
+        }
         
-        # Strategy-based weighting
-        if strategy == RoutingStrategy.COST_OPTIMIZED:
-            weights = {"cost": 0.5, "availability": 0.2, "reliability": 0.15, "quality": 0.1, "latency": 0.05}
-        elif strategy == RoutingStrategy.LATENCY_OPTIMIZED:
-            weights = {"latency": 0.4, "availability": 0.25, "reliability": 0.2, "cost": 0.1, "quality": 0.05}
-        elif strategy == RoutingStrategy.QUALITY_OPTIMIZED:
-            weights = {"quality": 0.4, "reliability": 0.25, "availability": 0.2, "cost": 0.1, "latency": 0.05}
-        elif strategy == RoutingStrategy.AVAILABILITY_FIRST:
-            weights = {"availability": 0.4, "reliability": 0.3, "latency": 0.15, "cost": 0.1, "quality": 0.05}
-        elif strategy == RoutingStrategy.LOCAL_PREFERRED:
-            if provider_name == "ollama":
-                return 0.95, factors  # Strong preference for local
-            weights = {"cost": 0.3, "availability": 0.25, "reliability": 0.2, "quality": 0.15, "latency": 0.1}
-        else:  # BALANCED
-            weights = {"cost": 0.2, "latency": 0.2, "quality": 0.2, "availability": 0.2, "reliability": 0.15, "task_preference": 0.05}
-        
-        # Calculate weighted score
+        return strategy_weights.get(strategy, strategy_weights[RoutingStrategy.BALANCED])
+    
+    def _calculate_weighted_score(self, factors: Dict[str, float], weights: Dict[str, float]) -> float:
+        """Calculate final weighted score from factors and weights"""
         total_score = sum(factors[factor] * weights.get(factor, 0) for factor in factors)
         
         # Apply task preference bonus
-        total_score *= task_preference_score
+        task_preference = factors.get("task_preference", 1.0)
+        total_score *= task_preference
         
-        return min(1.0, total_score), factors
+        return total_score
     
     def _calculate_cost_score(self, provider_name: str, request: ModelExecutionRequest) -> float:
         """Calculate cost score (higher = cheaper)"""
@@ -464,40 +546,72 @@ class IntelligentRouter:
                                        request: ModelExecutionRequest,
                                        strategy: RoutingStrategy,
                                        constraints: RoutingConstraints) -> str:
-        """Select optimal model for chosen provider"""
+        """Select optimal model for chosen provider - delegated to provider-specific methods"""
         
-        if provider_name == "openai":
-            # Select based on requirements
-            if strategy == RoutingStrategy.COST_OPTIMIZED:
-                return "gpt-3.5-turbo"
-            elif strategy == RoutingStrategy.QUALITY_OPTIMIZED:
-                return "gpt-4"
-            else:
-                return "gpt-3.5-turbo"
+        # Provider-specific model selection
+        model_selectors = {
+            "openai": self._select_openai_model,
+            "anthropic": self._select_anthropic_model,
+            "ollama": self._select_ollama_model,
+            "openrouter": self._select_openrouter_model
+        }
         
-        elif provider_name == "anthropic":
-            if strategy == RoutingStrategy.COST_OPTIMIZED:
-                return ClaudeModel.CLAUDE_3_HAIKU.value
-            elif strategy == RoutingStrategy.QUALITY_OPTIMIZED:
-                return ClaudeModel.CLAUDE_3_OPUS.value
-            else:
-                return ClaudeModel.CLAUDE_3_SONNET.value
+        selector = model_selectors.get(provider_name)
+        if selector:
+            return await selector(request, strategy, constraints)
         
-        elif provider_name == "ollama":
-            # Select based on available models and requirements
-            if hasattr(self.clients["ollama"], 'get_model_recommendations'):
+        # Fallback to request model or default
+        return request.model_id or "default"
+    
+    async def _select_openai_model(self,
+                                 request: ModelExecutionRequest,
+                                 strategy: RoutingStrategy,
+                                 constraints: RoutingConstraints) -> str:
+        """Select optimal OpenAI model based on strategy"""
+        if strategy == RoutingStrategy.COST_OPTIMIZED:
+            return "gpt-3.5-turbo"
+        elif strategy == RoutingStrategy.QUALITY_OPTIMIZED:
+            return "gpt-4"
+        else:
+            return "gpt-3.5-turbo"  # Default to cost-effective option
+    
+    async def _select_anthropic_model(self,
+                                    request: ModelExecutionRequest,
+                                    strategy: RoutingStrategy,
+                                    constraints: RoutingConstraints) -> str:
+        """Select optimal Anthropic model based on strategy"""
+        if strategy == RoutingStrategy.COST_OPTIMIZED:
+            return ClaudeModel.CLAUDE_3_HAIKU.value
+        elif strategy == RoutingStrategy.QUALITY_OPTIMIZED:
+            return ClaudeModel.CLAUDE_3_OPUS.value
+        else:
+            return ClaudeModel.CLAUDE_3_SONNET.value  # Balanced option
+    
+    async def _select_ollama_model(self,
+                                 request: ModelExecutionRequest,
+                                 strategy: RoutingStrategy,
+                                 constraints: RoutingConstraints) -> str:
+        """Select optimal Ollama model based on available models and requirements"""
+        # Try to get recommendations from Ollama client
+        if hasattr(self.clients["ollama"], 'get_model_recommendations'):
+            try:
                 recommendations = self.clients["ollama"].get_model_recommendations(
                     "general", "balanced"
                 )
                 if recommendations:
                     return recommendations[0].value
-            return OllamaModel.LLAMA2_7B_CHAT.value
+            except Exception as e:
+                logger.warning("Failed to get Ollama model recommendations", error=str(e))
         
-        elif provider_name == "openrouter":
-            # Use OpenRouter's auto-selection
-            return "auto"
-        
-        return request.model_id or "default"
+        # Fallback to default local model
+        return OllamaModel.LLAMA2_7B_CHAT.value
+    
+    async def _select_openrouter_model(self,
+                                     request: ModelExecutionRequest,
+                                     strategy: RoutingStrategy,
+                                     constraints: RoutingConstraints) -> str:
+        """Select model for OpenRouter - use their auto-selection"""
+        return "auto"  # OpenRouter handles model selection automatically
     
     def _estimate_cost(self, provider_name: str, model: str, request: ModelExecutionRequest) -> float:
         """Estimate request cost"""
