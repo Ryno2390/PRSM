@@ -768,6 +768,80 @@ resource "aws_cloudwatch_log_group" "elasticache" {
 }
 
 # ==========================================
+# Milvus Vector Database (Production Grade)
+# ==========================================
+
+# Milvus requires persistent storage - EBS volumes for EKS nodes
+resource "aws_ebs_csi_driver" "main" {
+  cluster_name = aws_eks_cluster.main.name
+}
+
+# Storage class for Milvus persistent volumes
+resource "kubernetes_storage_class" "milvus_storage" {
+  metadata {
+    name = "milvus-storage"
+  }
+  storage_provisioner    = "ebs.csi.aws.com"
+  reclaim_policy        = "Retain"
+  volume_binding_mode   = "WaitForFirstConsumer"
+  allow_volume_expansion = true
+  parameters = {
+    type      = "gp3"
+    encrypted = "true"
+  }
+  
+  depends_on = [aws_eks_cluster.main]
+}
+
+# Milvus Security Group
+resource "aws_security_group" "milvus" {
+  name_prefix = "${local.name_prefix}-milvus"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port       = 19530
+    to_port         = 19530
+    protocol        = "tcp"
+    security_groups = [aws_security_group.eks_node.id]
+  }
+
+  ingress {
+    from_port       = 9091
+    to_port         = 9091
+    protocol        = "tcp"
+    security_groups = [aws_security_group.eks_node.id]
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${local.name_prefix}-milvus-sg"
+  })
+}
+
+# Milvus configuration stored in Secrets Manager
+resource "aws_secretsmanager_secret" "milvus_config" {
+  name = "${local.name_prefix}-milvus-config"
+  
+  tags = local.common_tags
+}
+
+resource "aws_secretsmanager_secret_version" "milvus_config" {
+  secret_id = aws_secretsmanager_secret.milvus_config.id
+  secret_string = jsonencode({
+    milvus_host = "milvus-service.default.svc.cluster.local"
+    milvus_port = "19530"
+    milvus_user = "root"
+    milvus_password = random_password.milvus_password.result
+    collection_prefix = "prsm_${var.environment}"
+  })
+}
+
+# Random password for Milvus
+resource "random_password" "milvus_password" {
+  length  = 32
+  special = true
+}
+
+# ==========================================
 # Outputs
 # ==========================================
 
@@ -858,4 +932,15 @@ output "redis_port" {
 output "redis_auth_token_secret_arn" {
   description = "ARN of the secret containing Redis auth token"
   value       = aws_secretsmanager_secret.redis_auth_token.arn
+}
+
+# Milvus outputs
+output "milvus_config_secret_arn" {
+  description = "ARN of the secret containing Milvus configuration"
+  value       = aws_secretsmanager_secret.milvus_config.arn
+}
+
+output "milvus_storage_class" {
+  description = "Storage class name for Milvus persistent volumes"
+  value       = kubernetes_storage_class.milvus_storage.metadata[0].name
 }

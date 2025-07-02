@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prsm-consensus
+  namespace: prsm-production
+  labels:
+    app: prsm-consensus
+    component: consensus
+    environment: production
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: prsm-consensus
+      component: consensus
+  template:
+    metadata:
+      labels:
+        app: prsm-consensus
+        component: consensus
+        environment: production
+    spec:
+      serviceAccountName: prsm-consensus
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: prsm-consensus
+        image: prsm/consensus:latest
+        imagePullPolicy: Always
+        ports:
+        - name: consensus
+          containerPort: 8002
+          protocol: TCP
+        - name: p2p
+          containerPort: 8001
+          protocol: TCP
+        - name: metrics
+          containerPort: 8080
+          protocol: TCP
+        env:
+        - name: NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        envFrom:
+        - configMapRef:
+            name: prsm-config
+        - secretRef:
+            name: prsm-secrets
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+          limits:
+            cpu: 4000m
+            memory: 8Gi
+        livenessProbe:
+          tcpSocket:
+            port: consensus
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          tcpSocket:
+            port: consensus
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: consensus-data
+          mountPath: /app/data
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: consensus-data
+        persistentVolumeClaim:
+          claimName: prsm-consensus-data
+      - name: tmp
+        emptyDir: {}
+      terminationGracePeriodSeconds: 60
