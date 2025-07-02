@@ -100,9 +100,96 @@ class BaseModelClient(ABC):
         pass
     
     @abstractmethod
-    async def execute(self, request: ModelExecutionRequest) -> ModelExecutionResponse:
-        """Execute a task with the model"""
+    def _get_provider(self) -> ModelProvider:
+        """Get the provider type for this client"""
         pass
+    
+    @abstractmethod
+    async def _execute_api_request(self, request: ModelExecutionRequest) -> Dict[str, Any]:
+        """Execute the provider-specific API request"""
+        pass
+    
+    @abstractmethod
+    def _parse_success_response(self, data: Dict[str, Any], request: ModelExecutionRequest) -> Dict[str, Any]:
+        """Parse successful API response into standardized format"""
+        pass
+    
+    @abstractmethod
+    def _parse_error_response(self, error_data: Dict[str, Any], status_code: int) -> str:
+        """Parse error response into human-readable message"""
+        pass
+    
+    async def execute(self, request: ModelExecutionRequest) -> ModelExecutionResponse:
+        """
+        Execute a task with the model using standardized flow
+        
+        🔄 STANDARDIZED EXECUTION FLOW:
+        1. Start timing and logging
+        2. Execute provider-specific API request
+        3. Parse response using provider-specific logic
+        4. Create standardized response object
+        5. Handle errors consistently
+        """
+        start_time = time.time()
+        provider = self._get_provider()
+        
+        logger.debug(
+            "Starting model execution",
+            provider=provider.value,
+            model_id=request.model_id,
+            prompt_length=len(request.prompt)
+        )
+        
+        try:
+            # Execute provider-specific API request
+            response_data = await self._execute_api_request(request)
+            execution_time = time.time() - start_time
+            
+            # Parse success response
+            parsed_data = self._parse_success_response(response_data, request)
+            
+            response = ModelExecutionResponse(
+                content=parsed_data["content"],
+                provider=provider,
+                model_id=request.model_id,
+                execution_time=execution_time,
+                token_usage=parsed_data.get("token_usage", {}),
+                success=True,
+                metadata=parsed_data.get("metadata", {})
+            )
+            
+            logger.info(
+                "Model execution completed successfully",
+                provider=provider.value,
+                model_id=request.model_id,
+                execution_time=execution_time,
+                tokens_used=parsed_data.get("token_usage", {}).get("total_tokens", 0)
+            )
+            
+            return response
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            error_msg = str(e)
+            
+            logger.error(
+                "Model execution failed",
+                provider=provider.value,
+                model_id=request.model_id,
+                execution_time=execution_time,
+                error=error_msg,
+                exc_info=True
+            )
+            
+            return ModelExecutionResponse(
+                content="",
+                provider=provider,
+                model_id=request.model_id,
+                execution_time=execution_time,
+                token_usage={},
+                success=False,
+                error=error_msg
+            )
     
     async def __aenter__(self):
         await self.initialize()
@@ -139,83 +226,50 @@ class OpenAIClient(BaseModelClient):
                 if response.status == 200:
                     logger.info("OpenAI client initialized successfully")
                 else:
-                    logger.warning(f"OpenAI API returned status {response.status}")
+                    logger.warning("OpenAI API returned non-200 status", status=response.status)
         except Exception as e:
-            logger.error(f"Failed to initialize OpenAI client: {e}")
+            logger.error("Failed to initialize OpenAI client", error=str(e))
     
-    async def execute(self, request: ModelExecutionRequest) -> ModelExecutionResponse:
-        """
-        Execute task using OpenAI API
+    def _get_provider(self) -> ModelProvider:
+        return ModelProvider.OPENAI
+    
+    async def _execute_api_request(self, request: ModelExecutionRequest) -> Dict[str, Any]:
+        """Execute OpenAI API request"""
+        # Format messages according to OpenAI chat format
+        messages = []
+        if request.system_prompt:
+            messages.append({"role": "system", "content": request.system_prompt})
+        messages.append({"role": "user", "content": request.prompt})
         
-        🔄 EXECUTION FLOW:
-        1. Format prompt according to OpenAI chat format
-        2. Send request to appropriate endpoint
-        3. Parse response and extract content
-        4. Calculate usage costs for FTNS integration
-        """
-        start_time = time.time()
+        payload = {
+            "model": request.model_id,
+            "messages": messages,
+            "max_tokens": request.max_tokens,
+            "temperature": request.temperature
+        }
         
-        try:
-            # 📝 FORMAT REQUEST
-            messages = []
-            if request.system_prompt:
-                messages.append({"role": "system", "content": request.system_prompt})
-            messages.append({"role": "user", "content": request.prompt})
-            
-            payload = {
-                "model": request.model_id,
-                "messages": messages,
-                "max_tokens": request.max_tokens,
-                "temperature": request.temperature
-            }
-            
-            # 🚀 SEND REQUEST
-            async with self.session.post(
-                f"{self.base_url}/chat/completions",
-                json=payload
-            ) as response:
-                
-                execution_time = time.time() - start_time
-                
-                if response.status == 200:
-                    data = await response.json()
-                    
-                    return ModelExecutionResponse(
-                        content=data["choices"][0]["message"]["content"],
-                        provider=ModelProvider.OPENAI,
-                        model_id=request.model_id,
-                        execution_time=execution_time,
-                        token_usage=data.get("usage", {}),
-                        success=True,
-                        metadata={"finish_reason": data["choices"][0].get("finish_reason")}
-                    )
-                else:
-                    error_data = await response.json()
-                    error_msg = error_data.get("error", {}).get("message", f"HTTP {response.status}")
-                    
-                    return ModelExecutionResponse(
-                        content="",
-                        provider=ModelProvider.OPENAI,
-                        model_id=request.model_id,
-                        execution_time=execution_time,
-                        token_usage={},
-                        success=False,
-                        error=error_msg
-                    )
-                    
-        except Exception as e:
-            execution_time = time.time() - start_time
-            logger.error(f"OpenAI execution failed: {e}")
-            
-            return ModelExecutionResponse(
-                content="",
-                provider=ModelProvider.OPENAI,
-                model_id=request.model_id,
-                execution_time=execution_time,
-                token_usage={},
-                success=False,
-                error=str(e)
-            )
+        async with self.session.post(
+            f"{self.base_url}/chat/completions",
+            json=payload
+        ) as response:
+            if response.status == 200:
+                return await response.json()
+            else:
+                error_data = await response.json()
+                error_msg = self._parse_error_response(error_data, response.status)
+                raise Exception(f"OpenAI API error: {error_msg}")
+    
+    def _parse_success_response(self, data: Dict[str, Any], request: ModelExecutionRequest) -> Dict[str, Any]:
+        """Parse OpenAI success response"""
+        return {
+            "content": data["choices"][0]["message"]["content"],
+            "token_usage": data.get("usage", {}),
+            "metadata": {"finish_reason": data["choices"][0].get("finish_reason")}
+        }
+    
+    def _parse_error_response(self, error_data: Dict[str, Any], status_code: int) -> str:
+        """Parse OpenAI error response"""
+        return error_data.get("error", {}).get("message", f"HTTP {status_code}")
 
 
 class AnthropicClient(BaseModelClient):
@@ -242,77 +296,43 @@ class AnthropicClient(BaseModelClient):
         """Validate API key"""
         logger.info("Anthropic client initialized")
     
-    async def execute(self, request: ModelExecutionRequest) -> ModelExecutionResponse:
-        """
-        Execute task using Anthropic API
+    def _get_provider(self) -> ModelProvider:
+        return ModelProvider.ANTHROPIC
+    
+    async def _execute_api_request(self, request: ModelExecutionRequest) -> Dict[str, Any]:
+        """Execute Anthropic API request"""
+        payload = {
+            "model": request.model_id,
+            "max_tokens": request.max_tokens,
+            "temperature": request.temperature,
+            "messages": [{"role": "user", "content": request.prompt}]
+        }
         
-        🔄 EXECUTION FLOW:
-        1. Format prompt for Claude's expected format
-        2. Send request with appropriate parameters
-        3. Parse streaming or non-streaming response
-        4. Extract usage information for FTNS tracking
-        """
-        start_time = time.time()
+        if request.system_prompt:
+            payload["system"] = request.system_prompt
         
-        try:
-            # 📝 FORMAT REQUEST
-            payload = {
-                "model": request.model_id,
-                "max_tokens": request.max_tokens,
-                "temperature": request.temperature,
-                "messages": [{"role": "user", "content": request.prompt}]
-            }
-            
-            if request.system_prompt:
-                payload["system"] = request.system_prompt
-            
-            # 🚀 SEND REQUEST
-            async with self.session.post(
-                f"{self.base_url}/messages",
-                json=payload
-            ) as response:
-                
-                execution_time = time.time() - start_time
-                
-                if response.status == 200:
-                    data = await response.json()
-                    
-                    return ModelExecutionResponse(
-                        content=data["content"][0]["text"],
-                        provider=ModelProvider.ANTHROPIC,
-                        model_id=request.model_id,
-                        execution_time=execution_time,
-                        token_usage=data.get("usage", {}),
-                        success=True,
-                        metadata={"stop_reason": data.get("stop_reason")}
-                    )
-                else:
-                    error_data = await response.json()
-                    error_msg = error_data.get("error", {}).get("message", f"HTTP {response.status}")
-                    
-                    return ModelExecutionResponse(
-                        content="",
-                        provider=ModelProvider.ANTHROPIC,
-                        model_id=request.model_id,
-                        execution_time=execution_time,
-                        token_usage={},
-                        success=False,
-                        error=error_msg
-                    )
-                    
-        except Exception as e:
-            execution_time = time.time() - start_time
-            logger.error(f"Anthropic execution failed: {e}")
-            
-            return ModelExecutionResponse(
-                content="",
-                provider=ModelProvider.ANTHROPIC,
-                model_id=request.model_id,
-                execution_time=execution_time,
-                token_usage={},
-                success=False,
-                error=str(e)
-            )
+        async with self.session.post(
+            f"{self.base_url}/messages",
+            json=payload
+        ) as response:
+            if response.status == 200:
+                return await response.json()
+            else:
+                error_data = await response.json()
+                error_msg = self._parse_error_response(error_data, response.status)
+                raise Exception(f"Anthropic API error: {error_msg}")
+    
+    def _parse_success_response(self, data: Dict[str, Any], request: ModelExecutionRequest) -> Dict[str, Any]:
+        """Parse Anthropic success response"""
+        return {
+            "content": data["content"][0]["text"],
+            "token_usage": data.get("usage", {}),
+            "metadata": {"stop_reason": data.get("stop_reason")}
+        }
+    
+    def _parse_error_response(self, error_data: Dict[str, Any], status_code: int) -> str:
+        """Parse Anthropic error response"""
+        return error_data.get("error", {}).get("message", f"HTTP {status_code}")
 
 
 class HuggingFaceClient(BaseModelClient):
@@ -339,84 +359,50 @@ class HuggingFaceClient(BaseModelClient):
         """Test API connectivity"""
         logger.info("HuggingFace client initialized")
     
-    async def execute(self, request: ModelExecutionRequest) -> ModelExecutionResponse:
-        """
-        Execute task using Hugging Face Inference API
-        
-        🔄 EXECUTION FLOW:
-        1. Format request for HF Inference API
-        2. Handle different model types (text generation, text classification, etc.)
-        3. Parse response based on model capability
-        4. Estimate token usage for FTNS tracking
-        """
-        start_time = time.time()
-        
-        try:
-            # 📝 FORMAT REQUEST
-            payload = {
-                "inputs": request.prompt,
-                "parameters": {
-                    "max_new_tokens": request.max_tokens,
-                    "temperature": request.temperature,
-                    "return_full_text": False
-                }
+    def _get_provider(self) -> ModelProvider:
+        return ModelProvider.HUGGINGFACE
+    
+    async def _execute_api_request(self, request: ModelExecutionRequest) -> Dict[str, Any]:
+        """Execute HuggingFace API request"""
+        payload = {
+            "inputs": request.prompt,
+            "parameters": {
+                "max_new_tokens": request.max_tokens,
+                "temperature": request.temperature,
+                "return_full_text": False
             }
-            
-            # 🚀 SEND REQUEST
-            async with self.session.post(
-                f"{self.base_url}/{request.model_id}",
-                json=payload
-            ) as response:
-                
-                execution_time = time.time() - start_time
-                
-                if response.status == 200:
-                    data = await response.json()
-                    
-                    # Handle different response formats
-                    if isinstance(data, list) and len(data) > 0:
-                        content = data[0].get("generated_text", str(data[0]))
-                    else:
-                        content = str(data)
-                    
-                    # Estimate token usage (HF doesn't always provide this)
-                    estimated_tokens = len(content.split()) * 1.3  # Rough estimate
-                    
-                    return ModelExecutionResponse(
-                        content=content,
-                        provider=ModelProvider.HUGGINGFACE,
-                        model_id=request.model_id,
-                        execution_time=execution_time,
-                        token_usage={"estimated_tokens": int(estimated_tokens)},
-                        success=True,
-                        metadata={"response_type": "text_generation"}
-                    )
-                else:
-                    error_text = await response.text()
-                    
-                    return ModelExecutionResponse(
-                        content="",
-                        provider=ModelProvider.HUGGINGFACE,
-                        model_id=request.model_id,
-                        execution_time=execution_time,
-                        token_usage={},
-                        success=False,
-                        error=f"HTTP {response.status}: {error_text}"
-                    )
-                    
-        except Exception as e:
-            execution_time = time.time() - start_time
-            logger.error(f"HuggingFace execution failed: {e}")
-            
-            return ModelExecutionResponse(
-                content="",
-                provider=ModelProvider.HUGGINGFACE,
-                model_id=request.model_id,
-                execution_time=execution_time,
-                token_usage={},
-                success=False,
-                error=str(e)
-            )
+        }
+        
+        async with self.session.post(
+            f"{self.base_url}/{request.model_id}",
+            json=payload
+        ) as response:
+            if response.status == 200:
+                return await response.json()
+            else:
+                error_text = await response.text()
+                raise Exception(f"HTTP {response.status}: {error_text}")
+    
+    def _parse_success_response(self, data: Dict[str, Any], request: ModelExecutionRequest) -> Dict[str, Any]:
+        """Parse HuggingFace success response"""
+        # Handle different response formats
+        if isinstance(data, list) and len(data) > 0:
+            content = data[0].get("generated_text", str(data[0]))
+        else:
+            content = str(data)
+        
+        # Estimate token usage (HF doesn't always provide this)
+        estimated_tokens = len(content.split()) * 1.3  # Rough estimate
+        
+        return {
+            "content": content,
+            "token_usage": {"estimated_tokens": int(estimated_tokens)},
+            "metadata": {"response_type": "text_generation"}
+        }
+    
+    def _parse_error_response(self, error_data: Dict[str, Any], status_code: int) -> str:
+        """Parse HuggingFace error response"""
+        return f"HTTP {status_code}: {str(error_data)}"
 
 
 class LocalModelClient(BaseModelClient):
@@ -450,10 +436,13 @@ class LocalModelClient(BaseModelClient):
             else:
                 await self._load_transformers_model()
                 
-            logger.info(f"Local model loaded: {self.model_path}")
+            logger.info("Local model loaded", model_path=self.model_path)
         except Exception as e:
-            logger.error(f"Failed to load local model: {e}")
+            logger.error("Failed to load local model", error=str(e), model_path=self.model_path)
             raise
+    
+    def _get_provider(self) -> ModelProvider:
+        return ModelProvider.LOCAL
     
     async def _load_pytorch_model(self):
         """Load PyTorch model"""
@@ -481,58 +470,40 @@ class LocalModelClient(BaseModelClient):
         except ImportError:
             raise RuntimeError("Transformers not available for local model execution")
     
-    async def execute(self, request: ModelExecutionRequest) -> ModelExecutionResponse:
-        """
-        Execute task using local model
+    async def _execute_api_request(self, request: ModelExecutionRequest) -> Dict[str, Any]:
+        """Execute local model inference (overrides HTTP-based execution)"""
+        if not self.model:
+            raise RuntimeError("Model not loaded")
         
-        🔄 EXECUTION FLOW:
-        1. Tokenize input based on model type
-        2. Run inference using appropriate framework
-        3. Decode output to text
-        4. Calculate inference metrics
-        """
-        start_time = time.time()
+        # Execute based on model type
+        if hasattr(self.model, 'generate') and self.tokenizer:
+            # Transformers model
+            content = await self._execute_transformers(request)
+        else:
+            # PyTorch/TensorFlow model - simplified execution
+            content = f"Local model response to: {request.prompt[:100]}..."
         
-        try:
-            if not self.model:
-                raise RuntimeError("Model not loaded")
-            
-            # Execute based on model type
-            if hasattr(self.model, 'generate') and self.tokenizer:
-                # Transformers model
-                content = await self._execute_transformers(request)
-            else:
-                # PyTorch/TensorFlow model - simplified execution
-                content = f"Local model response to: {request.prompt[:100]}..."
-            
-            execution_time = time.time() - start_time
-            
-            return ModelExecutionResponse(
-                content=content,
-                provider=ModelProvider.LOCAL,
-                model_id=request.model_id,
-                execution_time=execution_time,
-                token_usage={"local_inference": True},
-                success=True,
-                metadata={"model_path": self.model_path}
-            )
-            
-        except Exception as e:
-            execution_time = time.time() - start_time
-            logger.error(f"Local model execution failed: {e}")
-            
-            return ModelExecutionResponse(
-                content="",
-                provider=ModelProvider.LOCAL,
-                model_id=request.model_id,
-                execution_time=execution_time,
-                token_usage={},
-                success=False,
-                error=str(e)
-            )
+        return {"content": content}
+    
+    def _parse_success_response(self, data: Dict[str, Any], request: ModelExecutionRequest) -> Dict[str, Any]:
+        """Parse local model success response"""
+        return {
+            "content": data["content"],
+            "token_usage": {"local_inference": True},
+            "metadata": {"model_path": self.model_path}
+        }
+    
+    def _parse_error_response(self, error_data: Dict[str, Any], status_code: int) -> str:
+        """Parse local model error response"""
+        return str(error_data)
     
     async def _execute_transformers(self, request: ModelExecutionRequest) -> str:
         """Execute with Transformers model"""
+        try:
+            import torch
+        except ImportError:
+            raise RuntimeError("PyTorch not available for transformers execution")
+        
         inputs = self.tokenizer(request.prompt, return_tensors="pt", truncation=True, max_length=512)
         
         with torch.no_grad():
