@@ -16,7 +16,10 @@ documentation for details.
    :caption: Contents:
 
    main
-   auth
-   marketplace
+   auth_api
+   marketplace_api
+   governance_api
+   health_api
+   budget_api
    task
 
