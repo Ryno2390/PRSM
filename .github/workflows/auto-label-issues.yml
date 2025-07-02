@@ -1,0 +1,216 @@
+name: 🏷️ Auto-Label Issues and PRs
+
+on:
+  issues:
+    types: [opened, edited]
+  pull_request:
+    types: [opened, edited, synchronize]
+
+jobs:
+  auto-label:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Auto-label based on file paths
+      uses: actions/labeler@v4
+      with:
+        repo-token: "${{ secrets.GITHUB_TOKEN }}"
+        configuration-path: .github/labeler.yml
+
+    - name: Label documentation issues
+      if: github.event_name == 'issues'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const issue = context.payload.issue;
+          const title = issue.title.toLowerCase();
+          const body = issue.body ? issue.body.toLowerCase() : '';
+          
+          const labels = [];
+          
+          // Documentation labels
+          if (title.includes('docs') || title.includes('documentation') || 
+              title.includes('readme') || title.includes('tutorial') ||
+              body.includes('documentation') || body.includes('docstring')) {
+            labels.push('documentation');
+          }
+          
+          // Good first issue detection
+          if (title.includes('[good first issue]') || 
+              body.includes('good first issue') ||
+              title.includes('docstring') || title.includes('typo') ||
+              title.includes('example') || title.includes('readme')) {
+            labels.push('good first issue');
+          }
+          
+          // Bug detection
+          if (title.includes('bug') || title.includes('fix') || 
+              title.includes('error') || title.includes('broken') ||
+              body.includes('expected behavior') || body.includes('actual behavior')) {
+            labels.push('bug');
+          }
+          
+          // Feature detection
+          if (title.includes('feature') || title.includes('enhancement') || 
+              title.includes('add') || title.includes('implement') ||
+              body.includes('feature request') || body.includes('enhancement')) {
+            labels.push('enhancement');
+          }
+          
+          // Testing labels
+          if (title.includes('test') || title.includes('testing') ||
+              body.includes('unit test') || body.includes('integration test')) {
+            labels.push('testing');
+          }
+          
+          // SDK labels
+          if (title.includes('python sdk') || body.includes('python sdk') ||
+              title.includes('sdks/python')) {
+            labels.push('python-sdk');
+          }
+          
+          if (title.includes('javascript sdk') || body.includes('javascript sdk') ||
+              title.includes('sdks/javascript') || title.includes('js sdk')) {
+            labels.push('javascript-sdk');
+          }
+          
+          if (title.includes('go sdk') || body.includes('go sdk') ||
+              title.includes('sdks/go')) {
+            labels.push('go-sdk');
+          }
+          
+          // Priority detection
+          if (title.includes('critical') || title.includes('urgent') ||
+              body.includes('critical') || body.includes('blocking')) {
+            labels.push('priority: high');
+          } else if (title.includes('minor') || title.includes('small') ||
+                     labels.includes('good first issue')) {
+            labels.push('priority: low');
+          } else {
+            labels.push('priority: medium');
+          }
+          
+          // Component detection
+          if (title.includes('core') || body.includes('prsm/core')) {
+            labels.push('component: core');
+          }
+          
+          if (title.includes('api') || body.includes('prsm/api')) {
+            labels.push('component: api');
+          }
+          
+          if (title.includes('web') || title.includes('ui') || 
+              body.includes('frontend') || body.includes('web interface')) {
+            labels.push('component: ui');
+          }
+          
+          if (title.includes('auth') || body.includes('authentication') ||
+              body.includes('prsm/auth')) {
+            labels.push('component: auth');
+          }
+          
+          // Help wanted for community issues
+          if (labels.includes('good first issue') || 
+              body.includes('help wanted') || 
+              title.includes('contributor')) {
+            labels.push('help wanted');
+          }
+          
+          // Add triage label for new issues
+          if (!labels.some(label => label.startsWith('priority:'))) {
+            labels.push('needs triage');
+          }
+          
+          // Apply labels
+          if (labels.length > 0) {
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              labels: labels
+            });
+          }
+
+    - name: Welcome new contributors
+      if: github.event_name == 'issues' && github.event.action == 'opened'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const issue = context.payload.issue;
+          const author = issue.user.login;
+          
+          // Check if this is the user's first issue
+          const { data: issues } = await github.rest.issues.listForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            creator: author,
+            state: 'all',
+            per_page: 10
+          });
+          
+          if (issues.length === 1) {
+            // This is their first issue
+            const welcomeMessage = `
+          🎉 **Welcome to PRSM, @${author}!** 
+          
+          Thank you for opening your first issue! Here are some helpful resources:
+          
+          - 📚 [Contributor Onboarding Guide](docs/CONTRIBUTOR_ONBOARDING.md)
+          - 🌟 [Good First Issues](docs/CURATED_GOOD_FIRST_ISSUES.md)  
+          - 🤝 [Contributing Guidelines](CONTRIBUTING.md)
+          - 💬 [Community Discord](https://discord.gg/prsm-ai)
+          
+          A maintainer will review your issue and add appropriate labels soon. If you're interested in working on this issue yourself, just let us know in the comments!
+          
+          Welcome to the community! 🚀
+          `;
+          
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: welcomeMessage
+            });
+          }
+
+    - name: Auto-assign reviewers for PRs
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const pr = context.payload.pull_request;
+          const files = await github.rest.pulls.listFiles({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: pr.number
+          });
+          
+          const changedFiles = files.data.map(file => file.filename);
+          let reviewers = [];
+          
+          // Assign reviewers based on changed files
+          if (changedFiles.some(file => file.startsWith('sdks/python'))) {
+            reviewers.push('python-sdk-team'); // Replace with actual team/usernames
+          }
+          
+          if (changedFiles.some(file => file.startsWith('sdks/javascript'))) {
+            reviewers.push('javascript-sdk-team');
+          }
+          
+          if (changedFiles.some(file => file.startsWith('docs/'))) {
+            reviewers.push('docs-team');
+          }
+          
+          if (changedFiles.some(file => file.startsWith('prsm/core'))) {
+            reviewers.push('core-team');
+          }
+          
+          // Don't auto-assign if author is a maintainer
+          const maintainers = ['maintainer1', 'maintainer2']; // Replace with actual usernames
+          if (!maintainers.includes(pr.user.login) && reviewers.length > 0) {
+            // Note: This would need actual team/user names configured
+            console.log(`Would assign reviewers: ${reviewers.join(', ')}`);
+          }
