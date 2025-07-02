@@ -21,7 +21,7 @@ from ..teams.models import (
 )
 
 # Initialize router
-router = APIRouter(prefix="/teams", tags=["teams"])
+router = APIRouter(prefix="/api/v1/teams", tags=["teams"])
 
 # Service dependencies
 team_service = get_team_service()
