@@ -164,49 +164,110 @@ jobs:
       with:
         node-version: '18'
         
-    - name: 🔍 Check for package.json
-      id: check-package
+    - name: 🔍 Check for JavaScript projects
+      id: check-js-projects
       run: |
-        if [ -f "package.json" ]; then
-          echo "has_package_json=true" >> $GITHUB_OUTPUT
-        else
-          echo "has_package_json=false" >> $GITHUB_OUTPUT
+        # Check for multiple JavaScript projects in the repo
+        JS_PROJECTS=()
+        
+        if [ -f "ai-concierge/package.json" ]; then
+          JS_PROJECTS+=("ai-concierge")
         fi
         
-    - name: 📦 Install dependencies
-      if: steps.check-package.outputs.has_package_json == 'true'
-      run: npm ci
-      
-    - name: 🔍 Run npm audit
-      if: steps.check-package.outputs.has_package_json == 'true'
-      run: |
-        # Run npm audit and save results
-        npm audit --audit-level=moderate --json > npm-audit-results.json || true
+        if [ -f "contracts/package.json" ]; then
+          JS_PROJECTS+=("contracts")
+        fi
         
-        # Generate human-readable report
+        if [ -f "package.json" ]; then
+          JS_PROJECTS+=(".")
+        fi
+        
+        if [ ${#JS_PROJECTS[@]} -gt 0 ]; then
+          echo "has_js_projects=true" >> $GITHUB_OUTPUT
+          echo "js_projects=${JS_PROJECTS[*]}" >> $GITHUB_OUTPUT
+        else
+          echo "has_js_projects=false" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: 🔍 Run npm audit on all JavaScript projects
+      if: steps.check-js-projects.outputs.has_js_projects == 'true'
+      run: |
+        # Initialize combined results
         echo "# 📦 JavaScript Security Audit" > js-security-report.md
         echo "" >> js-security-report.md
         echo "**Audit Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> js-security-report.md
         echo "" >> js-security-report.md
         
-        # Check if there are vulnerabilities
-        VULN_COUNT=$(cat npm-audit-results.json | jq '.metadata.vulnerabilities.total // 0')
+        TOTAL_VULNS=0
+        PROJECT_COUNT=0
         
-        if [[ "$VULN_COUNT" -eq 0 ]]; then
-          echo "✅ **Status: CLEAN** - No known vulnerabilities in JavaScript dependencies" >> js-security-report.md
-        else
-          echo "⚠️ **Status: VULNERABILITIES FOUND** - $VULN_COUNT vulnerabilities detected" >> js-security-report.md
+        # Read projects array
+        IFS=' ' read -ra PROJECTS <<< "${{ steps.check-js-projects.outputs.js_projects }}"
+        
+        for PROJECT in "${PROJECTS[@]}"; do
+          PROJECT_COUNT=$((PROJECT_COUNT + 1))
+          echo "## Project: $PROJECT" >> js-security-report.md
           echo "" >> js-security-report.md
-          echo "Run \`npm audit fix\` to automatically fix issues where possible." >> js-security-report.md
+          
+          cd "$PROJECT"
+          
+          # Install dependencies if needed
+          if [ -f "package-lock.json" ]; then
+            npm ci || npm install --legacy-peer-deps || true
+          else
+            npm install --legacy-peer-deps || true
+          fi
+          
+          # Run audit
+          npm audit --audit-level=moderate --json > "../npm-audit-${PROJECT//\//-}.json" 2>/dev/null || true
+          
+          # Check vulnerabilities
+          if [ -f "../npm-audit-${PROJECT//\//-}.json" ]; then
+            VULN_COUNT=$(cat "../npm-audit-${PROJECT//\//-}.json" | jq '.metadata.vulnerabilities.total // 0' 2>/dev/null || echo "0")
+          else
+            # Fallback: run npm audit without JSON and parse output
+            AUDIT_OUTPUT=$(npm audit --audit-level=moderate 2>&1 || true)
+            if echo "$AUDIT_OUTPUT" | grep -q "found 0 vulnerabilities"; then
+              VULN_COUNT=0
+            elif echo "$AUDIT_OUTPUT" | grep -q "vulnerabilities"; then
+              VULN_COUNT=$(echo "$AUDIT_OUTPUT" | grep -o '[0-9]\+ \(low\|moderate\|high\|critical\)' | wc -l)
+            else
+              VULN_COUNT=0
+            fi
+          fi
+          
+          TOTAL_VULNS=$((TOTAL_VULNS + VULN_COUNT))
+          
+          if [[ "$VULN_COUNT" -eq 0 ]]; then
+            echo "✅ **Status: CLEAN** - No vulnerabilities found" >> ../js-security-report.md
+          else
+            echo "⚠️ **Status: $VULN_COUNT vulnerabilities found**" >> ../js-security-report.md
+            echo "- Run \`npm audit fix\` in $PROJECT directory to fix automatically" >> ../js-security-report.md
+          fi
+          
+          echo "" >> ../js-security-report.md
+          cd ..
+        done
+        
+        # Add summary
+        echo "## Summary" >> js-security-report.md
+        echo "" >> js-security-report.md
+        echo "- **Projects Scanned:** $PROJECT_COUNT" >> js-security-report.md
+        echo "- **Total Vulnerabilities:** $TOTAL_VULNS" >> js-security-report.md
+        
+        if [[ "$TOTAL_VULNS" -eq 0 ]]; then
+          echo "- **Overall Status:** ✅ CLEAN" >> js-security-report.md
+        else
+          echo "- **Overall Status:** ⚠️ ATTENTION NEEDED" >> js-security-report.md
         fi
         
     - name: 📋 Upload JavaScript Security Artifacts
-      if: steps.check-package.outputs.has_package_json == 'true'
+      if: steps.check-js-projects.outputs.has_js_projects == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: javascript-security-audit-results
         path: |
-          npm-audit-results.json
+          npm-audit-*.json
           js-security-report.md
         retention-days: 90
 
