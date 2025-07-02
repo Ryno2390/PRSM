@@ -4404,5 +4404,502 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
         initializeMarketplaceAssetSwitching();
         initializeAssetCardInteractions();
+        initializeModelLabFunctionality();
     }, 700);
 });
+
+// ========================================
+// MODEL LAB FUNCTIONALITY
+// ========================================
+
+function initializeModelLabFunctionality() {
+    // Initialize workflow step navigation
+    initializeWorkflowSteps();
+    
+    // Initialize model selection
+    initializeModelSelection();
+    
+    // Initialize upload functionality
+    initializeDatasetUpload();
+    
+    // Initialize accuracy slider
+    initializeAccuracySlider();
+    
+    // Initialize marketplace sharing toggle
+    initializeMarketplaceSharing();
+    
+    // Initialize distillation controls
+    initializeDistillationControls();
+}
+
+// Workflow step navigation
+function initializeWorkflowSteps() {
+    const steps = document.querySelectorAll('.workflow-step');
+    const nextBtn = document.getElementById('next-step');
+    const prevBtn = document.getElementById('prev-step');
+    const startBtn = document.getElementById('start-distillation');
+    const progressFill = document.querySelector('.workflow-controls .progress-fill');
+    const currentStepText = document.querySelector('.current-step');
+    
+    let currentStep = 0;
+    const totalSteps = steps.length;
+    
+    function updateStepDisplay() {
+        // Update step visibility
+        steps.forEach((step, index) => {
+            step.classList.toggle('active', index === currentStep);
+        });
+        
+        // Update progress bar
+        const progressPercent = ((currentStep + 1) / totalSteps) * 100;
+        if (progressFill) {
+            progressFill.style.width = `${progressPercent}%`;
+        }
+        
+        // Update step text
+        if (currentStepText) {
+            currentStepText.textContent = `Step ${currentStep + 1} of ${totalSteps}`;
+        }
+        
+        // Update button states
+        if (prevBtn) {
+            prevBtn.disabled = currentStep === 0;
+        }
+        
+        if (nextBtn && startBtn) {
+            if (currentStep === totalSteps - 1) {
+                nextBtn.style.display = 'none';
+                startBtn.style.display = 'inline-flex';
+            } else {
+                nextBtn.style.display = 'inline-flex';
+                startBtn.style.display = 'none';
+            }
+        }
+    }
+    
+    // Next button handler
+    if (nextBtn) {
+        nextBtn.addEventListener('click', () => {
+            if (currentStep < totalSteps - 1) {
+                currentStep++;
+                updateStepDisplay();
+            }
+        });
+    }
+    
+    // Previous button handler
+    if (prevBtn) {
+        prevBtn.addEventListener('click', () => {
+            if (currentStep > 0) {
+                currentStep--;
+                updateStepDisplay();
+            }
+        });
+    }
+    
+    // Start distillation button handler
+    if (startBtn) {
+        startBtn.addEventListener('click', () => {
+            startDistillationProcess();
+        });
+    }
+    
+    // Initialize display
+    updateStepDisplay();
+}
+
+// Model selection functionality
+function initializeModelSelection() {
+    const modelCards = document.querySelectorAll('.model-card');
+    
+    modelCards.forEach(card => {
+        card.addEventListener('click', () => {
+            // Remove selected class from all cards
+            modelCards.forEach(c => c.classList.remove('selected'));
+            
+            // Add selected class to clicked card
+            card.classList.add('selected');
+            
+            // Update the button text
+            const selectButton = card.querySelector('.btn');
+            if (selectButton) {
+                selectButton.textContent = 'Selected';
+                selectButton.classList.remove('secondary');
+                selectButton.classList.add('primary');
+            }
+            
+            // Reset other buttons
+            modelCards.forEach(otherCard => {
+                if (otherCard !== card) {
+                    const otherButton = otherCard.querySelector('.btn');
+                    if (otherButton) {
+                        otherButton.textContent = 'Select';
+                        otherButton.classList.remove('primary');
+                        otherButton.classList.add('secondary');
+                    }
+                }
+            });
+        });
+    });
+}
+
+// Dataset upload functionality
+function initializeDatasetUpload() {
+    const uploadOptions = document.querySelectorAll('.upload-option');
+    const uploadDropzone = document.querySelector('.upload-dropzone');
+    const chooseFilesBtn = uploadDropzone?.querySelector('.btn');
+    
+    // Upload option switching
+    uploadOptions.forEach(option => {
+        option.addEventListener('click', () => {
+            uploadOptions.forEach(opt => opt.classList.remove('active'));
+            option.classList.add('active');
+            
+            // You could show/hide different upload interfaces here
+            // based on the selected option (local, cloud, database)
+        });
+    });
+    
+    // File selection
+    if (chooseFilesBtn) {
+        chooseFilesBtn.addEventListener('click', () => {
+            // Create a hidden file input
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.multiple = true;
+            fileInput.accept = '.csv,.json,.jsonl,.txt,.zip';
+            
+            fileInput.addEventListener('change', (e) => {
+                const files = Array.from(e.target.files);
+                handleFileSelection(files);
+            });
+            
+            fileInput.click();
+        });
+    }
+    
+    // Drag and drop functionality
+    if (uploadDropzone) {
+        uploadDropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadDropzone.style.borderColor = 'var(--accent-primary)';
+            uploadDropzone.style.background = 'var(--bg-tertiary)';
+        });
+        
+        uploadDropzone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            uploadDropzone.style.borderColor = 'var(--border-color)';
+            uploadDropzone.style.background = 'var(--bg-primary)';
+        });
+        
+        uploadDropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadDropzone.style.borderColor = 'var(--border-color)';
+            uploadDropzone.style.background = 'var(--bg-primary)';
+            
+            const files = Array.from(e.dataTransfer.files);
+            handleFileSelection(files);
+        });
+    }
+}
+
+function handleFileSelection(files) {
+    const fileList = document.querySelector('.file-list');
+    if (!fileList) return;
+    
+    files.forEach(file => {
+        // Create file item element
+        const fileItem = document.createElement('div');
+        fileItem.className = 'file-item';
+        
+        // Determine file icon based on extension
+        const extension = file.name.split('.').pop().toLowerCase();
+        let iconClass = 'fas fa-file';
+        
+        switch (extension) {
+            case 'csv':
+                iconClass = 'fas fa-file-csv';
+                break;
+            case 'json':
+            case 'jsonl':
+                iconClass = 'fas fa-file-code';
+                break;
+            case 'txt':
+                iconClass = 'fas fa-file-alt';
+                break;
+            case 'zip':
+                iconClass = 'fas fa-file-archive';
+                break;
+        }
+        
+        fileItem.innerHTML = `
+            <div class="file-icon">
+                <i class="${iconClass}"></i>
+            </div>
+            <div class="file-info">
+                <span class="file-name">${file.name}</span>
+                <span class="file-size">${formatFileSize(file.size)} • Processing...</span>
+            </div>
+            <div class="file-actions">
+                <button class="btn-icon" title="Preview">
+                    <i class="fas fa-eye"></i>
+                </button>
+                <button class="btn-icon" title="Remove" onclick="this.closest('.file-item').remove()">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        `;
+        
+        fileList.appendChild(fileItem);
+        
+        // Simulate processing delay
+        setTimeout(() => {
+            const sizeSpan = fileItem.querySelector('.file-size');
+            if (sizeSpan) {
+                // Simulate record count based on file size
+                const estimatedRecords = Math.floor(file.size / 100);
+                sizeSpan.textContent = `${formatFileSize(file.size)} • ~${estimatedRecords.toLocaleString()} records`;
+            }
+        }, 1000);
+    });
+}
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+// Accuracy slider functionality
+function initializeAccuracySlider() {
+    const slider = document.querySelector('.accuracy-slider .slider');
+    const valueDisplay = document.querySelector('.accuracy-value');
+    
+    if (slider && valueDisplay) {
+        slider.addEventListener('input', (e) => {
+            valueDisplay.textContent = `${e.target.value}%`;
+        });
+    }
+}
+
+// Marketplace sharing toggle
+function initializeMarketplaceSharing() {
+    const shareCheckbox = document.getElementById('share-marketplace');
+    const sharingDetails = document.querySelector('.sharing-details');
+    
+    if (shareCheckbox && sharingDetails) {
+        shareCheckbox.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                sharingDetails.style.display = 'block';
+            } else {
+                sharingDetails.style.display = 'none';
+            }
+        });
+    }
+}
+
+// Distillation process controls
+function initializeDistillationControls() {
+    // Recent model actions
+    const modelActions = document.querySelectorAll('.model-actions .btn-icon');
+    
+    modelActions.forEach(action => {
+        action.addEventListener('click', (e) => {
+            const title = action.getAttribute('title');
+            const modelName = action.closest('.model-item').querySelector('h6').textContent;
+            
+            switch (title) {
+                case 'Download':
+                    simulateDownload(modelName);
+                    break;
+                case 'Share':
+                    simulateShare(modelName);
+                    break;
+                case 'Deploy':
+                    simulateDeploy(modelName);
+                    break;
+            }
+        });
+    });
+}
+
+function startDistillationProcess() {
+    const workflowContainer = document.querySelector('.distillation-workflow');
+    const progressContainer = document.querySelector('.distillation-progress');
+    
+    if (workflowContainer && progressContainer) {
+        // Hide workflow and show progress
+        workflowContainer.style.display = 'none';
+        progressContainer.style.display = 'block';
+        
+        // Simulate progress updates
+        simulateDistillationProgress();
+    }
+}
+
+function simulateDistillationProgress() {
+    const stages = document.querySelectorAll('.stage');
+    const progressBars = document.querySelectorAll('.stage-progress .progress-fill');
+    const statusTexts = document.querySelectorAll('.stage-progress span');
+    const detailStats = document.querySelectorAll('.detail-stats .value');
+    const timeRemaining = document.querySelector('.time-remaining span');
+    
+    let currentStage = 1; // Start with stage 2 (Data Processing is complete)
+    
+    function updateProgress() {
+        // Update current stage progress
+        if (currentStage < stages.length && progressBars[currentStage]) {
+            const currentProgress = parseInt(progressBars[currentStage].style.width) || 0;
+            const newProgress = Math.min(currentProgress + Math.random() * 10, 100);
+            
+            progressBars[currentStage].style.width = `${newProgress}%`;
+            statusTexts[currentStage].textContent = `${Math.floor(newProgress)}% complete`;
+            
+            // Update detail stats with realistic values
+            if (detailStats.length >= 4) {
+                detailStats[0].textContent = (0.1 - newProgress * 0.001).toFixed(4); // Training Loss
+                detailStats[1].textContent = `${(90 + newProgress * 0.05).toFixed(1)}%`; // Validation Accuracy
+                detailStats[2].textContent = `${Math.floor(1200 - newProgress * 4)} MB`; // Model Size
+                detailStats[3].textContent = `${Math.floor(80 + newProgress * 0.1)}%`; // Compression Ratio
+            }
+            
+            // Update time remaining
+            if (timeRemaining) {
+                const remaining = Math.floor(30 - (newProgress / 100) * 30);
+                timeRemaining.textContent = `${remaining} minutes remaining`;
+            }
+            
+            // Complete current stage and move to next
+            if (newProgress >= 100) {
+                stages[currentStage].classList.add('active');
+                statusTexts[currentStage].textContent = 'Complete';
+                currentStage++;
+                
+                if (currentStage >= stages.length) {
+                    // All stages complete
+                    setTimeout(() => {
+                        completeDistillation();
+                    }, 2000);
+                    return;
+                }
+            }
+        }
+        
+        // Continue updating
+        setTimeout(updateProgress, 1000 + Math.random() * 2000);
+    }
+    
+    updateProgress();
+}
+
+function completeDistillation() {
+    const progressContainer = document.querySelector('.distillation-progress');
+    const recentModels = document.querySelector('.recent-models .models-list');
+    
+    if (progressContainer) {
+        progressContainer.innerHTML = `
+            <div class="progress-header">
+                <h5><i class="fas fa-check-circle" style="color: #10b981;"></i> Distillation Complete!</h5>
+                <p>Your specialized model has been successfully created and is ready for use.</p>
+            </div>
+            <div style="text-align: center; padding: 32px;">
+                <div style="background: var(--bg-tertiary); border-radius: 12px; padding: 24px; margin-bottom: 24px;">
+                    <h6 style="margin: 0 0 16px 0;">Model Performance Summary</h6>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px;">
+                        <div style="text-align: center;">
+                            <div style="font-size: 24px; font-weight: 700; color: var(--accent-primary);">96.2%</div>
+                            <div style="font-size: 12px; color: var(--text-secondary);">ACCURACY</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 24px; font-weight: 700; color: var(--accent-primary);">423 MB</div>
+                            <div style="font-size: 12px; color: var(--text-secondary);">MODEL SIZE</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 24px; font-weight: 700; color: var(--accent-primary);">89%</div>
+                            <div style="font-size: 12px; color: var(--text-secondary);">COMPRESSION</div>
+                        </div>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                    <button class="btn primary" onclick="simulateDownload('Loan Risk Assessor v2.0')">
+                        <i class="fas fa-download"></i> Download Model
+                    </button>
+                    <button class="btn secondary" onclick="location.reload()">
+                        <i class="fas fa-plus"></i> Create Another Model
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Add new model to recent models list
+    if (recentModels) {
+        const newModel = document.createElement('div');
+        newModel.className = 'model-item';
+        newModel.style.border = '2px solid var(--accent-primary)';
+        newModel.innerHTML = `
+            <div class="model-icon">
+                <i class="fas fa-certificate"></i>
+            </div>
+            <div class="model-info">
+                <h6>Loan Risk Assessor v2.0 <span style="background: var(--accent-primary); color: var(--bg-primary); padding: 2px 8px; border-radius: 4px; font-size: 10px; margin-left: 8px;">NEW</span></h6>
+                <p>Financial risk assessment model</p>
+                <div class="model-meta">
+                    <span>Created just now</span>
+                    <span>•</span>
+                    <span>96.2% accuracy</span>
+                    <span>•</span>
+                    <span>423 MB</span>
+                </div>
+            </div>
+            <div class="model-actions">
+                <button class="btn-icon" title="Download">
+                    <i class="fas fa-download"></i>
+                </button>
+                <button class="btn-icon" title="Share">
+                    <i class="fas fa-share"></i>
+                </button>
+                <button class="btn-icon" title="Deploy">
+                    <i class="fas fa-rocket"></i>
+                </button>
+            </div>
+        `;
+        
+        recentModels.insertBefore(newModel, recentModels.firstChild);
+    }
+}
+
+// Utility functions for model actions
+function simulateDownload(modelName) {
+    showNotification(`Starting download of ${modelName}...`, 'success');
+    
+    // Simulate download progress
+    setTimeout(() => {
+        showNotification(`${modelName} download complete!`, 'success');
+    }, 3000);
+}
+
+function simulateShare(modelName) {
+    if (navigator.share) {
+        navigator.share({
+            title: `PRSM Model Lab - ${modelName}`,
+            text: `Check out this custom model I created with PRSM Model Lab: ${modelName}`,
+            url: window.location.href
+        });
+    } else {
+        // Fallback: copy to clipboard
+        navigator.clipboard.writeText(window.location.href).then(() => {
+            showNotification(`Shareable link for ${modelName} copied to clipboard!`, 'success');
+        });
+    }
+}
+
+function simulateDeploy(modelName) {
+    showNotification(`Deploying ${modelName} to cloud infrastructure...`, 'info');
+    
+    setTimeout(() => {
+        showNotification(`${modelName} successfully deployed! Endpoint: https://api.prsm.dev/models/${modelName.toLowerCase().replace(/\s+/g, '-')}`, 'success');
+    }, 5000);
+}

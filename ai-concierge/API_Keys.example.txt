@@ -1,0 +1,26 @@
+# PRSM AI Concierge API Keys Template
+# =====================================
+# Copy this file to API_Keys.txt and add your actual API keys
+# NEVER commit the actual API_Keys.txt file to version control!
+
+# Google Gemini API Key
+# Get from: https://aistudio.google.com/app/apikey
+Gemini: your_gemini_api_key_here
+
+# OpenAI API Key  
+# Get from: https://platform.openai.com/api-keys
+OpenAI: sk-your_openai_api_key_here
+
+# OpenRouter API Key (optional)
+# Get from: https://openrouter.ai/keys
+OpenRouter: sk-or-v1-your_openrouter_api_key_here
+
+# Anthropic Claude API Key
+# Get from: https://console.anthropic.com/
+Anthropic: sk-ant-api03-your_anthropic_api_key_here
+
+# SECURITY NOTE:
+# - Keep API keys secure and never share them
+# - Use environment variables in production
+# - Monitor usage and set spending limits
+# - Rotate keys regularly for security

@@ -1,0 +1,346 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Authentication API &mdash; PRSM API Documentation  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Marketplace API" href="marketplace.html" />
+    <link rel="prev" title="Main API" href="main.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            PRSM API Documentation
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="main.html">Main API</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Authentication API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#prsm.api.auth_api.assign_user_role"><code class="docutils literal notranslate"><span class="pre">assign_user_role()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#prsm.api.auth_api.auth_health_check"><code class="docutils literal notranslate"><span class="pre">auth_health_check()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#prsm.api.auth_api.change_password"><code class="docutils literal notranslate"><span class="pre">change_password()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#prsm.api.auth_api.check_user_permission"><code class="docutils literal notranslate"><span class="pre">check_user_permission()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#prsm.api.auth_api.deactivate_user"><code class="docutils literal notranslate"><span class="pre">deactivate_user()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#prsm.api.auth_api.get_client_info"><code class="docutils literal notranslate"><span class="pre">get_client_info()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#prsm.api.auth_api.get_current_user_profile"><code class="docutils literal notranslate"><span class="pre">get_current_user_profile()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#prsm.api.auth_api.list_users"><code class="docutils literal notranslate"><span class="pre">list_users()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#prsm.api.auth_api.login_user"><code class="docutils literal notranslate"><span class="pre">login_user()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#prsm.api.auth_api.logout_user"><code class="docutils literal notranslate"><span class="pre">logout_user()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#prsm.api.auth_api.refresh_tokens"><code class="docutils literal notranslate"><span class="pre">refresh_tokens()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#prsm.api.auth_api.register_user"><code class="docutils literal notranslate"><span class="pre">register_user()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="marketplace.html">Marketplace API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="task.html">Task API</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">PRSM API Documentation</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Authentication API</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/auth.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-prsm.api.auth_api">
+<span id="authentication-api"></span><h1>Authentication API<a class="headerlink" href="#module-prsm.api.auth_api" title="Link to this heading"></a></h1>
+<p>Authentication API Endpoints
+Secure authentication and authorization endpoints for PRSM</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="prsm.api.auth_api.assign_user_role">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">prsm.api.auth_api.</span></span><span class="sig-name descname"><span class="pre">assign_user_role</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">user_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">request</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">req</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">current_user</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">Depends(role_checker)</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/prsm/api/auth_api.html#assign_user_role"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#prsm.api.auth_api.assign_user_role" title="Link to this definition"></a></dt>
+<dd><p>Assign role to user (admin only)</p>
+<p><strong>Features:</strong>
+- Role assignment and modification
+- Custom permission grants
+- Admin authorization required
+- Comprehensive audit logging</p>
+<p><strong>Returns:</strong>
+- Role assignment confirmation</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="prsm.api.auth_api.auth_health_check">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">prsm.api.auth_api.</span></span><span class="sig-name descname"><span class="pre">auth_health_check</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/prsm/api/auth_api.html#auth_health_check"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#prsm.api.auth_api.auth_health_check" title="Link to this definition"></a></dt>
+<dd><p>Authentication system health check</p>
+<p><strong>Features:</strong>
+- Service availability check
+- Component status verification
+- Performance metrics
+- Public access (no auth required)</p>
+<p><strong>Returns:</strong>
+- Health status information</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="prsm.api.auth_api.change_password">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">prsm.api.auth_api.</span></span><span class="sig-name descname"><span class="pre">change_password</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">request</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">req</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">current_user</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">Depends(require_auth)</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/prsm/api/auth_api.html#change_password"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#prsm.api.auth_api.change_password" title="Link to this definition"></a></dt>
+<dd><p>Change user password</p>
+<p><strong>Features:</strong>
+- Current password verification
+- Password strength validation
+- Security audit logging
+- Automatic token revocation</p>
+<p><strong>Returns:</strong>
+- Password change confirmation</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="prsm.api.auth_api.check_user_permission">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">prsm.api.auth_api.</span></span><span class="sig-name descname"><span class="pre">check_user_permission</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">request</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">current_user</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">Depends(require_auth)</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/prsm/api/auth_api.html#check_user_permission"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#prsm.api.auth_api.check_user_permission" title="Link to this definition"></a></dt>
+<dd><p>Check if current user has specific permission</p>
+<p><strong>Features:</strong>
+- Fine-grained permission checking
+- Resource-specific permissions
+- Role inheritance validation
+- Audit trail for access checks</p>
+<p><strong>Returns:</strong>
+- Permission check result
+- Additional context if needed</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="prsm.api.auth_api.deactivate_user">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">prsm.api.auth_api.</span></span><span class="sig-name descname"><span class="pre">deactivate_user</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">user_id</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">req</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">current_user</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">Depends(role_checker)</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/prsm/api/auth_api.html#deactivate_user"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#prsm.api.auth_api.deactivate_user" title="Link to this definition"></a></dt>
+<dd><p>Deactivate user account (admin only)</p>
+<p><strong>Features:</strong>
+- Account deactivation
+- Token revocation
+- Admin authorization required
+- Audit trail maintenance</p>
+<p><strong>Returns:</strong>
+- Deactivation confirmation</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="prsm.api.auth_api.get_client_info">
+<span class="sig-prename descclassname"><span class="pre">prsm.api.auth_api.</span></span><span class="sig-name descname"><span class="pre">get_client_info</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">request</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/prsm/api/auth_api.html#get_client_info"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#prsm.api.auth_api.get_client_info" title="Link to this definition"></a></dt>
+<dd><p>Extract client information from request</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>, <code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="prsm.api.auth_api.get_current_user_profile">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">prsm.api.auth_api.</span></span><span class="sig-name descname"><span class="pre">get_current_user_profile</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">current_user</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">Depends(require_auth)</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/prsm/api/auth_api.html#get_current_user_profile"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#prsm.api.auth_api.get_current_user_profile" title="Link to this definition"></a></dt>
+<dd><p>Get current user profile information</p>
+<p><strong>Features:</strong>
+- Complete user profile
+- Role and permission information
+- Account status details
+- Last activity tracking</p>
+<p><strong>Returns:</strong>
+- User profile data
+- Account metadata</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">UserResponse</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="prsm.api.auth_api.list_users">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">prsm.api.auth_api.</span></span><span class="sig-name descname"><span class="pre">list_users</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">skip</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">limit</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">100</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">current_user</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">Depends(role_checker)</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/prsm/api/auth_api.html#list_users"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#prsm.api.auth_api.list_users" title="Link to this definition"></a></dt>
+<dd><p>List all users (admin only)</p>
+<p><strong>Features:</strong>
+- Paginated user listing
+- Role and status filtering
+- Search capabilities
+- Admin access control</p>
+<p><strong>Returns:</strong>
+- List of user profiles
+- Pagination metadata</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">list</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">UserResponse</span></code>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="prsm.api.auth_api.login_user">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">prsm.api.auth_api.</span></span><span class="sig-name descname"><span class="pre">login_user</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">request</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">req</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/prsm/api/auth_api.html#login_user"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#prsm.api.auth_api.login_user" title="Link to this definition"></a></dt>
+<dd><p>Authenticate user and return JWT tokens</p>
+<p><strong>Features:</strong>
+- Username/email login support
+- Account lockout protection
+- Rate limiting integration
+- Remember me functionality
+- Comprehensive audit logging</p>
+<p><strong>Returns:</strong>
+- Access token (30 min expiry)
+- Refresh token (7 day expiry)
+- Token type and expiration info</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TokenResponse</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="prsm.api.auth_api.logout_user">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">prsm.api.auth_api.</span></span><span class="sig-name descname"><span class="pre">logout_user</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">req</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">current_user</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">Depends(require_auth)</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/prsm/api/auth_api.html#logout_user"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#prsm.api.auth_api.logout_user" title="Link to this definition"></a></dt>
+<dd><p>Logout user and revoke current token</p>
+<p><strong>Features:</strong>
+- Token revocation
+- Session cleanup
+- Audit logging
+- Multi-device logout support</p>
+<p><strong>Returns:</strong>
+- Logout confirmation</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code>[<code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="prsm.api.auth_api.refresh_tokens">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">prsm.api.auth_api.</span></span><span class="sig-name descname"><span class="pre">refresh_tokens</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">request</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">req</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/prsm/api/auth_api.html#refresh_tokens"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#prsm.api.auth_api.refresh_tokens" title="Link to this definition"></a></dt>
+<dd><p>Refresh access token using refresh token</p>
+<p><strong>Features:</strong>
+- Automatic token rotation
+- Refresh token invalidation
+- Security validation
+- Audit trail maintenance</p>
+<p><strong>Returns:</strong>
+- New access token
+- New refresh token
+- Updated expiration times</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">TokenResponse</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="prsm.api.auth_api.register_user">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">prsm.api.auth_api.</span></span><span class="sig-name descname"><span class="pre">register_user</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">request</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">req</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/prsm/api/auth_api.html#register_user"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#prsm.api.auth_api.register_user" title="Link to this definition"></a></dt>
+<dd><p>Register a new user account</p>
+<p><strong>Features:</strong>
+- Password strength validation
+- Email uniqueness checking
+- Automatic role assignment
+- Security audit logging</p>
+<p><strong>Returns:</strong>
+- User profile information
+- Account verification status</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><code class="xref py py-class docutils literal notranslate"><span class="pre">UserResponse</span></code></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="main.html" class="btn btn-neutral float-left" title="Main API" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="marketplace.html" class="btn btn-neutral float-right" title="Marketplace API" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, PRSM Team.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

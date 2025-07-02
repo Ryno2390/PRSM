@@ -5,7 +5,7 @@ Official Go SDK for PRSM (Protocol for Recursive Scientific Modeling)
 ## 🚀 Quick Start
 
 ```bash
-go get github.com/PRSM-AI/PRSM/sdks/go
+go get github.com/PRSM-AI/prsm-go-sdk
 ```
 
 ```go
@@ -15,62 +15,52 @@ import (
     "context"
     "fmt"
     "log"
+    "os"
     
-    "github.com/PRSM-AI/PRSM/sdks/go/prsm"
+    "github.com/PRSM-AI/prsm-go-sdk/client"
+    "github.com/PRSM-AI/prsm-go-sdk/types"
 )
 
 func main() {
-    // Initialize client
-    client, err := prsm.NewClient(&prsm.Config{
-        BaseURL: "https://api.prsm.ai",
-        APIKey:  "your-api-key",
-    })
+    // Get API key from environment variable
+    apiKey := os.Getenv("PRSM_API_KEY")
+    if apiKey == "" {
+        log.Fatal("PRSM_API_KEY environment variable is required")
+    }
+
+    // Create PRSM client
+    prsmClient := client.New(apiKey)
+
+    // Prepare query request
+    queryReq := &types.QueryRequest{
+        Prompt:      "What are the key principles of machine learning?",
+        MaxTokens:   500,
+        Temperature: 0.7,
+        SafetyLevel: types.SafetyLevelModerate,
+    }
+
+    fmt.Println("Executing query...")
+
+    // Execute query
+    response, err := prsmClient.Query(context.Background(), queryReq)
     if err != nil {
-        log.Fatal(err)
-    }
-    defer client.Close()
-
-    // Submit research query with SEAL enhancement
-    query := &prsm.NWTNQuery{
-        Query:  "Analyze the effectiveness of renewable energy policies",
-        Domain: "environmental_policy",
-        SEALEnhancement: &prsm.SEALConfig{
-            Enabled:              true,
-            AutonomousImprovement: true,
-            TargetLearningGain:   0.25,
-        },
+        log.Fatalf("Query failed: %v", err)
     }
 
-    session, err := client.NWTN.SubmitQuery(context.Background(), query)
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    fmt.Printf("Research session started: %s\n", session.ID)
-
-    // Monitor progress with real-time updates
-    progressCh, err := client.WebSocket.SubscribeToSession(session.ID)
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    for progress := range progressCh {
-        fmt.Printf("Progress: %.1f%% - %s\n", 
-            progress.Progress, progress.CurrentPhase)
-        
-        if progress.Status == prsm.SessionStatusCompleted {
-            fmt.Printf("Research completed! Results: %s\n", 
-                progress.Results.Summary)
-            break
-        }
-    }
+    // Display results
+    fmt.Printf("Response: %s\n", response.Content)
+    fmt.Printf("Model ID: %s\n", response.ModelID)
+    fmt.Printf("Provider: %s\n", response.Provider)
+    fmt.Printf("Execution Time: %.2f seconds\n", response.ExecutionTime)
+    fmt.Printf("FTNS Cost: %.4f\n", response.FTNSCost)
+    fmt.Printf("Safety Status: %s\n", response.SafetyStatus)
 }
 ```
 
 ## 📦 Installation
 
 ```bash
-go get github.com/PRSM-AI/PRSM/sdks/go
+go get github.com/PRSM-AI/prsm-go-sdk
 ```
 
 ## 🔧 Configuration
@@ -78,110 +68,96 @@ go get github.com/PRSM-AI/PRSM/sdks/go
 ### Basic Configuration
 
 ```go
-config := &prsm.Config{
-    BaseURL: "https://api.prsm.ai",
-    APIKey:  "your-api-key",
-    Timeout: 30 * time.Second,
-}
-
-client, err := prsm.NewClient(config)
+// Simple client with API key
+client := client.New("your-api-key")
 ```
 
 ### Advanced Configuration
 
 ```go
-config := &prsm.Config{
-    BaseURL: "https://api.prsm.ai",
-    APIKey:  "your-api-key",
-    Timeout: 60 * time.Second,
-    RetryConfig: &prsm.RetryConfig{
-        MaxRetries:    3,
-        RetryDelay:    time.Second,
-        ExponentialBackoff: true,
-    },
-    WebSocket: &prsm.WebSocketConfig{
-        ReconnectAttempts: 5,
-        ReconnectDelay:    2 * time.Second,
-    },
-    FTNS: &prsm.FTNSConfig{
-        WalletAddress: "0x...",
-        PrivateKey:    "your-private-key",
-        Network:       "polygon",
-    },
+config := &client.Config{
+    APIKey:       "your-api-key",
+    BaseURL:      "https://api.prsm.ai/v1",
+    WebSocketURL: "wss://ws.prsm.ai/v1",
+    Timeout:      60 * time.Second,
+    MaxRetries:   3,
+    RateLimit:    10, // requests per second
 }
 
-client, err := prsm.NewClient(config)
+prsmClient := client.NewWithConfig(config)
 ```
 
 ## 🧠 Core Features
 
-### 1. NWTN (Neural Web of Thought Networks)
+### 1. AI Query Execution
 
-Submit complex research queries and get comprehensive analysis:
-
-```go
-// Basic research query
-query := &prsm.NWTNQuery{
-    Query:    "Impact of AI on healthcare efficiency",
-    Domain:   "healthcare_technology",
-    Priority: prsm.PriorityHigh,
-}
-
-session, err := client.NWTN.SubmitQuery(ctx, query)
-if err != nil {
-    return err
-}
-
-// Advanced query with SEAL enhancement
-advancedQuery := &prsm.NWTNQuery{
-    Query:  "Optimize renewable energy grid integration",
-    Domain: "energy_systems",
-    SEALEnhancement: &prsm.SEALConfig{
-        Enabled:                true,
-        AutonomousImprovement:  true,
-        TargetLearningGain:     0.30,
-        RecursiveDepth:         5,
-        QualityThreshold:       0.85,
-    },
-    Constraints: &prsm.QueryConstraints{
-        MaxCost:      100.0,
-        MaxDuration:  time.Hour * 2,
-        RequiredQuality: 0.9,
-    },
-}
-
-session, err := client.NWTN.SubmitQuery(ctx, advancedQuery)
-```
-
-### 2. Model Management
-
-Discover and interact with AI models:
+Execute AI queries with comprehensive configuration:
 
 ```go
-// Browse available models
-models, err := client.Models.Browse(ctx, &prsm.ModelFilter{
-    Category:    "scientific",
-    Provider:    prsm.ProviderAnthropic,
-    MinQuality:  0.8,
-    MaxCost:     0.01,
-})
-
-// Execute with specific model
-request := &prsm.ModelRequest{
-    ModelID: "claude-3-sonnet",
-    Prompt:  "Explain quantum entanglement",
-    SystemPrompt: "You are a quantum physics expert",
-    MaxTokens: 1000,
+// Basic query
+request := &types.QueryRequest{
+    Prompt:      "Explain machine learning fundamentals",
+    MaxTokens:   1000,
     Temperature: 0.7,
+    SafetyLevel: types.SafetyLevelModerate,
 }
 
-response, err := client.Models.Execute(ctx, request)
+response, err := client.Query(ctx, request)
 if err != nil {
     return err
 }
 
 fmt.Printf("Response: %s\n", response.Content)
-fmt.Printf("Cost: $%.4f\n", response.Cost)
+fmt.Printf("Cost: %.4f FTNS\n", response.FTNSCost)
+
+// Advanced query with system prompt and tools
+systemPrompt := "You are an expert AI researcher"
+advancedRequest := &types.QueryRequest{
+    Prompt:       "Compare transformer architectures for NLP tasks",
+    ModelID:      &modelID,
+    MaxTokens:    800,
+    Temperature:  0.3,
+    SystemPrompt: &systemPrompt,
+    Context: map[string]interface{}{
+        "domain": "natural_language_processing",
+        "level":  "advanced",
+    },
+    Tools:       []string{"web_search", "arxiv_search"},
+    SafetyLevel: types.SafetyLevelHigh,
+}
+
+response, err := client.Query(ctx, advancedRequest)
+```
+
+### 2. Model Discovery & Management
+
+Discover and interact with available AI models:
+
+```go
+// List all available models
+models, err := client.ListAvailableModels(ctx)
+if err != nil {
+    return err
+}
+
+for _, model := range models {
+    fmt.Printf("Model: %s (%s)\n", model.Name, model.ID)
+    fmt.Printf("  Provider: %s\n", model.Provider)
+    fmt.Printf("  Cost per token: %.6f FTNS\n", model.CostPerToken)
+    fmt.Printf("  Performance: %.2f/5.0\n", model.PerformanceRating)
+    fmt.Printf("  Available: %t\n", model.IsAvailable)
+}
+
+// Search marketplace for specific models
+searchQuery := &types.MarketplaceQuery{
+    Query:          "language model",
+    MaxCost:        &maxCost,
+    MinPerformance: &minPerformance,
+    Capabilities:   []string{"text-generation", "reasoning"},
+    Limit:          10,
+}
+
+searchResults, err := client.Marketplace.SearchModels(ctx, searchQuery)
 ```
 
 ### 3. FTNS Token Management
@@ -189,61 +165,88 @@ fmt.Printf("Cost: $%.4f\n", response.Cost)
 Manage FTNS tokens for the PRSM ecosystem:
 
 ```go
-// Check token balance
+// Check current balance
 balance, err := client.FTNS.GetBalance(ctx)
 if err != nil {
     return err
 }
 
-fmt.Printf("FTNS Balance: %.2f\n", balance.Available)
+fmt.Printf("Total Balance: %.4f FTNS\n", balance.TotalBalance)
+fmt.Printf("Available: %.4f FTNS\n", balance.AvailableBalance)
+fmt.Printf("Reserved: %.4f FTNS\n", balance.ReservedBalance)
 
-// Transfer tokens
-transfer := &prsm.FTNSTransfer{
-    ToAddress: "0x742d35Cc6634C0532925a3b8D138C6B9be7b6s5a3",
-    Amount:    100.0,
-    Note:      "Research collaboration payment",
-}
-
-txHash, err := client.FTNS.Transfer(ctx, transfer)
+// Get transaction history
+transactions, err := client.FTNS.GetTransactionHistory(ctx, 10)
 if err != nil {
     return err
 }
 
-fmt.Printf("Transfer completed: %s\n", txHash)
+for _, tx := range transactions {
+    fmt.Printf("%s: %+.4f FTNS (%s)\n", 
+        tx.Timestamp.Format("Jan 02 15:04"), 
+        tx.Amount, 
+        tx.Type)
+}
+
+// Estimate cost before executing query
+cost, err := client.EstimateCost(ctx, "Complex research query", nil)
+if err != nil {
+    return err
+}
+
+fmt.Printf("Estimated cost: %.4f FTNS\n", cost)
 ```
 
-### 4. Real-time WebSocket
+### 4. Safety & Monitoring
 
-Monitor sessions and receive live updates:
+Monitor system safety and health:
 
 ```go
-// Connect to WebSocket
-err := client.WebSocket.Connect(ctx)
+// Check safety status
+safetyStatus, err := client.GetSafetyStatus(ctx)
 if err != nil {
     return err
 }
 
-// Subscribe to session updates
-progressCh, err := client.WebSocket.SubscribeToSession(sessionID)
+fmt.Printf("Safety Status: %s\n", safetyStatus.OverallStatus)
+fmt.Printf("Active Monitors: %d\n", safetyStatus.ActiveMonitors)
+fmt.Printf("Network Health: %.2f%%\n", safetyStatus.NetworkHealth*100)
+
+// Health check
+health, err := client.HealthCheck(ctx)
 if err != nil {
     return err
 }
 
-// Handle real-time updates
-go func() {
-    for progress := range progressCh {
-        switch progress.Status {
-        case prsm.SessionStatusRunning:
-            fmt.Printf("Progress: %.1f%% - %s\n", 
-                progress.Progress, progress.CurrentPhase)
-        case prsm.SessionStatusCompleted:
-            fmt.Printf("Session completed!\n")
-            handleResults(progress.Results)
-        case prsm.SessionStatusFailed:
-            fmt.Printf("Session failed: %s\n", progress.Error)
-        }
-    }
-}()
+fmt.Printf("API Status: %v\n", health["status"])
+fmt.Printf("Response Time: %v ms\n", health["response_time"])
+```
+
+### 5. Tool Execution (MCP Integration)
+
+Execute external tools for enhanced functionality:
+
+```go
+// Execute web search tool
+toolReq := &types.ToolExecutionRequest{
+    ToolName: "web_search",
+    Parameters: map[string]interface{}{
+        "query":       "latest AI research 2024",
+        "max_results": 5,
+    },
+    SafetyLevel: types.SafetyLevelModerate,
+}
+
+toolResponse, err := client.Tools.Execute(ctx, toolReq)
+if err != nil {
+    return err
+}
+
+if toolResponse.Success {
+    fmt.Printf("Tool execution successful!\n")
+    fmt.Printf("Result: %v\n", toolResponse.Result)
+    fmt.Printf("Cost: %.4f FTNS\n", toolResponse.FTNSCost)
+}
 ```
 
 ## 🔄 Error Handling
@@ -251,28 +254,37 @@ go func() {
 The SDK provides comprehensive error handling with specific error types:
 
 ```go
-_, err := client.NWTN.SubmitQuery(ctx, query)
+response, err := client.Query(ctx, request)
 if err != nil {
     switch e := err.(type) {
-    case *prsm.AuthenticationError:
+    case *types.AuthenticationError:
         fmt.Printf("Authentication failed: %s\n", e.Message)
-        // Handle auth error (refresh token, re-login, etc.)
-    case *prsm.ValidationError:
-        fmt.Printf("Validation error: %s\n", e.Message)
-        for field, message := range e.FieldErrors {
-            fmt.Printf("  %s: %s\n", field, message)
+        // Handle auth error (check API key, refresh token, etc.)
+    case *types.ValidationError:
+        fmt.Printf("Validation error: %s - %s\n", e.Field, e.ValidationMessage)
+        // Handle validation error (fix request parameters)
+    case *types.RateLimitError:
+        if e.RetryAfter != nil {
+            fmt.Printf("Rate limited. Retry after: %d seconds\n", *e.RetryAfter)
+            time.Sleep(time.Duration(*e.RetryAfter) * time.Second)
         }
-    case *prsm.RateLimitError:
-        fmt.Printf("Rate limited. Retry after: %s\n", e.RetryAfter)
-        time.Sleep(e.RetryAfter)
-        // Retry request
-    case *prsm.SafetyViolationError:
-        fmt.Printf("Safety violation: %s\n", e.Violation)
-        // Handle safety violation
-    case *prsm.InsufficientFundsError:
+        // Retry request with backoff
+    case *types.SafetyViolationError:
+        fmt.Printf("Safety violation [%s]: %s\n", e.SafetyLevel, e.Message)
+        // Handle safety violation (modify content, use different safety level)
+    case *types.InsufficientFundsError:
         fmt.Printf("Insufficient FTNS balance: %.2f required, %.2f available\n", 
             e.Required, e.Available)
-        // Handle insufficient funds
+        // Handle insufficient funds (top up balance, reduce query complexity)
+    case *types.ModelNotFoundError:
+        fmt.Printf("Model not found: %s\n", e.ModelID)
+        // Handle model not found (choose different model)
+    case *types.NetworkError:
+        fmt.Printf("Network error: %s\n", e.Message)
+        // Handle network error (retry with backoff, check connectivity)
+    case *types.ToolExecutionError:
+        fmt.Printf("Tool execution failed: %s - %s\n", e.ToolName, e.ErrorMessage)
+        // Handle tool execution error
     default:
         fmt.Printf("Unexpected error: %s\n", err)
     }
@@ -281,138 +293,120 @@ if err != nil {
 
 ## 🧪 Testing
 
-### Unit Tests
+### Running Tests
+
+```bash
+# Run all tests
+go test ./...
+
+# Run tests with coverage
+go test -cover ./...
+
+# Run race condition detection
+go test -race ./...
+
+# Use the provided test runner script
+./test_runner.sh
+```
+
+### Example Tests
+
+The SDK includes comprehensive tests for all components:
 
 ```go
-func TestNWTNQuerySubmission(t *testing.T) {
-    client := prsm.NewTestClient()
+func TestClientQuery(t *testing.T) {
+    client := client.New("test-api-key")
     
-    query := &prsm.NWTNQuery{
-        Query:  "Test research query",
-        Domain: "test_domain",
+    request := &types.QueryRequest{
+        Prompt:      "Test prompt",
+        MaxTokens:   100,
+        Temperature: 0.7,
+        SafetyLevel: types.SafetyLevelModerate,
     }
     
-    session, err := client.NWTN.SubmitQuery(context.Background(), query)
+    // This would use mock server in real tests
+    response, err := client.Query(context.Background(), request)
     
     assert.NoError(t, err)
-    assert.NotEmpty(t, session.ID)
-    assert.Equal(t, prsm.SessionStatusPending, session.Status)
+    assert.NotEmpty(t, response.Content)
+    assert.Greater(t, response.FTNSCost, 0.0)
+}
+
+func TestErrorHandling(t *testing.T) {
+    client := client.New("invalid-key")
+    
+    request := &types.QueryRequest{
+        Prompt: "Test prompt",
+    }
+    
+    _, err := client.Query(context.Background(), request)
+    
+    assert.Error(t, err)
+    assert.IsType(t, &types.AuthenticationError{}, err)
 }
 ```
 
-### Integration Tests
+## 📊 Examples and Documentation
 
-```go
-func TestFullResearchWorkflow(t *testing.T) {
-    if testing.Short() {
-        t.Skip("Skipping integration test")
-    }
-    
-    client := setupIntegrationClient(t)
-    
-    // Submit query
-    query := &prsm.NWTNQuery{
-        Query:  "Integration test query",
-        Domain: "test",
-    }
-    
-    session, err := client.NWTN.SubmitQuery(context.Background(), query)
-    require.NoError(t, err)
-    
-    // Monitor progress
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-    defer cancel()
-    
-    progressCh, err := client.WebSocket.SubscribeToSession(session.ID)
-    require.NoError(t, err)
-    
-    for {
-        select {
-        case progress := <-progressCh:
-            if progress.Status == prsm.SessionStatusCompleted {
-                assert.NotEmpty(t, progress.Results.Summary)
-                return
-            }
-        case <-ctx.Done():
-            t.Fatal("Test timeout")
-        }
-    }
-}
-```
+Comprehensive examples are available in the `examples/` directory:
 
-## 📊 Performance and Monitoring
+- **basic_query.go** - Simple AI query execution
+- **cost_estimation.go** - Cost estimation and balance checking
+- **model_marketplace.go** - Model discovery and marketplace features
+- **ftns_management.go** - Token management and transactions
+- **advanced_features.go** - Safety monitoring, tools, and error handling
 
-### Metrics Collection
+See the [Examples README](examples/README.md) for detailed usage instructions.
 
-```go
-// Enable metrics collection
-client.EnableMetrics()
+## 🔒 Security Best Practices
 
-// Get client metrics
-metrics := client.GetMetrics()
+1. **Environment Variables**: Store API keys in environment variables
+   ```bash
+   export PRSM_API_KEY="your-api-key"
+   ```
 
-fmt.Printf("Total requests: %d\n", metrics.TotalRequests)
-fmt.Printf("Average response time: %s\n", metrics.AvgResponseTime)
-fmt.Printf("Error rate: %.2f%%\n", metrics.ErrorRate)
-```
-
-## 🔒 Security
-
-### API Key Management
-
-```go
-// Rotate API key
-newKey, err := client.Auth.RotateAPIKey(ctx)
-if err != nil {
-    return err
-}
-
-// Update client configuration
-client.UpdateAPIKey(newKey)
-```
+2. **Input Validation**: Always validate user inputs before sending to PRSM
+3. **Safety Levels**: Use appropriate safety levels for your use case
+4. **Error Handling**: Implement proper error handling for all operations
+5. **Rate Limiting**: Respect API rate limits to avoid throttling
 
 ## 📈 Advanced Usage
 
-### Custom HTTP Client
-
-```go
-import "net/http"
-
-httpClient := &http.Client{
-    Timeout: 30 * time.Second,
-    Transport: &http.Transport{
-        MaxIdleConns:        100,
-        MaxIdleConnsPerHost: 10,
-    },
-}
-
-config := &prsm.Config{
-    BaseURL:    "https://api.prsm.ai",
-    APIKey:     "your-api-key",
-    HTTPClient: httpClient,
-}
-
-client, err := prsm.NewClient(config)
-```
-
-### Context and Cancellation
+### Context and Timeouts
 
 ```go
 // Request with timeout
 ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 defer cancel()
 
-session, err := client.NWTN.SubmitQuery(ctx, query)
+response, err := client.Query(ctx, request)
 
 // Request with cancellation
 ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
 
+// Cancel from another goroutine if needed
 go func() {
     time.Sleep(10 * time.Second)
-    cancel() // Cancel after 10 seconds
+    cancel()
 }()
 
-session, err := client.NWTN.SubmitQuery(ctx, query)
+response, err := client.Query(ctx, request)
+```
+
+### Custom Configuration
+
+```go
+// Custom rate limiting and timeouts
+config := &client.Config{
+    APIKey:     "your-api-key",
+    BaseURL:    "https://api.prsm.ai/v1",
+    Timeout:    120 * time.Second,
+    MaxRetries: 5,
+    RateLimit:  5, // 5 requests per second
+}
+
+prsmClient := client.NewWithConfig(config)
 ```
 
 ## 🤝 Contributing

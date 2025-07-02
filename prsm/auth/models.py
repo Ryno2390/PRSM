@@ -22,6 +22,7 @@ class UserRole(str, Enum):
     RESEARCHER = "researcher"          # Full AI model access
     DEVELOPER = "developer"            # Development and testing access
     ANALYST = "analyst"                # Read-only analysis access
+    ENTERPRISE = "enterprise"          # Enterprise-level access with enhanced features
     USER = "user"                      # Basic user access
     GUEST = "guest"                    # Limited guest access
 
@@ -86,6 +87,14 @@ ROLE_PERMISSIONS = {
         Permission.AGENT_READ,
         Permission.DATA_READ,
         Permission.IPFS_DOWNLOAD
+    ],
+    UserRole.ENTERPRISE: [
+        Permission.MODEL_CREATE, Permission.MODEL_READ, Permission.MODEL_UPDATE, Permission.MODEL_EXECUTE,
+        Permission.AGENT_CREATE, Permission.AGENT_READ, Permission.AGENT_UPDATE, Permission.AGENT_EXECUTE,
+        Permission.DATA_CREATE, Permission.DATA_READ, Permission.DATA_UPDATE,
+        Permission.IPFS_UPLOAD, Permission.IPFS_DOWNLOAD, Permission.IPFS_PIN,
+        Permission.TOKEN_TRANSFER, Permission.TOKEN_MINT,
+        Permission.CONFIG_MANAGE
     ],
     UserRole.USER: [
         Permission.MODEL_READ, Permission.MODEL_EXECUTE,

@@ -16,6 +16,10 @@ const PRSM_ROOT = path.resolve(__dirname, '../../');
 const OUTPUT_DIR = path.resolve(__dirname, '../knowledge-base');
 const COMPILED_FILE = path.resolve(OUTPUT_DIR, 'comprehensive-knowledge.json');
 
+// Size limits for Netlify deployment (avoid JSON.stringify limits)
+const MAX_TOTAL_SIZE = 100 * 1024 * 1024; // 100MB total content
+const MAX_FILE_SIZE = 1024 * 1024; // 1MB per file
+
 // File extensions to include
 const INCLUDE_EXTENSIONS = [
   '.md', '.py', '.js', '.ts', '.tsx', '.json', '.yml', '.yaml', 
@@ -26,7 +30,10 @@ const INCLUDE_EXTENSIONS = [
 const EXCLUDE_DIRS = [
   'node_modules', '.git', '__pycache__', '.next', 'out', 
   '.vscode', '.idea', 'dist', 'build', '.cache', 'logs',
-  '.claude', 'ai-concierge/node_modules', 'ai-concierge/.next'
+  '.claude', 'ai-concierge/node_modules', 'ai-concierge/.next',
+  '.venv', 'venv', '.env', 'env', '.virtualenv', 'virtualenv',
+  '__pycache__', '.pytest_cache', '.coverage', 'htmlcov',
+  '.tox', '.nox'
 ];
 
 // File patterns to exclude
@@ -155,6 +162,18 @@ class ComprehensiveKnowledgeCompiler {
     const filename = path.basename(fullPath);
     
     if (!this.shouldIncludeFile(filename, relativePath)) {
+      return;
+    }
+    
+    // Skip files that are too large
+    if (stat.size > MAX_FILE_SIZE) {
+      console.log(`  ⚠ Skipped ${relativePath}: File too large (${Math.round(stat.size / 1024)}KB)`);
+      return;
+    }
+    
+    // Check if we're approaching total size limit
+    if (this.knowledgeBase.metadata.totalSize > MAX_TOTAL_SIZE) {
+      console.log(`  ⚠ Stopping compilation: Reached size limit (${Math.round(MAX_TOTAL_SIZE / 1024 / 1024)}MB)`);
       return;
     }
     
