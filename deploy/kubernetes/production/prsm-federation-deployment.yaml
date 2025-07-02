@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prsm-federation
+  namespace: prsm-production
+  labels:
+    app: prsm-federation
+    component: federation
+    environment: production
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: prsm-federation
+      component: federation
+  template:
+    metadata:
+      labels:
+        app: prsm-federation
+        component: federation
+        environment: production
+    spec:
+      serviceAccountName: prsm-federation
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: prsm-federation
+        image: prsm/federation:latest
+        imagePullPolicy: Always
+        ports:
+        - name: federation
+          containerPort: 8003
+          protocol: TCP
+        - name: metrics
+          containerPort: 8080
+          protocol: TCP
+        env:
+        - name: NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        envFrom:
+        - configMapRef:
+            name: prsm-config
+        - secretRef:
+            name: prsm-secrets
+        resources:
+          requests:
+            cpu: 750m
+            memory: 1.5Gi
+          limits:
+            cpu: 3000m
+            memory: 6Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: federation
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: federation
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: federation-data
+          mountPath: /app/data
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: federation-data
+        persistentVolumeClaim:
+          claimName: prsm-federation-data
+      - name: tmp
+        emptyDir: {}
+      terminationGracePeriodSeconds: 30
