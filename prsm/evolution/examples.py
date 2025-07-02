@@ -23,7 +23,7 @@ from .models import (
 # Import PRSM components (these would be actual imports in real implementation)
 try:
     from ..nwtn.orchestrator import TaskOrchestrator
-    from ..agents.executors.intelligent_router import IntelligentRouter
+    from ..agents.executors.unified_router import UnifiedModelRouter
     from ..governance.voting import GovernanceSystem
 except ImportError:
     # Mock classes for standalone testing

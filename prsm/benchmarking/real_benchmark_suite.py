@@ -48,7 +48,7 @@ except ImportError:
     print("Warning: Install sentence-transformers, rouge-score, matplotlib for full evaluation capabilities")
 
 # PRSM imports
-from ..agents.executors.hybrid_router import HybridModelRouter, RoutingStrategy
+from ..agents.executors.unified_router import UnifiedModelRouter, RoutingStrategy
 from ..agents.executors.openrouter_client import OpenRouterClient
 from ..agents.executors.ollama_client import OllamaClient
 from ..agents.executors.api_clients import ModelExecutionRequest, ModelProvider

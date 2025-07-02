@@ -18,7 +18,7 @@ PERFORMANCE VALIDATION:
 - Latency reduction: Performance gains to be validated
 """
 
-from .intelligent_router import IntelligentRouter, ComponentMetrics, RoutingRule
+from ..agents.executors.unified_router import UnifiedModelRouter
 from .cpu_optimizer import CPUOptimizer, CPUOptimizationConfig
 from .auto_scaler import AutoScaler, ScalingMetrics, ScalingPolicy, LoadBalancingPolicy
 from .advanced_cache import AdvancedCache, CacheManager, CacheLevel, CacheItem
