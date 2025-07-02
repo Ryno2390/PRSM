@@ -567,7 +567,7 @@ async def health_check() -> Dict[str, Any]:
 
 
 @app.post("/query", response_model=PRSMResponse)
-async def process_query(user_input: UserInput) -> PRSMResponse:
+async def process_query(user_input: UserInput, current_user: str = Depends(get_current_user)) -> PRSMResponse:
     """
     Process a user query through the NWTN system
     
@@ -602,7 +602,7 @@ async def process_query(user_input: UserInput) -> PRSMResponse:
 
 
 @app.get("/models")
-async def list_models() -> Dict[str, Any]:
+async def list_models(current_user: str = Depends(get_current_user)) -> Dict[str, Any]:
     """
     List available models in the PRSM network
     
@@ -645,7 +645,7 @@ async def list_models() -> Dict[str, Any]:
 
 
 @app.get("/users/{user_id}/balance")
-async def get_user_balance(user_id: str) -> Dict[str, Any]:
+async def get_user_balance(user_id: str, current_user: str = Depends(get_current_user)) -> Dict[str, Any]:
     """
     Get user's FTNS token balance
     
@@ -707,7 +707,8 @@ async def list_proposals() -> Dict[str, Any]:
 
 @app.post("/ftns/transactions")
 async def create_ftns_transaction(
-    transaction_data: Dict[str, Any]
+    transaction_data: Dict[str, Any],
+    current_user: str = Depends(get_current_user)
 ) -> Dict[str, str]:
     """
     Create a new FTNS transaction
@@ -758,7 +759,10 @@ async def create_ftns_transaction(
 
 
 @app.post("/cache/model_output")
-async def cache_model_output(cache_request: Dict[str, Any]) -> Dict[str, str]:
+async def cache_model_output(
+    cache_request: Dict[str, Any],
+    current_user: str = Depends(get_current_user)
+) -> Dict[str, str]:
     """
     Cache model output for performance optimization
     
@@ -815,7 +819,10 @@ async def cache_model_output(cache_request: Dict[str, Any]) -> Dict[str, str]:
 
 
 @app.get("/cache/model_output/{cache_key}")
-async def get_cached_model_output(cache_key: str) -> Dict[str, Any]:
+async def get_cached_model_output(
+    cache_key: str,
+    current_user: str = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
     Get cached model output
     
@@ -863,7 +870,10 @@ async def get_cached_model_output(cache_key: str) -> Dict[str, Any]:
 
 
 @app.post("/models/register")
-async def register_model_with_embedding(model_data: Dict[str, Any]) -> Dict[str, str]:
+async def register_model_with_embedding(
+    model_data: Dict[str, Any],
+    current_user: str = Depends(get_current_user)
+) -> Dict[str, str]:
     """
     Register a new model with semantic embedding
     
@@ -949,7 +959,10 @@ async def register_model_with_embedding(model_data: Dict[str, Any]) -> Dict[str,
 
 
 @app.post("/models/search/semantic")
-async def search_models_semantic(search_request: Dict[str, Any]) -> Dict[str, Any]:
+async def search_models_semantic(
+    search_request: Dict[str, Any],
+    current_user: str = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
     Semantic search for models using natural language queries
     
@@ -1029,7 +1042,11 @@ async def search_models_semantic(search_request: Dict[str, Any]) -> Dict[str, An
 
 
 @app.get("/models/{model_id}/similar")
-async def find_similar_models(model_id: str, top_k: int = 5) -> Dict[str, Any]:
+async def find_similar_models(
+    model_id: str,
+    top_k: int = 5,
+    current_user: str = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
     Find models similar to a specific model
     
@@ -1115,7 +1132,9 @@ async def find_similar_models(model_id: str, top_k: int = 5) -> Dict[str, Any]:
 
 
 @app.get("/vectors/stats")
-async def get_vector_database_stats() -> Dict[str, Any]:
+async def get_vector_database_stats(
+    current_user: str = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
     Get comprehensive vector database statistics
     
@@ -1171,7 +1190,10 @@ async def get_vector_database_stats() -> Dict[str, Any]:
 
 
 @app.post("/embeddings/generate")
-async def generate_embedding_endpoint(embedding_request: Dict[str, Any]) -> Dict[str, Any]:
+async def generate_embedding_endpoint(
+    embedding_request: Dict[str, Any],
+    current_user: str = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
     Generate embedding for arbitrary text
     
@@ -1238,7 +1260,10 @@ async def generate_embedding_endpoint(embedding_request: Dict[str, Any]) -> Dict
 # === Teacher Model Endpoints ===
 
 @app.post("/teachers/create")
-async def create_teacher_endpoint(teacher_request: Dict[str, Any]) -> Dict[str, Any]:
+async def create_teacher_endpoint(
+    teacher_request: Dict[str, Any],
+    current_user: str = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
     Create a new teacher model with real ML implementation
     
@@ -1302,7 +1327,8 @@ async def create_teacher_endpoint(teacher_request: Dict[str, Any]) -> Dict[str, 
 @app.post("/teachers/{teacher_id}/teach")
 async def conduct_teaching_session(
     teacher_id: str,
-    teaching_request: Dict[str, Any]
+    teaching_request: Dict[str, Any],
+    current_user: str = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """
     Conduct a teaching session with a specific teacher
@@ -1407,7 +1433,9 @@ async def conduct_teaching_session(
 
 
 @app.get("/teachers/available_backends")
-async def get_available_teacher_backends() -> Dict[str, Any]:
+async def get_available_teacher_backends(
+    current_user: str = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
     Get information about available teacher model backends
     
