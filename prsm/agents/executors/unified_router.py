@@ -39,6 +39,7 @@ from .enhanced_anthropic_client import EnhancedAnthropicClient, ClaudeModel
 from .enhanced_ollama_client import EnhancedOllamaClient, OllamaModel
 from .openrouter_client import OpenRouterClient
 from prsm.core.usage_tracker import GenericUsageTracker, ResourceType, CostCategory, OperationType
+from ...config.model_config_manager import get_model_config_manager
 
 logger = structlog.get_logger(__name__)
 
@@ -290,24 +291,46 @@ class UnifiedModelRouter:
             'production': 0.20
         }
         
-        # Provider cost and quality mappings
-        self.provider_cost_tiers = {
-            "openai": {"gpt-4": 0.06, "gpt-3.5-turbo": 0.002},
-            "anthropic": {"claude-3-opus": 0.075, "claude-3-sonnet": 0.015, "claude-3-haiku": 0.00125},
-            "ollama": {"default": 0.0},
-            "openrouter": {"default": 0.01}
-        }
+        # Initialize ModelConfigManager for dynamic configuration
+        self.config_manager = get_model_config_manager()
         
-        self.provider_quality_scores = {
-            "openai": {"gpt-4": 0.95, "gpt-3.5-turbo": 0.85},
-            "anthropic": {"claude-3-opus": 0.96, "claude-3-sonnet": 0.90, "claude-3-haiku": 0.80},
-            "ollama": {"llama2-70b": 0.85, "llama2-13b": 0.75, "llama2-7b": 0.65},
-            "openrouter": {"default": 0.80}
-        }
+        # Load provider cost and quality mappings from configuration
+        self._load_provider_configurations()
         
         # Health monitoring
         self._last_health_check = 0.0
         self._health_check_task: Optional[asyncio.Task] = None
+    
+    def _load_provider_configurations(self):
+        """Load provider cost and quality mappings from ModelConfigManager"""
+        self.provider_cost_tiers = {}
+        self.provider_quality_scores = {}
+        
+        # Get all providers and their models
+        all_providers = self.config_manager.get_all_providers()
+        all_models = self.config_manager.get_all_models()
+        
+        for provider_name, provider_config in all_providers.items():
+            self.provider_cost_tiers[provider_name] = {}
+            self.provider_quality_scores[provider_name] = {}
+            
+            # Get models for this provider
+            provider_models = self.config_manager.get_models_by_provider(provider_name)
+            
+            for model_id, model_config in provider_models.items():
+                # Set cost (using output cost as it's typically higher)
+                self.provider_cost_tiers[provider_name][model_id] = float(model_config.pricing.output_cost_per_1k)
+                
+                # Set quality score
+                self.provider_quality_scores[provider_name][model_id] = model_config.quality_score
+            
+            # Set default values for provider if no models found
+            if not provider_models:
+                self.provider_cost_tiers[provider_name]["default"] = 0.01
+                self.provider_quality_scores[provider_name]["default"] = 0.8
+        
+        logger.info("Loaded provider configurations from ModelConfigManager", 
+                   providers=len(all_providers), models=len(all_models))
     
     async def initialize(self):
         """Initialize router and all clients"""
