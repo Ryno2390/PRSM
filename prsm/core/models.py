@@ -123,11 +123,15 @@ class AgentType(str, Enum):
 
 class UserRole(str, Enum):
     """User roles for RBAC system"""
-    ADMIN = "admin"
-    USER = "user"
-    PREMIUM = "premium"
-    DEVELOPER = "developer"
-    MODERATOR = "moderator"
+    ADMIN = "admin"                    # Full system access
+    RESEARCHER = "researcher"          # Full AI model access
+    DEVELOPER = "developer"            # Development and testing access
+    ANALYST = "analyst"                # Read-only analysis access
+    ENTERPRISE = "enterprise"          # Enterprise-level access with enhanced features
+    USER = "user"                      # Basic user access
+    GUEST = "guest"                    # Limited guest access
+    PREMIUM = "premium"                # Premium user access (legacy)
+    MODERATOR = "moderator"            # Moderation access (legacy)
 
 
 class SafetyLevel(str, Enum):

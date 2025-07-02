@@ -132,6 +132,7 @@
                              <button class="tab" data-target="my-files-content"><i class="fas fa-folder-open"></i>My Files</button>
                              <button class="tab" data-target="integrations-content"><i class="fas fa-plug"></i>Integrations</button>
                              <button class="tab" data-target="marketplace-content"><i class="fas fa-store"></i>Marketplace</button>
+                             <button class="tab" data-target="model-lab-content"><i class="fas fa-flask"></i>Model Lab</button>
                              <button class="tab" data-target="tokenomics-content"><i class="fas fa-coins"></i>Tokenomics</button>
                              <button class="tab" data-target="analytics-content"><i class="fas fa-chart-line"></i>Analytics</button>
                              <button class="tab" data-target="research-content"><i class="fas fa-microscope"></i>Research</button>
@@ -1766,6 +1767,588 @@
                                     <h6>Scientific</h6>
                                     <p>298 models</p>
                                     <span class="trend-indicator up">+22% this week</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Model Lab Section -->
+                <section id="model-lab-content" class="content-section">
+                    <h4>PRSM Model Lab</h4>
+                    <div class="model-lab-container">
+                        
+                        <!-- Model Lab Header -->
+                        <div class="model-lab-header">
+                            <div class="lab-intro">
+                                <p class="lab-description">Create custom AI models through automated distillation. Upload your data, select a base model, and let PRSM create optimized models tailored to your specific needs.</p>
+                            </div>
+                            <div class="lab-stats">
+                                <div class="stat-card">
+                                    <i class="fas fa-flask"></i>
+                                    <div class="stat-content">
+                                        <span class="stat-number">24</span>
+                                        <span class="stat-label">Models Created</span>
+                                    </div>
+                                </div>
+                                <div class="stat-card">
+                                    <i class="fas fa-compress-alt"></i>
+                                    <div class="stat-content">
+                                        <span class="stat-number">87%</span>
+                                        <span class="stat-label">Avg Compression</span>
+                                    </div>
+                                </div>
+                                <div class="stat-card">
+                                    <i class="fas fa-chart-line"></i>
+                                    <div class="stat-content">
+                                        <span class="stat-number">94%</span>
+                                        <span class="stat-label">Accuracy Retained</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Model Distillation Workflow -->
+                        <div class="distillation-workflow">
+                            <h5><i class="fas fa-magic"></i> Create New Model</h5>
+                            
+                            <!-- Step 1: Base Model Selection -->
+                            <div class="workflow-step active" id="step-base-model">
+                                <div class="step-header">
+                                    <div class="step-indicator">
+                                        <span class="step-number">1</span>
+                                    </div>
+                                    <div class="step-title">
+                                        <h6>Select Base Model</h6>
+                                        <p>Choose a foundation model from the marketplace</p>
+                                    </div>
+                                </div>
+                                <div class="step-content">
+                                    <div class="base-model-selector">
+                                        <div class="search-bar">
+                                            <input type="text" placeholder="Search models..." class="model-search">
+                                            <button class="search-btn"><i class="fas fa-search"></i></button>
+                                        </div>
+                                        <div class="model-grid">
+                                            <div class="model-card selected">
+                                                <div class="model-icon">
+                                                    <i class="fas fa-brain"></i>
+                                                </div>
+                                                <div class="model-info">
+                                                    <h6>GPT-4 Turbo</h6>
+                                                    <p class="model-size">175B parameters</p>
+                                                    <p class="model-type">General Purpose</p>
+                                                    <div class="model-metrics">
+                                                        <span class="metric">Accuracy: 96%</span>
+                                                        <span class="metric">Speed: Fast</span>
+                                                    </div>
+                                                </div>
+                                                <div class="model-actions">
+                                                    <button class="btn primary small">Select</button>
+                                                </div>
+                                            </div>
+                                            <div class="model-card">
+                                                <div class="model-icon">
+                                                    <i class="fas fa-language"></i>
+                                                </div>
+                                                <div class="model-info">
+                                                    <h6>Claude-3.5 Sonnet</h6>
+                                                    <p class="model-size">Unknown params</p>
+                                                    <p class="model-type">Reasoning</p>
+                                                    <div class="model-metrics">
+                                                        <span class="metric">Accuracy: 97%</span>
+                                                        <span class="metric">Speed: Medium</span>
+                                                    </div>
+                                                </div>
+                                                <div class="model-actions">
+                                                    <button class="btn secondary small">Select</button>
+                                                </div>
+                                            </div>
+                                            <div class="model-card">
+                                                <div class="model-icon">
+                                                    <i class="fas fa-code"></i>
+                                                </div>
+                                                <div class="model-info">
+                                                    <h6>CodeLlama-70B</h6>
+                                                    <p class="model-size">70B parameters</p>
+                                                    <p class="model-type">Code Generation</p>
+                                                    <div class="model-metrics">
+                                                        <span class="metric">Accuracy: 89%</span>
+                                                        <span class="metric">Speed: Fast</span>
+                                                    </div>
+                                                </div>
+                                                <div class="model-actions">
+                                                    <button class="btn secondary small">Select</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Step 2: Dataset Upload -->
+                            <div class="workflow-step" id="step-dataset">
+                                <div class="step-header">
+                                    <div class="step-indicator">
+                                        <span class="step-number">2</span>
+                                    </div>
+                                    <div class="step-title">
+                                        <h6>Upload Training Data</h6>
+                                        <p>Provide the data for your specialized model</p>
+                                    </div>
+                                </div>
+                                <div class="step-content">
+                                    <div class="dataset-upload">
+                                        <div class="upload-options">
+                                            <div class="upload-option active" data-source="local">
+                                                <i class="fas fa-upload"></i>
+                                                <span>Upload Files</span>
+                                            </div>
+                                            <div class="upload-option" data-source="cloud">
+                                                <i class="fas fa-cloud"></i>
+                                                <span>Cloud Storage</span>
+                                            </div>
+                                            <div class="upload-option" data-source="database">
+                                                <i class="fas fa-database"></i>
+                                                <span>Database</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="upload-area">
+                                            <div class="upload-dropzone">
+                                                <i class="fas fa-cloud-upload-alt"></i>
+                                                <h6>Drop files here or click to browse</h6>
+                                                <p>Supports CSV, JSON, JSONL, TXT, and ZIP files</p>
+                                                <button class="btn primary">Choose Files</button>
+                                            </div>
+                                        </div>
+
+                                        <div class="uploaded-files">
+                                            <h6>Uploaded Files</h6>
+                                            <div class="file-list">
+                                                <div class="file-item">
+                                                    <div class="file-icon">
+                                                        <i class="fas fa-file-csv"></i>
+                                                    </div>
+                                                    <div class="file-info">
+                                                        <span class="file-name">loan_applications.csv</span>
+                                                        <span class="file-size">2.4 MB • 10,000 records</span>
+                                                    </div>
+                                                    <div class="file-actions">
+                                                        <button class="btn-icon" title="Preview">
+                                                            <i class="fas fa-eye"></i>
+                                                        </button>
+                                                        <button class="btn-icon" title="Remove">
+                                                            <i class="fas fa-trash"></i>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Step 3: Distillation Configuration -->
+                            <div class="workflow-step" id="step-config">
+                                <div class="step-header">
+                                    <div class="step-indicator">
+                                        <span class="step-number">3</span>
+                                    </div>
+                                    <div class="step-title">
+                                        <h6>Configure Distillation</h6>
+                                        <p>Define your model requirements and objectives</p>
+                                    </div>
+                                </div>
+                                <div class="step-content">
+                                    <div class="config-form">
+                                        <div class="form-section">
+                                            <h6>Model Objective</h6>
+                                            <textarea class="objective-input" placeholder="Describe what you want your model to do. For example: 'I need a model that can analyze loan applications and predict approval likelihood with 95% accuracy while being as small as possible for deployment on mobile devices.'" rows="4">I have provided loan application data. I need a distilled model that can specialize in reviewing new loan applications and assigning each new loan application a score based on the likelihood of repayment. Please make the model as small as possible while still retaining a 95% accuracy rate.</textarea>
+                                        </div>
+                                        
+                                        <div class="form-row">
+                                            <div class="form-section">
+                                                <h6>Target Model Size</h6>
+                                                <select class="size-selector">
+                                                    <option value="auto">Optimize for Performance</option>
+                                                    <option value="small">Small (< 1B params)</option>
+                                                    <option value="medium">Medium (1-7B params)</option>
+                                                    <option value="large">Large (7-30B params)</option>
+                                                </select>
+                                            </div>
+                                            
+                                            <div class="form-section">
+                                                <h6>Minimum Accuracy</h6>
+                                                <div class="accuracy-slider">
+                                                    <input type="range" min="70" max="99" value="95" class="slider">
+                                                    <span class="accuracy-value">95%</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-row">
+                                            <div class="form-section">
+                                                <h6>Output Format</h6>
+                                                <div class="format-options">
+                                                    <label class="checkbox-option">
+                                                        <input type="checkbox" checked>
+                                                        <span>ONNX</span>
+                                                    </label>
+                                                    <label class="checkbox-option">
+                                                        <input type="checkbox" checked>
+                                                        <span>PyTorch</span>
+                                                    </label>
+                                                    <label class="checkbox-option">
+                                                        <input type="checkbox">
+                                                        <span>TensorFlow</span>
+                                                    </label>
+                                                    <label class="checkbox-option">
+                                                        <input type="checkbox">
+                                                        <span>CoreML</span>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="form-section">
+                                                <h6>Deployment Target</h6>
+                                                <select class="deployment-selector">
+                                                    <option value="cloud">Cloud/Server</option>
+                                                    <option value="edge">Edge Device</option>
+                                                    <option value="mobile">Mobile</option>
+                                                    <option value="browser">Browser</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Step 4: Output Configuration -->
+                            <div class="workflow-step" id="step-output">
+                                <div class="step-header">
+                                    <div class="step-indicator">
+                                        <span class="step-number">4</span>
+                                    </div>
+                                    <div class="step-title">
+                                        <h6>Output & Sharing</h6>
+                                        <p>Choose where to save and how to share your model</p>
+                                    </div>
+                                </div>
+                                <div class="step-content">
+                                    <div class="output-config">
+                                        <div class="form-section">
+                                            <h6>Save Location</h6>
+                                            <div class="save-options">
+                                                <label class="radio-option">
+                                                    <input type="radio" name="save-location" value="local" checked>
+                                                    <div class="option-content">
+                                                        <i class="fas fa-download"></i>
+                                                        <span>Download to Computer</span>
+                                                        <p>Save the model files locally</p>
+                                                    </div>
+                                                </label>
+                                                <label class="radio-option">
+                                                    <input type="radio" name="save-location" value="cloud">
+                                                    <div class="option-content">
+                                                        <i class="fas fa-cloud"></i>
+                                                        <span>Cloud Storage</span>
+                                                        <p>Save to AWS S3, Google Cloud, or Azure</p>
+                                                    </div>
+                                                </label>
+                                                <label class="radio-option">
+                                                    <input type="radio" name="save-location" value="prsm">
+                                                    <div class="option-content">
+                                                        <i class="fas fa-server"></i>
+                                                        <span>PRSM Storage</span>
+                                                        <p>Store in your PRSM workspace</p>
+                                                    </div>
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-section">
+                                            <h6>Marketplace Sharing</h6>
+                                            <div class="sharing-config">
+                                                <label class="checkbox-option large">
+                                                    <input type="checkbox" id="share-marketplace">
+                                                    <div class="option-content">
+                                                        <span>Share on PRSM Marketplace</span>
+                                                        <p>Make your model available to other users and earn provenance royalties</p>
+                                                    </div>
+                                                </label>
+                                                
+                                                <div class="sharing-details" style="display: none;">
+                                                    <div class="form-row">
+                                                        <div class="form-group">
+                                                            <label>Model Name</label>
+                                                            <input type="text" placeholder="e.g., Loan Risk Assessor v1.0">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>License Type</label>
+                                                            <select>
+                                                                <option>Open Source (MIT)</option>
+                                                                <option>Commercial Use</option>
+                                                                <option>Non-Commercial</option>
+                                                                <option>Custom License</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <label>Description</label>
+                                                        <textarea placeholder="Describe your model's capabilities and use cases..." rows="3"></textarea>
+                                                    </div>
+                                                    <div class="form-row">
+                                                        <div class="form-group">
+                                                            <label>Royalty Rate</label>
+                                                            <select>
+                                                                <option>5% (Recommended)</option>
+                                                                <option>10%</option>
+                                                                <option>15%</option>
+                                                                <option>20%</option>
+                                                            </select>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Category</label>
+                                                            <select>
+                                                                <option>Financial Services</option>
+                                                                <option>Healthcare</option>
+                                                                <option>Retail</option>
+                                                                <option>Manufacturing</option>
+                                                                <option>Other</option>
+                                                            </select>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Process Controls -->
+                            <div class="workflow-controls">
+                                <div class="progress-info">
+                                    <div class="step-progress">
+                                        <span class="current-step">Step 1 of 4</span>
+                                        <div class="progress-bar">
+                                            <div class="progress-fill" style="width: 25%"></div>
+                                        </div>
+                                    </div>
+                                    <div class="estimated-time">
+                                        <i class="fas fa-clock"></i>
+                                        <span>Estimated time: 15-30 minutes</span>
+                                    </div>
+                                </div>
+                                <div class="control-buttons">
+                                    <button class="btn secondary" id="prev-step" disabled>
+                                        <i class="fas fa-arrow-left"></i> Previous
+                                    </button>
+                                    <button class="btn primary" id="next-step">
+                                        Next <i class="fas fa-arrow-right"></i>
+                                    </button>
+                                    <button class="btn success large" id="start-distillation" style="display: none;">
+                                        <i class="fas fa-play"></i> Start Distillation
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Distillation Progress (Hidden initially) -->
+                        <div class="distillation-progress" style="display: none;">
+                            <div class="progress-header">
+                                <h5><i class="fas fa-cogs"></i> Distillation in Progress</h5>
+                                <p>Creating your specialized model based on GPT-4 Turbo...</p>
+                            </div>
+                            
+                            <div class="progress-stages">
+                                <div class="stage active">
+                                    <div class="stage-icon">
+                                        <i class="fas fa-database"></i>
+                                    </div>
+                                    <div class="stage-info">
+                                        <h6>Data Processing</h6>
+                                        <p>Analyzing and preparing your dataset</p>
+                                        <div class="stage-progress">
+                                            <div class="progress-bar">
+                                                <div class="progress-fill" style="width: 100%"></div>
+                                            </div>
+                                            <span>Complete</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="stage active">
+                                    <div class="stage-icon">
+                                        <i class="fas fa-brain"></i>
+                                    </div>
+                                    <div class="stage-info">
+                                        <h6>Model Distillation</h6>
+                                        <p>Training specialized model from base model</p>
+                                        <div class="stage-progress">
+                                            <div class="progress-bar">
+                                                <div class="progress-fill animated" style="width: 67%"></div>
+                                            </div>
+                                            <span>67% complete</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="stage">
+                                    <div class="stage-icon">
+                                        <i class="fas fa-check-circle"></i>
+                                    </div>
+                                    <div class="stage-info">
+                                        <h6>Validation</h6>
+                                        <p>Testing model performance and accuracy</p>
+                                        <div class="stage-progress">
+                                            <div class="progress-bar">
+                                                <div class="progress-fill" style="width: 0%"></div>
+                                            </div>
+                                            <span>Pending</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="stage">
+                                    <div class="stage-icon">
+                                        <i class="fas fa-download"></i>
+                                    </div>
+                                    <div class="stage-info">
+                                        <h6>Export</h6>
+                                        <p>Packaging and delivering your model</p>
+                                        <div class="stage-progress">
+                                            <div class="progress-bar">
+                                                <div class="progress-fill" style="width: 0%"></div>
+                                            </div>
+                                            <span>Pending</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="progress-details">
+                                <div class="detail-card">
+                                    <h6>Current Progress</h6>
+                                    <div class="detail-stats">
+                                        <div class="stat">
+                                            <span class="label">Training Loss:</span>
+                                            <span class="value">0.0234</span>
+                                        </div>
+                                        <div class="stat">
+                                            <span class="label">Validation Accuracy:</span>
+                                            <span class="value">94.7%</span>
+                                        </div>
+                                        <div class="stat">
+                                            <span class="label">Model Size:</span>
+                                            <span class="value">847 MB</span>
+                                        </div>
+                                        <div class="stat">
+                                            <span class="label">Compression Ratio:</span>
+                                            <span class="value">89%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="detail-card">
+                                    <h6>Estimated Completion</h6>
+                                    <div class="time-remaining">
+                                        <i class="fas fa-clock"></i>
+                                        <span>12 minutes remaining</span>
+                                    </div>
+                                    <button class="btn secondary small">
+                                        <i class="fas fa-pause"></i> Pause
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Recent Models -->
+                        <div class="recent-models">
+                            <h5><i class="fas fa-history"></i> Recent Models</h5>
+                            <div class="models-list">
+                                <div class="model-item">
+                                    <div class="model-icon">
+                                        <i class="fas fa-certificate"></i>
+                                    </div>
+                                    <div class="model-info">
+                                        <h6>Loan Risk Assessor v1.0</h6>
+                                        <p>Financial risk assessment model</p>
+                                        <div class="model-meta">
+                                            <span>Created 2 days ago</span>
+                                            <span>•</span>
+                                            <span>95.3% accuracy</span>
+                                            <span>•</span>
+                                            <span>423 MB</span>
+                                        </div>
+                                    </div>
+                                    <div class="model-actions">
+                                        <button class="btn-icon" title="Download">
+                                            <i class="fas fa-download"></i>
+                                        </button>
+                                        <button class="btn-icon" title="Share">
+                                            <i class="fas fa-share"></i>
+                                        </button>
+                                        <button class="btn-icon" title="Deploy">
+                                            <i class="fas fa-rocket"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div class="model-item">
+                                    <div class="model-icon">
+                                        <i class="fas fa-shopping-cart"></i>
+                                    </div>
+                                    <div class="model-info">
+                                        <h6>Product Classifier</h6>
+                                        <p>E-commerce product categorization</p>
+                                        <div class="model-meta">
+                                            <span>Created 1 week ago</span>
+                                            <span>•</span>
+                                            <span>91.8% accuracy</span>
+                                            <span>•</span>
+                                            <span>156 MB</span>
+                                        </div>
+                                    </div>
+                                    <div class="model-actions">
+                                        <button class="btn-icon" title="Download">
+                                            <i class="fas fa-download"></i>
+                                        </button>
+                                        <button class="btn-icon" title="Share">
+                                            <i class="fas fa-share"></i>
+                                        </button>
+                                        <button class="btn-icon" title="Deploy">
+                                            <i class="fas fa-rocket"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div class="model-item">
+                                    <div class="model-icon">
+                                        <i class="fas fa-comments"></i>
+                                    </div>
+                                    <div class="model-info">
+                                        <h6>Sentiment Analyzer Pro</h6>
+                                        <p>Customer feedback sentiment analysis</p>
+                                        <div class="model-meta">
+                                            <span>Created 2 weeks ago</span>
+                                            <span>•</span>
+                                            <span>89.2% accuracy</span>
+                                            <span>•</span>
+                                            <span>298 MB</span>
+                                        </div>
+                                    </div>
+                                    <div class="model-actions">
+                                        <button class="btn-icon" title="Download">
+                                            <i class="fas fa-download"></i>
+                                        </button>
+                                        <button class="btn-icon" title="Share">
+                                            <i class="fas fa-share"></i>
+                                        </button>
+                                        <button class="btn-icon" title="Deploy">
+                                            <i class="fas fa-rocket"></i>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
