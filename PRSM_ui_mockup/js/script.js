@@ -3405,24 +3405,29 @@ function showNotification(message, type = 'info') {
         <button class="notification-close" onclick="this.parentElement.remove()">×</button>
     `;
     
-    // Add styles
+    // Add styles with PRSM design language
     notification.style.cssText = `
         position: fixed;
         top: 20px;
         right: 20px;
         background: var(--card-bg);
+        color: var(--text-primary);
         border: 1px solid var(--border-color);
-        border-left: 4px solid ${type === 'success' ? '#28a745' : type === 'error' ? '#dc3545' : '#007bff'};
-        border-radius: 6px;
-        padding: 12px 16px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        border-left: 4px solid ${type === 'success' ? 'var(--prsm-success)' : type === 'error' ? 'var(--prsm-error)' : 'var(--prsm-primary)'};
+        border-radius: 8px;
+        padding: 14px 18px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+        backdrop-filter: blur(8px);
         z-index: 10000;
         max-width: 400px;
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 12px;
         font-size: 0.9rem;
+        font-family: var(--font-main);
+        font-weight: 500;
         animation: slideIn 0.3s ease;
+        opacity: 1;
     `;
     
     document.body.appendChild(notification);
