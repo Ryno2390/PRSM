@@ -7,6 +7,8 @@
 [![Version](https://img.shields.io/badge/version-1.0.0--production-brightgreen.svg)](https://github.com/Ryno2390/PRSM/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-brightgreen.svg)](https://python.org)
+[![macOS Setup](https://img.shields.io/badge/macOS-setup%20guide-blue.svg)](docs/MACOS_SETUP.md)
+[![Dependencies](https://img.shields.io/badge/dependencies-compatibility%20guide-orange.svg)](docs/DEPENDENCY_COMPATIBILITY.md)
 
 ---
 

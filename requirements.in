@@ -27,7 +27,7 @@ py-multiaddr
 py-multicodec
 
 # Web3 & Blockchain
-web3
+web3>=6.0.0
 eth-account
 py-ecc
 eth-keys
@@ -92,3 +92,6 @@ rich
 # Utilities
 uuid
 pathlib
+
+# Documentation
+sphinx
