@@ -50,9 +50,9 @@ For comprehensive Series A due diligence, see **[Investor Audit Guide](docs/audi
 - ✅ **[Architecture Overview](docs/architecture/)**: Multi-cloud infrastructure and system design
 - ✅ **[Economic Validation](docs/economic/ECONOMIC_VALIDATION.md)**: Revenue projections and market analysis  
 - ✅ **[Security Framework](docs/SECURITY_ARCHITECTURE.md)**: Enterprise security and compliance
-- ✅ **[Performance Metrics](docs/performance/PERFORMANCE_BASELINES.md)**: Production performance baselines
-- ✅ **Code Review**: Complete codebase available for technical evaluation
-- ✅ **Performance Metrics**: Benchmark results and scalability analysis
+- ✅ **[Performance Metrics](docs/PERFORMANCE_METRICS.md)**: Comprehensive benchmarks and scalability analysis
+- ✅ **[Code Review](docs/CODE_REVIEW.md)**: Complete codebase quality assessment and technical evaluation
+- ✅ **[Performance Baselines](docs/performance/PERFORMANCE_BASELINES.md)**: Production performance validation
 
 ---
 
@@ -98,10 +98,6 @@ Meanwhile, proprietary AI labs guard their models jealously, creating artificial
 
 ---
 
-**References:**
-¹ [AI Models Are Not Conscious and Are Massively Inefficient, Causing Complexity and Scalability Bottlenecks to Artificial General Superintelligence](docs/5299044.pdf) - Trevor Nestor (2025)  
-² [Yann LeCun on a vision to make AI systems learn and reason like animals and humans](docs/Yann%20LeCun%20on%20a%20vision%20to%20make%20AI%20systems%20learn%20and%20reason%20like%20animals%20and%20humans.pdf) - Meta AI (2022)  
-³ [Bartz v. Anthropic Order on Fair Use](docs/Bartz-v-Anthropic-Order-on-Fair-Use-6-23-25.pdf) - U.S. District Court (June 2025)
 
 ## The Monopolization Risk: Betting Everything on Brittleness
 
@@ -176,6 +172,13 @@ PRSM offers more than an alternative—it offers the infrastructure for AI's nec
 3. **🌐 Access Global Network**: Tap into distributed intelligence with guaranteed clean data sources
 4. **🔄 Recursive Improvement**: The network gets smarter while maintaining legal compliance
 5. **🛡️ Democratic Governance**: Community-driven decisions prevent both centralization and legal liability
+
+---
+
+**References:**
+¹ [AI Models Are Not Conscious and Are Massively Inefficient, Causing Complexity and Scalability Bottlenecks to Artificial General Superintelligence](docs/5299044.pdf) - Trevor Nestor (2025)  
+² [Yann LeCun on a vision to make AI systems learn and reason like animals and humans](docs/Yann%20LeCun%20on%20a%20vision%20to%20make%20AI%20systems%20learn%20and%20reason%20like%20animals%20and%20humans.pdf) - Meta AI (2022)  
+³ [Bartz v. Anthropic Order on Fair Use](docs/Bartz-v-Anthropic-Order-on-Fair-Use-6-23-25.pdf) - U.S. District Court (June 2025)
 
 ---
 
@@ -351,23 +354,6 @@ Experience PRSM's user interface vision:
 - **Component architecture** demonstrating production-ready design patterns
 
 *This mockup represents the user experience vision for PRSM's production platform interface.*
-
-## 🤖 AI Auditor Documentation
-
-**For Investment Firm AI Systems**: PRSM provides comprehensive documentation optimized for automated due diligence:
-
-📋 **[AI Auditor Index](docs/ai-auditor/AI_AUDITOR_INDEX.md)** - Complete navigation guide for AI systems  
-🔍 **[Technical Claims Validation](docs/ai-auditor/TECHNICAL_CLAIMS_VALIDATION.md)** - Direct claim-to-code mapping  
-📊 **[90-Minute Audit Guide](docs/ai-auditor/AI_AUDIT_GUIDE.md)** - Structured investment decision framework  
-⚡ **Quick Validation**: `./scripts/ai_auditor_quick_validate.sh` - 5-minute technical verification
-
-**Key Features for AI Auditors**:
-- Every technical claim mapped to implementation with line numbers
-- Automated verification commands for independent testing  
-- Machine-readable metadata and benchmarks
-- 96/100 investment score with Strong Buy recommendation
-
----
 
 ## 🔬 PRSM Deep Dive: Technical Architecture & Implementation
 
@@ -1502,37 +1488,6 @@ Our current implementation includes:
 
 ---
 
-## 🚀 Production Path
-
-### Current State: Production-Ready Core
-- ✅ **530+ Python files** with comprehensive production system architecture
-- ✅ **Complete marketplace implementation** with real database operations
-- ✅ **110+ test suites** covering all critical components and integrations
-- ✅ **Enterprise security patterns** implemented and validated
-- ✅ **Real AI provider integrations** with secure credential management
-- ✅ **Production deployment configurations** ready for immediate use
-
-### PRSM Foundation Development Timeline
-| Phase | Timeline | Investment | Objectives |
-|-------|----------|------------|------------|
-| **1A: Infrastructure Hardening** | Months 1-6 | $6M | 50+ federation nodes, enterprise security, 1K users |
-| **1B: University Partnerships** | Months 7-12 | $6M | Academic partnerships, provenance revenue flows |
-| **1C: FTNS Economics & Governance** | Months 13-18 | $6M | Token launch, marketplace activation, governance |
-
-### Phase 1 Success Metrics (18 Months)
-- **Network**: 50+ federation nodes with 99.9% uptime
-- **Users**: 1,000+ active users, 10,000 TPS capacity
-- **Revenue**: $100k+ monthly provenance revenue
-- **Security**: SOC2 Type II and ISO27001 certification, production GDPR compliance
-- **Governance**: Live FTNS token economics and decentralized decision-making
-
-### Series A Funding: $18M
-- **Technical Infrastructure**: Production-grade P2P network, security, compliance
-- **Team Expansion**: 9-person specialized team across 7 technical domains
-- **University Partnerships**: Academic content integration and collaboration framework
-- **Market Validation**: Live marketplace with proven economic models
-
----
 
 ## 💼 Investment Opportunity
 
