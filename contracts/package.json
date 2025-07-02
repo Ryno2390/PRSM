@@ -6,6 +6,10 @@
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
+    "test:coverage": "hardhat coverage",
+    "test:gas": "REPORT_GAS=true hardhat test",
+    "test:ci": "hardhat test --reporter=json > test-results.json",
+    "coverage:check": "hardhat coverage && node scripts/check-coverage.js",
     "deploy:testnet": "hardhat run scripts/deploy.js --network polygon-mumbai",
     "deploy:mainnet": "hardhat run scripts/deploy.js --network polygon-mainnet",
     "verify": "hardhat verify --network polygon-mumbai",
@@ -26,6 +30,7 @@
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.0.9",
     "@nomicfoundation/hardhat-ethers": "^3.0.9",
+    "@nomicfoundation/hardhat-ignition-ethers": "^0.15.0",
     "@nomicfoundation/hardhat-network-helpers": "^1.0.12",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@nomicfoundation/hardhat-verify": "^2.0.14",
