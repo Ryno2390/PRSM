@@ -17,6 +17,7 @@
     --progress-bar-bg: var(--bg-tertiary);
     --response-area-bg: var(--bg-primary);
     --placeholder-box-bg: var(--bg-secondary);
+    --card-bg: var(--bg-secondary);
     --resizer-color: var(--border-color);
     --header-height: 120px; /* Final increase to header height */
     --panel-padding: 20px;
@@ -48,6 +49,7 @@ body.light-theme {
     --status-inactive: #c0392b; /* Keep red for errors */
     --response-area-bg: var(--bg-tertiary); /* Added light theme override */
     --placeholder-box-bg: var(--bg-secondary); /* Added light theme override */
+    --card-bg: var(--bg-secondary);
     /* Keep accents, statuses */
 }
 
@@ -10587,6 +10589,52 @@ button.inline-btn:hover {
         transform: translateX(0);
         opacity: 1;
     }
+}
+
+/* Notification animations */
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOut {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+}
+
+/* Notification Styles */
+.notification-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    padding: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.notification-close:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
 }
 
 /* Asset Action Button States */
