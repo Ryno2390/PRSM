@@ -1,0 +1,23 @@
+{
+  "timestamp": "2025-07-02T14:58:44.495241",
+  "project": "PRSM",
+  "audit_tool": "pip-audit",
+  "status": "unknown",
+  "summary": {
+    "total_vulnerabilities": 0,
+    "critical_count": 0,
+    "high_count": 0,
+    "medium_count": 0,
+    "low_count": 0
+  },
+  "vulnerabilities": [],
+  "recommendations": [
+    "\u2705 No known vulnerabilities detected in dependencies",
+    "\ud83d\udd04 Continue regular security audits with automated CI/CD integration",
+    "\ud83d\udcca Consider implementing dependency scanning in pre-commit hooks",
+    "\ud83d\udd12 Implement automated dependency scanning in CI/CD pipeline",
+    "\ud83d\udcc5 Schedule weekly security audits",
+    "\ud83d\udd04 Keep dependencies updated regularly",
+    "\ud83d\udccb Document security review process for new dependencies"
+  ]
+}

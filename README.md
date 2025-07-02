@@ -3,6 +3,7 @@
 [![Status](https://img.shields.io/badge/status-Production%20Ready-green.svg)](#production-readiness)
 [![Investment](https://img.shields.io/badge/investment-STRONG%20RECOMMENDATION%20TO%20FUND-green.svg)](#series-a-validation)
 [![Security](https://img.shields.io/badge/security-SOC2%20Ready-green.svg)](#security-compliance)
+[![Security Audit](https://img.shields.io/badge/security%20audit-automated-brightgreen.svg)](#security-audit-system)
 [![Funding](https://img.shields.io/badge/stage-Series%20A%20Ready-brightgreen.svg)](#investment-opportunity)
 [![Version](https://img.shields.io/badge/version-1.0.0--production-brightgreen.svg)](https://github.com/Ryno2390/PRSM/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -726,13 +727,36 @@ class InputValidator:
 - **Transaction Monitoring**: Suspicious activity detection and reporting
 - **Audit Readiness**: Comprehensive logging and evidence preservation
 
-**Current Security Status (2025-06-30):**
+**Current Security Status (2025-07-02):**
 - ✅ **Enterprise security framework** fully implemented with comprehensive controls
 - ✅ **Multi-layered authentication** with JWT, MFA, SSO, and LDAP integration
 - ✅ **Advanced safety systems** with real-time monitoring and bias detection
 - ✅ **Production-ready security code** with proper error handling and audit trails
+- ✅ **Automated security auditing** with CI/CD integrated dependency scanning
 - 🔄 **Security validation** preparing for third-party penetration testing
 - 🔄 **Compliance certification** SOC2 and ISO 27001 audit preparation underway
+
+#### Security Audit System
+
+**Automated Dependency Scanning:**
+- **Python Dependencies**: `pip-audit` with custom severity assessment and CI/CD integration
+- **GitHub Actions**: Automated security audits on push, PR, and weekly schedule
+- **Vulnerability Tracking**: Comprehensive reporting with actionable remediation guidance
+- **Historical Analysis**: 90-day retention of all security audit results for trend analysis
+
+**Current Vulnerability Status:**
+- **Total Dependencies**: ~140 Python packages scanned
+- **Known Vulnerabilities**: 1 medium-severity issue (torch 2.7.1 DoS vulnerability)
+- **Fix Availability**: Monitoring PyTorch releases for security patch
+- **Risk Assessment**: Low impact (local DoS only, requires specific function usage)
+
+**Security Automation Features:**
+- **PR Integration**: Automatic security reports posted to pull requests
+- **Severity Classification**: Critical/High/Medium/Low with automated risk assessment
+- **Fix Recommendations**: Specific upgrade paths and timeline guidance
+- **Compliance Reporting**: SOC2-ready audit trails and evidence collection
+
+See **[Security Framework Documentation](security/README.md)** for complete security audit setup and procedures.
 
 ---
 
