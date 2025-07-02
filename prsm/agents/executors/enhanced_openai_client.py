@@ -20,6 +20,7 @@ import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from .api_clients import BaseModelClient, ModelExecutionRequest, ModelExecutionResponse, ModelProvider
+from ...config.model_config_manager import get_model_config_manager
 
 logger = structlog.get_logger(__name__)
 
@@ -28,14 +29,6 @@ logger = structlog.get_logger(__name__)
 class CostTracker:
     """Track API costs and usage for budget management"""
     
-    # OpenAI pricing (as of 2024) - prices per 1000 tokens
-    MODEL_PRICING = {
-        "gpt-4": {"input": Decimal("0.03"), "output": Decimal("0.06")},
-        "gpt-4-turbo": {"input": Decimal("0.01"), "output": Decimal("0.03")},
-        "gpt-3.5-turbo": {"input": Decimal("0.0005"), "output": Decimal("0.0015")},
-        "gpt-3.5-turbo-16k": {"input": Decimal("0.003"), "output": Decimal("0.004")}
-    }
-    
     total_cost: Decimal = field(default_factory=lambda: Decimal("0"))
     total_input_tokens: int = 0
     total_output_tokens: int = 0
@@ -43,18 +36,24 @@ class CostTracker:
     cost_by_model: Dict[str, Decimal] = field(default_factory=dict)
     
     def calculate_request_cost(self, model_id: str, token_usage: Dict[str, int]) -> Decimal:
-        """Calculate cost for a single request"""
-        if model_id not in self.MODEL_PRICING:
-            # Default to GPT-4 pricing for unknown models
-            pricing = self.MODEL_PRICING["gpt-4"]
+        """Calculate cost for a single request using ModelConfigManager"""
+        config_manager = get_model_config_manager()
+        model_pricing = config_manager.get_model_pricing(model_id, "openai")
+        
+        if not model_pricing:
+            # Fallback to default GPT-4 pricing if model not found
+            logger.warning(f"Pricing not found for model {model_id}, using GPT-4 fallback")
+            input_cost_per_1k = Decimal("0.03")
+            output_cost_per_1k = Decimal("0.06")
         else:
-            pricing = self.MODEL_PRICING[model_id]
+            input_cost_per_1k = model_pricing.input_cost_per_1k
+            output_cost_per_1k = model_pricing.output_cost_per_1k
         
         input_tokens = token_usage.get("prompt_tokens", 0)
         output_tokens = token_usage.get("completion_tokens", 0)
         
-        input_cost = (Decimal(str(input_tokens)) / 1000) * pricing["input"]
-        output_cost = (Decimal(str(output_tokens)) / 1000) * pricing["output"]
+        input_cost = (Decimal(str(input_tokens)) / 1000) * input_cost_per_1k
+        output_cost = (Decimal(str(output_tokens)) / 1000) * output_cost_per_1k
         
         return input_cost + output_cost
     

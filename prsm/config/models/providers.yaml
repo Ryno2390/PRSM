@@ -1,0 +1,84 @@
+# PRSM Provider Configuration
+# Provider-specific settings and capabilities
+
+providers:
+  openai:
+    name: "OpenAI"
+    base_url: "https://api.openai.com/v1"
+    auth_type: "api_key"
+    rate_limits:
+      requests_per_minute: 3500
+      tokens_per_minute: 90000
+    default_models:
+      - "gpt-3.5-turbo"
+      - "gpt-4"
+    supported_capabilities:
+      - "text_generation"
+      - "code_generation"
+      - "reasoning"
+      - "analysis"
+      - "vision"
+      - "function_calling"
+    health_check_endpoint: "/models"
+    metadata:
+      reliability_score: 0.95
+      documentation_url: "https://platform.openai.com/docs"
+      
+  anthropic:
+    name: "Anthropic"
+    base_url: "https://api.anthropic.com/v1"
+    auth_type: "api_key"
+    rate_limits:
+      requests_per_minute: 1000
+      tokens_per_minute: 40000
+    default_models:
+      - "claude-3-sonnet"
+      - "claude-3-haiku"
+    supported_capabilities:
+      - "text_generation"
+      - "reasoning"
+      - "analysis"
+      - "creative_writing"
+      - "function_calling"
+    metadata:
+      reliability_score: 0.93
+      documentation_url: "https://docs.anthropic.com"
+      
+  ollama:
+    name: "Ollama"
+    base_url: "http://localhost:11434"
+    auth_type: "none"
+    rate_limits:
+      requests_per_minute: 1000
+      tokens_per_minute: 100000
+    default_models:
+      - "llama2-7b-chat"
+      - "codellama-13b"
+    supported_capabilities:
+      - "text_generation"
+      - "code_generation"
+    health_check_endpoint: "/api/tags"
+    metadata:
+      reliability_score: 0.80
+      local_deployment: true
+      
+  openrouter:
+    name: "OpenRouter"
+    base_url: "https://openrouter.ai/api/v1"
+    auth_type: "api_key"
+    rate_limits:
+      requests_per_minute: 200
+      tokens_per_minute: 20000
+    default_models:
+      - "openai/gpt-3.5-turbo"
+      - "anthropic/claude-3-sonnet"
+    supported_capabilities:
+      - "text_generation"
+      - "code_generation"
+      - "reasoning"
+      - "analysis"
+      - "creative_writing"
+    metadata:
+      reliability_score: 0.88
+      multi_provider: true
+      documentation_url: "https://openrouter.ai/docs"

@@ -1,0 +1,62 @@
+# PRSM Pricing Configuration
+# Centralized pricing data with update tracking
+
+pricing:
+  openai:
+    gpt-4:
+      input: 0.03
+      output: 0.06
+      currency: "USD"
+      effective_date: "2024-01-01"
+      notes: "Standard GPT-4 pricing"
+      
+    gpt-4-turbo:
+      input: 0.01
+      output: 0.03
+      currency: "USD"
+      effective_date: "2024-01-01"
+      notes: "Turbo model with lower costs"
+      
+    gpt-3.5-turbo:
+      input: 0.0005
+      output: 0.0015
+      currency: "USD"
+      effective_date: "2024-01-01"
+      notes: "Most cost-effective option"
+      
+  anthropic:
+    claude-3-opus:
+      input: 0.015
+      output: 0.075
+      currency: "USD"
+      effective_date: "2024-01-01"
+      notes: "Highest quality model"
+      
+    claude-3-sonnet:
+      input: 0.003
+      output: 0.015
+      currency: "USD"
+      effective_date: "2024-01-01"
+      notes: "Balanced performance and cost"
+      
+    claude-3-haiku:
+      input: 0.00025
+      output: 0.00125
+      currency: "USD"
+      effective_date: "2024-01-01"
+      notes: "Fastest and most cost-effective"
+      
+  ollama:
+    llama2-7b-chat:
+      input: 0
+      output: 0
+      currency: "USD"
+      effective_date: "2024-01-01"
+      notes: "Free local deployment"
+      
+    codellama-13b:
+      input: 0
+      output: 0
+      currency: "USD"
+      effective_date: "2024-01-01"
+      notes: "Free code-specialized model"

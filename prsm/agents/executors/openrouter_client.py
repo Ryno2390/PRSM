@@ -43,6 +43,7 @@ from .api_clients import (
     ModelExecutionResponse,
     ModelProvider
 )
+from ...config.model_config_manager import get_model_config_manager, ModelConfiguration
 
 logger = structlog.get_logger(__name__)
 
@@ -392,23 +393,91 @@ class OpenRouterClient(BaseModelClient):
         self.retry_delay = 1.0
         self.budget_limit: Optional[float] = None
         
-        # Enhanced model catalog with 100+ models
-        self.models = self._initialize_model_catalog()
+        # Initialize model catalog from ModelConfigManager
+        self.config_manager = get_model_config_manager()
+        self.models = self._load_models_from_config()
         
         # Performance tracking
         self.performance_history = []
         self.last_models_update = datetime.now()
     
-    def _initialize_model_catalog(self) -> Dict[str, OpenRouterModel]:
-        """Initialize comprehensive model catalog"""
+    def _load_models_from_config(self) -> Dict[str, OpenRouterModel]:
+        """Load model catalog from ModelConfigManager"""
         models = {}
         
-        # OpenAI Models
-        openai_models = {
-            "gpt-4-turbo": OpenRouterModel(
-                id="openai/gpt-4-turbo",
-                name="GPT-4 Turbo",
-                provider="OpenAI",
+        # Get all models from configuration
+        all_models = self.config_manager.get_all_models()
+        
+        for model_id, model_config in all_models.items():
+            # Convert ModelConfiguration to OpenRouterModel
+            openrouter_model = self._convert_to_openrouter_model(model_config)
+            if openrouter_model:
+                models[model_id] = openrouter_model
+        
+        logger.info("Model catalog loaded from configuration", total_models=len(models))
+        return models
+    
+    def _convert_to_openrouter_model(self, model_config: ModelConfiguration) -> Optional['OpenRouterModel']:
+        """Convert ModelConfiguration to OpenRouterModel format"""
+        try:
+            # Map ModelTier from config to OpenRouter ModelTier
+            tier_mapping = {
+                "free": ModelTier.FREE,
+                "basic": ModelTier.BASIC,
+                "premium": ModelTier.PREMIUM,
+                "enterprise": ModelTier.ULTRA
+            }
+            
+            tier = tier_mapping.get(model_config.tier.value, ModelTier.BASIC)
+            
+            # Convert pricing (config uses per-1k tokens, OpenRouter expects different format)
+            pricing = {
+                "input": float(model_config.pricing.input_cost_per_1k),
+                "output": float(model_config.pricing.output_cost_per_1k)
+            }
+            
+            # Convert capabilities
+            capabilities = ModelCapabilities(
+                supports_system_prompt=True,
+                supports_streaming=model_config.supports_streaming,
+                supports_tools=model_config.supports_tools,
+                supports_vision=model_config.supports_vision,
+                supports_code="code_generation" in [cap.value for cap in model_config.capabilities],
+                max_output_tokens=model_config.max_tokens
+            )
+            
+            # Create OpenRouterModel
+            return OpenRouterModel(
+                id=f"{model_config.provider}/{model_config.id}",
+                name=model_config.name,
+                provider=model_config.provider.title(),
+                tier=tier,
+                pricing=pricing,
+                context_length=model_config.context_length,
+                capabilities=capabilities,
+                description=f"{model_config.name} - {model_config.provider} model"
+            )
+            
+        except Exception as e:
+            logger.warning(f"Failed to convert model {model_config.id}: {e}")
+            return None
+    
+    def _get_headers(self) -> Dict[str, str]:
+        """Get HTTP headers for OpenRouter API requests"""
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/PRSM-AI/prsm",
+            "X-Title": "PRSM Protocol - Enterprise Edition"
+        }
+    
+    async def _setup_client(self) -> None:
+        """Enhanced setup with health monitoring"""
+        logger.info("Initializing OpenRouter enterprise client",
+                   models_available=len(self.models),
+                   features=['intelligent_selection', 'cost_optimization', 'health_monitoring'])
+    
+    async def initialize(self) -> None:
                 tier=ModelTier.PREMIUM,
                 pricing={"input": 10.0, "output": 30.0},
                 context_length=128000,

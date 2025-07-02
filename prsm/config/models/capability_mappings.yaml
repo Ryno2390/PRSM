@@ -1,0 +1,80 @@
+# PRSM Capability Mappings
+# Task-to-provider routing configuration
+
+task_mappings:
+  code_generation:
+    preferred_providers:
+      - "openai"
+      - "anthropic"
+    fallback_providers:
+      - "ollama"
+    model_requirements:
+      min_context_length: 8192
+      supports_tools: true
+    quality_threshold: 0.8
+    cost_threshold: 0.05
+    latency_threshold: 10.0
+    
+  reasoning:
+    preferred_providers:
+      - "anthropic"
+      - "openai"
+    fallback_providers:
+      - "ollama"
+    model_requirements:
+      min_context_length: 4096
+    quality_threshold: 0.85
+    cost_threshold: 0.10
+    
+  creative_writing:
+    preferred_providers:
+      - "anthropic"
+      - "openai"
+    fallback_providers: []
+    model_requirements:
+      min_context_length: 8192
+    quality_threshold: 0.80
+    cost_threshold: 0.08
+    
+  analysis:
+    preferred_providers:
+      - "openai"
+      - "anthropic"
+    fallback_providers:
+      - "ollama"
+    model_requirements:
+      min_context_length: 16384
+    quality_threshold: 0.85
+    cost_threshold: 0.06
+    
+  general_chat:
+    preferred_providers:
+      - "ollama"
+      - "openai"
+      - "anthropic"
+    fallback_providers: []
+    model_requirements:
+      min_context_length: 4096
+    quality_threshold: 0.70
+    cost_threshold: 0.02
+    
+  translation:
+    preferred_providers:
+      - "openai"
+      - "anthropic"
+    fallback_providers:
+      - "ollama"
+    model_requirements:
+      min_context_length: 4096
+    quality_threshold: 0.80
+    
+  summarization:
+    preferred_providers:
+      - "anthropic"
+      - "openai"
+    fallback_providers:
+      - "ollama"
+    model_requirements:
+      min_context_length: 8192
+    quality_threshold: 0.75
+    cost_threshold: 0.04
