@@ -6,11 +6,16 @@ Executes tasks using assigned specialist models
 import asyncio
 import time
 from typing import List, Dict, Any, Optional, Union
-from uuid import UUID
+from uuid import UUID, uuid4
+from decimal import Decimal
 import structlog
 
 from prsm.core.models import AgentType, ArchitectTask
 from prsm.core.config import get_settings
+from prsm.core.usage_tracker import (
+    GenericUsageTracker, create_usage_tracker, track_model_execution,
+    ResourceType, CostCategory, OperationType
+)
 from prsm.agents.base import BaseAgent
 from .api_clients import (
     ModelClientRegistry, ModelProvider, ModelExecutionRequest, 
@@ -58,7 +63,7 @@ class ModelExecutor(BaseAgent):
     - Route to appropriate API providers based on model IDs
     """
     
-    def __init__(self, agent_id: Optional[str] = None, timeout_seconds: Optional[int] = None):
+    def __init__(self, agent_id: Optional[str] = None, timeout_seconds: Optional[int] = None, usage_tracker: Optional[GenericUsageTracker] = None):
         super().__init__(agent_id=agent_id, agent_type=AgentType.EXECUTOR)
         self.timeout_seconds = timeout_seconds or settings.agent_timeout_seconds
         self.active_executions: Dict[str, asyncio.Task] = {}
@@ -71,8 +76,12 @@ class ModelExecutor(BaseAgent):
         # Maps model IDs to their providers for efficient routing
         self.model_providers: Dict[str, ModelProvider] = {}
         
-        # 📊 COMPREHENSIVE EXECUTION STATISTICS
-        # Track real API usage, costs, and performance across providers
+        # 📊 UNIFIED USAGE TRACKING
+        # Consolidated tracking of usage, costs, and performance
+        self.usage_tracker = usage_tracker or create_usage_tracker()
+        
+        # 📊 LEGACY EXECUTION STATISTICS (deprecated - use usage_tracker instead)
+        # Keeping for backward compatibility
         self.execution_stats = {
             "total_executions": 0,
             "successful_executions": 0,
@@ -86,11 +95,11 @@ class ModelExecutor(BaseAgent):
         # 🔧 Initialize API providers
         self._initialize_providers()
         
-        logger.info("ModelExecutor initialized with real API clients", agent_id=self.agent_id)
+        logger.info("ModelExecutor initialized with real API clients and usage tracking", agent_id=self.agent_id)
     
     async def process(self, input_data: Any, context: Optional[Dict[str, Any]] = None) -> List[ExecutionResult]:
         """
-        Process execution request
+        Process execution request with comprehensive usage tracking
         
         Args:
             input_data: Task and model assignments
@@ -99,6 +108,10 @@ class ModelExecutor(BaseAgent):
         Returns:
             List[ExecutionResult]: Results from all model executions
         """
+        # Generate session ID for tracking
+        session_id = uuid4()
+        user_id = context.get("user_id", "system") if context else "system"
+        
         # Parse input data
         if isinstance(input_data, dict):
             task_description = input_data.get("task", "")
@@ -110,34 +123,37 @@ class ModelExecutor(BaseAgent):
             parallel = True
         
         if not model_assignments:
-            logger.warning("No model assignments provided", agent_id=self.agent_id)
+            logger.warning("No model assignments provided", agent_id=self.agent_id, session_id=str(session_id))
             return []
         
         logger.info("Starting task execution",
                    agent_id=self.agent_id,
+                   session_id=str(session_id),
+                   user_id=user_id,
                    task_length=len(task_description),
                    model_count=len(model_assignments),
                    parallel=parallel)
         
         # Execute with assigned models
         if parallel:
-            results = await self._execute_parallel(task_description, model_assignments)
+            results = await self._execute_parallel(task_description, model_assignments, session_id, user_id)
         else:
-            results = await self._execute_sequential(task_description, model_assignments)
+            results = await self._execute_sequential(task_description, model_assignments, session_id, user_id)
         
         logger.info("Execution completed",
                    agent_id=self.agent_id,
+                   session_id=str(session_id),
                    total_results=len(results),
                    successful_results=len([r for r in results if r.success]))
         
         return results
     
-    async def _execute_parallel(self, task: str, model_assignments: List[str]) -> List[ExecutionResult]:
+    async def _execute_parallel(self, task: str, model_assignments: List[str], session_id: UUID, user_id: str) -> List[ExecutionResult]:
         """Execute task with multiple models in parallel"""
         tasks = []
         
         for model_id in model_assignments:
-            task_coro = self._execute_with_model(task, model_id)
+            task_coro = self._execute_with_model(task, model_id, session_id, user_id)
             execution_task = asyncio.create_task(task_coro)
             tasks.append(execution_task)
             self.active_executions[f"{model_id}_{time.time()}"] = execution_task
@@ -208,14 +224,14 @@ class ModelExecutor(BaseAgent):
             # Clean up active executions
             self.active_executions.clear()
     
-    async def _execute_sequential(self, task: str, model_assignments: List[str]) -> List[ExecutionResult]:
+    async def _execute_sequential(self, task: str, model_assignments: List[str], session_id: UUID, user_id: str) -> List[ExecutionResult]:
         """Execute task with models sequentially"""
         results = []
         
         for model_id in model_assignments:
             try:
                 result = await asyncio.wait_for(
-                    self._execute_with_model(task, model_id),
+                    self._execute_with_model(task, model_id, session_id, user_id),
                     timeout=self.timeout_seconds
                 )
                 results.append(result)
@@ -247,7 +263,7 @@ class ModelExecutor(BaseAgent):
         
         return results
     
-    async def _execute_with_model(self, task: str, model_id: str) -> ExecutionResult:
+    async def _execute_with_model(self, task: str, model_id: str, session_id: UUID, user_id: str) -> ExecutionResult:
         """
         Execute task with a specific model using real API clients
         
@@ -289,7 +305,12 @@ class ModelExecutor(BaseAgent):
                 # 🛡️ VALIDATE RESPONSE THROUGH SAFETY MONITOR
                 validated_result = await self._validate_response(response.content, model_id)
                 
-                # 📊 UPDATE STATISTICS
+                # 📊 TRACK USAGE WITH CONSOLIDATED TRACKER
+                await self._track_execution_usage(
+                    response, execution_time, True, session_id, user_id, provider.value
+                )
+                
+                # 📊 UPDATE LEGACY STATISTICS (deprecated)
                 self._update_execution_stats(response, execution_time, True)
                 
                 return ExecutionResult(
@@ -302,12 +323,18 @@ class ModelExecutor(BaseAgent):
                 # Handle API failure
                 logger.warning("Model API call failed",
                               model_id=model_id,
+                              session_id=str(session_id),
                               error=response.error)
                 
                 # 🔄 ATTEMPT FALLBACK TO ALTERNATIVE MODEL
                 fallback_result = await self._attempt_fallback(task, model_id)
                 if fallback_result:
                     return fallback_result
+                
+                # 📊 TRACK FAILED EXECUTION
+                await self._track_execution_usage(
+                    response, execution_time, False, session_id, user_id, provider.value
+                )
                 
                 self._update_execution_stats(response, execution_time, False)
                 
@@ -337,6 +364,80 @@ class ModelExecutor(BaseAgent):
                 error=str(e)
             )
     
+    async def _track_execution_usage(
+        self,
+        response: ModelExecutionResponse,
+        execution_time: float,
+        success: bool,
+        session_id: UUID,
+        user_id: str,
+        provider: str
+    ) -> None:
+        """Track execution usage with the consolidated usage tracker"""
+        try:
+            # Extract token usage information
+            token_usage = response.token_usage or {}
+            input_tokens = token_usage.get('prompt_tokens', 0)
+            output_tokens = token_usage.get('completion_tokens', 0)
+            total_tokens = token_usage.get('total_tokens', input_tokens + output_tokens)
+            
+            # Estimate cost (this would be more sophisticated in production)
+            estimated_cost = self._estimate_cost(response.model_id, provider, total_tokens)
+            
+            # Use the convenience function to track complete model execution
+            await track_model_execution(
+                self.usage_tracker,
+                user_id,
+                session_id,
+                response.model_id,
+                provider,
+                input_tokens,
+                output_tokens,
+                execution_time * 1000,  # Convert to milliseconds
+                estimated_cost,
+                success,
+                response.error if not success else None
+            )
+            
+        except Exception as e:
+            logger.error(
+                "Failed to track execution usage",
+                error=str(e),
+                model_id=response.model_id,
+                session_id=str(session_id)
+            )
+    
+    def _estimate_cost(self, model_id: str, provider: str, total_tokens: int) -> Decimal:
+        """
+        Estimate cost based on model and token usage
+        
+        This is a simplified cost estimation. In production, this would
+        integrate with precise pricing models for each provider.
+        """
+        # Simplified cost estimation (tokens * rate per token)
+        base_rates = {
+            "openai": {
+                "gpt-4": Decimal("0.00006"),  # $0.06 per 1K tokens
+                "gpt-3.5-turbo": Decimal("0.000002"),  # $0.002 per 1K tokens
+            },
+            "anthropic": {
+                "claude-3-opus": Decimal("0.000075"),  # $0.075 per 1K tokens
+                "claude-3-sonnet": Decimal("0.000015"),  # $0.015 per 1K tokens
+                "claude-3-haiku": Decimal("0.0000025"),  # $0.0025 per 1K tokens
+            },
+            "huggingface": {
+                "default": Decimal("0.000001"),  # $0.001 per 1K tokens
+            }
+        }
+        
+        provider_rates = base_rates.get(provider, {"default": Decimal("0.000001")})
+        rate = provider_rates.get(model_id, provider_rates.get("default", Decimal("0.000001")))
+        
+        # Convert to FTNS (assuming 1 USD = 1000 FTNS for this example)
+        ftns_rate = rate * 1000
+        cost = (Decimal(total_tokens) / 1000) * ftns_rate
+        
+        return cost
     
     def _initialize_providers(self):
         """
