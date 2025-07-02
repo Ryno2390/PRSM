@@ -9,7 +9,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 /**
  * @title FTNS Token
- * @dev The FTNS (Federated Token Network System) token for PRSM
+ * @dev The FTNS (Fungible Tokens for Node Support) token for PRSM
  * 
  * Features:
  * - ERC20 compliant token with permit functionality

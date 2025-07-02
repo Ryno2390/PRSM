@@ -31,7 +31,7 @@ def create_mock_deployment():
             "ftns_token": generate_mock_address()
         },
         "token_config": {
-            "name": "PRSM Federated Token Network System",
+            "name": "PRSM Fungible Tokens for Node Support",
             "symbol": "FTNS", 
             "decimals": 18,
             "initial_supply": 100_000_000,

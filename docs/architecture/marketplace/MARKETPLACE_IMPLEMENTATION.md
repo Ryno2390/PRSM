@@ -3,7 +3,7 @@
 
 ## Overview
 
-The PRSM marketplace provides a federated platform for trading computational resources, AI services, and data processing capabilities using the FTNS (Federated Token Network System). This document consolidates the complete marketplace implementation including API design, database models, and integration patterns.
+The PRSM marketplace provides a federated platform for trading computational resources, AI services, and data processing capabilities using the FTNS (Fungible Tokens for Node Support). This document consolidates the complete marketplace implementation including API design, database models, and integration patterns.
 
 ## Architecture Overview
 

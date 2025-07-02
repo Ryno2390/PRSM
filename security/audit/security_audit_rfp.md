@@ -12,7 +12,7 @@
 
 ## About PRSM
 
-PRSM is a federated marketplace platform enabling decentralized resource sharing through the FTNS (Federated Token Network System). The platform connects resource providers with consumers across compute, storage, AI/ML, and data processing services.
+PRSM is a federated marketplace platform enabling decentralized resource sharing through the FTNS (Fungible Tokens for Node Support). The platform connects resource providers with consumers across compute, storage, AI/ML, and data processing services.
 
 **Technology Stack:**
 - **Backend:** Python/FastAPI, PostgreSQL, Redis

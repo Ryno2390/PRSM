@@ -1,5 +1,5 @@
 """
-FTNS (Federated Token Network System) Database Models
+FTNS (Fungible Tokens for Node Support) Database Models
 Production-ready SQLAlchemy models for PRSM token economy
 
 This module defines the complete database schema for FTNS tokens,

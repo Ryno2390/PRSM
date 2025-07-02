@@ -58,7 +58,7 @@ async function main() {
   await test("Token has correct name and symbol", async () => {
     const name = await ftnsToken.name();
     const symbol = await ftnsToken.symbol();
-    if (name !== "PRSM Federated Token Network System" || symbol !== "FTNS") {
+    if (name !== "PRSM Fungible Tokens for Node Support" || symbol !== "FTNS") {
       throw new Error(`Incorrect name/symbol: ${name}/${symbol}`);
     }
   });

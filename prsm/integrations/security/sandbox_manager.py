@@ -100,33 +100,64 @@ class ToolSecurityLevel(str, Enum):
 
 @dataclass
 class ResourceLimits:
-    """Resource limits for sandbox execution"""
-    # CPU limits
-    cpu_percent: float = 50.0          # Maximum CPU usage percentage
-    cpu_time_seconds: float = 30.0     # Maximum CPU time
+    """Enhanced resource limits for sandbox execution with strict security controls"""
+    # CPU limits (more restrictive)
+    cpu_percent: float = 25.0          # Maximum CPU usage percentage (reduced from 50%)
+    cpu_time_seconds: float = 15.0     # Maximum CPU time (reduced from 30s)
+    cpu_burst_limit: float = 50.0      # Maximum burst CPU for short periods
+    cpu_burst_duration: float = 2.0    # Maximum burst duration in seconds
     
-    # Memory limits
-    memory_mb: int = 512               # Maximum memory in MB
-    virtual_memory_mb: int = 1024      # Maximum virtual memory in MB
+    # Memory limits (stricter enforcement)
+    memory_mb: int = 256               # Maximum memory in MB (reduced from 512MB)
+    virtual_memory_mb: int = 512       # Maximum virtual memory in MB (reduced from 1024MB)
+    memory_swap_mb: int = 0            # Disable swap to prevent resource exhaustion
+    memory_kill_threshold: float = 0.9 # Kill at 90% of limit to prevent OOM
     
-    # Disk limits
-    disk_read_mb: int = 100            # Maximum disk read in MB
-    disk_write_mb: int = 50            # Maximum disk write in MB
-    temp_space_mb: int = 100           # Maximum temporary space in MB
+    # Disk limits (enhanced controls)
+    disk_read_mb: int = 50             # Maximum disk read in MB (reduced from 100MB)
+    disk_write_mb: int = 25            # Maximum disk write in MB (reduced from 50MB)
+    temp_space_mb: int = 50            # Maximum temporary space in MB (reduced from 100MB)
+    disk_iops_limit: int = 1000        # Maximum disk IOPS per second
+    disk_bandwidth_mbps: float = 10.0  # Maximum disk bandwidth in MB/s
     
-    # Network limits
-    network_upload_mb: int = 10        # Maximum network upload in MB
-    network_download_mb: int = 50      # Maximum network download in MB
-    network_connections: int = 5       # Maximum concurrent connections
+    # Network limits (tighter restrictions)
+    network_upload_mb: int = 5         # Maximum network upload in MB (reduced from 10MB)
+    network_download_mb: int = 25      # Maximum network download in MB (reduced from 50MB)
+    network_connections: int = 3       # Maximum concurrent connections (reduced from 5)
+    network_bandwidth_kbps: int = 1024 # Maximum network bandwidth in KB/s
+    network_timeout: float = 10.0      # Network operation timeout
     
-    # Process limits
-    max_processes: int = 10            # Maximum number of processes
-    max_threads: int = 20              # Maximum number of threads
-    max_file_descriptors: int = 100    # Maximum file descriptors
+    # Process limits (enhanced security)
+    max_processes: int = 5             # Maximum number of processes (reduced from 10)
+    max_threads: int = 10              # Maximum number of threads (reduced from 20)
+    max_file_descriptors: int = 50     # Maximum file descriptors (reduced from 100)
+    max_child_processes: int = 2       # Maximum child processes
+    process_priority: int = 19         # Lowest process priority (nice value)
     
-    # Time limits
-    execution_timeout: float = 60.0    # Maximum execution time in seconds
-    idle_timeout: float = 10.0         # Maximum idle time in seconds
+    # Time limits (stricter timeouts)
+    execution_timeout: float = 30.0    # Maximum execution time in seconds (reduced from 60s)
+    idle_timeout: float = 5.0          # Maximum idle time in seconds (reduced from 10s)
+    startup_timeout: float = 10.0      # Maximum startup time
+    cleanup_timeout: float = 5.0       # Maximum cleanup time
+    
+    # Enhanced security limits
+    syscall_whitelist: List[str] = None        # Allowed system calls (None = all allowed)
+    disable_network: bool = False              # Completely disable network access
+    read_only_filesystem: bool = False         # Mount filesystem as read-only
+    disable_ptrace: bool = True               # Disable process tracing
+    disable_core_dumps: bool = True           # Disable core dump generation
+    umask: int = 0o077                        # Restrictive file creation mask
+    
+    # Resource monitoring
+    monitor_interval: float = 0.5              # Monitoring check interval in seconds
+    violation_threshold: int = 3               # Violations before termination
+    resource_check_frequency: int = 10         # Resource checks per second
+    
+    # Emergency limits (triggered during security incidents)
+    emergency_mode: bool = False
+    emergency_cpu_percent: float = 10.0       # Emergency CPU limit
+    emergency_memory_mb: int = 128             # Emergency memory limit
+    emergency_timeout: float = 15.0            # Emergency execution timeout
 
 
 @dataclass
@@ -285,47 +316,176 @@ class ResourceMonitor:
                         error=str(e))
     
     async def _check_resources(self):
-        """Check current resource usage against limits"""
+        """Enhanced resource checking with strict enforcement"""
         try:
-            # Simulate resource checking (in production, use psutil or similar)
+            # Get current resource usage (in production, use psutil or similar)
             current_cpu = await self._get_cpu_usage()
             current_memory = await self._get_memory_usage()
             current_disk_read = await self._get_disk_read()
             current_disk_write = await self._get_disk_write()
             current_network = await self._get_network_usage()
+            current_processes = await self._get_process_count()
+            current_file_descriptors = await self._get_file_descriptor_count()
             
-            # Store usage data
+            # Store usage data for analysis
             self.usage_data["cpu"].append(current_cpu)
             self.usage_data["memory"].append(current_memory)
             self.usage_data["disk_read"].append(current_disk_read)
             self.usage_data["disk_write"].append(current_disk_write)
             self.usage_data["network"].append(current_network)
             
-            # Check limits
             limits = self.context.resource_limits
+            violations_detected = []
             
+            # Enhanced CPU monitoring with burst detection
             if current_cpu > limits.cpu_percent:
                 violation = f"CPU usage {current_cpu:.1f}% exceeds limit {limits.cpu_percent}%"
-                self.violations.append(violation)
-                logger.warning("Resource violation detected", violation=violation)
+                violations_detected.append(violation)
+                
+                # Check for sustained high CPU
+                recent_cpu = self.usage_data["cpu"][-10:] if len(self.usage_data["cpu"]) >= 10 else self.usage_data["cpu"]
+                if len(recent_cpu) >= 5 and all(cpu > limits.cpu_percent * 0.8 for cpu in recent_cpu):
+                    violations_detected.append("Sustained high CPU usage detected")
             
+            # Enhanced memory monitoring with kill threshold
             if current_memory > limits.memory_mb:
                 violation = f"Memory usage {current_memory:.1f}MB exceeds limit {limits.memory_mb}MB"
-                self.violations.append(violation)
-                logger.warning("Resource violation detected", violation=violation)
+                violations_detected.append(violation)
+                
+                # Emergency termination if approaching kill threshold
+                if current_memory > limits.memory_mb * limits.memory_kill_threshold:
+                    violations_detected.append(f"CRITICAL: Memory usage exceeds kill threshold")
+                    await self._emergency_resource_action("memory_kill_threshold")
             
-            # Check execution timeout
+            # Enhanced disk monitoring
+            total_disk_read = sum(self.usage_data["disk_read"])
+            total_disk_write = sum(self.usage_data["disk_write"])
+            
+            if total_disk_read > limits.disk_read_mb:
+                violations_detected.append(f"Total disk read {total_disk_read:.1f}MB exceeds limit {limits.disk_read_mb}MB")
+            
+            if total_disk_write > limits.disk_write_mb:
+                violations_detected.append(f"Total disk write {total_disk_write:.1f}MB exceeds limit {limits.disk_write_mb}MB")
+            
+            # Enhanced network monitoring
+            total_network = sum(self.usage_data["network"])
+            if total_network > limits.network_download_mb + limits.network_upload_mb:
+                violations_detected.append(f"Total network usage {total_network:.1f}MB exceeds limits")
+            
+            # Process and file descriptor limits
+            if current_processes > limits.max_processes:
+                violations_detected.append(f"Process count {current_processes} exceeds limit {limits.max_processes}")
+                await self._emergency_resource_action("process_limit")
+            
+            if current_file_descriptors > limits.max_file_descriptors:
+                violations_detected.append(f"File descriptor count {current_file_descriptors} exceeds limit {limits.max_file_descriptors}")
+            
+            # Enhanced timeout checking
             elapsed_time = time.time() - self.start_time
             if elapsed_time > limits.execution_timeout:
-                violation = f"Execution time {elapsed_time:.1f}s exceeds timeout {limits.execution_timeout}s"
-                self.violations.append(violation)
-                logger.warning("Timeout violation", violation=violation)
-                self.monitoring = False  # Stop monitoring on timeout
+                violations_detected.append(f"Execution time {elapsed_time:.1f}s exceeds timeout {limits.execution_timeout}s")
+                await self._emergency_resource_action("timeout")
+                self.monitoring = False
+            
+            # Check for idle timeout
+            if hasattr(self, 'last_activity_time'):
+                idle_time = time.time() - self.last_activity_time
+                if idle_time > limits.idle_timeout:
+                    violations_detected.append(f"Idle time {idle_time:.1f}s exceeds limit {limits.idle_timeout}s")
+                    await self._emergency_resource_action("idle_timeout")
+            
+            # Log violations and take action
+            if violations_detected:
+                self.violations.extend(violations_detected)
                 
+                for violation in violations_detected:
+                    logger.warning("Enhanced resource violation detected", 
+                                 sandbox_id=self.context.sandbox_id,
+                                 violation=violation)
+                
+                # Escalate if too many violations
+                if len(self.violations) >= limits.violation_threshold:
+                    logger.critical("Violation threshold exceeded - terminating sandbox",
+                                  sandbox_id=self.context.sandbox_id,
+                                  violation_count=len(self.violations))
+                    await self._emergency_resource_action("violation_threshold")
+                    self.monitoring = False
+            
+            # Update activity timestamp for idle detection
+            if current_cpu > 1.0 or current_memory > 10:  # Some activity detected
+                self.last_activity_time = time.time()
+            
         except Exception as e:
-            logger.error("Resource check failed",
+            logger.error("Enhanced resource check failed",
                         sandbox_id=self.context.sandbox_id,
                         error=str(e))
+    
+    async def _emergency_resource_action(self, violation_type: str) -> None:
+        """Take emergency action when critical resource violations occur"""
+        try:
+            logger.critical("Taking emergency resource action",
+                           sandbox_id=self.context.sandbox_id,
+                           violation_type=violation_type)
+            
+            # Send immediate signal to sandbox manager to terminate this sandbox
+            if hasattr(self.context, 'emergency_callback'):
+                await self.context.emergency_callback(self.context.sandbox_id, violation_type)
+            
+            # For memory violations, try to force garbage collection first
+            if violation_type == "memory_kill_threshold":
+                import gc
+                gc.collect()
+                
+                # If still over threshold after GC, terminate
+                current_memory = await self._get_memory_usage()
+                if current_memory > self.context.resource_limits.memory_mb * self.context.resource_limits.memory_kill_threshold:
+                    self.monitoring = False
+            
+            # For process violations, attempt to kill excess processes
+            elif violation_type == "process_limit":
+                await self._cleanup_excess_processes()
+            
+            # For timeout violations, immediate termination
+            elif violation_type in ["timeout", "idle_timeout", "violation_threshold"]:
+                self.monitoring = False
+            
+        except Exception as e:
+            logger.error("Emergency resource action failed",
+                        sandbox_id=self.context.sandbox_id,
+                        violation_type=violation_type,
+                        error=str(e))
+    
+    async def _cleanup_excess_processes(self) -> None:
+        """Attempt to clean up excess processes"""
+        try:
+            # In production, would use psutil to identify and terminate excess processes
+            logger.warning("Attempting to cleanup excess processes",
+                          sandbox_id=self.context.sandbox_id)
+            
+            # Placeholder for process cleanup logic
+            # In real implementation:
+            # 1. Identify processes spawned by this sandbox
+            # 2. Terminate non-essential processes first
+            # 3. Force kill if necessary
+            
+        except Exception as e:
+            logger.error("Process cleanup failed", error=str(e))
+    
+    async def _get_process_count(self) -> int:
+        """Get current process count for sandbox"""
+        try:
+            # Placeholder - in production use psutil or /proc
+            return 3  # Mock value
+        except Exception:
+            return 0
+    
+    async def _get_file_descriptor_count(self) -> int:
+        """Get current file descriptor count"""
+        try:
+            # Placeholder - in production check /proc/[pid]/fd
+            return 15  # Mock value  
+        except Exception:
+            return 0
     
     async def _get_cpu_usage(self) -> float:
         """Get current CPU usage percentage"""
@@ -403,6 +563,10 @@ class SandboxManager:
             "min_license_compliance": 0.8,
             "max_file_size_ratio": 2.0
         }
+        
+        # Enhanced security state
+        self.emergency_mode = False
+        self.blocked_patterns = set()
         
         # Initialize sandbox environment
         self._setup_sandbox()
@@ -505,11 +669,12 @@ class SandboxManager:
             if scan_result.risk_level in [SecurityRisk.HIGH, SecurityRisk.CRITICAL]:
                 await self._quarantine_content(content_path, scan_result)
                 
-                # Log critical risks (circuit breaker integration would go here)
+                # Log critical risks and trigger enhanced security measures
                 if scan_result.risk_level == SecurityRisk.CRITICAL:
                     print(f"🚨 CRITICAL SECURITY RISK: {scan_result.vulnerabilities_found}")
-                    # TODO: Integrate with circuit breaker when available
-                    # await circuit_breaker.trigger_breach("critical_security_risk", ...)
+                    await self._trigger_critical_security_response(scan_result)
+                    # Enhanced circuit breaker integration for critical risks
+                    await self._enforce_enhanced_resource_limits()
             
             print(f"🔍 Security scan completed: {scan_id}")
             print(f"   - Risk level: {scan_result.risk_level}")
@@ -896,6 +1061,176 @@ class SandboxManager:
             
         except Exception as e:
             print(f"❌ Failed to quarantine content: {e}")
+    
+    async def _trigger_critical_security_response(self, scan_result: SecurityScanResult) -> None:
+        """Trigger enhanced security response for critical threats"""
+        try:
+            logger.critical("Critical security threat detected - activating enhanced measures",
+                           scan_id=str(scan_result.scan_id),
+                           risk_level=scan_result.risk_level,
+                           vulnerabilities=scan_result.vulnerabilities_found[:3])  # Log first 3 for brevity
+            
+            # Activate emergency mode
+            self.emergency_mode = True
+            
+            # Immediately terminate all active tool sandboxes
+            for sandbox_id, context in list(self.active_tool_sandboxes.items()):
+                logger.warning("Terminating sandbox due to critical security threat",
+                             sandbox_id=sandbox_id,
+                             tool_id=context.tool_id)
+                await self._emergency_terminate_sandbox(sandbox_id)
+            
+            # Block similar content patterns
+            await self._add_content_block_patterns(scan_result)
+            
+            # Notify security monitoring systems
+            await self._notify_security_systems(scan_result)
+            
+            logger.info("Critical security response completed")
+            
+        except Exception as e:
+            logger.error("Failed to execute critical security response", error=str(e))
+    
+    async def _enforce_enhanced_resource_limits(self) -> None:
+        """Enforce enhanced resource limits across all active sandboxes"""
+        try:
+            logger.info("Enforcing enhanced resource limits due to security incident")
+            
+            # Apply emergency limits to all active sandboxes
+            for sandbox_id, context in self.active_tool_sandboxes.items():
+                # Update resource limits to emergency mode
+                context.resource_limits.emergency_mode = True
+                context.resource_limits.cpu_percent = min(
+                    context.resource_limits.cpu_percent,
+                    context.resource_limits.emergency_cpu_percent
+                )
+                context.resource_limits.memory_mb = min(
+                    context.resource_limits.memory_mb,
+                    context.resource_limits.emergency_memory_mb
+                )
+                context.resource_limits.execution_timeout = min(
+                    context.resource_limits.execution_timeout,
+                    context.resource_limits.emergency_timeout
+                )
+                
+                logger.debug("Applied emergency limits to sandbox",
+                           sandbox_id=sandbox_id,
+                           cpu_limit=context.resource_limits.cpu_percent,
+                           memory_limit=context.resource_limits.memory_mb)
+            
+            # Set global emergency state that affects new sandboxes
+            self.emergency_mode = True
+            
+        except Exception as e:
+            logger.error("Failed to enforce enhanced resource limits", error=str(e))
+    
+    async def _emergency_terminate_sandbox(self, sandbox_id: str) -> None:
+        """Emergency termination of a sandbox"""
+        try:
+            if sandbox_id in self.active_tool_sandboxes:
+                context = self.active_tool_sandboxes[sandbox_id]
+                
+                # Send termination signal
+                if hasattr(context, 'process') and context.process:
+                    try:
+                        context.process.terminate()
+                        # Give 2 seconds for graceful shutdown
+                        await asyncio.wait_for(context.process.wait(), timeout=2.0)
+                    except asyncio.TimeoutError:
+                        # Force kill if doesn't terminate gracefully
+                        context.process.kill()
+                        await context.process.wait()
+                
+                # Clean up resources
+                await self._cleanup_sandbox_resources(context)
+                
+                # Remove from active sandboxes
+                del self.active_tool_sandboxes[sandbox_id]
+                
+                logger.info("Emergency sandbox termination completed", sandbox_id=sandbox_id)
+            
+        except Exception as e:
+            logger.error("Emergency sandbox termination failed", 
+                        sandbox_id=sandbox_id, error=str(e))
+    
+    async def _add_content_block_patterns(self, scan_result: SecurityScanResult) -> None:
+        """Add blocking patterns for similar malicious content"""
+        try:
+            # Extract patterns from vulnerabilities for future blocking
+            block_patterns = []
+            for vuln in scan_result.vulnerabilities_found:
+                if "malware" in vuln.lower():
+                    block_patterns.append("malware_pattern")
+                elif "virus" in vuln.lower():
+                    block_patterns.append("virus_pattern")
+                elif "trojan" in vuln.lower():
+                    block_patterns.append("trojan_pattern")
+                elif "backdoor" in vuln.lower():
+                    block_patterns.append("backdoor_pattern")
+            
+            # Store patterns for future reference (would integrate with threat intelligence)
+            if not hasattr(self, 'blocked_patterns'):
+                self.blocked_patterns = set()
+            
+            self.blocked_patterns.update(block_patterns)
+            
+            logger.info("Added content blocking patterns", patterns=block_patterns)
+            
+        except Exception as e:
+            logger.error("Failed to add content block patterns", error=str(e))
+    
+    async def _notify_security_systems(self, scan_result: SecurityScanResult) -> None:
+        """Notify external security monitoring systems"""
+        try:
+            # Prepare security alert payload
+            alert_data = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "alert_type": "critical_security_threat",
+                "scan_id": str(scan_result.scan_id),
+                "risk_level": scan_result.risk_level,
+                "vulnerabilities": scan_result.vulnerabilities_found,
+                "system": "prsm_sandbox_manager",
+                "action_taken": "quarantine_and_emergency_response"
+            }
+            
+            # Log security alert (would also send to SIEM/monitoring systems)
+            logger.critical("SECURITY ALERT", **alert_data)
+            
+            # TODO: Integrate with external security systems
+            # await security_monitoring_client.send_alert(alert_data)
+            # await siem_client.log_security_incident(alert_data)
+            
+        except Exception as e:
+            logger.error("Failed to notify security systems", error=str(e))
+    
+    async def _cleanup_sandbox_resources(self, context) -> None:
+        """Clean up resources for a terminated sandbox"""
+        try:
+            # Clean up temporary files
+            if hasattr(context, 'temp_dir') and context.temp_dir and os.path.exists(context.temp_dir):
+                shutil.rmtree(context.temp_dir, ignore_errors=True)
+            
+            # Close file descriptors
+            if hasattr(context, 'file_descriptors'):
+                for fd in context.file_descriptors:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass  # Already closed
+            
+            # Clean up network connections
+            if hasattr(context, 'network_connections'):
+                for conn in context.network_connections:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass  # Already closed or invalid
+            
+            logger.debug("Sandbox resource cleanup completed", 
+                        sandbox_id=getattr(context, 'sandbox_id', 'unknown'))
+            
+        except Exception as e:
+            logger.error("Sandbox resource cleanup failed", error=str(e))
     
     async def _finalize_scan(self, scan_id: UUID, scan_result: SecurityScanResult) -> SecurityScanResult:
         """Finalize scan and update tracking"""
@@ -1365,27 +1700,65 @@ class SandboxManager:
             return ToolSandboxType.BASIC
     
     def _create_resource_limits(self, request: ToolExecutionRequest) -> ResourceLimits:
-        """Create resource limits based on tool execution request"""
-        # Base limits with security-level adjustments
-        base_limits = ResourceLimits()
+        """Create enhanced resource limits based on tool execution request and security level"""
+        # Start with base enhanced limits
+        limits = ResourceLimits()
         
+        # Apply security-level specific adjustments
         if request.sandbox_level == ToolSecurityLevel.SAFE:
-            # More generous limits for safe tools
-            base_limits.cpu_percent = 75.0
-            base_limits.memory_mb = 1024
-            base_limits.execution_timeout = min(request.timeout_seconds, 120.0)
+            # More generous limits for safe tools, but still secure
+            limits.cpu_percent = 40.0
+            limits.memory_mb = 512
+            limits.execution_timeout = min(request.timeout_seconds, 60.0)
+            limits.max_processes = 8
+            limits.network_connections = 5
+            limits.disk_read_mb = 100
+            limits.disk_write_mb = 50
+            
         elif request.sandbox_level == ToolSecurityLevel.RESTRICTED:
-            # Standard limits
-            base_limits.execution_timeout = min(request.timeout_seconds, 60.0)
-        else:
-            # Strict limits for privileged/dangerous tools
-            base_limits.cpu_percent = 25.0
-            base_limits.memory_mb = 256
-            base_limits.execution_timeout = min(request.timeout_seconds, 30.0)
-            base_limits.network_upload_mb = 5
-            base_limits.network_download_mb = 10
+            # Standard enhanced limits - use defaults from ResourceLimits class
+            limits.execution_timeout = min(request.timeout_seconds, 30.0)
+            
+        elif request.sandbox_level == ToolSecurityLevel.PRIVILEGED:
+            # Stricter limits for privileged operations
+            limits.cpu_percent = 20.0
+            limits.memory_mb = 128
+            limits.execution_timeout = min(request.timeout_seconds, 20.0)
+            limits.max_processes = 3
+            limits.max_threads = 5
+            limits.network_connections = 2
+            limits.network_upload_mb = 2
+            limits.network_download_mb = 10
+            limits.disable_ptrace = True
+            limits.read_only_filesystem = True
+            
+        else:  # DANGEROUS
+            # Maximum security restrictions for dangerous tools
+            limits.cpu_percent = 15.0
+            limits.memory_mb = 64
+            limits.execution_timeout = min(request.timeout_seconds, 15.0)
+            limits.max_processes = 2
+            limits.max_threads = 3
+            limits.network_connections = 1
+            limits.network_upload_mb = 1
+            limits.network_download_mb = 5
+            limits.disable_network = True
+            limits.read_only_filesystem = True
+            limits.disable_ptrace = True
+            limits.disable_core_dumps = True
+            limits.syscall_whitelist = [
+                "read", "write", "open", "close", "stat", "fstat", "lstat",
+                "access", "getcwd", "getpid", "exit", "exit_group"
+            ]
         
-        return base_limits
+        # Apply emergency mode restrictions if active
+        if hasattr(self, 'emergency_mode') and self.emergency_mode:
+            limits.emergency_mode = True
+            limits.cpu_percent = min(limits.cpu_percent, limits.emergency_cpu_percent)
+            limits.memory_mb = min(limits.memory_mb, limits.emergency_memory_mb)
+            limits.execution_timeout = min(limits.execution_timeout, limits.emergency_timeout)
+        
+        return limits
     
     def _create_security_permissions(self, request: ToolExecutionRequest) -> SecurityPermissions:
         """Create security permissions based on tool execution request"""

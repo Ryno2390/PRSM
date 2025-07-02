@@ -55,7 +55,7 @@ class FTNSContractDeployer:
                 }
             },
             "token": {
-                "name": "PRSM Federated Token Network System",
+                "name": "PRSM Fungible Tokens for Node Support",
                 "symbol": "FTNS",
                 "decimals": 18,
                 "initial_supply": 100_000_000,  # 100M tokens

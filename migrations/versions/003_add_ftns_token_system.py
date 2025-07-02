@@ -4,7 +4,7 @@ Revision ID: 003_add_ftns_token_system
 Revises: 002_add_auth_system
 Create Date: 2025-06-10 12:00:00.000000
 
-This migration adds the complete FTNS (Federated Token Network System) 
+This migration adds the complete FTNS (Fungible Tokens for Node Support) 
 database schema to support:
 
 - User wallet management with balance tracking

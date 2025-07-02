@@ -3,7 +3,7 @@ Database-Backed FTNS Service
 Production-ready token service replacing in-memory simulation
 
 This service provides a complete database-backed implementation of the FTNS
-(Federated Token Network System) that replaces the simulation-based approach
+(Fungible Tokens for Node Support) that replaces the simulation-based approach
 with persistent storage and real transaction processing.
 
 Key Features:

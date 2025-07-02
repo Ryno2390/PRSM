@@ -81,7 +81,7 @@ Deployer balance: 0.5 MATIC
    Implementation: 0xefgh5678...
 
 🔍 Verifying deployment...
-- Token: PRSM Federated Token Network System (FTNS) with 18 decimals
+- Token: PRSM Fungible Tokens for Node Support (FTNS) with 18 decimals
 - Total Supply: 100000000.0 FTNS
 - Deployer Balance: 100000000.0 FTNS
 

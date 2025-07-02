@@ -9,7 +9,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 /**
  * @title FTNSTokenSimple
- * @dev Simplified PRSM FTNS Token for initial deployment
+ * @dev Simplified PRSM Fungible Tokens for Node Support (FTNS) for initial deployment
  * 
  * Basic features:
  * - ERC20 token with minting capability
@@ -47,7 +47,7 @@ contract FTNSTokenSimple is
         address initialOwner,
         address treasuryAddress
     ) public initializer {
-        __ERC20_init("PRSM Federated Token Network System", "FTNS");
+        __ERC20_init("PRSM Fungible Tokens for Node Support", "FTNS");
         __AccessControl_init();
         __Pausable_init();
         __UUPSUpgradeable_init();

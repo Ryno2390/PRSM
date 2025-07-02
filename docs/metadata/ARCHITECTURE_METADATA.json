@@ -8,7 +8,7 @@
   },
   "system_components": {
     "core_orchestrator": {
-      "name": "NWTN (Neural Web for Transformation Networking)",
+      "name": "NWTN (Networked Weighted Task Nexus)",
       "implementation_files": [
         "prsm/nwtn/orchestrator.py",
         "prsm/nwtn/enhanced_orchestrator.py",

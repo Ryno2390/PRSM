@@ -3,7 +3,7 @@
 
 ## Executive Summary
 
-This document presents comprehensive economic validation for the PRSM (Production-Ready Semantic Marketplace) platform, demonstrating the financial viability and scalability of the FTNS (Federated Token Network System) marketplace model. Through rigorous economic simulation and real-world modeling, we validate the business case for Series A funding.
+This document presents comprehensive economic validation for the PRSM (Production-Ready Semantic Marketplace) platform, demonstrating the financial viability and scalability of the FTNS (Fungible Tokens for Node Support) marketplace model. Through rigorous economic simulation and real-world modeling, we validate the business case for Series A funding.
 
 ## Economic Model Overview
 

@@ -23,7 +23,7 @@ describe("FTNSToken", function () {
 
   describe("Deployment", function () {
     it("Should set the correct name and symbol", async function () {
-      expect(await ftnsToken.name()).to.equal("PRSM Federated Token Network System");
+      expect(await ftnsToken.name()).to.equal("PRSM Fungible Tokens for Node Support");
       expect(await ftnsToken.symbol()).to.equal("FTNS");
     });
 
