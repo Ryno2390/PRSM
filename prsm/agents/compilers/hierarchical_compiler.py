@@ -11,6 +11,7 @@ Advanced multi-level compilation with reasoning trace generation and intelligent
 """
 
 import asyncio
+import hashlib
 import json
 import time
 from datetime import datetime, timezone
@@ -27,6 +28,7 @@ from prsm.core.models import (
     AgentType, CompilerResult, AgentResponse, 
     TimestampMixin, TaskStatus, SafetyLevel
 )
+from prsm.core.redis_client import get_agent_plan_cache
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -384,7 +386,8 @@ class HierarchicalCompiler(BaseAgent):
                  default_strategy: SynthesisStrategy = SynthesisStrategy.COMPREHENSIVE,
                  enable_absolute_zero: bool = True,
                  enable_red_team_safety: bool = True,
-                 supported_languages: Optional[List[ProgrammingLanguage]] = None):
+                 supported_languages: Optional[List[ProgrammingLanguage]] = None,
+                 enable_plan_caching: bool = True):
         super().__init__(agent_id=agent_id, agent_type=AgentType.COMPILER)
         self.confidence_threshold = confidence_threshold
         self.default_strategy = default_strategy
@@ -392,6 +395,16 @@ class HierarchicalCompiler(BaseAgent):
         self.reasoning_trace: Optional[ReasoningTrace] = None
         self.compilation_history: List[CompilerResult] = []
         self.performance_metrics: Dict[str, List[float]] = {}
+        
+        # 🚀 PERFORMANCE OPTIMIZATION: Agent Plan Caching
+        self.enable_plan_caching = enable_plan_caching
+        if enable_plan_caching:
+            self.plan_cache = get_agent_plan_cache()
+            self.cache_hit_count = 0
+            self.cache_miss_count = 0
+            logger.info("Agent plan caching enabled", agent_id=self.agent_id)
+        else:
+            self.plan_cache = None
         
         # 🧠 ABSOLUTE ZERO CODE GENERATION ENGINE (Item 3.1)
         self.enable_absolute_zero = enable_absolute_zero
@@ -569,7 +582,7 @@ class HierarchicalCompiler(BaseAgent):
     async def compile_elemental(self, responses: List[Any], 
                                strategy: SynthesisStrategy = SynthesisStrategy.COMPREHENSIVE) -> IntermediateResult:
         """
-        Enhanced elemental compilation with intelligent synthesis
+        Enhanced elemental compilation with intelligent synthesis and caching
         
         Args:
             responses: AgentResponse objects or raw data from executors
@@ -584,6 +597,18 @@ class HierarchicalCompiler(BaseAgent):
                     agent_id=self.agent_id,
                     input_count=len(responses),
                     strategy=strategy.value)
+        
+        # 🚀 PERFORMANCE OPTIMIZATION: Check cache first
+        plan_hash = self._generate_compilation_hash(responses, strategy, CompilationLevel.ELEMENTAL)
+        cached_result = await self._check_cached_plan(plan_hash, CompilationLevel.ELEMENTAL)
+        
+        if cached_result:
+            logger.info("Using cached elemental compilation result",
+                       plan_hash=plan_hash,
+                       cache_hit_count=self.cache_hit_count)
+            
+            # Convert cached data back to IntermediateResult
+            return IntermediateResult(**cached_result)
         
         # Process and categorize responses
         agent_responses = []
@@ -668,6 +693,20 @@ class HierarchicalCompiler(BaseAgent):
         # Update reasoning trace
         self.reasoning_trace.compilation_path.append(f"Elemental compilation: {len(responses)} inputs processed")
         self.reasoning_trace.confidence_evolution.append(confidence_score)
+        
+        # 🚀 PERFORMANCE OPTIMIZATION: Cache the result for future use
+        cache_data = elemental_result.dict() if hasattr(elemental_result, 'dict') else elemental_result.__dict__
+        await self._store_compilation_plan(plan_hash, cache_data, CompilationLevel.ELEMENTAL)
+        
+        # Cache reasoning trace if high confidence
+        if confidence_score > 0.8:
+            reasoning_hash = hashlib.md5(f"{plan_hash}_reasoning".encode()).hexdigest()
+            reasoning_data = {
+                "steps": reasoning_steps,
+                "confidence_score": confidence_score,
+                "compilation_level": CompilationLevel.ELEMENTAL.value
+            }
+            await self._cache_reasoning_trace(reasoning_hash, reasoning_data)
         
         return elemental_result
     
@@ -907,12 +946,24 @@ class HierarchicalCompiler(BaseAgent):
     
     async def compile_mid_level(self, intermediate_results: List[IntermediateResult], 
                                strategy: SynthesisStrategy = SynthesisStrategy.COMPREHENSIVE) -> MidResult:
-        """Enhanced mid-level compilation"""
+        """Enhanced mid-level compilation with caching"""
         stage_start = time.time()
         
         logger.debug("Enhanced mid-level compilation",
                     agent_id=self.agent_id,
                     input_count=len(intermediate_results))
+        
+        # 🚀 PERFORMANCE OPTIMIZATION: Check cache first
+        plan_hash = self._generate_compilation_hash(intermediate_results, strategy, CompilationLevel.MID_LEVEL)
+        cached_result = await self._check_cached_plan(plan_hash, CompilationLevel.MID_LEVEL)
+        
+        if cached_result:
+            logger.info("Using cached mid-level compilation result",
+                       plan_hash=plan_hash,
+                       cache_hit_count=self.cache_hit_count)
+            
+            # Convert cached data back to MidResult
+            return MidResult(**cached_result)
         
         # Extract themes and insights
         themes = await self._extract_themes_enhanced(intermediate_results)
@@ -969,16 +1020,32 @@ class HierarchicalCompiler(BaseAgent):
         self.reasoning_trace.compilation_path.append(f"Mid-level compilation: {len(themes)} themes, {len(insights)} insights")
         self.reasoning_trace.confidence_evolution.append(confidence_score)
         
+        # 🚀 PERFORMANCE OPTIMIZATION: Cache the result for future use
+        cache_data = mid_result.dict() if hasattr(mid_result, 'dict') else mid_result.__dict__
+        await self._store_compilation_plan(plan_hash, cache_data, CompilationLevel.MID_LEVEL)
+        
         return mid_result
     
     async def compile_final(self, mid_results: List[MidResult], 
                            strategy: SynthesisStrategy = SynthesisStrategy.COMPREHENSIVE) -> FinalResponse:
-        """Enhanced final compilation"""
+        """Enhanced final compilation with caching"""
         stage_start = time.time()
         
         logger.debug("Enhanced final compilation",
                     agent_id=self.agent_id,
                     input_count=len(mid_results))
+        
+        # 🚀 PERFORMANCE OPTIMIZATION: Check cache first
+        plan_hash = self._generate_compilation_hash(mid_results, strategy, CompilationLevel.FINAL)
+        cached_result = await self._check_cached_plan(plan_hash, CompilationLevel.FINAL)
+        
+        if cached_result:
+            logger.info("Using cached final compilation result",
+                       plan_hash=plan_hash,
+                       cache_hit_count=self.cache_hit_count)
+            
+            # Convert cached data back to FinalResponse
+            return FinalResponse(**cached_result)
         
         # Generate comprehensive outputs
         executive_summary = await self._create_executive_summary(mid_results)
@@ -1036,6 +1103,23 @@ class HierarchicalCompiler(BaseAgent):
         # Update reasoning trace
         self.reasoning_trace.compilation_path.append(f"Final compilation: {len(key_findings)} findings, {len(recommendations)} recommendations")
         self.reasoning_trace.confidence_evolution.append(overall_confidence)
+        
+        # 🚀 PERFORMANCE OPTIMIZATION: Cache the result for future use
+        cache_data = final_response.dict() if hasattr(final_response, 'dict') else final_response.__dict__
+        await self._store_compilation_plan(plan_hash, cache_data, CompilationLevel.FINAL)
+        
+        # Cache high-quality synthesis strategies for reuse
+        if quality_score > 0.8:
+            strategy_hash = hashlib.md5(f"{strategy.value}_{quality_score}".encode()).hexdigest()
+            strategy_data = {
+                "strategy": strategy.value,
+                "quality_score": quality_score,
+                "confidence_score": overall_confidence,
+                "performance_score": quality_score * overall_confidence,
+                "input_count": len(mid_results),
+                "processing_time": time.time() - stage_start
+            }
+            await self._cache_synthesis_strategy(strategy_hash, strategy_data)
         
         return final_response
     
@@ -3177,6 +3261,233 @@ describe('Solution Tests', function() {{
     async def _determine_vulnerability_severity(self, vulnerability: SecurityVulnerability) -> SecurityThreatLevel:
         """Determine vulnerability severity"""
         return vulnerability.severity  # Already set, but can be enhanced
+    
+    # ===============================
+    # PERFORMANCE OPTIMIZATION: Agent Plan Caching Methods
+    # ===============================
+    
+    def _generate_compilation_hash(self, responses: List[Any], strategy: SynthesisStrategy, 
+                                 compilation_level: CompilationLevel) -> str:
+        """
+        Generate a unique hash for compilation inputs to enable caching
+        
+        Args:
+            responses: Input responses for compilation
+            strategy: Synthesis strategy being used
+            compilation_level: Level of compilation (elemental, mid, final)
+            
+        Returns:
+            Unique hash string for cache key generation
+        """
+        try:
+            # Create a deterministic hash based on inputs
+            hash_components = []
+            
+            # Add responses content
+            for response in responses:
+                if isinstance(response, AgentResponse):
+                    content = f"{response.content}_{response.confidence_score}_{response.agent_id}"
+                elif hasattr(response, 'content'):
+                    content = str(response.content)
+                else:
+                    content = str(response)
+                hash_components.append(content)
+            
+            # Add strategy and level
+            hash_components.extend([strategy.value, compilation_level.value])
+            
+            # Add agent configuration that affects compilation
+            hash_components.extend([
+                str(self.confidence_threshold),
+                str(self.enable_absolute_zero),
+                str(self.enable_red_team_safety)
+            ])
+            
+            # Create hash
+            combined_content = "|".join(hash_components)
+            return hashlib.md5(combined_content.encode()).hexdigest()
+            
+        except Exception as e:
+            logger.error("Failed to generate compilation hash", error=str(e))
+            return f"fallback_{int(time.time())}"
+    
+    async def _check_cached_plan(self, plan_hash: str, compilation_level: CompilationLevel) -> Optional[Dict[str, Any]]:
+        """
+        Check if a compilation plan exists in cache
+        
+        Args:
+            plan_hash: Hash of the compilation inputs
+            compilation_level: Level of compilation being attempted
+            
+        Returns:
+            Cached plan data or None if not found
+        """
+        if not self.enable_plan_caching or not self.plan_cache:
+            return None
+        
+        try:
+            # Check for cached compilation plan
+            cached_plan = await self.plan_cache.get_compilation_plan(plan_hash)
+            
+            if cached_plan:
+                self.cache_hit_count += 1
+                logger.debug("Compilation plan cache hit",
+                           plan_hash=plan_hash,
+                           compilation_level=compilation_level.value,
+                           hit_count=self.cache_hit_count)
+                
+                # Update performance metrics
+                self.performance_metrics.setdefault("cache_hits", []).append(time.time())
+                
+                return cached_plan
+            else:
+                self.cache_miss_count += 1
+                logger.debug("Compilation plan cache miss",
+                           plan_hash=plan_hash,
+                           compilation_level=compilation_level.value,
+                           miss_count=self.cache_miss_count)
+                
+                # Update performance metrics
+                self.performance_metrics.setdefault("cache_misses", []).append(time.time())
+                
+                return None
+                
+        except Exception as e:
+            logger.error("Error checking cached plan", error=str(e))
+            return None
+    
+    async def _store_compilation_plan(self, plan_hash: str, plan_data: Dict[str, Any], 
+                                    compilation_level: CompilationLevel) -> bool:
+        """
+        Store a compilation plan in cache for future reuse
+        
+        Args:
+            plan_hash: Hash of the compilation inputs
+            plan_data: Complete compilation result to cache
+            compilation_level: Level of compilation
+            
+        Returns:
+            True if successfully cached, False otherwise
+        """
+        if not self.enable_plan_caching or not self.plan_cache:
+            return False
+        
+        try:
+            # Add metadata for cache optimization
+            enhanced_plan_data = {
+                **plan_data,
+                "compilation_level": compilation_level.value,
+                "agent_id": self.agent_id,
+                "cached_timestamp": datetime.now(timezone.utc).isoformat(),
+                "cache_version": "1.0"
+            }
+            
+            success = await self.plan_cache.store_compilation_plan(plan_hash, enhanced_plan_data)
+            
+            if success:
+                logger.debug("Compilation plan cached successfully",
+                           plan_hash=plan_hash,
+                           compilation_level=compilation_level.value,
+                           plan_size=len(str(plan_data)))
+                
+                # Update performance metrics
+                self.performance_metrics.setdefault("plans_cached", []).append(time.time())
+            
+            return success
+            
+        except Exception as e:
+            logger.error("Error storing compilation plan", error=str(e))
+            return False
+    
+    async def _cache_synthesis_strategy(self, strategy_hash: str, strategy_data: Dict[str, Any]) -> bool:
+        """Cache an effective synthesis strategy for reuse"""
+        if not self.enable_plan_caching or not self.plan_cache:
+            return False
+        
+        try:
+            return await self.plan_cache.store_synthesis_strategy(strategy_hash, strategy_data)
+        except Exception as e:
+            logger.error("Error caching synthesis strategy", error=str(e))
+            return False
+    
+    async def _get_cached_synthesis_strategy(self, strategy_hash: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a cached synthesis strategy"""
+        if not self.enable_plan_caching or not self.plan_cache:
+            return None
+        
+        try:
+            return await self.plan_cache.get_synthesis_strategy(strategy_hash)
+        except Exception as e:
+            logger.error("Error retrieving cached synthesis strategy", error=str(e))
+            return None
+    
+    async def _cache_reasoning_trace(self, trace_hash: str, reasoning_data: Dict[str, Any]) -> bool:
+        """Cache reasoning traces for optimization"""
+        if not self.enable_plan_caching or not self.plan_cache:
+            return False
+        
+        try:
+            return await self.plan_cache.store_reasoning_trace(trace_hash, reasoning_data)
+        except Exception as e:
+            logger.error("Error caching reasoning trace", error=str(e))
+            return False
+    
+    async def _get_cached_reasoning_trace(self, trace_hash: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a cached reasoning trace"""
+        if not self.enable_plan_caching or not self.plan_cache:
+            return None
+        
+        try:
+            return await self.plan_cache.get_reasoning_trace(trace_hash)
+        except Exception as e:
+            logger.error("Error retrieving cached reasoning trace", error=str(e))
+            return None
+    
+    async def get_cache_performance_stats(self) -> Dict[str, Any]:
+        """
+        Get comprehensive cache performance statistics for this compiler instance
+        
+        Returns:
+            Dictionary containing cache performance metrics
+        """
+        try:
+            base_stats = {
+                "cache_enabled": self.enable_plan_caching,
+                "cache_hits": self.cache_hit_count,
+                "cache_misses": self.cache_miss_count,
+                "hit_rate": self.cache_hit_count / (self.cache_hit_count + self.cache_miss_count) if (self.cache_hit_count + self.cache_miss_count) > 0 else 0.0,
+                "total_requests": self.cache_hit_count + self.cache_miss_count
+            }
+            
+            if self.enable_plan_caching and self.plan_cache:
+                # Get global cache statistics
+                global_stats = await self.plan_cache.get_cache_statistics()
+                base_stats["global_cache_stats"] = global_stats
+            
+            return base_stats
+            
+        except Exception as e:
+            logger.error("Error retrieving cache performance stats", error=str(e))
+            return {"error": str(e)}
+    
+    async def invalidate_cache_by_pattern(self, pattern_type: str) -> int:
+        """
+        Invalidate cached plans matching a specific pattern
+        
+        Args:
+            pattern_type: Type of pattern to invalidate
+            
+        Returns:
+            Number of cache entries invalidated
+        """
+        if not self.enable_plan_caching or not self.plan_cache:
+            return 0
+        
+        try:
+            return await self.plan_cache.invalidate_pattern(pattern_type)
+        except Exception as e:
+            logger.error("Error invalidating cache pattern", error=str(e))
+            return 0
 
 
 # Factory function
@@ -3184,7 +3495,8 @@ def create_compiler(
     confidence_threshold: float = 0.8,
     enable_absolute_zero: bool = True,
     enable_red_team_safety: bool = True,
-    supported_languages: Optional[List[ProgrammingLanguage]] = None
+    supported_languages: Optional[List[ProgrammingLanguage]] = None,
+    enable_plan_caching: bool = True
 ) -> HierarchicalCompiler:
     """
     Create a hierarchical compiler agent with optional Absolute Zero and Red Team safety
@@ -3194,15 +3506,17 @@ def create_compiler(
         enable_absolute_zero: Enable Absolute Zero code generation capabilities
         enable_red_team_safety: Enable Red Team code safety validation
         supported_languages: List of programming languages to support
+        enable_plan_caching: Enable agent plan caching for performance optimization
         
     Returns:
-        HierarchicalCompiler: Enhanced compiler with Absolute Zero and Red Team capabilities
+        HierarchicalCompiler: Enhanced compiler with Absolute Zero, Red Team, and caching capabilities
     """
     return HierarchicalCompiler(
         confidence_threshold=confidence_threshold,
         enable_absolute_zero=enable_absolute_zero,
         enable_red_team_safety=enable_red_team_safety,
-        supported_languages=supported_languages
+        supported_languages=supported_languages,
+        enable_plan_caching=enable_plan_caching
     )
 
 

@@ -61,7 +61,7 @@ const CONFIG = {
   MUMBAI_RPC: process.env.POLYGON_MUMBAI_RPC_URL || 'https://rpc-mumbai.maticvigil.com',
   PRIVATE_KEY: process.env.PRIVATE_KEY,
   INITIAL_SUPPLY: '100000000000000000000000000', // 100M tokens with 18 decimals
-  TOKEN_NAME: 'PRSM Federated Token Network System',
+  TOKEN_NAME: 'PRSM Fungible Tokens for Node Support',
   TOKEN_SYMBOL: 'FTNS'
 };
 

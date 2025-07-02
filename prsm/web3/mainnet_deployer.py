@@ -414,11 +414,11 @@ class MainnetDeployer:
         """Load contract configuration for deployment"""
         return {
             "ftns_token": {
-                "name": "PRSM Federated Token Network System",
+                "name": "PRSM Fungible Tokens for Node Support",
                 "symbol": "FTNS",
                 "decimals": 18,
                 "initial_supply": 100_000_000,  # 100M tokens
-                "constructor_args": ["PRSM Federated Token Network System", "FTNS", 18]
+                "constructor_args": ["PRSM Fungible Tokens for Node Support", "FTNS", 18]
             },
             "marketplace": {
                 "name": "FTNS Marketplace",
