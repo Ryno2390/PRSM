@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: milvus-standalone
+  namespace: prsm-production
+  labels:
+    app: milvus
+    component: standalone
+    environment: production
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: milvus
+      component: standalone
+  template:
+    metadata:
+      labels:
+        app: milvus
+        component: standalone
+        environment: production
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: milvus
+        image: milvusdb/milvus:v2.3.4
+        imagePullPolicy: IfNotPresent
+        args:
+        - milvus
+        - run
+        - standalone
+        ports:
+        - name: milvus
+          containerPort: 19530
+          protocol: TCP
+        - name: metrics
+          containerPort: 9091
+          protocol: TCP
+        env:
+        - name: ETCD_ENDPOINTS
+          value: "milvus-etcd:2379"
+        - name: MINIO_ADDRESS
+          value: "milvus-minio:9000"
+        - name: PULSAR_ADDRESS
+          value: "pulsar://milvus-pulsar:6650"
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 4Gi
+          limits:
+            cpu: 4000m
+            memory: 16Gi
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 9091
+          initialDelaySeconds: 90
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 5
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 9091
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: milvus-config
+          mountPath: /milvus/configs
+        - name: milvus-data
+          mountPath: /var/lib/milvus
+      volumes:
+      - name: milvus-config
+        configMap:
+          name: milvus-config
+      - name: milvus-data
+        persistentVolumeClaim:
+          claimName: milvus-data
+      terminationGracePeriodSeconds: 60

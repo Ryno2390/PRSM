@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prsm-config
+  namespace: prsm-production
+  labels:
+    app: prsm
+    environment: production
+data:
+  # Application configuration
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  API_PORT: "8000"
+  METRICS_PORT: "8080"
+  
+  # Service discovery
+  CONSENSUS_SERVICE: "prsm-consensus.prsm-production.svc.cluster.local"
+  FEDERATION_SERVICE: "prsm-federation.prsm-production.svc.cluster.local"
+  MARKETPLACE_SERVICE: "prsm-marketplace.prsm-production.svc.cluster.local"
+  
+  # Networking configuration
+  P2P_PORT: "8001"
+  CONSENSUS_PORT: "8002"
+  FEDERATION_PORT: "8003"
+  MARKETPLACE_PORT: "8004"
+  
+  # Performance settings
+  MAX_WORKERS: "4"
+  REQUEST_TIMEOUT: "30"
+  CONNECTION_POOL_SIZE: "20"
+  
+  # Feature flags
+  ENABLE_METRICS: "true"
+  ENABLE_HEALTH_CHECKS: "true"
+  ENABLE_RATE_LIMITING: "true"
+  ENABLE_INPUT_SANITIZATION: "true"
+  
+  # Security settings
+  SECURITY_SCAN_ENABLED: "true"
+  RBAC_ENABLED: "true"
+  MFA_REQUIRED: "true"

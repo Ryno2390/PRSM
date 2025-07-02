@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prsm-consensus-data
+  namespace: prsm-production
+  labels:
+    app: prsm-consensus
+    component: consensus
+    environment: production
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3-encrypted
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prsm-federation-data
+  namespace: prsm-production
+  labels:
+    app: prsm-federation
+    component: federation
+    environment: production
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3-encrypted
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: milvus-data
+  namespace: prsm-production
+  labels:
+    app: milvus
+    component: standalone
+    environment: production
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3-encrypted
+  resources:
+    requests:
+      storage: 200Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: milvus-etcd-data
+  namespace: prsm-production
+  labels:
+    app: milvus-etcd
+    component: etcd
+    environment: production
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3-encrypted
+  resources:
+    requests:
+      storage: 10Gi
