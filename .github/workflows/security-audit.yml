@@ -1,0 +1,257 @@
+name: 🔒 Security Audit
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run weekly security audit on Mondays at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      fail_on_vulnerabilities:
+        description: 'Fail the build if vulnerabilities are found'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  python-security-audit:
+    name: 🐍 Python Security Audit
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 🏗️ Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: 🐍 Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: 📦 Install pip-audit
+      run: |
+        python -m pip install --upgrade pip
+        pip install pip-audit
+        
+    - name: 🔍 Run pip-audit
+      id: pip-audit
+      run: |
+        # Run pip-audit and capture results
+        pip-audit -r requirements.txt --format=json --output=security-audit-results.json || true
+        
+        # Run our custom security audit script
+        python scripts/security-audit.py --output=security-audit-detailed.json --json-only > security-summary.json
+        
+        # Extract vulnerability count for decision making
+        VULN_COUNT=$(python -c "import json; data=json.load(open('security-summary.json')); print(data['summary']['total_vulnerabilities'])")
+        echo "vulnerability_count=$VULN_COUNT" >> $GITHUB_OUTPUT
+        
+        # Set build failure condition
+        SHOULD_FAIL="${{ github.event.inputs.fail_on_vulnerabilities || 'false' }}"
+        if [[ "$SHOULD_FAIL" == "true" && "$VULN_COUNT" -gt 0 ]]; then
+          echo "Build will fail due to $VULN_COUNT vulnerabilities"
+          echo "should_fail=true" >> $GITHUB_OUTPUT
+        else
+          echo "should_fail=false" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: 📊 Generate Security Report
+      run: |
+        echo "# 🔒 Security Audit Results" > security-report.md
+        echo "" >> security-report.md
+        echo "**Audit Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> security-report.md
+        echo "**Repository:** ${{ github.repository }}" >> security-report.md
+        echo "**Branch:** ${{ github.ref_name }}" >> security-report.md
+        echo "**Commit:** ${{ github.sha }}" >> security-report.md
+        echo "" >> security-report.md
+        
+        # Add vulnerability summary
+        VULN_COUNT="${{ steps.pip-audit.outputs.vulnerability_count }}"
+        if [[ "$VULN_COUNT" -eq 0 ]]; then
+          echo "✅ **Status: CLEAN** - No known vulnerabilities detected" >> security-report.md
+        else
+          echo "⚠️ **Status: VULNERABILITIES FOUND** - $VULN_COUNT vulnerabilities detected" >> security-report.md
+        fi
+        
+        echo "" >> security-report.md
+        echo "## Detailed Results" >> security-report.md
+        echo "" >> security-report.md
+        echo "\`\`\`json" >> security-report.md
+        cat security-summary.json >> security-report.md
+        echo "\`\`\`" >> security-report.md
+        
+    - name: 📋 Upload Security Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-audit-results
+        path: |
+          security-audit-results.json
+          security-audit-detailed.json
+          security-summary.json
+          security-report.md
+        retention-days: 90
+        
+    - name: 💬 Comment on PR (if applicable)
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          
+          // Read the security report
+          const report = fs.readFileSync('security-report.md', 'utf8');
+          const vulnCount = ${{ steps.pip-audit.outputs.vulnerability_count }};
+          
+          // Create or update comment
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          
+          const botComment = comments.find(comment => 
+            comment.user.type === 'Bot' && comment.body.includes('🔒 Security Audit Results')
+          );
+          
+          const commentBody = report + '\n\n---\n*This comment is automatically updated on every push*';
+          
+          if (botComment) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: botComment.id,
+              body: commentBody
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: commentBody
+            });
+          }
+          
+    - name: 🛡️ Upload to GitHub Security Advisory (if supported)
+      if: steps.pip-audit.outputs.vulnerability_count > 0
+      run: |
+        echo "Security vulnerabilities detected. Consider creating a security advisory if needed."
+        echo "Manual review recommended for: https://github.com/${{ github.repository }}/security/advisories"
+        
+    - name: ❌ Fail build if vulnerabilities found (conditional)
+      if: steps.pip-audit.outputs.should_fail == 'true'
+      run: |
+        echo "❌ Build failed due to ${{ steps.pip-audit.outputs.vulnerability_count }} security vulnerabilities"
+        echo "Review the security audit results and address vulnerabilities before proceeding"
+        exit 1
+
+  javascript-security-audit:
+    name: 📦 JavaScript Security Audit
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' # Skip JS audit on scheduled runs unless needed
+    
+    steps:
+    - name: 🏗️ Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: 📦 Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: 🔍 Check for package.json
+      id: check-package
+      run: |
+        if [ -f "package.json" ]; then
+          echo "has_package_json=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_package_json=false" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: 📦 Install dependencies
+      if: steps.check-package.outputs.has_package_json == 'true'
+      run: npm ci
+      
+    - name: 🔍 Run npm audit
+      if: steps.check-package.outputs.has_package_json == 'true'
+      run: |
+        # Run npm audit and save results
+        npm audit --audit-level=moderate --json > npm-audit-results.json || true
+        
+        # Generate human-readable report
+        echo "# 📦 JavaScript Security Audit" > js-security-report.md
+        echo "" >> js-security-report.md
+        echo "**Audit Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> js-security-report.md
+        echo "" >> js-security-report.md
+        
+        # Check if there are vulnerabilities
+        VULN_COUNT=$(cat npm-audit-results.json | jq '.metadata.vulnerabilities.total // 0')
+        
+        if [[ "$VULN_COUNT" -eq 0 ]]; then
+          echo "✅ **Status: CLEAN** - No known vulnerabilities in JavaScript dependencies" >> js-security-report.md
+        else
+          echo "⚠️ **Status: VULNERABILITIES FOUND** - $VULN_COUNT vulnerabilities detected" >> js-security-report.md
+          echo "" >> js-security-report.md
+          echo "Run \`npm audit fix\` to automatically fix issues where possible." >> js-security-report.md
+        fi
+        
+    - name: 📋 Upload JavaScript Security Artifacts
+      if: steps.check-package.outputs.has_package_json == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: javascript-security-audit-results
+        path: |
+          npm-audit-results.json
+          js-security-report.md
+        retention-days: 90
+
+  security-summary:
+    name: 📊 Security Summary
+    runs-on: ubuntu-latest
+    needs: [python-security-audit, javascript-security-audit]
+    if: always()
+    
+    steps:
+    - name: 📋 Download all artifacts
+      uses: actions/download-artifact@v4
+      
+    - name: 📊 Generate Combined Security Summary
+      run: |
+        echo "# 🔒 Combined Security Audit Summary" > combined-security-summary.md
+        echo "" >> combined-security-summary.md
+        echo "**Repository:** ${{ github.repository }}" >> combined-security-summary.md
+        echo "**Workflow:** ${{ github.workflow }}" >> combined-security-summary.md
+        echo "**Run ID:** ${{ github.run_id }}" >> combined-security-summary.md
+        echo "**Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> combined-security-summary.md
+        echo "" >> combined-security-summary.md
+        
+        echo "## 🐍 Python Dependencies" >> combined-security-summary.md
+        if [ -f "security-audit-results/security-report.md" ]; then
+          cat security-audit-results/security-report.md >> combined-security-summary.md
+        else
+          echo "❌ Python security audit failed or not run" >> combined-security-summary.md
+        fi
+        
+        echo "" >> combined-security-summary.md
+        echo "## 📦 JavaScript Dependencies" >> combined-security-summary.md
+        if [ -f "javascript-security-audit-results/js-security-report.md" ]; then
+          cat javascript-security-audit-results/js-security-report.md >> combined-security-summary.md
+        else
+          echo "ℹ️ No JavaScript dependencies found or audit skipped" >> combined-security-summary.md
+        fi
+        
+        echo "" >> combined-security-summary.md
+        echo "---" >> combined-security-summary.md
+        echo "*This summary combines results from all security audits*" >> combined-security-summary.md
+        
+    - name: 📋 Upload Combined Summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: combined-security-summary
+        path: combined-security-summary.md
+        retention-days: 90
