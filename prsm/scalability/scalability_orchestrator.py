@@ -19,14 +19,14 @@ import statistics
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-import logging
+import structlog
 
 from .intelligent_router import IntelligentRouter
 from .cpu_optimizer import CPUOptimizer
 from .auto_scaler import AutoScaler
 from .advanced_cache import CacheManager
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @dataclass

@@ -11,7 +11,6 @@ line-by-line validation, and parallel exploration of reasoning paths.
 import ast
 import asyncio
 import copy
-import logging
 import sys
 import time
 import traceback
@@ -27,10 +26,10 @@ import subprocess
 import tempfile
 import os
 import re
+import structlog
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Setup structured logging
+logger = structlog.get_logger(__name__)
 
 
 class SecurityError(Exception):
@@ -274,7 +273,7 @@ class SafeExecutionEnvironment:
         
         for pattern in dangerous_patterns:
             if re.search(pattern, code, re.IGNORECASE):
-                logger.warning(f"Blocked potentially dangerous code pattern: {pattern}")
+                logger.warning("Blocked potentially dangerous code pattern", pattern=pattern, code_preview=code[:50])
                 return False
         
         # Additional AST-based validation
@@ -322,7 +321,7 @@ class ExecutionGuidedCodeRunner:
         self.generation_history: List[CodeCandidate] = []
         self.execution_feedback: List[ExecutionTrace] = []
         
-        logger.info("🚀 Initialized Execution-Guided Code Runner with EG-CFG")
+        logger.info("Initialized Execution-Guided Code Runner with EG-CFG", methodology="EG-CFG")
     
     async def generate_and_execute_code(self, 
                                        prompt: str, 
@@ -331,7 +330,7 @@ class ExecutionGuidedCodeRunner:
         Generate code using execution-guided approach
         Implements the core EG-CFG methodology
         """
-        logger.info("🔄 Starting execution-guided code generation")
+        logger.info("Starting execution-guided code generation", methodology="EG-CFG")
         
         start_time = time.time()
         context = context or {}
@@ -371,7 +370,7 @@ class ExecutionGuidedCodeRunner:
             "final_score": final_candidate.total_score
         }
         
-        logger.info(f"✅ Code generation completed in {total_time:.2f}s")
+        logger.info("Code generation completed", total_time=total_time, methodology="EG-CFG")
         return result
     
     async def _generate_line_candidates(self, 
@@ -569,7 +568,7 @@ class ExecutionGuidedCodeRunner:
         best_idx = final_scores.index(max(final_scores))
         best_candidate = candidates[best_idx]
         
-        logger.info(f"🎯 Selected candidate {best_candidate.candidate_id} with CFG score: {final_scores[best_idx]:.2f}")
+        logger.info("Selected candidate with CFG score", candidate_id=best_candidate.candidate_id, cfg_score=final_scores[best_idx])
         
         return best_candidate
     
@@ -712,7 +711,7 @@ class EGCFGAgent:
         prompt = task.get('prompt', '')
         context = task.get('context', {})
         
-        logger.info(f"🤖 EG-CFG Agent processing coding task")
+        logger.info("EG-CFG Agent processing coding task", agent_id=self.agent_id)
         
         result = await self.code_runner.generate_and_execute_code(prompt, context)
         
