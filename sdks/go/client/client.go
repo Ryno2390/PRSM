@@ -12,9 +12,13 @@ import (
 
 	"github.com/PRSM-AI/prsm-go-sdk/auth"
 	"github.com/PRSM-AI/prsm-go-sdk/ftns"
+	"github.com/PRSM-AI/prsm-go-sdk/governance"
 	"github.com/PRSM-AI/prsm-go-sdk/marketplace"
+	"github.com/PRSM-AI/prsm-go-sdk/nwtn"
+	"github.com/PRSM-AI/prsm-go-sdk/seal"
 	"github.com/PRSM-AI/prsm-go-sdk/tools"
 	"github.com/PRSM-AI/prsm-go-sdk/types"
+	"github.com/PRSM-AI/prsm-go-sdk/websocket"
 	"github.com/pkg/errors"
 	"golang.org/x/time/rate"
 )
@@ -27,12 +31,17 @@ type Client struct {
 	maxRetries   int
 	httpClient   *http.Client
 	rateLimiter  *rate.Limiter
+	debug        bool
 
-	// Managers
+	// API Managers
 	Auth        *auth.Manager
 	FTNS        *ftns.Manager
 	Marketplace *marketplace.Manager
 	Tools       *tools.Executor
+	NWTN        *nwtn.Manager
+	SEAL        *seal.Manager
+	Governance  *governance.Manager
+	WebSocket   *websocket.Manager
 }
 
 // Config holds configuration for the PRSM client
@@ -43,6 +52,8 @@ type Config struct {
 	Timeout      time.Duration
 	MaxRetries   int
 	RateLimit    rate.Limit // requests per second
+	Debug        bool
+	Headers      map[string]string
 }
 
 // DefaultConfig returns a default configuration
@@ -76,6 +87,7 @@ func NewWithConfig(config *Config) *Client {
 		maxRetries:   config.MaxRetries,
 		httpClient:   httpClient,
 		rateLimiter:  rate.NewLimiter(config.RateLimit, 1),
+		debug:        config.Debug,
 	}
 
 	// Initialize managers
@@ -83,6 +95,22 @@ func NewWithConfig(config *Config) *Client {
 	client.FTNS = ftns.New(client)
 	client.Marketplace = marketplace.New(client)
 	client.Tools = tools.New(client)
+	client.NWTN = nwtn.New(client)
+	client.SEAL = seal.New(client)
+	client.Governance = governance.New(client)
+
+	// Initialize WebSocket manager
+	wsConfig := &websocket.Config{
+		URL:                  config.WebSocketURL,
+		GetAuthHeaders:       client.getAuthHeaders,
+		AutoReconnect:        true,
+		ReconnectInterval:    5 * time.Second,
+		MaxReconnectAttempts: 10,
+		ConnectionTimeout:    30 * time.Second,
+		HeartbeatInterval:    30 * time.Second,
+		Debug:                config.Debug,
+	}
+	client.WebSocket = websocket.New(wsConfig)
 
 	return client
 }
@@ -262,4 +290,150 @@ func (c *Client) makeRequest(ctx context.Context, method, endpoint string, reqBo
 	}
 
 	return lastErr
+}
+
+// MakeRequest implements the HTTPClient interface for managers
+func (c *Client) MakeRequest(ctx context.Context, method, endpoint string, reqBody interface{}, respBody interface{}) error {
+	return c.makeRequest(ctx, method, endpoint, reqBody, respBody)
+}
+
+// getAuthHeaders returns authentication headers for WebSocket
+func (c *Client) getAuthHeaders() (map[string]string, error) {
+	return c.Auth.GetHeaders()
+}
+
+// Initialize establishes initial connections and validates configuration
+func (c *Client) Initialize(ctx context.Context) error {
+	if c.debug {
+		fmt.Println("[PRSM Client] Initializing client")
+	}
+
+	// Test API connectivity
+	_, err := c.HealthCheck(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to connect to PRSM API")
+	}
+
+	// Connect WebSocket if authenticated
+	if c.Auth.IsAuthenticated() {
+		if err := c.WebSocket.Connect(ctx); err != nil {
+			// Don't fail initialization if WebSocket fails
+			if c.debug {
+				fmt.Printf("[PRSM Client] WebSocket connection failed: %v\n", err)
+			}
+		}
+	}
+
+	if c.debug {
+		fmt.Println("[PRSM Client] Client initialized successfully")
+	}
+
+	return nil
+}
+
+// Destroy cleans up resources and closes connections
+func (c *Client) Destroy() error {
+	if c.debug {
+		fmt.Println("[PRSM Client] Destroying client")
+	}
+
+	// Disconnect WebSocket
+	if err := c.WebSocket.Disconnect(); err != nil {
+		if c.debug {
+			fmt.Printf("[PRSM Client] WebSocket disconnect error: %v\n", err)
+		}
+	}
+
+	if c.debug {
+		fmt.Println("[PRSM Client] Client destroyed successfully")
+	}
+
+	return nil
+}
+
+// GetStatus returns client status and statistics
+func (c *Client) GetStatus() map[string]interface{} {
+	ftnsBalance, _ := c.FTNS.GetBalance(context.Background())
+	
+	status := map[string]interface{}{
+		"is_authenticated":         c.Auth.IsAuthenticated(),
+		"is_websocket_connected":   c.WebSocket.IsConnected(),
+		"base_url":                c.baseURL,
+		"websocket_url":           c.websocketURL,
+		"ftns_balance":            nil,
+		"websocket_stats":         c.WebSocket.GetStats(),
+	}
+
+	if ftnsBalance != nil {
+		status["ftns_balance"] = ftnsBalance.TotalBalance
+	}
+
+	return status
+}
+
+// QuickQuery provides a simplified interface for basic queries
+func (c *Client) QuickQuery(ctx context.Context, query string, options *QuickQueryOptions) (*types.PRSMResponse, error) {
+	if options == nil {
+		options = &QuickQueryOptions{}
+	}
+
+	// Set defaults
+	if options.MaxIterations == 0 {
+		options.MaxIterations = 3
+	}
+
+	// Submit NWTN query
+	nwtnReq := &nwtn.QueryRequest{
+		Query:            query,
+		Domain:           options.Domain,
+		MaxIterations:    options.MaxIterations,
+		IncludeCitations: options.IncludeCitations,
+		SEALEnhancement: &nwtn.SEALConfig{
+			Enabled:              true,
+			AutonomousImprovement: true,
+			TargetLearningGain:   0.15,
+			RestemMethodology:    true,
+		},
+	}
+
+	session, err := c.NWTN.SubmitQuery(ctx, nwtnReq)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to submit NWTN query")
+	}
+
+	// Wait for completion
+	completed, err := c.NWTN.WaitForCompletion(ctx, session.SessionID, &nwtn.WaitForCompletionOptions{
+		TimeoutDuration: 10 * time.Minute,
+		PollInterval:    5 * time.Second,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to wait for completion")
+	}
+
+	if completed.Results == nil {
+		return nil, errors.New("session completed without results")
+	}
+
+	// Convert to standard response format
+	response := &types.PRSMResponse{
+		Content:       completed.Results.Summary,
+		ModelID:       "nwtn-ensemble",
+		Provider:      types.ModelProviderPRSMDistilled,
+		ExecutionTime: float64(time.Since(completed.CreatedAt).Milliseconds()),
+		TokenUsage:    map[string]int{"total_tokens": 0}, // Would need actual token count
+		FTNSCost:      0, // Would need actual cost
+		SafetyStatus:  types.SafetyLevelModerate,
+		Metadata:      completed.Results.Artifacts,
+		RequestID:     session.SessionID,
+		Timestamp:     time.Now(),
+	}
+
+	return response, nil
+}
+
+// QuickQueryOptions represents options for quick queries
+type QuickQueryOptions struct {
+	Domain           *string
+	MaxIterations    int
+	IncludeCitations bool
 }
