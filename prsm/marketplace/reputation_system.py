@@ -29,7 +29,7 @@ import math
 from prsm.core.database_service import get_database_service
 from prsm.core.config import get_settings
 from prsm.core.models import UserRole
-from prsm.marketplace.models import MarketplaceResource
+from prsm.marketplace.database_models import MarketplaceResource
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()

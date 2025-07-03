@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 import structlog
 
 from fastapi import Request, Response, HTTPException, status
-from fastapi.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import RequestResponseEndpoint
 
@@ -255,7 +255,7 @@ class GeolocationFilterMiddleware(BaseHTTPMiddleware):
         return any(ip.startswith(prefix) for prefix in private_ranges)
 
 
-def configure_cors() -> CORSMiddleware:
+def configure_cors() -> dict:
     """
     Configure CORS middleware with secure defaults
     """
@@ -265,11 +265,11 @@ def configure_cors() -> CORSMiddleware:
         "https://api.prsm.app"
     ])
     
-    return CORSMiddleware(
-        allow_origins=allowed_origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=[
+    return {
+        "allow_origins": allowed_origins,
+        "allow_credentials": True,
+        "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": [
             "Accept",
             "Accept-Language", 
             "Content-Language",
@@ -278,9 +278,9 @@ def configure_cors() -> CORSMiddleware:
             "X-Requested-With",
             "X-Request-ID"
         ],
-        expose_headers=["X-Request-ID"],
-        max_age=3600,  # 1 hour
-    )
+        "expose_headers": ["X-Request-ID"],
+        "max_age": 3600,  # 1 hour
+    }
 
 
 def get_security_middleware_stack():

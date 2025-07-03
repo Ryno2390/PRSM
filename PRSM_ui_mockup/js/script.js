@@ -2628,9 +2628,12 @@ function initializeCollaborationFeatures() {
             btn.classList.add('active');
             
             const view = btn.dataset.view;
-            const filesGrid = document.querySelector('.files-grid');
-            if (filesGrid) {
-                filesGrid.className = view === 'list' ? 'files-list' : 'files-grid';
+            const filesContainer = document.querySelector('.files-grid, .files-list');
+            if (filesContainer) {
+                // Remove both classes first
+                filesContainer.classList.remove('files-grid', 'files-list');
+                // Add the appropriate class based on view
+                filesContainer.classList.add(view === 'list' ? 'files-list' : 'files-grid');
             }
         });
     });
@@ -4903,3 +4906,669 @@ function simulateDeploy(modelName) {
         showNotification(`${modelName} successfully deployed! Endpoint: https://api.prsm.dev/models/${modelName.toLowerCase().replace(/\s+/g, '-')}`, 'success');
     }, 5000);
 }
+
+// ===============================
+// FTNS Budget & Cost Management
+// ===============================
+
+class FTNSBudgetManager {
+    constructor() {
+        this.currentBudget = 5000; // Default budget
+        this.usedFTNS = 1500; // Current usage
+        this.totalFTNSBalance = 42750; // User's total FTNS balance
+        this.ftnsPrice = 0.0234; // Starting price in USD
+        this.priceVariation = 0.001; // Price variation range
+        
+        this.initializeElements();
+        this.setupEventListeners();
+        this.startPriceUpdates();
+        this.updateDisplay();
+    }
+    
+    initializeElements() {
+        this.ftnsProgress = document.getElementById('ftns-progress');
+        this.ftnsDisplay = document.getElementById('ftns-display');
+        this.ftnsCost = document.getElementById('ftns-cost');
+        this.budgetModal = document.getElementById('budget-modal');
+        this.adjustBudgetBtn = document.getElementById('adjust-budget-btn');
+        this.customBudgetInput = document.getElementById('custom-budget-input');
+        this.currentFtnsPrice = document.getElementById('current-ftns-price');
+        this.budgetUsdValue = document.getElementById('budget-usd-value');
+        this.totalFtnsBalanceElement = document.getElementById('total-ftns-balance');
+        this.sessionFtnsUsed = document.getElementById('session-ftns-used');
+        this.remainingAfterBudget = document.getElementById('remaining-after-budget');
+        
+        // Debug log to check if elements are found
+        console.log('FTNS Elements initialized:', {
+            ftnsProgress: !!this.ftnsProgress,
+            ftnsDisplay: !!this.ftnsDisplay,
+            ftnsCost: !!this.ftnsCost,
+            budgetModal: !!this.budgetModal,
+            adjustBudgetBtn: !!this.adjustBudgetBtn,
+            totalFtnsBalanceElement: !!this.totalFtnsBalanceElement
+        });
+    }
+    
+    setupEventListeners() {
+        // Budget adjustment button
+        if (this.adjustBudgetBtn) {
+            console.log('Adding click listener to budget button');
+            this.adjustBudgetBtn.addEventListener('click', () => {
+                console.log('Budget button clicked!');
+                this.openBudgetModal();
+            });
+        } else {
+            console.error('Budget adjustment button not found!');
+        }
+        
+        // Modal close buttons
+        const closeBudgetModal = document.getElementById('close-budget-modal');
+        const cancelBudget = document.getElementById('cancel-budget');
+        if (closeBudgetModal) closeBudgetModal.addEventListener('click', () => this.closeBudgetModal());
+        if (cancelBudget) cancelBudget.addEventListener('click', () => this.closeBudgetModal());
+        
+        // Save budget button
+        const saveBudget = document.getElementById('save-budget');
+        if (saveBudget) saveBudget.addEventListener('click', () => this.saveBudget());
+        
+        // Preset budget buttons
+        const presetButtons = document.querySelectorAll('.preset-btn');
+        presetButtons.forEach(btn => {
+            btn.addEventListener('click', () => this.selectPreset(btn));
+        });
+        
+        // Custom input updates
+        if (this.customBudgetInput) {
+            this.customBudgetInput.addEventListener('input', () => this.updateCustomBudget());
+        }
+        
+        // Close modal when clicking outside
+        if (this.budgetModal) {
+            this.budgetModal.addEventListener('click', (e) => {
+                if (e.target === this.budgetModal) {
+                    this.closeBudgetModal();
+                }
+            });
+        }
+    }
+    
+    openBudgetModal() {
+        console.log('openBudgetModal called, modal element:', this.budgetModal);
+        if (this.budgetModal) {
+            console.log('Setting modal display to flex');
+            this.budgetModal.style.display = 'flex';
+            this.updateModalDisplay();
+            
+            // Set current budget in custom input
+            if (this.customBudgetInput) {
+                this.customBudgetInput.value = this.currentBudget;
+            }
+            
+            // Set active preset button
+            this.updateActivePreset();
+            console.log('Modal should now be visible');
+        } else {
+            console.error('Budget modal element not found!');
+        }
+    }
+    
+    closeBudgetModal() {
+        if (this.budgetModal) {
+            this.budgetModal.style.display = 'none';
+        }
+    }
+    
+    selectPreset(button) {
+        // Remove active class from all presets
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        
+        // Add active class to clicked button
+        button.classList.add('active');
+        
+        // Update custom input
+        const amount = parseInt(button.dataset.amount);
+        if (this.customBudgetInput) {
+            this.customBudgetInput.value = amount;
+        }
+        
+        this.updateModalDisplay();
+    }
+    
+    updateActivePreset() {
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.classList.remove('active');
+            if (parseInt(btn.dataset.amount) === this.currentBudget) {
+                btn.classList.add('active');
+            }
+        });
+    }
+    
+    updateCustomBudget() {
+        // Remove active class from all presets if custom value doesn't match any
+        const customValue = parseInt(this.customBudgetInput.value);
+        let matchesPreset = false;
+        
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            if (parseInt(btn.dataset.amount) === customValue) {
+                btn.classList.add('active');
+                matchesPreset = true;
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+        
+        this.updateModalDisplay();
+    }
+    
+    updateModalDisplay() {
+        const budgetAmount = parseInt(this.customBudgetInput?.value) || this.currentBudget;
+        
+        // Update total FTNS balance
+        if (this.totalFtnsBalanceElement) {
+            this.totalFtnsBalanceElement.textContent = `${this.totalFTNSBalance.toLocaleString()} FTNS`;
+        }
+        
+        // Update session FTNS used
+        if (this.sessionFtnsUsed) {
+            this.sessionFtnsUsed.textContent = `${this.usedFTNS.toLocaleString()} FTNS`;
+        }
+        
+        // Calculate and update remaining balance after budget
+        if (this.remainingAfterBudget) {
+            const remainingBalance = this.totalFTNSBalance - budgetAmount;
+            this.remainingAfterBudget.textContent = `${remainingBalance.toLocaleString()} FTNS`;
+            
+            // Add visual warning if budget exceeds balance
+            if (remainingBalance < 0) {
+                this.remainingAfterBudget.style.color = '#f87171';
+                this.remainingAfterBudget.textContent = `${remainingBalance.toLocaleString()} FTNS (Insufficient Balance!)`;
+            } else if (remainingBalance < 1000) {
+                this.remainingAfterBudget.style.color = '#fbbf24';
+            } else {
+                this.remainingAfterBudget.style.color = 'var(--text-primary)';
+            }
+        }
+        
+        // Update price display
+        if (this.currentFtnsPrice) {
+            this.currentFtnsPrice.textContent = `$${this.ftnsPrice.toFixed(4)}`;
+        }
+        
+        // Update USD value
+        if (this.budgetUsdValue) {
+            const usdValue = (budgetAmount * this.ftnsPrice).toFixed(2);
+            this.budgetUsdValue.textContent = `$${usdValue}`;
+        }
+    }
+    
+    saveBudget() {
+        const newBudget = parseInt(this.customBudgetInput?.value) || this.currentBudget;
+        
+        if (newBudget < 100) {
+            alert('Budget must be at least 100 FTNS');
+            return;
+        }
+        
+        if (newBudget > this.totalFTNSBalance) {
+            alert(`Budget cannot exceed your total balance of ${this.totalFTNSBalance.toLocaleString()} FTNS`);
+            return;
+        }
+        
+        if (newBudget > 100000) {
+            alert('Budget cannot exceed 100,000 FTNS');
+            return;
+        }
+        
+        this.currentBudget = newBudget;
+        this.updateDisplay();
+        this.closeBudgetModal();
+        
+        // Show confirmation
+        const remainingBalance = this.totalFTNSBalance - newBudget;
+        showNotification(`FTNS budget updated to ${newBudget.toLocaleString()} FTNS. Remaining balance: ${remainingBalance.toLocaleString()} FTNS`, 'success');
+    }
+    
+    updateDisplay() {
+        // Update progress bar
+        if (this.ftnsProgress) {
+            this.ftnsProgress.max = this.currentBudget;
+            this.ftnsProgress.value = this.usedFTNS;
+        }
+        
+        // Update display text
+        if (this.ftnsDisplay) {
+            this.ftnsDisplay.textContent = `${this.usedFTNS.toLocaleString()} / ${this.currentBudget.toLocaleString()}`;
+        }
+        
+        // Update cost
+        this.updateCostDisplay();
+    }
+    
+    updateCostDisplay() {
+        if (this.ftnsCost) {
+            const totalCost = (this.usedFTNS * this.ftnsPrice).toFixed(2);
+            this.ftnsCost.textContent = `Cost: $${totalCost} USD`;
+        }
+    }
+    
+    simulateFTNSUsage(amount) {
+        this.usedFTNS += amount;
+        
+        // Also reduce total balance as FTNS are spent
+        this.totalFTNSBalance -= amount;
+        
+        if (this.usedFTNS > this.currentBudget) {
+            this.usedFTNS = this.currentBudget;
+            showNotification('FTNS budget limit reached!', 'warning');
+        }
+        
+        // Check if user is running low on total balance
+        if (this.totalFTNSBalance < 5000) {
+            showNotification('Warning: Your FTNS balance is running low. Consider purchasing more FTNS.', 'warning');
+        }
+        
+        this.updateDisplay();
+    }
+    
+    startPriceUpdates() {
+        // Simulate real-time FTNS price fluctuations
+        setInterval(() => {
+            // Create realistic price movement (small random walk)
+            const change = (Math.random() - 0.5) * this.priceVariation * 2;
+            this.ftnsPrice += change;
+            
+            // Keep price within reasonable bounds
+            this.ftnsPrice = Math.max(0.01, Math.min(0.1, this.ftnsPrice));
+            
+            this.updateCostDisplay();
+            
+            // Update modal if open
+            if (this.budgetModal && this.budgetModal.style.display === 'flex') {
+                this.updateModalDisplay();
+            }
+        }, 5000); // Update every 5 seconds
+    }
+    
+    // Public methods for integration with conversation features
+    addFTNSUsage(tokens) {
+        // Convert tokens to FTNS usage (approximately 1:1 ratio)
+        this.simulateFTNSUsage(tokens);
+    }
+    
+    getCurrentPrice() {
+        return this.ftnsPrice;
+    }
+    
+    getBudgetStatus() {
+        return {
+            used: this.usedFTNS,
+            budget: this.currentBudget,
+            remaining: this.currentBudget - this.usedFTNS,
+            cost: this.usedFTNS * this.ftnsPrice,
+            totalBalance: this.totalFTNSBalance,
+            balanceAfterBudget: this.totalFTNSBalance - this.currentBudget,
+            currentPrice: this.ftnsPrice
+        };
+    }
+}
+
+// Initialize FTNS Budget Manager when DOM is loaded
+let ftnsManager;
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Wait a bit for other initializations to complete
+    setTimeout(() => {
+        console.log('Initializing FTNS Budget Manager...');
+        
+        // Check if elements exist before initializing
+        const adjustBtn = document.getElementById('adjust-budget-btn');
+        const modal = document.getElementById('budget-modal');
+        console.log('Pre-check elements:', {
+            adjustBtn: !!adjustBtn,
+            modal: !!modal
+        });
+        
+        ftnsManager = new FTNSBudgetManager();
+        console.log('FTNS Budget Manager initialized');
+        
+        // Simulate periodic FTNS usage for demo purposes
+        setInterval(() => {
+            if (Math.random() > 0.7) { // 30% chance every 10 seconds
+                const usage = Math.floor(Math.random() * 50) + 10; // 10-59 FTNS
+                ftnsManager.simulateFTNSUsage(usage);
+            }
+        }, 10000);
+    }, 2000); // Increased wait time to 2 seconds
+});
+
+// Fallback initialization for budget modal (in case class initialization fails)
+window.addEventListener('load', function() {
+    setTimeout(() => {
+        console.log('Fallback initialization for budget modal');
+        
+        const adjustBtn = document.getElementById('adjust-budget-btn');
+        const modal = document.getElementById('budget-modal');
+        
+        if (adjustBtn && modal) {
+            console.log('Setting up fallback budget modal');
+            
+            adjustBtn.addEventListener('click', function() {
+                console.log('Fallback: Budget button clicked');
+                modal.style.display = 'flex';
+            });
+            
+            // Close button
+            const closeBtn = document.getElementById('close-budget-modal');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', function() {
+                    modal.style.display = 'none';
+                });
+            }
+            
+            // Cancel button  
+            const cancelBtn = document.getElementById('cancel-budget');
+            if (cancelBtn) {
+                cancelBtn.addEventListener('click', function() {
+                    modal.style.display = 'none';
+                });
+            }
+            
+            // Click outside to close
+            modal.addEventListener('click', function(e) {
+                if (e.target === modal) {
+                    modal.style.display = 'none';
+                }
+            });
+            
+            console.log('Fallback budget modal setup complete');
+        } else {
+            console.error('Fallback: Could not find budget elements', {
+                adjustBtn: !!adjustBtn,
+                modal: !!modal
+            });
+        }
+    }, 3000);
+});
+
+// ===============================
+// FTNS Selling Functionality
+// ===============================
+
+class FTNSSellManager {
+    constructor() {
+        this.initializeElements();
+        this.setupEventListeners();
+        this.updateDisplays();
+    }
+    
+    initializeElements() {
+        this.sellBalanceDisplay = document.getElementById('sell-balance-display');
+        this.sellRateDisplay = document.getElementById('sell-rate-display');
+        this.ftnsSellAmount = document.getElementById('ftns-sell-amount');
+        this.sellCurrencySelect = document.getElementById('sell-currency-select');
+        this.estimatedPayout = document.getElementById('estimated-payout');
+        this.feeBreakdown = document.getElementById('fee-breakdown');
+        this.netPayout = document.getElementById('net-payout');
+        this.sellBtn = document.getElementById('sell-ftns-btn');
+        
+        // Crypto exchange rates (mock data)
+        this.exchangeRates = {
+            usd: 1,
+            btc: 0.000028,  // Example: 1 USD = 0.000028 BTC
+            eth: 0.0004,    // Example: 1 USD = 0.0004 ETH
+            usdc: 0.999     // Example: 1 USD = 0.999 USDC
+        };
+        
+        // Fee structures
+        this.fees = {
+            usd: { percentage: 0.025, fixed: 0.50 },    // 2.5% + $0.50
+            btc: { percentage: 0.015, fixed: 0 },       // 1.5%
+            eth: { percentage: 0.015, fixed: 0 },       // 1.5% 
+            usdc: { percentage: 0.015, fixed: 0 }       // 1.5%
+        };
+    }
+    
+    setupEventListeners() {
+        if (this.ftnsSellAmount) {
+            this.ftnsSellAmount.addEventListener('input', () => this.calculatePayout());
+        }
+        
+        if (this.sellCurrencySelect) {
+            this.sellCurrencySelect.addEventListener('change', () => this.calculatePayout());
+        }
+        
+        if (this.sellBtn) {
+            this.sellBtn.addEventListener('click', () => this.processSell());
+        }
+        
+        // Payout option selection
+        document.querySelectorAll('.payout-option').forEach(btn => {
+            btn.addEventListener('click', (e) => this.selectPayoutOption(e.target));
+        });
+    }
+    
+    updateDisplays() {
+        // Update balance display
+        if (this.sellBalanceDisplay && ftnsManager) {
+            const balance = ftnsManager.totalFTNSBalance;
+            this.sellBalanceDisplay.textContent = `${balance.toLocaleString()} FTNS`;
+            
+            // Update max attribute on input
+            if (this.ftnsSellAmount) {
+                this.ftnsSellAmount.max = balance;
+            }
+        }
+        
+        // Update rate display
+        if (this.sellRateDisplay && ftnsManager) {
+            const rate = ftnsManager.ftnsPrice;
+            this.sellRateDisplay.textContent = `1 FTNS = $${rate.toFixed(4)} USD`;
+        }
+    }
+    
+    calculatePayout() {
+        const ftnsAmount = parseFloat(this.ftnsSellAmount?.value) || 0;
+        const currency = this.sellCurrencySelect?.value || 'usd';
+        
+        if (ftnsAmount <= 0) {
+            this.resetCalculator();
+            return;
+        }
+        
+        // Check if amount exceeds balance
+        const maxBalance = ftnsManager?.totalFTNSBalance || 42750;
+        if (ftnsAmount > maxBalance) {
+            this.ftnsSellAmount.value = maxBalance;
+            return this.calculatePayout();
+        }
+        
+        // Get current FTNS price
+        const ftnsPrice = ftnsManager?.ftnsPrice || 0.0234;
+        
+        // Calculate gross payout in USD
+        const grossUSD = ftnsAmount * ftnsPrice;
+        
+        // Calculate fees
+        const feeStructure = this.fees[currency];
+        const percentageFee = grossUSD * feeStructure.percentage;
+        const totalFeeUSD = percentageFee + feeStructure.fixed;
+        
+        // Calculate net payout in USD
+        const netUSD = grossUSD - totalFeeUSD;
+        
+        // Convert to target currency
+        const exchangeRate = this.exchangeRates[currency];
+        const grossPayout = grossUSD * exchangeRate;
+        const netPayout = netUSD * exchangeRate;
+        const totalFee = totalFeeUSD * exchangeRate;
+        
+        // Update displays
+        this.updatePayoutDisplays(currency, grossPayout, totalFee, netPayout);
+        
+        // Enable/disable sell button
+        if (this.sellBtn) {
+            this.sellBtn.disabled = ftnsAmount <= 0 || ftnsAmount > maxBalance;
+        }
+    }
+    
+    updatePayoutDisplays(currency, gross, fee, net) {
+        const symbols = {
+            usd: '$',
+            btc: '₿',
+            eth: 'Ξ',
+            usdc: '$'
+        };
+        
+        const decimals = {
+            usd: 2,
+            btc: 8,
+            eth: 6,
+            usdc: 2
+        };
+        
+        const symbol = symbols[currency];
+        const decimal = decimals[currency];
+        
+        if (this.estimatedPayout) {
+            this.estimatedPayout.textContent = `${symbol}${gross.toFixed(decimal)}`;
+        }
+        
+        if (this.feeBreakdown) {
+            this.feeBreakdown.textContent = `Fee: ${symbol}${fee.toFixed(decimal)}`;
+        }
+        
+        if (this.netPayout) {
+            this.netPayout.textContent = `Net: ${symbol}${net.toFixed(decimal)}`;
+        }
+    }
+    
+    resetCalculator() {
+        if (this.estimatedPayout) this.estimatedPayout.textContent = '$0.00';
+        if (this.feeBreakdown) this.feeBreakdown.textContent = 'Fee: $0.00';
+        if (this.netPayout) this.netPayout.textContent = 'Net: $0.00';
+        if (this.sellBtn) this.sellBtn.disabled = true;
+    }
+    
+    selectPayoutOption(button) {
+        // Remove active class from siblings
+        const siblings = button.parentElement.querySelectorAll('.payout-option');
+        siblings.forEach(btn => btn.classList.remove('active'));
+        
+        // Add active class to clicked button
+        button.classList.add('active');
+    }
+    
+    processSell() {
+        const ftnsAmount = parseFloat(this.ftnsSellAmount?.value) || 0;
+        const currency = this.sellCurrencySelect?.value || 'usd';
+        
+        if (ftnsAmount <= 0) {
+            alert('Please enter a valid FTNS amount to sell');
+            return;
+        }
+        
+        const maxBalance = ftnsManager?.totalFTNSBalance || 42750;
+        if (ftnsAmount > maxBalance) {
+            alert(`You cannot sell more than your available balance of ${maxBalance.toLocaleString()} FTNS`);
+            return;
+        }
+        
+        // Check if payout method is selected
+        const activePayoutOption = document.querySelector('.payout-option.active');
+        if (!activePayoutOption) {
+            alert('Please select a payout method');
+            return;
+        }
+        
+        // Calculate final amounts
+        const ftnsPrice = ftnsManager?.ftnsPrice || 0.0234;
+        const grossUSD = ftnsAmount * ftnsPrice;
+        const feeStructure = this.fees[currency];
+        const totalFeeUSD = (grossUSD * feeStructure.percentage) + feeStructure.fixed;
+        const netUSD = grossUSD - totalFeeUSD;
+        
+        const exchangeRate = this.exchangeRates[currency];
+        const netPayout = netUSD * exchangeRate;
+        
+        const symbols = { usd: '$', btc: '₿', eth: 'Ξ', usdc: '$' };
+        const decimals = { usd: 2, btc: 8, eth: 6, usdc: 2 };
+        
+        const symbol = symbols[currency];
+        const decimal = decimals[currency];
+        
+        // Confirmation dialog
+        const confirmed = confirm(
+            `Confirm FTNS Sale:\n\n` +
+            `Amount: ${ftnsAmount.toLocaleString()} FTNS\n` +
+            `Payout: ${symbol}${netPayout.toFixed(decimal)} ${currency.toUpperCase()}\n` +
+            `Method: ${activePayoutOption.textContent}\n\n` +
+            `Proceed with sale?`
+        );
+        
+        if (confirmed) {
+            this.executeSell(ftnsAmount, netPayout, currency, activePayoutOption.textContent);
+        }
+    }
+    
+    executeSell(ftnsAmount, netPayout, currency, payoutMethod) {
+        // Update FTNS balance
+        if (ftnsManager) {
+            ftnsManager.totalFTNSBalance -= ftnsAmount;
+            ftnsManager.updateDisplay();
+        }
+        
+        // Update sell display
+        this.updateDisplays();
+        
+        // Reset form
+        if (this.ftnsSellAmount) this.ftnsSellAmount.value = '';
+        this.resetCalculator();
+        
+        // Remove active payout selection
+        document.querySelectorAll('.payout-option.active').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        
+        // Show success notification
+        const symbols = { usd: '$', btc: '₿', eth: 'Ξ', usdc: '$' };
+        const decimals = { usd: 2, btc: 8, eth: 6, usdc: 2 };
+        const symbol = symbols[currency];
+        const decimal = decimals[currency];
+        
+        showNotification(
+            `Successfully sold ${ftnsAmount.toLocaleString()} FTNS for ${symbol}${netPayout.toFixed(decimal)} via ${payoutMethod}. Processing time: 1-3 business days.`,
+            'success'
+        );
+    }
+    
+    // Public method to update displays when FTNS price changes
+    updateFromPriceChange() {
+        this.updateDisplays();
+        if (this.ftnsSellAmount?.value) {
+            this.calculatePayout();
+        }
+    }
+}
+
+// Initialize FTNS Sell Manager
+let ftnsSellManager;
+
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(() => {
+        ftnsSellManager = new FTNSSellManager();
+        console.log('FTNS Sell Manager initialized');
+        
+        // Update sell displays when FTNS price changes
+        if (ftnsManager) {
+            const originalUpdateCostDisplay = ftnsManager.updateCostDisplay;
+            ftnsManager.updateCostDisplay = function() {
+                originalUpdateCostDisplay.call(this);
+                if (ftnsSellManager) {
+                    ftnsSellManager.updateFromPriceChange();
+                }
+            };
+        }
+    }, 2500);
+});
