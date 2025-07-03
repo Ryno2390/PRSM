@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import asyncio
 import psutil
-import aioredis
+# import aioredis  # Temporarily commented out for Python 3.13 compatibility
 import asyncpg
 import httpx
 import time

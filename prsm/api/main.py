@@ -410,20 +410,20 @@ app.include_router(auth_router)  # Has /api/v1/auth prefix internally
 
 
 # Add secure CORS middleware
-cors_middleware = configure_cors()
+cors_config = configure_cors()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_middleware.allow_origins if not settings.is_development else ["*"],
-    allow_credentials=cors_middleware.allow_credentials,
-    allow_methods=cors_middleware.allow_methods,
-    allow_headers=cors_middleware.allow_headers,
-    expose_headers=cors_middleware.expose_headers,
-    max_age=cors_middleware.max_age
+    allow_origins=cors_config["allow_origins"] if not settings.is_development else ["*"],
+    allow_credentials=cors_config["allow_credentials"],
+    allow_methods=cors_config["allow_methods"],
+    allow_headers=cors_config["allow_headers"],
+    expose_headers=cors_config["expose_headers"],
+    max_age=cors_config["max_age"]
 )
 
 logger.info("Secure CORS configuration applied",
            development_mode=settings.is_development,
-           origins_count=len(cors_middleware.allow_origins) if not settings.is_development else "all")
+           origins_count=len(cors_config["allow_origins"]) if not settings.is_development else "all")
 
 
 @app.exception_handler(Exception)

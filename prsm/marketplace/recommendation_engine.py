@@ -31,7 +31,7 @@ from collections import defaultdict, Counter
 
 from prsm.core.database_service import get_database_service
 from prsm.core.config import get_settings
-from prsm.marketplace.models import MarketplaceResource
+from prsm.marketplace.database_models import MarketplaceResource
 from prsm.core.models import UserRole
 
 logger = structlog.get_logger(__name__)
