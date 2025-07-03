@@ -63,11 +63,14 @@
                     <!-- Conversation Sub-Header -->
                     <div class="conversation-sub-header">
                         <div class="context-progress-bar">
-                            <span class="label">Tokens:</span>
-                            <progress max="4096" value="1500"></progress>
-                            <span class="value">1500 / 4096</span>
+                            <span class="label">FTNS:</span>
+                            <progress max="5000" value="1500" id="ftns-progress"></progress>
+                            <span class="value" id="ftns-display">1500 / 5000</span>
+                            <button class="budget-btn" id="adjust-budget-btn" title="Adjust FTNS Budget">
+                                <i class="fas fa-cog"></i>
+                            </button>
                         </div>
-                        <span class="api-cost">Cost: $0.02</span>
+                        <span class="api-cost" id="ftns-cost">Cost: $35.10 USD</span>
                         <span id="api-status" class="api-status">Connecting...</span>
                         <div class="header-actions">
                              <button class="icon-btn download-btn" title="Download Conversation">
@@ -2556,6 +2559,71 @@
                                         <option value="eth">ETH</option>
                                     </select>
                                     <button class="purchase-btn">Purchase FTNS</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Sell FTNS -->
+                        <div class="tokenomics-section">
+                            <h5><i class="fas fa-coins"></i> Sell FTNS</h5>
+                            <div class="sell-ftns">
+                                <div class="sell-info">
+                                    <div class="balance-display">
+                                        <span class="balance-label">Available Balance:</span>
+                                        <span class="balance-amount" id="sell-balance-display">42,750 FTNS</span>
+                                    </div>
+                                    <div class="current-rate">
+                                        <span class="rate-label">Current Rate:</span>
+                                        <span class="rate-amount" id="sell-rate-display">1 FTNS = $0.0234 USD</span>
+                                    </div>
+                                </div>
+                                
+                                <div class="sell-methods">
+                                    <div class="sell-method">
+                                        <div class="method-header">
+                                            <i class="fas fa-dollar-sign"></i>
+                                            <span>Convert to Fiat</span>
+                                        </div>
+                                        <div class="method-options">
+                                            <button class="payout-option">Bank Transfer</button>
+                                            <button class="payout-option">PayPal</button>
+                                            <button class="payout-option">Wire Transfer</button>
+                                        </div>
+                                        <div class="withdrawal-fee">Fee: 2.5% + $0.50</div>
+                                    </div>
+                                    <div class="sell-method">
+                                        <div class="method-header">
+                                            <i class="fab fa-bitcoin"></i>
+                                            <span>Convert to Crypto</span>
+                                        </div>
+                                        <div class="method-options">
+                                            <button class="payout-option">Bitcoin</button>
+                                            <button class="payout-option">Ethereum</button>
+                                            <button class="payout-option">USDC</button>
+                                        </div>
+                                        <div class="withdrawal-fee">Fee: 1.5%</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="sell-calculator">
+                                    <div class="calculator-row">
+                                        <input type="number" placeholder="FTNS amount to sell" class="sell-input" id="ftns-sell-amount" max="42750">
+                                        <span class="input-label">FTNS</span>
+                                    </div>
+                                    <div class="calculator-row">
+                                        <select class="payout-currency-select" id="sell-currency-select">
+                                            <option value="usd">USD</option>
+                                            <option value="btc">Bitcoin</option>
+                                            <option value="eth">Ethereum</option>
+                                            <option value="usdc">USDC</option>
+                                        </select>
+                                        <span class="estimated-payout" id="estimated-payout">$0.00</span>
+                                    </div>
+                                    <div class="calculator-row">
+                                        <span class="fee-breakdown" id="fee-breakdown">Fee: $0.00</span>
+                                        <span class="net-payout" id="net-payout">Net: $0.00</span>
+                                    </div>
+                                    <button class="sell-btn" id="sell-ftns-btn">Sell FTNS</button>
                                 </div>
                             </div>
                         </div>
@@ -5512,6 +5580,65 @@
                         <button id="save-settings-btn">Save API Settings</button>
                     </div>
                 </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- FTNS Budget Adjustment Modal -->
+    <div id="budget-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-coins"></i> Adjust FTNS Budget</h3>
+                <button class="close-btn" id="close-budget-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-description">Set your FTNS spending budget for this session. You can adjust this anytime.</p>
+                
+                <div class="budget-presets">
+                    <h4>Quick Select:</h4>
+                    <div class="preset-buttons">
+                        <button class="preset-btn" data-amount="1000">1,000 FTNS</button>
+                        <button class="preset-btn" data-amount="2500">2,500 FTNS</button>
+                        <button class="preset-btn active" data-amount="5000">5,000 FTNS</button>
+                        <button class="preset-btn" data-amount="10000">10,000 FTNS</button>
+                    </div>
+                </div>
+
+                <div class="custom-budget">
+                    <h4>Custom Amount:</h4>
+                    <div class="input-group">
+                        <input type="number" id="custom-budget-input" placeholder="Enter FTNS amount" min="100" max="100000" value="5000">
+                        <span class="input-suffix">FTNS</span>
+                    </div>
+                </div>
+
+                <div class="budget-info">
+                    <div class="info-item balance-highlight">
+                        <span class="info-label">Your FTNS Balance:</span>
+                        <span class="info-value" id="total-ftns-balance">42,750 FTNS</span>
+                    </div>
+                    <div class="info-divider"></div>
+                    <div class="info-item">
+                        <span class="info-label">Current FTNS Price:</span>
+                        <span class="info-value" id="current-ftns-price">$0.0234</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Budget USD Value:</span>
+                        <span class="info-value" id="budget-usd-value">$117.00</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">FTNS Used This Session:</span>
+                        <span class="info-value" id="session-ftns-used">1,500 FTNS</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Remaining After Budget:</span>
+                        <span class="info-value" id="remaining-after-budget">37,750 FTNS</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="cancel-btn" id="cancel-budget">Cancel</button>
+                <button class="save-btn" id="save-budget">Update Budget</button>
             </div>
         </div>
     </div>

@@ -221,7 +221,7 @@ class PRSMSettings(BaseSettings):
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, v):
-        if not v.startswith(("postgresql://", "sqlite:///")):
+        if not v.startswith(("postgresql://", "postgresql+asyncpg://", "sqlite:///")):
             raise ValueError("Database URL must be PostgreSQL or SQLite")
         return v
     
