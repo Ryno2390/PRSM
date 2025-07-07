@@ -946,7 +946,7 @@ spec:
 
 ### Executive Summary: A Two-Entity Ecosystem
 
-PRSM's long-term value creation strategy centers on **Prismatica Holdings**, a separate for-profit entity that will implement groundbreaking initiatives while providing multiple revenue streams and investment opportunities for PRSM stakeholders. This dual-entity approach creates sustainable economic incentives while maintaining PRSM's open-source, non-profit mission.
+PRSM's long-term value creation strategy centers on **[Prismatica Holdings](docs/Prismatica_Business_Case.md)**, a separate for-profit entity that will implement groundbreaking initiatives while providing multiple revenue streams and investment opportunities for PRSM stakeholders. This dual-entity approach creates sustainable economic incentives while maintaining PRSM's open-source, non-profit mission.
 
 ### Phase 1: Production-Ready Core Platform (18 Months)
 
