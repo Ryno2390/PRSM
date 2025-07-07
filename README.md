@@ -25,7 +25,7 @@ Imagine if the internet had been designed from the ground up to coordinate artif
 
 The artificial intelligence industry stands at a critical crossroads. Despite remarkable advances in AI capabilities, the current path of development is fundamentally unsustainable—technically, economically, and ethically. Leading researchers warn that without a paradigm shift, we risk not just diminishing returns, but institutional collapse as early as 2026¹.
 
-## The Efficiency Paradox: Doing More with Exponentially Less
+## The Efficiency Paradox: Doing More with Less
 
 Today's most advanced AI systems consume thousands to millions of watts to accomplish tasks that the human brain performs with just 20 watts—the power of a dim light bulb¹. A teenager who has never sat behind a steering wheel can learn to drive competently in about 20 hours. Meanwhile, our best autonomous driving systems require millions or billions of labeled training examples, millions of reinforcement learning trials in virtual environments, and still fall short of human reliability².
 
@@ -37,9 +37,19 @@ Current AI architectures are built on a fundamental misconception: that to under
 
 Close your eyes and imagine a chair. You probably see a simplified sketch, not a photorealistic masterpiece. That's your brain's world model at work—efficient, focused on what matters, discarding irrelevant details. When you see a car approaching an icy intersection, your brain doesn't calculate every molecular friction coefficient. It predicts: "car might skid, I should slow down." That's intelligent prediction without wasteful generation.
 
-Yet current AI systems try to predict every pixel, every minute detail, believing that perfect reproduction equals comprehension. It's like trying to kill a rat with a artillery round—massive overkill that misses the point entirely. Joint Embedding Predictive Architectures (JEPAs) and distilled LLM models prove this with models under 2 billion parameters that outperform systems hundreds of times larger by focusing on efficiency anda abstract representations rather than pixel-perfect generation².
+Yet current AI systems try to predict every pixel, every minute detail, believing that perfect reproduction equals comprehension. It's like trying to kill a rat with an artillery round—massive overkill that misses the point entirely. Joint Embedding Predictive Architectures (JEPAs) and distilled LLM models prove this with models under 2 billion parameters that outperform systems hundreds of times larger by focusing on efficiency and abstract representations rather than pixel-perfect generation².
 
 A bicycle recognition system that generates every spoke and gear tooth won't generalize to mountain bikes versus road bikes. But a system that understands "two wheels, handlebars, pedals, seat" can recognize any bicycle, even partially hidden behind a wall. This is what intelligence really is: extracting key patterns to make accurate predictions about the world, not memorizing every possible variation.
+
+## The Potemkin Problem: Facades of Understanding
+
+Perhaps most damning is recent research revealing that LLMs suffer from "Potemkin understanding"—named after the elaborate facades built to impress Catherine the Great that had no substance behind them. Modern LLMs create sophisticated illusions of comprehension that mask fundamental reasoning failures.
+
+When tested with novel approaches that probe genuine understanding rather than pattern matching, LLMs consistently fail at tasks humans find relatively straightforward. They struggle with logical inconsistency detection, lose coherent reasoning threads in extended interactions, and demonstrate what researchers call "superficial pattern matching rather than deep comprehension."
+
+The most troubling discovery: LLMs generate plausible-sounding responses that create convincing facades of intelligence while lacking genuine understanding. They've become masterful at mimicking the appearance of reasoning without actually reasoning. Like Potemkin villages, they look impressive from a distance but reveal emptiness upon closer examination.
+
+This isn't a minor limitation—it's a fundamental architectural problem. Current benchmarks miss these failures because they don't probe deep enough to distinguish between genuine understanding and sophisticated mimicry. The AI industry has been building increasingly elaborate Potemkin villages of intelligence, systems that appear capable but lack the foundational comprehension necessary for reliable reasoning.
 
 ## The Original Sin: Building Monopolies on Stolen Intellectual Property
 
