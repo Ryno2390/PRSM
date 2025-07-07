@@ -1122,22 +1122,17 @@ Use staked FTNS capital to fund breakthrough technologies that generate massive 
 - **Prismatica Advantage**: AI-coordinated research and development
 - **Expected Returns**: 50-1000x for early breakthrough investments
 
-**2. Next-Generation Quantum Computing**
-- **Focus Areas**: Error correction, quantum networking, quantum advantage applications
-- **PRSM Synergy**: Distributed quantum algorithm development and testing
-- **Market Timing**: Commercial viability emerging 2027-2030
-
-**3. Advanced Nuclear Technologies**
+**2. Advanced Nuclear Technologies**
 - **Thorium Fuel Cycles**: Safer, more abundant nuclear fuel
 - **Small Modular Reactors (SMRs)**: Distributed, scalable nuclear power
 - **Nuclear Batteries**: Long-duration energy storage for critical applications
 
-**4. Revolutionary Energy Storage**
+**3. Revolutionary Energy Storage**
 - **Nuclear Diamond Batteries**: 28,000-year energy storage
 - **Quantum Battery Technologies**: Instantaneous charging capabilities
 - **Grid-Scale Solutions**: Renewable energy stabilization systems
 
-**5. Carbon Capture & Utilization**
+**4. Carbon Capture & Utilization**
 - **Direct Air Capture**: Profitable CO2 removal technologies
 - **Carbon-to-Products**: Converting captured CO2 into valuable materials
 - **Economic Viability**: Technologies that make environmental protection profitable
