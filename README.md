@@ -14,24 +14,6 @@
 ---
 
 
-## 📊 INVESTOR DUE DILIGENCE
-
-For comprehensive Series A due diligence, see **[Investor Audit Guide](docs/audit/INVESTOR_AUDIT_GUIDE.md)** which provides:
-
-- **Technical Validation**: Production infrastructure with performance baselines
-- **Economic Model Validation**: Agent-based simulation with proven revenue potential  
-- **Compliance Assessment**: SOC2/ISO27001 readiness with security policy framework
-- **Risk Analysis**: Comprehensive risk mitigation and operational readiness
-
-**Key Documentation:**
-- ✅ **[Architecture Overview](docs/architecture/)**: Multi-cloud infrastructure and system design
-- ✅ **[Economic Validation](docs/economic/ECONOMIC_VALIDATION.md)**: Revenue projections and market analysis  
-- ✅ **[Security Framework](docs/SECURITY_ARCHITECTURE.md)**: Enterprise security and compliance
-- ✅ **[Performance Metrics](docs/PERFORMANCE_METRICS.md)**: Comprehensive benchmarks and scalability analysis
-- ✅ **[Code Review](docs/CODE_REVIEW.md)**: Complete codebase quality assessment and technical evaluation
-- ✅ **[Performance Baselines](docs/performance/PERFORMANCE_BASELINES.md)**: Production performance validation
-
----
 
 ## 🚀 Overview
 
@@ -1547,6 +1529,23 @@ PRSM isn't betting on technology adoption—it's betting on **economic and legal
 - Legal clarity creates **immediate adoption pressure** (Q3 2025)
 - Technical crisis threshold approaching **2026**
 - PRSM ready before competitors can rebuild on clean foundations
+
+### 📊 INVESTOR DUE DILIGENCE
+
+For comprehensive Series A due diligence, see **[Investor Audit Guide](docs/audit/INVESTOR_AUDIT_GUIDE.md)** which provides:
+
+- **Technical Validation**: Production infrastructure with performance baselines
+- **Economic Model Validation**: Agent-based simulation with proven revenue potential  
+- **Compliance Assessment**: SOC2/ISO27001 readiness with security policy framework
+- **Risk Analysis**: Comprehensive risk mitigation and operational readiness
+
+**Key Documentation:**
+- ✅ **[Architecture Overview](docs/architecture/)**: Multi-cloud infrastructure and system design
+- ✅ **[Economic Validation](docs/economic/ECONOMIC_VALIDATION.md)**: Revenue projections and market analysis  
+- ✅ **[Security Framework](docs/SECURITY_ARCHITECTURE.md)**: Enterprise security and compliance
+- ✅ **[Performance Metrics](docs/PERFORMANCE_METRICS.md)**: Comprehensive benchmarks and scalability analysis
+- ✅ **[Code Review](docs/CODE_REVIEW.md)**: Complete codebase quality assessment and technical evaluation
+- ✅ **[Performance Baselines](docs/performance/PERFORMANCE_BASELINES.md)**: Production performance validation
 
 **Ready to invest?** [Complete investor package →](docs/business/INVESTOR_MATERIALS.md)
 
