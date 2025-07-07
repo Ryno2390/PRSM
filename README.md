@@ -1,4 +1,4 @@
-# PRSM: Protocol for Recursive Scientific Modeling
+I# PRSM: Protocol for Recursive Scientific Modeling
 
 [![Status](https://img.shields.io/badge/status-Production%20Ready-green.svg)](#production-readiness)
 [![Investment](https://img.shields.io/badge/investment-STRONG%20RECOMMENDATION%20TO%20FUND-green.svg)](#series-a-validation)
@@ -33,7 +33,7 @@ This isn't just inefficient—it's backwards. As AI systems scale larger, they w
 
 ## The Generation Fallacy: Confusing Detail with Understanding
 
-Current AI architectures are built on a fundamental misconception: that to understand something, you must be able to generate every detail of it. Think about a chair. To recognize and use a chair, you don't need to conjure up every screw, every splinter, every thread of fabric. Your brain maintains a simplified model: a seat, a back, some legs. That's enough for intelligence. When you imagined a chair, you probably saw a simplified sketch, not a photorealistic masterpiece. That's your brain's world model at work—efficient, focused on what matters, discarding irrelevant details. After all, when approaching an icy intersection, your brain doesn't calculate every molecular friction coefficient. It predicts: "car might skid, I should slow down." That's intelligent prediction without wasteful generation.
+The popular obsession with scale that current AI architectures are built on derived from a fundamental misconception: that to understand something, you must be able to generate every detail of it. Think about a chair. To recognize and use a chair, you don't need to conjure up every screw, every splinter, every thread of fabric. Your brain maintains a simplified model: a seat, a back, some legs. That's enough for intelligence. When we imagine a chair, our mind's eye conjures a simplified sketch, not a photorealistic masterpiece. That's our collective "world model" at work—efficient, focused on what matters, discarding irrelevant details. After all, when approaching an icy intersection, your brain doesn't calculate every molecular friction coefficient. It predicts: "car might skid, I should slow down." That's intelligent prediction without wasteful generation.
 
 Yet current AI systems try to predict every pixel, every minute detail, believing that perfect reproduction equals comprehension. It's like trying to kill a rat with an artillery round—massive overkill that misses the point entirely. Joint Embedding Predictive Architectures (JEPAs) and light-weight, distilled LLM models prove this with models under 2 billion parameters that outperform systems hundreds of times larger by focusing on efficiency and abstract representations rather than pixel-perfect generation².
 
