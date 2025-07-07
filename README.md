@@ -29,7 +29,7 @@ The artificial intelligence industry stands at a critical crossroads. Despite re
 
 Today's most advanced AI systems consume millions of watts of electricity to accomplish tasks that the human brain can perform with just 20 watts—the power of a dim light bulb¹. A teenager who has never sat behind a steering wheel can learn to drive competently in about 20 hours. Meanwhile, our best autonomous driving systems require millions or billions of labeled training examples, millions of reinforcement learning trials in virtual environments, and still fall short of human reliability².
 
-This isn't just inefficient—it's backwards. As AI systems scale larger, theywill hit fundamental thermodynamic limits and complexity bottlenecks that make further scaling economically prohibitive¹. The current trajectory of throwing more data and bigger models at every problem is approaching a wall, whereny the energy costs will come to exceed the value created.
+This isn't just inefficient—it's backwards. As AI systems scale larger, they will hit fundamental thermodynamic limits and complexity bottlenecks that make further scaling economically prohibitive¹. The current trajectory of throwing more data and bigger models at every problem is approaching a wall, whereby the energy costs will come to exceed the value created.
 
 ## The Generation Fallacy: Confusing Detail with Understanding
 
