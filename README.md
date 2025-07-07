@@ -65,20 +65,23 @@ When you don't compensate creators, you destroy the incentive to create the very
 
 Meanwhile, proprietary AI labs guard their models jealously, creating artificial scarcity around what should be abundant: access to intelligence itself. This concentration of AI capabilities in the hands of a few corporations creates dangerous dependencies and stifles the open innovation that could solve AI's fundamental problems.
 
----
+## The Dual Thucydides Trap: A Perilous Race to Brittleness
 
+Visionaries, captivated by dreams of superhuman AI by 2028, face a perilous race. LLMs' path is shadowed by a dual Thucydides trap—the dangerous dynamic where rising and established powers inevitably clash, but now manifested on two levels simultaneously.
 
-## The Monopolization Risk: Betting Everything on Brittleness
+**Within nations**, labs burn fortunes chasing scaling laws that may stall at mere automation. Current AI development concentrates enormous resources into monolithic, brittle systems controlled by a handful of corporations. This creates what researchers call "institutional dependencies"—when critical social and economic functions become reliant on systems that could fail catastrophically.
 
-Current AI development concentrates enormous resources into monolithic, brittle systems controlled by a handful of corporations. This creates what researchers call "institutional dependencies"—when critical social and economic functions become reliant on systems that could fail catastrophically.
+**Across borders**, rival powers vie for dominance, risking chaos or an AI-driven infodemic. LLMs' billions of parameters, cloaked in unreadable "neuralese," defy alignment with human values. This sprint, fueled by profit and power, courts a future where AI serves neither humanity nor reason.
 
-Leading AI researcher Trevor Nestor warns of a "gentle singularity"—not the sci-fi scenario of robot takeover, but a gradual erosion of human agency and institutional resilience as societies become dependent on AI systems they don't understand or control¹. When these energy-hungry, opaque systems fail—and they will—the cascading effects could destabilize entire economies.
+Leading AI researcher Trevor Nestor warns of a "gentle singularity"—not the sci-fi scenario of robot takeover, but a gradual erosion of human agency and institutional resilience as societies become dependent on AI systems they don't understand or control. When these energy-hungry, opaque systems fail—and they will—the cascading effects could destabilize entire economies.
 
 This isn't science fiction. We're already seeing preview effects: social media algorithms influencing elections, trading algorithms causing market crashes, recommendation systems creating filter bubbles that polarize societies. Now imagine this level of dependency scaled up to every aspect of institutional decision-making, powered by systems that consume the energy of small cities and controlled by corporate interests.
 
-## PRSM's Comprehensive Solution: Aligning Technology, Economics, and Ethics
+---
 
-PRSM addresses all dimensions of this crisis simultaneously through a fundamentally different approach: distributed, incentive-aligned, architecture-agnostic artificial intelligence.
+# PRSM's Comprehensive Solution: Aligning Technology, Economics, and Ethics
+
+PRSM addresses all dimensions of this crisis simultaneously through a fundamentally different approach: distributed, incentive-aligned, architecture-agnostic artificial intelligence that sidesteps both domestic and international Thucydides traps.
 
 ### Technical Diversity Over Monolithic Betting
 
