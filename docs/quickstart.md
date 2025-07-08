@@ -14,12 +14,14 @@ In just 15 minutes, you'll:
 
 ## 📋 Prerequisites
 
-- **Python 3.9+** (we recommend 3.11 for best performance)
+- **Python 3.11+** (we recommend 3.12 for best performance)
 - **8GB RAM minimum** (16GB recommended for full functionality)
 - **Git** for cloning the repository
 - **Basic Python knowledge** for examples
 
 ## 🚀 Installation
+
+**Note**: This guide covers **local development setup**. For production deployments using Docker or Kubernetes, see the [Troubleshooting Guide](TROUBLESHOOTING_GUIDE.md#deployment-issues) and [Production Operations Manual](PRODUCTION_OPERATIONS_MANUAL.md).
 
 ### Step 1: Clone and Install
 
@@ -32,14 +34,43 @@ cd PRSM
 python -m venv prsm-env
 source prsm-env/bin/activate  # On Windows: prsm-env\Scripts\activate
 
-# Install dependencies
+# Install dependencies (choose one method)
+
+# Method 1: Standard installation (recommended for users)
 pip install -r requirements.txt
+
+# Method 2: Development installation (for contributors/developers)
+pip install -e .
 
 # Optional: Install development dependencies for testing
 pip install -r requirements-dev.txt
 ```
 
-### Step 2: Initialize PRSM
+### Step 2: Database Setup (Optional for Basic Usage)
+
+For basic PRSM usage, you can skip this section. For full functionality including marketplace and advanced features, set up PostgreSQL:
+
+```bash
+# Install PostgreSQL (macOS)
+brew install postgresql
+
+# Install PostgreSQL (Ubuntu/Debian)
+sudo apt-get install postgresql postgresql-contrib
+
+# Start PostgreSQL service
+brew services start postgresql  # macOS
+sudo systemctl start postgresql  # Linux
+
+# Create database
+createdb prsm_production
+
+# Run database migrations
+python -m alembic upgrade head
+```
+
+**Note**: For production deployment, see the [Troubleshooting Guide](TROUBLESHOOTING_GUIDE.md#database-issues) for detailed database configuration.
+
+### Step 3: Initialize PRSM
 
 ```bash
 # Initialize the system
@@ -411,10 +442,10 @@ python examples/materials_science_optimization.py
 ### 3. **P2P Network Participation**
 ```bash
 # Start a PRSM network node
-python -m prsm.cli start-node --port 8001
+python -m prsm.cli start-node --port 8000
 
 # Join the federated network
-python -m prsm.cli join-network --peer-address 192.168.1.100:8001
+python -m prsm.cli join-network --peer-address 192.168.1.100:8000
 ```
 
 ### 4. **Model Development**
@@ -445,8 +476,15 @@ python -m prsm.cli config --safety-level strict
 
 ## 🤝 Getting Help
 
+### When Things Go Wrong
+If you encounter issues during setup or usage, check the **[Troubleshooting Guide](TROUBLESHOOTING_GUIDE.md)** for:
+- Common setup problems and solutions
+- Database connection issues
+- API and authentication troubleshooting
+- Performance optimization tips
+
 ### Community Support
-- **GitHub Issues** - Report bugs or request features
+- **GitHub Issues** - Report bugs or request features at https://github.com/Ryno2390/PRSM/issues
 - **Discussions** - Ask questions and share experiences
 - **Wiki** - Community-driven documentation
 

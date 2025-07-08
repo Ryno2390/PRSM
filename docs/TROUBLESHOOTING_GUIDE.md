@@ -1,5 +1,9 @@
 # PRSM Troubleshooting Guide
 
+**Note**: This guide focuses on **production and containerized deployments**. For basic local development setup, start with the [Quickstart Guide](quickstart.md).
+
+**Command Syntax**: This guide uses both CLI commands (`python -m prsm.cli`) and direct script execution (`python scripts/`). For standard operations, prefer CLI commands as shown in the Quickstart Guide.
+
 ## Table of Contents
 
 1. [Quick Diagnostics](#quick-diagnostics)
@@ -139,11 +143,16 @@ pip list | grep prsm
 
 **Solutions**:
 ```bash
-# Install package in development mode
+# Install package in development mode (for contributors)
 pip install -e .
 
-# Reinstall dependencies
+# Reinstall dependencies (standard method)
 pip install -r requirements.txt
+
+# For development setup, see the Quickstart Guide for detailed installation instructions
+
+# Verify CLI is working
+python -m prsm.cli status
 
 # Check for circular imports
 python -m prsm.api.main --help
@@ -693,7 +702,7 @@ docker build --no-cache --progress=plain .
 docker-compose build --no-cache
 
 # Test individual steps
-docker run -it python:3.12 /bin/bash
+docker run -it python:3.11 /bin/bash
 ```
 
 **Solutions**:
@@ -812,6 +821,13 @@ python -m pdb script.py      # Debug script
 
 ## Getting Support
 
+### First Steps
+If you're new to PRSM and encountering setup issues, first check the **[Quickstart Guide](quickstart.md)** for:
+- Proper installation procedures
+- Basic configuration examples
+- Initial setup requirements
+- Common first-time user workflows
+
 ### Information to Collect
 
 Before contacting support, gather:
@@ -845,7 +861,7 @@ Before contacting support, gather:
 ### Support Channels
 
 1. **GitHub Issues**: Report bugs and feature requests
-   - Repository: https://github.com/PRSM-AI/PRSM/issues
+   - Repository: https://github.com/Ryno2390/PRSM/issues
    - Include system info and logs
 
 2. **Community Forum**: General questions and discussions
