@@ -220,7 +220,7 @@ Please analyze this repository and provide:
 Focus on: /docs/business/, /docs/ai-auditor/, /prsm/ core architecture, /tests/ coverage, and PRSM_PRODUCTION_ROADMAP.md for funding deployment plan.
 ```
 
-*Here's the result of a recent run of this prompt using Gemini 2.5 Pro: [PRSM Investment Analysis: STRONG RECOMMENDATION TO FUND](docs/external-audits/Gemini-2.5-Pro-Investment-Analysis.md)*
+*Here's the result of a recent run of this prompt using Gemini 2.5 Pro: [PRSM Investment Analysis: Final Report](docs/external-audits/Gemini-2.5-Pro-Investment-Analysis.md)*
 
 **For Developers:**
 ```
