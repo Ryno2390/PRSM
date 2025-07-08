@@ -25,17 +25,17 @@ Imagine if the internet had been designed from the ground up to coordinate artif
 
 The artificial intelligence industry stands at a critical crossroads. Despite remarkable advances in AI capabilities, the current path of development is fundamentally unsustainable—technically, economically, and ethically. Leading researchers warn that without a paradigm shift, we risk not just diminishing returns, but potential institutional collapse¹.
 
-## The Efficiency Paradox: Doing More with Less
+## The Efficiency Paradox: Doing Less with More
 
 Today's most advanced AI systems consume millions of watts of electricity to accomplish tasks that the human brain can perform with just 20 watts—the power of a dim light bulb¹. A teenager who has never sat behind a steering wheel can learn to drive competently in about 20 hours. Meanwhile, our best autonomous driving systems require millions or billions of labeled training examples, millions of reinforcement learning trials in virtual environments, and still fall short of human reliability².
 
-This isn't just inefficient—it's backwards. As AI systems scale larger, they will hit fundamental thermodynamic limits and complexity bottlenecks that make further scaling economically prohibitive¹. The current trajectory of throwing more data and bigger models at every problem is approaching a wall, whereby the energy costs will come to exceed the value created.
+This isn't just inefficient—it's backwards. As AI systems scale larger, they will hit fundamental thermodynamic limits and complexity bottlenecks that make further scaling economically prohibitive¹. The current trajectory of throwing more data and bigger models at every problem is approaching a wall, as marginal energy and compute costs will come to exceed the marginal value created.
 
 ## The Generation Fallacy: Confusing Detail with Understanding
 
-The popular obsession with scale that current AI architectures are built on derives from a fundamental misconception: that to understand something, you must be able to generate every detail of it. Think about a chair. To recognize and use a chair, you don't need to conjure up every screw, every splinter, every thread of fabric. Your brain maintains a simplified model: a seat, a back, some legs. That's enough for intelligence. When we imagine a chair, our mind's eye conjures a simplified sketch, not a photorealistic masterpiece. That's our collective "world model" at work—efficient, focused on what matters, discarding irrelevant details. After all, when approaching an icy intersection, your brain doesn't calculate every molecular friction coefficient. It predicts: "car might skid, I should slow down." That's intelligent prediction without wasteful generation.
+The popular obsession with scale that current AI architectures are built on derives from a fundamental misconception: that to understand something, you must be able to generate every detail of it. Think about a chair. To recognize and use a chair, you don't need to conjure up every screw, every splinter, every thread of fabric. Your brain maintains a simplified model: a seat, a back, some legs. That's enough for intelligence. When we imagine a chair, our mind's eye conjures a simplified sketch, not a photorealistic masterpiece. That's our collective "world model" at work—efficient, focused on what matters, discarding irrelevant details. After all, when approaching an icy intersection, we don't calculate every molecular friction coefficient. Instead, we make a simple prediction: "car might skid, I should slow down." That's intelligent prediction without wasteful generation.
 
-Yet current AI systems try to predict every pixel, every minute detail, believing that perfect reproduction equals comprehension. It's like trying to kill a rat with an artillery round—massive overkill that misses the point entirely. Joint Embedding Predictive Architectures (JEPAs) and light-weight, distilled LLM models prove this with models under 2 billion parameters that outperform systems hundreds of times larger by focusing on efficiency and abstract representations rather than pixel-perfect generation².
+Yet current AI systems try to predict every pixel, every minute detail, believing that perfect reproduction equals comprehension. It's like trying to kill a rat with an artillery round—massive overkill that misses the point entirely. Joint Embedding Predictive Architectures (JEPAs) and light-weight, distilled LLM models with models under 2 billion parameters routinely outperform systems hundreds of times larger by focusing on efficiency and abstract representations rather than pixel-perfect generation².
 
 ## The Potemkin Problem: Facades of Understanding
 
@@ -43,41 +43,35 @@ Perhaps most damning is recent research revealing that LLMs suffer from "Potemki
 
 When tested with novel approaches that probe genuine understanding rather than pattern matching, LLMs consistently fail at tasks humans find relatively straightforward. They struggle with logical inconsistency detection, lose coherent reasoning threads in extended interactions, and demonstrate what researchers call "superficial pattern matching" rather than deep comprehension.
 
-The most troubling discovery: LLMs generate plausible-sounding responses that create convincing facades of intelligence while lacking genuine understanding. They've become masterful at mimicking the appearance of reasoning without actually reasoning. Like Potemkin villages, they look impressive from a distance but reveal emptiness upon closer examination.
+The most troubling discovery: LLMs generate plausible-sounding responses that create convincing simulacrum of intelligence while lacking genuine understanding. They've become masterful at mimicking the appearance of reasoning without actually reasoning. Like Potemkin villages, they look impressive from a distance but betray their superficiality upon closer examination.
 
 This isn't a minor limitation—it's a fundamental architectural problem. Current benchmarks miss these failures because they don't probe deep enough to distinguish between genuine understanding and sophisticated mimicry. The AI industry has been building increasingly elaborate Potemkin villages of intelligence, systems that appear capable but lack the foundational comprehension necessary for reliable reasoning.
 
 ## The Original Sin: Building Monopolies on Stolen Intellectual Property
 
-But technical inefficiency isn't the industry's only crisis. Modern AI was built on a foundation of intellectual property theft—scraping billions of articles, books, artworks, photographs, and other creative works without permission, attribution, or compensation. This isn't just unethical; it's economically self-destructive.
+But technical inefficiency isn't the industry's only crisis. Modern AI was built on a foundation of intellectual property theft—scraping billions of articles, books, movies, paintings, and photographs, without permission, attribution, or compensation. This isn't just unethical; it's economically self-destructive.
 
 When you don't compensate creators, you destroy the incentive to create the very content these systems depend on. The current economic model extracts value from human creativity and concentrates it in corporate monopolies while giving nothing back to the people who made that intelligence possible. This is not sustainable economics—it's extraction masquerading as innovation.
-
-**Legal Crisis (Bartz v. Anthropic, June 2025)³:**
-- **Training Data Liability**: Court ruled that downloading pirated content for AI training constitutes **willful copyright infringement**
-- **Provenance Requirements**: AI companies must prove **clean data sources** or face massive statutory damages
-- **"Forever Libraries" Rejected**: Retaining copyrighted works beyond specific training use ruled **not fair use**
-- **Fair Use Validation**: Court confirmed AI training itself is fair use - but **only with legally obtained content**
 
 Meanwhile, proprietary AI labs guard their models jealously, creating artificial scarcity around what should be abundant: access to intelligence itself. This concentration of AI capabilities in the hands of a few corporations creates dangerous dependencies and stifles the open innovation that could solve AI's fundamental problems.
 
 ## The Dual Thucydides Trap: A Perilous Race to Brittleness
 
-Visionaries, captivated by dreams of superintelligent AI, face a perilous race, shadowed by a dual Thucydides trap—the dangerous dynamic where rising and established powers inevitably clash, but now manifested on two levels simultaneously.
+Even if we were to accept the predictions of leading AI visionaries, captivated by dreams of superintelligent AI, we face a perilous race, shadowed by a dual Thucydides trap:
 
-**Within nations**, labs burn fortunes chasing scaling laws that may stall at mere automation. Current AI development concentrates enormous resources into monolithic, brittle systems controlled by a handful of corporations. This creates what researchers call "institutional dependencies"—when critical social and economic functions become reliant on systems that could fail catastrophically.
+**Within nations**, labs burn fortunes chasing scaling laws. Current AI development concentrates enormous resources into monolithic, brittle systems controlled by a handful of corporations. This creates what researchers call "institutional dependencies"—when critical social and economic functions become dangerously reliant on only a handful of systems that could fail catastrophically.
 
-**Across borders**, rival powers vie for dominance, risking chaos or an AI-driven "infodemic". LLMs' billions of parameters, cloaked in unreadable "neuralese," defy alignment with human values. This sprint, fueled by profit and power, courts a future where AI serves neither humanity nor reason.
+**Across borders**, rival powers vie for dominance, risking chaos. LLMs' billions (soon to be trillions) of parameters, cloaked in unreadable "neuralese," defy alignment with human values. This sprint, fueled by profit and power, courts a future where AI serves neither humanity nor reason.
 
-Leading AI researchers warns of a "gentle singularity"—not the sci-fi scenario of robot takeover, but a gradual erosion of human agency and institutional resilience as societies become dependent on AI systems they don't understand or control. When these energy-hungry, opaque systems fail—and they will—the cascading effects could destabilize entire economies.
+Leading AI researchers warns of a "gentle singularity"—not the sci-fi dystopia of robot takeover, but a gradual erosion of human agency and institutional resilience as societies become dependent on AI systems they don't understand or control. When these energy-hungry, opaque systems fail—and they will—the cascading effects could destabilize entire economies.
 
-This isn't science fiction. We're already seeing preview effects: social media algorithms influencing elections, trading algorithms causing market crashes, recommendation systems creating filter bubbles that polarize societies. Now imagine this level of dependency scaled up to every aspect of institutional decision-making, powered by systems that consume the energy of small cities and controlled by corporate interests.
+This isn't science fiction. We're already seeing preview effects: social media algorithms influencing elections, trading algorithms causing market crashes, recommendation systems creating filter bubbles that polarize societies. Now imagine this level of dependency scaled up to every aspect of institutional decision-making, powered by systems that consume the energy of small countries and controlled by unaccountable corporate interests.
 
 ---
 
 # PRSM's Comprehensive Solution: Aligning Technology, Economics, and Ethics
 
-PRSM addresses all dimensions of this crisis simultaneously through a fundamentally different approach: distributed, incentive-aligned, architecture-agnostic artificial intelligence that sidesteps both domestic and international Thucydides traps.
+PRSM seeks to address this crisis through a fundamentally different approach: distributed, incentive-aligned, architecture-agnostic artificial intelligence that sidesteps both domestic and international arms races.
 
 ### Technical Diversity Over Monolithic Betting
 
@@ -87,13 +81,13 @@ Unlike platforms that lock users into specific paradigms (transformer-based mode
 
 ### Economic Alignment Through Provenance Royalties
 
-Through FTNS (Fungible Tokens for Node Support, pronounced "photons") and our innovative provenance royalty system, PRSM compensates all contributors to the AI ecosystem: data providers receive ongoing royalties when their contributions are used, compute providers earn for processing, storage providers earn for hosting, and model creators receive attribution and compensation for their innovations.
+Through FTNS (Fungible Tokens for Node Support, pronounced "photons") and our innovative provenance royalty system, PRSM compensates all contributors to the AI ecosystem: data providers receive ongoing royalties when their contributions are used, compute providers earn for providing processing power to the system, storage providers earn for hosting, and model creators receive attribution and compensation for their innovations.
 
 This isn't charity—it's sustainable economics. By aligning incentives properly, we create a virtuous cycle where contributors are motivated to provide high-quality data and resources, leading to better models, which generate more value that can be shared back to contributors. This is the opposite of the extractive model that dominates today's AI industry.
 
 ### Distributed Resilience Over Institutional Brittleness
 
-By distributing intelligence across a peer-to-peer network rather than concentrating it in corporate data centers, PRSM eliminates single points of failure. No corporate gatekeeper can cut off access, no monopolistic entity can control pricing or availability, and no institutional dependency can threaten societal stability.
+By distributing intelligence across a peer-to-peer network rather than concentrating it in private corporate data centers, PRSM eliminates single points of failure. No corporate gatekeeper can cut off access, no monopolistic entity can control pricing or availability, and no institutional dependency can threaten societal stability.
 
 The network becomes more robust as it grows, not more fragile. Individual nodes can fail without affecting the whole system. This distributed approach also dramatically reduces energy consumption by utilizing existing computational resources efficiently rather than building massive, dedicated data centers.
 
@@ -110,16 +104,16 @@ This model doesn't just solve AI's technical problems—it solves the economic a
 
 ## The Strategic Imperative: Act Before the Tipping Point
 
-The convergence of technical inefficiency, economic unsustainability, and ethical bankruptcy in current AI approaches is creating what complexity theorists call a "critical transition point." Multiple trend lines suggest this crisis will soon reach a tipping point
+The convergence of technical inefficiency, economic unsustainability, and ethical bankruptcy in current AI approaches is creating what complexity theorists call a "critical transition point." Multiple trend lines suggest this crisis will soon reach a tipping point:
 
 - Energy costs of training and running large models will exceed their economic value
 - Institutional dependencies on brittle AI systems will reach dangerous thresholds
 - Legal and regulatory pressure around IP theft will force industry restructuring
 - Alternative architectures will prove dramatically more efficient than current approaches
 
-Organizations that position themselves ahead of this transition will thrive. Those that double down on the current unsustainable path risk being left behind when the paradigm shifts.
+Organizations that position themselves ahead of this transition will thrive. Those that double down on the current unsustainable path risk being left behind.
 
-PRSM offers more than an alternative—it offers the infrastructure for AI's necessary evolution toward sustainability, efficiency, and alignment with human values. We're not just building a better AI platform; we're building the foundation for an AI industry that serves humanity rather than extracting from it.
+PRSM offers more than an alternative—it offers the infrastructure for AI's much-needed evolution toward sustainability, efficiency, and alignment with human values. We're not just building a better AI platform; we're building the foundation for an AI industry that serves humanity rather than extracting from it.
 
 **🧠 Intelligence Principles:**
 - **Distributed Processing**: No single massive model - intelligence emerges from agent coordination
@@ -136,8 +130,8 @@ PRSM offers more than an alternative—it offers the infrastructure for AI's nec
 
 **💰 Economic Sustainability:**
 1. **🔬 Contribute Intelligence**: Upload models, data, or compute resources with full legal protection
-2. **💰 Earn FTNS Tokens**: Get compensated based on usage and quality with transparent provenance
-3. **🌐 Access Global Network**: Tap into distributed intelligence with guaranteed clean data sources
+2. **💰 Earn FTNS**: Get compensated based on usage and quality with transparent provenance
+3. **🌐 Access a Global Network**: Tap into distributed intelligence with guaranteed clean data sources
 4. **🔄 Recursive Improvement**: The network gets smarter while maintaining legal compliance
 5. **🛡️ Democratic Governance**: Community-driven decisions prevent both centralization and legal liability
 
