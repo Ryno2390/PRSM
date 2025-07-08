@@ -716,7 +716,7 @@ class InputValidator:
 - **Fix Recommendations**: Specific upgrade paths and timeline guidance
 - **Compliance Reporting**: SOC2-ready audit trails and evidence collection
 
-See **[Security Framework Documentation](security/README.md)** for complete security audit setup and procedures.
+See **[Security Framework Documentation](docs/security/README.md)** for complete security audit setup and procedures.
 
 ---
 
