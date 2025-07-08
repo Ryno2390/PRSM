@@ -316,7 +316,7 @@ Experience PRSM's user interface vision:
 - **Professional branding** with dynamic PRSM logo integration
 - **Component architecture** demonstrating production-ready design patterns
 
-*This mockup represents the user experience vision for PRSM's production platform interface.*
+*This mockup represents the user experience vision for PRSM's production platform interface. NOTE: UI/UX is optimized for Chrome*
 
 ## 🔬 PRSM Deep Dive: Technical Architecture & Implementation
 
