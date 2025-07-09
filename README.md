@@ -170,16 +170,42 @@ This model doesn't just solve AI's technical problems—it solves the economic a
 
 ## The Strategic Imperative: Act Before the Tipping Point
 
-The convergence of technical inefficiency, economic unsustainability, and ethical bankruptcy in current AI approaches is creating what complexity theorists call a "critical transition point." Multiple trend lines suggest this crisis will soon reach a tipping point:
+The convergence of technical inefficiency, economic unsustainability, and ethical bankruptcy in current AI approaches is creating what complexity theorists call a "critical transition point." But beyond technical factors, powerful **game-theoretic forces** are making distributed AI coordination not just preferable, but **economically inevitable**.
 
-- Energy costs of training and running large models will exceed their economic value
-- Institutional dependencies on brittle AI systems will reach dangerous thresholds
-- Legal and regulatory pressure around IP theft will force industry restructuring
-- Alternative architectures will prove dramatically more efficient than current approaches
+### The Dual Thucydides Trap: Multiple Crises Converging
+
+Two concurrent crises are creating unstoppable momentum toward decentralized AI:
+
+**International Crisis**: China's systematic open-sourcing strategy (Qwen, Baichuan, ChatGLM) directly undermines billions in US proprietary AI investments. This creates a natural alignment between China's geopolitical goals and PRSM's architecture—major Chinese models joining day-one provides immediate global scale.
+
+**Domestic Crisis**: AI development's exponential nature means one lab will achieve "breakout" where others cannot catch up. When this happens, all remaining labs face a binary choice: coordinate through platforms like PRSM or become irrelevant. Either way, PRSM becomes essential infrastructure.
+
+### The $50B+ Investor Capital Recovery Crisis
+
+The most powerful forcing function may be economic: **over $50 billion invested in proprietary AI labs desperately needs monetization pathways**. Traditional exits (IPOs, acquisitions) can only support 1-2 winners, while AI model half-lives of 6-12 months mean delayed monetization equals exponentially lower returns.
+
+PRSM transforms this crisis into opportunity by converting model weights from depreciating assets into **dividend-paying intellectual property**. When the first major lab posts weights and earns significant FTNS royalties, investor pressure will force competitors to follow—creating a cascade effect where "publish or perish" becomes the new economic reality.
+
+### The Coordination Singularity: Economic Inevitability in Motion
+
+Game theory reveals why PRSM adoption is mathematically certain:
+
+**Traditional Prisoner's Dilemma**: Cooperate (share knowledge) vs. Defect (keep proprietary)
+**PRSM's Solution**: Cooperation now pays better than competition through ongoing royalties + network benefits + cost optimization
+
+Multiple forcing functions create inevitability:
+- **Competitive markets**: All labs benefit from cost-sharing and collaboration
+- **Monopoly emergence**: Runner-up labs must coordinate or become irrelevant  
+- **Investment pressure**: Stranded assets demand monetization
+- **Talent migration**: Researchers flow toward open, collaborative platforms
+
+**Result**: PRSM becomes the **Schelling Point** where all rational actors converge.
 
 Organizations that position themselves ahead of this transition will thrive. Those that double down on the current unsustainable path risk being left behind.
 
 PRSM offers more than an alternative—it offers the infrastructure for AI's much-needed evolution toward sustainability, efficiency, and alignment with human values. We're not just building a better AI platform; we're building the foundation for an AI industry that serves humanity rather than extracting from it.
+
+*For detailed game-theoretic analysis and economic modeling, see our comprehensive [Game-Theoretic Investor Thesis](docs/GAME_THEORETIC_INVESTOR_THESIS.md).*
 
 **🧠 Intelligence Principles:**
 - **Distributed Processing**: No single massive model - intelligence emerges from agent coordination
