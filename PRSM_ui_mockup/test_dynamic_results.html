@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Dynamic Results Info</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-container { margin: 20px 0; padding: 15px; background: #f0f0f0; border-radius: 5px; }
+        .category-test { margin: 10px 0; padding: 10px; background: white; border-radius: 4px; }
+        .results-display { font-weight: bold; color: #333; }
+        .button-display { margin-top: 5px; color: #666; }
+    </style>
+</head>
+<body>
+    <h1>Dynamic Results Info Test</h1>
+    
+    <div class="test-container">
+        <h3>Current Results Info:</h3>
+        <div class="results-info" id="results-info">Showing 4 of 2,847 models</div>
+        <button id="load-more-models">Load More Models</button>
+    </div>
+    
+    <div class="test-container">
+        <h3>Test Each Category:</h3>
+        <div id="category-tests"></div>
+    </div>
+
+    <script>
+        // Mock the updateResultsInfo function for testing
+        function updateResultsInfo(selectedType) {
+            const resultsInfoElement = document.querySelector('.results-info');
+            if (!resultsInfoElement) return;
+            
+            // Define reasonable total counts and appropriate terms for each category
+            const categoryInfo = {
+                'ai_model': { total: 2847, term: 'models' },
+                'dataset': { total: 1523, term: 'datasets' },
+                'agent_workflow': { total: 892, term: 'workflows' },
+                'mcp_tool': { total: 634, term: 'tools' },
+                'compute_resource': { total: 387, term: 'resources' },
+                'knowledge_resource': { total: 756, term: 'resources' },
+                'evaluation_service': { total: 295, term: 'services' },
+                'training_service': { total: 178, term: 'services' },
+                'safety_tool': { total: 423, term: 'tools' },
+                'data_work': { total: 2847, term: 'jobs' },
+                'api_integration': { total: 1156, term: 'integrations' },
+                'monitoring_analytics': { total: 892, term: 'tools' }
+            };
+            
+            const info = categoryInfo[selectedType] || { total: 500, term: 'items' };
+            const shownCount = 6; // We always show 6 simulated options
+            
+            resultsInfoElement.textContent = `Showing ${shownCount} of ${info.total.toLocaleString()} ${info.term}`;
+            
+            // Also update the "Load More" button text to match the category
+            const loadMoreBtn = document.getElementById('load-more-models');
+            if (loadMoreBtn) {
+                const capitalizedTerm = info.term.charAt(0).toUpperCase() + info.term.slice(1);
+                loadMoreBtn.textContent = `Load More ${capitalizedTerm}`;
+            }
+            
+            console.log(`Updated results info: Showing ${shownCount} of ${info.total.toLocaleString()} ${info.term}`);
+        }
+        
+        // Test all categories
+        function testAllCategories() {
+            const categories = [
+                { type: 'ai_model', name: 'AI Models' },
+                { type: 'dataset', name: 'Datasets' },
+                { type: 'agent_workflow', name: 'Agent Workflows' },
+                { type: 'mcp_tool', name: 'MCP Tools' },
+                { type: 'compute_resource', name: 'Compute Resources' },
+                { type: 'knowledge_resource', name: 'Knowledge Resources' },
+                { type: 'evaluation_service', name: 'Evaluation Services' },
+                { type: 'training_service', name: 'Training Services' },
+                { type: 'safety_tool', name: 'Safety Tools' },
+                { type: 'data_work', name: 'Data Work' },
+                { type: 'api_integration', name: 'APIs & Integrations' },
+                { type: 'monitoring_analytics', name: 'Monitoring & Analytics' }
+            ];
+            
+            const testsContainer = document.getElementById('category-tests');
+            
+            categories.forEach(category => {
+                const testDiv = document.createElement('div');
+                testDiv.className = 'category-test';
+                
+                const button = document.createElement('button');
+                button.textContent = `Test ${category.name}`;
+                button.onclick = () => {
+                    updateResultsInfo(category.type);
+                    
+                    // Update the test display
+                    const resultsText = document.querySelector('.results-info').textContent;
+                    const buttonText = document.getElementById('load-more-models').textContent;
+                    
+                    testDiv.querySelector('.results-display').textContent = resultsText;
+                    testDiv.querySelector('.button-display').textContent = `Button: ${buttonText}`;
+                };
+                
+                const resultsDisplay = document.createElement('div');
+                resultsDisplay.className = 'results-display';
+                resultsDisplay.textContent = 'Click button to test';
+                
+                const buttonDisplay = document.createElement('div');
+                buttonDisplay.className = 'button-display';
+                buttonDisplay.textContent = 'Button text will appear here';
+                
+                testDiv.appendChild(button);
+                testDiv.appendChild(resultsDisplay);
+                testDiv.appendChild(buttonDisplay);
+                
+                testsContainer.appendChild(testDiv);
+            });
+        }
+        
+        // Initialize test
+        document.addEventListener('DOMContentLoaded', () => {
+            testAllCategories();
+            
+            // Test default AI Models
+            updateResultsInfo('ai_model');
+        });
+    </script>
+</body>
+</html>

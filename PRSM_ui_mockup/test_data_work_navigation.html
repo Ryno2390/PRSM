@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Data Work Navigation</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-results { margin: 20px 0; padding: 15px; background: #f0f0f0; border-radius: 5px; }
+        .pass { color: green; }
+        .fail { color: red; }
+        button { margin: 5px; padding: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Data Work Navigation Test</h1>
+    
+    <div class="test-results" id="test-results">
+        <h3>Test Results:</h3>
+        <div id="results-list"></div>
+    </div>
+    
+    <h3>Manual Tests:</h3>
+    <button onclick="testFindDataWorkButton()">Test "Find Data Work" Button</button>
+    <button onclick="testDataWorkCard()">Test Data Work Card Click</button>
+    <button onclick="testGetStartedButton()">Test "Get Started" Button</button>
+    
+    <h3>Navigation Functions:</h3>
+    <button onclick="showDataWorkHub()">Navigate to Data Work Hub</button>
+    <button onclick="showMainMarketplace()">Return to Marketplace</button>
+
+    <script>
+        // Load the main script
+        const script = document.createElement('script');
+        script.src = 'js/script.js';
+        script.onload = function() {
+            console.log('Main script loaded');
+            runTests();
+        };
+        script.onerror = function() {
+            console.error('Failed to load main script');
+            addResult('Script Loading', false, 'Failed to load js/script.js');
+        };
+        document.head.appendChild(script);
+        
+        function addResult(testName, passed, message = '') {
+            const resultsList = document.getElementById('results-list');
+            const result = document.createElement('div');
+            result.className = passed ? 'pass' : 'fail';
+            result.innerHTML = `<strong>${testName}:</strong> ${passed ? 'PASS' : 'FAIL'} ${message}`;
+            resultsList.appendChild(result);
+        }
+        
+        function runTests() {
+            console.log('Running tests...');
+            
+            // Test 1: Check if showDataWorkHub function exists
+            try {
+                const exists = typeof showDataWorkHub === 'function';
+                addResult('showDataWorkHub function exists', exists);
+            } catch (e) {
+                addResult('showDataWorkHub function exists', false, e.message);
+            }
+            
+            // Test 2: Check if showMainMarketplace function exists  
+            try {
+                const exists = typeof showMainMarketplace === 'function';
+                addResult('showMainMarketplace function exists', exists);
+            } catch (e) {
+                addResult('showMainMarketplace function exists', false, e.message);
+            }
+            
+            // Test 3: Check if DOM elements exist (simulate them)
+            simulateDOM();
+            
+            // Test 4: Check button selector logic
+            testButtonSelectors();
+        }
+        
+        function simulateDOM() {
+            // Create mock DOM elements for testing
+            const marketplaceSection = document.createElement('div');
+            marketplaceSection.className = 'marketplace-section';
+            marketplaceSection.id = 'data-work-hub';
+            marketplaceSection.style.display = 'none';
+            document.body.appendChild(marketplaceSection);
+            
+            const dataWorkCard = document.createElement('div');
+            dataWorkCard.className = 'asset-type-card';
+            dataWorkCard.setAttribute('data-type', 'data_work');
+            document.body.appendChild(dataWorkCard);
+            
+            const quickActionBtn = document.createElement('button');
+            quickActionBtn.className = 'quick-action-btn';
+            const icon = document.createElement('i');
+            icon.className = 'fas fa-user-friends';
+            quickActionBtn.appendChild(icon);
+            document.body.appendChild(quickActionBtn);
+            
+            addResult('DOM simulation', true, 'Mock elements created');
+        }
+        
+        function testButtonSelectors() {
+            // Test the improved button selector logic
+            const quickActionBtns = document.querySelectorAll('.quick-action-btn');
+            let findWorkBtn = null;
+            
+            quickActionBtns.forEach(btn => {
+                const icon = btn.querySelector('i');
+                if (icon && icon.classList.contains('fa-user-friends')) {
+                    findWorkBtn = btn;
+                }
+            });
+            
+            addResult('Find Data Work button selector', findWorkBtn !== null, 
+                     findWorkBtn ? 'Found button with fa-user-friends icon' : 'Button not found');
+        }
+        
+        function testFindDataWorkButton() {
+            try {
+                const quickActionBtns = document.querySelectorAll('.quick-action-btn');
+                let findWorkBtn = null;
+                
+                quickActionBtns.forEach(btn => {
+                    const icon = btn.querySelector('i');
+                    if (icon && icon.classList.contains('fa-user-friends')) {
+                        findWorkBtn = btn;
+                    }
+                });
+                
+                if (findWorkBtn) {
+                    console.log('Simulating Find Data Work button click...');
+                    findWorkBtn.click();
+                    addResult('Find Data Work button click', true, 'Button clicked successfully');
+                } else {
+                    addResult('Find Data Work button click', false, 'Button not found');
+                }
+            } catch (e) {
+                addResult('Find Data Work button click', false, e.message);
+            }
+        }
+        
+        function testDataWorkCard() {
+            try {
+                const dataWorkCard = document.querySelector('.asset-type-card[data-type="data_work"]');
+                if (dataWorkCard) {
+                    console.log('Simulating Data Work card click...');
+                    dataWorkCard.click();
+                    addResult('Data Work card click', true, 'Card clicked successfully');
+                } else {
+                    addResult('Data Work card click', false, 'Card not found');
+                }
+            } catch (e) {
+                addResult('Data Work card click', false, e.message);
+            }
+        }
+        
+        function testGetStartedButton() {
+            try {
+                // Simulate onboarding completed
+                localStorage.setItem('prsmOnboardingCompleted', 'true');
+                
+                // Call addOnboardingTrigger to create the button
+                if (typeof addOnboardingTrigger === 'function') {
+                    addOnboardingTrigger();
+                    
+                    const getStartedBtn = document.querySelector('.get-started-btn');
+                    if (getStartedBtn) {
+                        console.log('Simulating Get Started button click...');
+                        getStartedBtn.click();
+                        addResult('Get Started button click', true, 'Button clicked successfully');
+                    } else {
+                        addResult('Get Started button click', false, 'Button not found after addOnboardingTrigger');
+                    }
+                } else {
+                    addResult('Get Started button click', false, 'addOnboardingTrigger function not found');
+                }
+            } catch (e) {
+                addResult('Get Started button click', false, e.message);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Get Started Button</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .debug-section { margin: 20px 0; padding: 15px; background: #f0f0f0; border-radius: 5px; }
+        .status { padding: 5px; margin: 5px 0; }
+        .pass { background: #d4edda; color: #155724; }
+        .fail { background: #f8d7da; color: #721c24; }
+        button { margin: 5px; padding: 10px; }
+        
+        /* Basic asset card styling */
+        .asset-type-card {
+            border: 1px solid #ccc;
+            padding: 20px;
+            margin: 10px;
+            border-radius: 8px;
+            background: white;
+            min-height: 100px;
+            position: relative;
+        }
+        
+        .get-started-btn, .trigger-onboarding-btn {
+            background: #4ade80;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Debug Get Started Button</h1>
+    
+    <div class="debug-section">
+        <h3>Test Environment Setup</h3>
+        <button onclick="setOnboardingCompleted(true)">Set Onboarding Completed</button>
+        <button onclick="setOnboardingCompleted(false)">Set Onboarding Not Completed</button>
+        <button onclick="clearOnboarding()">Clear Onboarding Status</button>
+        
+        <div id="onboarding-status" class="status"></div>
+    </div>
+    
+    <div class="debug-section">
+        <h3>Mock Data Work Card</h3>
+        <div class="asset-type-card" data-type="data_work" id="mock-data-work-card">
+            <i class="fas fa-user-edit"></i>
+            <h6>Data Work</h6>
+            <span class="asset-count">2,847</span>
+            <p>Annotation, labeling, transcription, human intelligence tasks</p>
+        </div>
+    </div>
+    
+    <div class="debug-section">
+        <h3>Test Actions</h3>
+        <button onclick="testAddOnboardingTrigger()">Test addOnboardingTrigger()</button>
+        <button onclick="testButtonClick()">Test Button Click</button>
+        <button onclick="testShowDataWorkHub()">Test showDataWorkHub()</button>
+        
+        <div id="test-results"></div>
+    </div>
+    
+    <div class="debug-section">
+        <h3>Console Output</h3>
+        <div id="console-output" style="background: black; color: green; padding: 10px; font-family: monospace; height: 200px; overflow-y: scroll;"></div>
+    </div>
+
+    <script>
+        // Capture console logs
+        const originalLog = console.log;
+        const originalError = console.error;
+        const consoleOutput = document.getElementById('console-output');
+        
+        function addToConsole(type, message) {
+            const div = document.createElement('div');
+            div.style.color = type === 'error' ? '#ff6b6b' : '#4ecdc4';
+            div.textContent = `[${type.toUpperCase()}] ${message}`;
+            consoleOutput.appendChild(div);
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+        }
+        
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            addToConsole('log', args.join(' '));
+        };
+        
+        console.error = function(...args) {
+            originalError.apply(console, args);
+            addToConsole('error', args.join(' '));
+        };
+        
+        function updateOnboardingStatus() {
+            const status = localStorage.getItem('prsmOnboardingCompleted');
+            const statusEl = document.getElementById('onboarding-status');
+            statusEl.className = 'status ' + (status === 'true' ? 'pass' : 'fail');
+            statusEl.textContent = `Onboarding Status: ${status || 'null'}`;
+        }
+        
+        function setOnboardingCompleted(completed) {
+            localStorage.setItem('prsmOnboardingCompleted', completed.toString());
+            updateOnboardingStatus();
+            console.log(`Set onboarding completed to: ${completed}`);
+        }
+        
+        function clearOnboarding() {
+            localStorage.removeItem('prsmOnboardingCompleted');
+            updateOnboardingStatus();
+            console.log('Cleared onboarding status');
+        }
+        
+        function testAddOnboardingTrigger() {
+            console.log('Testing addOnboardingTrigger function...');
+            
+            // Clear any existing buttons
+            const card = document.getElementById('mock-data-work-card');
+            const existingBtns = card.querySelectorAll('.trigger-onboarding-btn, .get-started-btn');
+            existingBtns.forEach(btn => btn.remove());
+            
+            if (typeof addOnboardingTrigger === 'function') {
+                addOnboardingTrigger();
+                
+                const newBtn = card.querySelector('.trigger-onboarding-btn, .get-started-btn');
+                if (newBtn) {
+                    console.log(`Button created: ${newBtn.className}`);
+                    console.log(`Button text: ${newBtn.textContent}`);
+                } else {
+                    console.error('No button was created');
+                }
+            } else {
+                console.error('addOnboardingTrigger function not found');
+            }
+        }
+        
+        function testButtonClick() {
+            const card = document.getElementById('mock-data-work-card');
+            const btn = card.querySelector('.trigger-onboarding-btn, .get-started-btn');
+            
+            if (btn) {
+                console.log(`Clicking button: ${btn.className}`);
+                btn.click();
+            } else {
+                console.error('No button found to click');
+            }
+        }
+        
+        function testShowDataWorkHub() {
+            if (typeof showDataWorkHub === 'function') {
+                console.log('Testing showDataWorkHub function...');
+                showDataWorkHub();
+            } else {
+                console.error('showDataWorkHub function not found');
+            }
+        }
+        
+        // Initialize
+        updateOnboardingStatus();
+        console.log('Debug page loaded');
+        
+        // Load the main script
+        const script = document.createElement('script');
+        script.src = 'js/script.js';
+        script.onload = function() {
+            console.log('Main script loaded successfully');
+            
+            // Test if functions are available
+            const functions = ['addOnboardingTrigger', 'showDataWorkHub', 'showMainMarketplace'];
+            functions.forEach(funcName => {
+                if (typeof window[funcName] === 'function') {
+                    console.log(`✓ Function ${funcName} is available`);
+                } else {
+                    console.error(`✗ Function ${funcName} is NOT available`);
+                }
+            });
+        };
+        script.onerror = function() {
+            console.error('Failed to load main script');
+        };
+        document.head.appendChild(script);
+    </script>
+</body>
+</html>

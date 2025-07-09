@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Navigation Flow</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        .test-overlay {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            z-index: 10000;
+            max-width: 300px;
+        }
+        .test-button {
+            background: #4ade80;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            margin: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .test-result {
+            margin: 5px 0;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        .success { background: #22c55e; }
+        .error { background: #ef4444; }
+        .info { background: #3b82f6; }
+    </style>
+</head>
+<body>
+    <div class="test-overlay">
+        <h4>Navigation Test</h4>
+        <button class="test-button" onclick="testGetStartedButton()">Test Get Started</button>
+        <button class="test-button" onclick="testFindDataWork()">Test Find Data Work</button>
+        <button class="test-button" onclick="testDataWorkCard()">Test Data Work Card</button>
+        <button class="test-button" onclick="clearResults()">Clear Results</button>
+        <div id="test-results"></div>
+    </div>
+
+    <!-- Minimal HTML structure for testing -->
+    <div class="app-container">
+        <div class="left-panel" style="width: 30%;">
+            <div class="panel-content">
+                <div class="conversation-main-area">
+                    <div class="response-area">Test conversation area</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="right-panel" style="width: 70%;">
+            <div class="panel-content">
+                <div class="tab-navigation">
+                    <button class="tab active" data-target="marketplace-content">
+                        <i class="fas fa-store"></i>Marketplace
+                    </button>
+                </div>
+                
+                <section id="marketplace-content" class="content-section">
+                    <div class="marketplace-container">
+                        <!-- Quick Actions -->
+                        <div class="quick-actions-grid">
+                            <button class="quick-action-btn">
+                                <i class="fas fa-user-friends"></i>
+                                <span>Find Data Work</span>
+                            </button>
+                        </div>
+                        
+                        <!-- Asset Categories -->
+                        <div class="asset-categories-grid">
+                            <div class="asset-type-card" data-type="data_work">
+                                <i class="fas fa-user-edit"></i>
+                                <h6>Data Work</h6>
+                                <span class="asset-count">2,847</span>
+                                <p>Annotation, labeling, transcription, human intelligence tasks</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Regular marketplace sections -->
+                        <div class="marketplace-section" id="regular-marketplace">
+                            <p>Regular marketplace content</p>
+                        </div>
+                        
+                        <!-- Data Work Hub -->
+                        <div class="marketplace-section data-work-hub" id="data-work-hub" style="display: none;">
+                            <div class="data-work-header">
+                                <h2>Data Work Hub</h2>
+                                <button id="back-to-marketplace-btn">
+                                    <i class="fas fa-arrow-left"></i> Back to Marketplace
+                                </button>
+                            </div>
+                            <p>This is the Data Work Hub content!</p>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/script.js"></script>
+    <script>
+        function addResult(type, message) {
+            const results = document.getElementById('test-results');
+            const div = document.createElement('div');
+            div.className = `test-result ${type}`;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            results.appendChild(div);
+            results.scrollTop = results.scrollHeight;
+        }
+        
+        function clearResults() {
+            document.getElementById('test-results').innerHTML = '';
+        }
+        
+        function testGetStartedButton() {
+            addResult('info', 'Testing Get Started button...');
+            
+            // First ensure the button exists
+            const dataWorkCard = document.querySelector('[data-type="data_work"]');
+            if (!dataWorkCard) {
+                addResult('error', 'Data Work card not found');
+                return;
+            }
+            
+            let getStartedBtn = dataWorkCard.querySelector('.get-started-btn');
+            if (!getStartedBtn) {
+                addResult('info', 'Get Started button not found, calling addOnboardingTrigger...');
+                if (typeof addOnboardingTrigger === 'function') {
+                    addOnboardingTrigger();
+                    getStartedBtn = dataWorkCard.querySelector('.get-started-btn');
+                } else {
+                    addResult('error', 'addOnboardingTrigger function not found');
+                    return;
+                }
+            }
+            
+            if (getStartedBtn) {
+                addResult('success', 'Get Started button found, clicking...');
+                getStartedBtn.click();
+                
+                // Check if Data Work Hub is visible
+                setTimeout(() => {
+                    const dataWorkHub = document.getElementById('data-work-hub');
+                    if (dataWorkHub && dataWorkHub.style.display === 'block') {
+                        addResult('success', 'Data Work Hub is now visible!');
+                    } else {
+                        addResult('error', 'Data Work Hub is not visible');
+                    }
+                }, 500);
+            } else {
+                addResult('error', 'Get Started button could not be created');
+            }
+        }
+        
+        function testFindDataWork() {
+            addResult('info', 'Testing Find Data Work button...');
+            
+            const findWorkBtn = document.querySelector('.quick-action-btn:has(.fa-user-friends)') ||
+                              Array.from(document.querySelectorAll('.quick-action-btn')).find(btn => 
+                                  btn.querySelector('.fa-user-friends'));
+            
+            if (findWorkBtn) {
+                addResult('success', 'Find Data Work button found, clicking...');
+                findWorkBtn.click();
+                
+                setTimeout(() => {
+                    const dataWorkHub = document.getElementById('data-work-hub');
+                    if (dataWorkHub && dataWorkHub.style.display === 'block') {
+                        addResult('success', 'Data Work Hub visible after Find Data Work click!');
+                    } else {
+                        addResult('error', 'Data Work Hub not visible after Find Data Work click');
+                    }
+                }, 500);
+            } else {
+                addResult('error', 'Find Data Work button not found');
+            }
+        }
+        
+        function testDataWorkCard() {
+            addResult('info', 'Testing Data Work card click...');
+            
+            const dataWorkCard = document.querySelector('[data-type="data_work"]');
+            if (dataWorkCard) {
+                addResult('success', 'Data Work card found, clicking...');
+                dataWorkCard.click();
+                
+                setTimeout(() => {
+                    const dataWorkHub = document.getElementById('data-work-hub');
+                    if (dataWorkHub && dataWorkHub.style.display === 'block') {
+                        addResult('success', 'Data Work Hub visible after card click!');
+                    } else {
+                        addResult('error', 'Data Work Hub not visible after card click');
+                    }
+                }, 500);
+            } else {
+                addResult('error', 'Data Work card not found');
+            }
+        }
+        
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            addResult('info', 'Page loaded, initializing...');
+            
+            // Check if required functions exist
+            const requiredFunctions = ['showDataWorkHub', 'addOnboardingTrigger', 'initializeDataWorkButtons'];
+            requiredFunctions.forEach(funcName => {
+                if (typeof window[funcName] === 'function') {
+                    addResult('success', `Function ${funcName} available`);
+                } else {
+                    addResult('error', `Function ${funcName} NOT available`);
+                }
+            });
+            
+            // Add the Get Started button
+            setTimeout(() => {
+                if (typeof addOnboardingTrigger === 'function') {
+                    addOnboardingTrigger();
+                    addResult('info', 'Called addOnboardingTrigger()');
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>
