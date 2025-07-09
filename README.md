@@ -89,7 +89,11 @@ Perhaps the most dangerous aspect of the scaling obsession isn't what it's build
 
 **The Stagnation Risk**: When scaling inevitably hits its limits—whether through the Compute Efficient Frontier, environmental constraints, or economic reality—there may be no mature alternative paradigm ready to advance. Decades of collective intelligence and resources will have been concentrated into perfecting an approach that was fundamentally limited from the start.
 
-This isn't just inefficient allocation of resources—it's a strategic catastrophe. The AI industry is betting everything on one approach while systematically defunding the research that might actually solve the hard problems scaling claims it will solve.
+This isn't just inefficient allocation of resources—it's a strategic catastrophe. The AI industry is betting everything on one approach while systematically defunding the research that might actually solve the hard problems scaling claims it will solve. When the scaling paradigm inevitably hits its walls—whether through thermodynamic limits, economic constraints, or simply the mathematical reality of the Compute Efficient Frontier—there will be no waiting paradigm to pick up the baton.
+
+Alternative approaches that might actually achieve the goals scaling promises—causal reasoning systems, first-principles AI, architectures that can bridge different scales of reality—have been systematically underfunded and understaffed. The brightest minds and biggest budgets have been captured by the scaling consensus, leaving breakthrough paradigms as academic curiosities rather than production-ready alternatives.
+
+This creates a peculiar form of institutional risk: not just the failure of current systems, but the absence of successor systems. When a generation of AI development has been organized around a single approach, the industry faces not just technical obsolescence but paradigmatic stagnation. The resources needed to develop truly transformative AI architectures—the kind that might actually understand reality rather than just mimic human descriptions of it—have been consumed by the endless pursuit of bigger versions of fundamentally limited systems.
 
 ## The Dual Thucydides Trap: A Perilous Race to Brittleness
 
@@ -102,16 +106,6 @@ Even if we were to accept the predictions of leading AI visionaries, captivated 
 Leading AI researchers warns of a "gentle singularity"—not the sci-fi dystopia of robot takeover, but a gradual erosion of human agency and institutional resilience as societies become dependent on AI systems they don't understand or control. When these energy-hungry, opaque systems fail—and they will—the cascading effects could destabilize entire economies.
 
 This isn't science fiction. We're already seeing preview effects: social media algorithms influencing elections, trading algorithms causing market crashes, recommendation systems creating filter bubbles that polarize societies. Now imagine this level of dependency scaled up to every aspect of institutional decision-making, powered by systems that consume the energy of small countries, controlled by unaccountable corporate interests.
-
-### The Paradigm Stagnation Trap
-
-This race toward brittleness is compounded by a deeper strategic error: the industry's myopic focus on scaling has created a dangerous monoculture. When the scaling paradigm inevitably hits its walls—whether through thermodynamic limits, economic constraints, or simply the mathematical reality of the Compute Efficient Frontier—there will be no waiting paradigm to pick up the baton.
-
-Alternative approaches that might actually achieve the goals scaling promises—causal reasoning systems, first-principles AI, architectures that can bridge different scales of reality—have been systematically underfunded and understaffed. The brightest minds and biggest budgets have been captured by the scaling consensus, leaving breakthrough paradigms as academic curiosities rather than production-ready alternatives.
-
-This creates a peculiar form of institutional risk: not just the failure of current systems, but the absence of successor systems. When a generation of AI development has been organized around a single approach, the industry faces not just technical obsolescence but paradigmatic stagnation. The resources needed to develop truly transformative AI architectures—the kind that might actually understand reality rather than just mimic human descriptions of it—have been consumed by the endless pursuit of bigger versions of fundamentally limited systems.
-
----
 
 # PRSM's Comprehensive Solution: Aligning Technology, Economics, and Ethics
 
