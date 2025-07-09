@@ -1,12 +1,113 @@
+// === PRSM UI MOCKUP INITIALIZATION ===
+console.log('🔄 PRSM UI Mockup - Script loading...');
+
+// Test function to check if buttons are working
+window.testButtonFunctionality = function() {
+    console.log('🔍 Testing button functionality...');
+    
+    // Test tab buttons
+    const tabs = document.querySelectorAll('.tab-navigation .tab');
+    console.log('📝 Found', tabs.length, 'tabs');
+    tabs.forEach((tab, index) => {
+        console.log(`  Tab ${index}: ${tab.textContent.trim()} -> ${tab.dataset.target}`);
+    });
+    
+    // Test asset type cards
+    const assetCards = document.querySelectorAll('.asset-type-card');
+    console.log('📊 Found', assetCards.length, 'asset type cards');
+    assetCards.forEach((card, index) => {
+        console.log(`  Asset card ${index}: ${card.textContent.trim()} -> ${card.dataset.type}`);
+    });
+    
+    // Test profile button
+    const profileBtn = document.getElementById('profile-button');
+    console.log('👤 Profile button:', profileBtn ? 'found' : 'not found');
+    
+    // Test data work functionality
+    const dataWorkCard = document.querySelector('.asset-type-card[data-type="data_work"]');
+    const dataWorkHub = document.getElementById('data-work-hub');
+    console.log('💼 Data work card:', dataWorkCard ? 'found' : 'not found');
+    console.log('💼 Data work hub:', dataWorkHub ? 'found' : 'not found');
+    
+    return '✅ Test complete - check console logs above';
+};
+
+// Quick test functions
+window.testTabs = function() {
+    const tabs = document.querySelectorAll('.tab-navigation .tab');
+    if (tabs.length === 0) {
+        console.error('No tabs found!');
+        return;
+    }
+    
+    console.log('Testing first tab click...');
+    tabs[0].click();
+    console.log('Tab click test completed.');
+};
+
+window.testMarketplace = function() {
+    const marketplaceTab = document.querySelector('.tab-navigation .tab[data-target="marketplace-content"]');
+    if (marketplaceTab) {
+        console.log('Testing marketplace tab...');
+        marketplaceTab.click();
+        console.log('Marketplace tab test completed.');
+    } else {
+        console.error('Marketplace tab not found!');
+    }
+};
+
+window.testDataWork = function() {
+    const dataWorkCard = document.querySelector('.asset-type-card[data-type="data_work"]');
+    if (dataWorkCard) {
+        console.log('Testing data work card...');
+        dataWorkCard.click();
+        console.log('Data work card test completed.');
+    } else {
+        console.error('Data work card not found!');
+    }
+};
+
+// Test function to verify discovery title updates
+window.testDiscoveryTitle = function() {
+    const assetTypes = ['ai_model', 'dataset', 'agent_workflow', 'mcp_tool', 'data_work'];
+    const discoveryTitle = document.getElementById('discovery-title');
+    
+    console.log('Testing discovery title updates...');
+    console.log('Current title:', discoveryTitle?.textContent || 'not found');
+    
+    assetTypes.forEach(type => {
+        const card = document.querySelector(`[data-type="${type}"]`);
+        if (card) {
+            console.log(`Testing ${type}...`);
+            updateMarketplaceStats(type, card);
+            console.log('Title after update:', discoveryTitle?.textContent);
+        }
+    });
+    
+    return 'Discovery title test completed - check console';
+};
+
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('🚀 PRSM UI Mockup - DOM ready, initializing...');
+    
+    // Add test function to global scope for debugging
+    window.testButtons = window.testButtonFunctionality;
     // --- DOM References ---
     const leftPanel = document.getElementById('left-panel');
     const rightPanel = document.getElementById('right-panel');
     const resizer = document.getElementById('drag-handle');
     const leftPanelToggleBtn = document.getElementById('left-panel-toggle');
     const logoImage = document.getElementById('logo-img'); // Logo in right header
-    const rightPanelTabs = document.querySelectorAll('.right-panel-nav .nav-tab-btn');
+    const rightPanelTabs = document.querySelectorAll('.tab-navigation .tab');
     const rightPanelContentSections = document.querySelectorAll('.right-panel-content-area .content-section');
+    
+    // Debug: Check if elements exist
+    console.log('✅ Elements found:', {
+        leftPanel: !!leftPanel,
+        rightPanel: !!rightPanel,
+        rightPanelTabs: rightPanelTabs.length,
+        leftPanelToggleBtn: !!leftPanelToggleBtn
+    });
 
     // Profile Dropdown Elements
     const profileButton = document.getElementById('profile-button');
@@ -69,6 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Apply saved theme on initial load
     const savedTheme = localStorage.getItem(themeKey) || 'dark';
+    console.log('Applying saved theme:', savedTheme);
     applyTheme(savedTheme);
 
 
@@ -80,10 +182,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     if (profileButton) {
+        console.log('Profile button found, adding click handler');
         profileButton.addEventListener('click', (e) => {
             e.stopPropagation();
+            console.log('Profile button clicked');
             toggleProfileDropdown();
         });
+    } else {
+        console.error('Profile button not found');
     }
 
     document.addEventListener('click', (e) => {
@@ -97,23 +203,24 @@ document.addEventListener('DOMContentLoaded', () => {
     if (dropdownThemeToggle) {
         dropdownThemeToggle.addEventListener('click', (e) => {
             e.preventDefault();
+            console.log('🌙 Theme toggle clicked');
             toggleTheme();
             toggleProfileDropdown(false);
         });
+    } else {
+        console.error('Theme toggle not found');
     }
 
     if (dropdownSettings) {
         dropdownSettings.addEventListener('click', (e) => {
             e.preventDefault();
-            // console.log("Settings dropdown item clicked"); // Log click - Removed
+            console.log("Settings dropdown item clicked");
             showRightPanelSection('settings-content');
             toggleProfileDropdown(false);
             // queryApiSettingFields(); // This is already called by showRightPanelSection logic if target is settings
         });
-            // Activate the settings tab - THIS WAS LIKELY THE ISSUE FOR SETTINGS ACCESS
-            // showRightPanelSection('settings-content'); // Keep commented out
-            // Ensure setting fields are queried after potential dynamic loading
-            // queryApiSettingFields(); // This is handled elsewhere now
+    } else {
+        console.error('Settings dropdown not found');
     }
 
     if (dropdownSignOut) {
@@ -366,6 +473,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Right Panel Tab Switching ---
     const showRightPanelSection = (targetId) => {
+        console.log('Switching to section:', targetId);
         rightPanelTabs.forEach(tab => {
             tab.classList.toggle('active', tab.dataset.target === targetId);
         });
@@ -378,10 +486,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    console.log(`Found ${rightPanelTabs.length} right panel tabs`);
     rightPanelTabs.forEach(tab => {
-        tab.addEventListener('click', () => {
+        console.log('Adding click handler to tab:', tab.dataset.target);
+        tab.addEventListener('click', (e) => {
+            e.preventDefault();
             const targetId = tab.dataset.target; // Get targetId here
-            // console.log(`Tab clicked: ${targetId}`); // Removed log
+            console.log(`Tab clicked: ${targetId}`);
             // --- Unsaved Changes Check ---
             // Updated check: Only prompt if leaving settings with unsaved changes
             if (hasUnsavedChanges && settingsContent.classList.contains('active') && targetId !== 'settings-content') {
@@ -396,7 +507,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             // --- End Unsaved Changes Check ---
 
-            // console.log(`Showing section: ${targetId}`); // Removed log
+            console.log(`Showing section: ${targetId}`);
             showRightPanelSection(targetId); // Keep only ONE call
             // If switching *to* settings, ensure fields are queried
             if (targetId === 'settings-content') {
@@ -4028,12 +4139,34 @@ function initializeMarketplaceAssetSwitching() {
     const assetTypeCards = document.querySelectorAll('.asset-type-card');
     const assetCards = document.querySelectorAll('.asset-card');
     
+    console.log(`Found ${assetTypeCards.length} asset type cards`);
     if (assetTypeCards.length === 0) return;
+    
+    // Initialize with the active asset type card
+    const activeCard = document.querySelector('.asset-type-card.active');
+    if (activeCard) {
+        const activeType = activeCard.getAttribute('data-type');
+        updateMarketplaceStats(activeType, activeCard);
+    }
     
     // Add click handlers to asset type cards
     assetTypeCards.forEach(card => {
+        console.log('Adding click handler to:', card.getAttribute('data-type'));
         card.addEventListener('click', () => {
             const selectedType = card.getAttribute('data-type');
+            console.log('Asset type card clicked:', selectedType);
+            
+            // Special handling for data work vs other asset types
+            if (selectedType === 'data_work') {
+                // This will be handled by the data work toggle function
+                return;
+            } else {
+                // If we're currently in data work hub, return to main marketplace
+                const dataWorkHub = document.getElementById('data-work-hub');
+                if (dataWorkHub && dataWorkHub.style.display !== 'none') {
+                    showMainMarketplace();
+                }
+            }
             
             // Update active state
             assetTypeCards.forEach(c => c.classList.remove('active'));
@@ -4044,6 +4177,9 @@ function initializeMarketplaceAssetSwitching() {
             
             // Update marketplace stats based on selection
             updateMarketplaceStats(selectedType, card);
+            
+            // Show assets for the selected type
+            showAssetsByType(selectedType);
             
             // Smooth scroll to assets if needed
             const assetsSection = document.querySelector('.marketplace-assets');
@@ -4128,11 +4264,32 @@ function updateMarketplaceStats(selectedType, selectedCard) {
      */
     const statsElement = document.querySelector('.marketplace-stats');
     const headerStatsElement = document.querySelector('.section-header .stats');
+    const discoveryTitleElement = document.getElementById('discovery-title');
     
     if (!selectedCard) return;
     
     const assetCount = selectedCard.querySelector('.asset-count')?.textContent || '0';
     const assetName = selectedCard.querySelector('h6')?.textContent || 'Assets';
+    
+    // Update discovery section title based on selected asset type
+    if (discoveryTitleElement) {
+        const discoveryTitles = {
+            'ai_model': 'AI Model Discovery',
+            'dataset': 'Dataset Discovery',
+            'agent_workflow': 'AI Agent Discovery',
+            'mcp_tool': 'MCP Tool Discovery',
+            'compute_resource': 'Compute Resource Discovery',
+            'knowledge_resource': 'Knowledge Resource Discovery',
+            'evaluation_service': 'Evaluation Service Discovery',
+            'training_service': 'Training Service Discovery',
+            'safety_tool': 'Safety Tool Discovery',
+            'data_work': 'Data Work Discovery'
+        };
+        
+        const newTitle = discoveryTitles[selectedType] || 'Asset Discovery';
+        discoveryTitleElement.textContent = newTitle;
+        console.log('✅ Updated discovery title to:', newTitle, 'for type:', selectedType);
+    }
     
     // Update header stats
     if (headerStatsElement) {
@@ -4160,6 +4317,47 @@ function updateMarketplaceStats(selectedType, selectedCard) {
             }
         });
     }
+    
+    // Update results info message
+    updateResultsInfo(selectedType);
+}
+
+function updateResultsInfo(selectedType) {
+    /**
+     * Update the "Showing X of Y items" message based on selected asset type
+     */
+    const resultsInfoElement = document.querySelector('.results-info');
+    if (!resultsInfoElement) return;
+    
+    // Define reasonable total counts and appropriate terms for each category
+    const categoryInfo = {
+        'ai_model': { total: 2847, term: 'models' },
+        'dataset': { total: 1523, term: 'datasets' },
+        'agent_workflow': { total: 892, term: 'workflows' },
+        'mcp_tool': { total: 634, term: 'tools' },
+        'compute_resource': { total: 387, term: 'resources' },
+        'knowledge_resource': { total: 756, term: 'resources' },
+        'evaluation_service': { total: 295, term: 'services' },
+        'training_service': { total: 178, term: 'services' },
+        'safety_tool': { total: 423, term: 'tools' },
+        'data_work': { total: 2847, term: 'jobs' },
+        'api_integration': { total: 1156, term: 'integrations' },
+        'monitoring_analytics': { total: 892, term: 'tools' }
+    };
+    
+    const info = categoryInfo[selectedType] || { total: 500, term: 'items' };
+    const shownCount = 6; // We always show 6 simulated options
+    
+    resultsInfoElement.textContent = `Showing ${shownCount} of ${info.total.toLocaleString()} ${info.term}`;
+    
+    // Also update the "Load More" button text to match the category
+    const loadMoreBtn = document.getElementById('load-more-models');
+    if (loadMoreBtn) {
+        const capitalizedTerm = info.term.charAt(0).toUpperCase() + info.term.slice(1);
+        loadMoreBtn.textContent = `Load More ${capitalizedTerm}`;
+    }
+    
+    console.log(`Updated results info: Showing ${shownCount} of ${info.total.toLocaleString()} ${info.term}`);
 }
 
 function showMarketplaceLoading(show) {
@@ -4187,6 +4385,59 @@ function showMarketplaceLoading(show) {
     } else if (!show && loadingElement) {
         loadingElement.remove();
     }
+}
+
+function showAssetsByType(selectedType) {
+    /**
+     * Show asset examples based on selected type
+     * @param {string} selectedType - The selected asset type
+     */
+    const modelCards = document.querySelectorAll('.model-card');
+    const categoryFilter = document.getElementById('category-filter');
+    
+    // Hide all model cards first
+    modelCards.forEach(card => {
+        card.style.display = 'none';
+    });
+    
+    // Show cards matching the selected type
+    const matchingCards = document.querySelectorAll(`.model-card[data-type="${selectedType}"]`);
+    matchingCards.forEach(card => {
+        card.style.display = 'block';
+    });
+    
+    // Update category filter options
+    if (categoryFilter) {
+        // Hide all optgroups first
+        const optgroups = categoryFilter.querySelectorAll('optgroup');
+        optgroups.forEach(group => {
+            group.style.display = 'none';
+        });
+        
+        // Show the relevant optgroup
+        const categoryMapping = {
+            'ai_model': 'ai-model-categories',
+            'dataset': 'dataset-categories', 
+            'agent_workflow': 'agent-categories',
+            'mcp_tool': 'tool-categories',
+            'compute_resource': 'compute-categories',
+            'knowledge_resource': 'knowledge-categories',
+            'evaluation_service': 'evaluation-categories',
+            'training_service': 'training-categories',
+            'safety_tool': 'safety-categories',
+            'data_work': 'data-work-categories'
+        };
+        
+        const targetGroupId = categoryMapping[selectedType];
+        if (targetGroupId) {
+            const targetGroup = document.getElementById(targetGroupId);
+            if (targetGroup) {
+                targetGroup.style.display = 'block';
+            }
+        }
+    }
+    
+    console.log('✅ Showing assets for type:', selectedType, 'Found', matchingCards.length, 'matching cards');
 }
 
 function initializeAssetCardInteractions() {
@@ -4405,10 +4656,17 @@ function handleAssetShare(assetName) {
 document.addEventListener('DOMContentLoaded', () => {
     // Add delay to ensure marketplace elements are loaded
     setTimeout(() => {
-        initializeMarketplaceAssetSwitching();
-        initializeAssetCardInteractions();
-        initializeModelLabFunctionality();
-    }, 700);
+        console.log('🛒 Initializing marketplace functionality...');
+        try {
+            initializeMarketplaceAssetSwitching();
+            initializeAssetCardInteractions();
+            initializeModelLabFunctionality();
+            initializeDataWorkFunctionality();
+            console.log('✅ Marketplace functionality initialized successfully.');
+        } catch (error) {
+            console.error('❌ Error initializing marketplace:', error);
+        }
+    }, 300);
 });
 
 // ========================================
@@ -5572,3 +5830,1139 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }, 2500);
 });
+
+// ========================================
+// DATA WORK HUB FUNCTIONALITY
+// ========================================
+
+function initializeDataWorkFunctionality() {
+    /**
+     * Initialize all data work related functionality
+     */
+    console.log('Initializing data work functionality...');
+    initializeDataWorkToggle();
+    initializeDataWorkButtons();
+    initializeJobApplications();
+    initializeWorkerTools();
+    addOnboardingTrigger(); // Add the Get Started button
+    console.log('Data work functionality initialized.');
+}
+
+function showMainMarketplace() {
+    /**
+     * Return to the main marketplace from the data work hub
+     */
+    const dataWorkHub = document.getElementById('data-work-hub');
+    const otherSections = document.querySelectorAll('.marketplace-section:not(.data-work-hub)');
+    const assetTypeCards = document.querySelectorAll('.asset-type-card');
+    
+    // Add fade out animation to data work hub
+    if (dataWorkHub) {
+        dataWorkHub.style.opacity = '0';
+        dataWorkHub.style.transform = 'translateY(-10px)';
+        
+        setTimeout(() => {
+            dataWorkHub.style.display = 'none';
+            dataWorkHub.style.opacity = '1';
+            dataWorkHub.style.transform = 'translateY(0)';
+        }, 200);
+    }
+    
+    // Show other marketplace sections with fade in
+    otherSections.forEach(section => {
+        section.style.display = 'block';
+        section.style.opacity = '0';
+        section.style.transform = 'translateY(10px)';
+        
+        setTimeout(() => {
+            section.style.opacity = '1';
+            section.style.transform = 'translateY(0)';
+        }, 100);
+    });
+    
+    // Reset active state - make AI Models active by default
+    assetTypeCards.forEach(card => card.classList.remove('active'));
+    const aiModelCard = document.querySelector('.asset-type-card[data-type="ai_model"]');
+    if (aiModelCard) {
+        aiModelCard.classList.add('active');
+    }
+    
+    // Filter assets to show AI models
+    filterAssetCards('ai_model');
+    
+    // Update discovery title
+    if (aiModelCard) {
+        updateMarketplaceStats('ai_model', aiModelCard);
+    }
+    
+    console.log('Returned to main marketplace');
+}
+
+function showDataWorkHub() {
+    /**
+     * Navigate to the Data Work Hub from any section
+     */
+    console.log('Navigating to Data Work Hub...');
+    
+    // First, ensure we're on the marketplace tab
+    const marketplaceTab = document.querySelector('[data-target="marketplace-content"]');
+    if (marketplaceTab) {
+        marketplaceTab.click();
+    }
+    
+    // Wait a bit for tab switching, then show Data Work Hub
+    setTimeout(() => {
+        const dataWorkHub = document.getElementById('data-work-hub');
+        const otherSections = document.querySelectorAll('.marketplace-section:not(.data-work-hub)');
+        const assetTypeCards = document.querySelectorAll('.asset-type-card');
+        const dataWorkCard = document.querySelector('.asset-type-card[data-type="data_work"]');
+        
+        console.log('Data Work Hub element:', dataWorkHub ? 'found' : 'not found');
+        console.log('Other sections found:', otherSections.length);
+        
+        // Hide other marketplace sections with fade out
+        otherSections.forEach(section => {
+            section.style.opacity = '0';
+            section.style.transform = 'translateY(-10px)';
+            
+            setTimeout(() => {
+                section.style.display = 'none';
+                section.style.opacity = '1';
+                section.style.transform = 'translateY(0)';
+            }, 200);
+        });
+        
+        // Show data work hub with fade in
+        if (dataWorkHub) {
+            console.log('Showing Data Work Hub...');
+            setTimeout(() => {
+                dataWorkHub.style.display = 'block';
+                dataWorkHub.style.opacity = '0';
+                dataWorkHub.style.transform = 'translateY(10px)';
+                
+                setTimeout(() => {
+                    dataWorkHub.style.opacity = '1';
+                    dataWorkHub.style.transform = 'translateY(0)';
+                    console.log('Data Work Hub should now be visible');
+                }, 100);
+            }, 100);
+        } else {
+            console.error('Data Work Hub element not found!');
+        }
+        
+        // Update active state
+        assetTypeCards.forEach(card => card.classList.remove('active'));
+        if (dataWorkCard) {
+            dataWorkCard.classList.add('active');
+        }
+        
+        console.log('Data Work Hub navigation completed');
+    }, 150);
+}
+
+function initializeDataWorkToggle() {
+    /**
+     * Handle showing/hiding data work hub when data work asset type is selected
+     */
+    const dataWorkCard = document.querySelector('.asset-type-card[data-type="data_work"]');
+    const dataWorkHub = document.getElementById('data-work-hub');
+    const assetTypeCards = document.querySelectorAll('.asset-type-card');
+    const backToMarketplaceBtn = document.getElementById('back-to-marketplace-btn');
+    
+    console.log('Data work card:', dataWorkCard ? 'found' : 'not found');
+    console.log('Data work hub:', dataWorkHub ? 'found' : 'not found');
+    console.log('Back to marketplace button:', backToMarketplaceBtn ? 'found' : 'not found');
+    
+    if (!dataWorkCard || !dataWorkHub) return;
+    
+    // Add click handler for back to marketplace button
+    if (backToMarketplaceBtn) {
+        backToMarketplaceBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            console.log('Back to marketplace clicked');
+            showMainMarketplace();
+        });
+    }
+    
+    // Handle data work card click (shows filter/discovery)
+    dataWorkCard.addEventListener('click', (e) => {
+        e.stopPropagation();
+        console.log('Data work card clicked - showing discovery with data work filter');
+        
+        // Ensure data work hub is hidden
+        dataWorkHub.style.display = 'none';
+        
+        // Show other marketplace sections
+        const otherSections = document.querySelectorAll('.marketplace-section:not(.data-work-hub)');
+        otherSections.forEach(section => {
+            section.style.display = 'block';
+        });
+        
+        // Update active state
+        assetTypeCards.forEach(card => card.classList.remove('active'));
+        dataWorkCard.classList.add('active');
+        
+        // Update discovery title and show data work assets
+        updateMarketplaceStats('data_work', dataWorkCard);
+        showAssetsByType('data_work');
+    });
+    
+    // Handle switching back to other asset types
+    assetTypeCards.forEach(card => {
+        if (card === dataWorkCard) return;
+        
+        card.addEventListener('click', () => {
+            dataWorkHub.style.display = 'none';
+            const otherSections = document.querySelectorAll('.marketplace-section:not(.data-work-hub)');
+            otherSections.forEach(section => {
+                section.style.display = 'block';
+            });
+        });
+    });
+}
+
+function initializeDataWorkButtons() {
+    /**
+     * Initialize data work quick action buttons
+     */
+    // Use more specific selectors instead of :has() for better browser compatibility
+    const quickActionBtns = document.querySelectorAll('.quick-action-btn');
+    let postJobBtn, findWorkBtn;
+    
+    quickActionBtns.forEach(btn => {
+        const icon = btn.querySelector('i');
+        if (icon && icon.classList.contains('fa-briefcase')) {
+            postJobBtn = btn;
+        } else if (icon && icon.classList.contains('fa-user-friends')) {
+            findWorkBtn = btn;
+        }
+    });
+    
+    if (postJobBtn) {
+        postJobBtn.addEventListener('click', () => {
+            showJobPostingModal();
+        });
+    }
+    
+    if (findWorkBtn) {
+        findWorkBtn.addEventListener('click', () => {
+            // Show filtered marketplace view with data work jobs
+            const dataWorkCard = document.querySelector('.asset-type-card[data-type="data_work"]');
+            if (dataWorkCard) {
+                dataWorkCard.click();
+            }
+        });
+    }
+}
+
+function initializeJobApplications() {
+    /**
+     * Handle job application buttons
+     */
+    const applyButtons = document.querySelectorAll('.apply-btn');
+    
+    applyButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const jobCard = e.target.closest('.job-card');
+            const jobTitle = jobCard.querySelector('.job-title').textContent;
+            const jobPayment = jobCard.querySelector('.job-payment').textContent;
+            
+            showJobApplicationModal(jobTitle, jobPayment);
+        });
+    });
+}
+
+function initializeWorkerTools() {
+    /**
+     * Initialize worker tool buttons
+     */
+    const toolButtons = document.querySelectorAll('.tool-btn');
+    
+    toolButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const toolCard = e.target.closest('.tool-card');
+            const toolTitle = toolCard.querySelector('h6').textContent;
+            
+            switch(toolTitle) {
+                case 'SMS Job Alerts':
+                    showSMSAlertsModal();
+                    break;
+                case 'Auto Translation':
+                    showTranslationModal();
+                    break;
+                case 'Currency Converter':
+                    showCurrencyModal();
+                    break;
+                case 'Payment Protection':
+                    showPaymentProtectionModal();
+                    break;
+            }
+        });
+    });
+}
+
+function showJobPostingModal() {
+    /**
+     * Show modal for posting a new data work job
+     */
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content data-work-modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-briefcase"></i> Post Data Work Job</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form class="job-posting-form">
+                    <div class="form-group">
+                        <label for="job-title">Job Title</label>
+                        <input type="text" id="job-title" placeholder="e.g., Medical Image Annotation" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="job-type">Job Type</label>
+                        <select id="job-type" required>
+                            <option value="image_annotation">Image Annotation</option>
+                            <option value="text_labeling">Text Labeling</option>
+                            <option value="audio_transcription">Audio Transcription</option>
+                            <option value="data_cleaning">Data Cleaning</option>
+                            <option value="content_moderation">Content Moderation</option>
+                            <option value="survey_responses">Survey Responses</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="job-quantity">Quantity</label>
+                            <input type="number" id="job-quantity" placeholder="1000" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="job-deadline">Deadline</label>
+                            <input type="number" id="job-deadline" placeholder="5" required>
+                            <small>Days from now</small>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="job-description">Description</label>
+                        <textarea id="job-description" rows="4" placeholder="Detailed description of the work required..." required></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="job-payment">Payment (FTNS)</label>
+                        <input type="number" id="job-payment" placeholder="2500" required>
+                        <div class="currency-preview">
+                            <span class="currency-amount">$0.00 USD</span>
+                            <span class="currency-amount">₦0 NGN</span>
+                            <span class="currency-amount">₹0 INR</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="job-requirements">Requirements</label>
+                        <textarea id="job-requirements" rows="3" placeholder="Special requirements, qualifications, or preferences..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal(this)">Cancel</button>
+                <button class="btn btn-primary" onclick="submitJobPosting()">Post Job</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Add payment calculation
+    const paymentInput = document.getElementById('job-payment');
+    paymentInput.addEventListener('input', updateJobPaymentPreview);
+    
+    // Add modal close handlers
+    addModalCloseHandlers(modal);
+}
+
+function showJobApplicationModal(jobTitle, jobPayment) {
+    /**
+     * Show modal for applying to a data work job
+     */
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content data-work-modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-user-edit"></i> Apply for Job</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="job-summary">
+                    <h4>${jobTitle}</h4>
+                    <div class="payment-info">
+                        <span class="payment-amount">${jobPayment}</span>
+                        <span class="payment-conversion">≈ $67.25 USD</span>
+                    </div>
+                </div>
+                <form class="job-application-form">
+                    <div class="form-group">
+                        <label for="applicant-experience">Relevant Experience</label>
+                        <textarea id="applicant-experience" rows="4" placeholder="Describe your relevant experience for this type of work..." required></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="applicant-availability">Availability</label>
+                        <select id="applicant-availability" required>
+                            <option value="immediate">Available immediately</option>
+                            <option value="1-day">Within 1 day</option>
+                            <option value="2-days">Within 2 days</option>
+                            <option value="1-week">Within 1 week</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="applicant-questions">Questions or Comments</label>
+                        <textarea id="applicant-questions" rows="3" placeholder="Any questions about the job or additional information you'd like to provide..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-group">
+                            <input type="checkbox" id="terms-agreement" required>
+                            <span>I agree to the PRSM Data Work Terms and Payment Protection policies</span>
+                        </label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal(this)">Cancel</button>
+                <button class="btn btn-primary" onclick="submitJobApplication()">Submit Application</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    addModalCloseHandlers(modal);
+}
+
+function showSMSAlertsModal() {
+    /**
+     * Show modal for setting up SMS job alerts
+     */
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content data-work-modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-bell"></i> SMS Job Alerts</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Get notified of new data work jobs that match your criteria via SMS.</p>
+                <form class="sms-alerts-form">
+                    <div class="form-group">
+                        <label for="phone-number">Phone Number</label>
+                        <input type="tel" id="phone-number" placeholder="+1-555-123-4567" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Job Types (select all that apply)</label>
+                        <div class="checkbox-grid">
+                            <label class="checkbox-option">
+                                <input type="checkbox" value="image_annotation">
+                                <span>Image Annotation</span>
+                            </label>
+                            <label class="checkbox-option">
+                                <input type="checkbox" value="text_labeling">
+                                <span>Text Labeling</span>
+                            </label>
+                            <label class="checkbox-option">
+                                <input type="checkbox" value="audio_transcription">
+                                <span>Audio Transcription</span>
+                            </label>
+                            <label class="checkbox-option">
+                                <input type="checkbox" value="data_cleaning">
+                                <span>Data Cleaning</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="min-payment">Minimum Payment (FTNS)</label>
+                            <input type="number" id="min-payment" placeholder="1000">
+                        </div>
+                        <div class="form-group">
+                            <label for="max-alerts">Max Alerts per Day</label>
+                            <input type="number" id="max-alerts" placeholder="5" max="10">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="quiet-hours">Quiet Hours</label>
+                        <div class="time-range">
+                            <input type="time" id="quiet-start" value="22:00">
+                            <span>to</span>
+                            <input type="time" id="quiet-end" value="06:00">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal(this)">Cancel</button>
+                <button class="btn btn-primary" onclick="saveSMSAlerts()">Save Alerts</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    addModalCloseHandlers(modal);
+}
+
+function showTranslationModal() {
+    /**
+     * Show modal for configuring auto-translation settings
+     */
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content data-work-modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-language"></i> Auto Translation Settings</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Configure automatic translation of job postings to your preferred language.</p>
+                <form class="translation-form">
+                    <div class="form-group">
+                        <label for="primary-language">Primary Language</label>
+                        <select id="primary-language" required>
+                            <option value="en">English</option>
+                            <option value="es">Spanish</option>
+                            <option value="fr">French</option>
+                            <option value="de">German</option>
+                            <option value="zh">Chinese (Mandarin)</option>
+                            <option value="hi">Hindi</option>
+                            <option value="ar">Arabic</option>
+                            <option value="pt">Portuguese</option>
+                            <option value="ru">Russian</option>
+                            <option value="ja">Japanese</option>
+                            <option value="yo">Yoruba</option>
+                            <option value="sw">Swahili</option>
+                            <option value="ha">Hausa</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="secondary-language">Secondary Language (Optional)</label>
+                        <select id="secondary-language">
+                            <option value="">None</option>
+                            <option value="en">English</option>
+                            <option value="es">Spanish</option>
+                            <option value="fr">French</option>
+                            <option value="de">German</option>
+                            <option value="zh">Chinese (Mandarin)</option>
+                            <option value="hi">Hindi</option>
+                            <option value="ar">Arabic</option>
+                            <option value="pt">Portuguese</option>
+                            <option value="ru">Russian</option>
+                            <option value="ja">Japanese</option>
+                            <option value="yo">Yoruba</option>
+                            <option value="sw">Swahili</option>
+                            <option value="ha">Hausa</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-group">
+                            <input type="checkbox" id="auto-translate" checked>
+                            <span>Automatically translate all job postings</span>
+                        </label>
+                        <label class="checkbox-group">
+                            <input type="checkbox" id="show-original">
+                            <span>Always show original text alongside translation</span>
+                        </label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal(this)">Cancel</button>
+                <button class="btn btn-primary" onclick="saveTranslationSettings()">Save Settings</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    addModalCloseHandlers(modal);
+}
+
+function showCurrencyModal() {
+    /**
+     * Show modal for setting preferred currency
+     */
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content data-work-modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-exchange-alt"></i> Currency Preferences</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Set your preferred currency for displaying job payments and earnings.</p>
+                <form class="currency-form">
+                    <div class="form-group">
+                        <label for="primary-currency">Primary Currency</label>
+                        <select id="primary-currency" required>
+                            <option value="USD">🇺🇸 US Dollar (USD)</option>
+                            <option value="NGN">🇳🇬 Nigerian Naira (NGN)</option>
+                            <option value="INR">🇮🇳 Indian Rupee (INR)</option>
+                            <option value="KES">🇰🇪 Kenyan Shilling (KES)</option>
+                            <option value="GHS">🇬🇭 Ghanaian Cedi (GHS)</option>
+                            <option value="ZAR">🇿🇦 South African Rand (ZAR)</option>
+                            <option value="EGP">🇪🇬 Egyptian Pound (EGP)</option>
+                            <option value="BRL">🇧🇷 Brazilian Real (BRL)</option>
+                            <option value="PHP">🇵🇭 Philippine Peso (PHP)</option>
+                            <option value="IDR">🇮🇩 Indonesian Rupiah (IDR)</option>
+                            <option value="EUR">🇪🇺 Euro (EUR)</option>
+                            <option value="GBP">🇬🇧 British Pound (GBP)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="location">Your Location</label>
+                        <input type="text" id="location" placeholder="e.g., Lagos, Nigeria" required>
+                        <small>Used to calculate local purchasing power and fair wages</small>
+                    </div>
+                    <div class="currency-preview">
+                        <h6>Currency Preview</h6>
+                        <div class="preview-item">
+                            <span>Sample Job Payment: 2,500 FTNS</span>
+                            <span class="converted-amount">≈ $48.00 USD</span>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal(this)">Cancel</button>
+                <button class="btn btn-primary" onclick="saveCurrencySettings()">Save Settings</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    addModalCloseHandlers(modal);
+}
+
+function showPaymentProtectionModal() {
+    /**
+     * Show information about payment protection
+     */
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content data-work-modal">
+            <div class="modal-header">
+                <h3><i class="fas fa-shield-alt"></i> Payment Protection</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="protection-info">
+                    <div class="protection-feature">
+                        <i class="fas fa-lock"></i>
+                        <div>
+                            <h6>Escrow System</h6>
+                            <p>Payments are held in secure FTNS escrow until work is completed and approved.</p>
+                        </div>
+                    </div>
+                    <div class="protection-feature">
+                        <i class="fas fa-gavel"></i>
+                        <div>
+                            <h6>Dispute Resolution</h6>
+                            <p>PRSM governance system provides fair dispute resolution for payment issues.</p>
+                        </div>
+                    </div>
+                    <div class="protection-feature">
+                        <i class="fas fa-chart-line"></i>
+                        <div>
+                            <h6>Token Appreciation</h6>
+                            <p>FTNS tokens may increase in value as PRSM adoption grows globally.</p>
+                        </div>
+                    </div>
+                    <div class="protection-feature">
+                        <i class="fas fa-globe"></i>
+                        <div>
+                            <h6>Global Access</h6>
+                            <p>Convert FTNS to any major currency through integrated exchange systems.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="protection-stats">
+                    <h6>Protection Statistics</h6>
+                    <div class="stat-grid">
+                        <div class="stat-item">
+                            <span class="stat-number">99.8%</span>
+                            <span class="stat-label">Payment Success Rate</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-number">2.4 days</span>
+                            <span class="stat-label">Average Resolution Time</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-number">$2.4M</span>
+                            <span class="stat-label">Protected Payments</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="closeModal(this)">Got It</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    addModalCloseHandlers(modal);
+}
+
+// Utility functions for data work
+function updateJobPaymentPreview() {
+    const paymentInput = document.getElementById('job-payment');
+    const currencyPreviews = document.querySelectorAll('.currency-amount');
+    
+    if (!paymentInput || currencyPreviews.length === 0) return;
+    
+    const ftnsAmount = parseFloat(paymentInput.value) || 0;
+    const ftnsRate = 0.0192; // $0.0192 per FTNS
+    
+    const usdAmount = ftnsAmount * ftnsRate;
+    const ngnAmount = usdAmount * 817; // Approximate NGN rate
+    const inrAmount = usdAmount * 84; // Approximate INR rate
+    
+    currencyPreviews[0].textContent = `$${usdAmount.toFixed(2)} USD`;
+    currencyPreviews[1].textContent = `₦${ngnAmount.toLocaleString()} NGN`;
+    currencyPreviews[2].textContent = `₹${inrAmount.toLocaleString()} INR`;
+}
+
+function addModalCloseHandlers(modal) {
+    const closeBtn = modal.querySelector('.modal-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => closeModal(closeBtn));
+    }
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeModal(modal);
+        }
+    });
+}
+
+function closeModal(element) {
+    const modal = element.closest('.modal-overlay') || element;
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function submitJobPosting() {
+    console.log('Job posting submitted');
+    showActionFeedback('posted', 'New data work job');
+    closeModal(document.querySelector('.modal-overlay'));
+}
+
+function submitJobApplication() {
+    console.log('Job application submitted');
+    showActionFeedback('applied', 'Job application');
+    closeModal(document.querySelector('.modal-overlay'));
+}
+
+function saveSMSAlerts() {
+    console.log('SMS alerts saved');
+    showActionFeedback('configured', 'SMS job alerts');
+    closeModal(document.querySelector('.modal-overlay'));
+}
+
+function saveTranslationSettings() {
+    console.log('Translation settings saved');
+    showActionFeedback('configured', 'Auto-translation');
+    closeModal(document.querySelector('.modal-overlay'));
+}
+
+function saveCurrencySettings() {
+    console.log('Currency settings saved');
+    showActionFeedback('configured', 'Currency preferences');
+    closeModal(document.querySelector('.modal-overlay'));
+}
+
+// === USER ONBOARDING FUNCTIONALITY ===
+
+// Global onboarding state
+let onboardingCurrentStep = 1;
+let onboardingData = {
+    language: {},
+    location: {},
+    work: {},
+    notifications: {}
+};
+
+// Initialize onboarding functionality
+function initializeOnboarding() {
+    const onboardingModal = document.getElementById('user-onboarding-modal');
+    const nextBtn = document.getElementById('onboarding-next-btn');
+    const backBtn = document.getElementById('onboarding-back-btn');
+    const finishBtn = document.getElementById('onboarding-finish-btn');
+    
+    if (nextBtn) {
+        nextBtn.addEventListener('click', handleOnboardingNext);
+    }
+    
+    if (backBtn) {
+        backBtn.addEventListener('click', handleOnboardingBack);
+    }
+    
+    if (finishBtn) {
+        finishBtn.addEventListener('click', handleOnboardingFinish);
+    }
+    
+    // Check if user needs onboarding on data work access
+    checkOnboardingStatus();
+}
+
+// Check if user needs onboarding
+function checkOnboardingStatus() {
+    // Always add the appropriate button (onboarding trigger or get started)
+    addOnboardingTrigger();
+}
+
+// Add onboarding trigger button to data work card
+function addOnboardingTrigger() {
+    const dataWorkCard = document.querySelector('[data-type="data_work"]');
+    if (dataWorkCard) {
+        // Remove any existing buttons first
+        const existingTrigger = dataWorkCard.querySelector('.trigger-onboarding-btn');
+        const existingGetStarted = dataWorkCard.querySelector('.get-started-btn');
+        if (existingTrigger) existingTrigger.remove();
+        if (existingGetStarted) existingGetStarted.remove();
+        
+        // Always show "Get Started" button that navigates to Data Work Hub
+        // The onboarding can be triggered from within the Data Work Hub if needed
+        const getStartedBtn = document.createElement('button');
+        getStartedBtn.className = 'get-started-btn';
+        getStartedBtn.innerHTML = '<i class="fas fa-arrow-right"></i> Get Started';
+        getStartedBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            console.log('Get Started button clicked - navigating to Data Work Hub');
+            showDataWorkHub();
+        });
+        dataWorkCard.appendChild(getStartedBtn);
+        
+        console.log('Get Started button added to Data Work card');
+    }
+}
+
+// Start the onboarding process
+function startOnboarding() {
+    const modal = document.getElementById('user-onboarding-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+        onboardingCurrentStep = 1;
+        updateOnboardingStep();
+        resetOnboardingData();
+    }
+}
+
+// Reset onboarding data
+function resetOnboardingData() {
+    onboardingData = {
+        language: {},
+        location: {},
+        work: {},
+        notifications: {}
+    };
+}
+
+// Handle next button click
+function handleOnboardingNext() {
+    if (validateCurrentStep()) {
+        saveCurrentStepData();
+        if (onboardingCurrentStep < 4) {
+            onboardingCurrentStep++;
+            updateOnboardingStep();
+        }
+    }
+}
+
+// Handle back button click
+function handleOnboardingBack() {
+    if (onboardingCurrentStep > 1) {
+        onboardingCurrentStep--;
+        updateOnboardingStep();
+    }
+}
+
+// Handle finish button click
+function handleOnboardingFinish() {
+    if (validateCurrentStep()) {
+        saveCurrentStepData();
+        completeOnboarding();
+    }
+}
+
+// Update the onboarding step display
+function updateOnboardingStep() {
+    // Hide all steps
+    for (let i = 1; i <= 4; i++) {
+        const step = document.getElementById(`onboarding-step-${i}`);
+        if (step) {
+            step.style.display = i === onboardingCurrentStep ? 'block' : 'none';
+        }
+        
+        // Update progress indicators
+        const indicator = document.getElementById(`step-${i}-indicator`);
+        if (indicator) {
+            indicator.classList.toggle('active', i === onboardingCurrentStep);
+            indicator.classList.toggle('completed', i < onboardingCurrentStep);
+        }
+    }
+    
+    // Update progress lines
+    const progressLines = document.querySelectorAll('.progress-line');
+    progressLines.forEach((line, index) => {
+        line.classList.toggle('completed', index < onboardingCurrentStep - 1);
+    });
+    
+    // Update button visibility
+    const nextBtn = document.getElementById('onboarding-next-btn');
+    const backBtn = document.getElementById('onboarding-back-btn');
+    const finishBtn = document.getElementById('onboarding-finish-btn');
+    
+    if (nextBtn) {
+        nextBtn.style.display = onboardingCurrentStep < 4 ? 'block' : 'none';
+    }
+    
+    if (backBtn) {
+        backBtn.style.display = onboardingCurrentStep > 1 ? 'block' : 'none';
+    }
+    
+    if (finishBtn) {
+        finishBtn.style.display = onboardingCurrentStep === 4 ? 'block' : 'none';
+    }
+}
+
+// Validate current step
+function validateCurrentStep() {
+    const currentStepElement = document.getElementById(`onboarding-step-${onboardingCurrentStep}`);
+    if (!currentStepElement) return false;
+    
+    const requiredFields = currentStepElement.querySelectorAll('[required]');
+    let isValid = true;
+    
+    requiredFields.forEach(field => {
+        if (!field.value.trim()) {
+            field.style.borderColor = 'var(--prsm-error)';
+            isValid = false;
+        } else {
+            field.style.borderColor = 'var(--border-color)';
+        }
+    });
+    
+    // Special validation for work categories (step 3)
+    if (onboardingCurrentStep === 3) {
+        const workCategories = currentStepElement.querySelectorAll('.work-categories input[type="checkbox"]:checked');
+        if (workCategories.length === 0) {
+            alert('Please select at least one work category.');
+            isValid = false;
+        }
+    }
+    
+    return isValid;
+}
+
+// Save current step data
+function saveCurrentStepData() {
+    const currentStepElement = document.getElementById(`onboarding-step-${onboardingCurrentStep}`);
+    if (!currentStepElement) return;
+    
+    switch (onboardingCurrentStep) {
+        case 1: // Language preferences
+            const primaryLanguage = document.getElementById('primary-language').value;
+            const additionalLanguages = Array.from(currentStepElement.querySelectorAll('.language-checkboxes input[type="checkbox"]:checked')).map(cb => cb.value);
+            const autoTranslation = document.getElementById('enable-auto-translation').checked;
+            
+            onboardingData.language = {
+                primary: primaryLanguage,
+                additional: additionalLanguages,
+                autoTranslation: autoTranslation
+            };
+            break;
+            
+        case 2: // Location & Currency
+            const country = document.getElementById('country-select').value;
+            const timezone = document.getElementById('timezone-select').value;
+            const currency = document.getElementById('currency-select').value;
+            const showFTNS = document.getElementById('show-ftns-equivalent').checked;
+            
+            onboardingData.location = {
+                country: country,
+                timezone: timezone,
+                currency: currency,
+                showFTNSEquivalent: showFTNS
+            };
+            break;
+            
+        case 3: // Work preferences
+            const workCategories = Array.from(currentStepElement.querySelectorAll('.work-categories input[type="checkbox"]:checked')).map(cb => cb.value);
+            const availability = document.getElementById('availability-select').value;
+            const experience = document.getElementById('experience-level').value;
+            
+            onboardingData.work = {
+                categories: workCategories,
+                availability: availability,
+                experience: experience
+            };
+            break;
+            
+        case 4: // Notification settings
+            const countryCode = document.getElementById('country-code').value;
+            const phoneNumber = document.getElementById('notification-phone').value;
+            const fullPhone = phoneNumber ? `${countryCode}${phoneNumber}` : '';
+            
+            const notifyNewJobs = document.getElementById('notify-new-jobs').checked;
+            const notifyHighPaying = document.getElementById('notify-high-paying').checked;
+            const notifyUrgent = document.getElementById('notify-urgent-jobs').checked;
+            const notifyUpdates = document.getElementById('notify-job-updates').checked;
+            
+            const frequency = document.getElementById('notification-frequency').value;
+            const quietStart = document.getElementById('quiet-start').value;
+            const quietEnd = document.getElementById('quiet-end').value;
+            
+            onboardingData.notifications = {
+                phone: fullPhone,
+                preferences: {
+                    newJobs: notifyNewJobs,
+                    highPaying: notifyHighPaying,
+                    urgent: notifyUrgent,
+                    updates: notifyUpdates
+                },
+                frequency: frequency,
+                quietHours: {
+                    start: quietStart,
+                    end: quietEnd
+                }
+            };
+            break;
+    }
+}
+
+// Complete the onboarding process
+function completeOnboarding() {
+    // Save onboarding data to localStorage
+    localStorage.setItem('prsmOnboardingData', JSON.stringify(onboardingData));
+    localStorage.setItem('prsmOnboardingCompleted', 'true');
+    
+    // Close modal
+    const modal = document.getElementById('user-onboarding-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    
+    // Update button to show "Get Started" instead of onboarding trigger
+    addOnboardingTrigger();
+    
+    // Show success message
+    showActionFeedback('completed', 'User onboarding setup');
+    
+    // Apply user preferences
+    applyUserPreferences();
+    
+    // Show data work content
+    showDataWorkContent();
+    
+    console.log('Onboarding completed:', onboardingData);
+}
+
+// Apply user preferences to the UI
+function applyUserPreferences() {
+    const savedData = JSON.parse(localStorage.getItem('prsmOnboardingData'));
+    if (!savedData) return;
+    
+    // Apply language preferences
+    if (savedData.language && savedData.language.autoTranslation) {
+        // Enable auto-translation in data work hub
+        const autoTranslateBtn = document.querySelector('.auto-translate-btn');
+        if (autoTranslateBtn) {
+            autoTranslateBtn.classList.add('active');
+        }
+    }
+    
+    // Apply currency preferences
+    if (savedData.location && savedData.location.currency) {
+        // Update currency displays in job cards
+        updateCurrencyDisplays(savedData.location.currency);
+    }
+    
+    // Apply work category filters
+    if (savedData.work && savedData.work.categories) {
+        // Pre-filter jobs based on user categories
+        filterJobsByCategories(savedData.work.categories);
+    }
+}
+
+// Update currency displays based on user preference
+function updateCurrencyDisplays(preferredCurrency) {
+    const currencyElements = document.querySelectorAll('.currency-display');
+    currencyElements.forEach(element => {
+        // In a real app, this would convert FTNS to user's preferred currency
+        const ftnsAmount = element.dataset.ftns;
+        if (ftnsAmount) {
+            const convertedAmount = convertFTNSToCurrency(ftnsAmount, preferredCurrency);
+            element.textContent = `${convertedAmount} ${preferredCurrency}`;
+        }
+    });
+}
+
+// Filter jobs by user's selected categories
+function filterJobsByCategories(categories) {
+    const jobCards = document.querySelectorAll('.job-card');
+    jobCards.forEach(card => {
+        const jobCategory = card.dataset.category;
+        if (jobCategory && categories.includes(jobCategory)) {
+            card.style.display = 'block';
+        } else {
+            card.style.display = 'none';
+        }
+    });
+}
+
+// Convert FTNS to user's preferred currency (mock function)
+function convertFTNSToCurrency(ftnsAmount, currency) {
+    // Mock conversion rates - in real app this would be from API
+    const rates = {
+        'USD': 0.0012,
+        'EUR': 0.0011,
+        'GBP': 0.0009,
+        'NGN': 0.75,
+        'KES': 0.15,
+        'INR': 0.095,
+        'BRL': 0.0065
+    };
+    
+    const rate = rates[currency] || rates['USD'];
+    return (ftnsAmount * rate).toFixed(2);
+}
+
+// Show data work content after onboarding
+function showDataWorkContent() {
+    // Switch to marketplace tab
+    const marketplaceTab = document.querySelector('[data-target="marketplace-content"]');
+    if (marketplaceTab) {
+        marketplaceTab.click();
+    }
+    
+    // Navigate directly to Data Work Hub
+    setTimeout(() => {
+        showDataWorkHub();
+    }, 100); // Small delay to ensure tab switching completes
+}
+
+// Close onboarding modal when clicking outside
+document.addEventListener('click', (e) => {
+    const modal = document.getElementById('user-onboarding-modal');
+    if (modal && e.target === modal) {
+        modal.style.display = 'none';
+    }
+});
+
+// Initialize onboarding when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('Onboarding initialization...');
+        initializeOnboarding();
+    });
+} else {
+    console.log('Onboarding initialization (DOM already loaded)...');
+    initializeOnboarding();
+}
