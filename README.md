@@ -174,9 +174,15 @@ The convergence of technical inefficiency, economic unsustainability, and ethica
 
 ### The $50B+ Investor Capital Recovery Crisis
 
-The most powerful forcing function may be economic: **over $50 billion invested in proprietary AI labs desperately needs monetization pathways**. Traditional exits (IPOs, acquisitions) can only support 1-2 winners, while AI model half-lives of 6-12 months mean delayed monetization equals exponentially lower returns.
+The most powerful forcing function may be economic: **over $50 billion invested in proprietary AI labs desperately needs monetization pathways**. As scaling laws encounter marginal returns, massive investments in GPU clusters, data centers, and infrastructure face the threat of becoming stranded assets. Traditional exits (IPOs, acquisitions) can only support 1-2 winners, while AI model half-lives of 6-12 months mean delayed monetization equals exponentially lower returns.
 
-PRSM transforms this crisis into opportunity by converting model weights from depreciating assets into **dividend-paying intellectual property**. When the first major lab posts weights and earns significant FTNS royalties, investor pressure will force competitors to follow—creating a cascade effect where "publish or perish" becomes the new economic reality.
+PRSM transforms this crisis into opportunity through **dual asset monetization**:
+
+**Model Weights**: Converting from depreciating assets into **dividend-paying intellectual property** through ongoing FTNS royalties
+
+**Physical Infrastructure**: Repurposing existing compute clusters, storage systems, and data centers as **PRSM network nodes** earning valuable FTNS payments for providing distributed services
+
+When current scaling approaches hit diminishing returns, investor pressure will demand that companies connect their idle infrastructure to PRSM's network to generate revenue. A GPU cluster that costs millions to operate for proprietary research becomes a profitable distributed compute node earning FTNS tokens. Storage systems become valuable data hosting nodes. This creates a cascade effect where infrastructure operators face a simple choice: earn FTNS payments through PRSM or watch assets depreciate unused.
 
 ### The Coordination Singularity: Economic Inevitability in Motion
 
