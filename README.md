@@ -172,14 +172,6 @@ This model doesn't just solve AI's technical problems—it solves the economic a
 
 The convergence of technical inefficiency, economic unsustainability, and ethical bankruptcy in current AI approaches is creating what complexity theorists call a "critical transition point." But beyond technical factors, powerful **game-theoretic forces** are making distributed AI coordination not just preferable, but **economically inevitable**.
 
-### The Dual Thucydides Trap: Multiple Crises Converging
-
-Two concurrent crises are creating unstoppable momentum toward decentralized AI:
-
-**International Crisis**: China's systematic open-sourcing strategy (Qwen, Baichuan, ChatGLM) directly undermines billions in US proprietary AI investments. This creates a natural alignment between China's geopolitical goals and PRSM's architecture—major Chinese models joining day-one provides immediate global scale.
-
-**Domestic Crisis**: AI development's exponential nature means one lab will achieve "breakout" where others cannot catch up. When this happens, all remaining labs face a binary choice: coordinate through platforms like PRSM or become irrelevant. Either way, PRSM becomes essential infrastructure.
-
 ### The $50B+ Investor Capital Recovery Crisis
 
 The most powerful forcing function may be economic: **over $50 billion invested in proprietary AI labs desperately needs monetization pathways**. Traditional exits (IPOs, acquisitions) can only support 1-2 winners, while AI model half-lives of 6-12 months mean delayed monetization equals exponentially lower returns.
