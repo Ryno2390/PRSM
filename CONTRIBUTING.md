@@ -69,11 +69,21 @@ PRSM/
 │   ├── js/                         # JavaScript API client and WebSocket integration
 │   ├── css/                        # Responsive styling and themes
 │   └── test_*.html                 # Testing interfaces for UI validation
+├── docs/                           # Documentation and business materials
+│   ├── source_documents/           # Research papers and citations
+│   ├── Prismatica_Business_Case.md # Business case for Prismatica Holdings
+│   ├── GAME_THEORETIC_INVESTOR_THESIS.md # Investment thesis
+│   ├── WEBSOCKET_API.md            # WebSocket API documentation
+│   ├── MACOS_SETUP.md             # macOS setup guide
+│   └── DEPENDENCY_COMPATIBILITY.md # Dependency compatibility guide
+├── prsm-demo/                      # Demo applications
+├── prsm-demo-test/                 # Test demo applications
 ├── test_results/                   # Comprehensive test documentation
-├── docs/                           # Documentation
-│   └── WEBSOCKET_API.md            # WebSocket API documentation
 ├── examples/                       # Usage examples
-└── tests/                          # Additional test suites
+├── tests/                          # Additional test suites
+├── CONTRIBUTING.md                 # Contribution guidelines
+├── README.md                       # Main project documentation
+└── CLAUDE.md                       # Project instructions for Claude
 ```
 
 ## 🤝 Ways to Contribute
