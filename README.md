@@ -101,7 +101,7 @@ Even if we were to accept the predictions of leading AI visionaries, captivated 
 
 Leading AI researchers warns of a "gentle singularity"—not the sci-fi dystopia of robot takeover, but a gradual erosion of human agency and institutional resilience as societies become dependent on AI systems they don't understand or control. When these energy-hungry, opaque systems fail—and they will—the cascading effects could destabilize entire economies.
 
-This isn't science fiction. We're already seeing preview effects: social media algorithms influencing elections, trading algorithms causing market crashes, recommendation systems creating filter bubbles that polarize societies. Now imagine this level of dependency scaled up to every aspect of institutional decision-making, powered by systems that consume the energy of small countries and controlled by unaccountable corporate interests.
+This isn't science fiction. We're already seeing preview effects: social media algorithms influencing elections, trading algorithms causing market crashes, recommendation systems creating filter bubbles that polarize societies. Now imagine this level of dependency scaled up to every aspect of institutional decision-making, powered by systems that consume the energy of small countries, controlled by unaccountable corporate interests.
 
 ### The Paradigm Stagnation Trap
 
@@ -134,6 +134,24 @@ This isn't charity—it's sustainable economics. By aligning incentives properly
 By distributing intelligence across a peer-to-peer network rather than concentrating it in private corporate data centers, PRSM eliminates single points of failure. No corporate gatekeeper can cut off access, no monopolistic entity can control pricing or availability, and no institutional dependency can threaten societal stability.
 
 The network becomes more robust as it grows, not more fragile. Individual nodes can fail without affecting the whole system. This distributed approach also dramatically reduces energy consumption by utilizing existing computational resources efficiently rather than building massive, dedicated data centers.
+
+The scale of latent computational power available in consumer devices is staggering. Consider these back-of-the-envelope calculations:
+
+**Global Consumer Compute Power:**
+- **Smartphones**: ~6.8 billion devices × 0.75 TFLOPS average = **5.1 exaFLOPS**
+- **Laptops/PCs**: ~2.5 billion devices × 2 TFLOPS average = **5.0 exaFLOPS**
+- **Tablets**: ~1.2 billion devices × 0.5 TFLOPS average = **0.6 exaFLOPS**
+- **Total Consumer Compute**: **~10.7 exaFLOPS**
+
+**AI Industry Comparison:**
+- GPT-4 training cluster: ~7.8 exaFLOPS
+- Google's total AI compute: ~15-20 exaFLOPS
+- Microsoft + Amazon + Meta AI: ~25-40 exaFLOPS
+- **Total major AI lab compute**: **~50-70 exaFLOPS**
+
+The remarkable insight: consumer devices are idle 80-90% of the time. Even if PRSM could efficiently harness just 10% of this latent compute power, that would yield over 1 exaFLOPS—more computational power than was used to train GPT-4. At 20% utilization, we'd have over 2 exaFLOPS, rivaling the computational resources of entire AI corporations.
+
+This isn't theoretical. Projects like SETI@home and Folding@home have successfully coordinated millions of consumer devices for distributed computing. PRSM extends this concept to AI inference and training, creating a computational commons that could democratically compete with—and potentially surpass—the resources of private AI monopolies.
 
 ## The Paradigm Shift: From Extraction to Collaboration
 
