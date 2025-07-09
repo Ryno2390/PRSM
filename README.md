@@ -1033,6 +1033,22 @@ spec:
 
 PRSM's long-term value creation strategy centers on **[Prismatica Holdings](docs/Prismatica_Business_Case.md)**, a separate for-profit entity that will implement groundbreaking initiatives while providing multiple revenue streams and investment opportunities for PRSM stakeholders. This dual-entity approach creates sustainable economic incentives while maintaining PRSM's open-source, non-profit mission.
 
+### The Technical Breakthrough: Revolutionary Hybrid AI Architecture
+
+Prismatica's competitive advantage lies in solving a fundamental problem that has prevented **Automated Bayesian Search (ABS)** from being practical: while the AI industry pursues ever-larger language models that optimize for text prediction, Prismatica leverages a **hybrid architecture** that enables genuine scientific reasoning.
+
+**The Secret Sauce: System 1 + System 2 AI Agents**
+
+Unlike LLMs that pattern-match on text, Prismatica's ABS agents combine:
+- **System 1 (Transformer Component)**: Rapid pattern recognition in experimental data and scientific literature
+- **System 2 (First-Principles World Model)**: Structured reasoning about causal relationships based on fundamental physical principles
+
+**Collective Intelligence Through Experimental Sharing**: Agents perform domain-specific experiments (simulations and physical validation), then share results—including failures—across PRSM's network to update collective Bayesian priors. When Dr. X publishes a failed synthesis attempt, she receives FTNS tokens because her negative result provides crucial information that helps other agents avoid similar dead ends.
+
+**Why This Enables Atomically Precise Manufacturing**: Traditional AI cannot develop APM because it lacks causal understanding of self-replication, precision assembly, and scaling laws. Prismatica's agents understand the **causal relationships** governing molecular manufacturing, bridging quantum-level interactions with macroscopic outcomes—the fundamental requirement for APM.
+
+This hybrid architecture transforms ABS from a theoretical concept into a practical system capable of compressing the traditional 20-year APM development timeline to potentially 5-7 years, unlocking Prismatica's vision of exponential manufacturing capabilities.
+
 ### Phase 1: Production-Ready Core Platform (18 Months)
 
 **Objective**: Transform PRSM from advanced prototype to production-grade AI coordination infrastructure.
