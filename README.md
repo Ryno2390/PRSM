@@ -149,7 +149,7 @@ The scale of latent computational power available in consumer devices is stagger
 - Microsoft + Amazon + Meta AI: ~25-40 exaFLOPS
 - **Total major AI lab compute**: **~50-70 exaFLOPS**
 
-The remarkable insight: consumer devices are idle 80-90% of the time. Even if PRSM could efficiently harness just 10% of this latent compute power, that would yield over 1 exaFLOPS—more computational power than was used to train GPT-4. At 20% utilization, we'd have over 2 exaFLOPS, rivaling the computational resources of entire AI corporations.
+The remarkable insight: consumer devices are idle 80-90% of the time. Even if PRSM could efficiently harness just 10% of this latent compute power, that would yield over 1 exaFLOPS—roughly 14% of GPT-4's training cluster capacity (7.8 exaFLOPS). At 20% utilization, we'd have over 2 exaFLOPS, approaching 30% of the computational resources used to train the world's most advanced language models.
 
 This isn't theoretical. Projects like SETI@home and Folding@home have successfully coordinated millions of consumer devices for distributed computing. PRSM extends this concept to AI inference and training, creating a computational commons that could democratically compete with—and potentially surpass—the resources of private AI monopolies.
 
