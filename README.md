@@ -107,7 +107,7 @@ Leading AI researchers warns of a "gentle singularity"—not the sci-fi dystopia
 
 This isn't science fiction. We're already seeing preview effects: social media algorithms influencing elections, trading algorithms causing market crashes, recommendation systems creating filter bubbles that polarize societies. Now imagine this level of dependency scaled up to every aspect of institutional decision-making, powered by systems that consume the energy of small countries, controlled by unaccountable corporate interests.
 
-# PRSM's Comprehensive Solution: Aligning Technology, Economics, and Ethics
+# PRSM's Solution: Aligning Technology, Economics, and Ethics
 
 PRSM seeks to address this crisis through a fundamentally different approach: distributed, incentive-aligned, architecture-agnostic artificial intelligence that sidesteps both domestic and international arms races.
 
@@ -232,7 +232,7 @@ PRSM offers more than an alternative—it offers the infrastructure for AI's muc
 ² [A Path Towards Autonomous Machine Intelligence](docs/source_documents/10356_a_path_towards_autonomous_mach.pdf) - Yann LeCun, Meta AI (2022)  
 ³ [Bartz v. Anthropic Order on Fair Use](docs/source_documents/bartz-et-al-v-anthropic-pbc_1.pdf) - U.S. District Court (June 2025)
 ⁴ [Potemkin Understanding in Large Language Models](docs/source_documents/2506.21521v2.pdf) - Mancoridis, Weeks, Vafa, Mullainathan (2025)
-⁵ [Research Document](docs/source_documents/3442188.3445922.pdf) - (2025)
+⁵ [On the Dangers of Stochastic Parrots: Can Language Models Be Too Big?](docs/source_documents/3442188.3445922.pdf) - (2025)
 
 ---
 
