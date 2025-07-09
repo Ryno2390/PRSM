@@ -1690,13 +1690,13 @@ Our current implementation includes:
 ### 🌈 Join Our Spectrum Teams
 PRSM organizes contributors through Newton's light spectrum:
 
-- **🔴 RED Team**: Foundational AI & SEAL Technology → [red-team@prsm.ai](mailto:red-team@prsm.ai)
-- **🟠 ORANGE Team**: System Orchestration & Optimization → [orange-team@prsm.ai](mailto:orange-team@prsm.ai)
-- **🟡 YELLOW Team**: Code Generation & Developer Tools → [yellow-team@prsm.ai](mailto:yellow-team@prsm.ai)
-- **🟢 GREEN Team**: Learning Systems & Community → [green-team@prsm.ai](mailto:green-team@prsm.ai)
-- **🔵 BLUE Team**: Security & Governance → [blue-team@prsm.ai](mailto:blue-team@prsm.ai)
-- **🟣 INDIGO Team**: Multi-Agent Intelligence → [indigo-team@prsm.ai](mailto:indigo-team@prsm.ai)
-- **🟪 VIOLET Team**: Marketplace & Enterprise → [violet-team@prsm.ai](mailto:violet-team@prsm.ai)
+- **🔴 RED Team**: Foundational AI & SEAL Technology → [red-team@prsmai.com](mailto:red-team@prsmai.com)
+- **🟠 ORANGE Team**: System Orchestration & Optimization → [orange-team@prsmai.com](mailto:orange-team@prsmai.com)
+- **🟡 YELLOW Team**: Code Generation & Developer Tools → [yellow-team@prsmai.com](mailto:yellow-team@prsmai.com)
+- **🟢 GREEN Team**: Learning Systems & Community → [green-team@prsmai.com](mailto:green-team@prsmai.com)
+- **🔵 BLUE Team**: Security & Governance → [blue-team@prsmai.com](mailto:blue-team@prsmai.com)
+- **🟣 INDIGO Team**: Multi-Agent Intelligence → [indigo-team@prsmai.com](mailto:indigo-team@prsmai.com)
+- **🟪 VIOLET Team**: Marketplace & Enterprise → [violet-team@prsmai.com](mailto:violet-team@prsmai.com)
 
 See our [Contributing Guide](CONTRIBUTING.md) for details.
 
