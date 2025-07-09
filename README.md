@@ -151,6 +151,16 @@ The scale of latent computational power available in consumer devices is stagger
 
 The remarkable insight: consumer devices are idle 80-90% of the time. Even if PRSM could efficiently harness just 10% of this latent compute power, that would yield over 1 exaFLOPS—roughly 14% of GPT-4's training cluster capacity (7.8 exaFLOPS). At 20% utilization, we'd have over 2 exaFLOPS, approaching 30% of the computational resources used to train the world's most advanced language models.
 
+But raw compute is only part of the equation. By leveraging PRSM's collective intelligence for model optimization, we could bridge this gap entirely through efficiency improvements. The distributed network needs only a **3.6x efficiency gain** to match GPT-4's training compute at 20% consumer utilization—a modest target compared to recent breakthroughs:
+
+**Proven Efficiency Achievements:**
+- **DeepSeek-V2**: Achieved GPT-4-level performance with 40% fewer parameters
+- **DeepSeek-R1**: Matches GPT-4o performance with 85% less inference compute  
+- **Training efficiency**: DeepSeek required ~10x less compute than GPT-4 for similar performance
+- **Architecture innovations**: Multi-head latent attention, mixture of experts, optimized data curation
+
+PRSM's collective intelligence could systematically discover and implement efficiency improvements—distillation, pruning, novel architectures, better training techniques—that have already proven capable of 5-15x gains. The 3.6x efficiency improvement PRSM needs is well within the realm of demonstrated possibility, potentially making distributed consumer compute not just competitive with, but superior to, centralized AI monopolies.
+
 This isn't theoretical. Projects like SETI@home and Folding@home have successfully coordinated millions of consumer devices for distributed computing. PRSM extends this concept to AI inference and training, creating a computational commons that could democratically compete with—and potentially surpass—the resources of private AI monopolies.
 
 ## The Paradigm Shift: From Extraction to Collaboration
