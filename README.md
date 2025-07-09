@@ -63,7 +63,7 @@ This isn't a minor limitation—it's a fundamental architectural problem. Curren
 
 The AI industry's obsession with a single metric—validation loss—reveals how deeply this Potemkin understanding has infected the field. Validation loss measures how well models predict the next token in human-generated text. The entire industry has organized around minimizing this metric, believing that lower loss equals better intelligence.
 
-But validation loss measures prediction accuracy, not understanding. It's the difference between a parrot that perfectly mimics human speech and a human who actually comprehends language. LLMs are being optimized to become better parrots—more convincing mimics of human-generated patterns—not better thinkers.
+But validation loss measures prediction accuracy, not understanding. It's the difference between a parrot that perfectly mimics human speech and a human who actually comprehends language. LLMs are being optimized to become better parrots—more convincing mimics of human-generated patterns—not better thinkers⁵.
 
 This metric fixation creates a fundamental misalignment. Even if we could somehow bypass the Compute Efficient Frontier (the mathematical limit on how much validation loss can be reduced regardless of scale), we'd still be optimizing for the wrong thing. Human language is full of errors, biases, and incomplete descriptions of reality. Training AI to better predict what humans might say next doesn't get us closer to truth—it gets us closer to human-like error patterns.
 
@@ -186,6 +186,7 @@ PRSM offers more than an alternative—it offers the infrastructure for AI's muc
 ² [A Path Towards Autonomous Machine Intelligence](docs/source_documents/10356_a_path_towards_autonomous_mach.pdf) - Yann LeCun, Meta AI (2022)  
 ³ [Bartz v. Anthropic Order on Fair Use](docs/source_documents/bartz-et-al-v-anthropic-pbc_1.pdf) - U.S. District Court (June 2025)
 ⁴ [Potemkin Understanding in Large Language Models](docs/source_documents/2506.21521v2.pdf) - Mancoridis, Weeks, Vafa, Mullainathan (2025)
+⁵ [Research Document](docs/source_documents/3442188.3445922.pdf) - (2025)
 
 ---
 
