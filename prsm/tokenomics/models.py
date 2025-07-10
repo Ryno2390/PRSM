@@ -105,6 +105,35 @@ class RoyaltyStatus(str, Enum):
     CANCELLED = "cancelled"        # Royalty payment cancelled
 
 
+class ContributorTier(str, Enum):
+    """Contributor status levels for FTNS earning eligibility"""
+    NONE = "none"           # No recent contributions - cannot earn FTNS
+    BASIC = "basic"         # Minimal contribution threshold met
+    ACTIVE = "active"       # Strong contribution history
+    POWER_USER = "power"    # Exceptional contributions
+
+
+class ContributionType(str, Enum):
+    """Types of contributions that can be verified"""
+    STORAGE = "storage"             # IPFS storage provision
+    COMPUTE = "compute"             # Computational work provision  
+    DATA = "data"                   # Dataset contribution
+    GOVERNANCE = "governance"       # Voting and proposal participation
+    DOCUMENTATION = "documentation" # Documentation and guides
+    MODEL = "model"                 # AI model contribution
+    RESEARCH = "research"           # Research publication
+    TEACHING = "teaching"           # Educational content
+
+
+class ProofStatus(str, Enum):
+    """Status of contribution proof verification"""
+    PENDING = "pending"             # Proof submitted, awaiting verification
+    VERIFIED = "verified"           # Proof successfully verified
+    REJECTED = "rejected"           # Proof failed verification
+    DISPUTED = "disputed"           # Proof under dispute
+    EXPIRED = "expired"             # Proof validity expired
+
+
 # === Core FTNS Models ===
 
 class FTNSWallet(Base):
@@ -617,4 +646,161 @@ class FTNSAuditLog(Base):
         Index('idx_audit_logs_category_severity', 'event_category', 'severity'),
         Index('idx_audit_logs_timestamp', 'timestamp'),
         Index('idx_audit_logs_actor', 'actor_wallet_id'),
+    )
+
+
+# === Contributor Status & Proof-of-Contribution Models ===
+
+class FTNSContributorStatus(Base):
+    """Track contribution status and eligibility for FTNS earning"""
+    __tablename__ = "ftns_contributor_status"
+    
+    # Primary identification  
+    status_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = Column(String(255), nullable=False, unique=True, index=True)
+    
+    # Contributor status
+    status = Column(String(50), nullable=False, default=ContributorTier.NONE.value, index=True)
+    last_contribution_date = Column(DateTime(timezone=True), nullable=True, index=True)
+    contribution_score = Column(DECIMAL(10, 4), nullable=False, default=Decimal('0.0'))
+    
+    # Active contribution tracking
+    storage_provided_gb = Column(DECIMAL(15, 6), nullable=False, default=Decimal('0.0'))
+    compute_hours_provided = Column(DECIMAL(15, 6), nullable=False, default=Decimal('0.0'))
+    data_contributions_verified = Column(Integer, nullable=False, default=0)
+    governance_votes_cast = Column(Integer, nullable=False, default=0)
+    documentation_contributions = Column(Integer, nullable=False, default=0)
+    model_contributions = Column(Integer, nullable=False, default=0)
+    research_publications = Column(Integer, nullable=False, default=0)
+    
+    # Grace period management
+    grace_period_expires = Column(DateTime(timezone=True), nullable=True)
+    last_status_update = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    
+    # Metadata and tracking
+    contribution_history = Column(JSONB, nullable=True, default=dict)
+    peer_validations = Column(JSONB, nullable=True, default=list)
+    quality_scores = Column(JSONB, nullable=True, default=dict)
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=True, onupdate=func.now())
+    
+    # Constraints
+    __table_args__ = (
+        CheckConstraint('contribution_score >= 0', name='positive_contribution_score'),
+        CheckConstraint('storage_provided_gb >= 0', name='positive_storage_provided'),
+        CheckConstraint('compute_hours_provided >= 0', name='positive_compute_hours'),
+        Index('idx_contributor_status_user', 'user_id'),
+        Index('idx_contributor_status_tier', 'status'),
+        Index('idx_contributor_last_contribution', 'last_contribution_date'),
+        Index('idx_contributor_score', 'contribution_score'),
+    )
+
+
+class FTNSContributionProof(Base):
+    """Cryptographic proofs of contribution for verification"""
+    __tablename__ = "ftns_contribution_proofs"
+    
+    # Primary identification
+    proof_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = Column(String(255), nullable=False, index=True)
+    contribution_type = Column(String(50), nullable=False, index=True)
+    
+    # Proof verification
+    proof_hash = Column(String(255), nullable=False, unique=True)
+    verification_timestamp = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    verification_status = Column(String(50), nullable=False, default=ProofStatus.PENDING.value, index=True)
+    verified_by_peers = Column(JSONB, nullable=True, default=list)
+    verification_confidence = Column(Float, nullable=False, default=0.0)
+    
+    # Contribution quantification
+    contribution_value = Column(DECIMAL(20, 8), nullable=False)
+    quality_score = Column(Float, nullable=False, default=0.0)
+    impact_multiplier = Column(Float, nullable=False, default=1.0)
+    
+    # Proof data and metadata
+    proof_data = Column(JSONB, nullable=False, default=dict)
+    blockchain_hash = Column(String(255), nullable=True)  # For on-chain verification
+    ipfs_hash = Column(String(255), nullable=True)        # For IPFS storage proofs
+    
+    # Validation details
+    validation_criteria = Column(JSONB, nullable=True, default=dict)
+    validation_results = Column(JSONB, nullable=True, default=dict)
+    rejection_reason = Column(Text, nullable=True)
+    
+    # Expiration and lifecycle
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Relationships
+    contributor_status = relationship(
+        "FTNSContributorStatus", 
+        foreign_keys=[user_id],
+        primaryjoin="FTNSContributionProof.user_id == FTNSContributorStatus.user_id",
+        backref="contribution_proofs"
+    )
+    
+    # Constraints
+    __table_args__ = (
+        CheckConstraint('contribution_value >= 0', name='positive_contribution_value'),
+        CheckConstraint('quality_score >= 0 AND quality_score <= 1', name='valid_quality_score'),
+        CheckConstraint('impact_multiplier >= 0.1 AND impact_multiplier <= 10', name='valid_impact_multiplier'),
+        CheckConstraint('verification_confidence >= 0 AND verification_confidence <= 1', name='valid_verification_confidence'),
+        Index('idx_proof_user_type', 'user_id', 'contribution_type'),
+        Index('idx_proof_status', 'verification_status'),
+        Index('idx_proof_timestamp', 'verification_timestamp'),
+        Index('idx_proof_hash', 'proof_hash'),
+        Index('idx_proof_expires', 'expires_at'),
+    )
+
+
+class FTNSContributionMetrics(Base):
+    """Aggregated contribution metrics for analytics and rewards"""
+    __tablename__ = "ftns_contribution_metrics"
+    
+    # Primary identification
+    metric_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = Column(String(255), nullable=False, index=True)
+    metric_type = Column(String(50), nullable=False, index=True)  # daily, weekly, monthly, quarterly
+    metric_period = Column(String(20), nullable=False, index=True)  # YYYY-MM-DD or YYYY-MM format
+    
+    # Contribution counts by type
+    storage_contributions = Column(Integer, nullable=False, default=0)
+    compute_contributions = Column(Integer, nullable=False, default=0)
+    data_contributions = Column(Integer, nullable=False, default=0)
+    governance_contributions = Column(Integer, nullable=False, default=0)
+    documentation_contributions = Column(Integer, nullable=False, default=0)
+    model_contributions = Column(Integer, nullable=False, default=0)
+    research_contributions = Column(Integer, nullable=False, default=0)
+    teaching_contributions = Column(Integer, nullable=False, default=0)
+    
+    # Quality and impact metrics
+    average_quality_score = Column(Float, nullable=False, default=0.0)
+    total_impact_score = Column(DECIMAL(15, 6), nullable=False, default=Decimal('0.0'))
+    peer_validation_count = Column(Integer, nullable=False, default=0)
+    unique_contribution_types = Column(Integer, nullable=False, default=0)
+    
+    # Rewards and recognition
+    ftns_earned_period = Column(DECIMAL(20, 8), nullable=False, default=Decimal('0.0'))
+    ftns_earned_cumulative = Column(DECIMAL(20, 8), nullable=False, default=Decimal('0.0'))
+    tier_advancement_count = Column(Integer, nullable=False, default=0)
+    
+    # Period metadata
+    period_start = Column(DateTime(timezone=True), nullable=False)
+    period_end = Column(DateTime(timezone=True), nullable=False)
+    calculated_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    
+    # Constraints
+    __table_args__ = (
+        CheckConstraint('average_quality_score >= 0 AND average_quality_score <= 1', name='valid_avg_quality'),
+        CheckConstraint('total_impact_score >= 0', name='positive_impact_score'),
+        CheckConstraint('ftns_earned_period >= 0', name='positive_period_earnings'),
+        CheckConstraint('ftns_earned_cumulative >= 0', name='positive_cumulative_earnings'),
+        CheckConstraint('unique_contribution_types >= 0 AND unique_contribution_types <= 8', name='valid_contribution_types'),
+        Index('idx_metrics_user_period', 'user_id', 'metric_period'),
+        Index('idx_metrics_type_period', 'metric_type', 'metric_period'),
+        Index('idx_metrics_calculated', 'calculated_at'),
+        UniqueConstraint('user_id', 'metric_type', 'metric_period', name='unique_user_metric_period'),
     )
