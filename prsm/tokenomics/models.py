@@ -125,6 +125,22 @@ class ContributionType(str, Enum):
     TEACHING = "teaching"           # Educational content
 
 
+class SupplyAdjustmentStatus(str, Enum):
+    """Status of supply adjustments"""
+    CALCULATED = "calculated"
+    APPLIED = "applied"
+    FAILED = "failed"
+    REVERTED = "reverted"
+
+
+class AdjustmentTrigger(str, Enum):
+    """Trigger types for supply adjustments"""
+    AUTOMATED = "automated"
+    GOVERNANCE = "governance"
+    EMERGENCY = "emergency"
+    MANUAL = "manual"
+
+
 class ProofStatus(str, Enum):
     """Status of contribution proof verification"""
     PENDING = "pending"             # Proof submitted, awaiting verification
@@ -803,4 +819,141 @@ class FTNSContributionMetrics(Base):
         Index('idx_metrics_type_period', 'metric_type', 'metric_period'),
         Index('idx_metrics_calculated', 'calculated_at'),
         UniqueConstraint('user_id', 'metric_type', 'metric_period', name='unique_user_metric_period'),
+    )
+
+
+# === PHASE 2: DYNAMIC SUPPLY ADJUSTMENT MODELS ===
+
+class FTNSSupplyAdjustment(Base):
+    """Track supply adjustment decisions and applications"""
+    __tablename__ = "ftns_supply_adjustments"
+    
+    # Primary identification
+    adjustment_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    
+    # Adjustment details
+    adjustment_factor = Column(DECIMAL(8, 6), nullable=False)  # Multiplier for rates (e.g., 1.15 = 15% increase)
+    trigger = Column(String(50), nullable=False, index=True)  # automated, governance, emergency, manual
+    
+    # Rate snapshots
+    previous_rates = Column(JSONB, nullable=False)  # Previous reward rates
+    new_rates = Column(JSONB, nullable=False)       # New reward rates after adjustment
+    
+    # Timing
+    calculated_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    applied_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Status tracking
+    status = Column(String(50), nullable=False, default=SupplyAdjustmentStatus.CALCULATED.value, index=True)
+    
+    # Economic context
+    target_appreciation_rate = Column(DECIMAL(8, 6), nullable=True)  # Target rate at time of adjustment
+    actual_appreciation_rate = Column(DECIMAL(8, 6), nullable=True)  # Actual rate at time of adjustment
+    price_volatility = Column(DECIMAL(8, 6), nullable=True)          # Price volatility measure
+    
+    # Governance and approval
+    approved_by = Column(String(255), nullable=True)  # Governance proposal ID or admin user
+    approval_timestamp = Column(DateTime(timezone=True), nullable=True)
+    
+    # Metadata and audit
+    metadata = Column(JSONB, nullable=True)  # Additional context, calculations, etc.
+    
+    # Constraints
+    __table_args__ = (
+        CheckConstraint('adjustment_factor > 0', name='positive_adjustment_factor'),
+        CheckConstraint('target_appreciation_rate >= 0', name='non_negative_target_rate'),
+        Index('idx_adjustments_status', 'status'),
+        Index('idx_adjustments_trigger', 'trigger'),
+        Index('idx_adjustments_calculated', 'calculated_at'),
+        Index('idx_adjustments_applied', 'applied_at'),
+    )
+
+
+class FTNSPriceMetrics(Base):
+    """Historical price metrics for supply adjustment analysis"""
+    __tablename__ = "ftns_price_metrics"
+    
+    # Primary identification
+    metric_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    
+    # Price data
+    current_price = Column(DECIMAL(20, 8), nullable=True)
+    target_appreciation_rate = Column(DECIMAL(8, 6), nullable=False)
+    actual_appreciation_rate = Column(DECIMAL(8, 6), nullable=False)
+    price_volatility = Column(DECIMAL(8, 6), nullable=False)
+    
+    # Analysis metrics
+    rate_ratio = Column(DECIMAL(8, 6), nullable=False)  # actual / target rate ratio
+    volatility_damping = Column(DECIMAL(5, 4), nullable=False)  # Volatility damping factor applied
+    
+    # Market data (if available)
+    volume_24h = Column(DECIMAL(20, 8), nullable=True)
+    market_cap = Column(DECIMAL(20, 8), nullable=True)
+    
+    # Timing and context
+    recorded_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    data_source = Column(String(100), nullable=False, default="price_oracle")
+    
+    # Metadata
+    metadata = Column(JSONB, nullable=True)  # Calculation details, data quality indicators, etc.
+    
+    # Constraints
+    __table_args__ = (
+        CheckConstraint('target_appreciation_rate >= 0', name='non_negative_target_rate_metrics'),
+        CheckConstraint('price_volatility >= 0', name='non_negative_volatility'),
+        CheckConstraint('rate_ratio > 0', name='positive_rate_ratio'),
+        CheckConstraint('volatility_damping >= 0 AND volatility_damping <= 1', name='valid_volatility_damping'),
+        Index('idx_price_metrics_recorded', 'recorded_at'),
+        Index('idx_price_metrics_source', 'data_source'),
+    )
+
+
+class FTNSRewardRates(Base):
+    """Current and historical reward rates for all network activities"""
+    __tablename__ = "ftns_reward_rates"
+    
+    # Primary identification
+    rate_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    
+    # Core reward rates
+    context_cost_multiplier = Column(DECIMAL(8, 6), nullable=False, default=Decimal('1.0'))
+    storage_reward_per_gb_hour = Column(DECIMAL(10, 8), nullable=False, default=Decimal('0.01'))
+    compute_reward_per_unit = Column(DECIMAL(10, 8), nullable=False, default=Decimal('0.05'))
+    data_contribution_base = Column(DECIMAL(10, 6), nullable=False, default=Decimal('10.0'))
+    governance_participation = Column(DECIMAL(10, 6), nullable=False, default=Decimal('2.0'))
+    documentation_reward = Column(DECIMAL(10, 6), nullable=False, default=Decimal('5.0'))
+    
+    # Advanced economic parameters
+    staking_apy = Column(DECIMAL(6, 4), nullable=False, default=Decimal('0.08'))  # 8% default
+    burn_rate_multiplier = Column(DECIMAL(6, 4), nullable=False, default=Decimal('1.0'))
+    
+    # Validity and versioning
+    effective_date = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    deactivated_at = Column(DateTime(timezone=True), nullable=True)
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    version = Column(String(50), nullable=False, default="1.0")
+    
+    # Governance and approval
+    approved_by = Column(String(255), nullable=True)  # Governance proposal or admin
+    adjustment_reference = Column(PG_UUID(as_uuid=True), ForeignKey('ftns_supply_adjustments.adjustment_id'), nullable=True)
+    
+    # Metadata
+    metadata = Column(JSONB, nullable=True)  # Rate calculation context, external factors, etc.
+    
+    # Relationships
+    adjustment = relationship("FTNSSupplyAdjustment", backref="rate_updates")
+    
+    # Constraints
+    __table_args__ = (
+        CheckConstraint('context_cost_multiplier > 0', name='positive_context_multiplier'),
+        CheckConstraint('storage_reward_per_gb_hour >= 0', name='non_negative_storage_reward'),
+        CheckConstraint('compute_reward_per_unit >= 0', name='non_negative_compute_reward'),
+        CheckConstraint('data_contribution_base >= 0', name='non_negative_data_reward'),
+        CheckConstraint('governance_participation >= 0', name='non_negative_governance_reward'),
+        CheckConstraint('documentation_reward >= 0', name='non_negative_doc_reward'),
+        CheckConstraint('staking_apy >= 0 AND staking_apy <= 1', name='valid_staking_apy'),
+        CheckConstraint('burn_rate_multiplier >= 0', name='non_negative_burn_rate'),
+        Index('idx_reward_rates_active', 'active'),
+        Index('idx_reward_rates_effective', 'effective_date'),
+        Index('idx_reward_rates_version', 'version'),
     )
