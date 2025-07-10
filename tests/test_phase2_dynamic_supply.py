@@ -160,6 +160,8 @@ class DynamicSupplyController:
         self.moderate_slow_threshold = 0.8
         
         self.last_adjustment_time = None
+        self.current_rates = self._get_default_reward_rates()
+        self.adjustment_history = []
     
     async def calculate_target_appreciation_rate(self, as_of_date=None):
         """Calculate target appreciation rate using asymptotic decay"""
@@ -324,7 +326,7 @@ class DynamicSupplyController:
     
     async def _get_current_reward_rates(self):
         """Get current reward rates"""
-        return self._get_default_reward_rates()
+        return self.current_rates.copy()
     
     async def apply_network_reward_adjustment(self, adjustment_factor, force=False):
         """Apply reward rate adjustment"""
@@ -341,11 +343,24 @@ class DynamicSupplyController:
         current_rates = await self._get_current_reward_rates()
         new_rates = {k: v * adjustment_factor for k, v in current_rates.items()}
         
+        # Update the stored rates
+        self.current_rates = new_rates.copy()
         self.last_adjustment_time = datetime.now(timezone.utc)
+        
+        # Store in adjustment history
+        adjustment_record = {
+            "adjustment_id": str(uuid4()),
+            "adjustment_factor": adjustment_factor,
+            "applied_at": self.last_adjustment_time.isoformat(),
+            "status": "applied",
+            "previous_rates": current_rates,
+            "new_rates": new_rates
+        }
+        self.adjustment_history.append(adjustment_record)
         
         return {
             "status": "applied",
-            "adjustment_id": str(uuid4()),
+            "adjustment_id": adjustment_record["adjustment_id"],
             "adjustment_factor": adjustment_factor,
             "previous_rates": current_rates,
             "new_rates": new_rates,
@@ -402,7 +417,16 @@ class DynamicSupplyController:
     
     async def get_adjustment_history(self, days=30):
         """Get adjustment history (mock implementation)"""
-        return []
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+        
+        # Filter history by date
+        filtered_history = []
+        for record in self.adjustment_history:
+            applied_at = datetime.fromisoformat(record["applied_at"].replace('Z', '+00:00'))
+            if applied_at >= cutoff_date:
+                filtered_history.append(record)
+        
+        return filtered_history
     
     async def get_controller_status(self):
         """Get controller status"""
@@ -970,7 +994,8 @@ class TestIntegrationScenarios:
         if result["status"] == "success":
             # Adjustment should be small due to volatility damping
             adjustment_magnitude = abs(result["adjustment_applied"] - 1.0)
-            assert adjustment_magnitude <= controller.max_daily_adjustment
+            # Use a small tolerance for floating point precision
+            assert adjustment_magnitude <= controller.max_daily_adjustment + 1e-10
         
         # Volatility should be detected as high
         if "metrics" in result:
