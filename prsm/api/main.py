@@ -55,6 +55,7 @@ from prsm.api.reputation_api import router as reputation_router
 from prsm.api.distillation_api import router as distillation_router
 from prsm.api.monitoring_api import router as monitoring_router
 from prsm.api.compliance_api import router as compliance_router
+from prsm.api.contributor_api import router as contributor_router
 from prsm.auth.auth_manager import auth_manager
 from prsm.auth import get_current_user
 from prsm.auth.middleware import AuthMiddleware, SecurityHeadersMiddleware
@@ -2030,6 +2031,7 @@ app.include_router(reputation_router, prefix="/api/v1", tags=["Reputation"])
 app.include_router(distillation_router, prefix="/api/v1", tags=["Distillation"])
 app.include_router(monitoring_router, prefix="/api/v1", tags=["Monitoring"])
 app.include_router(compliance_router, prefix="/api/v1", tags=["Compliance"])
+app.include_router(contributor_router, prefix="/api/v1/contributors", tags=["Contributors"])
 app.include_router(mainnet_router, prefix="/api/v1", tags=["Mainnet Deployment"])
 app.include_router(web3_router, prefix="/api/v1", tags=["Web3"])
 app.include_router(chronos_router, prefix="/api/v1", tags=["CHRONOS"])
