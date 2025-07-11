@@ -131,43 +131,6 @@ Whether breakthrough solutions emerge from "world models", neuromorphic computin
 
 Unlike platforms that lock users into specific paradigms (transformer-only models, particular cloud providers, proprietary APIs), PRSM enables experimentation and collaboration between radically different approaches. A user might employ Claude for code generation, a specialized vision model for image analysis, and a causal reasoning system for scientific hypothesis testing—all coordinated through PRSM's infrastructure. When the industry develops the next generation of breakthrough architectures, PRSM will be the platform where these systems can prove themselves and integrate with existing capabilities.
 
-### Economic Alignment Through Provenance Royalties
-
-Through FTNS (Fungible Tokens for Node Support, pronounced "photons") and our innovative provenance royalty system, PRSM compensates all contributors to the AI ecosystem: data providers receive ongoing royalties when their contributions are used, compute providers earn for providing processing power to the system, storage providers earn for hosting, and model creators receive attribution and compensation for their innovations.
-
-**🎉 Enhanced FTNS Infrastructure - Production Ready**: PRSM's tokenomics system has been completely redesigned with a sophisticated 5-phase implementation that creates sustainable incentives while maintaining our open-source mission:
-
-**✅ Phase 1: Merit-Based Contributor Access**
-- Only active contributors earn FTNS tokens, preventing pure speculation
-- Tiered earning multipliers (1.0x/1.3x/1.6x) based on contribution quality and frequency
-- 8 contribution types supported: code, research, documentation, governance, data, models, infrastructure, community
-- Cryptographic proof verification with peer validation ensures authenticity
-
-**✅ Phase 2: Dynamic Supply Adjustment** 
-- Asymptotic appreciation model: 50% initial annual appreciation gradually approaching 2% long-term
-- Daily market-responsive adjustments based on price velocity and volatility
-- Large supply changes require democratic governance approval
-- Economic design inherently favors contributors over speculators
-
-**✅ Phase 3: Anti-Hoarding Circulation Incentives**
-- Velocity-based demurrage fees (0.2%-1.0% monthly) for inactive holding
-- Active contributors receive up to 50% fee reductions based on participation
-- 90-day grace periods for new users to establish contribution patterns
-- Economic incentives promote circulation over passive accumulation
-
-**✅ Phase 4: Emergency Circuit Breakers**
-- Automated crisis detection: price crashes, volume spikes, oracle failures, system errors
-- Immediate response capabilities: transaction halts, limit reductions, governance alerts
-- Democratic override mechanisms allow community emergency responses within 6 hours
-- Comprehensive protection against market manipulation and technical failures
-
-**✅ Phase 5: Production Integration & Testing**
-- End-to-end workflow validation from user onboarding to crisis response
-- Sub-second response times with comprehensive performance monitoring
-- Enterprise-grade deployment configuration with security validation
-- 820+ lines of comprehensive API documentation
-
-This isn't charity—it's breakthrough economics. The enhanced FTNS system creates the first tokenomics model that genuinely aligns investor returns with ethical AI development. By properly aligning incentives, we create a virtuous cycle where contributors are motivated to provide high-quality data and resources, leading to better models, which generate more value that can be shared back to contributors. This is the opposite of the extractive model that dominates today's AI industry.
 
 ### Distributed Resilience Over Institutional Brittleness
 
@@ -211,6 +174,44 @@ PRSM represents more than just better AI infrastructure—it pioneers a fundamen
 - **Efficient architectures are rewarded** through marketplace dynamics rather than corporate mandate
 - **True intelligence emerges** from collaboration and healthy competition rather than domination and control
 - **Human agency is preserved** through distributed rather than centralized AI capabilities
+
+### Economic Alignment Through Provenance Royalties
+
+Through FTNS (Fungible Tokens for Node Support, pronounced "photons") and our innovative provenance royalty system, PRSM compensates all contributors to the AI ecosystem: data providers receive ongoing royalties when their contributions are used, compute providers earn for providing processing power to the system, storage providers earn for hosting, and model creators receive attribution and compensation for their innovations.
+
+**🎉 Enhanced FTNS Infrastructure - Production Ready**: PRSM's tokenomics system has been completely redesigned with a sophisticated 5-phase implementation that creates sustainable incentives while maintaining our open-source mission:
+
+**✅ Phase 1: Merit-Based Contributor Access**
+- Only active contributors earn FTNS tokens, preventing pure speculation
+- Tiered earning multipliers (1.0x/1.3x/1.6x) based on contribution quality and frequency
+- 8 contribution types supported: code, research, documentation, governance, data, models, infrastructure, community
+- Cryptographic proof verification with peer validation ensures authenticity
+
+**✅ Phase 2: Dynamic Supply Adjustment** 
+- Asymptotic appreciation model: 50% initial annual appreciation gradually approaching 2% long-term
+- Daily market-responsive adjustments based on price velocity and volatility
+- Large supply changes require democratic governance approval
+- Economic design inherently favors contributors over speculators
+
+**✅ Phase 3: Anti-Hoarding Circulation Incentives**
+- Velocity-based demurrage fees (0.2%-1.0% monthly) for inactive holding
+- Active contributors receive up to 50% fee reductions based on participation
+- 90-day grace periods for new users to establish contribution patterns
+- Economic incentives promote circulation over passive accumulation
+
+**✅ Phase 4: Emergency Circuit Breakers**
+- Automated crisis detection: price crashes, volume spikes, oracle failures, system errors
+- Immediate response capabilities: transaction halts, limit reductions, governance alerts
+- Democratic override mechanisms allow community emergency responses within 6 hours
+- Comprehensive protection against market manipulation and technical failures
+
+**✅ Phase 5: Production Integration & Testing**
+- End-to-end workflow validation from user onboarding to crisis response
+- Sub-second response times with comprehensive performance monitoring
+- Enterprise-grade deployment configuration with security validation
+- 820+ lines of comprehensive API documentation
+
+This isn't charity—it's breakthrough economics. The enhanced FTNS system creates the first tokenomics model that genuinely aligns investor returns with ethical AI development. By properly aligning incentives, we create a virtuous cycle where contributors are motivated to provide high-quality data and resources, leading to better models, which generate more value that can be shared back to contributors. This is the opposite of the extractive model that dominates today's AI industry.
 
 **🎯 Threading the Needle: Ethical AI with Investor Returns**
 
