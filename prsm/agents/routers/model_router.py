@@ -36,6 +36,7 @@ class RoutingStrategy(str, Enum):
     ACCURACY_OPTIMIZED = "accuracy_optimized"
     MARKETPLACE_PREFERRED = "marketplace_preferred"
     TEACHER_SELECTION = "teacher_selection"
+    HYBRID_CHEMISTRY = "hybrid_chemistry"  # New hybrid chemistry routing
 
 
 class ModelSource(str, Enum):
@@ -44,6 +45,7 @@ class ModelSource(str, Enum):
     MARKETPLACE = "marketplace"
     P2P_NETWORK = "p2p_network"
     TEACHER_POOL = "teacher_pool"
+    HYBRID_EXECUTOR = "hybrid_executor"  # New hybrid executor source
 
 
 class MarketplaceRequest(BaseModel):
@@ -144,6 +146,20 @@ class ModelCandidate(BaseModel):
                        (self.student_success_rate or 0.5) * 0.3
             else:
                 score = 0.1  # Non-teacher models get low score for teaching
+        elif strategy == RoutingStrategy.HYBRID_CHEMISTRY:
+            if self.source == ModelSource.HYBRID_EXECUTOR:
+                # Hybrid executors get significant bonus for chemistry tasks
+                score = (self.performance_score * 0.4 + 
+                        self.compatibility_score * 0.4 + 
+                        self.availability_score * 0.2)
+                if self.specialization == "chemistry":
+                    score += 0.2  # Extra bonus for chemistry specialization
+            else:
+                # Traditional models get lower scores for chemistry
+                score = (self.performance_score * 0.3 + 
+                        self.compatibility_score * 0.3 + 
+                        self.availability_score * 0.2 + 
+                        self.cost_score * 0.2)
         else:
             # Default balanced scoring
             score = (self.performance_score * 0.4 + 
@@ -188,10 +204,14 @@ class ModelRouter(BaseAgent):
         self.tool_routing_decisions: List[ToolRoutingDecision] = []
         self.model_tool_associations: Dict[str, List[str]] = {}  # model_id -> tool_ids
         
+        # Hybrid Architecture Integration
+        self.hybrid_executors: Dict[str, Any] = {}  # domain -> hybrid executor
+        self.chemistry_patterns = self._initialize_chemistry_patterns()
+        
         # Initialize performance tracking
         self._initialize_performance_tracking()
         
-        logger.info("Enhanced ModelRouter with MCP Tool integration initialized",
+        logger.info("Enhanced ModelRouter with MCP Tool and Hybrid Architecture integration initialized",
                    agent_id=self.agent_id,
                    marketplace_endpoints=len(self.marketplace_endpoints),
                    available_tools=len(self.tool_router.tool_registry.tools))
@@ -204,6 +224,47 @@ class ModelRouter(BaseAgent):
             "https://api.openai.com/models", 
             "https://api.anthropic.com/models",
             "https://api.cohere.ai/models"
+        ]
+    
+    def _initialize_chemistry_patterns(self) -> List[str]:
+        """Initialize chemistry detection patterns for automatic routing"""
+        return [
+            # Chemical reactions and processes
+            "reaction", "chemical reaction", "synthesis", "catalysis", "catalyst",
+            "reactant", "product", "reagent", "solvent", "precipitation",
+            "oxidation", "reduction", "combustion", "polymerization", "hydrolysis",
+            
+            # Molecular and atomic terms
+            "molecule", "molecular", "atom", "atomic", "bond", "ionic", "covalent",
+            "electron", "proton", "neutron", "orbital", "valence", "compound",
+            "element", "periodic table", "isotope", "ion", "radical",
+            
+            # Chemical properties and measurements
+            "ph", "acidity", "basicity", "molarity", "concentration", "solubility",
+            "boiling point", "melting point", "density", "viscosity", "conductivity",
+            "electronegativity", "polarity", "dipole", "entropy", "enthalpy",
+            
+            # Thermodynamics and kinetics
+            "gibbs free energy", "activation energy", "equilibrium", "rate constant",
+            "temperature", "pressure", "thermodynamic", "kinetic", "mechanism",
+            "pathway", "intermediate", "transition state", "endothermic", "exothermic",
+            
+            # Chemical notation and formulas
+            "smiles", "formula", "chemical formula", "molecular formula",
+            "structural formula", "lewis structure", "chemical equation",
+            
+            # Laboratory and analytical
+            "titration", "spectroscopy", "chromatography", "mass spectrometry",
+            "nmr", "ir", "uv", "lab", "laboratory", "analytical", "qualitative",
+            "quantitative", "purity", "yield", "synthesis",
+            
+            # Biochemistry
+            "protein", "enzyme", "amino acid", "nucleotide", "dna", "rna",
+            "metabolic", "biochemical", "substrate", "inhibitor", "cofactor",
+            
+            # Materials chemistry
+            "polymer", "crystal", "crystalline", "amorphous", "alloy", "ceramic",
+            "composite", "nanomaterial", "surface", "interface", "coating"
         ]
     
     def _initialize_performance_tracking(self):
@@ -247,6 +308,13 @@ class ModelRouter(BaseAgent):
             task_description = str(input_data)
             complexity = 0.5
             task_id = None
+        
+        # Auto-detect chemistry tasks and route to hybrid executor
+        if self._is_chemistry_task(task_description) and strategy != RoutingStrategy.HYBRID_CHEMISTRY:
+            logger.info("Auto-detected chemistry task, routing to hybrid executor",
+                       agent_id=self.agent_id,
+                       task_description=task_description[:100])
+            strategy = RoutingStrategy.HYBRID_CHEMISTRY
         
         logger.info("Processing enhanced routing request",
                    agent_id=self.agent_id,
@@ -326,7 +394,12 @@ class ModelRouter(BaseAgent):
             teacher_candidates = await self._discover_teacher_candidates(task_description)
             candidates.extend(teacher_candidates)
         
-        # 4. P2P network candidates
+        # 4. Hybrid executor candidates (for chemistry tasks)
+        if strategy == RoutingStrategy.HYBRID_CHEMISTRY:
+            hybrid_candidates = await self._discover_hybrid_candidates(task_description)
+            candidates.extend(hybrid_candidates)
+        
+        # 5. P2P network candidates
         p2p_candidates = await self._discover_p2p_candidates(task_description)
         candidates.extend(p2p_candidates)
         
@@ -561,6 +634,146 @@ class ModelRouter(BaseAgent):
         
         return candidates
     
+    def _is_chemistry_task(self, task_description: str) -> bool:
+        """Detect if a task is chemistry-related for automatic hybrid routing"""
+        task_lower = task_description.lower()
+        
+        # Check for chemistry patterns
+        chemistry_score = 0
+        for pattern in self.chemistry_patterns:
+            if pattern in task_lower:
+                chemistry_score += 1
+                
+        # Weighted scoring for compound patterns
+        if "chemical" in task_lower and any(word in task_lower for word in ["reaction", "synthesis", "compound", "molecule"]):
+            chemistry_score += 2
+            
+        if any(word in task_lower for word in ["catalyst", "catalysis"]) and any(word in task_lower for word in ["reaction", "mechanism", "pathway"]):
+            chemistry_score += 2
+            
+        if "thermodynamic" in task_lower or "kinetic" in task_lower:
+            chemistry_score += 1
+            
+        if any(notation in task_lower for notation in ["smiles", "chemical formula", "molecular formula"]):
+            chemistry_score += 2
+            
+        # Decision threshold: 2 or more chemistry indicators
+        is_chemistry = chemistry_score >= 2
+        
+        if is_chemistry:
+            logger.info("Chemistry task detected",
+                       task_description=task_description[:100],
+                       chemistry_score=chemistry_score)
+        
+        return is_chemistry
+    
+    async def _discover_hybrid_candidates(self, task_description: str) -> List[ModelCandidate]:
+        """Discover hybrid architecture candidates for chemistry tasks"""
+        candidates = []
+        
+        try:
+            # Check if chemistry hybrid executor is available
+            if "chemistry" not in self.hybrid_executors:
+                # Try to import and initialize chemistry hybrid executor
+                try:
+                    from prsm.nwtn.chemistry_hybrid_executor import ChemistryHybridExecutor
+                    
+                    hybrid_config = {
+                        "domain": "chemistry",
+                        "temperature": 0.7,
+                        "enable_learning": True,
+                        "enable_world_model": True,
+                        "enable_bayesian_search": True
+                    }
+                    
+                    self.hybrid_executors["chemistry"] = ChemistryHybridExecutor(hybrid_config)
+                    logger.info("Chemistry hybrid executor initialized for routing")
+                    
+                except ImportError:
+                    logger.warning("Chemistry hybrid executor not available, using mock")
+                    self.hybrid_executors["chemistry"] = "mock_chemistry_hybrid"
+                    
+            # Create chemistry hybrid candidate
+            chemistry_candidate = ModelCandidate(
+                model_id="chemistry_hybrid_executor",
+                name="Chemistry Hybrid Architecture",
+                specialization="chemistry",
+                model_type=ModelType.GENERAL,
+                source=ModelSource.HYBRID_EXECUTOR,
+                performance_score=0.95,  # High performance for chemistry tasks
+                compatibility_score=0.98,  # Very high compatibility for chemistry
+                availability_score=1.0,   # Always available locally
+                cost_score=0.9,          # Cost-effective (local execution)
+                latency_score=0.8,       # Good latency for complex reasoning
+                capabilities=[
+                    "chemical_reaction_prediction",
+                    "thermodynamic_analysis", 
+                    "kinetic_modeling",
+                    "molecular_property_prediction",
+                    "mechanism_pathway_analysis",
+                    "catalyst_optimization",
+                    "world_model_reasoning",
+                    "bayesian_experimentation",
+                    "first_principles_physics"
+                ],
+                limitations=[
+                    "specialized_for_chemistry",
+                    "requires_chemistry_knowledge_base"
+                ]
+            )
+            
+            candidates.append(chemistry_candidate)
+            
+            # Also add general hybrid executor if available
+            if "general" not in self.hybrid_executors:
+                try:
+                    from prsm.nwtn.hybrid_architecture import create_hybrid_nwtn_engine
+                    
+                    # Create general hybrid agent
+                    hybrid_agent = create_hybrid_nwtn_engine("general_hybrid", 0.7)
+                    self.hybrid_executors["general"] = hybrid_agent
+                    logger.info("General hybrid executor initialized for routing")
+                    
+                except ImportError:
+                    logger.warning("General hybrid executor not available")
+                    
+            if "general" in self.hybrid_executors:
+                general_candidate = ModelCandidate(
+                    model_id="general_hybrid_executor",
+                    name="General Hybrid Architecture",
+                    specialization="general",
+                    model_type=ModelType.GENERAL,
+                    source=ModelSource.HYBRID_EXECUTOR,
+                    performance_score=0.85,  # Good general performance
+                    compatibility_score=0.8,  # Good compatibility for chemistry
+                    availability_score=1.0,   # Always available locally
+                    cost_score=0.9,          # Cost-effective
+                    latency_score=0.7,       # Reasonable latency
+                    capabilities=[
+                        "world_model_reasoning",
+                        "bayesian_search",
+                        "first_principles_analysis",
+                        "multi_domain_knowledge",
+                        "soc_recognition",
+                        "causal_reasoning"
+                    ],
+                    limitations=[
+                        "general_purpose",
+                        "may_lack_domain_specialization"
+                    ]
+                )
+                
+                candidates.append(general_candidate)
+                
+        except Exception as e:
+            logger.error("Error discovering hybrid candidates", error=str(e))
+            
+        logger.info("Hybrid candidates discovered",
+                   task_description=task_description[:50],
+                   candidates_found=len(candidates))
+        
+        return candidates
+    
     async def _categorize_task(self, task_description: str) -> str:
         """Enhanced task categorization with domain awareness"""
         task_lower = task_description.lower()
@@ -788,6 +1001,14 @@ class ModelRouter(BaseAgent):
         elif strategy == RoutingStrategy.TEACHER_SELECTION:
             effectiveness = candidate.teaching_effectiveness or 0.0
             reasons.append(f"for teaching effectiveness ({effectiveness:.2f})")
+        elif strategy == RoutingStrategy.HYBRID_CHEMISTRY:
+            if candidate.source == ModelSource.HYBRID_EXECUTOR:
+                reasons.append(f"using hybrid architecture for superior chemistry reasoning")
+                if candidate.specialization == "chemistry":
+                    reasons.append("with domain-specific chemistry knowledge")
+                reasons.append("featuring System 1 + System 2 architecture")
+            else:
+                reasons.append(f"using traditional approach")
         
         # Confidence indicator
         reasons.append(f"with {candidate.overall_score:.0%} overall suitability")
