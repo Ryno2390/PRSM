@@ -51,7 +51,7 @@ Promising evidence suggests architectural diversity works better: Joint Embeddin
 
 This generation obsession stems from a deeper misunderstanding of how reality works. Leading AI researchers make a fundamental error about the relationship between different scales of reality. Consider this revealing quote from Ilya Sutskever, co-inventor of convolutional neural networks:
 
-*"Predicting the next token well means that you understand the underlying reality that led to the creation of that token. It's not statistics—like, it is statistics but what is statistics? In order to understand those statistics—to compress them—you need to understand what is it about the world that creates those statistics."*²
+_"Predicting the next token well means that you understand the underlying reality that led to the creation of that token. It's not statistics—like, it is statistics but what is statistics? In order to understand those statistics—to compress them—you need to understand what is it about the world that creates those statistics."_²
 
 The flaw in this reasoning is profound. Sutskever assumes we can deduce fundamental laws from emergent levels—that massive language models can somehow reverse-engineer the physics of reality from human-generated text. But physics teaches us that different scales of reality are often **decoupled**. 
 
