@@ -179,39 +179,33 @@ PRSM represents more than just better AI infrastructure—it pioneers a fundamen
 
 Through FTNS (Fungible Tokens for Node Support, pronounced "photons") and our innovative provenance royalty system, PRSM compensates all contributors to the AI ecosystem: data providers receive ongoing royalties when their contributions are used, compute providers earn for providing processing power to the system, storage providers earn for hosting, and model creators receive attribution and compensation for their innovations.
 
-**🎉 Enhanced FTNS Infrastructure - Production Ready**: PRSM's tokenomics system has been completely redesigned with a sophisticated 5-phase implementation that creates sustainable incentives while maintaining our open-source mission:
+**🎉 How FTNS Tokens Transform Your AI Experience**: 
 
-**✅ Phase 1: Merit-Based Contributor Access**
-- Only active contributors earn FTNS tokens, preventing pure speculation
-- Tiered earning multipliers (1.0x/1.3x/1.6x) based on contribution quality and frequency
-- 8 contribution types supported: code, research, documentation, governance, data, models, infrastructure, community
-- Cryptographic proof verification with peer validation ensures authenticity
+**💰 Earn While You Contribute**
+- Get rewarded for sharing data, code, research, or computational resources
+- Tiered earning multipliers (1.0x/1.3x/1.6x) reward high-quality contributions
+- 8 different ways to contribute: code, research, documentation, governance, data, models, infrastructure, community
+- Your contributions are cryptographically verified, ensuring you get credit for your work
 
-**✅ Phase 2: Dynamic Supply Adjustment** 
-- Asymptotic appreciation model: 50% initial annual appreciation gradually approaching 2% long-term
-- Daily market-responsive adjustments based on price velocity and volatility
-- Large supply changes require democratic governance approval
-- Economic design inherently favors contributors over speculators
+**🛡️ Built-In Speculation Protection**
+- Only active contributors earn tokens—no pure speculation allowed
+- Economic design favors people who actually use and improve the platform
+- Velocity-based fees discourage inactive hoarding while rewarding active participation
+- Community governance prevents manipulation and ensures fairness
 
-**✅ Phase 3: Anti-Hoarding Circulation Incentives**
-- Velocity-based demurrage fees (0.2%-1.0% monthly) for inactive holding
-- Active contributors receive up to 50% fee reductions based on participation
-- 90-day grace periods for new users to establish contribution patterns
-- Economic incentives promote circulation over passive accumulation
+**📈 Sustainable Value Growth**
+- Smart appreciation model starts at 50% annually, gradually stabilizing at 2% long-term
+- Daily market adjustments keep the system stable and responsive
+- Democratic governance approval required for major economic changes
+- Your tokens appreciate as the network grows, but speculation is discouraged
 
-**✅ Phase 4: Emergency Circuit Breakers**
-- Automated crisis detection: price crashes, volume spikes, oracle failures, system errors
-- Immediate response capabilities: transaction halts, limit reductions, governance alerts
-- Democratic override mechanisms allow community emergency responses within 6 hours
-- Comprehensive protection against market manipulation and technical failures
+**🚨 Crisis Protection**
+- Automated detection of market manipulation, technical failures, and unusual activity
+- Instant protective measures: transaction halts, limit adjustments, community alerts
+- Democratic override allows community emergency responses within 6 hours
+- Comprehensive safeguards protect both individual users and the broader ecosystem
 
-**✅ Phase 5: Production Integration & Testing**
-- End-to-end workflow validation from user onboarding to crisis response
-- Sub-second response times with comprehensive performance monitoring
-- Enterprise-grade deployment configuration with security validation
-- 820+ lines of comprehensive API documentation
-
-This isn't charity—it's breakthrough economics. The enhanced FTNS system creates the first tokenomics model that genuinely aligns investor returns with ethical AI development. By properly aligning incentives, we create a virtuous cycle where contributors are motivated to provide high-quality data and resources, leading to better models, which generate more value that can be shared back to contributors. This is the opposite of the extractive model that dominates today's AI industry.
+This isn't charity—it's breakthrough economics. FTNS creates the first tokenomics model that genuinely aligns investor returns with ethical AI development. By properly rewarding contributors, we create a virtuous cycle where people are motivated to provide high-quality data and resources, leading to better models, which generate more value that flows back to contributors. This is the opposite of the extractive model that dominates today's AI industry.
 
 **🎯 Threading the Needle: Ethical AI with Investor Returns**
 
