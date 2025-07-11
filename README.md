@@ -27,7 +27,7 @@ The artificial intelligence industry stands at a critical crossroads. While Larg
 
 ## The Efficiency Paradox: Doing Less with More
 
-Today's most advanced AI systems consume millions of watts of electricity to accomplish tasks that the human brain can perform with just 20 watts—the power of a dim light bulb¹. A teenager who has never sat behind a steering wheel can learn to drive competently in about 20 hours. Meanwhile, our best autonomous driving systems require millions or billions of labeled training examples, millions of reinforcement learning trials in virtual environments, and still fall short of human reliability².
+Today's most advanced AI systems consume millions of watts of electricity to accomplish tasks that the human brain can perform with just 20 watts—the power of a dim light bulb¹. A teenager who has never sat behind a steering wheel can learn to drive competently in about 20 hours. Meanwhile, our best autonomous driving systems require millions or billions of labeled training examples, millions of reinforcement learning trials in virtual environments, and still fall short of human reliability³.
 
 This isn't just inefficient—it's backwards. As AI systems scale larger, they will hit fundamental thermodynamic limits and complexity bottlenecks that make further scaling economically prohibitive¹. The current trajectory of throwing more data and bigger models at every problem is approaching a wall, as marginal energy and compute costs will come to exceed the marginal value created.
 
@@ -45,7 +45,7 @@ Promising evidence suggests architectural diversity works better: Joint Embeddin
 
 This generation obsession stems from a deeper misunderstanding of how reality works. Leading AI researchers make a fundamental error about the relationship between different scales of reality. Consider this revealing quote from Ilya Sutskever, co-inventor of convolutional neural networks:
 
-*"Predicting the next token well means that you understand the underlying reality that led to the creation of that token. It's not statistics—like, it is statistics but what is statistics? In order to understand those statistics—to compress them—you need to understand what is it about the world that creates those statistics."* (https://youtube.com/clip/UgkxY3B8TUl-kP2tJTslx9NJbkfn8uUdr3Bn?si=JSCjYNvZI_LEtiNn)
+*"Predicting the next token well means that you understand the underlying reality that led to the creation of that token. It's not statistics—like, it is statistics but what is statistics? In order to understand those statistics—to compress them—you need to understand what is it about the world that creates those statistics."*²
 
 The flaw in this reasoning is profound. Sutskever assumes we can deduce fundamental laws from emergent levels—that massive language models can somehow reverse-engineer the physics of reality from human-generated text. But physics teaches us that different scales of reality are often **decoupled**. 
 
@@ -57,7 +57,7 @@ Just as a weather model doesn't need to simulate every water molecule to predict
 
 **Balanced Perspective**: LLMs demonstrate remarkable capabilities within their domains—they can write code, analyze complex texts, engage in sophisticated reasoning, and solve many problems effectively. However, recent research reveals important limitations when we push them beyond their architectural strengths.
 
-Research shows that LLMs can suffer from "Potemkin understanding"—named after the elaborate facades built to impress Catherine the Great⁴. While LLMs excel at many tasks, they can create sophisticated illusions of comprehension that mask certain reasoning limitations, particularly when tested with novel approaches that probe understanding rather than pattern matching.
+Research shows that LLMs can suffer from "Potemkin understanding"—named after the elaborate facades built to impress Catherine the Great⁵. While LLMs excel at many tasks, they can create sophisticated illusions of comprehension that mask certain reasoning limitations, particularly when tested with novel approaches that probe understanding rather than pattern matching.
 
 **Where LLMs Excel**: Language understanding, code generation, creative writing, complex reasoning within well-defined domains, and sophisticated pattern recognition across vast text corpora.
 
@@ -335,10 +335,11 @@ PRSM offers more than an alternative—it offers the infrastructure for AI's muc
 
 **References:**
 ¹ [AI Models Are Not Conscious and Are Massively Inefficient, Causing Complexity and Scalability Bottlenecks to Artificial General Superintelligence](docs/source_documents/ssrn-5299044.pdf) - Trevor Nestor (2025)  
-² [A Path Towards Autonomous Machine Intelligence](docs/source_documents/10356_a_path_towards_autonomous_mach.pdf) - Yann LeCun, Meta AI (2022)  
-³ [Bartz v. Anthropic Order on Fair Use](docs/source_documents/bartz-et-al-v-anthropic-pbc_1.pdf) - U.S. District Court (June 2025)
-⁴ [Potemkin Understanding in Large Language Models](docs/source_documents/2506.21521v2.pdf) - Mancoridis, Weeks, Vafa, Mullainathan (2025)
-⁵ [On the Dangers of Stochastic Parrots: Can Language Models Be Too Big?](docs/source_documents/3442188.3445922.pdf) - (2025)
+² [Ilya Sutskever on Next-Token Prediction and Understanding Reality](https://youtube.com/clip/UgkxY3B8TUl-kP2tJTslx9NJbkfn8uUdr3Bn?si=JSCjYNvZI_LEtiNn) - Ilya Sutskever, OpenAI  
+³ [A Path Towards Autonomous Machine Intelligence](docs/source_documents/10356_a_path_towards_autonomous_mach.pdf) - Yann LeCun, Meta AI (2022)  
+⁴ [Bartz v. Anthropic Order on Fair Use](docs/source_documents/bartz-et-al-v-anthropic-pbc_1.pdf) - U.S. District Court (June 2025)
+⁵ [Potemkin Understanding in Large Language Models](docs/source_documents/2506.21521v2.pdf) - Mancoridis, Weeks, Vafa, Mullainathan (2025)
+⁶ [On the Dangers of Stochastic Parrots: Can Language Models Be Too Big?](docs/source_documents/3442188.3445922.pdf) - (2025)
 
 ---
 
