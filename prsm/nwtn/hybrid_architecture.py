@@ -588,66 +588,450 @@ class HybridNWTNEngine:
             temperature=self.temperature
         )
         
-        # Parse and create SOCs
         recognized_socs = []
-        try:
-            # Simple parsing - in full implementation, use robust NLP
-            # For now, create sample SOCs based on query
-            if "physics" in query.lower():
-                soc = self.soc_manager.create_or_update_soc(
-                    "physics_concept",
-                    SOCType.CONCEPT,
-                    0.6,
-                    "physics"
-                )
-                recognized_socs.append(soc)
-                
-            if "cause" in query.lower():
-                soc = self.soc_manager.create_or_update_soc(
-                    "causality",
-                    SOCType.PRINCIPLE,
-                    0.8,
-                    "logic"
-                )
-                recognized_socs.append(soc)
-                
-        except Exception as e:
-            logger.error("Error in SOC recognition", error=str(e))
-            
-        logger.info(
-            "System 1 SOC recognition completed",
-            recognized_count=len(recognized_socs)
-        )
         
-        return recognized_socs
+        # Fast pattern-based recognition (System 1 characteristic)
+        socs_from_patterns = await self._pattern_based_soc_recognition(query)
+        recognized_socs.extend(socs_from_patterns)
+        
+        # Context-based SOC activation
+        if context:
+            socs_from_context = await self._context_based_soc_recognition(context)
+            recognized_socs.extend(socs_from_context)
+        
+        try:
+            # Parse transformer response
+            parsed_socs = await self._parse_transformer_socs(analysis, query)
+            recognized_socs.extend(parsed_socs)
+            
+        except Exception as e:
+            logger.warning(f"Transformer SOC recognition failed: {e}")
+            # Fallback to simple keyword-based recognition
+            fallback_socs = await self._keyword_based_soc_recognition(query)
+            recognized_socs.extend(fallback_socs)
+        
+        # Remove duplicates and merge similar SOCs
+        unique_socs = await self._merge_similar_socs(recognized_socs)
+        
+        logger.info(f"System 1 recognized {len(unique_socs)} SOCs from query")
+        return unique_socs
+    
+    async def _pattern_based_soc_recognition(self, query: str) -> List[SOC]:
+        """Fast pattern-based SOC recognition using pre-compiled patterns"""
+        
+        socs = []
+        query_lower = query.lower()
+        
+        # Physics patterns
+        physics_patterns = {
+            "gravity": ["gravity", "gravitational", "falling", "weight", "mass attraction"],
+            "energy": ["energy", "kinetic", "potential", "conservation", "work"],
+            "momentum": ["momentum", "velocity", "collision", "impulse"],
+            "thermodynamics": ["heat", "temperature", "entropy", "thermal", "hot", "cold"]
+        }
+        
+        # Chemistry patterns
+        chemistry_patterns = {
+            "chemical_reaction": ["reaction", "catalyst", "reagent", "product", "chemical"],
+            "atomic_structure": ["atom", "electron", "proton", "neutron", "nucleus"],
+            "molecular_bonding": ["bond", "molecule", "ionic", "covalent", "polar"]
+        }
+        
+        # Mathematics patterns
+        math_patterns = {
+            "calculus": ["derivative", "integral", "limit", "differential", "calculus"],
+            "algebra": ["equation", "variable", "polynomial", "linear", "quadratic"],
+            "geometry": ["triangle", "circle", "angle", "area", "volume", "geometric"]
+        }
+        
+        # Check all patterns
+        all_patterns = {
+            **{f"physics_{k}": v for k, v in physics_patterns.items()},
+            **{f"chemistry_{k}": v for k, v in chemistry_patterns.items()},
+            **{f"math_{k}": v for k, v in math_patterns.items()}
+        }
+        
+        for concept_name, keywords in all_patterns.items():
+            confidence = 0.0
+            matched_keywords = []
+            
+            for keyword in keywords:
+                if keyword in query_lower:
+                    confidence += 0.2
+                    matched_keywords.append(keyword)
+            
+            if confidence > 0:
+                confidence = min(confidence, 0.8)  # Cap at 0.8 for pattern-based
+                
+                domain = concept_name.split('_')[0]
+                soc = self.soc_manager.create_or_update_soc(
+                    concept_name,
+                    SOCType.CONCEPT,
+                    confidence,
+                    domain=domain,
+                    properties={
+                        "recognition_method": "pattern_matching",
+                        "matched_keywords": matched_keywords,
+                        "query_fragment": query[:100]
+                    }
+                )
+                socs.append(soc)
+        
+        return socs
+    
+    async def _context_based_soc_recognition(self, context: Dict[str, Any]) -> List[SOC]:
+        """Activate SOCs based on context information"""
+        
+        socs = []
+        
+        # Extract SOCs from context
+        if "domain" in context:
+            domain = context["domain"]
+            # Activate domain-specific SOCs
+            domain_socs = self.soc_manager.domain_socs.get(domain, {})
+            for soc in domain_socs.values():
+                if soc.confidence > 0.5:  # Only activate confident SOCs
+                    socs.append(soc)
+        
+        if "corpus_socs" in context:
+            # Use SOCs from corpus search
+            corpus_socs = context["corpus_socs"]
+            socs.extend(corpus_socs)
+        
+        return socs
+    
+    async def _parse_transformer_socs(self, analysis: str, query: str) -> List[SOC]:
+        """Parse transformer response into SOCs"""
+        
+        socs = []
+        
+        try:
+            # Try to parse as JSON
+            import json
+            parsed = json.loads(analysis)
+            
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if all(key in item for key in ["type", "name", "confidence"]):
+                        soc_type = {
+                            "subject": SOCType.SUBJECT,
+                            "object": SOCType.OBJECT,
+                            "concept": SOCType.CONCEPT,
+                            "principle": SOCType.PRINCIPLE
+                        }.get(item["type"], SOCType.CONCEPT)
+                        
+                        soc = self.soc_manager.create_or_update_soc(
+                            item["name"],
+                            soc_type,
+                            float(item["confidence"]),
+                            domain=item.get("domain", "general"),
+                            properties={
+                                "recognition_method": "transformer_extraction",
+                                "source_query": query
+                            }
+                        )
+                        socs.append(soc)
+        
+        except Exception as e:
+            logger.warning(f"Failed to parse transformer SOC response: {e}")
+            # Fallback to simple text parsing
+            socs = await self._simple_text_soc_parsing(analysis, query)
+        
+        return socs
+    
+    async def _simple_text_soc_parsing(self, text: str, query: str) -> List[SOC]:
+        """Simple text-based SOC parsing as fallback"""
+        
+        socs = []
+        
+        # Extract key terms from the text
+        words = text.lower().split()
+        
+        # Look for domain indicators
+        domain_indicators = {
+            "physics": ["physics", "force", "energy", "motion", "gravity"],
+            "chemistry": ["chemistry", "reaction", "molecule", "atom", "chemical"],
+            "mathematics": ["math", "equation", "function", "variable", "calculation"]
+        }
+        
+        for domain, indicators in domain_indicators.items():
+            for indicator in indicators:
+                if indicator in words:
+                    soc = self.soc_manager.create_or_update_soc(
+                        f"{domain}_concept",
+                        SOCType.CONCEPT,
+                        0.6,
+                        domain=domain,
+                        properties={
+                            "recognition_method": "simple_text_parsing",
+                            "source_query": query,
+                            "detected_indicator": indicator
+                        }
+                    )
+                    socs.append(soc)
+        
+        return socs
+    
+    async def _keyword_based_soc_recognition(self, query: str) -> List[SOC]:
+        """Keyword-based SOC recognition as ultimate fallback"""
+        
+        socs = []
+        query_lower = query.lower()
+        
+        # Basic keyword recognition
+        keywords = {
+            "physics": SOCType.CONCEPT,
+            "chemistry": SOCType.CONCEPT,
+            "mathematics": SOCType.CONCEPT,
+            "science": SOCType.CONCEPT,
+            "research": SOCType.CONCEPT,
+            "experiment": SOCType.OBJECT,
+            "theory": SOCType.CONCEPT,
+            "law": SOCType.PRINCIPLE
+        }
+        
+        for keyword, soc_type in keywords.items():
+            if keyword in query_lower:
+                soc = self.soc_manager.create_or_update_soc(
+                    keyword,
+                    soc_type,
+                    0.5,
+                    domain="general",
+                    properties={
+                        "recognition_method": "keyword_fallback",
+                        "source_query": query
+                    }
+                )
+                socs.append(soc)
+        
+        return socs
+    
+    async def _merge_similar_socs(self, socs: List[SOC]) -> List[SOC]:
+        """Merge similar SOCs to avoid duplicates"""
+        
+        if not socs:
+            return []
+        
+        # Group SOCs by name similarity
+        merged = {}
+        
+        for soc in socs:
+            # Simple similarity based on name
+            merged_key = soc.name.lower().replace('_', ' ')
+            
+            if merged_key in merged:
+                # Merge with existing SOC
+                existing = merged[merged_key]
+                # Take the higher confidence
+                if soc.confidence > existing.confidence:
+                    merged[merged_key] = soc
+                else:
+                    # Update evidence count
+                    existing.evidence_count += 1
+            else:
+                merged[merged_key] = soc
+        
+        return list(merged.values())
         
     async def _system2_validation(self, socs: List[SOC]) -> List[SOC]:
-        """System 2: Validate SOCs against world model"""
+        """System 2: Deliberate validation against world model and logical reasoning"""
         
         validated_socs = []
         
         for soc in socs:
-            # Validate against first principles
+            # Step 1: Validate against first principles
             is_valid, confidence_adjustment, conflicts = self.world_model.validate_soc_against_principles(soc)
             
-            if confidence_adjustment != 0:
-                soc.update_confidence(soc.confidence + confidence_adjustment)
+            # Step 2: Perform logical consistency checks
+            logical_consistency = await self._check_logical_consistency(soc)
+            
+            # Step 3: Check for causal relationships
+            causal_validity = await self._validate_causal_relationships(soc)
+            
+            # Step 4: Cross-domain validation
+            cross_domain_support = await self._check_cross_domain_support(soc)
+            
+            # Step 5: Temporal consistency check
+            temporal_consistency = await self._check_temporal_consistency(soc)
+            
+            # Combine all validation results
+            total_adjustment = confidence_adjustment
+            total_adjustment += logical_consistency * 0.2
+            total_adjustment += causal_validity * 0.15
+            total_adjustment += cross_domain_support * 0.1
+            total_adjustment += temporal_consistency * 0.1
+            
+            # Update confidence based on all validations
+            if total_adjustment != 0:
+                soc.update_confidence(soc.confidence + total_adjustment)
                 
-            if is_valid:
+            # Accept SOC if it passes basic validation and has reasonable confidence
+            if is_valid and soc.confidence > 0.3:
                 validated_socs.append(soc)
                 logger.info(
-                    "SOC validated by world model",
+                    "SOC validated by System 2",
                     soc_name=soc.name,
-                    confidence=soc.confidence
+                    confidence=soc.confidence,
+                    adjustment=total_adjustment,
+                    validation_checks={
+                        "first_principles": is_valid,
+                        "logical_consistency": logical_consistency > 0,
+                        "causal_validity": causal_validity > 0,
+                        "cross_domain_support": cross_domain_support > 0,
+                        "temporal_consistency": temporal_consistency > 0
+                    }
                 )
             else:
                 logger.warning(
-                    "SOC conflicts with world model",
+                    "SOC rejected by System 2",
                     soc_name=soc.name,
-                    conflicts=conflicts
+                    confidence=soc.confidence,
+                    conflicts=conflicts,
+                    first_principles_valid=is_valid
                 )
                 
         return validated_socs
+    
+    async def _check_logical_consistency(self, soc: SOC) -> float:
+        """Check internal logical consistency of SOC"""
+        
+        consistency_score = 0.0
+        
+        # Check for logical contradictions in properties
+        props = soc.properties
+        if isinstance(props, dict):
+            # Look for contradictory properties
+            contradictions = [
+                ("hot", "cold"),
+                ("positive", "negative"),
+                ("solid", "liquid"),
+                ("increase", "decrease"),
+                ("stable", "unstable")
+            ]
+            
+            props_text = str(props).lower()
+            for pos, neg in contradictions:
+                if pos in props_text and neg in props_text:
+                    consistency_score -= 0.3  # Penalty for contradictions
+        
+        # Check relationships for logical consistency
+        if hasattr(soc, 'relationships') and soc.relationships:
+            # Strong relationships should be mutual
+            strong_relationships = [rel for rel, strength in soc.relationships.items() if strength > 0.8]
+            if strong_relationships:
+                consistency_score += 0.2  # Bonus for strong relationships
+        
+        # Domain consistency check
+        if soc.domain and soc.name:
+            domain_keywords = {
+                "physics": ["force", "energy", "motion", "gravity", "mass"],
+                "chemistry": ["reaction", "molecule", "atom", "bond", "chemical"],
+                "mathematics": ["equation", "function", "variable", "theorem", "proof"]
+            }
+            
+            if soc.domain in domain_keywords:
+                domain_words = domain_keywords[soc.domain]
+                name_lower = soc.name.lower()
+                
+                # Check if SOC name aligns with domain
+                if any(word in name_lower for word in domain_words):
+                    consistency_score += 0.1
+                else:
+                    # Check if it's a reasonable cross-domain concept
+                    if soc.domain != "general":
+                        consistency_score -= 0.1
+        
+        return consistency_score
+    
+    async def _validate_causal_relationships(self, soc: SOC) -> float:
+        """Validate causal relationships of SOC"""
+        
+        causal_score = 0.0
+        
+        # Check for causal indicators in properties
+        props_text = str(soc.properties).lower()
+        
+        # Positive causal indicators
+        causal_keywords = ["cause", "effect", "result", "lead to", "produce", "generate"]
+        for keyword in causal_keywords:
+            if keyword in props_text:
+                causal_score += 0.1
+        
+        # Check for impossible causal relationships
+        impossible_causals = [
+            "effect causes cause",
+            "result produces input",
+            "output creates input"
+        ]
+        
+        for impossible in impossible_causals:
+            if impossible in props_text:
+                causal_score -= 0.2
+        
+        # Check causal consistency with SOC type
+        if soc.soc_type == SOCType.PRINCIPLE:
+            # Principles should have causal implications
+            if any(keyword in props_text for keyword in ["law", "rule", "principle"]):
+                causal_score += 0.15
+        
+        return causal_score
+    
+    async def _check_cross_domain_support(self, soc: SOC) -> float:
+        """Check if SOC has support from other domains"""
+        
+        support_score = 0.0
+        
+        # Check if SOC appears in multiple domains
+        if soc.domain != "general":
+            # Look for similar SOCs in other domains
+            similar_socs = [s for s in self.soc_manager.socs.values() 
+                          if s.name.lower() in soc.name.lower() and s.domain != soc.domain]
+            
+            if similar_socs:
+                support_score += len(similar_socs) * 0.05
+        
+        # Check for universal concepts
+        universal_concepts = ["energy", "information", "structure", "pattern", "system"]
+        if any(concept in soc.name.lower() for concept in universal_concepts):
+            support_score += 0.1
+        
+        return support_score
+    
+    async def _check_temporal_consistency(self, soc: SOC) -> float:
+        """Check temporal consistency of SOC"""
+        
+        temporal_score = 0.0
+        
+        # Check for temporal indicators
+        props_text = str(soc.properties).lower()
+        
+        # Look for temporal keywords
+        temporal_keywords = ["time", "duration", "instant", "continuous", "periodic"]
+        for keyword in temporal_keywords:
+            if keyword in props_text:
+                temporal_score += 0.05
+        
+        # Check for temporal contradictions
+        contradictions = [
+            ("instant", "duration"),
+            ("permanent", "temporary"),
+            ("continuous", "discrete")
+        ]
+        
+        for pos, neg in contradictions:
+            if pos in props_text and neg in props_text:
+                temporal_score -= 0.1
+        
+        # Check SOC age vs confidence
+        if hasattr(soc, 'created_at') and hasattr(soc, 'last_updated'):
+            # Recent updates should align with confidence
+            import datetime
+            if soc.last_updated and soc.created_at:
+                time_diff = (soc.last_updated - soc.created_at).total_seconds()
+                if time_diff > 0 and soc.confidence > 0.8:
+                    temporal_score += 0.05  # Confidence built over time
+        
+        return temporal_score
         
     async def _bayesian_search_experiments(self, socs: List[SOC]) -> List[ExperimentResult]:
         """Conduct Bayesian search experiments on uncertain SOCs"""
