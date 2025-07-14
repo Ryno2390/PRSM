@@ -50,6 +50,10 @@ from prsm.nwtn.probabilistic_reasoning_engine import ProbabilisticReasoningEngin
 from prsm.nwtn.counterfactual_reasoning_engine import CounterfactualReasoningEngine, CounterfactualAnalysis
 from prsm.nwtn.world_model_engine import WorldModelEngine
 from prsm.agents.executors.model_executor import ModelExecutor
+from prsm.knowledge_system import KnowledgeSystem
+from prsm.embeddings.semantic_embedding_engine import SemanticEmbeddingEngine
+from prsm.data_layer.enhanced_ipfs import PRSMIPFSClient
+from prsm.information_space.service import InformationSpaceService
 
 logger = structlog.get_logger(__name__)
 
@@ -85,6 +89,83 @@ class QueryComponentType(str, Enum):
     COUNTERFACTUAL_ANALYSIS = "counterfactual_analysis" # "What if X had been different?"
 
 
+class ResourceType(str, Enum):
+    """Types of PRSM resources for discovery"""
+    RESEARCH_PAPER = "research_paper"           # Scientific papers and preprints
+    DATASET = "dataset"                         # Data collections and experimental results
+    CODE_REPOSITORY = "code_repository"         # Software implementations and algorithms
+    DOCUMENTATION = "documentation"             # Technical documentation and tutorials
+    MODEL = "model"                             # Pre-trained AI models and weights
+    EXPERIMENTAL_PROTOCOL = "experimental_protocol" # Research methodologies and procedures
+    REVIEW = "review"                           # Literature reviews and meta-analyses
+    PRESENTATION = "presentation"               # Conference talks and educational material
+    PATENT = "patent"                           # Patent filings and IP documentation
+    GOVERNMENT_DATA = "government_data"         # Public datasets and official reports
+    MULTIMEDIA = "multimedia"                   # Images, videos, audio content
+    STRUCTURED_DATA = "structured_data"         # JSON, XML, CSV formatted data
+
+
+@dataclass
+class PRSMResource:
+    """A resource discovered from PRSM's knowledge system"""
+    
+    cid: str                                    # IPFS content identifier
+    resource_type: ResourceType                 # Type of resource
+    title: str                                  # Human-readable title
+    description: str                            # Brief description
+    domain: str                                 # Subject domain
+    
+    # Metadata
+    authors: List[str] = field(default_factory=list)
+    publication_date: Optional[datetime] = None
+    license: Optional[str] = None
+    language: str = "en"
+    
+    # Quality and relevance metrics
+    quality_score: float = 0.0                 # 0-1 quality assessment
+    relevance_score: float = 0.0               # 0-1 relevance to query
+    citation_count: int = 0                    # Number of citations/references
+    
+    # Access and usage
+    access_url: Optional[str] = None           # Direct access URL
+    download_size: Optional[int] = None        # File size in bytes
+    content_hash: Optional[str] = None         # Content verification hash
+    
+    # PRSM-specific
+    ftns_cost: float = 0.0                     # FTNS cost for access
+    creator_id: Optional[str] = None           # Original contributor
+    royalty_percentage: float = 0.0            # Creator royalty percentage
+    
+    # Discovery metadata
+    discovery_timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    discovery_method: str = "semantic_search"  # How resource was discovered
+    embedding_similarity: float = 0.0          # Similarity to search query
+
+
+@dataclass
+class ResourceDiscoveryResult:
+    """Result of PRSM resource discovery"""
+    
+    query_component_id: str                     # ID of the query component
+    total_resources_found: int                  # Total number of resources discovered
+    resources: List[PRSMResource]               # List of discovered resources
+    
+    # Search metadata
+    search_query: str                           # Actual search query used
+    search_domain: str                          # Domain context
+    search_timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    
+    # Quality metrics
+    average_quality_score: float = 0.0          # Average quality of resources
+    average_relevance_score: float = 0.0        # Average relevance to query
+    high_quality_count: int = 0                 # Count of high-quality resources (>0.8)
+    
+    # Discovery strategy
+    discovery_strategy: str = "hybrid"          # Strategy used for discovery
+    semantic_expansion: bool = True             # Whether semantic expansion was used
+    cross_domain_search: bool = False           # Whether cross-domain search was performed
+
+
 @dataclass
 class QueryComponent:
     """A decomposed component of a user query"""
@@ -101,6 +182,9 @@ class QueryComponent:
     domain: str
     certainty_required: bool  # True if certainty needed, False if probability acceptable
     time_sensitivity: str     # "immediate", "medium", "long_term"
+    
+    # PRSM resource requirements
+    required_resource_types: List[ResourceType] = field(default_factory=list)
     
     # Dependencies
     depends_on: List[str] = field(default_factory=list)  # IDs of other components
@@ -165,6 +249,9 @@ class IntegratedReasoningResult:
     reasoning_completeness: float  # How thoroughly the query was addressed
     logical_consistency: float     # Internal logical consistency
     empirical_grounding: float     # How well grounded in evidence
+    
+    # PRSM resource discovery results
+    resource_discovery_results: Dict[str, ResourceDiscoveryResult] = field(default_factory=dict)
     
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -379,6 +466,9 @@ class ReasoningClassifier:
                 # Extract domain (simplified)
                 domain = await self._extract_domain(line)
                 
+                # Determine required resource types
+                required_resource_types = await self._determine_required_resource_types(line, domain)
+                
                 # Create component
                 component = QueryComponent(
                     id=f"comp_{component_count}",
@@ -388,7 +478,8 @@ class ReasoningClassifier:
                     primary_reasoning_type=ReasoningType.DEDUCTIVE,  # Default, will be updated
                     domain=domain,
                     certainty_required=await self._requires_certainty(line),
-                    time_sensitivity="medium"
+                    time_sensitivity="medium",
+                    required_resource_types=required_resource_types
                 )
                 
                 # Classify reasoning requirements
@@ -475,10 +566,58 @@ class ReasoningClassifier:
             primary_reasoning_type=ReasoningType.DEDUCTIVE,
             domain="general",
             certainty_required=False,
-            time_sensitivity="medium"
+            time_sensitivity="medium",
+            required_resource_types=[ResourceType.RESEARCH_PAPER, ResourceType.DOCUMENTATION]
         )
         
         return component
+    
+    async def _determine_required_resource_types(self, content: str, domain: str) -> List[ResourceType]:
+        """Determine what types of PRSM resources are needed for this query component"""
+        
+        content_lower = content.lower()
+        required_types = []
+        
+        # Always include research papers for evidence
+        required_types.append(ResourceType.RESEARCH_PAPER)
+        
+        # Add domain-specific resource types
+        if any(keyword in content_lower for keyword in ["data", "dataset", "experiment", "results", "measurement"]):
+            required_types.append(ResourceType.DATASET)
+        
+        if any(keyword in content_lower for keyword in ["code", "implementation", "algorithm", "software", "program"]):
+            required_types.append(ResourceType.CODE_REPOSITORY)
+        
+        if any(keyword in content_lower for keyword in ["model", "trained", "neural", "machine learning", "ai"]):
+            required_types.append(ResourceType.MODEL)
+        
+        if any(keyword in content_lower for keyword in ["protocol", "method", "procedure", "how to", "guide"]):
+            required_types.append(ResourceType.EXPERIMENTAL_PROTOCOL)
+        
+        if any(keyword in content_lower for keyword in ["review", "survey", "comparison", "overview", "analysis"]):
+            required_types.append(ResourceType.REVIEW)
+        
+        if any(keyword in content_lower for keyword in ["patent", "invention", "intellectual property"]):
+            required_types.append(ResourceType.PATENT)
+        
+        if any(keyword in content_lower for keyword in ["government", "official", "policy", "regulation"]):
+            required_types.append(ResourceType.GOVERNMENT_DATA)
+        
+        if any(keyword in content_lower for keyword in ["presentation", "slides", "talk", "lecture"]):
+            required_types.append(ResourceType.PRESENTATION)
+        
+        # Add documentation for explanatory queries
+        if any(keyword in content_lower for keyword in ["explain", "definition", "what is", "how does"]):
+            required_types.append(ResourceType.DOCUMENTATION)
+        
+        # Remove duplicates
+        required_types = list(set(required_types))
+        
+        # Ensure we have at least one resource type
+        if not required_types:
+            required_types = [ResourceType.RESEARCH_PAPER, ResourceType.DOCUMENTATION]
+        
+        return required_types
 
 
 class MultiModalReasoningEngine:
@@ -516,12 +655,18 @@ class MultiModalReasoningEngine:
             ReasoningType.COUNTERFACTUAL: self.counterfactual_engine  # ✅ Implemented
         }
         
+        # PRSM resource discovery components
+        self.knowledge_system = KnowledgeSystem()
+        self.semantic_embedding_engine = SemanticEmbeddingEngine()
+        self.ipfs_client = PRSMIPFSClient()
+        self.information_space_service = InformationSpaceService()
+        
         # Integration parameters
         self.consensus_threshold = 0.7
         self.confidence_threshold = 0.6
         self.max_iterations = 3
         
-        logger.info("Initialized Multi-Modal Reasoning Engine")
+        logger.info("Initialized Multi-Modal Reasoning Engine with PRSM resource discovery")
     
     async def process_query(self, query: str, context: Dict[str, Any] = None) -> IntegratedReasoningResult:
         """
@@ -539,17 +684,20 @@ class MultiModalReasoningEngine:
         # Step 1: Decompose query into components
         components = await self.reasoning_classifier.decompose_query(query)
         
-        # Step 2: Process each component with appropriate reasoning engines
+        # Step 2: Discover relevant PRSM resources for each component
+        resource_discovery_results = await self.discover_prsm_resources(components, context)
+        
+        # Step 3: Process each component with appropriate reasoning engines
         reasoning_results = []
         
         for component in components:
-            component_results = await self._process_component(component, context)
+            component_results = await self._process_component(component, context, resource_discovery_results.get(component.id))
             reasoning_results.extend(component_results)
         
-        # Step 3: Integrate results from multiple reasoning modes
-        integrated_result = await self._integrate_reasoning_results(query, components, reasoning_results)
+        # Step 4: Integrate results from multiple reasoning modes
+        integrated_result = await self._integrate_reasoning_results(query, components, reasoning_results, resource_discovery_results)
         
-        # Step 4: Validate and enhance result
+        # Step 5: Validate and enhance result
         enhanced_result = await self._enhance_integrated_result(integrated_result)
         
         logger.info(
@@ -561,7 +709,7 @@ class MultiModalReasoningEngine:
         
         return enhanced_result
     
-    async def _process_component(self, component: QueryComponent, context: Dict[str, Any] = None) -> List[ReasoningResult]:
+    async def _process_component(self, component: QueryComponent, context: Dict[str, Any] = None, resource_discovery: ResourceDiscoveryResult = None) -> List[ReasoningResult]:
         """Process a single component with all required reasoning types"""
         
         results = []
@@ -570,7 +718,7 @@ class MultiModalReasoningEngine:
             if reasoning_type in self.reasoning_engines and self.reasoning_engines[reasoning_type]:
                 # Route to appropriate reasoning engine
                 result = await self._route_to_reasoning_engine(
-                    reasoning_type, component, context
+                    reasoning_type, component, context, resource_discovery
                 )
                 
                 if result:
@@ -586,7 +734,8 @@ class MultiModalReasoningEngine:
         self, 
         reasoning_type: ReasoningType, 
         component: QueryComponent, 
-        context: Dict[str, Any] = None
+        context: Dict[str, Any] = None,
+        resource_discovery: ResourceDiscoveryResult = None
     ) -> Optional[ReasoningResult]:
         """Route component to appropriate reasoning engine"""
         
@@ -1224,7 +1373,8 @@ class MultiModalReasoningEngine:
         self, 
         query: str, 
         components: List[QueryComponent], 
-        reasoning_results: List[ReasoningResult]
+        reasoning_results: List[ReasoningResult],
+        resource_discovery_results: Dict[str, ResourceDiscoveryResult] = None
     ) -> IntegratedReasoningResult:
         """Integrate results from multiple reasoning modes"""
         
@@ -1272,7 +1422,8 @@ class MultiModalReasoningEngine:
             identified_uncertainties=uncertainties,
             reasoning_completeness=completeness,
             logical_consistency=consistency,
-            empirical_grounding=grounding
+            empirical_grounding=grounding,
+            resource_discovery_results=resource_discovery_results or {}
         )
     
     async def _calculate_reasoning_consensus(self, results: List[ReasoningResult]) -> float:
@@ -1449,6 +1600,176 @@ class MultiModalReasoningEngine:
             logger.error("Error in meta-reasoning analysis", error=str(e))
         
         return result
+    
+    async def discover_prsm_resources(
+        self, 
+        query_components: List[QueryComponent], 
+        context: Dict[str, Any] = None
+    ) -> Dict[str, ResourceDiscoveryResult]:
+        """
+        Discover relevant PRSM resources for query components
+        
+        This method leverages PRSM's comprehensive knowledge infrastructure to find
+        relevant resources that can inform the multi-modal reasoning process.
+        
+        Args:
+            query_components: List of decomposed query components
+            context: Additional context for resource discovery
+            
+        Returns:
+            Dictionary mapping component IDs to resource discovery results
+        """
+        
+        logger.info(f"Discovering PRSM resources for {len(query_components)} query components")
+        
+        discovery_results = {}
+        
+        for component in query_components:
+            try:
+                # Prepare search parameters
+                search_params = {
+                    "query": component.content,
+                    "domain": component.domain,
+                    "resource_types": component.required_resource_types,
+                    "reasoning_type": component.primary_reasoning_type,
+                    "max_results": 20,
+                    "quality_threshold": 0.6
+                }
+                
+                # Perform semantic search using PRSM's semantic embedding engine
+                semantic_results = await self.semantic_embedding_engine.semantic_search(
+                    query=component.content,
+                    domain=component.domain,
+                    limit=50,
+                    similarity_threshold=0.7
+                )
+                
+                # Convert semantic results to PRSM resources
+                discovered_resources = []
+                
+                for result in semantic_results:
+                    # Extract resource information from semantic search result
+                    resource = PRSMResource(
+                        cid=result.get("cid", ""),
+                        resource_type=self._determine_resource_type(result),
+                        title=result.get("title", ""),
+                        description=result.get("description", ""),
+                        domain=component.domain,
+                        authors=result.get("authors", []),
+                        publication_date=result.get("publication_date"),
+                        license=result.get("license"),
+                        language=result.get("language", "en"),
+                        quality_score=result.get("quality_score", 0.0),
+                        relevance_score=result.get("similarity_score", 0.0),
+                        citation_count=result.get("citation_count", 0),
+                        access_url=result.get("access_url"),
+                        download_size=result.get("download_size"),
+                        content_hash=result.get("content_hash"),
+                        ftns_cost=result.get("ftns_cost", 0.0),
+                        creator_id=result.get("creator_id"),
+                        royalty_percentage=result.get("royalty_percentage", 0.0),
+                        embedding_similarity=result.get("similarity_score", 0.0)
+                    )
+                    
+                    discovered_resources.append(resource)
+                
+                # Filter resources based on quality and relevance
+                filtered_resources = [
+                    r for r in discovered_resources 
+                    if r.quality_score >= 0.6 and r.relevance_score >= 0.5
+                ]
+                
+                # Sort by combined quality and relevance score
+                filtered_resources.sort(
+                    key=lambda r: (r.quality_score * 0.4 + r.relevance_score * 0.6),
+                    reverse=True
+                )
+                
+                # Limit to top resources
+                final_resources = filtered_resources[:15]
+                
+                # Calculate discovery metrics
+                avg_quality = sum(r.quality_score for r in final_resources) / len(final_resources) if final_resources else 0.0
+                avg_relevance = sum(r.relevance_score for r in final_resources) / len(final_resources) if final_resources else 0.0
+                high_quality_count = sum(1 for r in final_resources if r.quality_score > 0.8)
+                
+                # Create discovery result
+                discovery_result = ResourceDiscoveryResult(
+                    query_component_id=component.id,
+                    total_resources_found=len(semantic_results),
+                    resources=final_resources,
+                    search_query=component.content,
+                    search_domain=component.domain,
+                    average_quality_score=avg_quality,
+                    average_relevance_score=avg_relevance,
+                    high_quality_count=high_quality_count,
+                    discovery_strategy="semantic_search",
+                    semantic_expansion=True,
+                    cross_domain_search=component.primary_reasoning_type == ReasoningType.ANALOGICAL
+                )
+                
+                discovery_results[component.id] = discovery_result
+                
+                logger.info(f"Discovered {len(final_resources)} resources for component {component.id}")
+                
+            except Exception as e:
+                logger.error(f"Error discovering resources for component {component.id}", error=str(e))
+                
+                # Create empty result on error
+                discovery_results[component.id] = ResourceDiscoveryResult(
+                    query_component_id=component.id,
+                    total_resources_found=0,
+                    resources=[],
+                    search_query=component.content,
+                    search_domain=component.domain
+                )
+        
+        logger.info(f"Completed PRSM resource discovery for {len(discovery_results)} components")
+        return discovery_results
+    
+    def _determine_resource_type(self, result: Dict[str, Any]) -> ResourceType:
+        """Determine resource type from search result metadata"""
+        
+        # Check explicit resource type first
+        if "resource_type" in result:
+            return ResourceType(result["resource_type"])
+        
+        # Infer from content and metadata
+        content_type = result.get("content_type", "").lower()
+        file_extension = result.get("file_extension", "").lower()
+        title = result.get("title", "").lower()
+        
+        # Research papers
+        if any(keyword in content_type for keyword in ["paper", "article", "preprint", "journal"]):
+            return ResourceType.RESEARCH_PAPER
+        
+        # Datasets
+        if any(keyword in content_type for keyword in ["dataset", "data", "csv", "json", "parquet"]):
+            return ResourceType.DATASET
+        
+        # Code repositories
+        if any(keyword in content_type for keyword in ["code", "repository", "github", "software"]):
+            return ResourceType.CODE_REPOSITORY
+        
+        # Models
+        if any(keyword in content_type for keyword in ["model", "weights", "checkpoint", "pytorch", "tensorflow"]):
+            return ResourceType.MODEL
+        
+        # Documentation
+        if any(keyword in content_type for keyword in ["documentation", "manual", "guide", "tutorial"]):
+            return ResourceType.DOCUMENTATION
+        
+        # Default based on file extension
+        if file_extension in ["pdf", "doc", "docx"]:
+            return ResourceType.RESEARCH_PAPER
+        elif file_extension in ["csv", "json", "parquet", "h5", "npz"]:
+            return ResourceType.DATASET
+        elif file_extension in ["py", "ipynb", "r", "m", "cpp", "java"]:
+            return ResourceType.CODE_REPOSITORY
+        elif file_extension in ["pth", "pkl", "h5", "onnx", "pb"]:
+            return ResourceType.MODEL
+        else:
+            return ResourceType.DOCUMENTATION
     
     async def validate_candidates_with_network(
         self,
