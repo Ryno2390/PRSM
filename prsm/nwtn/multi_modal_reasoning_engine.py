@@ -58,6 +58,10 @@ from prsm.federation.distributed_resource_manager import DistributedResourceMana
 from prsm.context.selective_parallelism_engine import SelectiveParallelismEngine, ExecutionStrategy, TaskDefinition
 from prsm.scheduling.workflow_scheduler import WorkflowScheduler, ScheduledWorkflow, WorkflowStep
 from prsm.nwtn.orchestrator import NWTNOrchestrator
+from prsm.marketplace.real_marketplace_service import RealMarketplaceService
+from prsm.marketplace.recommendation_engine import RecommendationEngine
+from prsm.agents.routers.marketplace_integration import MarketplaceIntegration
+from prsm.tokenomics.ftns_budget_manager import FTNSBudgetManager
 
 logger = structlog.get_logger(__name__)
 
@@ -259,6 +263,9 @@ class IntegratedReasoningResult:
     
     # Distributed execution results
     distributed_execution_result: Optional[DistributedExecutionResult] = None
+    
+    # Marketplace asset integration results
+    asset_integration_result: Optional[AssetIntegrationResult] = None
     
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -726,6 +733,143 @@ class DistributedExecutionResult:
     execution_timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class MarketplaceAssetType(str, Enum):
+    """Types of marketplace assets that can be integrated"""
+    AI_MODEL = "ai_model"                     # AI models for specialized tasks
+    DATASET = "dataset"                       # Training and validation datasets
+    AGENT_WORKFLOW = "agent_workflow"         # Multi-agent coordination patterns
+    MCP_TOOL = "mcp_tool"                     # Function tools and utilities
+    COMPUTE_RESOURCE = "compute_resource"     # Specialized compute hardware
+    KNOWLEDGE_RESOURCE = "knowledge_resource" # Domain expertise and knowledge
+    EVALUATION_SERVICE = "evaluation_service" # Benchmarking and evaluation
+    TRAINING_SERVICE = "training_service"     # Model training and fine-tuning
+    SAFETY_TOOL = "safety_tool"               # Safety and compliance tools
+
+
+@dataclass
+class MarketplaceAsset:
+    """A marketplace asset available for integration"""
+    
+    asset_id: str
+    asset_type: MarketplaceAssetType
+    name: str
+    description: str
+    creator_id: str
+    
+    # Capabilities and requirements
+    capabilities: List[str] = field(default_factory=list)
+    requirements: Dict[str, Any] = field(default_factory=dict)
+    supported_domains: List[str] = field(default_factory=list)
+    
+    # Quality metrics
+    quality_score: float = 0.0
+    reputation_score: float = 0.0
+    usage_count: int = 0
+    average_rating: float = 0.0
+    
+    # Economic information
+    price_per_use: float = 0.0
+    royalty_percentage: float = 0.0
+    subscription_price: float = 0.0
+    
+    # Performance metrics
+    avg_execution_time: float = 0.0
+    success_rate: float = 0.0
+    reliability_score: float = 0.0
+    
+    # Integration metadata
+    api_endpoint: Optional[str] = None
+    configuration: Dict[str, Any] = field(default_factory=dict)
+    compatibility_score: float = 0.0
+
+
+@dataclass
+class MarketplaceAssetDiscoveryResult:
+    """Result of marketplace asset discovery for a query component"""
+    
+    component_id: str
+    total_assets_found: int
+    assets: List[MarketplaceAsset]
+    
+    # Discovery metadata
+    search_query: str
+    search_domain: str
+    asset_types_searched: List[MarketplaceAssetType]
+    
+    # Quality metrics
+    average_quality_score: float = 0.0
+    average_price: float = 0.0
+    high_quality_count: int = 0
+    
+    # Discovery strategy
+    discovery_method: str = "hybrid_search"
+    personalization_applied: bool = True
+    budget_filtering: bool = True
+    
+    discovery_timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class MarketplaceAssetExecutionResult:
+    """Result from executing a marketplace asset"""
+    
+    asset_id: str
+    component_id: str
+    execution_id: str
+    
+    # Execution results
+    status: ExecutionStatus
+    result: Optional[Any] = None
+    error: Optional[str] = None
+    
+    # Performance metrics
+    execution_time: float = 0.0
+    cost_ftns: float = 0.0
+    quality_score: float = 0.0
+    
+    # Economic tracking
+    price_paid: float = 0.0
+    royalty_paid: float = 0.0
+    escrow_transaction_id: Optional[str] = None
+    
+    # Execution metadata
+    node_id: Optional[str] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    
+    # Integration data
+    output_format: str = "json"
+    confidence_score: float = 0.0
+    validation_passed: bool = True
+
+
+@dataclass
+class AssetIntegrationResult:
+    """Complete result from marketplace asset integration"""
+    
+    execution_id: str
+    component_asset_discoveries: Dict[str, MarketplaceAssetDiscoveryResult]
+    asset_execution_results: List[MarketplaceAssetExecutionResult]
+    
+    # Overall metrics
+    total_assets_used: int = 0
+    total_cost_ftns: float = 0.0
+    average_quality_score: float = 0.0
+    success_rate: float = 0.0
+    
+    # Economic summary
+    total_asset_costs: float = 0.0
+    total_royalties_paid: float = 0.0
+    budget_utilization: float = 0.0
+    
+    # Quality metrics
+    asset_performance_score: float = 0.0
+    integration_quality: float = 0.0
+    user_satisfaction_predicted: float = 0.0
+    
+    integration_timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class MultiModalReasoningEngine:
     """
     The first comprehensive multi-modal reasoning AI system
@@ -773,12 +917,18 @@ class MultiModalReasoningEngine:
         self.workflow_scheduler = WorkflowScheduler()
         self.nwtn_orchestrator = NWTNOrchestrator()
         
+        # PRSM marketplace integration components
+        self.marketplace_service = RealMarketplaceService()
+        self.recommendation_engine = RecommendationEngine()
+        self.marketplace_integration = MarketplaceIntegration()
+        self.budget_manager = FTNSBudgetManager()
+        
         # Integration parameters
         self.consensus_threshold = 0.7
         self.confidence_threshold = 0.6
         self.max_iterations = 3
         
-        logger.info("Initialized Multi-Modal Reasoning Engine with PRSM distributed execution")
+        logger.info("Initialized Multi-Modal Reasoning Engine with PRSM marketplace integration")
     
     async def process_query(self, query: str, context: Dict[str, Any] = None) -> IntegratedReasoningResult:
         """
@@ -799,26 +949,38 @@ class MultiModalReasoningEngine:
         # Step 2: Discover relevant PRSM resources for each component
         resource_discovery_results = await self.discover_prsm_resources(components, context)
         
-        # Step 3: Execute distributed plan - process components simultaneously across PRSM network
+        # Step 3: Discover relevant marketplace assets for each component
+        budget_limit = context.get("budget_limit") if context else None
+        marketplace_asset_discoveries = await self.discover_marketplace_assets(
+            components, budget_limit, context
+        )
+        
+        # Step 4: Execute distributed plan - process components simultaneously across PRSM network
         distributed_execution_result = await self.execute_distributed_plan(
             components, resource_discovery_results, context
         )
         
-        # Step 4: Extract reasoning results from distributed execution
+        # Step 5: Integrate marketplace assets with distributed execution
+        asset_integration_result = await self.integrate_marketplace_assets(
+            components, marketplace_asset_discoveries, distributed_execution_result, context
+        )
+        
+        # Step 6: Extract reasoning results from distributed execution
         reasoning_results = []
         for component_result in distributed_execution_result.component_results:
             if component_result.status == ExecutionStatus.COMPLETED and component_result.result:
                 reasoning_results.extend(component_result.result)
         
-        # Step 5: Integrate results from distributed execution
+        # Step 7: Integrate results from distributed execution and marketplace assets
         integrated_result = await self._integrate_reasoning_results(
             query, components, reasoning_results, resource_discovery_results
         )
         
-        # Add distributed execution metrics to integrated result
+        # Add distributed execution and marketplace asset metrics to integrated result
         integrated_result.distributed_execution_result = distributed_execution_result
+        integrated_result.asset_integration_result = asset_integration_result
         
-        # Step 6: Validate and enhance result
+        # Step 8: Validate and enhance result
         enhanced_result = await self._enhance_integrated_result(integrated_result)
         
         logger.info(
@@ -2382,6 +2544,485 @@ class MultiModalReasoningEngine:
             'successful_count': successful_count,
             'failed_count': failed_count,
             'cancelled_count': cancelled_count
+        }
+    
+    async def discover_marketplace_assets(
+        self,
+        query_components: List[QueryComponent],
+        budget_limit: Optional[float] = None,
+        context: Dict[str, Any] = None
+    ) -> Dict[str, MarketplaceAssetDiscoveryResult]:
+        """
+        Discover relevant marketplace assets for each query component
+        
+        This method leverages PRSM's marketplace infrastructure to find and recommend
+        the best marketplace assets (AI models, tools, datasets, etc.) that can enhance
+        the multi-modal reasoning process for each component.
+        
+        Args:
+            query_components: List of decomposed query components
+            budget_limit: Optional budget limit for asset usage
+            context: Additional context for asset discovery
+            
+        Returns:
+            Dictionary mapping component IDs to marketplace asset discovery results
+        """
+        
+        logger.info(f"Discovering marketplace assets for {len(query_components)} components")
+        
+        asset_discoveries = {}
+        
+        for component in query_components:
+            try:
+                # Determine what types of marketplace assets would be useful
+                relevant_asset_types = self._determine_relevant_asset_types(component)
+                
+                # Create search query for this component
+                search_query = self._create_asset_search_query(component)
+                
+                # Search for assets using recommendation engine
+                recommended_assets = await self.recommendation_engine.get_recommendations(
+                    user_id=context.get("user_id", "anonymous"),
+                    query=search_query,
+                    domain=component.domain,
+                    asset_types=relevant_asset_types,
+                    budget_limit=budget_limit,
+                    limit=10
+                )
+                
+                # Convert recommendations to MarketplaceAsset objects
+                marketplace_assets = []
+                for asset_rec in recommended_assets:
+                    asset = MarketplaceAsset(
+                        asset_id=asset_rec.get("asset_id", ""),
+                        asset_type=MarketplaceAssetType(asset_rec.get("asset_type", "ai_model")),
+                        name=asset_rec.get("name", ""),
+                        description=asset_rec.get("description", ""),
+                        creator_id=asset_rec.get("creator_id", ""),
+                        capabilities=asset_rec.get("capabilities", []),
+                        requirements=asset_rec.get("requirements", {}),
+                        supported_domains=asset_rec.get("supported_domains", []),
+                        quality_score=asset_rec.get("quality_score", 0.0),
+                        reputation_score=asset_rec.get("reputation_score", 0.0),
+                        usage_count=asset_rec.get("usage_count", 0),
+                        average_rating=asset_rec.get("average_rating", 0.0),
+                        price_per_use=asset_rec.get("price_per_use", 0.0),
+                        royalty_percentage=asset_rec.get("royalty_percentage", 0.0),
+                        subscription_price=asset_rec.get("subscription_price", 0.0),
+                        avg_execution_time=asset_rec.get("avg_execution_time", 0.0),
+                        success_rate=asset_rec.get("success_rate", 0.0),
+                        reliability_score=asset_rec.get("reliability_score", 0.0),
+                        api_endpoint=asset_rec.get("api_endpoint"),
+                        configuration=asset_rec.get("configuration", {}),
+                        compatibility_score=asset_rec.get("compatibility_score", 0.0)
+                    )
+                    marketplace_assets.append(asset)
+                
+                # Filter assets based on quality and budget constraints
+                filtered_assets = self._filter_assets_by_quality_and_budget(
+                    marketplace_assets, budget_limit
+                )
+                
+                # Calculate discovery metrics
+                total_found = len(recommended_assets)
+                avg_quality = sum(asset.quality_score for asset in filtered_assets) / len(filtered_assets) if filtered_assets else 0.0
+                avg_price = sum(asset.price_per_use for asset in filtered_assets) / len(filtered_assets) if filtered_assets else 0.0
+                high_quality_count = sum(1 for asset in filtered_assets if asset.quality_score > 0.8)
+                
+                # Create discovery result
+                discovery_result = MarketplaceAssetDiscoveryResult(
+                    component_id=component.id,
+                    total_assets_found=total_found,
+                    assets=filtered_assets,
+                    search_query=search_query,
+                    search_domain=component.domain,
+                    asset_types_searched=relevant_asset_types,
+                    average_quality_score=avg_quality,
+                    average_price=avg_price,
+                    high_quality_count=high_quality_count,
+                    discovery_method="hybrid_search",
+                    personalization_applied=True,
+                    budget_filtering=budget_limit is not None
+                )
+                
+                asset_discoveries[component.id] = discovery_result
+                
+                logger.info(f"Discovered {len(filtered_assets)} assets for component {component.id}")
+                
+            except Exception as e:
+                logger.error(f"Error discovering assets for component {component.id}", error=str(e))
+                
+                # Create empty result on error
+                asset_discoveries[component.id] = MarketplaceAssetDiscoveryResult(
+                    component_id=component.id,
+                    total_assets_found=0,
+                    assets=[],
+                    search_query="",
+                    search_domain=component.domain,
+                    asset_types_searched=[]
+                )
+        
+        logger.info(f"Completed marketplace asset discovery for {len(asset_discoveries)} components")
+        return asset_discoveries
+    
+    async def integrate_marketplace_assets(
+        self,
+        query_components: List[QueryComponent],
+        asset_discoveries: Dict[str, MarketplaceAssetDiscoveryResult],
+        distributed_execution_result: DistributedExecutionResult,
+        context: Dict[str, Any] = None
+    ) -> AssetIntegrationResult:
+        """
+        Integrate marketplace assets into the distributed execution pipeline
+        
+        This method executes selected marketplace assets alongside the distributed
+        reasoning execution, providing enhanced capabilities and specialized tools
+        to improve the quality and accuracy of multi-modal reasoning.
+        
+        Args:
+            query_components: List of decomposed query components
+            asset_discoveries: Results from marketplace asset discovery
+            distributed_execution_result: Results from distributed execution
+            context: Additional context for integration
+            
+        Returns:
+            AssetIntegrationResult containing all marketplace asset execution results
+        """
+        
+        integration_id = str(uuid4())
+        logger.info(f"Integrating marketplace assets for execution {integration_id}")
+        
+        try:
+            # Select best assets for each component
+            selected_assets = self._select_optimal_assets(asset_discoveries, context)
+            
+            # Execute marketplace assets in parallel with distributed execution
+            asset_execution_results = await self._execute_marketplace_assets(
+                selected_assets, query_components, context
+            )
+            
+            # Calculate integration metrics
+            integration_metrics = self._calculate_integration_metrics(asset_execution_results)
+            
+            # Create integration result
+            integration_result = AssetIntegrationResult(
+                execution_id=integration_id,
+                component_asset_discoveries=asset_discoveries,
+                asset_execution_results=asset_execution_results,
+                total_assets_used=integration_metrics['total_assets_used'],
+                total_cost_ftns=integration_metrics['total_cost_ftns'],
+                average_quality_score=integration_metrics['average_quality_score'],
+                success_rate=integration_metrics['success_rate'],
+                total_asset_costs=integration_metrics['total_asset_costs'],
+                total_royalties_paid=integration_metrics['total_royalties_paid'],
+                budget_utilization=integration_metrics['budget_utilization'],
+                asset_performance_score=integration_metrics['asset_performance_score'],
+                integration_quality=integration_metrics['integration_quality'],
+                user_satisfaction_predicted=integration_metrics['user_satisfaction_predicted']
+            )
+            
+            logger.info(
+                f"Marketplace asset integration {integration_id} complete",
+                assets_used=integration_result.total_assets_used,
+                total_cost=integration_result.total_cost_ftns,
+                success_rate=integration_result.success_rate
+            )
+            
+            return integration_result
+            
+        except Exception as e:
+            logger.error(f"Error in marketplace asset integration {integration_id}", error=str(e))
+            
+            # Return empty result on error
+            return AssetIntegrationResult(
+                execution_id=integration_id,
+                component_asset_discoveries=asset_discoveries,
+                asset_execution_results=[],
+                success_rate=0.0
+            )
+    
+    async def _execute_marketplace_assets(
+        self,
+        selected_assets: Dict[str, List[MarketplaceAsset]],
+        query_components: List[QueryComponent],
+        context: Dict[str, Any] = None
+    ) -> List[MarketplaceAssetExecutionResult]:
+        """Execute selected marketplace assets"""
+        
+        execution_results = []
+        execution_tasks = []
+        
+        # Create execution tasks for all selected assets
+        for component_id, assets in selected_assets.items():
+            component = next((c for c in query_components if c.id == component_id), None)
+            if not component:
+                continue
+                
+            for asset in assets:
+                task = asyncio.create_task(
+                    self._execute_single_marketplace_asset(asset, component, context)
+                )
+                execution_tasks.append(task)
+        
+        # Execute all assets in parallel
+        if execution_tasks:
+            results = await asyncio.gather(*execution_tasks, return_exceptions=True)
+            
+            # Process results
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Marketplace asset execution failed", error=str(result))
+                    # Could add failed execution result here
+                else:
+                    execution_results.append(result)
+        
+        return execution_results
+    
+    async def _execute_single_marketplace_asset(
+        self,
+        asset: MarketplaceAsset,
+        component: QueryComponent,
+        context: Dict[str, Any] = None
+    ) -> MarketplaceAssetExecutionResult:
+        """Execute a single marketplace asset"""
+        
+        execution_id = str(uuid4())
+        start_time = datetime.now(timezone.utc)
+        
+        try:
+            # Prepare execution context
+            execution_context = {
+                "component_content": component.content,
+                "component_domain": component.domain,
+                "reasoning_type": component.primary_reasoning_type.value,
+                "asset_configuration": asset.configuration,
+                **context
+            }
+            
+            # Execute asset using marketplace integration
+            result = await self.marketplace_integration.execute_asset(
+                asset_id=asset.asset_id,
+                asset_type=asset.asset_type.value,
+                execution_context=execution_context
+            )
+            
+            end_time = datetime.now(timezone.utc)
+            execution_time = (end_time - start_time).total_seconds()
+            
+            # Calculate costs
+            cost_ftns = asset.price_per_use
+            royalty_paid = cost_ftns * (asset.royalty_percentage / 100.0)
+            
+            # Track budget usage
+            if hasattr(self.budget_manager, 'track_usage'):
+                await self.budget_manager.track_usage(
+                    user_id=context.get("user_id", "anonymous"),
+                    asset_id=asset.asset_id,
+                    cost=cost_ftns
+                )
+            
+            return MarketplaceAssetExecutionResult(
+                asset_id=asset.asset_id,
+                component_id=component.id,
+                execution_id=execution_id,
+                status=ExecutionStatus.COMPLETED,
+                result=result,
+                execution_time=execution_time,
+                cost_ftns=cost_ftns,
+                quality_score=asset.quality_score,
+                price_paid=asset.price_per_use,
+                royalty_paid=royalty_paid,
+                start_time=start_time,
+                end_time=end_time,
+                confidence_score=result.get("confidence", 0.0) if isinstance(result, dict) else 0.0,
+                validation_passed=True
+            )
+            
+        except Exception as e:
+            end_time = datetime.now(timezone.utc)
+            execution_time = (end_time - start_time).total_seconds()
+            
+            return MarketplaceAssetExecutionResult(
+                asset_id=asset.asset_id,
+                component_id=component.id,
+                execution_id=execution_id,
+                status=ExecutionStatus.FAILED,
+                error=str(e),
+                execution_time=execution_time,
+                start_time=start_time,
+                end_time=end_time,
+                validation_passed=False
+            )
+    
+    def _determine_relevant_asset_types(self, component: QueryComponent) -> List[MarketplaceAssetType]:
+        """Determine which marketplace asset types are relevant for a component"""
+        
+        relevant_types = []
+        
+        # Always consider AI models for specialized reasoning
+        relevant_types.append(MarketplaceAssetType.AI_MODEL)
+        
+        # Add domain-specific asset types
+        reasoning_type = component.primary_reasoning_type
+        
+        if reasoning_type == ReasoningType.ANALOGICAL:
+            relevant_types.extend([
+                MarketplaceAssetType.KNOWLEDGE_RESOURCE,
+                MarketplaceAssetType.DATASET
+            ])
+        
+        if reasoning_type == ReasoningType.PROBABILISTIC:
+            relevant_types.extend([
+                MarketplaceAssetType.EVALUATION_SERVICE,
+                MarketplaceAssetType.DATASET
+            ])
+        
+        if reasoning_type == ReasoningType.CAUSAL:
+            relevant_types.extend([
+                MarketplaceAssetType.AGENT_WORKFLOW,
+                MarketplaceAssetType.KNOWLEDGE_RESOURCE
+            ])
+        
+        # Add safety tools for sensitive domains
+        if component.domain in ["medical", "legal", "financial"]:
+            relevant_types.append(MarketplaceAssetType.SAFETY_TOOL)
+        
+        # Add MCP tools for technical domains
+        if component.domain in ["technical", "scientific", "engineering"]:
+            relevant_types.append(MarketplaceAssetType.MCP_TOOL)
+        
+        # Add training services for complex reasoning
+        if component.complexity > 1.5:
+            relevant_types.append(MarketplaceAssetType.TRAINING_SERVICE)
+        
+        return list(set(relevant_types))
+    
+    def _create_asset_search_query(self, component: QueryComponent) -> str:
+        """Create search query for marketplace asset discovery"""
+        
+        # Combine component content with reasoning type and domain
+        search_terms = [
+            component.content,
+            component.primary_reasoning_type.value,
+            component.domain
+        ]
+        
+        # Add capability requirements
+        if component.certainty_required:
+            search_terms.append("high_confidence")
+        
+        # Add time sensitivity
+        if component.time_sensitivity == "immediate":
+            search_terms.append("fast_execution")
+        
+        return " ".join(search_terms)
+    
+    def _filter_assets_by_quality_and_budget(
+        self,
+        assets: List[MarketplaceAsset],
+        budget_limit: Optional[float] = None
+    ) -> List[MarketplaceAsset]:
+        """Filter assets based on quality and budget constraints"""
+        
+        filtered_assets = []
+        
+        for asset in assets:
+            # Quality filter
+            if asset.quality_score < 0.6:
+                continue
+            
+            # Budget filter
+            if budget_limit is not None and asset.price_per_use > budget_limit:
+                continue
+            
+            # Reputation filter
+            if asset.reputation_score < 0.5:
+                continue
+            
+            filtered_assets.append(asset)
+        
+        # Sort by quality score (descending)
+        filtered_assets.sort(key=lambda a: a.quality_score, reverse=True)
+        
+        return filtered_assets
+    
+    def _select_optimal_assets(
+        self,
+        asset_discoveries: Dict[str, MarketplaceAssetDiscoveryResult],
+        context: Dict[str, Any] = None
+    ) -> Dict[str, List[MarketplaceAsset]]:
+        """Select optimal assets for each component"""
+        
+        selected_assets = {}
+        
+        for component_id, discovery in asset_discoveries.items():
+            if not discovery.assets:
+                continue
+            
+            # Select top assets based on quality and performance
+            top_assets = discovery.assets[:3]  # Top 3 assets per component
+            
+            # Filter by budget if specified
+            budget_limit = context.get("budget_per_component") if context else None
+            if budget_limit:
+                top_assets = [a for a in top_assets if a.price_per_use <= budget_limit]
+            
+            if top_assets:
+                selected_assets[component_id] = top_assets
+        
+        return selected_assets
+    
+    def _calculate_integration_metrics(
+        self,
+        asset_execution_results: List[MarketplaceAssetExecutionResult]
+    ) -> Dict[str, float]:
+        """Calculate integration metrics"""
+        
+        if not asset_execution_results:
+            return {
+                'total_assets_used': 0,
+                'total_cost_ftns': 0.0,
+                'average_quality_score': 0.0,
+                'success_rate': 0.0,
+                'total_asset_costs': 0.0,
+                'total_royalties_paid': 0.0,
+                'budget_utilization': 0.0,
+                'asset_performance_score': 0.0,
+                'integration_quality': 0.0,
+                'user_satisfaction_predicted': 0.0
+            }
+        
+        successful_results = [r for r in asset_execution_results if r.status == ExecutionStatus.COMPLETED]
+        
+        total_assets_used = len(asset_execution_results)
+        total_cost_ftns = sum(r.cost_ftns for r in asset_execution_results)
+        average_quality_score = sum(r.quality_score for r in successful_results) / len(successful_results) if successful_results else 0.0
+        success_rate = len(successful_results) / len(asset_execution_results)
+        total_asset_costs = sum(r.price_paid for r in asset_execution_results)
+        total_royalties_paid = sum(r.royalty_paid for r in asset_execution_results)
+        
+        # Calculate performance score
+        avg_execution_time = sum(r.execution_time for r in successful_results) / len(successful_results) if successful_results else 0.0
+        asset_performance_score = min(1.0, 10.0 / (avg_execution_time + 1.0))
+        
+        # Calculate integration quality
+        avg_confidence = sum(r.confidence_score for r in successful_results) / len(successful_results) if successful_results else 0.0
+        integration_quality = (average_quality_score + avg_confidence) / 2.0
+        
+        # Predict user satisfaction
+        user_satisfaction_predicted = (success_rate + integration_quality + asset_performance_score) / 3.0
+        
+        return {
+            'total_assets_used': total_assets_used,
+            'total_cost_ftns': total_cost_ftns,
+            'average_quality_score': average_quality_score,
+            'success_rate': success_rate,
+            'total_asset_costs': total_asset_costs,
+            'total_royalties_paid': total_royalties_paid,
+            'budget_utilization': total_cost_ftns / 100.0,  # Simplified calculation
+            'asset_performance_score': asset_performance_score,
+            'integration_quality': integration_quality,
+            'user_satisfaction_predicted': user_satisfaction_predicted
         }
     
     async def validate_candidates_with_network(
