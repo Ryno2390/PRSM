@@ -54,6 +54,10 @@ from prsm.knowledge_system import KnowledgeSystem
 from prsm.embeddings.semantic_embedding_engine import SemanticEmbeddingEngine
 from prsm.data_layer.enhanced_ipfs import PRSMIPFSClient
 from prsm.information_space.service import InformationSpaceService
+from prsm.federation.distributed_resource_manager import DistributedResourceManager, ResourceType as ResourceManagerType
+from prsm.context.selective_parallelism_engine import SelectiveParallelismEngine, ExecutionStrategy, TaskDefinition
+from prsm.scheduling.workflow_scheduler import WorkflowScheduler, ScheduledWorkflow, WorkflowStep
+from prsm.nwtn.orchestrator import NWTNOrchestrator
 
 logger = structlog.get_logger(__name__)
 
@@ -252,6 +256,9 @@ class IntegratedReasoningResult:
     
     # PRSM resource discovery results
     resource_discovery_results: Dict[str, ResourceDiscoveryResult] = field(default_factory=dict)
+    
+    # Distributed execution results
+    distributed_execution_result: Optional[DistributedExecutionResult] = None
     
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -620,6 +627,105 @@ class ReasoningClassifier:
         return required_types
 
 
+class ExecutionStatus(str, Enum):
+    """Status of distributed execution"""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+@dataclass
+class ElementalComponent:
+    """An elemental component for distributed execution"""
+    
+    id: str
+    query_component: QueryComponent
+    allocated_resources: Dict[str, Any] = field(default_factory=dict)
+    execution_node: Optional[str] = None
+    estimated_duration: float = 0.0
+    priority: float = 1.0
+    dependencies: List[str] = field(default_factory=list)
+    
+    def to_task_definition(self) -> TaskDefinition:
+        """Convert to TaskDefinition for parallelism engine"""
+        return TaskDefinition(
+            task_id=self.id,
+            task_name=f"reasoning_{self.query_component.primary_reasoning_type.value}",
+            estimated_duration=self.estimated_duration,
+            priority=self.priority,
+            dependencies=self.dependencies,
+            resource_requirements=self.allocated_resources
+        )
+
+
+@dataclass
+class DistributedExecutionPlan:
+    """Execution plan for distributed component processing"""
+    
+    execution_id: str
+    elemental_components: List[ElementalComponent]
+    execution_strategy: ExecutionStrategy
+    resource_allocation: Dict[str, Any]
+    estimated_total_duration: float
+    estimated_total_cost: float
+    parallel_groups: List[List[str]] = field(default_factory=list)
+    critical_path: List[str] = field(default_factory=list)
+    
+    # Optimization metrics
+    resource_efficiency: float = 0.0
+    cost_optimization: float = 0.0
+    performance_optimization: float = 0.0
+
+
+@dataclass
+class ComponentExecutionResult:
+    """Result from executing a single elemental component"""
+    
+    component_id: str
+    status: ExecutionStatus
+    result: Optional[Any] = None
+    error: Optional[str] = None
+    execution_time: float = 0.0
+    resources_used: Dict[str, float] = field(default_factory=dict)
+    cost_ftns: float = 0.0
+    node_id: Optional[str] = None
+    confidence_score: float = 0.0
+    
+    # Performance metrics
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    resource_efficiency: float = 0.0
+
+
+@dataclass
+class DistributedExecutionResult:
+    """Complete result from distributed execution"""
+    
+    execution_id: str
+    plan: DistributedExecutionPlan
+    component_results: List[ComponentExecutionResult]
+    
+    # Overall execution metrics
+    total_execution_time: float = 0.0
+    total_cost_ftns: float = 0.0
+    success_rate: float = 0.0
+    resource_utilization: Dict[str, float] = field(default_factory=dict)
+    
+    # Quality metrics
+    overall_confidence: float = 0.0
+    result_consistency: float = 0.0
+    error_rate: float = 0.0
+    
+    # Execution summary
+    successful_components: int = 0
+    failed_components: int = 0
+    cancelled_components: int = 0
+    
+    execution_timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class MultiModalReasoningEngine:
     """
     The first comprehensive multi-modal reasoning AI system
@@ -661,12 +767,18 @@ class MultiModalReasoningEngine:
         self.ipfs_client = PRSMIPFSClient()
         self.information_space_service = InformationSpaceService()
         
+        # PRSM distributed execution components
+        self.distributed_resource_manager = DistributedResourceManager()
+        self.parallelism_engine = SelectiveParallelismEngine()
+        self.workflow_scheduler = WorkflowScheduler()
+        self.nwtn_orchestrator = NWTNOrchestrator()
+        
         # Integration parameters
         self.consensus_threshold = 0.7
         self.confidence_threshold = 0.6
         self.max_iterations = 3
         
-        logger.info("Initialized Multi-Modal Reasoning Engine with PRSM resource discovery")
+        logger.info("Initialized Multi-Modal Reasoning Engine with PRSM distributed execution")
     
     async def process_query(self, query: str, context: Dict[str, Any] = None) -> IntegratedReasoningResult:
         """
@@ -687,17 +799,26 @@ class MultiModalReasoningEngine:
         # Step 2: Discover relevant PRSM resources for each component
         resource_discovery_results = await self.discover_prsm_resources(components, context)
         
-        # Step 3: Process each component with appropriate reasoning engines
+        # Step 3: Execute distributed plan - process components simultaneously across PRSM network
+        distributed_execution_result = await self.execute_distributed_plan(
+            components, resource_discovery_results, context
+        )
+        
+        # Step 4: Extract reasoning results from distributed execution
         reasoning_results = []
+        for component_result in distributed_execution_result.component_results:
+            if component_result.status == ExecutionStatus.COMPLETED and component_result.result:
+                reasoning_results.extend(component_result.result)
         
-        for component in components:
-            component_results = await self._process_component(component, context, resource_discovery_results.get(component.id))
-            reasoning_results.extend(component_results)
+        # Step 5: Integrate results from distributed execution
+        integrated_result = await self._integrate_reasoning_results(
+            query, components, reasoning_results, resource_discovery_results
+        )
         
-        # Step 4: Integrate results from multiple reasoning modes
-        integrated_result = await self._integrate_reasoning_results(query, components, reasoning_results, resource_discovery_results)
+        # Add distributed execution metrics to integrated result
+        integrated_result.distributed_execution_result = distributed_execution_result
         
-        # Step 5: Validate and enhance result
+        # Step 6: Validate and enhance result
         enhanced_result = await self._enhance_integrated_result(integrated_result)
         
         logger.info(
@@ -1770,6 +1891,498 @@ class MultiModalReasoningEngine:
             return ResourceType.MODEL
         else:
             return ResourceType.DOCUMENTATION
+    
+    async def execute_distributed_plan(
+        self,
+        query_components: List[QueryComponent],
+        resource_discovery_results: Dict[str, ResourceDiscoveryResult],
+        context: Dict[str, Any] = None,
+        optimization_strategy: str = "hybrid_optimal"
+    ) -> DistributedExecutionResult:
+        """
+        Execute elemental components simultaneously across PRSM's distributed infrastructure
+        
+        This method implements the core distributed execution capability that enables
+        NWTN to process multiple query components in parallel across the best available
+        PRSM resources, dramatically improving performance and leveraging the full
+        power of the distributed network.
+        
+        Args:
+            query_components: List of decomposed query components
+            resource_discovery_results: Results from PRSM resource discovery
+            context: Additional execution context
+            optimization_strategy: Strategy for resource allocation optimization
+            
+        Returns:
+            DistributedExecutionResult containing results from all parallel executions
+        """
+        
+        execution_id = str(uuid4())
+        logger.info(f"Starting distributed execution {execution_id} for {len(query_components)} components")
+        
+        try:
+            # Step 1: Convert query components to elemental components
+            elemental_components = []
+            for component in query_components:
+                elemental_comp = ElementalComponent(
+                    id=component.id,
+                    query_component=component,
+                    estimated_duration=self._estimate_execution_duration(component),
+                    priority=component.priority,
+                    dependencies=component.depends_on
+                )
+                elemental_components.append(elemental_comp)
+            
+            # Step 2: Analyze dependencies and determine execution strategy
+            task_definitions = [comp.to_task_definition() for comp in elemental_components]
+            
+            parallelism_decision = await self.parallelism_engine.make_parallelism_decision(task_definitions)
+            
+            logger.info(f"Parallelism decision: {parallelism_decision.recommended_strategy}")
+            
+            # Step 3: Allocate optimal resources across distributed nodes
+            resource_requirements = self._calculate_total_resource_requirements(elemental_components)
+            
+            allocation_result = await self.distributed_resource_manager.allocate_resources_for_computation(
+                resource_requirements,
+                optimization_strategy=optimization_strategy
+            )
+            
+            logger.info(f"Resource allocation complete: {len(allocation_result.get('allocated_nodes', []))} nodes allocated")
+            
+            # Step 4: Create distributed execution plan
+            execution_plan = DistributedExecutionPlan(
+                execution_id=execution_id,
+                elemental_components=elemental_components,
+                execution_strategy=parallelism_decision.recommended_strategy,
+                resource_allocation=allocation_result,
+                estimated_total_duration=parallelism_decision.estimated_completion_time,
+                estimated_total_cost=allocation_result.get('estimated_cost', 0.0),
+                parallel_groups=parallelism_decision.parallel_groups,
+                critical_path=parallelism_decision.critical_path,
+                resource_efficiency=allocation_result.get('efficiency_score', 0.0),
+                cost_optimization=allocation_result.get('cost_optimization', 0.0),
+                performance_optimization=allocation_result.get('performance_optimization', 0.0)
+            )
+            
+            # Step 5: Execute components based on strategy
+            component_results = []
+            
+            if parallelism_decision.recommended_strategy == ExecutionStrategy.PARALLEL:
+                # Execute all components simultaneously
+                logger.info("Executing all components in parallel")
+                component_results = await self._execute_parallel_components(
+                    elemental_components, allocation_result, resource_discovery_results
+                )
+                
+            elif parallelism_decision.recommended_strategy == ExecutionStrategy.MIXED_PARALLEL:
+                # Execute in parallel groups according to dependencies
+                logger.info("Executing components in mixed parallel groups")
+                component_results = await self._execute_mixed_parallel_components(
+                    elemental_components, parallelism_decision.parallel_groups, 
+                    allocation_result, resource_discovery_results
+                )
+                
+            else:
+                # Fallback to sequential execution
+                logger.info("Executing components sequentially")
+                component_results = await self._execute_sequential_components(
+                    elemental_components, allocation_result, resource_discovery_results
+                )
+            
+            # Step 6: Calculate execution metrics
+            execution_metrics = self._calculate_execution_metrics(component_results)
+            
+            # Step 7: Create final result
+            distributed_result = DistributedExecutionResult(
+                execution_id=execution_id,
+                plan=execution_plan,
+                component_results=component_results,
+                total_execution_time=execution_metrics['total_time'],
+                total_cost_ftns=execution_metrics['total_cost'],
+                success_rate=execution_metrics['success_rate'],
+                resource_utilization=execution_metrics['resource_utilization'],
+                overall_confidence=execution_metrics['overall_confidence'],
+                result_consistency=execution_metrics['result_consistency'],
+                error_rate=execution_metrics['error_rate'],
+                successful_components=execution_metrics['successful_count'],
+                failed_components=execution_metrics['failed_count'],
+                cancelled_components=execution_metrics['cancelled_count']
+            )
+            
+            logger.info(
+                f"Distributed execution {execution_id} complete",
+                success_rate=distributed_result.success_rate,
+                total_time=distributed_result.total_execution_time,
+                total_cost=distributed_result.total_cost_ftns
+            )
+            
+            return distributed_result
+            
+        except Exception as e:
+            logger.error(f"Error in distributed execution {execution_id}", error=str(e))
+            
+            # Return failure result
+            return DistributedExecutionResult(
+                execution_id=execution_id,
+                plan=DistributedExecutionPlan(
+                    execution_id=execution_id,
+                    elemental_components=elemental_components,
+                    execution_strategy=ExecutionStrategy.SEQUENTIAL,
+                    resource_allocation={},
+                    estimated_total_duration=0.0,
+                    estimated_total_cost=0.0
+                ),
+                component_results=[
+                    ComponentExecutionResult(
+                        component_id=comp.id,
+                        status=ExecutionStatus.FAILED,
+                        error=str(e)
+                    ) for comp in elemental_components
+                ],
+                error_rate=1.0,
+                failed_components=len(elemental_components)
+            )
+    
+    async def _execute_parallel_components(
+        self,
+        elemental_components: List[ElementalComponent],
+        allocation_result: Dict[str, Any],
+        resource_discovery_results: Dict[str, ResourceDiscoveryResult]
+    ) -> List[ComponentExecutionResult]:
+        """Execute all components simultaneously in parallel"""
+        
+        execution_tasks = []
+        
+        for component in elemental_components:
+            task = asyncio.create_task(
+                self._execute_single_component(
+                    component, allocation_result, resource_discovery_results
+                )
+            )
+            execution_tasks.append(task)
+        
+        # Wait for all tasks to complete
+        results = await asyncio.gather(*execution_tasks, return_exceptions=True)
+        
+        # Process results and handle exceptions
+        component_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                component_results.append(ComponentExecutionResult(
+                    component_id=elemental_components[i].id,
+                    status=ExecutionStatus.FAILED,
+                    error=str(result)
+                ))
+            else:
+                component_results.append(result)
+        
+        return component_results
+    
+    async def _execute_mixed_parallel_components(
+        self,
+        elemental_components: List[ElementalComponent],
+        parallel_groups: List[List[str]],
+        allocation_result: Dict[str, Any],
+        resource_discovery_results: Dict[str, ResourceDiscoveryResult]
+    ) -> List[ComponentExecutionResult]:
+        """Execute components in parallel groups according to dependencies"""
+        
+        all_results = []
+        component_map = {comp.id: comp for comp in elemental_components}
+        
+        for group in parallel_groups:
+            # Execute components in this group in parallel
+            group_tasks = []
+            for component_id in group:
+                if component_id in component_map:
+                    task = asyncio.create_task(
+                        self._execute_single_component(
+                            component_map[component_id], allocation_result, resource_discovery_results
+                        )
+                    )
+                    group_tasks.append(task)
+            
+            # Wait for this group to complete before moving to next
+            group_results = await asyncio.gather(*group_tasks, return_exceptions=True)
+            
+            # Process group results
+            for i, result in enumerate(group_results):
+                if isinstance(result, Exception):
+                    all_results.append(ComponentExecutionResult(
+                        component_id=group[i],
+                        status=ExecutionStatus.FAILED,
+                        error=str(result)
+                    ))
+                else:
+                    all_results.append(result)
+        
+        return all_results
+    
+    async def _execute_sequential_components(
+        self,
+        elemental_components: List[ElementalComponent],
+        allocation_result: Dict[str, Any],
+        resource_discovery_results: Dict[str, ResourceDiscoveryResult]
+    ) -> List[ComponentExecutionResult]:
+        """Execute components sequentially as fallback"""
+        
+        results = []
+        
+        for component in elemental_components:
+            try:
+                result = await self._execute_single_component(
+                    component, allocation_result, resource_discovery_results
+                )
+                results.append(result)
+            except Exception as e:
+                results.append(ComponentExecutionResult(
+                    component_id=component.id,
+                    status=ExecutionStatus.FAILED,
+                    error=str(e)
+                ))
+        
+        return results
+    
+    async def _execute_single_component(
+        self,
+        component: ElementalComponent,
+        allocation_result: Dict[str, Any],
+        resource_discovery_results: Dict[str, ResourceDiscoveryResult]
+    ) -> ComponentExecutionResult:
+        """Execute a single elemental component using allocated resources"""
+        
+        start_time = datetime.now(timezone.utc)
+        
+        try:
+            # Get resource discovery for this component
+            discovery_result = resource_discovery_results.get(component.id)
+            
+            # Execute the component using the appropriate reasoning engine
+            reasoning_result = await self._process_component(
+                component.query_component, 
+                context={"allocated_resources": allocation_result},
+                resource_discovery=discovery_result
+            )
+            
+            end_time = datetime.now(timezone.utc)
+            execution_time = (end_time - start_time).total_seconds()
+            
+            # Calculate resource usage and cost
+            resources_used = self._calculate_resource_usage(component, allocation_result)
+            cost_ftns = self._calculate_ftns_cost(resources_used, execution_time)
+            
+            return ComponentExecutionResult(
+                component_id=component.id,
+                status=ExecutionStatus.COMPLETED,
+                result=reasoning_result,
+                execution_time=execution_time,
+                resources_used=resources_used,
+                cost_ftns=cost_ftns,
+                node_id=allocation_result.get('node_id'),
+                confidence_score=reasoning_result[0].confidence if reasoning_result else 0.0,
+                start_time=start_time,
+                end_time=end_time,
+                resource_efficiency=self._calculate_resource_efficiency(resources_used, execution_time)
+            )
+            
+        except Exception as e:
+            end_time = datetime.now(timezone.utc)
+            execution_time = (end_time - start_time).total_seconds()
+            
+            return ComponentExecutionResult(
+                component_id=component.id,
+                status=ExecutionStatus.FAILED,
+                error=str(e),
+                execution_time=execution_time,
+                start_time=start_time,
+                end_time=end_time
+            )
+    
+    def _estimate_execution_duration(self, component: QueryComponent) -> float:
+        """Estimate execution duration for a component"""
+        # Base duration by reasoning type
+        base_durations = {
+            ReasoningType.DEDUCTIVE: 2.0,
+            ReasoningType.INDUCTIVE: 5.0,
+            ReasoningType.ABDUCTIVE: 4.0,
+            ReasoningType.ANALOGICAL: 8.0,
+            ReasoningType.CAUSAL: 6.0,
+            ReasoningType.PROBABILISTIC: 7.0,
+            ReasoningType.COUNTERFACTUAL: 5.0
+        }
+        
+        base_duration = base_durations.get(component.primary_reasoning_type, 3.0)
+        
+        # Adjust for complexity
+        complexity_multiplier = component.complexity
+        
+        # Adjust for domain complexity
+        domain_multipliers = {
+            "general": 1.0,
+            "scientific": 1.5,
+            "medical": 2.0,
+            "legal": 1.8,
+            "financial": 1.6,
+            "technical": 1.4
+        }
+        
+        domain_multiplier = domain_multipliers.get(component.domain, 1.0)
+        
+        return base_duration * complexity_multiplier * domain_multiplier
+    
+    def _calculate_total_resource_requirements(self, elemental_components: List[ElementalComponent]) -> Dict[str, float]:
+        """Calculate total resource requirements for all components"""
+        
+        total_requirements = {
+            "cpu_cores": 0.0,
+            "memory_gb": 0.0,
+            "gpu_memory_gb": 0.0,
+            "storage_gb": 0.0,
+            "ftns_credits": 0.0
+        }
+        
+        for component in elemental_components:
+            # Estimate resources needed based on reasoning type
+            component_requirements = self._estimate_component_resources(component)
+            
+            for resource_type, amount in component_requirements.items():
+                total_requirements[resource_type] += amount
+        
+        return total_requirements
+    
+    def _estimate_component_resources(self, component: ElementalComponent) -> Dict[str, float]:
+        """Estimate resource requirements for a single component"""
+        
+        # Base resource requirements by reasoning type
+        base_requirements = {
+            ReasoningType.DEDUCTIVE: {"cpu_cores": 1.0, "memory_gb": 2.0, "ftns_credits": 5.0},
+            ReasoningType.INDUCTIVE: {"cpu_cores": 2.0, "memory_gb": 4.0, "ftns_credits": 10.0},
+            ReasoningType.ABDUCTIVE: {"cpu_cores": 1.5, "memory_gb": 3.0, "ftns_credits": 8.0},
+            ReasoningType.ANALOGICAL: {"cpu_cores": 3.0, "memory_gb": 6.0, "gpu_memory_gb": 2.0, "ftns_credits": 15.0},
+            ReasoningType.CAUSAL: {"cpu_cores": 2.0, "memory_gb": 4.0, "ftns_credits": 12.0},
+            ReasoningType.PROBABILISTIC: {"cpu_cores": 2.5, "memory_gb": 5.0, "ftns_credits": 12.0},
+            ReasoningType.COUNTERFACTUAL: {"cpu_cores": 2.0, "memory_gb": 4.0, "ftns_credits": 10.0}
+        }
+        
+        requirements = base_requirements.get(
+            component.query_component.primary_reasoning_type,
+            {"cpu_cores": 1.0, "memory_gb": 2.0, "ftns_credits": 5.0}
+        )
+        
+        # Adjust for complexity
+        complexity_multiplier = component.query_component.complexity
+        
+        adjusted_requirements = {}
+        for resource_type, amount in requirements.items():
+            adjusted_requirements[resource_type] = amount * complexity_multiplier
+        
+        return adjusted_requirements
+    
+    def _calculate_resource_usage(self, component: ElementalComponent, allocation_result: Dict[str, Any]) -> Dict[str, float]:
+        """Calculate actual resource usage for a component"""
+        
+        # Get estimated usage as baseline
+        estimated_usage = self._estimate_component_resources(component)
+        
+        # Apply efficiency factor from allocation
+        efficiency_factor = allocation_result.get('efficiency_score', 1.0)
+        
+        actual_usage = {}
+        for resource_type, amount in estimated_usage.items():
+            actual_usage[resource_type] = amount * efficiency_factor
+        
+        return actual_usage
+    
+    def _calculate_ftns_cost(self, resources_used: Dict[str, float], execution_time: float) -> float:
+        """Calculate FTNS cost for resource usage"""
+        
+        # Base cost rates (FTNS per unit per second)
+        cost_rates = {
+            "cpu_cores": 0.001,
+            "memory_gb": 0.0005,
+            "gpu_memory_gb": 0.01,
+            "storage_gb": 0.0001,
+            "ftns_credits": 1.0  # Direct cost
+        }
+        
+        total_cost = 0.0
+        
+        for resource_type, amount in resources_used.items():
+            rate = cost_rates.get(resource_type, 0.0)
+            if resource_type == "ftns_credits":
+                total_cost += amount  # Direct cost
+            else:
+                total_cost += amount * rate * execution_time
+        
+        return total_cost
+    
+    def _calculate_resource_efficiency(self, resources_used: Dict[str, float], execution_time: float) -> float:
+        """Calculate resource efficiency score"""
+        
+        # Simple efficiency calculation based on resource utilization
+        total_resources = sum(resources_used.values())
+        
+        if total_resources == 0:
+            return 1.0
+        
+        # Higher efficiency for shorter execution times with same resources
+        efficiency = min(1.0, 10.0 / (execution_time + 0.1))
+        
+        return efficiency
+    
+    def _calculate_execution_metrics(self, component_results: List[ComponentExecutionResult]) -> Dict[str, float]:
+        """Calculate overall execution metrics"""
+        
+        if not component_results:
+            return {
+                'total_time': 0.0,
+                'total_cost': 0.0,
+                'success_rate': 0.0,
+                'resource_utilization': {},
+                'overall_confidence': 0.0,
+                'result_consistency': 0.0,
+                'error_rate': 1.0,
+                'successful_count': 0,
+                'failed_count': 0,
+                'cancelled_count': 0
+            }
+        
+        total_time = max(result.execution_time for result in component_results)
+        total_cost = sum(result.cost_ftns for result in component_results)
+        
+        successful_count = sum(1 for result in component_results if result.status == ExecutionStatus.COMPLETED)
+        failed_count = sum(1 for result in component_results if result.status == ExecutionStatus.FAILED)
+        cancelled_count = sum(1 for result in component_results if result.status == ExecutionStatus.CANCELLED)
+        
+        success_rate = successful_count / len(component_results)
+        error_rate = failed_count / len(component_results)
+        
+        # Calculate overall confidence from successful results
+        successful_results = [r for r in component_results if r.status == ExecutionStatus.COMPLETED]
+        overall_confidence = sum(r.confidence_score for r in successful_results) / len(successful_results) if successful_results else 0.0
+        
+        # Calculate resource utilization
+        resource_utilization = {}
+        for result in component_results:
+            for resource_type, amount in result.resources_used.items():
+                resource_utilization[resource_type] = resource_utilization.get(resource_type, 0.0) + amount
+        
+        # Simple consistency measure (could be improved)
+        result_consistency = success_rate  # Simplified - could analyze result similarity
+        
+        return {
+            'total_time': total_time,
+            'total_cost': total_cost,
+            'success_rate': success_rate,
+            'resource_utilization': resource_utilization,
+            'overall_confidence': overall_confidence,
+            'result_consistency': result_consistency,
+            'error_rate': error_rate,
+            'successful_count': successful_count,
+            'failed_count': failed_count,
+            'cancelled_count': cancelled_count
+        }
     
     async def validate_candidates_with_network(
         self,
