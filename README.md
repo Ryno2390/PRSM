@@ -284,6 +284,17 @@ Unlike LLMs that excel at sophisticated pattern matching, NWTN's multi-modal arc
 
 NWTN demonstrates that AI systems can move beyond pattern matching to achieve genuine scientific discovery. Where LLMs excel at language tasks within their training domains, NWTN pushes the boundaries of what AI can accomplish—systematically discovering new knowledge that advances human understanding.
 
+### **🔄 Complete NWTN Workflow**
+
+NWTN operates as the central orchestrator of the PRSM ecosystem, transforming user queries into network-validated breakthrough insights through a comprehensive 6-phase process:
+
+1. **Query Decomposition**: Break complex queries into reasoning components
+2. **PRSM Resource Discovery**: Search network for relevant datasets, models, agents
+3. **Distributed Execution**: Execute tasks across PRSM federation
+4. **Asset Integration**: Compose results from multiple network resources
+5. **Multi-Modal Network Validation**: Validate candidates across all 7 reasoning engines
+6. **Final Response**: Deliver network-validated breakthrough insights
+
 **[➤ Explore NWTN's Complete Technical Documentation](prsm/nwtn/README.md)**
 
 The future of AI isn't about making transformers bigger—it's about making AI systems that actually understand and discover. NWTN proves this future is achievable today.
