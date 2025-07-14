@@ -253,9 +253,9 @@ SOCs **learn and evolve** through experience, building genuine understanding rat
 
 ## 🔄 **Complete NWTN Workflow: From Query to Validated Response**
 
-### **The Complete Cycle: How NWTN Processes User Queries**
+### **Current Implementation: Multi-Modal Reasoning Workflow**
 
-NWTN operates as the central orchestrator of the PRSM ecosystem, transforming user queries into network-validated breakthrough insights through a comprehensive 6-phase process:
+NWTN currently implements a revolutionary 4-phase multi-modal reasoning workflow that transforms user queries into network-validated breakthrough insights:
 
 #### **Phase 1: Query Decomposition & Classification**
 ```python
@@ -284,83 +284,28 @@ components = [
 ]
 ```
 
-#### **Phase 2: PRSM Network Resource Discovery**
+#### **Phase 2: Multi-Modal Reasoning Analysis**
 ```python
-# NWTN searches PRSM ecosystem for relevant resources
-prsm_resources = await nwtn.discover_prsm_resources(components)
+# NWTN processes components through all 7 reasoning engines
+reasoning_results = []
 
-# Returns:
-{
-    "datasets": [
-        "inflammation_pathway_database",
-        "drug_side_effect_registry", 
-        "experimental_protocol_library"
-    ],
-    "models": [
-        "biochemical_pathway_predictor",
-        "pharmacokinetic_simulator",
-        "molecular_docking_model"
-    ],
-    "agents": [
-        "inflammation_specialist_agent",
-        "drug_safety_agent",
-        "experimental_design_agent"
-    ],
-    "knowledge_corpus": [
-        "10,000+ inflammation research papers",
-        "clinical_trial_database",
-        "molecular_interaction_networks"
-    ]
-}
+for component in components:
+    # Route to appropriate reasoning engines based on component type
+    if component.primary_reasoning_type == ReasoningType.CAUSAL:
+        result = await nwtn.causal_engine.analyze_causal_relationships(
+            observations=[component.content]
+        )
+    elif component.primary_reasoning_type == ReasoningType.PROBABILISTIC:
+        result = await nwtn.probabilistic_engine.probabilistic_inference(
+            evidence=[component.content],
+            hypothesis=component.content
+        )
+    # ... (all 7 engines)
+    
+    reasoning_results.append(result)
 ```
 
-#### **Phase 3: Distributed Execution Plan**
-```python
-# NWTN creates execution plan using PRSM assets
-execution_plan = [
-    {
-        "task": "mine_inflammation_mechanisms",
-        "resources": ["inflammation_pathway_database", "biochemical_pathway_predictor"],
-        "agents": ["inflammation_specialist_agent"],
-        "reasoning_engine": "causal_reasoning_engine"
-    },
-    {
-        "task": "assess_side_effect_risks", 
-        "resources": ["drug_side_effect_registry", "pharmacokinetic_simulator"],
-        "agents": ["drug_safety_agent"],
-        "reasoning_engine": "probabilistic_reasoning_engine"
-    },
-    {
-        "task": "generate_experimental_designs",
-        "resources": ["experimental_protocol_library"],
-        "agents": ["experimental_design_agent"], 
-        "reasoning_engine": "abductive_reasoning_engine"
-    }
-]
-
-# Execute plan across PRSM network
-execution_results = await nwtn.execute_distributed_plan(execution_plan)
-```
-
-#### **Phase 4: Asset Integration & Candidate Generation**
-```python
-# Integration via NWTN's composer system
-integrated_results = await nwtn.integrate_asset_outputs(execution_results)
-
-# Generate candidate solutions
-candidate_solutions = await nwtn.generate_candidate_solutions(integrated_results)
-
-# Example candidates:
-candidates = [
-    "Novel IL-6 receptor antagonist with targeted delivery system",
-    "Engineered probiotic bacteria producing anti-inflammatory compounds", 
-    "Photodynamic therapy targeting inflammatory pathways",
-    "Nanotechnology-based drug delivery minimizing systemic exposure",
-    "Gene therapy approach using CRISPR to modulate inflammation"
-]
-```
-
-#### **Phase 5: Multi-Modal Reasoning Network Validation**
+#### **Phase 3: Multi-Modal Network Validation**
 ```python
 # Network validation across all 7 reasoning engines
 validation_results = await nwtn.validate_candidates_with_network(
@@ -378,7 +323,7 @@ for candidate in validation_results["approved_candidates"]:
     print(f"Engines Validated: {candidate['engines_validated']}/7")
 ```
 
-#### **Phase 6: Final Response Generation**
+#### **Phase 4: Final Response Generation**
 ```python
 # Final response with top 5 highest-confidence candidates
 final_response = {
@@ -390,41 +335,41 @@ final_response = {
         "average_confidence": validation_results["validation_metrics"]["average_confidence"],
         "cross_engine_consensus": validation_results["validation_metrics"]["consensus_rate"]
     },
-    "prsm_resources_used": prsm_resources,
     "breakthrough_insights": validation_results["insights"]["breakthrough_insights"]
 }
 ```
 
-### **🔗 NWTN as PRSM Network Orchestrator**
+### **🚀 Future Development: PRSM Network Integration**
 
-**Key Innovation**: NWTN operates as the central orchestrator that transforms the entire PRSM ecosystem into a **Network-Validated Distributed Intelligence System**:
+**Planned Enhancement**: Full integration with the PRSM distributed network to create a **Network-Validated Distributed Intelligence System**:
 
-#### **PRSM Network Resources NWTN Leverages:**
-1. **Knowledge Corpus**: IPFS-stored research papers, datasets, experimental data
-2. **AI Models**: Specialized models for different domains and reasoning tasks
-3. **Agent Network**: Expert agents with domain-specific capabilities
-4. **Compute Resources**: Distributed processing across PRSM federation
-5. **Validation Assets**: Historical data for calibrating confidence assessments
+#### **Planned PRSM Network Integration Features:**
+1. **PRSM Resource Discovery**: Automatic discovery of relevant resources across the network
+2. **Distributed Execution**: Coordinated execution across PRSM federation nodes
+3. **Asset Integration**: Integration of outputs from marketplace models and agents
+4. **Dynamic Candidate Generation**: Network-wide candidate solution generation
 
-#### **The Complete Workflow:**
+#### **Planned Extended Workflow:**
 ```
 User Query → 
 Query Decomposition → 
-PRSM Resource Discovery → 
-Distributed Execution Plan → 
-Asset Integration → 
-Candidate Generation → 
+[FUTURE] PRSM Resource Discovery → 
+[FUTURE] Distributed Execution Plan → 
+[FUTURE] Asset Integration → 
+[FUTURE] Dynamic Candidate Generation → 
 Multi-Modal Network Validation → 
-Confidence Assessment → 
-Final Response to User
+Final Response Generation
 ```
 
-#### **Result: Network-Validated Breakthrough Insights**
-Users receive not just AI-generated answers, but **network-validated breakthrough insights** backed by:
-- The collective intelligence of the entire PRSM ecosystem
-- Multi-modal reasoning validation across all 7 fundamental forms of reasoning
-- Unprecedented confidence levels through cross-engine consensus
-- Real-time access to the latest research, models, and expert agents
+#### **Current Status vs. Roadmap:**
+- ✅ **Implemented**: Multi-modal reasoning (all 7 engines)
+- ✅ **Implemented**: Network validation system  
+- ✅ **Implemented**: Query decomposition & classification
+- ✅ **Implemented**: Response generation & synthesis
+- 🔄 **Planned**: PRSM resource discovery integration
+- 🔄 **Planned**: Distributed execution coordination  
+- 🔄 **Planned**: Asset integration from marketplace
+- 🔄 **Planned**: Dynamic candidate generation
 
 ---
 
