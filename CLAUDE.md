@@ -1,6 +1,7 @@
 ## Testing Methodology
 
 - When performing tests do not deprecate to simpler testing methods - work through the problem and if, need be, download packages to aid in your debugging.
+- never deprecate tests or simplify them - ALWAYS ALWAYS ALWAYS work through issues. Do not just make tests simpler just so you can clear the hurdle. If a problem is difficult work through it! Find the source of the problem and fix it EVERY TIME!
 
 ## GitHub Workflow
 
