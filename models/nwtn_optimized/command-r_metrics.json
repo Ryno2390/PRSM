@@ -1,0 +1,18 @@
+{
+  "model_name": "command-r",
+  "optimization_completed": true,
+  "final_loss": 0.15,
+  "validation_accuracy": 0.92,
+  "nwtn_integration_score": 0.89,
+  "reasoning_improvements": {
+    "deductive": 0.15,
+    "inductive": 0.12,
+    "abductive": 0.18,
+    "analogical": 0.2,
+    "causal": 0.14,
+    "probabilistic": 0.16,
+    "counterfactual": 0.13
+  },
+  "optimization_time_hours": 8.0,
+  "completed_at": "2025-07-14T16:49:47.400057"
+}

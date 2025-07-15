@@ -1,0 +1,36 @@
+{
+  "deductive_reasoning": [
+    {
+      "premise": "All metals expand when heated",
+      "specific_case": "Copper is a metal",
+      "conclusion": "Therefore, copper expands when heated",
+      "reasoning_type": "deductive",
+      "domain": "physics"
+    }
+  ],
+  "inductive_reasoning": [
+    {
+      "observations": [
+        "Water boils at 100\u00b0C at sea level",
+        "Water boils at 90\u00b0C at high altitude"
+      ],
+      "pattern": "Water boiling point decreases with altitude",
+      "generalization": "Atmospheric pressure affects boiling point",
+      "reasoning_type": "inductive",
+      "domain": "physics"
+    }
+  ],
+  "analogical_reasoning": [
+    {
+      "source_domain": "planetary_motion",
+      "target_domain": "atomic_structure",
+      "analogy": "Electrons orbit nucleus like planets orbit sun",
+      "insights": [
+        "Quantized energy levels",
+        "Electromagnetic forces"
+      ],
+      "reasoning_type": "analogical",
+      "domain": "physics"
+    }
+  ]
+}

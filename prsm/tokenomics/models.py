@@ -902,7 +902,7 @@ class FTNSSupplyAdjustment(Base):
     approval_timestamp = Column(DateTime(timezone=True), nullable=True)
     
     # Metadata and audit
-    metadata = Column(JSONB, nullable=True)  # Additional context, calculations, etc.
+    adjustment_metadata = Column(JSONB, nullable=True)  # Additional context, calculations, etc.
     
     # Constraints
     __table_args__ = (
@@ -941,7 +941,7 @@ class FTNSPriceMetrics(Base):
     data_source = Column(String(100), nullable=False, default="price_oracle")
     
     # Metadata
-    metadata = Column(JSONB, nullable=True)  # Calculation details, data quality indicators, etc.
+    price_metadata = Column(JSONB, nullable=True)  # Calculation details, data quality indicators, etc.
     
     # Constraints
     __table_args__ = (
@@ -984,7 +984,7 @@ class FTNSRewardRates(Base):
     adjustment_reference = Column(PG_UUID(as_uuid=True), ForeignKey('ftns_supply_adjustments.adjustment_id'), nullable=True)
     
     # Metadata
-    metadata = Column(JSONB, nullable=True)  # Rate calculation context, external factors, etc.
+    rate_metadata = Column(JSONB, nullable=True)  # Rate calculation context, external factors, etc.
     
     # Relationships
     adjustment = relationship("FTNSSupplyAdjustment", backref="rate_updates")
