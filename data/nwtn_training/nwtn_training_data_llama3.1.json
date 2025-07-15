@@ -1,0 +1,26 @@
+{
+  "reasoning_examples": {
+    "deductive": [],
+    "inductive": [],
+    "abductive": [],
+    "analogical": [],
+    "causal": [],
+    "probabilistic": [],
+    "counterfactual": []
+  },
+  "scientific_domains": {
+    "physics": [],
+    "chemistry": [],
+    "biology": [],
+    "materials_science": [],
+    "engineering": [],
+    "mathematics": [],
+    "computer_science": []
+  },
+  "breakthrough_patterns": {
+    "historical_breakthroughs": [],
+    "cross_domain_insights": [],
+    "paradigm_shifts": [],
+    "innovation_patterns": []
+  }
+}

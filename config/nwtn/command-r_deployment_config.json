@@ -1,0 +1,39 @@
+{
+  "model_info": {
+    "name": "command-r",
+    "type": "nwtn_optimized",
+    "version": "1.0.0",
+    "deployed_at": "2025-07-14T16:49:57.049376"
+  },
+  "performance_metrics": {
+    "validation_accuracy": 0.92,
+    "nwtn_integration_score": 0.89,
+    "final_loss": 0.15,
+    "optimization_time_hours": 8.0
+  },
+  "reasoning_capabilities": {
+    "deductive": 0.15,
+    "inductive": 0.12,
+    "abductive": 0.18,
+    "analogical": 0.2,
+    "causal": 0.14,
+    "probabilistic": 0.16,
+    "counterfactual": 0.13
+  },
+  "integration_settings": {
+    "primary_voicebox": true,
+    "fallback_to_byoa": true,
+    "seal_learning_enabled": true,
+    "quality_threshold": 0.8,
+    "max_context_length": 4096,
+    "temperature": 0.7,
+    "top_p": 0.9
+  },
+  "deployment_status": "deployed",
+  "health_checks": {
+    "model_loaded": true,
+    "nwtn_integration": true,
+    "reasoning_tests": true,
+    "performance_validation": true
+  }
+}
