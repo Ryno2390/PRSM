@@ -278,7 +278,7 @@ Provide detailed complexity assessment in JSON format:
             
             # Convert to IntentAnalysis object
             result = IntentAnalysis(
-                category=IntentCategory(final_analysis["category"].lower()),
+                category=IntentCategory(str(final_analysis["category"]).lower()),
                 complexity=ComplexityLevel(final_analysis["complexity"]),
                 confidence=final_analysis["confidence"],
                 reasoning_chain=final_analysis["reasoning_chain"],

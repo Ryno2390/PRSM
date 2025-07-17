@@ -303,7 +303,7 @@ class InductiveReasoningEngine:
         
         # Remove duplicates and common words
         stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
-        entities = list(set([entity.lower() for entity in entities if entity.lower() not in stop_words]))
+        entities = list(set([str(entity).lower() for entity in entities if str(entity).lower() not in stop_words]))
         
         return entities[:10]  # Limit to top 10 entities
     
@@ -356,7 +356,7 @@ class InductiveReasoningEngine:
         for pattern in relationship_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for entity1, relation, entity2 in matches:
-                relationships.append((entity1.lower(), relation.lower(), entity2.lower()))
+                relationships.append((str(entity1).lower(), str(relation).lower(), str(entity2).lower()))
         
         return relationships
     
@@ -379,7 +379,7 @@ class InductiveReasoningEngine:
             "social": ["society", "culture", "group", "community", "social", "human"]
         }
         
-        text_lower = text.lower()
+        text_lower = str(text).lower()
         domain_scores = {}
         
         for domain, keywords in domain_keywords.items():
@@ -401,7 +401,7 @@ class InductiveReasoningEngine:
         certainty_indicators = ["definitely", "certainly", "clearly", "obviously", "always"]
         uncertainty_indicators = ["maybe", "possibly", "perhaps", "might", "could", "seems"]
         
-        text_lower = text.lower()
+        text_lower = str(text).lower()
         
         certainty_score = sum(1 for indicator in certainty_indicators if indicator in text_lower)
         uncertainty_score = sum(1 for indicator in uncertainty_indicators if indicator in text_lower)
@@ -585,7 +585,7 @@ class InductiveReasoningEngine:
         # Word frequency patterns
         word_counts = Counter()
         for obs in observations:
-            words = obs.content.lower().split()
+            words = str(obs.content).lower().split()
             # Filter out common words
             stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were'}
             filtered_words = [word for word in words if word not in stop_words and len(word) > 3]
@@ -604,7 +604,7 @@ class InductiveReasoningEngine:
                     pattern_rules=[f"Term '{word}' appears frequently in observations"],
                     frequency=count,
                     support=support,
-                    supporting_observations=[obs for obs in observations if word in obs.content.lower()]
+                    supporting_observations=[obs for obs in observations if word in str(obs.content).lower()]
                 )
                 patterns.append(pattern)
         
@@ -799,11 +799,11 @@ class InductiveReasoningEngine:
         
         # Add probability qualifier
         if primary_pattern.confidence >= 0.8:
-            base_statement = f"It is highly likely that {base_statement.lower()}"
+            base_statement = f"It is highly likely that {str(base_statement).lower()}"
         elif primary_pattern.confidence >= 0.6:
-            base_statement = f"It is likely that {base_statement.lower()}"
+            base_statement = f"It is likely that {str(base_statement).lower()}"
         else:
-            base_statement = f"It is possible that {base_statement.lower()}"
+            base_statement = f"It is possible that {str(base_statement).lower()}"
         
         return base_statement
     

@@ -316,6 +316,12 @@ class PremiseIdentificationEngine:
     async def _parse_statement(self, statement: str) -> Dict[str, Any]:
         """Parse statement into logical components"""
         
+        # Handle case where statement is a list
+        if isinstance(statement, list):
+            statement = ' '.join(str(item) for item in statement)
+        elif not isinstance(statement, str):
+            statement = str(statement)
+        
         statement = statement.strip()
         
         # Identify quantifiers
@@ -329,7 +335,7 @@ class PremiseIdentificationEngine:
         quantifier = None
         for quant_type, patterns in quantifiers.items():
             for pattern in patterns:
-                if statement.lower().startswith(pattern):
+                if str(statement).lower().startswith(pattern):
                     quantifier = quant_type
                     break
             if quantifier:
@@ -347,7 +353,7 @@ class PremiseIdentificationEngine:
         found_connectives = []
         for conn_type, patterns in connectives.items():
             for pattern in patterns:
-                if pattern in statement.lower():
+                if pattern in str(statement).lower():
                     found_connectives.append(conn_type)
                     break
         
@@ -389,7 +395,7 @@ class PremiseIdentificationEngine:
         
         # Heuristics for source determination
         if context and "source" in context:
-            source_hints = context["source"].lower()
+            source_hints = str(context["source"]).lower()
             if "axiom" in source_hints:
                 return PremiseSource.AXIOM
             elif "definition" in source_hints:
@@ -400,7 +406,7 @@ class PremiseIdentificationEngine:
                 return PremiseSource.AUTHORITY
         
         # Default heuristics
-        statement_lower = statement.lower()
+        statement_lower = str(statement).lower()
         if "by definition" in statement_lower:
             return PremiseSource.DEFINITION
         elif "assume" in statement_lower:
@@ -425,7 +431,7 @@ class PremiseIdentificationEngine:
         ]
         
         for pattern in patterns:
-            match = re.search(pattern, statement.lower())
+            match = re.search(pattern, str(statement).lower())
             if match:
                 subject = match.group(1).strip()
                 predicate = match.group(2).strip()
@@ -434,7 +440,7 @@ class PremiseIdentificationEngine:
         # Fallback
         words = statement.split()
         if len(words) >= 3:
-            subject = words[0] if not words[0].lower() in ["all", "some", "no"] else words[1]
+            subject = words[0] if not str(words[0]).lower() in ["all", "some", "no"] else words[1]
             predicate = " ".join(words[2:])
             return subject, predicate, quantifier
         
@@ -691,12 +697,12 @@ class ConclusionDerivationEngine:
         for premise in premises:
             if premise.premise_type == PremiseType.CONDITIONAL:
                 # Check if this conditional can derive the query
-                if premise.predicate.lower() in query.lower():
+                if str(premise.predicate).lower() in str(query).lower():
                     conditional_premise = premise
                     
                     # Look for antecedent
                     for other_premise in premises:
-                        if other_premise != premise and other_premise.content.lower() in premise.subject.lower():
+                        if other_premise != premise and str(other_premise.content).lower() in str(premise.subject).lower():
                             antecedent_premise = other_premise
                             break
                     break
@@ -738,7 +744,7 @@ class ConclusionDerivationEngine:
                     if premise1.predicate == premise2.subject:
                         # Check if conclusion matches query
                         expected_conclusion = f"all {premise1.subject} are {premise2.predicate}"
-                        if expected_conclusion.lower() in query.lower():
+                        if str(expected_conclusion).lower() in str(query).lower():
                             
                             conclusion = DeductiveConclusion(
                                 id=str(uuid4()),
@@ -785,7 +791,7 @@ class ConclusionDerivationEngine:
                         # Check if they form a Darii syllogism
                         if universal_premise.subject == particular_premise.predicate:
                             expected_conclusion = f"some {particular_premise.subject} are {universal_premise.predicate}"
-                            if expected_conclusion.lower() in query.lower():
+                            if str(expected_conclusion).lower() in str(query).lower():
                                 
                                 conclusion = DeductiveConclusion(
                                     id=str(uuid4()),
@@ -816,7 +822,7 @@ class ConclusionDerivationEngine:
         for premise in premises:
             if premise.premise_type == PremiseType.UNIVERSAL_AFFIRMATIVE:
                 # Check if query is an instantiation of this universal
-                if premise.subject.lower() in query.lower() and premise.predicate.lower() in query.lower():
+                if str(premise.subject).lower() in str(query).lower() and str(premise.predicate).lower() in str(query).lower():
                     
                     conclusion = DeductiveConclusion(
                         id=str(uuid4()),
@@ -992,7 +998,7 @@ class ValiditySoundnessEvaluator:
             return False
         
         # Check if antecedent matches the conditional's subject
-        return conditional_premise.subject.lower() in antecedent_premise.content.lower()
+        return str(conditional_premise.subject).lower() in str(antecedent_premise.content).lower()
     
     async def _verify_barbara_application(self, premises: List[Premise], conclusion: DeductiveConclusion) -> bool:
         """Verify Barbara syllogism was applied correctly"""
@@ -1086,11 +1092,11 @@ class ValiditySoundnessEvaluator:
         """Check if premises are relevant to conclusion"""
         
         # Check if premises used in conclusion are actually relevant
-        conclusion_terms = set(conclusion.content.lower().split())
+        conclusion_terms = set(str(conclusion.content).lower().split())
         
         for premise_id in conclusion.premises_used:
             premise = next(p for p in premises if p.id == premise_id)
-            premise_terms = set(premise.content.lower().split())
+            premise_terms = set(str(premise.content).lower().split())
             
             # Check for term overlap
             if not conclusion_terms.intersection(premise_terms):

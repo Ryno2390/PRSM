@@ -470,15 +470,21 @@ class ObservationCollectionEngine:
         
         # Check context hints
         if context:
-            if "experiment" in context.get("method", "").lower():
+            if "experiment" in str(context.get("method", "")).lower():
                 return ObservationType.EXPERIMENTAL
-            elif "survey" in context.get("method", "").lower():
+            elif "survey" in str(context.get("method", "")).lower():
                 return ObservationType.SURVEY
-            elif "historical" in context.get("source", "").lower():
+            elif "historical" in str(context.get("source", "")).lower():
                 return ObservationType.HISTORICAL
         
+        # Handle case where data_point is a list
+        if isinstance(data_point, list):
+            data_point = ' '.join(str(item) for item in data_point)
+        elif not isinstance(data_point, str):
+            data_point = str(data_point)
+        
         # Content-based classification
-        data_lower = data_point.lower()
+        data_lower = str(data_point).lower()
         
         if any(word in data_lower for word in ["measured", "recorded", "observed"]):
             return ObservationType.MEASUREMENT
@@ -498,6 +504,12 @@ class ObservationCollectionEngine:
     async def _extract_entities(self, data_point: str) -> List[str]:
         """Extract entities from observation"""
         
+        # Handle case where data_point is a list
+        if isinstance(data_point, list):
+            data_point = ' '.join(str(item) for item in data_point)
+        elif not isinstance(data_point, str):
+            data_point = str(data_point)
+        
         entities = []
         
         # Extract proper nouns
@@ -512,7 +524,7 @@ class ObservationCollectionEngine:
         ]
         
         for pattern in entity_patterns:
-            matches = re.findall(pattern, data_point.lower())
+            matches = re.findall(pattern, str(data_point).lower())
             entities.extend(matches)
         
         # Clean and deduplicate
@@ -522,6 +534,12 @@ class ObservationCollectionEngine:
     
     async def _extract_attributes(self, data_point: str) -> Dict[str, Any]:
         """Extract attributes and properties"""
+        
+        # Handle case where data_point is a list
+        if isinstance(data_point, list):
+            data_point = ' '.join(str(item) for item in data_point)
+        elif not isinstance(data_point, str):
+            data_point = str(data_point)
         
         attributes = {}
         
@@ -533,7 +551,7 @@ class ObservationCollectionEngine:
         ]
         
         for pattern in quality_patterns:
-            matches = re.findall(pattern, data_point.lower())
+            matches = re.findall(pattern, str(data_point).lower())
             for match in matches:
                 if isinstance(match, tuple):
                     intensity, quality = match
@@ -549,7 +567,7 @@ class ObservationCollectionEngine:
         ]
         
         for pattern in number_patterns:
-            matches = re.findall(pattern, data_point.lower())
+            matches = re.findall(pattern, str(data_point).lower())
             for value, unit in matches:
                 attributes[f"measurement_{unit}"] = float(value)
         
@@ -557,6 +575,12 @@ class ObservationCollectionEngine:
     
     async def _extract_relationships(self, data_point: str) -> List[Tuple[str, str, str]]:
         """Extract relationships between entities"""
+        
+        # Handle case where data_point is a list
+        if isinstance(data_point, list):
+            data_point = ' '.join(str(item) for item in data_point)
+        elif not isinstance(data_point, str):
+            data_point = str(data_point)
         
         relationships = []
         
@@ -570,7 +594,7 @@ class ObservationCollectionEngine:
         ]
         
         for pattern in rel_patterns:
-            matches = re.findall(pattern, data_point.lower())
+            matches = re.findall(pattern, str(data_point).lower())
             for entity1, relation, entity2 in matches:
                 relationships.append((entity1.strip(), relation.strip(), entity2.strip()))
         
@@ -578,6 +602,12 @@ class ObservationCollectionEngine:
     
     async def _extract_measurements(self, data_point: str) -> Dict[str, float]:
         """Extract numerical measurements"""
+        
+        # Handle case where data_point is a list
+        if isinstance(data_point, list):
+            data_point = ' '.join(str(item) for item in data_point)
+        elif not isinstance(data_point, str):
+            data_point = str(data_point)
         
         measurements = {}
         
@@ -589,7 +619,7 @@ class ObservationCollectionEngine:
         ]
         
         for pattern in measurement_patterns:
-            matches = re.findall(pattern, data_point.lower())
+            matches = re.findall(pattern, str(data_point).lower())
             for measure, value, unit in matches:
                 measurements[f"{measure}_{unit}"] = float(value)
         
@@ -641,7 +671,14 @@ class ObservationCollectionEngine:
         
         # Adjust based on content quality
         if observation.content:
-            content_lower = observation.content.lower()
+            # Handle case where content is a list
+            content = observation.content
+            if isinstance(content, list):
+                content = ' '.join(str(item) for item in content)
+            elif not isinstance(content, str):
+                content = str(content)
+            
+            content_lower = str(content).lower()
             
             # Certainty indicators increase reliability
             certainty_words = ["definitely", "clearly", "obviously", "certainly", "measured"]
@@ -761,8 +798,15 @@ class ObservationCollectionEngine:
         
         # Confirmation bias indicators
         if observation.content:
+            # Handle case where content is a list
+            content = observation.content
+            if isinstance(content, list):
+                content = ' '.join(str(item) for item in content)
+            elif not isinstance(content, str):
+                content = str(content)
+            
             bias_words = ["obviously", "clearly", "as expected", "predictably"]
-            bias_count = sum(1 for word in bias_words if word in observation.content.lower())
+            bias_count = sum(1 for word in bias_words if word in str(content).lower())
             bias_score += bias_count * 0.1
         
         return min(1.0, bias_score)

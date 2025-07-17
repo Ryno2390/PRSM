@@ -381,32 +381,35 @@ class WorkflowScheduler(TimestampMixin):
     through time-based workflow execution and resource management.
     """
     
-    def __init__(self):
-        super().__init__()
+    # Performance tracking fields
+    scheduling_statistics: Dict[str, Any] = Field(default_factory=lambda: defaultdict(int), description="Scheduling statistics")
+    cost_optimization_savings: float = Field(default=0.0, description="Cost optimization savings")
+    peak_load_periods: List[Tuple[datetime, float]] = Field(default_factory=list, description="Peak load periods")
+    
+    # Configuration fields
+    max_concurrent_workflows: int = Field(default=50, description="Maximum concurrent workflows")
+    scheduling_interval: timedelta = Field(default_factory=lambda: timedelta(minutes=1), description="Scheduling interval")
+    cost_optimization_threshold: float = Field(default=0.8, description="Cost optimization threshold")
+    default_workflow_timeout: timedelta = Field(default_factory=lambda: timedelta(hours=24), description="Default workflow timeout")
+    
+    model_config = {"arbitrary_types_allowed": True}
+    
+    def __init__(self, **data):
+        super().__init__(**data)
         
+        # Initialize non-serializable components after Pydantic initialization
         # Scheduling infrastructure
-        self.scheduled_workflows: Dict[UUID, ScheduledWorkflow] = {}
-        self.execution_queue: deque = deque()
-        self.event_queue: List[SchedulingEvent] = []  # Min-heap for time-based events
+        self._scheduled_workflows: Dict[UUID, ScheduledWorkflow] = {}
+        self._execution_queue: deque = deque()
+        self._event_queue: List[SchedulingEvent] = []  # Min-heap for time-based events
         
         # Resource management
-        self.resource_pools: Dict[ResourceType, ResourcePool] = {}
-        self.active_allocations: Dict[UUID, Dict[ResourceType, float]] = defaultdict(dict)
+        self._resource_pools: Dict[ResourceType, ResourcePool] = {}
+        self._active_allocations: Dict[UUID, Dict[ResourceType, float]] = defaultdict(dict)
         
         # Scheduling algorithms
-        self.parallelism_engine: Optional[SelectiveParallelismEngine] = None
-        self.critical_path_calculator = CriticalPathCalculator()
-        
-        # Performance tracking
-        self.scheduling_statistics: Dict[str, Any] = defaultdict(int)
-        self.cost_optimization_savings: float = 0.0
-        self.peak_load_periods: List[Tuple[datetime, float]] = []
-        
-        # Configuration
-        self.max_concurrent_workflows = 50
-        self.scheduling_interval = timedelta(minutes=1)
-        self.cost_optimization_threshold = 0.8  # 80% utilization triggers optimization
-        self.default_workflow_timeout = timedelta(hours=24)
+        self._parallelism_engine: Optional[SelectiveParallelismEngine] = None
+        self._critical_path_calculator = CriticalPathCalculator()
         
         self._initialize_resource_pools()
         self._start_scheduling_loop()
@@ -420,34 +423,38 @@ class WorkflowScheduler(TimestampMixin):
                 resource_type=ResourceType.CPU_CORES,
                 total_capacity=64.0,
                 available_capacity=64.0,
-                base_cost_per_unit=0.10  # $0.10 per core-hour
+                base_cost_per_unit=0.10,  # $0.10 per core-hour
+                current_cost_per_unit=0.10
             ),
             ResourceType.MEMORY_GB: ResourcePool(
                 resource_type=ResourceType.MEMORY_GB,
                 total_capacity=512.0,
                 available_capacity=512.0,
-                base_cost_per_unit=0.05  # $0.05 per GB-hour
+                base_cost_per_unit=0.05,  # $0.05 per GB-hour
+                current_cost_per_unit=0.05
             ),
             ResourceType.GPU_UNITS: ResourcePool(
                 resource_type=ResourceType.GPU_UNITS,
                 total_capacity=8.0,
                 available_capacity=8.0,
-                base_cost_per_unit=2.50  # $2.50 per GPU-hour
+                base_cost_per_unit=2.50,  # $2.50 per GPU-hour
+                current_cost_per_unit=2.50
             ),
             ResourceType.FTNS_CREDITS: ResourcePool(
                 resource_type=ResourceType.FTNS_CREDITS,
                 total_capacity=10000.0,
                 available_capacity=10000.0,
-                base_cost_per_unit=1.00  # $1.00 per FTNS credit
+                base_cost_per_unit=1.00,  # $1.00 per FTNS credit
+                current_cost_per_unit=1.00
             )
         }
         
         for resource_type, pool in default_pools.items():
-            self.resource_pools[resource_type] = pool
+            self._resource_pools[resource_type] = pool
     
     def set_parallelism_engine(self, engine: SelectiveParallelismEngine):
         """Set selective parallelism engine for integration"""
-        self.parallelism_engine = engine
+        self._parallelism_engine = engine
         logger.info("Parallelism engine integrated with scheduler")
     
     def _start_scheduling_loop(self):
@@ -497,7 +504,7 @@ class WorkflowScheduler(TimestampMixin):
                 workflow.status = WorkflowStatus.SCHEDULED
                 
                 # Store workflow
-                self.scheduled_workflows[workflow.workflow_id] = workflow
+                self._scheduled_workflows[workflow.workflow_id] = workflow
                 
                 # Add to event queue
                 schedule_event = SchedulingEvent(
@@ -545,7 +552,7 @@ class WorkflowScheduler(TimestampMixin):
     def _get_current_ftns_rates(self) -> Dict[ResourceType, float]:
         """Get current FTNS rates for all resource types"""
         rates = {}
-        for resource_type, pool in self.resource_pools.items():
+        for resource_type, pool in self._resource_pools.items():
             pool.update_pricing()
             rates[resource_type] = pool.current_cost_per_unit
         return rates
@@ -675,7 +682,7 @@ class WorkflowScheduler(TimestampMixin):
             
             for step in workflow.steps:
                 for req in step.resource_requirements:
-                    pool = self.resource_pools.get(req.resource_type)
+                    pool = self._resource_pools.get(req.resource_type)
                     if pool:
                         # Project availability at execution time
                         projected_availability = self._project_resource_availability(
@@ -771,7 +778,7 @@ class WorkflowScheduler(TimestampMixin):
         target_time: datetime
     ) -> float:
         """Project resource availability at a future time"""
-        pool = self.resource_pools.get(resource_type)
+        pool = self._resource_pools.get(resource_type)
         if not pool:
             return 0.0
         
@@ -832,7 +839,7 @@ class WorkflowScheduler(TimestampMixin):
             Execution result
         """
         try:
-            workflow = self.scheduled_workflows.get(workflow_id)
+            workflow = self._scheduled_workflows.get(workflow_id)
             if not workflow:
                 return {"success": False, "error": "Workflow not found"}
             
@@ -922,18 +929,18 @@ class WorkflowScheduler(TimestampMixin):
             # Attempt allocation
             allocated_resources = {}
             for resource_type, amount in allocations.items():
-                pool = self.resource_pools.get(resource_type)
+                pool = self._resource_pools.get(resource_type)
                 if pool and pool.allocate_resources(amount):
                     allocated_resources[resource_type] = amount
                 else:
                     # Rollback previous allocations
                     for rollback_type, rollback_amount in allocated_resources.items():
-                        rollback_pool = self.resource_pools[rollback_type]
+                        rollback_pool = self._resource_pools[rollback_type]
                         rollback_pool.deallocate_resources(rollback_amount)
                     return False
             
             # Store allocation record
-            self.active_allocations[workflow.workflow_id] = allocated_resources
+            self._active_allocations[workflow.workflow_id] = allocated_resources
             return True
             
         except Exception as e:
@@ -943,16 +950,16 @@ class WorkflowScheduler(TimestampMixin):
     async def _deallocate_workflow_resources(self, workflow: ScheduledWorkflow):
         """Deallocate resources after workflow completion"""
         try:
-            allocations = self.active_allocations.get(workflow.workflow_id, {})
+            allocations = self._active_allocations.get(workflow.workflow_id, {})
             
             for resource_type, amount in allocations.items():
-                pool = self.resource_pools.get(resource_type)
+                pool = self._resource_pools.get(resource_type)
                 if pool:
                     pool.deallocate_resources(amount)
             
             # Remove allocation record
-            if workflow.workflow_id in self.active_allocations:
-                del self.active_allocations[workflow.workflow_id]
+            if workflow.workflow_id in self._active_allocations:
+                del self._active_allocations[workflow.workflow_id]
                 
         except Exception as e:
             logger.error("Error deallocating workflow resources", error=str(e))
@@ -964,7 +971,7 @@ class WorkflowScheduler(TimestampMixin):
             total_cost = 0.0
             
             # Use parallelism engine if available
-            if self.parallelism_engine and len(workflow.steps) > 1:
+            if self._parallelism_engine and len(workflow.steps) > 1:
                 # Convert to TaskDefinitions for parallelism analysis
                 task_definitions = []
                 for step in workflow.steps:
@@ -978,7 +985,7 @@ class WorkflowScheduler(TimestampMixin):
                     task_definitions.append(task_def)
                 
                 # Get parallelism decision
-                parallelism_decision = await self.parallelism_engine.make_parallelism_decision(
+                parallelism_decision = await self._parallelism_engine.make_parallelism_decision(
                     task_definitions
                 )
                 
@@ -1096,7 +1103,7 @@ class WorkflowScheduler(TimestampMixin):
             
             # Build resource constraints from current pools
             resource_constraints = {}
-            for resource_type, pool in self.resource_pools.items():
+            for resource_type, pool in self._resource_pools.items():
                 resource_constraints[resource_type.value] = ResourceConstraint(
                     resource_type=resource_type.value,
                     max_concurrent_usage=pool.available_capacity,
@@ -1104,7 +1111,7 @@ class WorkflowScheduler(TimestampMixin):
                 )
             
             # Perform comprehensive critical path analysis
-            critical_path_result = await self.critical_path_calculator.calculate_critical_path(
+            critical_path_result = await self._critical_path_calculator.calculate_critical_path(
                 workflow.steps,
                 resource_constraints
             )
@@ -1357,9 +1364,9 @@ class WorkflowScheduler(TimestampMixin):
         """Get comprehensive scheduling statistics"""
         return {
             "scheduling_stats": dict(self.scheduling_statistics),
-            "active_workflows": len([w for w in self.scheduled_workflows.values() 
+            "active_workflows": len([w for w in self._scheduled_workflows.values() 
                                    if w.status in [WorkflowStatus.SCHEDULED, WorkflowStatus.RUNNING]]),
-            "total_scheduled_workflows": len(self.scheduled_workflows),
+            "total_scheduled_workflows": len(self._scheduled_workflows),
             "cost_optimization_savings": self.cost_optimization_savings,
             "resource_utilization": {
                 resource_type.value: {
@@ -1367,10 +1374,10 @@ class WorkflowScheduler(TimestampMixin):
                     "current_cost_per_unit": pool.current_cost_per_unit,
                     "demand_multiplier": pool.demand_multiplier
                 }
-                for resource_type, pool in self.resource_pools.items()
+                for resource_type, pool in self._resource_pools.items()
             },
             "upcoming_events": len(self.event_queue),
-            "active_allocations": len(self.active_allocations)
+            "active_allocations": len(self._active_allocations)
         }
 
 

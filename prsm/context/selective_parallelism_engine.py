@@ -197,18 +197,23 @@ class SelectiveParallelismEngine(TimestampMixin):
     addressing Cognition.AI's insights about naive multi-agent parallelism.
     """
     
-    def __init__(self):
-        super().__init__()
-        self.dependency_graph = nx.DiGraph()
-        self.resource_monitor = self._initialize_resource_monitor()
-        self.execution_history: List[ExecutionPlan] = []
-        self.performance_cache: Dict[str, Dict[str, Any]] = {}
-        
-        # Configuration
-        self.max_parallel_tasks = 10
-        self.resource_threshold = 0.8  # 80% utilization threshold
-        self.coordination_overhead_factor = 0.1
-        self.safety_buffer_factor = 0.2
+    # Configuration fields
+    max_parallel_tasks: int = Field(default=10, description="Maximum parallel tasks")
+    resource_threshold: float = Field(default=0.8, description="Resource utilization threshold")
+    coordination_overhead_factor: float = Field(default=0.1, description="Coordination overhead factor")
+    safety_buffer_factor: float = Field(default=0.2, description="Safety buffer factor")
+    
+    # State fields (use Any to avoid complex serialization)
+    execution_history: List[Dict[str, Any]] = Field(default_factory=list, description="Execution history")
+    performance_cache: Dict[str, Dict[str, Any]] = Field(default_factory=dict, description="Performance cache")
+    
+    model_config = {"arbitrary_types_allowed": True}
+    
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Initialize non-serializable components after Pydantic initialization
+        self._dependency_graph = nx.DiGraph()
+        self._resource_monitor = self._initialize_resource_monitor()
         
         logger.info("SelectiveParallelismEngine initialized")
     
@@ -251,11 +256,11 @@ class SelectiveParallelismEngine(TimestampMixin):
         """
         try:
             # Build dependency graph
-            self.dependency_graph.clear()
+            self._dependency_graph.clear()
             
             # Add nodes
             for task in tasks:
-                self.dependency_graph.add_node(
+                self._dependency_graph.add_node(
                     task.task_id,
                     task_data=task.dict(),
                     complexity=task.complexity,
@@ -266,7 +271,7 @@ class SelectiveParallelismEngine(TimestampMixin):
             for task in tasks:
                 for dep_id in task.input_dependencies:
                     if dep_id in [t.task_id for t in tasks]:
-                        self.dependency_graph.add_edge(
+                        self._dependency_graph.add_edge(
                             dep_id, 
                             task.task_id,
                             dependency_type=TaskDependencyType.DATA_DEPENDENCY
@@ -275,7 +280,7 @@ class SelectiveParallelismEngine(TimestampMixin):
                 # Add resource conflict edges
                 for conflict_id in task.resource_conflicts:
                     if conflict_id in [t.task_id for t in tasks]:
-                        self.dependency_graph.add_edge(
+                        self._dependency_graph.add_edge(
                             task.task_id,
                             conflict_id,
                             dependency_type=TaskDependencyType.RESOURCE_DEPENDENCY
@@ -284,10 +289,10 @@ class SelectiveParallelismEngine(TimestampMixin):
             # Analyze dependency patterns
             analysis = {
                 "total_tasks": len(tasks),
-                "dependency_count": self.dependency_graph.number_of_edges(),
-                "strongly_connected_components": list(nx.strongly_connected_components(self.dependency_graph)),
-                "topological_order": list(nx.topological_sort(self.dependency_graph)) if nx.is_directed_acyclic_graph(self.dependency_graph) else [],
-                "has_cycles": not nx.is_directed_acyclic_graph(self.dependency_graph),
+                "dependency_count": self._dependency_graph.number_of_edges(),
+                "strongly_connected_components": list(nx.strongly_connected_components(self._dependency_graph)),
+                "topological_order": list(nx.topological_sort(self._dependency_graph)) if nx.is_directed_acyclic_graph(self._dependency_graph) else [],
+                "has_cycles": not nx.is_directed_acyclic_graph(self._dependency_graph),
                 "max_dependency_depth": 0,
                 "parallelizable_groups": [],
                 "critical_path": [],
@@ -325,7 +330,7 @@ class SelectiveParallelismEngine(TimestampMixin):
             # Find tasks with no unmet dependencies
             ready_tasks = []
             for task_id in remaining_tasks:
-                predecessors = set(self.dependency_graph.predecessors(task_id))
+                predecessors = set(self._dependency_graph.predecessors(task_id))
                 if not (predecessors & remaining_tasks):  # No unmet dependencies
                     ready_tasks.append(task_id)
             
@@ -340,7 +345,7 @@ class SelectiveParallelismEngine(TimestampMixin):
     
     def _find_critical_path(self, tasks: List[TaskDefinition]) -> List[UUID]:
         """Find the critical path through task dependencies"""
-        if not nx.is_directed_acyclic_graph(self.dependency_graph):
+        if not nx.is_directed_acyclic_graph(self._dependency_graph):
             return []
         
         # Calculate longest path (critical path)
@@ -349,7 +354,7 @@ class SelectiveParallelismEngine(TimestampMixin):
         try:
             # Use networkx to find longest path
             longest_path = nx.dag_longest_path(
-                self.dependency_graph,
+                self._dependency_graph,
                 weight=lambda u, v, d: task_durations.get(v, 0)
             )
             return longest_path
@@ -358,12 +363,12 @@ class SelectiveParallelismEngine(TimestampMixin):
     
     def _calculate_max_dependency_depth(self) -> int:
         """Calculate maximum dependency depth"""
-        if not nx.is_directed_acyclic_graph(self.dependency_graph):
+        if not nx.is_directed_acyclic_graph(self._dependency_graph):
             return 0
         
         depths = {}
-        for node in nx.topological_sort(self.dependency_graph):
-            predecessors = list(self.dependency_graph.predecessors(node))
+        for node in nx.topological_sort(self._dependency_graph):
+            predecessors = list(self._dependency_graph.predecessors(node))
             if not predecessors:
                 depths[node] = 0
             else:
@@ -382,7 +387,7 @@ class SelectiveParallelismEngine(TimestampMixin):
                 bottlenecks.append(task.task_id)
             
             # Tasks with many dependents
-            dependents = len(list(self.dependency_graph.successors(task.task_id)))
+            dependents = len(list(self._dependency_graph.successors(task.task_id)))
             if dependents > 3:
                 bottlenecks.append(task.task_id)
             
@@ -427,8 +432,8 @@ class SelectiveParallelismEngine(TimestampMixin):
                 
                 # Check feasibility
                 for resource_type, requirement in peak_requirements.items():
-                    available = self.resource_monitor[resource_type].available_capacity
-                    utilization = requirement / self.resource_monitor[resource_type].max_capacity
+                    available = self._resource_monitor[resource_type].available_capacity
+                    utilization = requirement / self._resource_monitor[resource_type].max_capacity
                     
                     analysis["resource_utilization"][resource_type.value] = {
                         "required": requirement,
@@ -458,8 +463,8 @@ class SelectiveParallelismEngine(TimestampMixin):
                 
                 # Check feasibility (much easier for sequential)
                 for resource_type, requirement in max_requirements.items():
-                    available = self.resource_monitor[resource_type].available_capacity
-                    utilization = requirement / self.resource_monitor[resource_type].max_capacity
+                    available = self._resource_monitor[resource_type].available_capacity
+                    utilization = requirement / self._resource_monitor[resource_type].max_capacity
                     
                     analysis["resource_utilization"][resource_type.value] = {
                         "required": requirement,
@@ -702,7 +707,7 @@ class SelectiveParallelismEngine(TimestampMixin):
             plan = ExecutionPlan(
                 task_definitions=tasks,
                 parallelism_decision=parallelism_decision,
-                resource_allocation=dict(self.resource_monitor)
+                resource_allocation=dict(self._resource_monitor)
             )
             
             # Generate execution schedule
@@ -912,7 +917,7 @@ class SelectiveParallelismEngine(TimestampMixin):
                     "current_usage": resource.current_usage,
                     "utilization_percentage": resource.utilization_percentage
                 }
-                for resource_type, resource in self.resource_monitor.items()
+                for resource_type, resource in self._resource_monitor.items()
             }
         }
 

@@ -237,7 +237,7 @@ class DeductiveReasoningEngine:
     async def _parse_logical_proposition(self, statement: str, prop_id: str) -> LogicalProposition:
         """Parse a single statement into a logical proposition"""
         
-        statement = statement.strip().lower()
+        statement = str(statement).strip().lower()
         
         # Identify quantifier
         quantifier = "all"  # Default
@@ -378,8 +378,8 @@ class DeductiveReasoningEngine:
         """Check if two propositions are logically equivalent"""
         
         # Normalize propositions
-        prop1_norm = prop1.lower().strip()
-        prop2_norm = prop2.lower().strip()
+        prop1_norm = str(prop1).lower().strip()
+        prop2_norm = str(prop2).lower().strip()
         
         # Direct equality
         if prop1_norm == prop2_norm:
@@ -438,7 +438,7 @@ class DeductiveReasoningEngine:
         ]
         
         for pattern in conditional_patterns:
-            match = re.search(pattern, statement.lower())
+            match = re.search(pattern, str(statement).lower())
             if match:
                 antecedent = match.group(1).strip()
                 consequent_part = match.group(2).strip()
@@ -460,7 +460,7 @@ class DeductiveReasoningEngine:
         ]
         
         for pattern in conditional_patterns:
-            match = re.search(pattern, conditional.lower())
+            match = re.search(pattern, str(conditional).lower())
             if match:
                 antecedent = match.group(1).strip()
                 
@@ -672,8 +672,8 @@ class DeductiveReasoningEngine:
             ("not all", "some are not")
         ]
         
-        stmt1_lower = statement1.lower()
-        stmt2_lower = statement2.lower()
+        stmt1_lower = str(statement1).lower()
+        stmt2_lower = str(statement2).lower()
         
         for equiv1, equiv2 in equivalences:
             if equiv1 in stmt1_lower and equiv2 in stmt2_lower:

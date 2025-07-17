@@ -362,7 +362,7 @@ class NetworkValidationEngine:
     async def _classify_query_type(self, query: str) -> str:
         """Classify the type of validation query"""
         
-        query_lower = query.lower()
+        query_lower = str(query).lower()
         
         # Pattern matching for query types
         if any(pattern in query_lower for pattern in ["breakthrough", "discovery", "innovation"]):
