@@ -488,8 +488,8 @@ class WorldModelEngine:
         # Full implementation would use sophisticated NLP and domain knowledge
         
         # Check for direct contradictions in descriptions
-        desc1 = soc1.properties.get("description", "").lower()
-        desc2 = soc2.properties.get("description", "").lower()
+        desc1 = str(soc1.properties.get("description", "")).lower()
+        desc2 = str(soc2.properties.get("description", "")).lower()
         
         # Basic keyword analysis
         contradiction_pairs = [
@@ -525,8 +525,8 @@ class WorldModelEngine:
         # Simplified rule checking
         # Full implementation would use domain-specific validators
         
-        soc_desc = soc.properties.get("description", "").lower()
-        rule_desc = rule_description.lower()
+        soc_desc = str(soc.properties.get("description", "")).lower()
+        rule_desc = str(rule_description).lower()
         
         # Check for rule-related keywords in SOC
         rule_keywords = rule_desc.split()

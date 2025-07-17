@@ -389,7 +389,7 @@ class ProbabilisticReasoningEngine:
     async def _classify_evidence_type(self, evidence_text: str) -> EvidenceType:
         """Classify the type of evidence"""
         
-        text_lower = evidence_text.lower()
+        text_lower = str(evidence_text).lower()
         
         # Statistical evidence
         if any(indicator in text_lower for indicator in ["statistics", "data", "study", "research", "percentage", "rate"]):
@@ -465,7 +465,7 @@ class ProbabilisticReasoningEngine:
         """Estimate base rate P(evidence)"""
         
         # Simple base rate estimation
-        text_lower = evidence_text.lower()
+        text_lower = str(evidence_text).lower()
         
         # Common evidence gets higher base rate
         if any(word in text_lower for word in ["common", "frequent", "often", "usual", "typical"]):
@@ -499,7 +499,7 @@ class ProbabilisticReasoningEngine:
         base_reliability = type_reliability.get(evidence_type, 0.5)
         
         # Adjust for reliability indicators
-        text_lower = evidence_text.lower()
+        text_lower = str(evidence_text).lower()
         
         # Positive reliability indicators
         if any(indicator in text_lower for indicator in ["verified", "confirmed", "established", "proven"]):
@@ -569,7 +569,7 @@ class ProbabilisticReasoningEngine:
             domain_priors = self.domain_priors[domain]
             
             # Simple keyword matching for domain-specific priors
-            hyp_lower = hypothesis.lower()
+            hyp_lower = str(hypothesis).lower()
             
             for prior_type, prior_value in domain_priors.items():
                 if any(keyword in hyp_lower for keyword in prior_type.split("_")):

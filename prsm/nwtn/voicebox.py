@@ -175,6 +175,9 @@ class NWTNVoicebox:
         # User API configurations
         self.user_api_configs: Dict[str, APIConfiguration] = {}
         
+        # System default API configuration
+        self.default_api_config: Optional[APIConfiguration] = None
+        
         # Active query sessions
         self.active_queries: Dict[str, QueryAnalysis] = {}
         self.clarification_exchanges: Dict[str, List[ClarificationExchange]] = {}
@@ -196,11 +199,14 @@ class NWTNVoicebox:
         try:
             # Initialize multi-modal reasoning engine
             self.multi_modal_engine = MultiModalReasoningEngine()
-            await self.multi_modal_engine.initialize()
+            # MultiModalReasoningEngine doesn't have an async initialize method
             
             # Initialize FTNS service
             self.ftns_service = FTNSService()
-            await self.ftns_service.initialize()
+            # FTNSService doesn't have an async initialize method
+            
+            # Initialize default Claude API configuration
+            self._initialize_default_api_config()
             
             logger.info("✅ NWTN Voicebox fully initialized")
             
@@ -301,11 +307,11 @@ class NWTNVoicebox:
                 query_id=query_id,
                 natural_language_response=natural_response,
                 structured_insights=reasoning_result,
-                reasoning_trace=reasoning_result.reasoning_trace if reasoning_result else [],
+                reasoning_trace=reasoning_result.reasoning_results if reasoning_result else [],
                 processing_time_seconds=processing_time,
                 total_cost_ftns=actual_cost,
-                confidence_score=reasoning_result.confidence_score if reasoning_result else 0.0,
-                used_reasoning_modes=reasoning_result.used_reasoning_modes if reasoning_result else []
+                confidence_score=reasoning_result.overall_confidence if reasoning_result else 0.0,
+                used_reasoning_modes=reasoning_result.reasoning_path if reasoning_result else []
             )
             
             # Store interaction in database
@@ -381,6 +387,27 @@ class NWTNVoicebox:
             return []
     
     # === Private Methods ===
+    
+    def _initialize_default_api_config(self):
+        """Initialize default Claude API configuration from environment variables"""
+        import os
+        
+        # Check for Claude API key in environment variables
+        claude_api_key = os.getenv('ANTHROPIC_API_KEY') or os.getenv('CLAUDE_API_KEY')
+        
+        if claude_api_key:
+            self.default_api_config = APIConfiguration(
+                provider=LLMProvider.CLAUDE,
+                api_key=claude_api_key,
+                model_name="claude-3-5-sonnet-20241022",
+                max_tokens=4000,
+                temperature=0.7,
+                timeout=30
+            )
+            logger.info("✅ Default Claude API configuration initialized")
+        else:
+            logger.warning("⚠️  No Claude API key found in environment variables (ANTHROPIC_API_KEY or CLAUDE_API_KEY)")
+            logger.info("💡 Voicebox will use fallback structured responses")
     
     async def _analyze_query(
         self,
@@ -615,20 +642,36 @@ class NWTNVoicebox:
     ) -> str:
         """Translate structured insights to natural language response"""
         try:
-            # Get user's API configuration
-            api_config = self.user_api_configs[user_id]
+            # Determine which API configuration to use
+            api_config = None
             
-            # Prepare translation prompt
-            translation_prompt = self._build_translation_prompt(
-                original_query, reasoning_result, analysis
-            )
+            # Priority 1: User's configured API
+            if user_id and user_id in self.user_api_configs:
+                api_config = self.user_api_configs[user_id]
+                logger.debug(f"Using user's {api_config.provider.value} API configuration")
             
-            # Call user's configured LLM API
-            natural_response = await self._call_user_llm(
-                api_config, translation_prompt
-            )
+            # Priority 2: System default Claude API
+            elif self.default_api_config:
+                api_config = self.default_api_config
+                logger.debug(f"Using default {api_config.provider.value} API configuration")
             
-            return natural_response
+            # If we have an API configuration, use it
+            if api_config:
+                # Prepare translation prompt
+                translation_prompt = self._build_translation_prompt(
+                    original_query, reasoning_result, analysis
+                )
+                
+                # Call the LLM API
+                natural_response = await self._call_user_llm(
+                    api_config, translation_prompt
+                )
+                
+                return natural_response
+            
+            else:
+                logger.info("No API configuration available, using fallback response")
+                return self._create_fallback_response(reasoning_result)
             
         except Exception as e:
             logger.error(f"Failed to translate to natural language: {e}")
@@ -650,14 +693,14 @@ ORIGINAL USER QUERY:
 {original_query}
 
 NWTN'S STRUCTURED ANALYSIS:
-- Confidence Score: {reasoning_result.confidence_score}
-- Reasoning Modes Used: {', '.join(reasoning_result.used_reasoning_modes)}
-- Primary Insights: {reasoning_result.primary_insights}
-- Supporting Evidence: {reasoning_result.supporting_evidence}
-- Uncertainty Factors: {reasoning_result.uncertainty_factors}
+- Confidence Score: {reasoning_result.overall_confidence}
+- Reasoning Modes Used: {', '.join(reasoning_result.reasoning_path)}
+- Primary Insights: {reasoning_result.integrated_conclusion}
+- Supporting Evidence: {reasoning_result.multi_modal_evidence}
+- Uncertainty Factors: {reasoning_result.identified_uncertainties}
 
 REASONING TRACE:
-{json.dumps(reasoning_result.reasoning_trace, indent=2)}
+{json.dumps(reasoning_result.reasoning_results, indent=2)}
 
 INSTRUCTIONS:
 1. Provide a clear, direct answer to the user's question
@@ -690,9 +733,52 @@ Generate a natural language response that makes NWTN's sophisticated reasoning a
             raise
     
     async def _call_claude_api(self, api_config: APIConfiguration, prompt: str) -> str:
-        """Call Claude API (placeholder - would implement actual API call)"""
-        # In production, would use actual Claude API
-        return f"[CLAUDE API RESPONSE] Based on NWTN's multi-modal reasoning analysis, here's the response to your query: {prompt[:200]}..."
+        """Call Claude API for natural language translation"""
+        try:
+            import aiohttp
+            import json
+            
+            # Claude API configuration
+            url = api_config.base_url or "https://api.anthropic.com/v1/messages"
+            model = api_config.model_name or "claude-3-sonnet-20240229"
+            
+            headers = {
+                "Content-Type": "application/json",
+                "x-api-key": api_config.api_key,
+                "anthropic-version": "2023-06-01"
+            }
+            
+            # Prepare the request payload
+            payload = {
+                "model": model,
+                "max_tokens": api_config.max_tokens,
+                "temperature": api_config.temperature,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            }
+            
+            # Make the API call
+            timeout = aiohttp.ClientTimeout(total=api_config.timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, headers=headers, json=payload) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        return result["content"][0]["text"]
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Claude API error {response.status}: {error_text}")
+                        raise Exception(f"Claude API error: {response.status}")
+                        
+        except ImportError:
+            logger.warning("aiohttp not available for Claude API calls")
+            raise Exception("aiohttp required for Claude API integration")
+        except Exception as e:
+            logger.error(f"Claude API call failed: {e}")
+            raise
     
     async def _call_openai_api(self, api_config: APIConfiguration, prompt: str) -> str:
         """Call OpenAI API (placeholder - would implement actual API call)"""
@@ -706,19 +792,19 @@ Generate a natural language response that makes NWTN's sophisticated reasoning a
     
     def _create_fallback_response(self, reasoning_result: IntegratedReasoningResult) -> str:
         """Create fallback response when LLM translation fails"""
-        return f"""Based on NWTN's multi-modal reasoning analysis (confidence: {reasoning_result.confidence_score:.2f}):
+        return f"""Based on NWTN's multi-modal reasoning analysis (confidence: {reasoning_result.overall_confidence:.2f}):
 
 **Key Insights:**
-{reasoning_result.primary_insights}
+{reasoning_result.integrated_conclusion}
 
 **Supporting Evidence:**
-{reasoning_result.supporting_evidence}
+{', '.join(reasoning_result.multi_modal_evidence)}
 
 **Reasoning Approach:**
-Used {', '.join(reasoning_result.used_reasoning_modes)} reasoning modes.
+Used {', '.join(reasoning_result.reasoning_path)} reasoning modes.
 
 **Important Considerations:**
-{reasoning_result.uncertainty_factors}
+{', '.join(reasoning_result.identified_uncertainties)}
 
 This analysis was generated using NWTN's sophisticated multi-modal reasoning system that employs all 7 fundamental forms of human reasoning with network validation for unprecedented confidence."""
     
@@ -733,12 +819,12 @@ This analysis was generated using NWTN's sophisticated multi-modal reasoning sys
         
         # Adjust based on actual reasoning modes used
         if reasoning_result:
-            actual_modes = len(reasoning_result.used_reasoning_modes)
+            actual_modes = len(reasoning_result.reasoning_path)
             estimated_modes = len(analysis.estimated_reasoning_modes)
             mode_adjustment = actual_modes / max(estimated_modes, 1)
             
             # Adjust based on confidence (higher confidence = more processing)
-            confidence_adjustment = reasoning_result.confidence_score
+            confidence_adjustment = reasoning_result.overall_confidence
             
             return base_cost * mode_adjustment * confidence_adjustment
         
@@ -799,7 +885,7 @@ This analysis was generated using NWTN's sophisticated multi-modal reasoning sys
     def _get_default_model(self, provider: LLMProvider) -> str:
         """Get default model for provider"""
         defaults = {
-            LLMProvider.CLAUDE: "claude-3-sonnet-20240229",
+            LLMProvider.CLAUDE: "claude-3-5-sonnet-20241022",
             LLMProvider.OPENAI: "gpt-4",
             LLMProvider.GEMINI: "gemini-pro",
             LLMProvider.AZURE_OPENAI: "gpt-4",

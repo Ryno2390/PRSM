@@ -369,7 +369,21 @@ class UncertaintyIdentificationEngine:
     async def _detect_uncertainty_type(self, observations: List[str], query: str) -> UncertaintyType:
         """Detect the type of uncertainty"""
         
-        text = " ".join(observations + [query]).lower()
+        # Handle case where observations contain lists
+        processed_observations = []
+        for obs in observations:
+            if isinstance(obs, list):
+                processed_observations.append(' '.join(str(item) for item in obs))
+            else:
+                processed_observations.append(str(obs))
+        
+        # Handle case where query is a list
+        if isinstance(query, list):
+            query = ' '.join(str(item) for item in query)
+        elif not isinstance(query, str):
+            query = str(query)
+        
+        text = " ".join(processed_observations + [str(query)]).lower()
         
         # Pattern matching for uncertainty types
         if any(pattern in text for pattern in ["random", "variable", "stochastic", "noise"]):
@@ -398,7 +412,21 @@ class UncertaintyIdentificationEngine:
     async def _determine_uncertainty_scope(self, observations: List[str], query: str, context: Dict[str, Any]) -> UncertaintyScope:
         """Determine the scope of uncertainty"""
         
-        text = " ".join(observations + [query]).lower()
+        # Handle case where observations contain lists
+        processed_observations = []
+        for obs in observations:
+            if isinstance(obs, list):
+                processed_observations.append(' '.join(str(item) for item in obs))
+            else:
+                processed_observations.append(str(obs))
+        
+        # Handle case where query is a list
+        if isinstance(query, list):
+            query = ' '.join(str(item) for item in query)
+        elif not isinstance(query, str):
+            query = str(query)
+        
+        text = " ".join(processed_observations + [str(query)]).lower()
         
         # Pattern matching for uncertainty scope
         if any(pattern in text for pattern in ["outcome", "result", "consequence"]):
@@ -431,22 +459,22 @@ class UncertaintyIdentificationEngine:
         
         # Extract explicit outcomes from observations
         for obs in observations:
-            if "outcome" in obs.lower() or "result" in obs.lower():
+            if "outcome" in str(obs).lower() or "result" in str(obs).lower():
                 outcomes.append(obs)
         
         # Generate binary outcomes for yes/no questions
-        if any(word in query.lower() for word in ["will", "is", "does", "can", "should"]):
+        if any(word in str(query).lower() for word in ["will", "is", "does", "can", "should"]):
             outcomes.extend(["Yes", "No"])
         
         # Generate categorical outcomes
-        if "which" in query.lower() or "what" in query.lower():
+        if "which" in str(query).lower() or "what" in str(query).lower():
             # Extract potential categories from observations
             for obs in observations:
-                if "option" in obs.lower() or "alternative" in obs.lower():
+                if "option" in str(obs).lower() or "alternative" in str(obs).lower():
                     outcomes.append(obs)
         
         # Generate continuous outcomes
-        if any(word in query.lower() for word in ["how much", "how many", "what percentage"]):
+        if any(word in str(query).lower() for word in ["how much", "how many", "what percentage"]):
             outcomes.extend(["Low", "Medium", "High"])
         
         # Domain-specific outcomes
@@ -502,7 +530,7 @@ class UncertaintyIdentificationEngine:
         constraints = []
         
         for obs in observations:
-            obs_lower = obs.lower()
+            obs_lower = str(obs).lower()
             
             # Time constraints
             if any(word in obs_lower for word in ["deadline", "by", "within", "before", "after"]):
@@ -528,7 +556,7 @@ class UncertaintyIdentificationEngine:
         assumptions = []
         
         for obs in observations:
-            obs_lower = obs.lower()
+            obs_lower = str(obs).lower()
             
             # Explicit assumptions
             if any(word in obs_lower for word in ["assume", "assuming", "given", "suppose"]):
@@ -559,7 +587,7 @@ class UncertaintyIdentificationEngine:
         
         # Extract context from observations
         for obs in observations:
-            obs_lower = obs.lower()
+            obs_lower = str(obs).lower()
             
             # Urgency factors
             if any(word in obs_lower for word in ["urgent", "immediate", "critical", "emergency"]):
@@ -589,7 +617,7 @@ class UncertaintyIdentificationEngine:
         uncertainty_indicators = 0
         total_indicators = 0
         
-        text = " ".join(observations + [query]).lower()
+        text = " ".join(observations + [str(query)]).lower()
         
         # Count uncertainty indicators
         uncertainty_words = ["uncertain", "unknown", "unclear", "ambiguous", "vague", "possibly", "maybe", "might", "could", "probably"]
@@ -622,7 +650,7 @@ class UncertaintyIdentificationEngine:
         completeness_score = 0.5  # Base completeness
         
         # Check for explicit completeness indicators
-        text = " ".join(observations + [query]).lower()
+        text = " ".join(observations + [str(query)]).lower()
         
         # Complete information indicators
         if any(word in text for word in ["complete", "comprehensive", "thorough", "detailed"]):
@@ -755,15 +783,15 @@ class ProbabilityAssessmentEngine:
         """Select appropriate probability assessment method"""
         
         # Check for statistical data
-        if any("data" in obs.lower() or "statistics" in obs.lower() for obs in observations):
+        if any("data" in str(obs).lower() or "statistics" in str(obs).lower() for obs in observations):
             return ProbabilityAssessmentMethod.FREQUENCY_BASED
         
         # Check for expert information
-        if any("expert" in obs.lower() or "professional" in obs.lower() for obs in observations):
+        if any("expert" in str(obs).lower() or "professional" in str(obs).lower() for obs in observations):
             return ProbabilityAssessmentMethod.SUBJECTIVE_EXPERT
         
         # Check for Bayesian updating context
-        if any("prior" in obs.lower() or "update" in obs.lower() for obs in observations):
+        if any("prior" in str(obs).lower() or "update" in str(obs).lower() for obs in observations):
             return ProbabilityAssessmentMethod.BAYESIAN_UPDATING
         
         # Check for maximum entropy conditions
@@ -771,7 +799,7 @@ class ProbabilityAssessmentEngine:
             return ProbabilityAssessmentMethod.MAXIMUM_ENTROPY
         
         # Check for likelihood ratio context
-        if any("likelihood" in obs.lower() or "ratio" in obs.lower() for obs in observations):
+        if any("likelihood" in str(obs).lower() or "ratio" in str(obs).lower() for obs in observations):
             return ProbabilityAssessmentMethod.LIKELIHOOD_RATIO
         
         # Default to Bayesian updating
@@ -786,7 +814,7 @@ class ProbabilityAssessmentEngine:
             domain_priors = self.prior_databases[domain]
             
             # Match outcome to domain priors
-            outcome_lower = outcome.lower()
+            outcome_lower = str(outcome).lower()
             for prior_key, prior_value in domain_priors.items():
                 if any(keyword in outcome_lower for keyword in prior_key.split("_")):
                     return prior_value
@@ -812,8 +840,8 @@ class ProbabilityAssessmentEngine:
         total_count = 0
         
         for obs in observations:
-            obs_lower = obs.lower()
-            outcome_lower = outcome.lower()
+            obs_lower = str(obs).lower()
+            outcome_lower = str(outcome).lower()
             
             # Direct mention
             if outcome_lower in obs_lower:
@@ -860,7 +888,7 @@ class ProbabilityAssessmentEngine:
         """Estimate probability distribution for outcome"""
         
         # Check for distribution indicators in observations
-        text = " ".join(observations).lower()
+        text = " ".join(str(obs) for obs in observations).lower()
         
         # Beta distribution for bounded [0,1] variables
         if any(word in text for word in ["percentage", "proportion", "rate", "probability"]):
@@ -930,7 +958,7 @@ class ProbabilityAssessmentEngine:
         calibration_score = 0.8  # Base calibration
         
         # Check for calibration indicators
-        text = " ".join(observations).lower()
+        text = " ".join(str(obs) for obs in observations).lower()
         
         # Good calibration indicators
         if any(word in text for word in ["data", "statistics", "research", "study"]):
@@ -975,8 +1003,8 @@ class ProbabilityAssessmentEngine:
         total_weight = 0.0
         
         for obs in observations:
-            obs_lower = obs.lower()
-            outcome_lower = outcome.lower()
+            obs_lower = str(obs).lower()
+            outcome_lower = str(outcome).lower()
             
             weight = 1.0
             
@@ -1004,7 +1032,7 @@ class ProbabilityAssessmentEngine:
         confidence = 0.5  # Base confidence
         
         # Adjust based on evidence quality
-        text = " ".join(observations).lower()
+        text = " ".join(str(obs) for obs in observations).lower()
         
         # High-quality evidence
         if any(word in text for word in ["data", "research", "study", "experiment"]):
@@ -1057,7 +1085,7 @@ class ProbabilityAssessmentEngine:
         sources = []
         
         for obs in observations:
-            obs_lower = obs.lower()
+            obs_lower = str(obs).lower()
             
             # Expert sources
             if any(word in obs_lower for word in ["expert", "professional", "specialist"]):
@@ -1118,7 +1146,7 @@ class ProbabilityAssessmentEngine:
             limitations.append("Limitation: Limited evidence available")
         
         # Uncertainty limitations
-        text = " ".join(observations).lower()
+        text = " ".join(str(obs) for obs in observations).lower()
         if any(word in text for word in ["uncertain", "unclear", "ambiguous"]):
             limitations.append("Limitation: High uncertainty in evidence")
         
@@ -1626,7 +1654,7 @@ class EvidenceQualityEvaluationEngine:
         
         reliability = 0.5  # Base reliability
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # Source reliability indicators
         if any(word in obs_lower for word in ["research", "study", "experiment", "data"]):
@@ -1661,26 +1689,26 @@ class EvidenceQualityEvaluationEngine:
         
         relevance = 0.5  # Base relevance
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # Check relevance to possible outcomes
         for outcome in uncertainty_context.possible_outcomes:
-            if outcome.lower() in obs_lower:
+            if str(outcome).lower() in obs_lower:
                 relevance += 0.2
         
         # Check relevance to probability assessments
         for assessment in probability_assessments:
-            if assessment.target_variable.lower() in obs_lower:
+            if str(assessment.target_variable).lower() in obs_lower:
                 relevance += 0.2
         
         # Check relevance to uncertainty context
-        if uncertainty_context.domain.lower() in obs_lower:
+        if str(uncertainty_context.domain).lower() in obs_lower:
             relevance += 0.1
         
         # Contextual relevance
         context_keywords = list(uncertainty_context.context_factors.keys())
         for keyword in context_keywords:
-            if keyword.lower() in obs_lower:
+            if str(keyword).lower() in obs_lower:
                 relevance += 0.1
         
         return max(0.0, min(1.0, relevance))
@@ -1690,7 +1718,7 @@ class EvidenceQualityEvaluationEngine:
         
         sufficiency = 0.5  # Base sufficiency
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # Quantitative evidence indicators
         if any(word in obs_lower for word in ["data", "statistics", "numbers", "measurements"]):
@@ -1719,7 +1747,7 @@ class EvidenceQualityEvaluationEngine:
         
         consistency = 0.7  # Base consistency
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # Check for consistency indicators
         if any(word in obs_lower for word in ["consistent", "agrees", "supports", "confirms"]):
@@ -1736,7 +1764,7 @@ class EvidenceQualityEvaluationEngine:
         for other_obs in observations:
             if other_obs != observation:
                 # Simple similarity check
-                common_words = set(obs_lower.split()) & set(other_obs.lower().split())
+                common_words = set(obs_lower.split()) & set(str(other_obs).lower().split())
                 if len(common_words) > 2:
                     similar_observations += 1
         
@@ -1751,7 +1779,7 @@ class EvidenceQualityEvaluationEngine:
         
         independence = 0.7  # Base independence
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # Check for independence indicators
         if any(word in obs_lower for word in ["independent", "separate", "unrelated", "different"]):
@@ -1764,7 +1792,7 @@ class EvidenceQualityEvaluationEngine:
         # Check for source diversity
         sources = set()
         for obs in observations:
-            obs_lower_other = obs.lower()
+            obs_lower_other = str(obs).lower()
             if "study" in obs_lower_other:
                 sources.add("study")
             if "expert" in obs_lower_other:
@@ -1782,7 +1810,7 @@ class EvidenceQualityEvaluationEngine:
         
         recency = 0.5  # Base recency
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # Recent indicators
         if any(word in obs_lower for word in ["recent", "new", "latest", "current", "today"]):
@@ -1807,7 +1835,7 @@ class EvidenceQualityEvaluationEngine:
         
         precision = 0.5  # Base precision
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # Precision indicators
         if any(word in obs_lower for word in ["precise", "exact", "specific", "accurate"]):
@@ -1836,7 +1864,7 @@ class EvidenceQualityEvaluationEngine:
         
         bias_score = 0.7  # Base low bias score (higher is better)
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # Bias indicators (reduce score)
         if any(word in obs_lower for word in ["biased", "prejudiced", "partial", "subjective"]):
@@ -1861,7 +1889,7 @@ class EvidenceQualityEvaluationEngine:
         
         completeness = 0.5  # Base completeness
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # Completeness indicators
         if any(word in obs_lower for word in ["complete", "comprehensive", "thorough", "full"]):
@@ -1882,7 +1910,7 @@ class EvidenceQualityEvaluationEngine:
         
         validity = 0.6  # Base validity
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # Validity indicators
         if any(word in obs_lower for word in ["valid", "sound", "well-founded", "legitimate"]):
@@ -1907,7 +1935,7 @@ class EvidenceQualityEvaluationEngine:
         
         bias_assessment = {}
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # Confirmation bias
         if any(word in obs_lower for word in ["confirms", "supports", "proves"]):
@@ -1946,7 +1974,7 @@ class EvidenceQualityEvaluationEngine:
         
         uncertainty_sources = []
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # Measurement uncertainty
         if any(word in obs_lower for word in ["measurement", "error", "precision"]):
@@ -1975,7 +2003,7 @@ class EvidenceQualityEvaluationEngine:
         
         validation_tests = []
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # Source validation
         validation_tests.append("Verify source credibility and expertise")
@@ -2001,7 +2029,7 @@ class EvidenceQualityEvaluationEngine:
         
         quality_indicators = {}
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # Source quality
         if any(word in obs_lower for word in ["research", "study", "expert"]):
@@ -2210,23 +2238,23 @@ class InferenceExecutionEngine:
             return InferenceExecutionType.DECISION_MAKING
         
         # Check for prediction context
-        if any(word in uncertainty_context.description.lower() for word in ["predict", "forecast", "future"]):
+        if any(word in str(uncertainty_context.description).lower() for word in ["predict", "forecast", "future"]):
             return InferenceExecutionType.PREDICTION
         
         # Check for classification context
-        if any(word in uncertainty_context.description.lower() for word in ["classify", "categorize", "identify"]):
+        if any(word in str(uncertainty_context.description).lower() for word in ["classify", "categorize", "identify"]):
             return InferenceExecutionType.CLASSIFICATION
         
         # Check for estimation context
-        if any(word in uncertainty_context.description.lower() for word in ["estimate", "measure", "calculate"]):
+        if any(word in str(uncertainty_context.description).lower() for word in ["estimate", "measure", "calculate"]):
             return InferenceExecutionType.ESTIMATION
         
         # Check for hypothesis testing context
-        if any(word in uncertainty_context.description.lower() for word in ["test", "hypothesis", "theory"]):
+        if any(word in str(uncertainty_context.description).lower() for word in ["test", "hypothesis", "theory"]):
             return InferenceExecutionType.HYPOTHESIS_TESTING
         
         # Check for risk assessment context
-        if any(word in uncertainty_context.description.lower() for word in ["risk", "danger", "threat"]):
+        if any(word in str(uncertainty_context.description).lower() for word in ["risk", "danger", "threat"]):
             return InferenceExecutionType.RISK_ASSESSMENT
         
         # Default to decision making

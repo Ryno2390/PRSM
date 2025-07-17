@@ -526,24 +526,30 @@ class ActualScenarioIdentificationEngine:
     async def _determine_element_type(self, observation: str, context: Dict[str, Any]) -> str:
         """Determine the type of scenario element"""
         
+        # Handle case where observation is a list
+        if isinstance(observation, list):
+            observation = ' '.join(str(item) for item in observation)
+        elif not isinstance(observation, str):
+            observation = str(observation)
+        
         # Check for event indicators
-        if any(word in observation.lower() for word in ["happened", "occurred", "took place", "event", "incident"]):
+        if any(word in str(observation).lower() for word in ["happened", "occurred", "took place", "event", "incident"]):
             return "event"
         
         # Check for entity indicators
-        if any(word in observation.lower() for word in ["person", "people", "organization", "system", "object"]):
+        if any(word in str(observation).lower() for word in ["person", "people", "organization", "system", "object"]):
             return "entity"
         
         # Check for condition indicators
-        if any(word in observation.lower() for word in ["condition", "state", "situation", "circumstance"]):
+        if any(word in str(observation).lower() for word in ["condition", "state", "situation", "circumstance"]):
             return "condition"
         
         # Check for outcome indicators
-        if any(word in observation.lower() for word in ["result", "outcome", "consequence", "effect"]):
+        if any(word in str(observation).lower() for word in ["result", "outcome", "consequence", "effect"]):
             return "outcome"
         
         # Check for relationship indicators
-        if any(word in observation.lower() for word in ["relationship", "connection", "link", "association"]):
+        if any(word in str(observation).lower() for word in ["relationship", "connection", "link", "association"]):
             return "relationship"
         
         # Default to general element
@@ -562,8 +568,8 @@ class ActualScenarioIdentificationEngine:
                 pass
         
         # Try to extract boolean values
-        if any(word in observation.lower() for word in ["true", "false", "yes", "no", "present", "absent"]):
-            return any(word in observation.lower() for word in ["true", "yes", "present"])
+        if any(word in str(observation).lower() for word in ["true", "false", "yes", "no", "present", "absent"]):
+            return any(word in str(observation).lower() for word in ["true", "yes", "present"])
         
         # Return the observation as text value
         return observation
@@ -574,19 +580,19 @@ class ActualScenarioIdentificationEngine:
         importance = 0.5  # Base importance
         
         # Check for importance indicators
-        if any(word in observation.lower() for word in ["critical", "important", "key", "crucial", "essential"]):
+        if any(word in str(observation).lower() for word in ["critical", "important", "key", "crucial", "essential"]):
             importance += 0.3
         
         # Check for causal indicators
-        if any(word in observation.lower() for word in ["caused", "led to", "resulted in", "because"]):
+        if any(word in str(observation).lower() for word in ["caused", "led to", "resulted in", "because"]):
             importance += 0.2
         
         # Check for outcome indicators
-        if any(word in observation.lower() for word in ["result", "outcome", "consequence", "effect"]):
+        if any(word in str(observation).lower() for word in ["result", "outcome", "consequence", "effect"]):
             importance += 0.2
         
         # Check for temporal indicators
-        if any(word in observation.lower() for word in ["first", "last", "final", "initial", "beginning"]):
+        if any(word in str(observation).lower() for word in ["first", "last", "final", "initial", "beginning"]):
             importance += 0.1
         
         return min(importance, 1.0)
@@ -597,19 +603,19 @@ class ActualScenarioIdentificationEngine:
         certainty = 0.5  # Base certainty
         
         # Check for certainty indicators
-        if any(word in observation.lower() for word in ["definitely", "certainly", "clearly", "obviously"]):
+        if any(word in str(observation).lower() for word in ["definitely", "certainly", "clearly", "obviously"]):
             certainty += 0.3
         
         # Check for uncertainty indicators
-        if any(word in observation.lower() for word in ["maybe", "possibly", "perhaps", "might", "could"]):
+        if any(word in str(observation).lower() for word in ["maybe", "possibly", "perhaps", "might", "could"]):
             certainty -= 0.2
         
         # Check for evidence indicators
-        if any(word in observation.lower() for word in ["observed", "measured", "recorded", "documented"]):
+        if any(word in str(observation).lower() for word in ["observed", "measured", "recorded", "documented"]):
             certainty += 0.2
         
         # Check for speculation indicators
-        if any(word in observation.lower() for word in ["assume", "suppose", "believe", "think"]):
+        if any(word in str(observation).lower() for word in ["assume", "suppose", "believe", "think"]):
             certainty -= 0.1
         
         return max(0.0, min(certainty, 1.0))
@@ -618,15 +624,15 @@ class ActualScenarioIdentificationEngine:
         """Extract temporal position of scenario element"""
         
         # Check for temporal indicators
-        if any(word in observation.lower() for word in ["before", "after", "during", "while", "when"]):
+        if any(word in str(observation).lower() for word in ["before", "after", "during", "while", "when"]):
             return "relative"
         
         # Check for specific time indicators
-        if any(word in observation.lower() for word in ["yesterday", "today", "tomorrow", "now", "then"]):
+        if any(word in str(observation).lower() for word in ["yesterday", "today", "tomorrow", "now", "then"]):
             return "specific"
         
         # Check for sequence indicators
-        if any(word in observation.lower() for word in ["first", "second", "next", "last", "final"]):
+        if any(word in str(observation).lower() for word in ["first", "second", "next", "last", "final"]):
             return "sequence"
         
         return None
@@ -635,19 +641,19 @@ class ActualScenarioIdentificationEngine:
         """Extract causal role of scenario element"""
         
         # Check for cause indicators
-        if any(word in observation.lower() for word in ["caused", "led to", "resulted in", "because"]):
+        if any(word in str(observation).lower() for word in ["caused", "led to", "resulted in", "because"]):
             return "cause"
         
         # Check for effect indicators
-        if any(word in observation.lower() for word in ["result", "outcome", "consequence", "effect"]):
+        if any(word in str(observation).lower() for word in ["result", "outcome", "consequence", "effect"]):
             return "effect"
         
         # Check for mediator indicators
-        if any(word in observation.lower() for word in ["through", "via", "by means of", "mediated"]):
+        if any(word in str(observation).lower() for word in ["through", "via", "by means of", "mediated"]):
             return "mediator"
         
         # Check for moderator indicators
-        if any(word in observation.lower() for word in ["depending on", "conditional on", "moderated"]):
+        if any(word in str(observation).lower() for word in ["depending on", "conditional on", "moderated"]):
             return "moderator"
         
         return None
@@ -658,13 +664,13 @@ class ActualScenarioIdentificationEngine:
         dependencies = []
         
         # Check for dependency indicators
-        if "depends on" in observation.lower():
+        if "depends on" in str(observation).lower():
             dependencies.append("dependency")
         
-        if "requires" in observation.lower():
+        if "requires" in str(observation).lower():
             dependencies.append("requirement")
         
-        if "needs" in observation.lower():
+        if "needs" in str(observation).lower():
             dependencies.append("need")
         
         return dependencies
@@ -675,13 +681,13 @@ class ActualScenarioIdentificationEngine:
         constraints = []
         
         # Check for constraint indicators
-        if any(word in observation.lower() for word in ["only", "must", "cannot", "prohibited"]):
+        if any(word in str(observation).lower() for word in ["only", "must", "cannot", "prohibited"]):
             constraints.append("restriction")
         
-        if any(word in observation.lower() for word in ["limited", "bounded", "constrained"]):
+        if any(word in str(observation).lower() for word in ["limited", "bounded", "constrained"]):
             constraints.append("limitation")
         
-        if any(word in observation.lower() for word in ["if", "unless", "provided that"]):
+        if any(word in str(observation).lower() for word in ["if", "unless", "provided that"]):
             constraints.append("condition")
         
         return constraints
@@ -699,12 +705,12 @@ class ActualScenarioIdentificationEngine:
         
         # Extract timeline events
         for obs in observations:
-            if any(word in obs.lower() for word in ["when", "before", "after", "during"]):
+            if any(word in str(obs).lower() for word in ["when", "before", "after", "during"]):
                 temporal_structure["timeline"].append(obs)
         
         # Extract sequence information
         for obs in observations:
-            if any(word in obs.lower() for word in ["first", "second", "next", "then", "finally"]):
+            if any(word in str(obs).lower() for word in ["first", "second", "next", "then", "finally"]):
                 temporal_structure["sequence"].append(obs)
         
         return temporal_structure
@@ -722,13 +728,13 @@ class ActualScenarioIdentificationEngine:
         
         # Extract causal relationships
         for obs in observations:
-            if any(word in obs.lower() for word in ["caused", "led to", "resulted in", "because"]):
+            if any(word in str(obs).lower() for word in ["caused", "led to", "resulted in", "because"]):
                 causal_structure["causes"].append(obs)
             
-            if any(word in obs.lower() for word in ["result", "outcome", "consequence", "effect"]):
+            if any(word in str(obs).lower() for word in ["result", "outcome", "consequence", "effect"]):
                 causal_structure["effects"].append(obs)
             
-            if any(word in obs.lower() for word in ["through", "via", "mechanism", "process"]):
+            if any(word in str(obs).lower() for word in ["through", "via", "mechanism", "process"]):
                 causal_structure["mechanisms"].append(obs)
         
         return causal_structure
@@ -740,11 +746,11 @@ class ActualScenarioIdentificationEngine:
         
         for obs in observations:
             # Check for event indicators
-            if any(word in obs.lower() for word in ["happened", "occurred", "took place", "event"]):
+            if any(word in str(obs).lower() for word in ["happened", "occurred", "took place", "event"]):
                 key_events.append(obs)
             
             # Check for important action indicators
-            if any(word in obs.lower() for word in ["decided", "announced", "implemented", "launched"]):
+            if any(word in str(obs).lower() for word in ["decided", "announced", "implemented", "launched"]):
                 key_events.append(obs)
         
         return key_events
@@ -756,11 +762,11 @@ class ActualScenarioIdentificationEngine:
         
         for obs in observations:
             # Check for outcome indicators
-            if any(word in obs.lower() for word in ["result", "outcome", "consequence", "effect"]):
+            if any(word in str(obs).lower() for word in ["result", "outcome", "consequence", "effect"]):
                 outcomes.append(obs)
             
             # Check for achievement indicators
-            if any(word in obs.lower() for word in ["achieved", "accomplished", "completed", "finished"]):
+            if any(word in str(obs).lower() for word in ["achieved", "accomplished", "completed", "finished"]):
                 outcomes.append(obs)
         
         return outcomes
@@ -772,11 +778,11 @@ class ActualScenarioIdentificationEngine:
         
         for obs in observations:
             # Check for constraint indicators
-            if any(word in obs.lower() for word in ["limited", "constrained", "restricted", "bounded"]):
+            if any(word in str(obs).lower() for word in ["limited", "constrained", "restricted", "bounded"]):
                 constraints.append(obs)
             
             # Check for prohibition indicators
-            if any(word in obs.lower() for word in ["cannot", "prohibited", "forbidden", "not allowed"]):
+            if any(word in str(obs).lower() for word in ["cannot", "prohibited", "forbidden", "not allowed"]):
                 constraints.append(obs)
         
         return constraints
@@ -788,11 +794,11 @@ class ActualScenarioIdentificationEngine:
         
         for obs in observations:
             # Check for assumption indicators
-            if any(word in obs.lower() for word in ["assume", "suppose", "presume", "given that"]):
+            if any(word in str(obs).lower() for word in ["assume", "suppose", "presume", "given that"]):
                 assumptions.append(obs)
             
             # Check for implicit assumption indicators
-            if any(word in obs.lower() for word in ["typically", "usually", "generally", "normally"]):
+            if any(word in str(obs).lower() for word in ["typically", "usually", "generally", "normally"]):
                 assumptions.append(obs)
         
         return assumptions
@@ -804,11 +810,11 @@ class ActualScenarioIdentificationEngine:
         
         for obs in observations:
             # Check for direct evidence indicators
-            if any(word in obs.lower() for word in ["observed", "measured", "recorded", "documented"]):
+            if any(word in str(obs).lower() for word in ["observed", "measured", "recorded", "documented"]):
                 evidence_sources.append(obs)
             
             # Check for testimonial evidence indicators
-            if any(word in obs.lower() for word in ["reported", "stated", "claimed", "testified"]):
+            if any(word in str(obs).lower() for word in ["reported", "stated", "claimed", "testified"]):
                 evidence_sources.append(obs)
         
         return evidence_sources
@@ -820,17 +826,17 @@ class ActualScenarioIdentificationEngine:
         
         # Check for direct observation indicators
         direct_observations = sum(1 for obs in observations 
-                                if any(word in obs.lower() for word in ["observed", "measured", "recorded"]))
+                                if any(word in str(obs).lower() for word in ["observed", "measured", "recorded"]))
         confidence += direct_observations * 0.1
         
         # Check for certainty indicators
         certainty_indicators = sum(1 for obs in observations 
-                                 if any(word in obs.lower() for word in ["definitely", "certainly", "clearly"]))
+                                 if any(word in str(obs).lower() for word in ["definitely", "certainly", "clearly"]))
         confidence += certainty_indicators * 0.05
         
         # Check for uncertainty indicators
         uncertainty_indicators = sum(1 for obs in observations 
-                                   if any(word in obs.lower() for word in ["maybe", "possibly", "might"]))
+                                   if any(word in str(obs).lower() for word in ["maybe", "possibly", "might"]))
         confidence -= uncertainty_indicators * 0.05
         
         return max(0.0, min(confidence, 1.0))
@@ -841,15 +847,15 @@ class ActualScenarioIdentificationEngine:
         completeness = 0.0
         
         # Check for presence of different types of information
-        has_events = any(word in obs.lower() for obs in observations 
+        has_events = any(word in str(obs).lower() for obs in observations 
                         for word in ["happened", "occurred", "event"])
-        has_entities = any(word in obs.lower() for obs in observations 
+        has_entities = any(word in str(obs).lower() for obs in observations 
                           for word in ["person", "organization", "system"])
-        has_outcomes = any(word in obs.lower() for obs in observations 
+        has_outcomes = any(word in str(obs).lower() for obs in observations 
                           for word in ["result", "outcome", "consequence"])
-        has_causes = any(word in obs.lower() for obs in observations 
+        has_causes = any(word in str(obs).lower() for obs in observations 
                         for word in ["caused", "led to", "because"])
-        has_timing = any(word in obs.lower() for obs in observations 
+        has_timing = any(word in str(obs).lower() for obs in observations 
                         for word in ["when", "before", "after", "during"])
         
         # Calculate completeness based on presence of different types
@@ -880,10 +886,10 @@ class ActualScenarioIdentificationEngine:
         """Check if two observations contradict each other"""
         
         # Simple contradiction detection
-        if "not" in obs1.lower() and obs1.lower().replace("not", "").strip() in obs2.lower():
+        if "not" in str(obs1).lower() and str(obs1).lower().replace("not", "").strip() in str(obs2).lower():
             return True
         
-        if "not" in obs2.lower() and obs2.lower().replace("not", "").strip() in obs1.lower():
+        if "not" in str(obs2).lower() and str(obs2).lower().replace("not", "").strip() in str(obs1).lower():
             return True
         
         return False
@@ -895,11 +901,11 @@ class ActualScenarioIdentificationEngine:
         
         for obs in observations:
             # Check for event indicators
-            if any(word in obs.lower() for word in ["happened", "occurred", "event", "incident", "took place"]):
+            if any(word in str(obs).lower() for word in ["happened", "occurred", "event", "incident", "took place"]):
                 events.append(obs)
             
             # Check for action verbs
-            if any(word in obs.lower() for word in ["did", "went", "came", "started", "stopped", "began", "ended"]):
+            if any(word in str(obs).lower() for word in ["did", "went", "came", "started", "stopped", "began", "ended"]):
                 events.append(obs)
         
         return events
@@ -911,13 +917,13 @@ class ActualScenarioIdentificationEngine:
         
         for obs in observations:
             # Check for entity indicators
-            if any(word in obs.lower() for word in ["person", "organization", "system", "company", "individual"]):
+            if any(word in str(obs).lower() for word in ["person", "organization", "system", "company", "individual"]):
                 entities.append(obs)
             
             # Check for proper nouns (simple heuristic)
             words = obs.split()
             for word in words:
-                if word[0].isupper() and word.lower() not in ["the", "a", "an", "and", "or", "but"]:
+                if word[0].isupper() and str(word).lower() not in ["the", "a", "an", "and", "or", "but"]:
                     entities.append(word)
         
         return entities
@@ -929,11 +935,11 @@ class ActualScenarioIdentificationEngine:
         
         for obs in observations:
             # Check for relationship indicators
-            if any(word in obs.lower() for word in ["related to", "connected to", "associated with", "linked to"]):
+            if any(word in str(obs).lower() for word in ["related to", "connected to", "associated with", "linked to"]):
                 relationships.append(obs)
             
             # Check for causal relationships
-            if any(word in obs.lower() for word in ["caused", "led to", "resulted in", "because of"]):
+            if any(word in str(obs).lower() for word in ["caused", "led to", "resulted in", "because of"]):
                 relationships.append(obs)
         
         return relationships
@@ -945,11 +951,11 @@ class ActualScenarioIdentificationEngine:
         
         for obs in observations:
             # Check for condition indicators
-            if any(word in obs.lower() for word in ["if", "when", "unless", "provided that", "given that"]):
+            if any(word in str(obs).lower() for word in ["if", "when", "unless", "provided that", "given that"]):
                 conditions.append(obs)
             
             # Check for state descriptions
-            if any(word in obs.lower() for word in ["state", "condition", "situation", "circumstance"]):
+            if any(word in str(obs).lower() for word in ["state", "condition", "situation", "circumstance"]):
                 conditions.append(obs)
         
         return conditions
@@ -961,11 +967,11 @@ class ActualScenarioIdentificationEngine:
         
         for obs in observations:
             # Check for outcome indicators
-            if any(word in obs.lower() for word in ["result", "outcome", "consequence", "effect", "impact"]):
+            if any(word in str(obs).lower() for word in ["result", "outcome", "consequence", "effect", "impact"]):
                 outcomes.append(obs)
             
             # Check for conclusion indicators
-            if any(word in obs.lower() for word in ["therefore", "thus", "consequently", "as a result"]):
+            if any(word in str(obs).lower() for word in ["therefore", "thus", "consequently", "as a result"]):
                 outcomes.append(obs)
         
         return outcomes
@@ -978,7 +984,7 @@ class ActualScenarioIdentificationEngine:
         # Extract temporal context
         temporal_indicators = []
         for obs in observations:
-            if any(word in obs.lower() for word in ["yesterday", "today", "tomorrow", "last week", "next month"]):
+            if any(word in str(obs).lower() for word in ["yesterday", "today", "tomorrow", "last week", "next month"]):
                 temporal_indicators.append(obs)
         
         if temporal_indicators:
@@ -987,7 +993,7 @@ class ActualScenarioIdentificationEngine:
         # Extract spatial context
         spatial_indicators = []
         for obs in observations:
-            if any(word in obs.lower() for word in ["at", "in", "on", "near", "location", "place"]):
+            if any(word in str(obs).lower() for word in ["at", "in", "on", "near", "location", "place"]):
                 spatial_indicators.append(obs)
         
         if spatial_indicators:
@@ -996,7 +1002,7 @@ class ActualScenarioIdentificationEngine:
         # Extract domain context
         domain_indicators = []
         for obs in observations:
-            if any(word in obs.lower() for word in ["business", "medical", "legal", "technical", "scientific"]):
+            if any(word in str(obs).lower() for word in ["business", "medical", "legal", "technical", "scientific"]):
                 domain_indicators.append(obs)
         
         if domain_indicators:
@@ -1062,23 +1068,23 @@ class HypotheticalScenarioConstructionEngine:
         """Determine the best construction method for the scenario"""
         
         # Check for minimal change indicators
-        if any(word in query.lower() for word in ["what if", "suppose", "imagine"]):
+        if any(word in str(query).lower() for word in ["what if", "suppose", "imagine"]):
             return "minimal_change"
         
         # Check for causal intervention indicators
-        if any(word in query.lower() for word in ["cause", "effect", "impact", "influence"]):
+        if any(word in str(query).lower() for word in ["cause", "effect", "impact", "influence"]):
             return "causal_intervention"
         
         # Check for temporal indicators
-        if any(word in query.lower() for word in ["earlier", "later", "before", "after", "timing"]):
+        if any(word in str(query).lower() for word in ["earlier", "later", "before", "after", "timing"]):
             return "temporal_shift"
         
         # Check for policy indicators
-        if any(word in query.lower() for word in ["policy", "rule", "regulation", "law"]):
+        if any(word in str(query).lower() for word in ["policy", "rule", "regulation", "law"]):
             return "policy_alternative"
         
         # Check for structural indicators
-        if any(word in query.lower() for word in ["structure", "system", "organization", "design"]):
+        if any(word in str(query).lower() for word in ["structure", "system", "organization", "design"]):
             return "structural_modification"
         
         # Default to minimal change
@@ -1093,7 +1099,7 @@ class HypotheticalScenarioConstructionEngine:
         interventions = []
         
         # Parse query for intervention indicators
-        if "remove" in query.lower() or "without" in query.lower():
+        if "remove" in str(query).lower() or "without" in str(query).lower():
             interventions.append({
                 "type": InterventionType.REMOVAL.value,
                 "description": "Remove identified element",
@@ -1101,7 +1107,7 @@ class HypotheticalScenarioConstructionEngine:
                 "impact_magnitude": 0.7
             })
         
-        if "add" in query.lower() or "include" in query.lower():
+        if "add" in str(query).lower() or "include" in str(query).lower():
             interventions.append({
                 "type": InterventionType.ADDITION.value,
                 "description": "Add new element",
@@ -1109,7 +1115,7 @@ class HypotheticalScenarioConstructionEngine:
                 "impact_magnitude": 0.6
             })
         
-        if "change" in query.lower() or "modify" in query.lower():
+        if "change" in str(query).lower() or "modify" in str(query).lower():
             interventions.append({
                 "type": InterventionType.MODIFICATION.value,
                 "description": "Modify existing element",
@@ -1117,7 +1123,7 @@ class HypotheticalScenarioConstructionEngine:
                 "impact_magnitude": 0.5
             })
         
-        if "replace" in query.lower() or "substitute" in query.lower():
+        if "replace" in str(query).lower() or "substitute" in str(query).lower():
             interventions.append({
                 "type": InterventionType.SUBSTITUTION.value,
                 "description": "Replace existing element",
@@ -1378,22 +1384,22 @@ class OutcomeSimulationEngine:
         """Determine the best simulation method"""
         
         # Check for causal indicators
-        if any("causal" in intervention.get("description", "").lower() 
+        if any("causal" in str(intervention.get("description", "")).lower() 
                for intervention in hypothetical_scenario.interventions):
             return "causal_model"
         
         # Check for agent-based indicators
-        if any("agent" in intervention.get("description", "").lower() 
+        if any("agent" in str(intervention.get("description", "")).lower() 
                for intervention in hypothetical_scenario.interventions):
             return "agent_based"
         
         # Check for statistical indicators
-        if any("statistical" in intervention.get("description", "").lower() 
+        if any("statistical" in str(intervention.get("description", "")).lower() 
                for intervention in hypothetical_scenario.interventions):
             return "statistical_model"
         
         # Check for network indicators
-        if any("network" in intervention.get("description", "").lower() 
+        if any("network" in str(intervention.get("description", "")).lower() 
                for intervention in hypothetical_scenario.interventions):
             return "network_analysis"
         
@@ -2020,7 +2026,7 @@ class PlausibilityEvaluationEngine:
         feasibility_score = 0.8  # Base score
         
         # Check for physical impossibilities
-        physical_constraints = [c for c in hypothetical_scenario.constraints if "physical" in c.lower()]
+        physical_constraints = [c for c in hypothetical_scenario.constraints if "physical" in str(c).lower()]
         if len(physical_constraints) == 0:
             feasibility_score += 0.1
         
@@ -2117,7 +2123,7 @@ class PlausibilityEvaluationEngine:
         availability_score = 0.6  # Base score
         
         # Check for resource constraints
-        resource_constraints = [c for c in hypothetical_scenario.constraints if "resource" in c.lower()]
+        resource_constraints = [c for c in hypothetical_scenario.constraints if "resource" in str(c).lower()]
         if len(resource_constraints) == 0:
             availability_score += 0.2
         
@@ -2383,15 +2389,15 @@ class PlausibilityEvaluationEngine:
         """Check if two elements logically contradict each other"""
         
         # Simple contradiction detection
-        if "not" in elem1.description.lower() and elem1.description.lower().replace("not", "").strip() in elem2.description.lower():
+        if "not" in str(elem1.description).lower() and str(elem1.description).lower().replace("not", "").strip() in str(elem2.description).lower():
             return True
         
-        if "not" in elem2.description.lower() and elem2.description.lower().replace("not", "").strip() in elem1.description.lower():
+        if "not" in str(elem2.description).lower() and str(elem2.description).lower().replace("not", "").strip() in str(elem1.description).lower():
             return True
         
         # Check for mutually exclusive states
         if elem1.element_type == elem2.element_type and elem1.value != elem2.value:
-            if any(word in elem1.description.lower() for word in ["only", "exclusively", "uniquely"]):
+            if any(word in str(elem1.description).lower() for word in ["only", "exclusively", "uniquely"]):
                 return True
         
         return False
@@ -2534,43 +2540,43 @@ class CounterfactualInferenceEngine:
         """Determine the type of inference to draw"""
         
         # Check for causal inference indicators
-        if any(word in query.lower() for word in ["cause", "effect", "impact", "influence", "lead to"]):
+        if any(word in str(query).lower() for word in ["cause", "effect", "impact", "influence", "lead to"]):
             return InferenceType.CAUSAL_INFERENCE
         
         # Check for policy evaluation indicators
-        if any(word in query.lower() for word in ["policy", "rule", "regulation", "intervention"]):
+        if any(word in str(query).lower() for word in ["policy", "rule", "regulation", "intervention"]):
             return InferenceType.POLICY_EVALUATION
         
         # Check for decision making indicators
-        if any(word in query.lower() for word in ["decision", "choose", "select", "decide"]):
+        if any(word in str(query).lower() for word in ["decision", "choose", "select", "decide"]):
             return InferenceType.DECISION_MAKING
         
         # Check for learning indicators
-        if any(word in query.lower() for word in ["learn", "insight", "understand", "discover"]):
+        if any(word in str(query).lower() for word in ["learn", "insight", "understand", "discover"]):
             return InferenceType.LEARNING
         
         # Check for attribution indicators
-        if any(word in query.lower() for word in ["blame", "credit", "responsible", "attribute"]):
+        if any(word in str(query).lower() for word in ["blame", "credit", "responsible", "attribute"]):
             return InferenceType.ATTRIBUTION
         
         # Check for prevention indicators
-        if any(word in query.lower() for word in ["prevent", "avoid", "stop", "reduce"]):
+        if any(word in str(query).lower() for word in ["prevent", "avoid", "stop", "reduce"]):
             return InferenceType.PREVENTION
         
         # Check for optimization indicators
-        if any(word in query.lower() for word in ["optimize", "improve", "maximize", "minimize"]):
+        if any(word in str(query).lower() for word in ["optimize", "improve", "maximize", "minimize"]):
             return InferenceType.OPTIMIZATION
         
         # Check for risk assessment indicators
-        if any(word in query.lower() for word in ["risk", "danger", "threat", "hazard"]):
+        if any(word in str(query).lower() for word in ["risk", "danger", "threat", "hazard"]):
             return InferenceType.RISK_ASSESSMENT
         
         # Check for scenario planning indicators
-        if any(word in query.lower() for word in ["scenario", "plan", "prepare", "anticipate"]):
+        if any(word in str(query).lower() for word in ["scenario", "plan", "prepare", "anticipate"]):
             return InferenceType.SCENARIO_PLANNING
         
         # Check for historical counterfactual indicators
-        if any(word in query.lower() for word in ["history", "historical", "past", "alternative"]):
+        if any(word in str(query).lower() for word in ["history", "historical", "past", "alternative"]):
             return InferenceType.COUNTERFACTUAL_HISTORY
         
         # Default to causal inference
@@ -2894,7 +2900,7 @@ class CounterfactualInferenceEngine:
             applicability += 0.2
         
         # Increase based on resource availability
-        resource_constraints = [c for c in hypothetical_scenario.constraints if "resource" in c.lower()]
+        resource_constraints = [c for c in hypothetical_scenario.constraints if "resource" in str(c).lower()]
         if len(resource_constraints) < 3:
             applicability += 0.1
         
@@ -3160,7 +3166,7 @@ class CounterfactualInferenceEngine:
         
         # Identify high-risk outcomes
         for outcome in outcome_simulation.simulated_outcomes:
-            if outcome.get("probability", 0) > 0.5 and "negative" in outcome.get("description", "").lower():
+            if outcome.get("probability", 0) > 0.5 and "negative" in str(outcome.get("description", "")).lower():
                 risk_assessment["high_risk_outcomes"].append(outcome["description"])
         
         # Identify risk factors
