@@ -396,7 +396,13 @@ class PhenomenonObservationEngine:
     async def _identify_phenomenon_type(self, observation: str, context: Dict[str, Any] = None) -> PhenomenonType:
         """Identify the type of phenomenon"""
         
-        obs_lower = observation.lower()
+        # Handle case where observation is a list
+        if isinstance(observation, list):
+            observation = ' '.join(str(item) for item in observation)
+        elif not isinstance(observation, str):
+            observation = str(observation)
+        
+        obs_lower = str(observation).lower()
         
         # Anomalous indicators
         if any(indicator in obs_lower for indicator in ["unexpected", "surprising", "anomalous", "unusual", "strange"]):
@@ -493,7 +499,13 @@ class PhenomenonObservationEngine:
         """Identify anomalous features in the observation"""
         
         anomalous_features = []
-        obs_lower = observation.lower()
+        # Handle case where observation is a list
+        if isinstance(observation, list):
+            observation = ' '.join(str(item) for item in observation)
+        elif not isinstance(observation, str):
+            observation = str(observation)
+        
+        obs_lower = str(observation).lower()
         
         # Type-specific anomalous features
         if phenomenon_type == PhenomenonType.ANOMALOUS:
@@ -542,7 +554,13 @@ class PhenomenonObservationEngine:
         """Identify missing information in the observation"""
         
         missing_info = []
-        obs_lower = observation.lower()
+        # Handle case where observation is a list
+        if isinstance(observation, list):
+            observation = ' '.join(str(item) for item in observation)
+        elif not isinstance(observation, str):
+            observation = str(observation)
+        
+        obs_lower = str(observation).lower()
         
         # Explicit missing information indicators
         missing_indicators = [
@@ -590,7 +608,13 @@ class PhenomenonObservationEngine:
         """Identify contradictions in the observation"""
         
         contradictions = []
-        obs_lower = observation.lower()
+        # Handle case where observation is a list
+        if isinstance(observation, list):
+            observation = ' '.join(str(item) for item in observation)
+        elif not isinstance(observation, str):
+            observation = str(observation)
+        
+        obs_lower = str(observation).lower()
         
         # Explicit contradiction indicators
         contradiction_indicators = [
@@ -648,7 +672,13 @@ class PhenomenonObservationEngine:
             "biological": ["organism", "biology", "life", "cell", "genetic", "evolution", "species", "biological"]
         }
         
-        obs_lower = observation.lower()
+        # Handle case where observation is a list
+        if isinstance(observation, list):
+            observation = ' '.join(str(item) for item in observation)
+        elif not isinstance(observation, str):
+            observation = str(observation)
+        
+        obs_lower = str(observation).lower()
         domain_scores = {}
         
         for domain, keywords in domain_keywords.items():
@@ -716,7 +746,14 @@ class PhenomenonObservationEngine:
         urgency_score = 0.5  # Base urgency
         
         for indicator in urgency_indicators:
-            if indicator in phenomenon.description.lower():
+            # Handle case where description is a list
+            description = phenomenon.description
+            if isinstance(description, list):
+                description = ' '.join(str(item) for item in description)
+            elif not isinstance(description, str):
+                description = str(description)
+            
+            if indicator in str(description).lower():
                 urgency_score += 0.2
         
         phenomenon.importance_score = max(0.0, min(1.0, importance_score))
@@ -750,8 +787,21 @@ class PhenomenonObservationEngine:
         type_similarity = 1.0 if phenomenon1.phenomenon_type == phenomenon2.phenomenon_type else 0.0
         
         # Content similarity (simple word overlap)
-        words1 = set(phenomenon1.description.lower().split())
-        words2 = set(phenomenon2.description.lower().split())
+        # Handle case where descriptions are lists
+        desc1 = phenomenon1.description
+        if isinstance(desc1, list):
+            desc1 = ' '.join(str(item) for item in desc1)
+        elif not isinstance(desc1, str):
+            desc1 = str(desc1)
+        
+        desc2 = phenomenon2.description
+        if isinstance(desc2, list):
+            desc2 = ' '.join(str(item) for item in desc2)
+        elif not isinstance(desc2, str):
+            desc2 = str(desc2)
+        
+        words1 = set(str(desc1).lower().split())
+        words2 = set(str(desc2).lower().split())
         
         # Remove common words
         stop_words = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "is", "are", "was", "were"}
@@ -1231,7 +1281,14 @@ class HypothesisGenerationEngine:
         
         for hypothesis in hypotheses:
             # Create normalized statement for comparison
-            normalized = hypothesis.statement.lower().strip()
+            # Handle case where statement is a list
+            statement = hypothesis.statement
+            if isinstance(statement, list):
+                statement = ' '.join(str(item) for item in statement)
+            elif not isinstance(statement, str):
+                statement = str(statement)
+            
+            normalized = str(statement).lower().strip()
             
             if normalized not in seen_statements:
                 unique_hypotheses.append(hypothesis)
@@ -1384,8 +1441,8 @@ class HypothesisGenerationEngine:
         """Calculate similarity between hypotheses"""
         
         # Statement similarity
-        words1 = set(hypothesis1.statement.lower().split())
-        words2 = set(hypothesis2.statement.lower().split())
+        words1 = set(str(hypothesis1.statement).lower().split())
+        words2 = set(str(hypothesis2.statement).lower().split())
         
         # Remove common words
         stop_words = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "is", "are", "was", "were", "explains", "through", "via"}
@@ -1518,7 +1575,14 @@ class ExplanationSelectionEngine:
         # Bonus for elegant explanations
         elegance_indicators = ["single", "unified", "simple", "direct", "straightforward"]
         for indicator in elegance_indicators:
-            if indicator in hypothesis.statement.lower():
+            # Handle case where statement is a list
+            statement = hypothesis.statement
+            if isinstance(statement, list):
+                statement = ' '.join(str(item) for item in statement)
+            elif not isinstance(statement, str):
+                statement = str(statement)
+            
+            if indicator in str(statement).lower():
                 simplicity += 0.1
                 break
         
@@ -1610,7 +1674,14 @@ class ExplanationSelectionEngine:
         coherence = 0.8
         
         # Check for logical consistency
-        statement_words = set(hypothesis.statement.lower().split())
+        # Handle case where statement is a list
+        statement = hypothesis.statement
+        if isinstance(statement, list):
+            statement = ' '.join(str(item) for item in statement)
+        elif not isinstance(statement, str):
+            statement = str(statement)
+        
+        statement_words = set(str(statement).lower().split())
         
         # Check for contradictory terms
         contradictory_pairs = [
@@ -1627,14 +1698,30 @@ class ExplanationSelectionEngine:
                 coherence -= 0.2
         
         # Check assumption consistency
-        assumption_text = " ".join(hypothesis.assumptions).lower()
+        assumption_text = " ".join(str(a) for a in hypothesis.assumptions).lower()
         for term1, term2 in contradictory_pairs:
             if term1 in assumption_text and term2 in assumption_text:
                 coherence -= 0.1
         
         # Check premise-conclusion consistency
-        premise_text = " ".join(hypothesis.premises).lower()
-        statement_lower = hypothesis.statement.lower()
+        # Handle case where premises contain lists
+        premises = []
+        for premise in hypothesis.premises:
+            if isinstance(premise, list):
+                premises.append(' '.join(str(item) for item in premise))
+            else:
+                premises.append(str(premise))
+        
+        premise_text = " ".join(str(p) for p in premises).lower()
+        
+        # Handle case where statement is a list
+        statement = hypothesis.statement
+        if isinstance(statement, list):
+            statement = ' '.join(str(item) for item in statement)
+        elif not isinstance(statement, str):
+            statement = str(statement)
+        
+        statement_lower = str(statement).lower()
         
         # Simple consistency check
         premise_words = set(premise_text.split())
@@ -1647,7 +1734,7 @@ class ExplanationSelectionEngine:
         
         # Mechanism consistency
         if hypothesis.mechanisms:
-            mechanism_text = " ".join(hypothesis.mechanisms).lower()
+            mechanism_text = " ".join(str(m) for m in hypothesis.mechanisms).lower()
             if any(word in mechanism_text for word in statement_words):
                 coherence += 0.05
         
@@ -1670,7 +1757,7 @@ class ExplanationSelectionEngine:
             "experiment", "verify", "validate", "confirm", "check"
         ]
         
-        prediction_text = " ".join(hypothesis.predictions).lower()
+        prediction_text = " ".join(str(p) for p in hypothesis.predictions).lower()
         for indicator in testable_indicators:
             if indicator in prediction_text:
                 testability += 0.1
@@ -1678,7 +1765,7 @@ class ExplanationSelectionEngine:
         
         # Mechanism testability
         if hypothesis.mechanisms:
-            mechanism_text = " ".join(hypothesis.mechanisms).lower()
+            mechanism_text = " ".join(str(m) for m in hypothesis.mechanisms).lower()
             for indicator in testable_indicators:
                 if indicator in mechanism_text:
                     testability += 0.05
@@ -1712,7 +1799,14 @@ class ExplanationSelectionEngine:
         # Depth of explanation
         depth_indicators = ["because", "due to", "mechanism", "process", "why", "how"]
         for indicator in depth_indicators:
-            if indicator in hypothesis.statement.lower():
+            # Handle case where statement is a list
+            statement = hypothesis.statement
+            if isinstance(statement, list):
+                statement = ' '.join(str(item) for item in statement)
+            elif not isinstance(statement, str):
+                statement = str(statement)
+            
+            if indicator in str(statement).lower():
                 explanatory_power += 0.05
         
         # Phenomena coverage quality
@@ -1761,7 +1855,14 @@ class ExplanationSelectionEngine:
         # Unification indicators
         unification_indicators = ["unified", "connects", "integrates", "combines", "unifies", "links"]
         for indicator in unification_indicators:
-            if indicator in hypothesis.statement.lower():
+            # Handle case where statement is a list
+            statement = hypothesis.statement
+            if isinstance(statement, list):
+                statement = ' '.join(str(item) for item in statement)
+            elif not isinstance(statement, str):
+                statement = str(statement)
+            
+            if indicator in str(statement).lower():
                 consilience += 0.1
                 break
         
@@ -1962,8 +2063,22 @@ class FitEvaluationEngine:
         fit = 0.6
         
         # Keyword overlap
-        hyp_words = set(hypothesis.statement.lower().split())
-        phen_words = set(phenomenon.description.lower().split())
+        # Handle case where statement is a list
+        statement = hypothesis.statement
+        if isinstance(statement, list):
+            statement = ' '.join(str(item) for item in statement)
+        elif not isinstance(statement, str):
+            statement = str(statement)
+        
+        # Handle case where description is a list
+        description = phenomenon.description
+        if isinstance(description, list):
+            description = ' '.join(str(item) for item in description)
+        elif not isinstance(description, str):
+            description = str(description)
+        
+        hyp_words = set(str(statement).lower().split())
+        phen_words = set(str(description).lower().split())
         
         # Remove common words
         stop_words = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "is", "are", "was", "were"}
@@ -1994,8 +2109,15 @@ class FitEvaluationEngine:
         # Anomalous feature handling
         if phenomenon.anomalous_features:
             # Check if hypothesis addresses anomalous features
-            hyp_text = hypothesis.statement.lower()
-            addressed_features = sum(1 for feature in phenomenon.anomalous_features if feature.lower() in hyp_text)
+            # Handle case where statement is a list
+            statement = hypothesis.statement
+            if isinstance(statement, list):
+                statement = ' '.join(str(item) for item in statement)
+            elif not isinstance(statement, str):
+                statement = str(statement)
+            
+            hyp_text = str(statement).lower()
+            addressed_features = sum(1 for feature in phenomenon.anomalous_features if str(feature).lower() in hyp_text)
             if addressed_features > 0:
                 fit += min(0.2, addressed_features * 0.1)
         
@@ -2025,8 +2147,21 @@ class FitEvaluationEngine:
         consistency = 0.8  # Base consistency
         
         # Check for contradictory terms
-        hyp_words = set(hypothesis.statement.lower().split())
-        obs_words = set(observation.lower().split())
+        # Handle case where statement is a list
+        statement = hypothesis.statement
+        if isinstance(statement, list):
+            statement = ' '.join(str(item) for item in statement)
+        elif not isinstance(statement, str):
+            statement = str(statement)
+        
+        # Handle case where observation is a list
+        if isinstance(observation, list):
+            observation = ' '.join(str(item) for item in observation)
+        elif not isinstance(observation, str):
+            observation = str(observation)
+        
+        hyp_words = set(str(statement).lower().split())
+        obs_words = set(str(observation).lower().split())
         
         # Contradictory pairs
         contradictory_pairs = [
@@ -2063,7 +2198,7 @@ class FitEvaluationEngine:
             specific_indicators = ["specific", "measure", "quantify", "exactly", "precisely"]
             for prediction in hypothesis.predictions:
                 for indicator in specific_indicators:
-                    if indicator in prediction.lower():
+                    if indicator in str(prediction).lower():
                         prediction_quality += 0.1
                         break
         
@@ -2071,7 +2206,7 @@ class FitEvaluationEngine:
         testable_indicators = ["test", "verify", "check", "observe", "measure"]
         for prediction in hypothesis.predictions:
             for indicator in testable_indicators:
-                if indicator in prediction.lower():
+                if indicator in str(prediction).lower():
                     prediction_quality += 0.05
                     break
         

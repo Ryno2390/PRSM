@@ -513,7 +513,10 @@ class AnalogicalBreakthroughEngine:
                 mathematical_relationships=["amplitude = A₁ + A₂", "phase_shift = 2π/λ"],
                 success_rate=0.95,
                 generalization_level="general",
-                abstraction_level="mathematical"
+                abstraction_level="mathematical",
+                domain_constraints=["requires_wave_medium", "linear_systems_only"],
+                validity_conditions=["coherent_waves", "stable_medium"],
+                known_failures=["non_linear_media", "incoherent_sources"]
             ),
             AnalogicalPattern(
                 id="resonance_pattern",
@@ -525,7 +528,10 @@ class AnalogicalBreakthroughEngine:
                 mathematical_relationships=["Q = f₀/Δf", "amplitude ∝ 1/damping"],
                 success_rate=0.9,
                 generalization_level="general",
-                abstraction_level="mathematical"
+                abstraction_level="mathematical",
+                domain_constraints=["requires_oscillatory_system", "low_damping_preferred"],
+                validity_conditions=["stable_frequency", "sufficient_coupling"],
+                known_failures=["high_damping_systems", "frequency_drift"]
             )
         ]
     
@@ -542,7 +548,10 @@ class AnalogicalBreakthroughEngine:
                 mathematical_relationships=["rate = k[A][B]", "k = Ae^(-Ea/RT)"],
                 success_rate=0.85,
                 generalization_level="general",
-                abstraction_level="concrete"
+                abstraction_level="concrete",
+                domain_constraints=["requires_compatible_catalyst", "suitable_reaction_conditions"],
+                validity_conditions=["catalyst_stability", "reactant_accessibility"],
+                known_failures=["catalyst_poisoning", "incompatible_solvents"]
             )
         ]
     
@@ -559,7 +568,10 @@ class AnalogicalBreakthroughEngine:
                 mathematical_relationships=["output = setpoint - error", "gain = output/input"],
                 success_rate=0.9,
                 generalization_level="general",
-                abstraction_level="abstract"
+                abstraction_level="abstract",
+                domain_constraints=["requires_sensor_accuracy", "responsive_effector_system"],
+                validity_conditions=["stable_setpoint", "measurable_output"],
+                known_failures=["sensor_saturation", "actuator_limits"]
             )
         ]
     
@@ -576,7 +588,10 @@ class AnalogicalBreakthroughEngine:
                 mathematical_relationships=["Noether's theorem", "∂L/∂q = 0 → conserved quantity"],
                 success_rate=0.95,
                 generalization_level="general",
-                abstraction_level="mathematical"
+                abstraction_level="mathematical",
+                domain_constraints=["requires_continuous_symmetry", "differentiable_system"],
+                validity_conditions=["symmetry_group_well_defined", "continuous_transformations"],
+                known_failures=["discrete_systems", "broken_symmetries"]
             )
         ]
     
@@ -593,7 +608,10 @@ class AnalogicalBreakthroughEngine:
                 mathematical_relationships=["∇f = λ∇g", "KKT conditions"],
                 success_rate=0.8,
                 generalization_level="general",
-                abstraction_level="mathematical"
+                abstraction_level="mathematical",
+                domain_constraints=["differentiable_functions", "well_defined_constraints"],
+                validity_conditions=["feasible_region_exists", "objective_function_bounded"],
+                known_failures=["non_convex_problems", "discontinuous_functions"]
             )
         ]
     
@@ -610,7 +628,10 @@ class AnalogicalBreakthroughEngine:
                 mathematical_relationships=["T(n) = T(n/2) + O(n)", "divide and conquer"],
                 success_rate=0.85,
                 generalization_level="general",
-                abstraction_level="abstract"
+                abstraction_level="abstract",
+                domain_constraints=["problem_decomposable", "finite_recursion_depth"],
+                validity_conditions=["well_defined_base_case", "convergent_recursion"],
+                known_failures=["infinite_recursion", "non_decomposable_problems"]
             )
         ]
     
@@ -664,7 +685,7 @@ class AnalogicalBreakthroughEngine:
             "cyclic": ["cycle", "circular", "loop", "repeat", "iterate"]
         }
         
-        text_lower = text.lower()
+        text_lower = str(text).lower()
         
         for structure_type, keywords in structural_keywords.items():
             for keyword in keywords:
@@ -874,7 +895,7 @@ class AnalogicalBreakthroughEngine:
         
         if target_domain in domain_keywords:
             keywords = domain_keywords[target_domain]
-            analysis_lower = analysis.lower()
+            analysis_lower = str(analysis).lower()
             
             for keyword in keywords:
                 if keyword in analysis_lower:

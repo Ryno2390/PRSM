@@ -622,6 +622,12 @@ class EventObservationEngine:
         if context and "domain" in context:
             return context["domain"]
         
+        # Handle case where observation is a list
+        if isinstance(observation, list):
+            observation = ' '.join(str(item) for item in observation)
+        elif not isinstance(observation, str):
+            observation = str(observation)
+        
         # Domain classification based on keywords
         domain_keywords = {
             "medical": ["patient", "symptom", "diagnosis", "treatment", "disease", "health", "medicine", "clinical", "therapy", "drug"],
@@ -636,7 +642,7 @@ class EventObservationEngine:
             "educational": ["student", "learning", "education", "academic", "school", "teaching", "knowledge", "instruction", "curriculum"]
         }
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         domain_scores = {}
         
         for domain, keywords in domain_keywords.items():
@@ -680,7 +686,14 @@ class EventObservationEngine:
     async def _refine_event_type(self, event: CausalEvent) -> EventType:
         """Refine event type based on description"""
         
-        desc_lower = event.description.lower()
+        # Handle case where description is a list
+        description = event.description
+        if isinstance(description, list):
+            description = ' '.join(str(item) for item in description)
+        elif not isinstance(description, str):
+            description = str(description)
+        
+        desc_lower = str(description).lower()
         
         # Check for specific event type indicators
         if any(indicator in desc_lower for indicator in ["outcome", "result", "consequence", "effect"]):
@@ -730,7 +743,7 @@ class EventObservationEngine:
             for match in matches:
                 if isinstance(match, tuple):
                     match = match[0]
-                if match.lower() not in ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by']:
+                if str(match).lower() not in ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by']:
                     variables.append(match.strip())
         
         return variables[:5]  # Limit to top 5
@@ -779,7 +792,13 @@ class EventObservationEngine:
                 properties[f"property_{property_name}"] = intensity
         
         # Extract categorical properties
-        if "type" in description.lower():
+        # Handle case where description is a list
+        if isinstance(description, list):
+            description = ' '.join(str(item) for item in description)
+        elif not isinstance(description, str):
+            description = str(description)
+        
+        if "type" in str(description).lower():
             type_match = re.search(r'type\s+of\s+(\w+)', description, re.IGNORECASE)
             if type_match:
                 properties["type"] = type_match.group(1)
@@ -795,7 +814,13 @@ class EventObservationEngine:
             "immediately", "soon", "eventually", "gradually", "suddenly", "instantly"
         ]
         
-        desc_lower = description.lower()
+        # Handle case where description is a list
+        if isinstance(description, list):
+            description = ' '.join(str(item) for item in description)
+        elif not isinstance(description, str):
+            description = str(description)
+        
+        desc_lower = str(description).lower()
         
         for indicator in temporal_indicators:
             if indicator in desc_lower:
@@ -905,7 +930,14 @@ class EventObservationEngine:
         observable_indicators = ["observed", "measured", "recorded", "documented", "reported", "detected"]
         unobservable_indicators = ["inferred", "assumed", "hypothetical", "theoretical", "supposed"]
         
-        desc_lower = event.description.lower()
+        # Handle case where description is a list
+        description = event.description
+        if isinstance(description, list):
+            description = ' '.join(str(item) for item in description)
+        elif not isinstance(description, str):
+            description = str(description)
+        
+        desc_lower = str(description).lower()
         
         for indicator in observable_indicators:
             if indicator in desc_lower:
@@ -932,7 +964,14 @@ class EventObservationEngine:
         high_quality_indicators = ["experimental", "controlled", "randomized", "peer-reviewed", "validated"]
         low_quality_indicators = ["anecdotal", "preliminary", "unverified", "suspected", "alleged"]
         
-        desc_lower = event.description.lower()
+        # Handle case where description is a list
+        description = event.description
+        if isinstance(description, list):
+            description = ' '.join(str(item) for item in description)
+        elif not isinstance(description, str):
+            description = str(description)
+        
+        desc_lower = str(description).lower()
         
         for indicator in high_quality_indicators:
             if indicator in desc_lower:
@@ -962,7 +1001,14 @@ class EventObservationEngine:
         reliable_indicators = ["consistent", "repeatable", "reproducible", "verified", "confirmed"]
         unreliable_indicators = ["inconsistent", "variable", "unreliable", "questionable", "disputed"]
         
-        desc_lower = event.description.lower()
+        # Handle case where description is a list
+        description = event.description
+        if isinstance(description, list):
+            description = ' '.join(str(item) for item in description)
+        elif not isinstance(description, str):
+            description = str(description)
+        
+        desc_lower = str(description).lower()
         
         for indicator in reliable_indicators:
             if indicator in desc_lower:
@@ -1013,8 +1059,21 @@ class EventObservationEngine:
             variable_similarity = 0.0
         
         # Description similarity (simple word overlap)
-        words1 = set(event1.description.lower().split())
-        words2 = set(event2.description.lower().split())
+        # Handle case where descriptions are lists
+        desc1 = event1.description
+        if isinstance(desc1, list):
+            desc1 = ' '.join(str(item) for item in desc1)
+        elif not isinstance(desc1, str):
+            desc1 = str(desc1)
+        
+        desc2 = event2.description
+        if isinstance(desc2, list):
+            desc2 = ' '.join(str(item) for item in desc2)
+        elif not isinstance(desc2, str):
+            desc2 = str(desc2)
+        
+        words1 = set(str(desc1).lower().split())
+        words2 = set(str(desc2).lower().split())
         
         # Remove common words
         stop_words = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "is", "are", "was", "were"}
@@ -1435,7 +1494,20 @@ class PotentialCauseIdentificationEngine:
             return 0.7  # Simplified
         
         # Look for qualitative dose-response indicators
-        desc_lower = f"{potential_cause_event.description} {effect_event.description}".lower()
+        # Handle case where descriptions are lists
+        cause_desc = potential_cause_event.description
+        if isinstance(cause_desc, list):
+            cause_desc = ' '.join(str(item) for item in cause_desc)
+        elif not isinstance(cause_desc, str):
+            cause_desc = str(cause_desc)
+        
+        effect_desc = effect_event.description
+        if isinstance(effect_desc, list):
+            effect_desc = ' '.join(str(item) for item in effect_desc)
+        elif not isinstance(effect_desc, str):
+            effect_desc = str(effect_desc)
+        
+        desc_lower = f"{str(cause_desc)} {str(effect_desc)}".lower()
         
         dose_response_indicators = [
             "more", "less", "increase", "decrease", "higher", "lower",
@@ -1455,7 +1527,14 @@ class PotentialCauseIdentificationEngine:
         
         for cause in potential_causes:
             # Normalize description for comparison
-            normalized_desc = cause.description.lower().strip()
+            # Handle case where description is a list
+            description = cause.description
+            if isinstance(description, list):
+                description = ' '.join(str(item) for item in description)
+            elif not isinstance(description, str):
+                description = str(description)
+            
+            normalized_desc = str(description).lower().strip()
             
             if normalized_desc not in seen_descriptions:
                 unique_causes.append(cause)
@@ -1502,7 +1581,7 @@ class PotentialCauseIdentificationEngine:
             for match in matches:
                 if isinstance(match, tuple):
                     match = match[0]
-                if match.lower() not in ['the', 'a', 'an', 'and', 'or', 'but']:
+                if str(match).lower() not in ['the', 'a', 'an', 'and', 'or', 'but']:
                     variables.append(match.strip())
         
         return variables[:3]  # Limit to top 3
@@ -1510,7 +1589,14 @@ class PotentialCauseIdentificationEngine:
     async def _determine_mechanism_type(self, cause: PotentialCause) -> CausalMechanism:
         """Determine mechanism type for cause"""
         
-        desc_lower = cause.description.lower()
+        # Handle case where description is a list
+        description = cause.description
+        if isinstance(description, list):
+            description = ' '.join(str(item) for item in description)
+        elif not isinstance(description, str):
+            description = str(description)
+        
+        desc_lower = str(description).lower()
         
         # Mechanism type indicators
         mechanism_keywords = {
@@ -1589,13 +1675,20 @@ class PotentialCauseIdentificationEngine:
         
         # Look for supporting evidence in events
         for event in events:
+            # Handle case where description is a list
+            description = event.description
+            if isinstance(description, list):
+                description = ' '.join(str(item) for item in description)
+            elif not isinstance(description, str):
+                description = str(description)
+            
             # Check for mentions of the cause
-            if any(var.lower() in event.description.lower() for var in cause.cause_variables):
-                supporting_evidence.append(f"Mentioned in event: {event.description}")
+            if any(str(var).lower() in str(description).lower() for var in cause.cause_variables):
+                supporting_evidence.append(f"Mentioned in event: {description}")
             
             # Check for mechanism support
-            if cause.proposed_mechanism and cause.proposed_mechanism.lower() in event.description.lower():
-                supporting_evidence.append(f"Mechanism support: {event.description}")
+            if cause.proposed_mechanism and str(cause.proposed_mechanism).lower() in str(description).lower():
+                supporting_evidence.append(f"Mechanism support: {description}")
         
         return supporting_evidence[:3]  # Limit to top 3
     
@@ -1779,7 +1872,7 @@ class CausalLinkingEngine:
             return CausalRelationType.SUFFICIENT_CAUSE
         
         # Check for bidirectional relationships
-        if "feedback" in potential_cause.description.lower() or "mutual" in potential_cause.description.lower():
+        if "feedback" in str(potential_cause.description).lower() or "mutual" in str(potential_cause.description).lower():
             return CausalRelationType.BIDIRECTIONAL
         
         # Check for common causes
@@ -1797,8 +1890,21 @@ class CausalLinkingEngine:
             return potential_cause.temporal_precedence
         
         # Analyze descriptions for temporal clues
-        cause_desc = potential_cause.description.lower()
-        effect_desc = effect_event.description.lower()
+        # Handle case where descriptions are lists
+        cause_desc = potential_cause.description
+        if isinstance(cause_desc, list):
+            cause_desc = ' '.join(str(item) for item in cause_desc)
+        elif not isinstance(cause_desc, str):
+            cause_desc = str(cause_desc)
+        
+        effect_desc = effect_event.description
+        if isinstance(effect_desc, list):
+            effect_desc = ' '.join(str(item) for item in effect_desc)
+        elif not isinstance(effect_desc, str):
+            effect_desc = str(effect_desc)
+        
+        cause_desc = str(cause_desc).lower()
+        effect_desc = str(effect_desc).lower()
         
         if "immediately" in cause_desc or "instant" in cause_desc:
             return TemporalRelation.IMMEDIATE
@@ -1881,11 +1987,11 @@ class CausalLinkingEngine:
             evidence_strength = (evidence_strength + link.mechanism_plausibility) / 2
             
             # Evidence quality indicators
-            if "experimental" in link.mechanism_description.lower():
+            if "experimental" in str(link.mechanism_description).lower():
                 evidence_strength += 0.2
-            elif "observational" in link.mechanism_description.lower():
+            elif "observational" in str(link.mechanism_description).lower():
                 evidence_strength += 0.1
-            elif "theoretical" in link.mechanism_description.lower():
+            elif "theoretical" in str(link.mechanism_description).lower():
                 evidence_strength -= 0.1
             
             link.evidence_strength = max(0.0, min(1.0, evidence_strength))
@@ -1909,7 +2015,7 @@ class CausalLinkingEngine:
                 temporal_validity = 0.6
             
             # Check for temporal violations
-            if "after" in link.mechanism_description.lower() and link.temporal_relation == TemporalRelation.IMMEDIATE:
+            if "after" in str(link.mechanism_description).lower() and link.temporal_relation == TemporalRelation.IMMEDIATE:
                 temporal_validity -= 0.3
             
             link.temporal_validity = max(0.0, min(1.0, temporal_validity))
@@ -2074,19 +2180,28 @@ class ConfoundingFactorEvaluationEngine:
         """Determine type of confounding factor"""
         
         # Check for common confounding patterns
-        if "selection" in event.description.lower():
+        # Handle case where description is a list
+        description = event.description
+        if isinstance(description, list):
+            description = ' '.join(str(item) for item in description)
+        elif not isinstance(description, str):
+            description = str(description)
+        
+        desc_lower = str(description).lower()
+        
+        if "selection" in desc_lower:
             return "selection_bias"
-        elif "measurement" in event.description.lower():
+        elif "measurement" in desc_lower:
             return "measurement_bias"
-        elif "information" in event.description.lower():
+        elif "information" in desc_lower:
             return "information_bias"
-        elif "time" in event.description.lower() or "temporal" in event.description.lower():
+        elif "time" in desc_lower or "temporal" in desc_lower:
             return "temporal_confounding"
-        elif "common" in event.description.lower():
+        elif "common" in desc_lower:
             return "common_cause"
-        elif "mediating" in event.description.lower():
+        elif "mediating" in desc_lower:
             return "mediator"
-        elif "moderating" in event.description.lower():
+        elif "moderating" in desc_lower:
             return "moderator"
         else:
             return "unknown_confounder"
@@ -2103,7 +2218,7 @@ class ConfoundingFactorEvaluationEngine:
         
         # Assess based on domain similarity
         if event.domain and link.mechanism_description:
-            if event.domain.lower() in link.mechanism_description.lower():
+            if str(event.domain).lower() in str(link.mechanism_description).lower():
                 impact += 0.2
         
         return max(0.0, min(1.0, impact))
@@ -2137,8 +2252,15 @@ class ConfoundingFactorEvaluationEngine:
         
         # Assess based on description similarity
         if event.description and link.mechanism_description:
-            desc_words = set(event.description.lower().split())
-            mech_words = set(link.mechanism_description.lower().split())
+            # Handle case where description is a list
+            description = event.description
+            if isinstance(description, list):
+                description = ' '.join(str(item) for item in description)
+            elif not isinstance(description, str):
+                description = str(description)
+            
+            desc_words = set(str(description).lower().split())
+            mech_words = set(str(link.mechanism_description).lower().split())
             overlap = len(desc_words & mech_words) / max(len(desc_words), 1)
             correlation += overlap * 0.3
         

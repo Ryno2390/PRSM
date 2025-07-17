@@ -88,6 +88,9 @@ class BulkDatasetProcessor:
         print("🌍 Domains: Physics, CS, Math, Biology")
         print()
         
+        # Initialize the processor first
+        await self.initialize()
+        
         # Check if dataset already exists
         arxiv_file = self.bulk_data_path / "arxiv-metadata-oai-snapshot.json"
         

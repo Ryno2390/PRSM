@@ -1,0 +1,31 @@
+{
+  "timestamp": "2025-07-17 06:31:41",
+  "total_indices": 2,
+  "total_size_mb": 481.5629663467407,
+  "indices": [
+    {
+      "name": "faiss_index_hnsw",
+      "type": "HNSW",
+      "file_size_mb": 242.16839027404785,
+      "created_at": "2025-07-17 06:19:26",
+      "total_embeddings": 151120,
+      "embedding_dimension": 384,
+      "model_name": "all-MiniLM-L6-v2",
+      "build_time_seconds": 0.0,
+      "has_paper_metadata": true,
+      "paper_metadata_size_mb": 158.86754035949707
+    },
+    {
+      "name": "faiss_index_flat",
+      "type": "Flat",
+      "file_size_mb": 46.87504291534424,
+      "created_at": "2025-07-17 06:19:35",
+      "total_embeddings": 32000,
+      "embedding_dimension": 384,
+      "model_name": "all-MiniLM-L6-v2",
+      "build_time_seconds": 0.003926992416381836,
+      "has_paper_metadata": true,
+      "paper_metadata_size_mb": 33.65199279785156
+    }
+  ]
+}

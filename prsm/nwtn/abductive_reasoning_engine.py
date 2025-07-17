@@ -321,7 +321,7 @@ class AbductiveReasoningEngine:
     async def _classify_evidence_type(self, observation: str) -> str:
         """Classify the type of evidence"""
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # Direct observation indicators
         if any(indicator in obs_lower for indicator in ["observed", "saw", "noticed", "witnessed"]):
@@ -344,7 +344,7 @@ class AbductiveReasoningEngine:
     async def _assess_evidence_reliability(self, observation: str) -> float:
         """Assess the reliability of evidence"""
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         # High reliability indicators
         high_reliability = ["measured", "recorded", "data", "scientific", "peer-reviewed", "established"]
@@ -381,8 +381,8 @@ class AbductiveReasoningEngine:
         if not context or "query" not in context:
             return 0.7
         
-        query = context["query"].lower()
-        obs_lower = observation.lower()
+        query = str(context["query"]).lower()
+        obs_lower = str(observation).lower()
         
         # Simple relevance based on keyword overlap
         query_words = set(query.split())
@@ -418,7 +418,7 @@ class AbductiveReasoningEngine:
             "environmental": ["climate", "weather", "environmental", "ecology", "nature", "pollution"]
         }
         
-        obs_lower = observation.lower()
+        obs_lower = str(observation).lower()
         
         for domain, keywords in domain_keywords.items():
             if any(keyword in obs_lower for keyword in keywords):
@@ -583,9 +583,9 @@ class AbductiveReasoningEngine:
         findings = []
         
         for evidence in evidence_list:
-            if any(word in evidence.description.lower() for word in ["symptom", "complains", "reports", "feels"]):
+            if any(word in str(evidence.description).lower() for word in ["symptom", "complains", "reports", "feels"]):
                 symptoms.append(evidence.description)
-            elif any(word in evidence.description.lower() for word in ["test", "finding", "result", "shows"]):
+            elif any(word in str(evidence.description).lower() for word in ["test", "finding", "result", "shows"]):
                 findings.append(evidence.description)
         
         # Generate diagnostic hypotheses
@@ -700,7 +700,7 @@ class AbductiveReasoningEngine:
         pattern_keywords = pattern.get("keywords", [])
         
         for evidence in evidence_list:
-            evidence_words = evidence.description.lower().split()
+            evidence_words = str(evidence.description).lower().split()
             if any(keyword in evidence_words for keyword in pattern_keywords):
                 return True
         
@@ -796,7 +796,7 @@ class AbductiveReasoningEngine:
             
             # Parse type
             elif line.startswith("Type:") and current_hypothesis:
-                type_str = line.split(":", 1)[1].strip().lower()
+                type_str = str(line.split(":", 1)[1].strip()).lower()
                 for exp_type in ExplanationType:
                     if exp_type.value in type_str:
                         current_hypothesis.explanation_type = exp_type
@@ -926,7 +926,7 @@ class AbductiveReasoningEngine:
         coherence = 0.8  # Default high coherence
         
         # Check for contradictory assumptions
-        assumptions = [assumption.lower() for assumption in hypothesis.assumptions]
+        assumptions = [str(assumption).lower() for assumption in hypothesis.assumptions]
         
         # Look for contradictory terms
         contradictory_pairs = [
@@ -957,7 +957,7 @@ class AbductiveReasoningEngine:
         # Bonus for specific, measurable predictions
         specific_indicators = ["measure", "test", "observe", "detect", "quantify"]
         for prediction in hypothesis.predictions:
-            if any(indicator in prediction.lower() for indicator in specific_indicators):
+            if any(indicator in str(prediction).lower() for indicator in specific_indicators):
                 testability += 0.1
         
         return max(0.0, min(1.0, testability))
@@ -980,8 +980,8 @@ class AbductiveReasoningEngine:
         """Calculate how much evidence supports hypothesis"""
         
         # Simple keyword overlap method
-        hyp_words = set(hypothesis.statement.lower().split())
-        evidence_words = set(evidence.description.lower().split())
+        hyp_words = set(str(hypothesis.statement).lower().split())
+        evidence_words = set(str(evidence.description).lower().split())
         
         # Remove common words
         stop_words = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "is", "are", "was", "were"}
@@ -1107,10 +1107,10 @@ class AbductiveReasoningEngine:
         predictions.append(f"Alternative explanations should be less well-supported by evidence")
         
         # Domain-specific predictions
-        if any(domain in hypothesis.statement.lower() for domain in ["medical", "health", "disease"]):
+        if any(domain in str(hypothesis.statement).lower() for domain in ["medical", "health", "disease"]):
             predictions.append("Additional symptoms or test results should be consistent with diagnosis")
         
-        elif any(domain in hypothesis.statement.lower() for domain in ["technical", "system", "failure"]):
+        elif any(domain in str(hypothesis.statement).lower() for domain in ["technical", "system", "failure"]):
             predictions.append("System diagnostics should reveal the hypothesized problem")
         
         return predictions

@@ -1,0 +1,36 @@
+{
+  "timestamp": "2025-07-17 07:05:11",
+  "embedding_stats": {
+    "total_batches": 4723,
+    "total_papers": 151136,
+    "total_embeddings": 151136
+  },
+  "building_processes": [],
+  "completed_indices": [
+    {
+      "name": "faiss_index_flat",
+      "file_size_mb": 46.87504291534424,
+      "created_at": "Thu Jul 17 06:19:36 2025",
+      "type": "Flat",
+      "total_embeddings": 32000,
+      "embedding_dimension": 384,
+      "build_time_seconds": 0.003926992416381836
+    },
+    {
+      "name": "faiss_index_hnsw",
+      "file_size_mb": 242.16839027404785,
+      "created_at": "Thu Jul 17 06:19:29 2025",
+      "type": "Flat",
+      "total_embeddings": 32000,
+      "embedding_dimension": 384,
+      "build_time_seconds": 0.003926992416381836
+    }
+  ],
+  "system_resources": {
+    "cpu_percent": 13.7,
+    "memory_percent": 62.5,
+    "memory_available_gb": 6.002166748046875,
+    "disk_free_gb": 717.3824462890625,
+    "disk_percent": 22.982210333583602
+  }
+}

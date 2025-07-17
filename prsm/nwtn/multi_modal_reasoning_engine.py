@@ -50,7 +50,7 @@ from prsm.nwtn.probabilistic_reasoning_engine import ProbabilisticReasoningEngin
 from prsm.nwtn.counterfactual_reasoning_engine import CounterfactualReasoningEngine, CounterfactualAnalysis
 from prsm.nwtn.world_model_engine import WorldModelEngine
 from prsm.agents.executors.model_executor import ModelExecutor
-from prsm.knowledge_system import KnowledgeSystem
+from prsm.knowledge_system import UnifiedKnowledgeSystem
 from prsm.embeddings.semantic_embedding_engine import SemanticEmbeddingEngine
 from prsm.data_layer.enhanced_ipfs import PRSMIPFSClient
 from prsm.information_space.service import InformationSpaceService
@@ -59,7 +59,7 @@ from prsm.context.selective_parallelism_engine import SelectiveParallelismEngine
 from prsm.scheduling.workflow_scheduler import WorkflowScheduler, ScheduledWorkflow, WorkflowStep
 from prsm.nwtn.orchestrator import NWTNOrchestrator
 from prsm.marketplace.real_marketplace_service import RealMarketplaceService
-from prsm.marketplace.recommendation_engine import RecommendationEngine
+from prsm.marketplace.recommendation_engine import MarketplaceRecommendationEngine
 from prsm.agents.routers.marketplace_integration import MarketplaceIntegration
 from prsm.tokenomics.ftns_budget_manager import FTNSBudgetManager
 
@@ -262,10 +262,10 @@ class IntegratedReasoningResult:
     resource_discovery_results: Dict[str, ResourceDiscoveryResult] = field(default_factory=dict)
     
     # Distributed execution results
-    distributed_execution_result: Optional[DistributedExecutionResult] = None
+    distributed_execution_result: Optional[Dict[str, Any]] = None
     
     # Marketplace asset integration results
-    asset_integration_result: Optional[AssetIntegrationResult] = None
+    asset_integration_result: Optional[Dict[str, Any]] = None
     
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -435,7 +435,7 @@ class ReasoningClassifier:
     async def _calculate_reasoning_score(self, content: str, indicators: Dict[str, List[str]]) -> float:
         """Calculate how well content matches reasoning type indicators"""
         
-        content_lower = content.lower()
+        content_lower = str(content).lower()
         score = 0.0
         
         # Keyword matching
@@ -510,7 +510,7 @@ class ReasoningClassifier:
     async def _classify_component_type(self, content: str) -> QueryComponentType:
         """Classify the type of query component"""
         
-        content_lower = content.lower()
+        content_lower = str(content).lower()
         
         # Calculate scores for each component type
         type_scores = {}
@@ -548,7 +548,7 @@ class ReasoningClassifier:
             "engineering": ["design", "build", "construct", "optimize", "efficiency", "system"]
         }
         
-        content_lower = content.lower()
+        content_lower = str(content).lower()
         
         for domain, keywords in domain_keywords.items():
             if any(keyword in content_lower for keyword in keywords):
@@ -562,7 +562,7 @@ class ReasoningClassifier:
         certainty_indicators = ["must", "always", "never", "definitely", "certainly", "absolutely"]
         probability_indicators = ["might", "could", "probably", "likely", "possible", "uncertain"]
         
-        content_lower = content.lower()
+        content_lower = str(content).lower()
         
         certainty_score = sum(1 for indicator in certainty_indicators if indicator in content_lower)
         probability_score = sum(1 for indicator in probability_indicators if indicator in content_lower)
@@ -589,7 +589,7 @@ class ReasoningClassifier:
     async def _determine_required_resource_types(self, content: str, domain: str) -> List[ResourceType]:
         """Determine what types of PRSM resources are needed for this query component"""
         
-        content_lower = content.lower()
+        content_lower = str(content).lower()
         required_types = []
         
         # Always include research papers for evidence
@@ -906,7 +906,7 @@ class MultiModalReasoningEngine:
         }
         
         # PRSM resource discovery components
-        self.knowledge_system = KnowledgeSystem()
+        self.knowledge_system = UnifiedKnowledgeSystem()
         self.semantic_embedding_engine = SemanticEmbeddingEngine()
         self.ipfs_client = PRSMIPFSClient()
         self.information_space_service = InformationSpaceService()
@@ -919,7 +919,7 @@ class MultiModalReasoningEngine:
         
         # PRSM marketplace integration components
         self.marketplace_service = RealMarketplaceService()
-        self.recommendation_engine = RecommendationEngine()
+        self.recommendation_engine = MarketplaceRecommendationEngine()
         self.marketplace_integration = MarketplaceIntegration()
         self.budget_manager = FTNSBudgetManager()
         
@@ -1510,7 +1510,7 @@ class MultiModalReasoningEngine:
         """Extract evidence from component content for probabilistic reasoning"""
         
         evidence = []
-        content = component.content.lower()
+        content = str(component.content).lower()
         
         # Look for evidence indicators
         evidence_patterns = [
@@ -1751,8 +1751,8 @@ class MultiModalReasoningEngine:
         # Simplified consistency check
         # In production, would use more sophisticated semantic analysis
         
-        conclusion1 = result1.conclusion.lower()
-        conclusion2 = result2.conclusion.lower()
+        conclusion1 = str(result1.conclusion).lower()
+        conclusion2 = str(result2.conclusion).lower()
         
         # Check for contradictory keywords
         positive_keywords = ["yes", "true", "correct", "likely", "probable", "supports"]
@@ -2018,9 +2018,9 @@ class MultiModalReasoningEngine:
             return ResourceType(result["resource_type"])
         
         # Infer from content and metadata
-        content_type = result.get("content_type", "").lower()
-        file_extension = result.get("file_extension", "").lower()
-        title = result.get("title", "").lower()
+        content_type = str(result.get("content_type", "")).lower()
+        file_extension = str(result.get("file_extension", "")).lower()
+        title = str(result.get("title", "")).lower()
         
         # Research papers
         if any(keyword in content_type for keyword in ["paper", "article", "preprint", "journal"]):

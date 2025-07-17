@@ -347,7 +347,7 @@ class CounterfactualReasoningEngine:
     async def _classify_counterfactual_type(self, query: str) -> CounterfactualType:
         """Classify the type of counterfactual query"""
         
-        query_lower = query.lower()
+        query_lower = str(query).lower()
         
         # Pattern matching for different types
         if any(pattern in query_lower for pattern in ["what if", "if only", "suppose", "imagine"]):
@@ -434,7 +434,7 @@ class CounterfactualReasoningEngine:
             r'if (.+?) then'
         ]
         
-        query_lower = query.lower()
+        query_lower = str(query).lower()
         
         for pattern in intervention_patterns:
             matches = re.findall(pattern, query_lower)
@@ -498,7 +498,7 @@ class CounterfactualReasoningEngine:
         changes = {}
         
         # Parse intervention components
-        intervention_lower = intervention.lower()
+        intervention_lower = str(intervention).lower()
         
         # Handle different intervention types
         if any(word in intervention_lower for word in ["not", "didn't", "hadn't", "without"]):
@@ -546,7 +546,7 @@ class CounterfactualReasoningEngine:
     async def _classify_intervention_type(self, intervention: str) -> InterventionType:
         """Classify the type of intervention"""
         
-        intervention_lower = intervention.lower()
+        intervention_lower = str(intervention).lower()
         
         if any(word in intervention_lower for word in ["not", "without", "didn't", "hadn't"]):
             return InterventionType.REMOVAL
@@ -583,15 +583,15 @@ class CounterfactualReasoningEngine:
             return float(numbers[0])
         
         # Extract qualitative values
-        if any(word in intervention.lower() for word in ["true", "false", "yes", "no"]):
-            return any(word in intervention.lower() for word in ["true", "yes"])
+        if any(word in str(intervention).lower() for word in ["true", "false", "yes", "no"]):
+            return any(word in str(intervention).lower() for word in ["true", "yes"])
         
         return intervention
     
     async def _determine_temporal_relation(self, query: str, intervention: str) -> TemporalRelation:
         """Determine the temporal relation of the intervention"""
         
-        combined_text = (query + " " + intervention).lower()
+        combined_text = str(query + " " + intervention).lower()
         
         if any(word in combined_text for word in ["before", "earlier", "prior"]):
             return TemporalRelation.BEFORE
@@ -684,7 +684,7 @@ class CounterfactualReasoningEngine:
             "social": ["society", "community", "culture", "social", "group"]
         }
         
-        query_lower = query.lower()
+        query_lower = str(query).lower()
         
         for domain, keywords in domain_keywords.items():
             if any(keyword in query_lower for keyword in keywords):
@@ -698,13 +698,13 @@ class CounterfactualReasoningEngine:
         constraints = []
         
         # Extract constraint indicators
-        if any(word in query.lower() for word in ["must", "should", "cannot", "impossible"]):
+        if any(word in str(query).lower() for word in ["must", "should", "cannot", "impossible"]):
             constraints.append("logical_constraints")
         
-        if any(word in query.lower() for word in ["physically", "naturally", "biologically"]):
+        if any(word in str(query).lower() for word in ["physically", "naturally", "biologically"]):
             constraints.append("physical_constraints")
         
-        if any(word in query.lower() for word in ["realistically", "practically", "feasibly"]):
+        if any(word in str(query).lower() for word in ["realistically", "practically", "feasibly"]):
             constraints.append("practical_constraints")
         
         if context and "constraints" in context:
@@ -735,7 +735,7 @@ class CounterfactualReasoningEngine:
         
         # Remove duplicates and stop words
         stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
-        entities = list(set([entity.lower() for entity in entities if entity.lower() not in stop_words]))
+        entities = list(set([str(entity).lower() for entity in entities if str(entity).lower() not in stop_words]))
         
         return entities[:5]  # Limit to top 5 entities
     
@@ -771,7 +771,7 @@ class CounterfactualReasoningEngine:
         for pattern in relationship_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for entity1, relation, entity2 in matches:
-                relationships.append((entity1.lower(), relation.lower(), entity2.lower()))
+                relationships.append((str(entity1).lower(), str(relation).lower(), str(entity2).lower()))
         
         return relationships
     

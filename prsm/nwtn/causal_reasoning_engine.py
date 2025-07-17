@@ -394,7 +394,7 @@ class CausalReasoningEngine:
                     match = match[0]
                 
                 # Filter out common words
-                if match.lower() not in ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by']:
+                if str(match).lower() not in ['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by']:
                     var_id = f"var_{obs_id}_{len(variables)}"
                     
                     # Determine variable type
@@ -402,7 +402,7 @@ class CausalReasoningEngine:
                     
                     variable = CausalVariable(
                         id=var_id,
-                        name=match.lower(),
+                        name=str(match).lower(),
                         description=f"Variable '{match}' extracted from observation",
                         variable_type=var_type
                     )
@@ -413,8 +413,8 @@ class CausalReasoningEngine:
     async def _determine_variable_type(self, variable_name: str, observation: str) -> str:
         """Determine the type of a variable"""
         
-        var_lower = variable_name.lower()
-        obs_lower = observation.lower()
+        var_lower = str(variable_name).lower()
+        obs_lower = str(observation).lower()
         
         # Numeric indicators
         if any(indicator in obs_lower for indicator in ["amount", "number", "level", "rate", "count", "measure"]):
@@ -439,7 +439,7 @@ class CausalReasoningEngine:
         
         for var in variables:
             # Normalize name for comparison
-            normalized_name = var.name.lower().strip()
+            normalized_name = str(var.name).lower().strip()
             
             if normalized_name not in seen_names:
                 unique_variables.append(var)
@@ -500,16 +500,16 @@ class CausalReasoningEngine:
     async def _find_matching_variable(self, text: str, variables: List[CausalVariable]) -> Optional[CausalVariable]:
         """Find variable that matches the given text"""
         
-        text_lower = text.lower().strip()
+        text_lower = str(text).lower().strip()
         
         # Direct name match
         for var in variables:
-            if var.name.lower() in text_lower or text_lower in var.name.lower():
+            if str(var.name).lower() in text_lower or text_lower in str(var.name).lower():
                 return var
         
         # Partial match
         for var in variables:
-            var_words = set(var.name.lower().split())
+            var_words = set(str(var.name).lower().split())
             text_words = set(text_lower.split())
             
             if var_words & text_words:  # If there's any overlap
@@ -546,14 +546,14 @@ class CausalReasoningEngine:
         pattern_keywords = pattern.get("keywords", [])
         
         for obs in observations:
-            obs_lower = obs.lower()
+            obs_lower = str(obs).lower()
             
             # Check if observation matches pattern
             if any(keyword in obs_lower for keyword in pattern_keywords):
                 # Extract variables that might be involved
                 involved_vars = []
                 for var in variables:
-                    if var.name.lower() in obs_lower:
+                    if str(var.name).lower() in obs_lower:
                         involved_vars.append(var)
                 
                 # Create relationships based on pattern
@@ -621,8 +621,8 @@ class CausalReasoningEngine:
         validation_score = 0.0
         
         # Check for consistent mentions
-        cause_mentions = sum(1 for obs in observations if relationship.cause.name.lower() in obs.lower())
-        effect_mentions = sum(1 for obs in observations if relationship.effect.name.lower() in obs.lower())
+        cause_mentions = sum(1 for obs in observations if str(relationship.cause.name).lower() in str(obs).lower())
+        effect_mentions = sum(1 for obs in observations if str(relationship.effect.name).lower() in str(obs).lower())
         
         if cause_mentions > 0 and effect_mentions > 0:
             validation_score += 0.3
@@ -631,10 +631,10 @@ class CausalReasoningEngine:
         causal_indicators = ["causes", "leads to", "results in", "produces", "triggers", "because of", "due to"]
         
         for obs in observations:
-            if (relationship.cause.name.lower() in obs.lower() and 
-                relationship.effect.name.lower() in obs.lower()):
+            if (str(relationship.cause.name).lower() in str(obs).lower() and 
+                str(relationship.effect.name).lower() in str(obs).lower()):
                 
-                if any(indicator in obs.lower() for indicator in causal_indicators):
+                if any(indicator in str(obs).lower() for indicator in causal_indicators):
                     validation_score += 0.4
                     break
         
@@ -642,7 +642,7 @@ class CausalReasoningEngine:
         mechanism_indicators = ["mechanism", "process", "pathway", "method", "how", "through"]
         
         for obs in observations:
-            if any(indicator in obs.lower() for indicator in mechanism_indicators):
+            if any(indicator in str(obs).lower() for indicator in mechanism_indicators):
                 validation_score += 0.2
                 break
         
@@ -650,10 +650,10 @@ class CausalReasoningEngine:
         dose_indicators = ["more", "less", "increase", "decrease", "higher", "lower"]
         
         for obs in observations:
-            if (relationship.cause.name.lower() in obs.lower() and 
-                relationship.effect.name.lower() in obs.lower()):
+            if (str(relationship.cause.name).lower() in str(obs).lower() and 
+                str(relationship.effect.name).lower() in str(obs).lower()):
                 
-                if any(indicator in obs.lower() for indicator in dose_indicators):
+                if any(indicator in str(obs).lower() for indicator in dose_indicators):
                     validation_score += 0.1
                     break
         
@@ -676,11 +676,11 @@ class CausalReasoningEngine:
                 var_with_effect = 0
                 
                 for obs in observations:
-                    obs_lower = obs.lower()
-                    if var.name.lower() in obs_lower:
-                        if relationship.cause.name.lower() in obs_lower:
+                    obs_lower = str(obs).lower()
+                    if str(var.name).lower() in obs_lower:
+                        if str(relationship.cause.name).lower() in obs_lower:
                             var_with_cause += 1
-                        if relationship.effect.name.lower() in obs_lower:
+                        if str(relationship.effect.name).lower() in obs_lower:
                             var_with_effect += 1
                 
                 # If variable appears with both cause and effect, it might be confounding
@@ -715,18 +715,18 @@ class CausalReasoningEngine:
         temporal_score = 0.5  # Default neutral score
         
         for obs in observations:
-            obs_lower = obs.lower()
+            obs_lower = str(obs).lower()
             
             # Check if both cause and effect are mentioned
-            if (relationship.cause.name.lower() in obs_lower and 
-                relationship.effect.name.lower() in obs_lower):
+            if (str(relationship.cause.name).lower() in obs_lower and 
+                str(relationship.effect.name).lower() in obs_lower):
                 
                 # Look for temporal indicators
                 for indicator, score in temporal_indicators.items():
                     if indicator in obs_lower:
                         # Check relative position
-                        cause_pos = obs_lower.find(relationship.cause.name.lower())
-                        effect_pos = obs_lower.find(relationship.effect.name.lower())
+                        cause_pos = obs_lower.find(str(relationship.cause.name).lower())
+                        effect_pos = obs_lower.find(str(relationship.effect.name).lower())
                         indicator_pos = obs_lower.find(indicator)
                         
                         # Adjust score based on temporal logic
@@ -873,11 +873,11 @@ class CausalReasoningEngine:
         co_occurrence_count = 0
         
         for obs in observations:
-            obs_lower = obs.lower()
-            if variable.name.lower() in obs_lower:
+            obs_lower = str(obs).lower()
+            if str(variable.name).lower() in obs_lower:
                 # Count co-occurrences with other variables
                 for other_var in model.variables:
-                    if other_var != variable and other_var.name.lower() in obs_lower:
+                    if other_var != variable and str(other_var.name).lower() in obs_lower:
                         co_occurrence_count += 1
         
         # Higher co-occurrence suggests potential confounding
@@ -888,8 +888,8 @@ class CausalReasoningEngine:
         common_cause_indicators = ["common", "shared", "underlying", "both", "all"]
         
         for obs in observations:
-            obs_lower = obs.lower()
-            if variable.name.lower() in obs_lower:
+            obs_lower = str(obs).lower()
+            if str(variable.name).lower() in obs_lower:
                 if any(indicator in obs_lower for indicator in common_cause_indicators):
                     confounder_score += 0.3
                     break
@@ -898,8 +898,8 @@ class CausalReasoningEngine:
         third_var_indicators = ["third", "additional", "another", "also", "factor", "influence"]
         
         for obs in observations:
-            obs_lower = obs.lower()
-            if variable.name.lower() in obs_lower:
+            obs_lower = str(obs).lower()
+            if str(variable.name).lower() in obs_lower:
                 if any(indicator in obs_lower for indicator in third_var_indicators):
                     confounder_score += 0.2
                     break

@@ -1,0 +1,30 @@
+{
+  "timestamp": "2025-07-16 21:10:43",
+  "system_resources": {
+    "cpu_percent": 14.8,
+    "memory_percent": 73.8,
+    "memory_available_gb": 4.1912994384765625,
+    "disk_free_gb": 718.1800537109375,
+    "disk_percent": 22.896579634125995
+  },
+  "processing_stats": {
+    "completed_batches": 2448,
+    "papers_processed": 78336,
+    "avg_batch_size_mb": 0.08188333511352539,
+    "estimated_total_size_gb": 0.3777508545666933
+  },
+  "bottlenecks": [
+    "MULTIPLE_EMBEDDING_PROCESSES"
+  ],
+  "optimizations": {
+    "recommended_batch_size": 32,
+    "recommended_processes": 2,
+    "current_batch_size": 32,
+    "optimization_potential": "MEDIUM"
+  },
+  "recommendations": [
+    "Consolidate to single optimized process"
+  ],
+  "monitoring_duration_minutes": 15,
+  "total_reports": 15
+}
