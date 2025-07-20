@@ -287,7 +287,7 @@ class BulkDatasetProcessor:
         return True
     
     async def _store_paper(self, paper: Dict[str, Any]):
-        """Store paper using storage manager"""
+        """Store paper using storage manager and database"""
         
         try:
             # Store main content
@@ -299,10 +299,83 @@ class BulkDatasetProcessor:
                 content_type="content"
             )
             
+            # Also store in arxiv_papers database table
+            await self._store_paper_in_database(paper)
+            
             self.stats["total_stored"] += 1
             
         except Exception as e:
             logger.error(f"Failed to store paper {paper.get('id', 'unknown')}: {e}")
+    
+    async def _store_paper_in_database(self, paper: Dict[str, Any]):
+        """Store paper metadata in arxiv_papers database table"""
+        
+        try:
+            if not hasattr(self.storage_manager, 'storage_db') or not self.storage_manager.storage_db:
+                return
+            
+            # Create arxiv_papers table if it doesn't exist
+            await self._ensure_arxiv_papers_table()
+            
+            # Insert paper data
+            cursor = self.storage_manager.storage_db.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO arxiv_papers 
+                (id, title, abstract, authors, arxiv_id, publish_date, categories, domain, 
+                 journal_ref, submitter, source, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                paper.get("id", ""),
+                paper.get("title", ""),
+                paper.get("abstract", ""),
+                paper.get("authors", "") if isinstance(paper.get("authors"), str) else str(paper.get("authors", "")),
+                paper.get("arxiv_id", paper.get("id", "")),
+                paper.get("published_date", ""),
+                ",".join(paper.get("categories", [])) if paper.get("categories") else "",
+                paper.get("domain", ""),
+                paper.get("journal_ref", ""),
+                paper.get("submitter", ""),
+                paper.get("source", "bulk_processor"),
+                datetime.now(timezone.utc).isoformat()
+            ))
+            self.storage_manager.storage_db.commit()
+            
+        except Exception as e:
+            logger.warning(f"Failed to store paper in database: {e}")
+    
+    async def _ensure_arxiv_papers_table(self):
+        """Ensure the arxiv_papers table exists"""
+        
+        try:
+            cursor = self.storage_manager.storage_db.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS arxiv_papers (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    abstract TEXT NOT NULL,
+                    authors TEXT,
+                    arxiv_id TEXT,
+                    publish_date TEXT,
+                    categories TEXT,
+                    domain TEXT,
+                    journal_ref TEXT,
+                    submitter TEXT,
+                    source TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create indexes for faster searching
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_arxiv_title ON arxiv_papers(title)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_arxiv_domain ON arxiv_papers(domain)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_arxiv_categories ON arxiv_papers(categories)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_arxiv_publish_date ON arxiv_papers(publish_date)")
+            
+            self.storage_manager.storage_db.commit()
+            
+        except Exception as e:
+            logger.error(f"Failed to create arxiv_papers table: {e}")
     
     async def process_sample_dataset(self, sample_size: int = 1000):
         """Process a small sample for testing"""

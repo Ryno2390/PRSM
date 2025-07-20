@@ -33,6 +33,9 @@ class IntegrationPlatform(str, Enum):
     DEEPSEEK = "deepseek"
     QWEN = "qwen"
     MISTRAL = "mistral"
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    CUSTOM = "custom"
 
 
 class ImportStatus(str, Enum):

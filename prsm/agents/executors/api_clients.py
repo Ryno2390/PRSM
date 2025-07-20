@@ -29,8 +29,7 @@ logger = structlog.get_logger(__name__)
 
 
 class ModelProvider(Enum):
-    """Supported AI model providers"""
-    OPENAI = "openai"
+    """Supported AI model providers - NWTN uses Claude API only"""
     ANTHROPIC = "anthropic"
     HUGGINGFACE = "huggingface"
     COHERE = "cohere"
@@ -199,77 +198,7 @@ class BaseModelClient(ABC):
         await self.close()
 
 
-class OpenAIClient(BaseModelClient):
-    """
-    OpenAI API client for GPT models
-    
-    🤖 MODELS SUPPORTED:
-    - GPT-4 (gpt-4, gpt-4-turbo)
-    - GPT-3.5 (gpt-3.5-turbo)
-    - Custom fine-tuned models
-    """
-    
-    def __init__(self, api_key: str, **kwargs):
-        super().__init__(api_key, **kwargs)
-        self.base_url = "https://api.openai.com/v1"
-        
-    def _get_headers(self) -> Dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-    
-    async def _setup_client(self):
-        """Test API connectivity"""
-        try:
-            async with self.session.get(f"{self.base_url}/models") as response:
-                if response.status == 200:
-                    logger.info("OpenAI client initialized successfully")
-                else:
-                    logger.warning("OpenAI API returned non-200 status", status=response.status)
-        except Exception as e:
-            logger.error("Failed to initialize OpenAI client", error=str(e))
-    
-    def _get_provider(self) -> ModelProvider:
-        return ModelProvider.OPENAI
-    
-    async def _execute_api_request(self, request: ModelExecutionRequest) -> Dict[str, Any]:
-        """Execute OpenAI API request"""
-        # Format messages according to OpenAI chat format
-        messages = []
-        if request.system_prompt:
-            messages.append({"role": "system", "content": request.system_prompt})
-        messages.append({"role": "user", "content": request.prompt})
-        
-        payload = {
-            "model": request.model_id,
-            "messages": messages,
-            "max_tokens": request.max_tokens,
-            "temperature": request.temperature
-        }
-        
-        async with self.session.post(
-            f"{self.base_url}/chat/completions",
-            json=payload
-        ) as response:
-            if response.status == 200:
-                return await response.json()
-            else:
-                error_data = await response.json()
-                error_msg = self._parse_error_response(error_data, response.status)
-                raise Exception(f"OpenAI API error: {error_msg}")
-    
-    def _parse_success_response(self, data: Dict[str, Any], request: ModelExecutionRequest) -> Dict[str, Any]:
-        """Parse OpenAI success response"""
-        return {
-            "content": data["choices"][0]["message"]["content"],
-            "token_usage": data.get("usage", {}),
-            "metadata": {"finish_reason": data["choices"][0].get("finish_reason")}
-        }
-    
-    def _parse_error_response(self, error_data: Dict[str, Any], status_code: int) -> str:
-        """Parse OpenAI error response"""
-        return error_data.get("error", {}).get("message", f"HTTP {status_code}")
+# OpenAI client removed - NWTN uses Claude API only
 
 
 class AnthropicClient(BaseModelClient):
@@ -538,6 +467,49 @@ class ModelClientRegistry:
         self.provider_configs[provider] = config
         logger.info(f"Registered provider: {provider.value}")
     
+    async def _create_fallback_config(self, provider: ModelProvider) -> Dict[str, Any]:
+        """Create fallback configuration from secure credential system or environment variables"""
+        import os
+        
+        # First try to get credentials from secure credential system
+        try:
+            from ...integrations.security.secure_api_client_factory import SecureClientType, secure_client_factory
+            
+            # Map provider to secure client type
+            provider_mapping = {
+                ModelProvider.ANTHROPIC: SecureClientType.ANTHROPIC,
+                ModelProvider.HUGGINGFACE: SecureClientType.HUGGINGFACE,
+            }
+            
+            if provider in provider_mapping:
+                client_type = provider_mapping[provider]
+                
+                # Try to get system credentials
+                credentials = await secure_client_factory._get_secure_credentials(client_type, "system")
+                if credentials:
+                    logger.info(f"Using secure credentials for {provider.value}")
+                    return credentials
+                    
+        except Exception as e:
+            logger.warning(f"Failed to get secure credentials for {provider.value}: {e}")
+        
+        # Fallback to environment variables
+        logger.warning(f"No secure configuration found for {provider.value}, attempting fallback from environment variables")
+        
+        # OpenAI removed - NWTN uses Claude API only
+        if provider == ModelProvider.ANTHROPIC:
+            api_key = os.getenv('ANTHROPIC_API_KEY')
+            if api_key:
+                return {'api_key': api_key}
+        elif provider == ModelProvider.HUGGINGFACE:
+            api_key = os.getenv('HUGGINGFACE_API_KEY')
+            if api_key:
+                return {'api_key': api_key}
+        
+        # If no fallback is available, raise an error
+        raise ValueError(f"No configuration or fallback credentials available for {provider.value}")
+    
+    
     async def get_client(self, provider: ModelProvider, model_id: str) -> BaseModelClient:
         """Get or create client for provider"""
         client_key = f"{provider.value}:{model_id}"
@@ -545,9 +517,12 @@ class ModelClientRegistry:
         if client_key not in self.clients:
             config = self.provider_configs.get(provider, {})
             
-            if provider == ModelProvider.OPENAI:
-                client = OpenAIClient(**config)
-            elif provider == ModelProvider.ANTHROPIC:
+            # If no configuration is available, try to create a fallback configuration
+            if not config and provider != ModelProvider.LOCAL:
+                config = await self._create_fallback_config(provider)
+            
+            # OpenAI removed - NWTN uses Claude API only
+            if provider == ModelProvider.ANTHROPIC:
                 client = AnthropicClient(**config)
             elif provider == ModelProvider.HUGGINGFACE:
                 client = HuggingFaceClient(**config)

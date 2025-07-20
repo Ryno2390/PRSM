@@ -137,7 +137,7 @@ class PRSMSettings(BaseSettings):
     nwtn_enabled: bool = Field(default=True, env="PRSM_NWTN_ENABLED")
     nwtn_max_context_per_query: int = Field(default=1000, env="PRSM_NWTN_MAX_CONTEXT")
     nwtn_min_context_cost: int = Field(default=10, env="PRSM_NWTN_MIN_CONTEXT_COST")
-    nwtn_default_model: str = Field(default="gpt-4", env="PRSM_NWTN_MODEL")
+    nwtn_default_model: str = Field(default="claude-3-5-sonnet-20241022", env="PRSM_NWTN_MODEL")
     nwtn_temperature: float = Field(default=0.7, env="PRSM_NWTN_TEMPERATURE")
     
     # === AI Model Configuration ===

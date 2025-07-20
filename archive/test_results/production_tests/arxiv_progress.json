@@ -1,0 +1,10 @@
+{
+  "processed": 56852,
+  "accepted": 56779,
+  "target": 150000,
+  "elapsed_seconds": 90730.8452308178,
+  "timestamp": "2025-07-17T17:30:22.084204",
+  "rate_per_second": 0.626600577293967,
+  "acceptance_rate": 99.87159642580737,
+  "estimated_completion": 148656.10306691437
+}

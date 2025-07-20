@@ -734,3 +734,35 @@ class CircuitBreakerNetwork:
         else:
             self.logger.warning("Unknown consensus action", action=action)
             return False
+    
+    def is_open(self, model_id: str = None) -> bool:
+        """
+        Check if circuit breaker is open (blocking requests).
+        
+        Args:
+            model_id: Optional specific model ID to check. If None, checks network-wide status.
+            
+        Returns:
+            True if circuit breaker is open and blocking requests
+        """
+        try:
+            if model_id:
+                # Check specific model circuit breaker
+                if model_id in self.model_breakers:
+                    breaker = self.model_breakers[model_id]
+                    return breaker.state == CircuitState.OPEN
+                else:
+                    # Model not found, assume closed (safe default)
+                    return False
+            else:
+                # Check network-wide status - if any critical models are open
+                critical_open = any(
+                    breaker.state == CircuitState.OPEN 
+                    for breaker in self.model_breakers.values()
+                )
+                return critical_open
+                
+        except Exception as e:
+            self.logger.error("Error checking circuit breaker status", error=str(e))
+            # Fail-safe: return True (block requests) on error
+            return True

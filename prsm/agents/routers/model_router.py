@@ -693,10 +693,10 @@ class ModelRouter(BaseAgent):
                     logger.warning("Chemistry hybrid executor not available, using mock")
                     self.hybrid_executors["chemistry"] = "mock_chemistry_hybrid"
                     
-            # Create chemistry hybrid candidate
+            # Create chemistry hybrid candidate - use Claude-3.5-Sonnet for robust performance
             chemistry_candidate = ModelCandidate(
-                model_id="chemistry_hybrid_executor",
-                name="Chemistry Hybrid Architecture",
+                model_id="claude-3-5-sonnet-20241022",
+                name="Claude-3.5-Sonnet Architecture",
                 specialization="chemistry",
                 model_type=ModelType.GENERAL,
                 source=ModelSource.HYBRID_EXECUTOR,

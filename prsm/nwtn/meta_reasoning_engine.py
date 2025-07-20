@@ -24,7 +24,7 @@ from typing import Dict, List, Optional, Any, Tuple, Set
 from dataclasses import dataclass, field
 from enum import Enum
 from itertools import permutations, combinations
-from uuid import uuid4
+from uuid import uuid4, UUID
 from datetime import datetime, timezone, timedelta
 import statistics
 import weakref
@@ -40,6 +40,10 @@ import hashlib
 import gc
 
 import structlog
+
+# Import provenance and FTNS services
+from prsm.provenance.enhanced_provenance_system import EnhancedProvenanceSystem
+from prsm.tokenomics.ftns_service import FTNSService
 
 # Optional psutil import for memory monitoring
 try:
@@ -5854,6 +5858,8 @@ class MetaReasoningResult:
     emergent_properties: List[str] = field(default_factory=list)
     cross_engine_interactions: Dict[str, Any] = field(default_factory=dict)
     quality_metrics: Dict[str, float] = field(default_factory=dict)
+    content_sources: List[str] = field(default_factory=list)  # FERRARI FUEL LINE: Track external content
+    original_query: str = ""  # Store original query for source link fallback
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     def __post_init__(self):
@@ -5953,9 +5959,9 @@ class ThinkingConfiguration:
             ThinkingMode.DEEP: cls(
                 mode=ThinkingMode.DEEP,
                 max_permutations=5040,  # 7! = 5040 full permutations
-                timeout_seconds=1800.0,
+                timeout_seconds=None,  # NO TIMEOUT - runs until all permutations complete
                 ftns_cost_multiplier=10.0,
-                description="Deep analysis with full permutation exploration"
+                description="Deep analysis with full permutation exploration - NO TIME LIMITS"
             )
         }
 
@@ -5976,6 +5982,14 @@ class MetaReasoningEngine:
         # Initialize world model core
         self.world_model = WorldModelCore()
         self.world_model_integration = WorldModelIntegration(self.world_model)
+        
+        # Initialize provenance and FTNS services
+        self.provenance_system = EnhancedProvenanceSystem()
+        self.ftns_service = FTNSService()
+        self.used_content: List[str] = []  # Track content used in reasoning
+        
+        # Initialize external knowledge base for Ferrari fuel line
+        self.external_knowledge_base = None  # Will be set by initialize_external_knowledge_base
         
         # Initialize all reasoning engines
         self.reasoning_engines = {
@@ -6012,6 +6026,9 @@ class MetaReasoningEngine:
             (ReasoningEngine.DEDUCTIVE, ReasoningEngine.PROBABILISTIC): "logical_frameworks",
             (ReasoningEngine.COUNTERFACTUAL, ReasoningEngine.PROBABILISTIC): "scenario_quantification"
         }
+        
+        # Initialize progress visualizer
+        self.progress_visualizer = ProcessingProgressVisualizer()
         
         # Initialize health monitoring system
         self.health_monitor = EngineHealthMonitor()
@@ -6053,6 +6070,17 @@ class MetaReasoningEngine:
                    pattern_recognizer_enabled=self.pattern_recognizer.enabled,
                    context_passing_enabled=self.context_passing_engine.enabled)
     
+    async def initialize_external_knowledge_base(self):
+        """Initialize external knowledge base for Ferrari fuel line"""
+        try:
+            from prsm.nwtn.external_storage_config import get_external_knowledge_base
+            self.external_knowledge_base = await get_external_knowledge_base()
+            logger.info("External knowledge base initialized for MetaReasoningEngine",
+                       available=self.external_knowledge_base.initialized if self.external_knowledge_base else False)
+        except Exception as e:
+            logger.error(f"Failed to initialize external knowledge base: {e}")
+            self.external_knowledge_base = None
+    
     async def meta_reason(self, 
                          query: str, 
                          context: Dict[str, Any],
@@ -6079,11 +6107,84 @@ class MetaReasoningEngine:
         start_time = time.time()
         config = custom_config or self.thinking_configs[thinking_mode]
         
+        # Initialize provenance tracking for this reasoning session
+        user_id = context.get('user_id', 'anonymous') if context else 'anonymous'
+        session_id = f"{user_id}_{int(time.time())}"
+        self.used_content.clear()  # Reset content tracking for this session
+        
+        logger.info("Initializing provenance tracking", 
+                   session_id=session_id,
+                   user_id=user_id)
+        
+        # Create complexity analysis for progress tracking
+        complexity_analysis = ProblemComplexityAnalysis(
+            complexity_category=thinking_mode.value,
+            reasoning_engines_needed=[engine.value for engine in ReasoningEngine][:3],  # Use first 3 engines
+            estimated_processing_time=config.timeout_seconds
+        )
+        
+        # Start progress session with the main session_id
+        progress_session_id = self.progress_visualizer.start_processing_session(
+            user_id=user_id,
+            mode=thinking_mode.value,
+            estimated_time=config.timeout_seconds,
+            complexity_analysis=complexity_analysis,
+            session_id=session_id  # Use the main session_id
+        )
+        
+        logger.info("Progress session started", 
+                   progress_session_id=progress_session_id,
+                   expected_session_id=session_id)
+        
         # Enhance context with world model knowledge if requested
         enhanced_context = context.copy() if context else {}
         if include_world_model:
             relevant_knowledge = self.get_world_model_knowledge(query, min_certainty=0.9)
             enhanced_context['world_model_knowledge'] = relevant_knowledge
+            
+            # FERRARI FUEL LINE: Search external knowledge base for relevant papers
+            external_papers = []
+            logger.info("FERRARI DEBUG: Checking external knowledge base", 
+                       kb_available=self.external_knowledge_base is not None,
+                       kb_initialized=self.external_knowledge_base.initialized if self.external_knowledge_base else False)
+            
+            if self.external_knowledge_base and self.external_knowledge_base.initialized:
+                try:
+                    logger.info("FERRARI DEBUG: Starting external knowledge base search", query=query)
+                    external_papers = await self.external_knowledge_base.search_papers(query, max_results=20)
+                    logger.info("FERRARI DEBUG: External knowledge base search completed", 
+                               papers_found=len(external_papers))
+                    
+                    if external_papers:
+                        enhanced_context['external_papers'] = external_papers
+                        logger.info("External papers found for reasoning",
+                                   query=query[:50],
+                                   paper_count=len(external_papers))
+                        
+                        # Add paper content to relevant knowledge for tracking
+                        for paper in external_papers:
+                            paper_knowledge = {
+                                'content_id': paper.get('id'),
+                                'title': paper.get('title', ''),
+                                'certainty': 0.95,  # High certainty for published papers
+                                'source': 'external_knowledge_base',
+                                'authors': paper.get('authors', ''),
+                                'arxiv_id': paper.get('arxiv_id', ''),
+                                'abstract': paper.get('abstract', ''),
+                                'references': [paper.get('id')]
+                            }
+                            relevant_knowledge.append(paper_knowledge)
+                    else:
+                        logger.warning("FERRARI DEBUG: No external papers found for query", query=query)
+                except Exception as e:
+                    logger.error(f"Failed to search external knowledge base: {e}")
+                    import traceback
+                    logger.error(f"FERRARI DEBUG: Full traceback: {traceback.format_exc()}")
+            else:
+                logger.warning("FERRARI DEBUG: External knowledge base not available or not initialized")
+            
+            # Track world model and external knowledge usage for provenance
+            await self._track_knowledge_usage(relevant_knowledge, session_id, user_id, query)
             
             # Add high-certainty principles for reasoning guidance
             high_certainty_knowledge = [item for item in relevant_knowledge if item['certainty'] > 0.99]
@@ -6094,8 +6195,20 @@ class MetaReasoningEngine:
         result = MetaReasoningResult(
             id=str(uuid4()),
             query=query,
-            thinking_mode=thinking_mode
+            thinking_mode=thinking_mode,
+            original_query=query
         )
+        
+        # FERRARI FUEL LINE: Populate content sources from external papers
+        if external_papers:
+            result.content_sources = []
+            for paper in external_papers:
+                title = paper.get('title', 'Unknown Title')
+                authors = paper.get('authors', 'Unknown Authors')
+                source = f"{title} by {authors}"
+                result.content_sources.append(source)
+            logger.info("Content sources populated from external papers",
+                       source_count=len(result.content_sources))
         
         try:
             if thinking_mode == ThinkingMode.QUICK:
@@ -6124,13 +6237,21 @@ class MetaReasoningEngine:
                 result.reasoning_depth = 3
                 
             elif thinking_mode == ThinkingMode.DEEP:
-                # Deep mode: Full permutation exploration
+                # Deep mode: Full permutation exploration - NO TIME LIMITS!
+                logger.info("STARTING DEEP MODE - FULL PERMUTATION EXPLORATION", 
+                           permutations=config.max_permutations,
+                           note="This will take 30+ minutes to complete ALL sequences")
+                
+                # Run parallel reasoning first (no timeout constraints)
                 result.parallel_results = await self._parallel_reasoning(
-                    query, enhanced_context, timeout=config.timeout_seconds / 3  # Split timeout between parallel and sequential
+                    query, enhanced_context, timeout=600.0  # Allow 10 minutes for parallel phase
                 )
+                
+                # Run ALL sequential permutations - NO TIMEOUT!
                 result.sequential_results = await self._full_sequential_reasoning(
-                    query, enhanced_context, max_sequences=config.max_permutations, timeout=config.timeout_seconds * 2 / 3
+                    query, enhanced_context, max_sequences=config.max_permutations, timeout=None
                 )
+                
                 result.final_synthesis = await self._synthesize_comprehensive_results(
                     result.parallel_results, result.sequential_results, enhanced_context
                 )
@@ -6154,12 +6275,44 @@ class MetaReasoningEngine:
                        processing_time=result.total_processing_time,
                        ftns_cost=result.ftns_cost)
             
+            # Complete progress session
+            completion_result = self.progress_visualizer.complete_session(
+                session_id=progress_session_id,
+                final_result={
+                    "quality_score": result.get_overall_quality(),
+                    "confidence": result.meta_confidence,
+                    "processing_time": result.total_processing_time,
+                    "ftns_cost": result.ftns_cost
+                }
+            )
+            
+            logger.info("Progress session completed", 
+                       session_id=progress_session_id,
+                       completion_result=completion_result)
+            
             return result
             
         except Exception as e:
             logger.error("Meta-reasoning failed", error=str(e))
             result.total_processing_time = time.time() - start_time
             result.ftns_cost = self._calculate_ftns_cost(result, config)
+            
+            # Complete progress session even on failure
+            completion_result = self.progress_visualizer.complete_session(
+                session_id=progress_session_id,
+                final_result={
+                    "quality_score": 0.0,
+                    "confidence": 0.0,
+                    "processing_time": result.total_processing_time,
+                    "ftns_cost": result.ftns_cost,
+                    "error": str(e)
+                }
+            )
+            
+            logger.info("Progress session completed (with error)", 
+                       session_id=progress_session_id,
+                       completion_result=completion_result)
+            
             return result
     
     async def _parallel_reasoning(self, query: str, context: Dict[str, Any], timeout: float = 30.0) -> List[ReasoningResult]:
@@ -6476,49 +6629,103 @@ class MetaReasoningEngine:
                                        query: str, 
                                        context: Dict[str, Any],
                                        max_sequences: int = 5040,
-                                       timeout: float = 600.0) -> List[SequentialResult]:
-        """Execute reasoning engines in full sequential permutations"""
+                                       timeout: float = None) -> List[SequentialResult]:
+        """Execute reasoning engines in full sequential permutations - NO TIMEOUTS!"""
         
-        logger.info("Starting full sequential reasoning", max_sequences=max_sequences, timeout=timeout)
+        logger.info("Starting DEEP sequential reasoning - ALL PERMUTATIONS", 
+                   max_sequences=max_sequences, 
+                   note="NO TIME LIMITS - will run until completion")
         
         engines = list(self.reasoning_engines.keys())
         sequential_results = []
         
-        # Calculate timeout per sequence  
-        timeout_per_sequence = timeout / max_sequences if max_sequences > 0 else 60.0
-        
         start_time = time.time()
         
-        # Generate all 7! permutations
+        # Generate all 7! permutations - NO TIMEOUT CONSTRAINTS
         sequence_count = 0
+        total_permutations = len(list(permutations(engines)))
+        
+        logger.info("DEEP REASONING: Processing ALL permutations", 
+                   total_permutations=total_permutations,
+                   engines=len(engines))
+        
+        # Memory-efficient processing with checkpoints
+        checkpoint_interval = 500  # Save progress every 500 sequences
+        last_checkpoint = 0
+        
         for sequence in permutations(engines):
             if sequence_count >= max_sequences:
                 break
             
-            # Check if we're running out of time
-            elapsed = time.time() - start_time
-            if elapsed >= timeout:
-                logger.warning("Full sequential reasoning timeout", 
-                             elapsed=elapsed, 
-                             timeout=timeout,
-                             completed_sequences=sequence_count)
-                break
+            # Progress logging every 100 sequences with memory monitoring
+            if sequence_count % 100 == 0:
+                elapsed = time.time() - start_time
+                current_memory = self._get_memory_usage()
+                logger.info("DEEP REASONING PROGRESS", 
+                           completed=sequence_count,
+                           total=max_sequences,
+                           elapsed_minutes=elapsed/60,
+                           remaining=max_sequences-sequence_count,
+                           current_sequence=[e.value for e in sequence],
+                           memory_mb=current_memory)
+                
+                # Force garbage collection every 1000 sequences to prevent memory buildup
+                if sequence_count % 1000 == 0 and sequence_count > 0:
+                    import gc
+                    gc.collect()
+                    logger.info("Memory cleanup performed", sequence=sequence_count)
+            
+            # Checkpoint progress every 500 sequences
+            if sequence_count - last_checkpoint >= checkpoint_interval:
+                try:
+                    self._save_checkpoint(sequence_count, sequential_results)
+                    last_checkpoint = sequence_count
+                    logger.info("Checkpoint saved", sequence=sequence_count)
+                except Exception as e:
+                    logger.warning("Checkpoint save failed", error=str(e))
             
             try:
-                sequential_result = await asyncio.wait_for(
-                    self._execute_reasoning_sequence(list(sequence), query, context),
-                    timeout=timeout_per_sequence
-                )
-                sequential_results.append(sequential_result)
+                # Execute with enhanced error handling and retry logic
+                sequential_result = await self._execute_reasoning_sequence_with_retry(
+                    list(sequence), query, context, sequence_count)
+                if sequential_result:
+                    sequential_results.append(sequential_result)
                 sequence_count += 1
-            except asyncio.TimeoutError:
-                logger.warning("Sequence execution timeout", 
-                             sequence=sequence, 
-                             timeout=timeout_per_sequence)
+                
+            except Exception as e:
+                logger.warning("Sequence execution failed", 
+                             sequence=[e.value for e in sequence], 
+                             error=str(e),
+                             sequence_number=sequence_count,
+                             continuing=True)
+                # Continue with next sequence even if one fails
+                sequence_count += 1
                 continue
+                
+            # Memory pressure check - prevent system overload
+            if sequence_count % 200 == 0:
+                current_memory = self._get_memory_usage()
+                if current_memory > 1500:  # 1.5GB threshold
+                    logger.warning("High memory usage detected, performing cleanup", 
+                                 memory_mb=current_memory)
+                    import gc
+                    gc.collect()
+                    await asyncio.sleep(0.1)  # Brief pause for system recovery
         
-        logger.info("Full sequential reasoning completed", 
-                   sequences_executed=len(sequential_results))
+        # Final checkpoint
+        try:
+            self._save_checkpoint(sequence_count, sequential_results)
+            logger.info("Final checkpoint saved")
+        except Exception as e:
+            logger.warning("Final checkpoint save failed", error=str(e))
+        
+        total_time = time.time() - start_time
+        logger.info("DEEP SEQUENTIAL REASONING COMPLETED!", 
+                   sequences_executed=len(sequential_results),
+                   total_sequences_attempted=sequence_count,
+                   total_time_minutes=total_time/60,
+                   success_rate=len(sequential_results)/sequence_count if sequence_count > 0 else 0,
+                   final_memory_mb=self._get_memory_usage())
         
         return sequential_results
     
@@ -7687,12 +7894,83 @@ class MetaReasoningEngine:
         
         return True
     
+    def _save_checkpoint(self, sequence_count: int, results: List[SequentialResult]):
+        """Save checkpoint of current progress"""
+        try:
+            checkpoint_data = {
+                'sequence_count': sequence_count,
+                'results_count': len(results),
+                'timestamp': time.time(),
+                'memory_mb': self._get_memory_usage()
+            }
+            
+            # Save to temporary location
+            import json
+            checkpoint_path = "/tmp/nwtn_checkpoint.json"
+            with open(checkpoint_path, 'w') as f:
+                json.dump(checkpoint_data, f)
+                
+        except Exception as e:
+            logger.warning("Checkpoint save failed", error=str(e))
+    
+    async def _execute_reasoning_sequence_with_retry(self, 
+                                                   sequence: List[ReasoningEngine],
+                                                   query: str,
+                                                   context: Dict[str, Any],
+                                                   sequence_number: int) -> Optional[SequentialResult]:
+        """Execute a sequence with enhanced safety and error recovery"""
+        
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                # Add sequence number to context for tracking
+                enhanced_context = context.copy()
+                enhanced_context['sequence_number'] = sequence_number
+                
+                result = await self._execute_reasoning_sequence(sequence, query, enhanced_context)
+                return result
+                
+            except asyncio.TimeoutError as e:
+                retry_count += 1
+                logger.warning("Sequence timeout, retrying", 
+                             sequence_number=sequence_number,
+                             retry=retry_count,
+                             max_retries=max_retries)
+                if retry_count >= max_retries:
+                    logger.error("Sequence failed after max retries", 
+                               sequence_number=sequence_number)
+                    return None
+                await asyncio.sleep(1)  # Brief delay before retry
+                
+            except Exception as e:
+                retry_count += 1
+                logger.warning("Sequence execution error, retrying", 
+                             sequence_number=sequence_number,
+                             error=str(e),
+                             retry=retry_count)
+                if retry_count >= max_retries:
+                    logger.error("Sequence failed after max retries", 
+                               sequence_number=sequence_number,
+                               error=str(e))
+                    return None
+                await asyncio.sleep(1)  # Brief delay before retry
+        
+        return None
+    
     async def _cleanup_resources(self):
         """Clean up resources after engine execution"""
         
         # Force garbage collection
         import gc
         gc.collect()
+        
+        # Clear any cached data that might be consuming memory
+        if hasattr(self, 'interaction_patterns'):
+            # Keep only recent patterns to prevent memory bloat
+            if len(self.interaction_patterns) > 1000:
+                self.interaction_patterns = self.interaction_patterns[-500:]
         
         # Log current resource usage
         memory_usage = self._get_memory_usage()
@@ -7701,6 +7979,98 @@ class MetaReasoningEngine:
         logger.debug("Resource cleanup completed", 
                     memory_usage_mb=memory_usage, 
                     cpu_usage_percent=cpu_usage)
+    
+    async def _track_knowledge_usage(self, 
+                                   relevant_knowledge: List[Dict[str, Any]], 
+                                   session_id: str, 
+                                   user_id: str, 
+                                   query: str):
+        """
+        Track knowledge usage for provenance and royalty calculation
+        
+        This method records which pieces of content are used in NWTN reasoning
+        and ensures proper attribution and creator compensation.
+        
+        Args:
+            relevant_knowledge: List of knowledge items used in reasoning
+            session_id: Unique session identifier
+            user_id: User requesting the reasoning
+            query: Original query that triggered the usage
+        """
+        try:
+            for knowledge_item in relevant_knowledge:
+                # Extract content identifier (could be IPFS hash, content ID, etc.)
+                content_id = knowledge_item.get('content_id')
+                
+                # If no direct content_id, try to derive from other fields
+                if not content_id:
+                    # Try to find content ID from references or other metadata
+                    references = knowledge_item.get('references', [])
+                    if references and len(references) > 0:
+                        # Use the first reference as content identifier
+                        content_id = references[0]
+                    else:
+                        # Generate a content ID based on content hash
+                        content_str = str(knowledge_item.get('content', ''))
+                        content_id = hashlib.sha256(content_str.encode()).hexdigest()
+                
+                # Track this content as used in reasoning
+                self.used_content.append(content_id)
+                
+                # Record usage event in provenance system
+                try:
+                    # Convert content_id to UUID if it's a string
+                    if isinstance(content_id, str):
+                        # Try to parse as UUID, or create deterministic UUID from string
+                        try:
+                            content_uuid = UUID(content_id)
+                        except ValueError:
+                            # Create deterministic UUID from string hash
+                            hash_bytes = hashlib.sha256(content_id.encode()).digest()[:16]
+                            content_uuid = UUID(bytes=hash_bytes)
+                    else:
+                        content_uuid = content_id
+                    
+                    # Record the usage event
+                    await self.provenance_system.track_content_usage(
+                        content_id=content_uuid,
+                        user_id=user_id,
+                        session_id=session_id,
+                        usage_type="reasoning_source",
+                        context={
+                            "query": query,
+                            "reasoning_mode": "meta_reasoning",
+                            "certainty": knowledge_item.get('certainty', 0.0),
+                            "domain": knowledge_item.get('domain', 'unknown'),
+                            "category": knowledge_item.get('category', 'unknown')
+                        }
+                    )
+                    
+                    logger.debug("Knowledge usage tracked", 
+                               content_id=str(content_uuid),
+                               session_id=str(session_id),
+                               user_id=user_id,
+                               certainty=knowledge_item.get('certainty', 0.0))
+                
+                except Exception as usage_error:
+                    logger.warning("Failed to track knowledge usage in provenance system",
+                                 content_id=str(content_id),
+                                 error=str(usage_error))
+                    
+                    # Continue processing other knowledge items even if one fails
+                    continue
+            
+            logger.info("Knowledge usage tracking completed",
+                       session_id=str(session_id),
+                       user_id=user_id,
+                       items_tracked=len(relevant_knowledge),
+                       total_content_used=len(self.used_content))
+                       
+        except Exception as e:
+            logger.error("Knowledge usage tracking failed",
+                        session_id=str(session_id),
+                        user_id=user_id,
+                        error=str(e))
     
     # Health Monitoring API Methods
     
@@ -18806,10 +19176,13 @@ class ProcessingProgressVisualizer:
                                 user_id: str,
                                 mode: str,
                                 estimated_time: float,
-                                complexity_analysis: ProblemComplexityAnalysis) -> str:
+                                complexity_analysis: ProblemComplexityAnalysis,
+                                session_id: Optional[str] = None) -> str:
         """Start a processing session"""
         
-        session_id = f"{user_id}_{int(time.time())}"
+        # Use provided session_id or generate a timestamp-based one
+        if session_id is None:
+            session_id = f"{user_id}_{int(time.time())}"
         
         session_data = {
             "user_id": user_id,
@@ -18842,6 +19215,10 @@ class ProcessingProgressVisualizer:
             return {"error": "Session not found"}
         
         session = self.active_sessions[session_id]
+        
+        # Skip updates if session is already completed
+        if session.get("status") == "completed":
+            return {"error": "Session already completed"}
         
         # Update basic progress
         session["current_stage"] = stage
@@ -18889,10 +19266,23 @@ class ProcessingProgressVisualizer:
             "complexity_handled": session["complexity"]
         }
         
-        # Remove from active sessions
-        del self.active_sessions[session_id]
+        # Mark session as completed but keep it for grace period to handle late access
+        session["status"] = "completed"
+        session["completed_at"] = time.time()
+        
+        # Schedule cleanup after grace period (5 seconds)
+        import asyncio
+        asyncio.create_task(self._cleanup_session_after_delay(session_id, 5.0))
         
         return completion_data
+    
+    async def _cleanup_session_after_delay(self, session_id: str, delay_seconds: float):
+        """Clean up session after grace period"""
+        await asyncio.sleep(delay_seconds)
+        
+        if session_id in self.active_sessions:
+            del self.active_sessions[session_id]
+            logger.info(f"Session {session_id} cleaned up after grace period")
     
     def _update_quality_indicators(self, session: Dict[str, Any], quality_metrics: Dict[str, Any]):
         """Update quality indicators"""

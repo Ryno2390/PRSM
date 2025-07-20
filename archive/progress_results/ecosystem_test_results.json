@@ -1,0 +1,85 @@
+{
+  "ingestion_results": {
+    "papers_processed": 150000,
+    "embeddings_created": 150000,
+    "provenance_records": 150000,
+    "ftns_rewards_distributed": 75000.0,
+    "total_processing_time": 1112.5855000019073,
+    "errors": []
+  },
+  "prompt_results": [
+    {
+      "prompt_id": "creative_synthesis_1",
+      "prompt": "What novel experimental approaches could emerge from combining quantum computing principles with biological neural network architectures? Suggest 3 specific experiments that have never been attempted.",
+      "success": false,
+      "processing_time": 2506.57936501503,
+      "response_quality": 0.0,
+      "sources_used": 0,
+      "ftns_charged": 0.0,
+      "ftns_distributed": 0,
+      "economic_impact": {
+        "total_cost": 0.0,
+        "content_creator_payments": [],
+        "system_fee": 0.0,
+        "roi_for_prismatica": 0
+      },
+      "pipeline_metrics": {
+        "error": "Session 6f2b9cc0-1111-47f3-bfd6-10bfa4266556 not found"
+      },
+      "response_preview": "Error processing query: Session 6f2b9cc0-1111-47f3-bfd6-10bfa4266556 not found"
+    },
+    {
+      "prompt_id": "interdisciplinary_breakthrough_1",
+      "success": false,
+      "error": "Pipeline processing was cancelled or failed"
+    },
+    {
+      "prompt_id": "emergent_technology_1",
+      "success": false,
+      "error": "Pipeline processing was cancelled or failed"
+    },
+    {
+      "prompt_id": "complex_system_design_1",
+      "success": false,
+      "error": "Pipeline processing was cancelled or failed"
+    },
+    {
+      "prompt_id": "paradigm_shift_1",
+      "success": false,
+      "error": "Pipeline processing was cancelled or failed"
+    }
+  ],
+  "economic_results": {
+    "prismatica_initial_balance": 0.0,
+    "prismatica_final_balance": 75000.0,
+    "total_revenue_earned": 0,
+    "total_queries_processed": 0,
+    "average_revenue_per_query": 0.0,
+    "economic_cycle_valid": true
+  },
+  "performance_metrics": {},
+  "validation_status": {},
+  "final_report": {
+    "test_summary": {
+      "total_papers_processed": 150000,
+      "total_prompts_processed": 5,
+      "successful_prompts": 0,
+      "success_rate": 0.0,
+      "total_ftns_distributed": 0.0,
+      "test_duration": 5418.793383
+    },
+    "production_readiness": {
+      "data_ingestion_working": true,
+      "semantic_search_working": false,
+      "deep_reasoning_working": false,
+      "economic_cycle_working": true,
+      "claude_api_working": true,
+      "overall_production_ready": false
+    },
+    "performance_metrics": {
+      "average_processing_time": 0.0,
+      "average_response_quality": 0.0,
+      "average_sources_per_response": 0.0
+    }
+  }
+}

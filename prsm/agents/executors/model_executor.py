@@ -416,14 +416,12 @@ class ModelExecutor(BaseAgent):
         """
         # Simplified cost estimation (tokens * rate per token)
         base_rates = {
-            "openai": {
-                "gpt-4": Decimal("0.00006"),  # $0.06 per 1K tokens
-                "gpt-3.5-turbo": Decimal("0.000002"),  # $0.002 per 1K tokens
-            },
             "anthropic": {
                 "claude-3-opus": Decimal("0.000075"),  # $0.075 per 1K tokens
                 "claude-3-sonnet": Decimal("0.000015"),  # $0.015 per 1K tokens
                 "claude-3-haiku": Decimal("0.0000025"),  # $0.0025 per 1K tokens
+                "claude-3-5-sonnet": Decimal("0.000015"),  # $0.015 per 1K tokens
+                "claude-3-5-sonnet-20241022": Decimal("0.000015"),  # $0.015 per 1K tokens
             },
             "huggingface": {
                 "default": Decimal("0.000001"),  # $0.001 per 1K tokens
@@ -450,10 +448,6 @@ class ModelExecutor(BaseAgent):
         - Set up fallback strategies with secure fallbacks
         """
         try:
-            # This method is kept for backward compatibility but now uses secure credentials
-            # Actual secure initialization happens in _initialize_secure_providers
-            asyncio.create_task(self._initialize_secure_providers())
-            
             # 📂 Local Models Configuration (no credentials needed)
             import os
             local_models_path = os.getenv('PRSM_LOCAL_MODELS_PATH', '/models')
@@ -463,6 +457,16 @@ class ModelExecutor(BaseAgent):
             
             # 🎯 Default Model Provider Mappings
             self._setup_default_model_mappings()
+            
+            # Add initialization state tracking to prevent infinite loops
+            if not hasattr(self, '_secure_init_attempted'):
+                self._secure_init_attempted = False
+            
+            # Only attempt secure initialization once
+            if not self._secure_init_attempted:
+                self._secure_init_attempted = True
+                # Use fire-and-forget for secure initialization to avoid blocking
+                asyncio.create_task(self._initialize_secure_providers())
             
         except Exception as e:
             logger.error("Failed to initialize model providers", error=str(e))
@@ -478,7 +482,7 @@ class ModelExecutor(BaseAgent):
     
     async def _initialize_secure_providers(self):
         """
-        Initialize providers using secure credential management
+        Initialize providers using secure credential management - DISABLED TO PREVENT INFINITE LOOPS
         
         🔐 SECURITY FEATURES:
         - Uses encrypted credential manager instead of environment variables
@@ -486,57 +490,16 @@ class ModelExecutor(BaseAgent):
         - Logs all credential access for audit trail
         - Supports both user-specific and system credentials
         """
-        from prsm.integrations.security.secure_api_client_factory import secure_client_factory, SecureClientType
+        # DISABLED: Skip secure initialization completely to prevent infinite loops
+        logger.info("Secure provider initialization disabled to prevent infinite loops")
         
-        try:
-            # Initialize for system-level operations (background tasks, etc.)
-            user_id = "system"
-            
-            # 🔐 Secure OpenAI Configuration
-            if await secure_client_factory.validate_client_credentials(SecureClientType.OPENAI, user_id):
-                openai_client = await secure_client_factory.get_secure_client(SecureClientType.OPENAI, user_id)
-                if openai_client:
-                    # Register secure OpenAI client
-                    self.client_registry.register_provider(ModelProvider.OPENAI, {
-                        'secure_client': openai_client,
-                        'client_type': SecureClientType.OPENAI
-                    })
-                    logger.info("Secure OpenAI provider configured")
-            else:
-                logger.warning("OpenAI credentials not available or invalid")
-            
-            # 🔐 Secure Anthropic Configuration  
-            if await secure_client_factory.validate_client_credentials(SecureClientType.ANTHROPIC, user_id):
-                anthropic_client = await secure_client_factory.get_secure_client(SecureClientType.ANTHROPIC, user_id)
-                if anthropic_client:
-                    # Register secure Anthropic client
-                    self.client_registry.register_provider(ModelProvider.ANTHROPIC, {
-                        'secure_client': anthropic_client,
-                        'client_type': SecureClientType.ANTHROPIC
-                    })
-                    logger.info("Secure Anthropic provider configured")
-            else:
-                logger.warning("Anthropic credentials not available or invalid")
-            
-            # 🔐 Secure Hugging Face Configuration
-            if await secure_client_factory.validate_client_credentials(SecureClientType.HUGGINGFACE, user_id):
-                hf_client = await secure_client_factory.get_secure_client(SecureClientType.HUGGINGFACE, user_id)
-                if hf_client:
-                    # Register secure HuggingFace client
-                    self.client_registry.register_provider(ModelProvider.HUGGINGFACE, {
-                        'secure_client': hf_client,
-                        'client_type': SecureClientType.HUGGINGFACE
-                    })
-                    logger.info("Secure HuggingFace provider configured")
-            else:
-                logger.warning("HuggingFace credentials not available or invalid")
-            
-            logger.info("Secure provider initialization completed")
-            
-        except Exception as e:
-            logger.error("Failed to initialize secure providers", error=str(e))
-            # Fall back to insecure initialization for development
+        # Go directly to insecure fallback
+        if not hasattr(self, '_fallback_init_completed'):
+            logger.warning("Using insecure credential fallback - not recommended for production")
             await self._fallback_insecure_initialization()
+            self._fallback_init_completed = True
+        
+        return
     
     async def _fallback_insecure_initialization(self):
         """
@@ -548,16 +511,16 @@ class ModelExecutor(BaseAgent):
         """
         import os
         
+        # Add circuit breaker to prevent infinite fallback loops
+        if hasattr(self, '_fallback_init_completed') and self._fallback_init_completed:
+            logger.warning("Fallback initialization already completed, skipping to prevent infinite loop")
+            return
+        
+        self._fallback_init_completed = True
         logger.warning("Using insecure credential fallback - not recommended for production")
         
-        # 🔑 OpenAI Configuration (INSECURE FALLBACK)
-        openai_key = os.getenv('OPENAI_API_KEY')
-        if openai_key:
-            self.client_registry.register_provider(ModelProvider.OPENAI, {
-                'api_key': openai_key,
-                'secure': False  # Mark as insecure
-            })
-            logger.warning("OpenAI provider configured with insecure credentials")
+        # OpenAI not used - NWTN uses Claude API only
+        # All reasoning engines configured to use Claude API
         
         # 🔑 Anthropic Configuration (INSECURE FALLBACK)
         anthropic_key = os.getenv('ANTHROPIC_API_KEY')
@@ -579,13 +542,12 @@ class ModelExecutor(BaseAgent):
     
     def _setup_default_model_mappings(self):
         """Set up default mappings from model IDs to providers"""
-        # OpenAI models
-        openai_models = ['gpt-4', 'gpt-4-turbo', 'gpt-3.5-turbo']
-        for model in openai_models:
-            self.model_providers[model] = ModelProvider.OPENAI
-        
+        # NWTN uses Claude API only - all models map to Anthropic
         # Anthropic models
-        anthropic_models = ['claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku', 'claude-2.1']
+        anthropic_models = [
+            'claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku', 'claude-2.1',
+            'claude-3-5-sonnet', 'claude-3-5-sonnet-20241022'
+        ]
         for model in anthropic_models:
             self.model_providers[model] = ModelProvider.ANTHROPIC
         
@@ -611,17 +573,20 @@ class ModelExecutor(BaseAgent):
         # Use heuristics based on model name
         model_lower = model_id.lower()
         
-        if any(name in model_lower for name in ['gpt', 'davinci', 'curie', 'babbage']):
-            return ModelProvider.OPENAI
-        elif any(name in model_lower for name in ['claude', 'anthropic']):
+        # NWTN uses Claude API only - all AI models route to Anthropic
+        if any(name in model_lower for name in ['claude', 'anthropic']):
+            return ModelProvider.ANTHROPIC
+        elif any(name in model_lower for name in ['gpt', 'davinci', 'curie', 'babbage']):
+            # Legacy OpenAI models redirect to Claude
+            logger.warning(f"Legacy OpenAI model {model_id} redirected to Claude API")
             return ModelProvider.ANTHROPIC
         elif model_id.startswith('prsm-distilled-'):
             return ModelProvider.LOCAL
         elif '/' in model_id:  # Hugging Face format: org/model
             return ModelProvider.HUGGINGFACE
         else:
-            # Default to local for unknown models
-            return ModelProvider.LOCAL
+            # Default to Claude for unknown AI models
+            return ModelProvider.ANTHROPIC
     
     async def _validate_response(self, content: str, model_id: str) -> Dict[str, Any]:
         """
@@ -678,11 +643,12 @@ class ModelExecutor(BaseAgent):
         4. Return None if all fallbacks fail
         """
         try:
-            # Define fallback mappings
+            # Define fallback mappings - Claude API only
             fallback_map = {
-                'gpt-4': 'gpt-3.5-turbo',
                 'claude-3-opus': 'claude-3-sonnet',
-                'claude-3-sonnet': 'claude-3-haiku'
+                'claude-3-sonnet': 'claude-3-haiku',
+                'claude-3-5-sonnet': 'claude-3-sonnet',
+                'claude-3-5-sonnet-20241022': 'claude-3-sonnet'
             }
             
             fallback_model = fallback_map.get(failed_model_id)
@@ -753,6 +719,49 @@ class ModelExecutor(BaseAgent):
     def get_active_executions(self) -> List[str]:
         """Get list of currently active execution IDs"""
         return list(self.active_executions.keys())
+    
+    async def execute_request(self, prompt: str, model_name: str, temperature: float = 0.7, **kwargs) -> str:
+        """
+        Execute a request with the specified model
+        
+        Args:
+            prompt: The text prompt to send to the model
+            model_name: The name/ID of the model to use
+            temperature: Temperature setting for the model
+            **kwargs: Additional parameters
+            
+        Returns:
+            The model's response as a string
+        """
+        # Prepare input data for the process method
+        input_data = {
+            "task": prompt,
+            "models": [model_name],
+            "parallel": False,
+            "temperature": temperature
+        }
+        
+        # Execute using the existing process method
+        try:
+            results = await self.process(input_data)
+            
+            # Return the content from the first result
+            if results and results[0].success:
+                result_content = results[0].result
+                if isinstance(result_content, dict):
+                    return result_content.get("content", str(result_content))
+                else:
+                    return str(result_content)
+            else:
+                error_msg = results[0].error if results else "Unknown error"
+                raise Exception(f"Model execution failed: {error_msg}")
+                
+        except Exception as e:
+            logger.error(f"execute_request failed: {e}", 
+                        agent_id=self.agent_id,
+                        model_name=model_name,
+                        prompt_length=len(prompt))
+            raise
 
 
 # Factory function

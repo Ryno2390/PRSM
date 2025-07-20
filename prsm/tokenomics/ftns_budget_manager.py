@@ -306,9 +306,13 @@ class FTNSBudgetManager:
                 # Use prediction with safety margin
                 total_budget = prediction.get_recommended_budget()
                 
+                # Ensure minimum budget
+                minimum_budget = Decimal('100')  # Minimum 100 FTNS tokens
+                total_budget = max(total_budget, minimum_budget)
+                
                 # Ensure within user balance and limits
                 user_balance = await self.ftns_service.get_user_balance(session.user_id)
-                max_affordable = min(user_balance.balance, self.max_session_budget)
+                max_affordable = min(Decimal(str(user_balance.balance)), Decimal(str(self.max_session_budget)))
                 total_budget = min(total_budget, max_affordable)
             
             # Step 3: Create category allocations based on prediction
@@ -831,12 +835,12 @@ class FTNSBudgetManager:
         allocations = {}
         
         # Use prediction as base, then adjust for total budget
-        prediction_total = prediction.estimated_total_cost
+        prediction_total = Decimal(str(prediction.estimated_total_cost))
         scale_factor = total_budget / prediction_total if prediction_total > 0 else Decimal('1')
         
         for category, estimated_cost in prediction.category_estimates.items():
             # Scale estimate to fit total budget
-            allocated_amount = estimated_cost * scale_factor
+            allocated_amount = Decimal(str(estimated_cost)) * scale_factor
             
             # Apply config overrides if provided
             if config and "category_allocations" in config:

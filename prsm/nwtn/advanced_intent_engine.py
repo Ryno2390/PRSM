@@ -229,6 +229,29 @@ Provide detailed complexity assessment in JSON format:
 }
 ```"""
 
+    def _map_capabilities_to_agents(self, capabilities: List[str]) -> List[str]:
+        """Map required capabilities to valid AgentType values"""
+        capability_to_agent = {
+            "basic_llm": "executor",
+            "advanced_reasoning": "architect", 
+            "prompt_optimization": "prompter",
+            "model_routing": "router",
+            "result_synthesis": "compiler",
+            "llm": "executor",
+            "reasoning": "architect",
+            "optimization": "prompter",
+            "routing": "router",
+            "synthesis": "compiler"
+        }
+        
+        mapped_agents = []
+        for capability in capabilities:
+            agent = capability_to_agent.get(capability, "executor")  # Default to executor
+            if agent not in mapped_agents:
+                mapped_agents.append(agent)
+        
+        return mapped_agents if mapped_agents else ["executor"]
+    
     async def analyze_intent(
         self, 
         prompt: str, 
@@ -560,7 +583,7 @@ Provide detailed complexity assessment in JSON format:
                 intent_category=intent_analysis.category.value,
                 complexity_estimate=intent_analysis.complexity.value / 5.0,  # Normalize to 0-1
                 context_required=intent_analysis.estimated_tokens,
-                suggested_agents=intent_analysis.required_capabilities,
+                suggested_agents=self._map_capabilities_to_agents(intent_analysis.required_capabilities),
                 metadata={
                     "advanced_analysis": True,
                     "confidence": intent_analysis.confidence,

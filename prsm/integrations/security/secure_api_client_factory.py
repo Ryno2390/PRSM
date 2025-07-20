@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, Union
 from enum import Enum
 
-from ..config.credential_manager import CredentialManager, CredentialType
+from ..config.credential_manager import CredentialManager, CredentialType, CredentialData
 from ..models.integration_models import IntegrationPlatform
 from ...core.config import settings
 from .audit_logger import audit_logger
@@ -22,8 +22,7 @@ logger = structlog.get_logger(__name__)
 
 
 class SecureClientType(str, Enum):
-    """Types of secure API clients"""
-    OPENAI = "openai"
+    """Types of secure API clients - OpenAI removed, NWTN uses Claude only"""
     ANTHROPIC = "anthropic"
     HUGGINGFACE = "huggingface"
     GITHUB = "github"
@@ -196,14 +195,24 @@ class SecureAPIClientFactory:
             platform = self._get_platform_for_client_type(client_type)
             credential_type = self._get_credential_type_for_client_type(client_type)
             
+            # Convert credentials dict to CredentialData
+            credential_data = CredentialData(**credentials)
+            
+            # Calculate expires_in_days if expires_at is provided
+            expires_in_days = None
+            if expires_at:
+                days_until_expiry = (expires_at - datetime.now(timezone.utc)).days
+                expires_in_days = max(1, days_until_expiry)  # At least 1 day
+            
             # Store credentials securely
-            success = await self.credential_manager.store_credential(
+            credential_id = self.credential_manager.store_credential(
                 user_id=user_id,
                 platform=platform,
+                credential_data=credential_data,
                 credential_type=credential_type,
-                credential_data=credentials,
-                expires_at=expires_at
+                expires_in_days=expires_in_days
             )
+            success = bool(credential_id)
             
             if success:
                 # Clear cache to force refresh
@@ -283,18 +292,42 @@ class SecureAPIClientFactory:
             platform = self._get_platform_for_client_type(client_type)
             
             # Try user-specific credentials first
-            credentials = await self.credential_manager.get_credential(user_id, platform)
+            credentials = self.credential_manager.get_credential(user_id, platform)
             
             # Fall back to system credentials if user credentials not available
             if not credentials and user_id != "system":
-                credentials = await self.credential_manager.get_credential("system", platform)
+                credentials = self.credential_manager.get_credential("system", platform)
                 
                 if credentials:
                     logger.debug("Using system credentials as fallback",
                                client_type=client_type,
                                user_id=user_id)
             
-            return credentials
+            # Convert CredentialData object to dictionary if needed
+            if credentials:
+                if hasattr(credentials, 'model_dump'):
+                    # Pydantic model - convert to dict
+                    cred_dict = credentials.model_dump()
+                elif hasattr(credentials, 'dict'):
+                    # Legacy Pydantic - convert to dict
+                    cred_dict = credentials.dict()
+                else:
+                    # Already a dict
+                    cred_dict = credentials
+                
+                # Filter out None values and convert SecretStr to string
+                result = {}
+                for key, value in cred_dict.items():
+                    if value is not None:
+                        # Handle SecretStr objects
+                        if hasattr(value, 'get_secret_value'):
+                            result[key] = value.get_secret_value()
+                        else:
+                            result[key] = value
+                
+                return result
+            
+            return None
             
         except Exception as e:
             logger.error("Failed to get secure credentials",
@@ -337,9 +370,7 @@ class SecureAPIClientFactory:
     ) -> Optional[Any]:
         """Create API client with secured credentials"""
         try:
-            if client_type == SecureClientType.OPENAI:
-                return await self._create_openai_client(credentials)
-            elif client_type == SecureClientType.ANTHROPIC:
+            if client_type == SecureClientType.ANTHROPIC:
                 return await self._create_anthropic_client(credentials)
             elif client_type == SecureClientType.HUGGINGFACE:
                 return await self._create_huggingface_client(credentials)
@@ -513,7 +544,6 @@ class SecureAPIClientFactory:
     def _get_platform_for_client_type(self, client_type: SecureClientType) -> IntegrationPlatform:
         """Map client type to integration platform"""
         mapping = {
-            SecureClientType.OPENAI: IntegrationPlatform.OPENAI,
             SecureClientType.ANTHROPIC: IntegrationPlatform.ANTHROPIC,
             SecureClientType.HUGGINGFACE: IntegrationPlatform.HUGGINGFACE,
             SecureClientType.GITHUB: IntegrationPlatform.GITHUB,

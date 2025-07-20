@@ -275,7 +275,7 @@ class AnalogicalBreakthroughEngine:
         try:
             analysis = await self.model_executor.execute_request(
                 prompt=pattern_discovery_prompt,
-                model_name="gpt-4",
+                model_name="claude-3-sonnet",
                 temperature=0.3
             )
             
@@ -308,7 +308,7 @@ class AnalogicalBreakthroughEngine:
         try:
             analysis = await self.model_executor.execute_request(
                 prompt=gap_analysis_prompt,
-                model_name="gpt-4",
+                model_name="claude-3-sonnet",
                 temperature=0.4
             )
             
@@ -355,7 +355,7 @@ class AnalogicalBreakthroughEngine:
                 try:
                     mapping_analysis = await self.model_executor.execute_request(
                         prompt=mapping_prompt,
-                        model_name="gpt-4",
+                        model_name="claude-3-sonnet",
                         temperature=0.5
                     )
                     
@@ -486,7 +486,7 @@ class AnalogicalBreakthroughEngine:
             try:
                 hypothesis_analysis = await self.model_executor.execute_request(
                     prompt=hypothesis_prompt,
-                    model_name="gpt-4",
+                    model_name="claude-3-sonnet",
                     temperature=0.4
                 )
                 
