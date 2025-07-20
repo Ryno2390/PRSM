@@ -109,6 +109,32 @@ class DatabaseService:
                 self.logger.error(f"Failed to list sessions for user {user_id}: {e}")
                 raise
     
+    # === Helper Methods ===
+    
+    def _serialize_for_json(self, data: Any) -> Any:
+        """Convert data to JSON-serializable format, handling UUIDs, datetime, and complex objects"""
+        if isinstance(data, UUID):
+            return str(data)
+        elif isinstance(data, datetime):
+            return data.isoformat()
+        elif hasattr(data, '__dict__'):
+            # Handle Pydantic models and other complex objects
+            if hasattr(data, 'model_dump'):
+                # Pydantic v2 style
+                return self._serialize_for_json(data.model_dump())
+            elif hasattr(data, 'dict'):
+                # Pydantic v1 style
+                return self._serialize_for_json(data.dict())
+            else:
+                # Convert to string representation for complex objects
+                return str(data)
+        elif isinstance(data, dict):
+            return {k: self._serialize_for_json(v) for k, v in data.items()}
+        elif isinstance(data, (list, tuple)):
+            return [self._serialize_for_json(item) for item in data]
+        else:
+            return data
+    
     # === Reasoning Steps CRUD ===
     
     async def create_reasoning_step(
@@ -120,13 +146,18 @@ class DatabaseService:
         async with get_async_session() as db:
             try:
                 step_id = uuid4()
+                
+                # Serialize data to handle UUIDs
+                input_data = self._serialize_for_json(step_data.get("input_data", {}))
+                output_data = self._serialize_for_json(step_data.get("output_data", {}))
+                
                 reasoning_step = ReasoningStepModel(
                     step_id=step_id,
                     session_id=session_id,
                     agent_type=step_data.get("agent_type", "default"),
                     agent_id=step_data.get("agent_id", "unknown"),
-                    input_data=step_data.get("input_data", {}),
-                    output_data=step_data.get("output_data", {}),
+                    input_data=input_data,
+                    output_data=output_data,
                     execution_time=step_data.get("execution_time", 0.0),
                     confidence_score=step_data.get("confidence_score", 0.0)
                 )
@@ -518,8 +549,232 @@ class DatabaseService:
                 self.logger.error(f"Failed to get session statistics for {session_id}: {e}")
                 raise
     
+    # === Provenance Record Management ===
+    
+    async def create_provenance_record(self, record_data: Dict[str, Any]) -> bool:
+        """Create a new provenance record in the database"""
+        async with get_async_session() as db:
+            try:
+                from .models import ProvenanceRecord
+                
+                # Create record entry for the provenance system
+                provenance_record = {
+                    'content_id': record_data['content_id'],
+                    'fingerprint_data': record_data['fingerprint_data'],
+                    'attribution_data': record_data['attribution_data'],
+                    'usage_data': record_data.get('usage_data', {}),
+                    'created_at': datetime.now(timezone.utc),
+                    'updated_at': datetime.now(timezone.utc)
+                }
+                
+                # For now, store in a simple in-memory registry
+                # In production, this would be a proper database table
+                if not hasattr(self, '_provenance_records'):
+                    self._provenance_records = {}
+                
+                self._provenance_records[record_data['content_id']] = provenance_record
+                
+                self.logger.info(f"Created provenance record for content {record_data['content_id']}")
+                return True
+                
+            except Exception as e:
+                self.logger.error(f"Failed to create provenance record: {e}")
+                return False
+    
+    async def get_provenance_record(self, content_id: str) -> Optional[Dict[str, Any]]:
+        """Get provenance record by content ID"""
+        try:
+            # Check in-memory registry first
+            if hasattr(self, '_provenance_records') and content_id in self._provenance_records:
+                return self._provenance_records[content_id]
+            
+            # In production, this would query a proper database table
+            # For now, return None if not found in memory
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get provenance record for {content_id}: {e}")
+            return None
+    
+    async def update_provenance_record(self, content_id: str, update_data: Dict[str, Any]) -> bool:
+        """Update an existing provenance record"""
+        try:
+            if hasattr(self, '_provenance_records') and content_id in self._provenance_records:
+                self._provenance_records[content_id].update(update_data)
+                self._provenance_records[content_id]['updated_at'] = datetime.now(timezone.utc)
+                return True
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Failed to update provenance record for {content_id}: {e}")
+            return False
+    
+    async def store_royalty_distribution_record(self, record: Dict[str, Any]) -> bool:
+        """Store royalty distribution record for audit trail"""
+        try:
+            # For now, store in a simple in-memory registry
+            # In production, this would be a proper database table
+            if not hasattr(self, '_royalty_distribution_records'):
+                self._royalty_distribution_records = []
+            
+            self._royalty_distribution_records.append(record)
+            
+            self.logger.info(f"Stored royalty distribution record for session {record['session_id']}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store royalty distribution record: {e}")
+            return False
+    
+    async def get_creator_earnings(self, creator_id: str, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
+        """Get creator earnings for a specific time period"""
+        try:
+            # For now, return empty list as this is a placeholder
+            # In production, this would query earnings from royalty distribution records
+            return []
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get creator earnings for {creator_id}: {e}")
+            return []
+    
+    async def record_content_ingestion(self, content_id: str, user_id: str, quality_assessment: Any, reward_amount: float) -> bool:
+        """Record successful content ingestion for audit trail"""
+        try:
+            # For now, store in a simple in-memory registry
+            # In production, this would be a proper database table
+            if not hasattr(self, '_content_ingestion_records'):
+                self._content_ingestion_records = []
+            
+            ingestion_record = {
+                'content_id': content_id,
+                'user_id': user_id,
+                'quality_level': quality_assessment.quality_level.value if hasattr(quality_assessment, 'quality_level') else 'standard',
+                'reward_amount': reward_amount,
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+            
+            self._content_ingestion_records.append(ingestion_record)
+            
+            self.logger.info(f"Recorded content ingestion for {content_id} by {user_id}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to record content ingestion: {e}")
+            return False
+    
     # === Health Check ===
     
+    async def store_user_api_config(self, user_id: str, provider: str, config: Dict[str, Any]) -> bool:
+        """
+        Store user API configuration for LLM providers
+        
+        Args:
+            user_id: User identifier
+            provider: LLM provider name (e.g., 'claude', 'openai')
+            config: Configuration data
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # For testing purposes, store in memory
+            if not hasattr(self, '_user_api_configs'):
+                self._user_api_configs = {}
+            
+            if user_id not in self._user_api_configs:
+                self._user_api_configs[user_id] = {}
+                
+            self._user_api_configs[user_id][provider] = config
+            self.logger.info(f"Stored API config for user {user_id}, provider {provider}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store user API config: {e}")
+            return False
+    
+    async def get_user_api_config(self, user_id: str, provider: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve user API configuration for a specific provider
+        
+        Args:
+            user_id: User identifier
+            provider: LLM provider name
+            
+        Returns:
+            Configuration data or None if not found
+        """
+        try:
+            if hasattr(self, '_user_api_configs'):
+                return self._user_api_configs.get(user_id, {}).get(provider)
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get user API config: {e}")
+            return None
+
+    # === Voicebox Integration Methods ===
+    
+    async def store_voicebox_interaction(self, user_id: str, interaction_data: Dict[str, Any]) -> bool:
+        """Store voicebox interaction in database"""
+        try:
+            # For now, we'll store in a simple dict structure
+            # In production, this would use a proper database table
+            if not hasattr(self, '_voicebox_interactions'):
+                self._voicebox_interactions = {}
+            
+            if user_id not in self._voicebox_interactions:
+                self._voicebox_interactions[user_id] = []
+            
+            interaction_data['stored_at'] = datetime.now(timezone.utc).isoformat()
+            self._voicebox_interactions[user_id].append(interaction_data)
+            
+            # Keep only last 100 interactions per user
+            if len(self._voicebox_interactions[user_id]) > 100:
+                self._voicebox_interactions[user_id] = self._voicebox_interactions[user_id][-100:]
+            
+            self.logger.info(f"Stored voicebox interaction for user {user_id}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store voicebox interaction: {e}")
+            return False
+    
+    async def store_user_api_config(self, user_id: str, provider: str, config_data: Dict[str, Any]) -> bool:
+        """Store user API configuration"""
+        try:
+            # For now, we'll store in a simple dict structure
+            # In production, this would use a proper database table with encryption
+            if not hasattr(self, '_user_api_configs'):
+                self._user_api_configs = {}
+            
+            if user_id not in self._user_api_configs:
+                self._user_api_configs[user_id] = {}
+            
+            config_data['stored_at'] = datetime.now(timezone.utc).isoformat()
+            self._user_api_configs[user_id][provider] = config_data
+            
+            self.logger.info(f"Stored API config for user {user_id}, provider {provider}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to store user API config: {e}")
+            return False
+    
+    async def get_user_voicebox_history(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get user's voicebox interaction history"""
+        try:
+            if not hasattr(self, '_voicebox_interactions'):
+                self._voicebox_interactions = {}
+            
+            user_interactions = self._voicebox_interactions.get(user_id, [])
+            
+            # Return the most recent interactions
+            return user_interactions[-limit:] if user_interactions else []
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get voicebox history for user {user_id}: {e}")
+            return []
+
     async def health_check(self) -> Dict[str, Any]:
         """Perform database health check"""
         try:

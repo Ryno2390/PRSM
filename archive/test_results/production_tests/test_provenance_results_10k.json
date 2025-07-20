@@ -1,0 +1,66 @@
+{
+  "test_result": {
+    "test_name": "150K_Papers_Provenance_Test",
+    "papers_processed": 10000,
+    "papers_successfully_ingested": 10000,
+    "queries_processed": 6,
+    "successful_queries": 1,
+    "total_ftns_transferred": 0.0,
+    "provenance_user_earnings": 500000.0,
+    "prompt_user_spending": 4.0,
+    "average_query_processing_time": 0.009436229360289872,
+    "average_royalty_per_paper": 0.0,
+    "content_attribution_accuracy": 0.0,
+    "duplicate_detection_accuracy": 1.0,
+    "performance_metrics": {
+      "paper_ingestion": {
+        "average_time": 0.007470101231778972,
+        "success_rate": 1.0,
+        "throughput_papers_per_second": 133.86699443186185
+      },
+      "query_processing": {
+        "average_time": 0.009436229360289872,
+        "success_rate": 0.16666666666666666,
+        "average_sources_per_query": 1.0
+      },
+      "economic_flow": {
+        "total_ftns_transferred": 0.0,
+        "ftns_flow_efficiency": 1.0
+      }
+    },
+    "execution_time_seconds": 76.96003891690634,
+    "timestamp": "2025-07-17T20:10:00.054368+00:00",
+    "errors_count": 5,
+    "errors": [
+      "Query 2 failed: No relevant papers found",
+      "Query 3 failed: No relevant papers found",
+      "Query 4 failed: No relevant papers found",
+      "Query 5 failed: No relevant papers found",
+      "Query 6 failed: No relevant papers found"
+    ]
+  },
+  "ftns_transactions": [
+    {
+      "type": "query_usage_royalty",
+      "from_user": "prompt_user_001",
+      "to_user": "provenance_user_001",
+      "amount": 0.0,
+      "query": "What are the latest advances in transformer archit...",
+      "timestamp": "2025-07-17T20:10:00.007310+00:00"
+    }
+  ],
+  "user_final_balances": {
+    "prompt_user": {
+      "user_id": "prompt_user_001",
+      "final_balance": 9996.0,
+      "total_spent": 4.0,
+      "queries_made": 1
+    },
+    "provenance_user": {
+      "user_id": "provenance_user_001",
+      "final_balance": 500000.0,
+      "total_earned": 500000.0,
+      "content_owned": 10000
+    }
+  }
+}

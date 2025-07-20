@@ -64,6 +64,86 @@ class ProvenanceEngine:
         
         print("📝 Provenance Engine initialized")
     
+    async def initialize(self):
+        """
+        Initialize the provenance engine (async initialization)
+        
+        This method exists for compatibility with the SystemIntegrator
+        and other components that expect an async initialize() method.
+        """
+        # ProvenanceEngine is currently stateless at initialization
+        # Future enhancement: Could initialize IPFS connection, database connections, etc.
+        print("📝 Provenance Engine async initialization completed")
+        return True
+    
+    async def register_content_creator(self, creator_id: str, creator_name: str, 
+                                     creator_metadata: Optional[Dict[str, Any]] = None) -> str:
+        """
+        Register a new content creator in the provenance system
+        
+        Args:
+            creator_id: Unique identifier for the creator
+            creator_name: Display name for the creator
+            creator_metadata: Additional metadata about the creator
+            
+        Returns:
+            str: Registration record ID
+        """
+        registration_id = str(uuid4())
+        
+        # Create creator record
+        creator_record = {
+            'registration_id': registration_id,
+            'creator_id': creator_id,
+            'creator_name': creator_name,
+            'metadata': creator_metadata or {},
+            'registered_at': datetime.now(timezone.utc).isoformat(),
+            'total_content_items': 0,
+            'total_rewards_earned': 0.0
+        }
+        
+        # Store in provenance records (using creator_id as key)
+        self.provenance_records[creator_id] = creator_record
+        
+        return registration_id
+    
+    async def create_content_record(self, creator_id: str, content_id: str, 
+                                  content_type: str, metadata: Dict[str, Any]) -> str:
+        """
+        Create a provenance record for content
+        
+        Args:
+            creator_id: ID of the content creator
+            content_id: Unique identifier for the content
+            content_type: Type of content (e.g., 'academic_paper', 'model', 'dataset')
+            metadata: Content metadata
+            
+        Returns:
+            str: Provenance record ID
+        """
+        record_id = str(uuid4())
+        
+        # Create provenance record
+        provenance_record = {
+            'record_id': record_id,
+            'creator_id': creator_id,
+            'content_id': content_id,
+            'content_type': content_type,
+            'metadata': metadata,
+            'created_at': datetime.now(timezone.utc).isoformat(),
+            'usage_count': 0,
+            'total_rewards': 0.0
+        }
+        
+        # Store record
+        self.provenance_records[record_id] = provenance_record
+        
+        # Update creator's content count
+        if creator_id in self.provenance_records:
+            self.provenance_records[creator_id]['total_content_items'] += 1
+        
+        return record_id
+    
     # === Provenance Tracking ===
     
     async def create_provenance_record(self, import_request: ImportRequest, 

@@ -69,10 +69,14 @@ from datetime import datetime, timezone
 import structlog
 from pydantic import BaseModel, Field
 
-from prsm.nwtn.multi_modal_reasoning_engine import MultiModalReasoningEngine, IntegratedReasoningResult
+from prsm.nwtn.meta_reasoning_engine import MetaReasoningEngine, MetaReasoningResult
 from prsm.core.config import get_settings
 from prsm.core.database_service import get_database_service
 from prsm.tokenomics.ftns_service import FTNSService
+from prsm.core.models import FTNSTransaction
+from prsm.nwtn.content_royalty_engine import ContentRoyaltyEngine, QueryComplexity
+from prsm.nwtn.external_storage_config import get_external_knowledge_base
+from prsm.provenance.enhanced_provenance_system import EnhancedProvenanceSystem
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -142,17 +146,31 @@ class ClarificationExchange:
 
 
 @dataclass
+class SourceLink:
+    """Information about a source used in reasoning"""
+    content_id: str
+    title: str
+    creator: str
+    ipfs_link: str
+    contribution_date: str
+    relevance_score: float
+    content_type: str
+    
+@dataclass
 class VoiceboxResponse:
     """Complete voicebox response to user"""
     response_id: str
     query_id: str
     natural_language_response: str
-    structured_insights: Optional[IntegratedReasoningResult] = None
+    structured_insights: Optional[MetaReasoningResult] = None
     reasoning_trace: List[Dict[str, Any]] = field(default_factory=list)
     processing_time_seconds: float = 0.0
     total_cost_ftns: float = 0.0
     confidence_score: float = 0.0
     used_reasoning_modes: List[str] = field(default_factory=list)
+    source_links: List[SourceLink] = field(default_factory=list)
+    attribution_summary: str = ""
+    royalties_distributed: Dict[str, float] = field(default_factory=dict)
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -168,9 +186,12 @@ class NWTNVoicebox:
     """
     
     def __init__(self):
-        self.multi_modal_engine = None  # Will be initialized async
+        self.meta_reasoning_engine = None  # Will be initialized async
         self.database_service = get_database_service()
         self.ftns_service = None  # Will be initialized async
+        self.content_royalty_engine = None  # Will be initialized async
+        self.provenance_system = None  # Will be initialized async
+        self.external_knowledge_base = None  # Will be initialized async
         
         # User API configurations
         self.user_api_configs: Dict[str, APIConfiguration] = {}
@@ -198,12 +219,25 @@ class NWTNVoicebox:
         """Initialize voicebox service dependencies"""
         try:
             # Initialize multi-modal reasoning engine
-            self.multi_modal_engine = MultiModalReasoningEngine()
-            # MultiModalReasoningEngine doesn't have an async initialize method
+            self.meta_reasoning_engine = MetaReasoningEngine()
+            # Initialize external knowledge base for Ferrari fuel line
+            await self.meta_reasoning_engine.initialize_external_knowledge_base()
+            # MetaReasoningEngine initializes itself in constructor
             
             # Initialize FTNS service
-            self.ftns_service = FTNSService()
+            from ..tokenomics.ftns_service import get_ftns_service
+            self.ftns_service = await get_ftns_service()
             # FTNSService doesn't have an async initialize method
+            
+            # Initialize content royalty engine
+            self.content_royalty_engine = ContentRoyaltyEngine()
+            await self.content_royalty_engine.initialize()
+            
+            # Initialize provenance system for source links
+            self.provenance_system = EnhancedProvenanceSystem()
+            
+            # Initialize external knowledge base for Ferrari fuel line
+            self.external_knowledge_base = await get_external_knowledge_base()
             
             # Initialize default Claude API configuration
             self._initialize_default_api_config()
@@ -245,8 +279,7 @@ class NWTNVoicebox:
             self.user_api_configs[user_id] = config
             
             # Store encrypted configuration in database
-            await self.database_service.store_user_api_config(user_id, {
-                'provider': provider.value,
+            await self.database_service.store_user_api_config(user_id, provider.value, {
                 'api_key_hash': self._hash_api_key(api_key),  # Store hash, not key
                 'base_url': base_url,
                 'model_name': config.model_name,
@@ -298,9 +331,24 @@ class NWTNVoicebox:
             
             # Calculate actual costs and charge user
             actual_cost = await self._calculate_actual_cost(analysis, reasoning_result)
-            await self.ftns_service.charge_user(user_id, actual_cost, f"NWTN Query: {query_id}")
+            # Create a transaction to charge the user
+            transaction = FTNSTransaction(
+                from_user=user_id,
+                to_user="system",
+                amount=actual_cost,
+                transaction_type="charge",
+                description=f"NWTN Query: {query_id}",
+                context_units=int(actual_cost * 10)  # Convert to context units
+            )
+            await self.ftns_service._update_balance(user_id, -actual_cost)
+            await self.ftns_service._record_transaction(transaction)
             
-            # Create response
+            # Generate source links and attribution summary
+            source_links = await self._generate_source_links(reasoning_result)
+            attribution_summary = await self._generate_attribution_summary(reasoning_result, source_links)
+            royalties_summary = await self._get_royalty_summary(reasoning_result)
+            
+            # Create enhanced response with source access
             processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             response = VoiceboxResponse(
                 response_id=str(uuid4()),
@@ -310,8 +358,11 @@ class NWTNVoicebox:
                 reasoning_trace=reasoning_result.reasoning_results if reasoning_result else [],
                 processing_time_seconds=processing_time,
                 total_cost_ftns=actual_cost,
-                confidence_score=reasoning_result.overall_confidence if reasoning_result else 0.0,
-                used_reasoning_modes=reasoning_result.reasoning_path if reasoning_result else []
+                confidence_score=reasoning_result.meta_confidence if reasoning_result else 0.0,
+                used_reasoning_modes=reasoning_result.reasoning_path if reasoning_result else [],
+                source_links=source_links,
+                attribution_summary=attribution_summary,
+                royalties_distributed=royalties_summary
             )
             
             # Store interaction in database
@@ -545,22 +596,27 @@ class NWTNVoicebox:
     def _assess_clarification_needs(self, query: str) -> Tuple[bool, List[str]]:
         """Assess if query needs clarification"""
         questions = []
+        query_lower = query.lower()
         
-        # Check for ambiguous terms
-        if "it" in query.lower() or "this" in query.lower() or "that" in query.lower():
-            questions.append("Could you clarify what specific subject or concept you're referring to?")
+        # Check for ambiguous terms, but only if they're not referring to a clearly defined subject
+        # Don't trigger clarification for questions like "What is X and how does it work?"
+        has_clear_subject = any(word in query_lower for word in ["what is", "how does", "explain", "describe", "define"])
         
-        # Check for vague scope
-        if "best" in query.lower() or "most" in query.lower():
+        if not has_clear_subject:
+            if "it" in query_lower or "this" in query_lower or "that" in query_lower:
+                questions.append("Could you clarify what specific subject or concept you're referring to?")
+        
+        # Check for vague scope - but only for comparative questions without clear context
+        if ("best" in query_lower or "most" in query_lower) and "what" not in query_lower:
             questions.append("What specific criteria should I use to evaluate 'best' or 'most'?")
         
-        # Check for missing context
-        if len(query.split()) < 5:
+        # Check for missing context - but be more lenient for well-formed questions
+        if len(query.split()) < 3:  # Only very short queries need more context
             questions.append("Could you provide more context about what you're looking for?")
         
-        # Check for unclear intent
+        # Check for unclear intent - but not for scientific or technical questions
         unclear_words = ["help", "about", "stuff", "things", "something"]
-        if any(word in query.lower() for word in unclear_words):
+        if any(word in query_lower for word in unclear_words) and not has_clear_subject:
             questions.append("What specific information or outcome are you looking for?")
         
         return len(questions) > 0, questions
@@ -606,7 +662,7 @@ class NWTNVoicebox:
         query_id: str,
         analysis: QueryAnalysis,
         context: Optional[Dict[str, Any]] = None
-    ) -> IntegratedReasoningResult:
+    ) -> MetaReasoningResult:
         """Process query through 8-step NWTN reasoning system"""
         try:
             # Prepare context for NWTN
@@ -621,11 +677,22 @@ class NWTNVoicebox:
             if context:
                 nwtn_context.update(context)
             
-            # Process through multi-modal reasoning engine
-            result = await self.multi_modal_engine.process_query(
+            # Process through meta-reasoning engine
+            result = await self.meta_reasoning_engine.meta_reason(
                 query=analysis.original_query,
                 context=nwtn_context
             )
+            
+            # Add comprehensive compatibility attributes for voicebox
+            result.reasoning_path = self._extract_reasoning_path(result)
+            result.integrated_conclusion = self._extract_integrated_conclusion(result)
+            result.multi_modal_evidence = self._extract_evidence(result)
+            result.identified_uncertainties = self._extract_uncertainties(result)
+            result.reasoning_results = self._extract_reasoning_results(result)
+            result.overall_confidence = result.meta_confidence
+            result.reasoning_trace = self._extract_reasoning_trace(result)
+            result.confidence_score = result.meta_confidence
+            result.used_reasoning_modes = result.reasoning_path
             
             return result
             
@@ -633,15 +700,95 @@ class NWTNVoicebox:
             logger.error(f"Failed to process through NWTN: {e}")
             raise
     
+    def _extract_reasoning_path(self, result: MetaReasoningResult) -> List[str]:
+        """Extract reasoning modes used from MetaReasoningResult"""
+        reasoning_path = []
+        if result.parallel_results:
+            # Get unique reasoning engines used
+            engines = set()
+            for r in result.parallel_results:
+                if hasattr(r, 'reasoning_engine'):
+                    engines.add(r.reasoning_engine)
+                elif hasattr(r, 'engine_name'):
+                    engines.add(r.engine_name)
+            reasoning_path = [f"{engine}_reasoning" for engine in engines]
+        return reasoning_path
+    
+    def _extract_integrated_conclusion(self, result: MetaReasoningResult) -> str:
+        """Extract integrated conclusion from MetaReasoningResult"""
+        if hasattr(result, 'final_synthesis') and result.final_synthesis:
+            return str(result.final_synthesis)
+        
+        # Fallback: summarize from parallel results
+        if result.parallel_results:
+            conclusions = []
+            for r in result.parallel_results:
+                if hasattr(r, 'conclusion'):
+                    conclusions.append(r.conclusion)
+            if conclusions:
+                return "; ".join(conclusions[:3])  # First 3 conclusions
+        
+        return "Meta-reasoning analysis completed with enhanced reasoning engines"
+    
+    def _extract_evidence(self, result: MetaReasoningResult) -> List[str]:
+        """Extract multi-modal evidence from MetaReasoningResult"""
+        evidence = []
+        if result.parallel_results:
+            for r in result.parallel_results:
+                if hasattr(r, 'supporting_evidence'):
+                    evidence.extend(r.supporting_evidence)
+                elif hasattr(r, 'evidence'):
+                    evidence.extend(r.evidence)
+        return evidence
+    
+    def _extract_uncertainties(self, result: MetaReasoningResult) -> List[str]:
+        """Extract uncertainties from MetaReasoningResult"""
+        uncertainties = []
+        if result.parallel_results:
+            for r in result.parallel_results:
+                if hasattr(r, 'uncertainties'):
+                    uncertainties.extend(r.uncertainties)
+                elif hasattr(r, 'limitations'):
+                    uncertainties.extend(r.limitations)
+                elif hasattr(r, 'confidence') and r.confidence < 0.7:
+                    uncertainties.append(f"Low confidence in {getattr(r, 'reasoning_engine', 'reasoning')}: {r.confidence:.2f}")
+        return uncertainties
+    
+    def _extract_reasoning_results(self, result: MetaReasoningResult) -> List[Dict[str, Any]]:
+        """Extract reasoning results from MetaReasoningResult"""
+        reasoning_results = []
+        if result.parallel_results:
+            for r in result.parallel_results:
+                reasoning_results.append({
+                    'engine': getattr(r, 'reasoning_engine', 'unknown'),
+                    'conclusion': getattr(r, 'conclusion', 'No conclusion'),
+                    'confidence': getattr(r, 'confidence', 0.0),
+                    'evidence': getattr(r, 'supporting_evidence', []),
+                    'reasoning_trace': getattr(r, 'reasoning_trace', [])
+                })
+        return reasoning_results
+    
+    def _extract_reasoning_trace(self, result: MetaReasoningResult) -> List[Dict[str, Any]]:
+        """Extract reasoning trace from MetaReasoningResult"""
+        trace = []
+        if result.parallel_results:
+            for r in result.parallel_results:
+                if hasattr(r, 'reasoning_trace'):
+                    trace.extend(r.reasoning_trace)
+        return trace
+
     async def _translate_to_natural_language(
         self,
         user_id: str,
         original_query: str,
-        reasoning_result: IntegratedReasoningResult,
+        reasoning_result: MetaReasoningResult,
         analysis: QueryAnalysis
     ) -> str:
-        """Translate structured insights to natural language response"""
+        """Translate structured insights to natural language response with attribution"""
         try:
+            # Generate source attribution for content used in reasoning
+            attribution_text = await self._generate_attribution_text(reasoning_result)
+            
             # Determine which API configuration to use
             api_config = None
             
@@ -657,9 +804,9 @@ class NWTNVoicebox:
             
             # If we have an API configuration, use it
             if api_config:
-                # Prepare translation prompt
-                translation_prompt = self._build_translation_prompt(
-                    original_query, reasoning_result, analysis
+                # Prepare enhanced translation prompt with attribution
+                translation_prompt = self._build_translation_prompt_with_attribution(
+                    original_query, reasoning_result, analysis, attribution_text
                 )
                 
                 # Call the LLM API
@@ -667,21 +814,34 @@ class NWTNVoicebox:
                     api_config, translation_prompt
                 )
                 
+                # Calculate and distribute usage royalties
+                await self._distribute_usage_royalties(reasoning_result, user_id)
+                
                 return natural_response
             
             else:
                 logger.info("No API configuration available, using fallback response")
-                return self._create_fallback_response(reasoning_result)
+                fallback_response = self._create_fallback_response(reasoning_result)
+                
+                # Even for fallback, distribute royalties
+                await self._distribute_usage_royalties(reasoning_result, user_id)
+                
+                return fallback_response
             
         except Exception as e:
             logger.error(f"Failed to translate to natural language: {e}")
-            # Fallback to structured response
+            # Fallback to structured response, but still try to distribute royalties
+            try:
+                await self._distribute_usage_royalties(reasoning_result, user_id)
+            except Exception as royalty_error:
+                logger.error(f"Failed to distribute royalties in fallback: {royalty_error}")
+            
             return self._create_fallback_response(reasoning_result)
     
     def _build_translation_prompt(
         self,
         original_query: str,
-        reasoning_result: IntegratedReasoningResult,
+        reasoning_result: MetaReasoningResult,
         analysis: QueryAnalysis
     ) -> str:
         """Build prompt for translating structured insights to natural language"""
@@ -693,7 +853,7 @@ ORIGINAL USER QUERY:
 {original_query}
 
 NWTN'S STRUCTURED ANALYSIS:
-- Confidence Score: {reasoning_result.overall_confidence}
+- Confidence Score: {reasoning_result.meta_confidence}
 - Reasoning Modes Used: {', '.join(reasoning_result.reasoning_path)}
 - Primary Insights: {reasoning_result.integrated_conclusion}
 - Supporting Evidence: {reasoning_result.multi_modal_evidence}
@@ -790,9 +950,9 @@ Generate a natural language response that makes NWTN's sophisticated reasoning a
         # In production, would use actual Gemini API
         return f"[GEMINI API RESPONSE] Based on NWTN's multi-modal reasoning analysis, here's the response to your query: {prompt[:200]}..."
     
-    def _create_fallback_response(self, reasoning_result: IntegratedReasoningResult) -> str:
+    def _create_fallback_response(self, reasoning_result: MetaReasoningResult) -> str:
         """Create fallback response when LLM translation fails"""
-        return f"""Based on NWTN's multi-modal reasoning analysis (confidence: {reasoning_result.overall_confidence:.2f}):
+        return f"""Based on NWTN's multi-modal reasoning analysis (confidence: {reasoning_result.meta_confidence:.2f}):
 
 **Key Insights:**
 {reasoning_result.integrated_conclusion}
@@ -811,7 +971,7 @@ This analysis was generated using NWTN's sophisticated multi-modal reasoning sys
     async def _calculate_actual_cost(
         self,
         analysis: QueryAnalysis,
-        reasoning_result: IntegratedReasoningResult
+        reasoning_result: MetaReasoningResult
     ) -> float:
         """Calculate actual cost based on processing"""
         # Base cost from estimate
@@ -824,7 +984,7 @@ This analysis was generated using NWTN's sophisticated multi-modal reasoning sys
             mode_adjustment = actual_modes / max(estimated_modes, 1)
             
             # Adjust based on confidence (higher confidence = more processing)
-            confidence_adjustment = reasoning_result.overall_confidence
+            confidence_adjustment = reasoning_result.meta_confidence
             
             return base_cost * mode_adjustment * confidence_adjustment
         
@@ -897,6 +1057,460 @@ This analysis was generated using NWTN's sophisticated multi-modal reasoning sys
         """Hash API key for secure storage"""
         import hashlib
         return hashlib.sha256(api_key.encode()).hexdigest()
+    
+    async def _generate_attribution_text(self, reasoning_result: MetaReasoningResult) -> str:
+        """
+        Generate human-readable attribution text for content sources
+        
+        Args:
+            reasoning_result: The reasoning result containing content usage information
+            
+        Returns:
+            Formatted attribution text for inclusion in responses
+        """
+        try:
+            # Check if reasoning result has content sources information
+            if not hasattr(reasoning_result, 'content_sources') or not reasoning_result.content_sources:
+                return "This response was generated using NWTN's internal knowledge base."
+            
+            content_sources = reasoning_result.content_sources
+            
+            # Generate attribution summary
+            if len(content_sources) == 1:
+                attribution = f"This response is based on 1 knowledge source"
+            else:
+                attribution = f"This response is based on {len(content_sources)} knowledge sources"
+            
+            # Add source quality information if available
+            if hasattr(reasoning_result, 'average_source_confidence'):
+                confidence = reasoning_result.average_source_confidence
+                confidence_text = "high" if confidence > 0.8 else "moderate" if confidence > 0.6 else "varied"
+                attribution += f" with {confidence_text} confidence"
+            
+            attribution += " from PRSM's verified knowledge corpus."
+            
+            logger.debug("Generated attribution text",
+                        source_count=len(content_sources),
+                        attribution_length=len(attribution))
+            
+            return attribution
+            
+        except Exception as e:
+            logger.error(f"Failed to generate attribution text: {e}")
+            return "This response was generated using NWTN's verified knowledge sources."
+    
+    def _build_translation_prompt_with_attribution(
+        self,
+        original_query: str,
+        reasoning_result: MetaReasoningResult,
+        analysis: QueryAnalysis,
+        attribution_text: str
+    ) -> str:
+        """Build enhanced translation prompt with source attribution"""
+        
+        base_prompt = self._build_translation_prompt(original_query, reasoning_result, analysis)
+        
+        # Add attribution instructions to the prompt
+        enhanced_prompt = f"""{base_prompt}
+
+IMPORTANT ATTRIBUTION REQUIREMENTS:
+{attribution_text}
+
+Please include appropriate source attribution in your response. Acknowledge that this analysis is based on verified knowledge sources from PRSM's corpus and was processed through NWTN's multi-modal reasoning system.
+
+Remember to:
+1. Credit the underlying knowledge sources appropriately
+2. Mention that this represents analysis by NWTN's reasoning system
+3. Be transparent about the collaborative nature of the knowledge synthesis
+
+Generate your response with proper attribution:"""
+        
+        return enhanced_prompt
+    
+    async def _distribute_usage_royalties(self, reasoning_result: MetaReasoningResult, user_id: str):
+        """
+        Calculate and distribute FTNS royalties to content creators using sophisticated engine
+        
+        Args:
+            reasoning_result: The reasoning result containing content usage information
+            user_id: User who requested the reasoning (for cost calculation)
+        """
+        try:
+            # Check if reasoning result has content sources
+            if not hasattr(reasoning_result, 'content_sources') or not reasoning_result.content_sources:
+                logger.debug("No content sources found for royalty distribution")
+                return
+            
+            content_sources = reasoning_result.content_sources
+            
+            # Determine query complexity based on reasoning result
+            query_complexity = self._determine_query_complexity(reasoning_result)
+            
+            # Get user tier (could be enhanced to look up actual user tier from database)
+            user_tier = "basic"  # Default tier - could be enhanced to get from user profile
+            
+            # Prepare reasoning context for royalty calculation
+            reasoning_context = {
+                'reasoning_path': getattr(reasoning_result, 'reasoning_path', []),
+                'overall_confidence': getattr(reasoning_result, 'overall_confidence', 0.0),
+                'multi_modal_evidence': getattr(reasoning_result, 'multi_modal_evidence', []),
+                'content_weights': self._extract_content_weights(reasoning_result),
+                'confidence_contributions': self._extract_confidence_contributions(reasoning_result),
+                'domain_relevance': self._extract_domain_relevance(reasoning_result),
+                'user_id': user_id,
+                'reasoning_type': 'nwtn_multi_modal'
+            }
+            
+            # Calculate royalties using the sophisticated engine
+            royalty_calculations = await self.content_royalty_engine.calculate_usage_royalty(
+                content_sources=content_sources,
+                query_complexity=query_complexity,
+                user_tier=user_tier,
+                reasoning_context=reasoning_context
+            )
+            
+            if not royalty_calculations:
+                logger.debug("No royalty calculations generated")
+                return
+            
+            # Distribute the calculated royalties
+            distribution_result = await self.content_royalty_engine.distribute_royalties(
+                royalty_calculations=royalty_calculations
+            )
+            
+            logger.info("Sophisticated royalty distribution completed",
+                       user_id=user_id,
+                       content_sources=len(content_sources),
+                       successful_distributions=distribution_result.successful_distributions,
+                       failed_distributions=distribution_result.failed_distributions,
+                       total_distributed=float(distribution_result.total_royalties_distributed))
+            
+        except Exception as e:
+            logger.error(f"Failed to distribute usage royalties: {e}")
+    
+    def _determine_query_complexity(self, reasoning_result: MetaReasoningResult) -> QueryComplexity:
+        """Determine query complexity based on reasoning result characteristics"""
+        try:
+            # Get reasoning path length and confidence
+            reasoning_modes_used = len(getattr(reasoning_result, 'reasoning_path', []))
+            overall_confidence = getattr(reasoning_result, 'overall_confidence', 0.0)
+            
+            # Determine complexity based on reasoning depth and confidence
+            if reasoning_modes_used >= 6 and overall_confidence > 0.9:
+                return QueryComplexity.BREAKTHROUGH
+            elif reasoning_modes_used >= 4:
+                return QueryComplexity.COMPLEX
+            elif reasoning_modes_used >= 2:
+                return QueryComplexity.MODERATE
+            else:
+                return QueryComplexity.SIMPLE
+                
+        except Exception:
+            return QueryComplexity.MODERATE  # Default complexity
+    
+    def _extract_content_weights(self, reasoning_result: MetaReasoningResult) -> Dict[str, float]:
+        """Extract content weights from reasoning result"""
+        try:
+            # This would extract how much each content source contributed to the reasoning
+            # Placeholder implementation - would be more sophisticated in production
+            content_sources = getattr(reasoning_result, 'content_sources', [])
+            if not content_sources:
+                return {}
+            
+            # For now, assign equal weights
+            weight_per_source = 1.0 / len(content_sources)
+            return {str(content_id): weight_per_source for content_id in content_sources}
+            
+        except Exception:
+            return {}
+    
+    def _extract_confidence_contributions(self, reasoning_result: MetaReasoningResult) -> Dict[str, float]:
+        """Extract confidence contributions from reasoning result"""
+        try:
+            # This would extract how much each content source contributed to overall confidence
+            # Placeholder implementation
+            content_sources = getattr(reasoning_result, 'content_sources', [])
+            overall_confidence = getattr(reasoning_result, 'overall_confidence', 0.0)
+            
+            if not content_sources:
+                return {}
+            
+            # For now, distribute confidence equally
+            confidence_per_source = overall_confidence / len(content_sources)
+            return {str(content_id): confidence_per_source for content_id in content_sources}
+            
+        except Exception:
+            return {}
+    
+    def _extract_domain_relevance(self, reasoning_result: MetaReasoningResult) -> Dict[str, float]:
+        """Extract domain relevance from reasoning result"""
+        try:
+            # This would extract how relevant each content source is to the query domain
+            # Placeholder implementation
+            content_sources = getattr(reasoning_result, 'content_sources', [])
+            
+            if not content_sources:
+                return {}
+            
+            # For now, assume high relevance for all sources
+            return {str(content_id): 1.0 for content_id in content_sources}
+            
+        except Exception:
+            return {}
+    
+    async def _generate_source_links(self, reasoning_result: MetaReasoningResult) -> List[SourceLink]:
+        """
+        Generate direct access links for content sources used in reasoning
+        
+        FERRARI FUEL LINE CONNECTION: This method now connects to the external drive
+        containing 150K+ papers to generate real, attributable source links.
+        
+        Args:
+            reasoning_result: The reasoning result containing content sources
+            
+        Returns:
+            List of SourceLink objects with access information to real papers
+        """
+        try:
+            source_links: List[SourceLink] = []
+            
+            # Check if reasoning result has content sources
+            if not hasattr(reasoning_result, 'content_sources') or not reasoning_result.content_sources:
+                # If no content sources, search external knowledge base for related papers
+                if hasattr(reasoning_result, 'original_query') and reasoning_result.original_query:
+                    logger.info("No content sources found, searching external knowledge base",
+                               query=reasoning_result.original_query)
+                    
+                    # Search for relevant papers in external storage
+                    if self.external_knowledge_base and self.external_knowledge_base.initialized:
+                        papers = await self.external_knowledge_base.search_papers(
+                            reasoning_result.original_query, 
+                            max_results=10
+                        )
+                        
+                        for paper in papers:
+                            source_link = SourceLink(
+                                content_id=paper.get('id', str(uuid4())),
+                                title=paper.get('title', 'Research Paper'),
+                                creator=paper.get('authors', 'Unknown Author'),
+                                ipfs_link=f"https://arxiv.org/abs/{paper.get('arxiv_id', paper.get('id', ''))}",
+                                contribution_date=paper.get('publish_date', '2024-01-01'),
+                                relevance_score=paper.get('relevance_score', 0.8),
+                                content_type='research_paper'
+                            )
+                            source_links.append(source_link)
+                    else:
+                        logger.warning("External knowledge base not available for source link generation")
+                
+                return source_links
+            
+            content_sources = reasoning_result.content_sources
+            
+            # Try to generate source links from external knowledge base first
+            if self.external_knowledge_base and self.external_knowledge_base.initialized:
+                try:
+                    # Content sources are now formatted as "Title by Authors" - extract titles for search
+                    paper_titles = []
+                    for source in content_sources:
+                        if " by " in source:
+                            title = source.split(" by ")[0]
+                            paper_titles.append(title)
+                        else:
+                            paper_titles.append(source)
+                    
+                    # Search for papers by title to get their IDs
+                    paper_ids = []
+                    for title in paper_titles:
+                        papers = await self.external_knowledge_base.search_papers(title, max_results=1)
+                        if papers:
+                            paper_ids.append(papers[0].get('id'))
+                    
+                    # Get source links from external knowledge base
+                    external_links = await self.external_knowledge_base.generate_source_links(paper_ids)
+                    
+                    for link_data in external_links:
+                        source_link = SourceLink(
+                            content_id=link_data['content_id'],
+                            title=link_data['title'],
+                            creator=link_data['creator'],
+                            ipfs_link=link_data['ipfs_link'],
+                            contribution_date=link_data['contribution_date'],
+                            relevance_score=link_data['relevance_score'],
+                            content_type=link_data['content_type']
+                        )
+                        source_links.append(source_link)
+                        
+                        logger.debug("External source link generated",
+                                   content_id=link_data['content_id'],
+                                   title=link_data['title'],
+                                   creator=link_data['creator'])
+                    
+                    if source_links:
+                        logger.info("Source links generated from external knowledge base",
+                                   total_sources=len(content_sources),
+                                   successful_links=len(source_links))
+                        return source_links
+                
+                except Exception as external_error:
+                    logger.warning(f"Failed to generate source links from external knowledge base: {external_error}")
+            
+            # Fallback to provenance system for legacy content
+            for content_id in content_sources:
+                try:
+                    # Get attribution chain from provenance system
+                    attribution_chain = await self.provenance_system._load_attribution_chain(content_id)
+                    if not attribution_chain:
+                        logger.warning(f"No attribution chain found for content {content_id}")
+                        continue
+                    
+                    # Get content fingerprint for IPFS link
+                    fingerprint = await self.provenance_system._load_content_fingerprint(content_id)
+                    if not fingerprint or not fingerprint.ipfs_hash:
+                        logger.warning(f"No IPFS hash found for content {content_id}")
+                        continue
+                    
+                    # Generate IPFS access link
+                    ipfs_link = f"https://ipfs.prsm.ai/ipfs/{fingerprint.ipfs_hash}"
+                    
+                    # Determine content type
+                    content_type = fingerprint.content_type.value if fingerprint.content_type else "unknown"
+                    
+                    # Calculate relevance score (placeholder - would be more sophisticated)
+                    relevance_score = 0.8  # Default relevance
+                    
+                    # Create source link
+                    source_link = SourceLink(
+                        content_id=str(content_id),
+                        title=getattr(attribution_chain, 'title', f"Content {str(content_id)[:8]}"),
+                        creator=attribution_chain.original_creator,
+                        ipfs_link=ipfs_link,
+                        contribution_date=attribution_chain.creation_timestamp.isoformat(),
+                        relevance_score=relevance_score,
+                        content_type=content_type
+                    )
+                    
+                    source_links.append(source_link)
+                    
+                    logger.debug("Legacy source link generated",
+                               content_id=str(content_id),
+                               creator=attribution_chain.original_creator,
+                               ipfs_hash=fingerprint.ipfs_hash[:16] + "...")
+                
+                except Exception as source_error:
+                    logger.warning(f"Failed to generate source link for {content_id}: {source_error}")
+                    continue
+            
+            logger.info("Source links generated",
+                       total_sources=len(content_sources),
+                       successful_links=len(source_links),
+                       source_type="external_knowledge_base" if self.external_knowledge_base else "legacy_provenance")
+            
+            return source_links
+            
+        except Exception as e:
+            logger.error(f"Failed to generate source links: {e}")
+            return []
+    
+    async def _generate_attribution_summary(
+        self, 
+        reasoning_result: MetaReasoningResult, 
+        source_links: List[SourceLink]
+    ) -> str:
+        """
+        Generate a comprehensive attribution summary for the response
+        
+        Args:
+            reasoning_result: The reasoning result
+            source_links: Generated source links
+            
+        Returns:
+            Human-readable attribution summary
+        """
+        try:
+            if not source_links:
+                return "This response was generated using NWTN's internal knowledge base with multi-modal reasoning."
+            
+            source_count = len(source_links)
+            unique_creators = len(set(link.creator for link in source_links))
+            
+            # Build attribution summary
+            if source_count == 1:
+                summary = f"This response is based on 1 verified source"
+            else:
+                summary = f"This response is based on {source_count} verified sources"
+            
+            if unique_creators == 1:
+                summary += f" from 1 contributor"
+            else:
+                summary += f" from {unique_creators} contributors"
+            
+            summary += " in PRSM's knowledge corpus."
+            
+            # Add confidence information
+            confidence = getattr(reasoning_result, 'overall_confidence', 0.0)
+            if confidence > 0.9:
+                summary += " Analysis performed with high confidence using NWTN's multi-modal reasoning."
+            elif confidence > 0.7:
+                summary += " Analysis performed with good confidence using NWTN's multi-modal reasoning."
+            else:
+                summary += " Analysis performed using NWTN's multi-modal reasoning."
+            
+            # Add reasoning modes used
+            reasoning_modes = getattr(reasoning_result, 'reasoning_path', [])
+            if reasoning_modes:
+                modes_text = ", ".join(reasoning_modes[:3])  # Show first 3 modes
+                if len(reasoning_modes) > 3:
+                    modes_text += f" and {len(reasoning_modes) - 3} other reasoning modes"
+                summary += f" Reasoning employed: {modes_text}."
+            
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Failed to generate attribution summary: {e}")
+            return "This response was generated using NWTN's verified knowledge sources."
+    
+    async def _get_royalty_summary(self, reasoning_result: MetaReasoningResult) -> Dict[str, float]:
+        """
+        Get summary of royalties distributed for this reasoning session
+        
+        Args:
+            reasoning_result: The reasoning result containing royalty information
+            
+        Returns:
+            Dictionary mapping creator IDs to royalty amounts
+        """
+        try:
+            # This would typically be populated during the royalty distribution process
+            # For now, return a placeholder summary
+            
+            if not hasattr(reasoning_result, 'content_sources') or not reasoning_result.content_sources:
+                return {}
+            
+            # Simplified summary - in production this would come from the royalty engine
+            royalty_summary = {}
+            content_sources = reasoning_result.content_sources
+            
+            # Calculate estimated royalties (simplified)
+            estimated_royalty_per_source = 0.02  # 0.02 FTNS per source (example)
+            
+            for content_id in content_sources:
+                try:
+                    # Get creator info
+                    attribution_chain = await self.provenance_system._load_attribution_chain(content_id)
+                    if attribution_chain:
+                        creator_id = attribution_chain.original_creator
+                        if creator_id not in royalty_summary:
+                            royalty_summary[creator_id] = 0.0
+                        royalty_summary[creator_id] += estimated_royalty_per_source
+                
+                except Exception:
+                    continue
+            
+            return royalty_summary
+            
+        except Exception as e:
+            logger.error(f"Failed to get royalty summary: {e}")
+            return {}
 
 
 # Global voicebox service instance

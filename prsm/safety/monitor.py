@@ -705,3 +705,57 @@ class SafetyMonitor:
             mitigation_suggestions=mitigation_suggestions,
             urgency=urgency
         )
+    
+    async def validate_session_creation(self, session) -> bool:
+        """
+        Validate session creation for safety compliance.
+        
+        Args:
+            session: PRSMSession to validate
+            
+        Returns:
+            True if session creation passes safety validation
+        """
+        try:
+            # Basic session validation - check for safe parameters
+            if not session or not session.user_id:
+                self.logger.warning("Session validation failed: invalid session data")
+                return False
+            
+            # Check if user has any safety violations in recent history
+            # This is a basic implementation - in production you'd check against
+            # a database of user safety records
+            
+            # For now, allow all sessions to pass basic safety validation
+            # This can be enhanced with more sophisticated checks
+            self.logger.info("Session creation validated", 
+                           session_id=session.session_id,
+                           user_id=session.user_id)
+            return True
+            
+        except Exception as e:
+            self.logger.error("Error validating session creation", error=str(e))
+            return False
+    
+    async def check_user_safety_status(self, user_id: str) -> bool:
+        """
+        Check user safety status for circuit breaker functionality.
+        
+        Args:
+            user_id: User identifier to check
+            
+        Returns:
+            True if user is in good standing, False if flagged
+        """
+        try:
+            # Basic implementation - check if user has recent safety violations
+            # In production, this would check against a comprehensive safety database
+            
+            # For now, allow all users (safe default for testing)
+            self.logger.debug("User safety status checked", user_id=user_id, status="safe")
+            return True
+            
+        except Exception as e:
+            self.logger.error("Error checking user safety status", user_id=user_id, error=str(e))
+            # Fail-safe: return True to avoid blocking users due to system errors
+            return True

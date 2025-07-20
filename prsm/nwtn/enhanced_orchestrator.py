@@ -452,18 +452,17 @@ class EnhancedNWTNOrchestrator:
             
             # Check user-specific safety status
             user_safety_status = await self.safety_monitor.check_user_safety_status(session.user_id)
-            if not user_safety_status.safe:
+            if not user_safety_status:
                 logger.warning("User safety check failed",
                              session_id=session.session_id,
-                             user_id=session.user_id,
-                             reason=user_safety_status.reason)
+                             user_id=session.user_id)
                 
                 await self.database_service.create_safety_flag(
                     session_id=session.session_id,
                     flag_data={
                         "level": "high",
                         "category": "user_safety",
-                        "description": f"User safety check failed: {user_safety_status.reason}",
+                        "description": "User safety check failed",
                         "triggered_by": "safety_monitor"
                     }
                 )
@@ -500,15 +499,19 @@ class EnhancedNWTNOrchestrator:
                 raise ValueError("Failed to allocate required context for real agent coordination")
             
             # Step 2: Use ModelRouter for enhanced model discovery
-            routing_result = await self.router.route_to_models(
-                query=clarified_prompt.clarified_prompt,
-                context={
-                    "complexity": clarified_prompt.complexity_estimate,
-                    "domain": clarified_prompt.intent_category,
-                    "session_id": session.session_id
-                },
-                required_capabilities=clarified_prompt.metadata.get("required_capabilities", [])
+            selected_model = await self.router.route_to_best_model(
+                clarified_prompt.clarified_prompt
             )
+            
+            # Create routing result wrapper with expected attributes
+            class RoutingResult:
+                def __init__(self, model_id):
+                    self.selected_models = [model_id] if model_id else []
+                    self.primary_model = model_id
+                    self.confidence_score = 0.8
+                    self.confidence = 0.8  # Also add confidence attribute
+            
+            routing_result = RoutingResult(selected_model)
             
             # Step 3: Create enhanced pipeline configuration
             pipeline_config = {
@@ -528,6 +531,14 @@ class EnhancedNWTNOrchestrator:
             }
             
             # Step 4: Store pipeline configuration in database
+            # Convert complex objects to JSON-serializable format
+            serializable_pipeline_config = {
+                "session_id": str(session.session_id),
+                "agent_assignments": pipeline_config.get("agent_assignments", []),
+                "execution_strategy": pipeline_config.get("execution_strategy", {}),
+                "routing_confidence": getattr(routing_result, 'confidence', 0.8)
+            }
+            
             await self.database_service.create_architect_task(
                 session_id=session.session_id,
                 task_data={
@@ -538,9 +549,9 @@ class EnhancedNWTNOrchestrator:
                     "status": "configured",
                     "assigned_agent": "enhanced_orchestrator",
                     "metadata": {
-                        "pipeline_config": pipeline_config,
-                        "agent_count": len(pipeline_config["agent_assignments"]),
-                        "routing_score": routing_result.confidence
+                        "pipeline_config": serializable_pipeline_config,
+                        "agent_count": len(pipeline_config.get("agent_assignments", [])),
+                        "routing_score": getattr(routing_result, 'confidence', 0.8)
                     }
                 }
             )
@@ -578,15 +589,13 @@ class EnhancedNWTNOrchestrator:
             logger.info("Starting advanced agent coordination with LLM-enhanced planning",
                        session_id=session.session_id,
                        intent=clarified_prompt.intent_category,
-                       llm_confidence=clarified_prompt.metadata.get("confidence", 0.7),
-                       risk_factors=clarified_prompt.metadata.get("risk_factors", []))
+                       llm_confidence=0.7)  # Default confidence since ClarifiedPrompt doesn't have metadata
             
-            # Step 1: Extract LLM analysis metadata for coordination
-            llm_metadata = clarified_prompt.metadata
-            reasoning_chain = llm_metadata.get("reasoning_chain", [])
-            suggested_models = llm_metadata.get("suggested_models", [])
-            risk_factors = llm_metadata.get("risk_factors", [])
-            estimated_tokens = llm_metadata.get("estimated_tokens", 1000)
+            # Step 1: Use basic analysis since metadata not available
+            reasoning_chain = []
+            suggested_models = []
+            risk_factors = []
+            estimated_tokens = clarified_prompt.context_required
             
             # Step 2: Enhanced context allocation based on LLM token estimation
             allocation_success = await self.context_manager.allocate_context(
@@ -629,8 +638,8 @@ class EnhancedNWTNOrchestrator:
                     "reasoning_chain": reasoning_chain,
                     "suggested_models": suggested_models,
                     "risk_factors": risk_factors,
-                    "confidence_score": llm_metadata.get("confidence", 0.7),
-                    "disambiguation_questions": llm_metadata.get("disambiguation_questions", [])
+                    "confidence_score": 0.7,  # Default since metadata not available
+                    "disambiguation_questions": []  # Default since metadata not available
                 },
                 "monitoring_config": {
                     "track_performance": True,
@@ -664,7 +673,7 @@ class EnhancedNWTNOrchestrator:
                             "reasoning_steps": len(reasoning_chain),
                             "suggested_models": len(suggested_models),
                             "risk_factors": len(risk_factors),
-                            "confidence": llm_metadata.get("confidence", 0.7)
+                            "confidence": 0.7  # Default since metadata not available
                         }
                     }
                 }
@@ -675,7 +684,7 @@ class EnhancedNWTNOrchestrator:
                        agents_assigned=len(agent_assignments),
                        routing_confidence=routing_result.confidence,
                        execution_strategy=execution_strategy["strategy_type"],
-                       llm_confidence=llm_metadata.get("confidence", 0.7),
+                       llm_confidence=0.7,  # Default since metadata not available
                        risk_factors_detected=len(risk_factors))
             
             return pipeline_config
@@ -763,7 +772,7 @@ class EnhancedNWTNOrchestrator:
                 "priority": 2,
                 "routing_result": routing_result
             },
-            "prompt_optimizer": {
+            "prompter": {
                 "agent": self.prompt_optimizer,
                 "task": "Prompt optimization for selected models", 
                 "priority": 3
@@ -798,11 +807,19 @@ class EnhancedNWTNOrchestrator:
         }
         
         # Use the standard router but with enhanced context
-        return await self.router.route_to_models(
-            query=clarified_prompt.clarified_prompt,
-            context=routing_context,
-            required_capabilities=clarified_prompt.metadata.get("required_capabilities", [])
+        selected_model = await self.router.route_to_best_model(
+            clarified_prompt.clarified_prompt
         )
+        
+        # Create routing result wrapper with expected attributes
+        class RoutingResult:
+            def __init__(self, model_id):
+                self.selected_models = [model_id] if model_id else []
+                self.primary_model = model_id
+                self.confidence_score = 0.8
+                self.confidence = 0.8  # Also add confidence attribute
+        
+        return RoutingResult(selected_model)
     
     async def _determine_advanced_execution_strategy(
         self, 
@@ -856,7 +873,7 @@ class EnhancedNWTNOrchestrator:
             # Adjust priorities based on LLM analysis
             if clarified_prompt.intent_category == "research" and agent_name == "architect":
                 assignment["priority"] = 0  # Higher priority for research tasks
-            elif clarified_prompt.complexity_estimate > 0.8 and agent_name == "prompt_optimizer":
+            elif clarified_prompt.complexity_estimate > 0.8 and agent_name == "prompter":
                 assignment["priority"] = 1.5  # Higher priority for complex optimization
         
         return base_assignments
@@ -968,14 +985,17 @@ class EnhancedNWTNOrchestrator:
                         }
                     )
                     
-                    reasoning_steps.append({
-                        "step_id": step_id,
-                        "agent_type": agent_name,
-                        "task": task,
-                        "result": result,
-                        "execution_time": execution_time,
-                        "context_used": context_used
-                    })
+                    # Create proper ReasoningStep object for PRSMResponse
+                    reasoning_step = ReasoningStep(
+                        step_id=step_id,
+                        agent_type=agent_name,
+                        agent_id=agent.agent_id,
+                        input_data={"task": task, "context": context_used},
+                        output_data=result,
+                        execution_time=execution_time,
+                        confidence_score=result.get("confidence", 0.8)
+                    )
+                    reasoning_steps.append(reasoning_step)
                     
                     # Safety validation after each step
                     await self._validate_step_safety(result, session)
@@ -1086,7 +1106,7 @@ class EnhancedNWTNOrchestrator:
             
             # Create execution request for ModelExecutor
             execution_request = {
-                "task": agent_results.get("prompt_optimizer", {}).get("optimized_prompt", 
+                "task": agent_results.get("prompter", {}).get("optimized_prompt", 
                         agent_results.get("architect", {}).get("task_description", "Process query")),
                 "models": model_assignments,
                 "parallel": True
@@ -1111,12 +1131,18 @@ class EnhancedNWTNOrchestrator:
                     )
                     tool_enhanced_results.append(tool_result)
                     
-                    # Track tool usage metrics
-                    self.performance_stats["tool_usage"]["total_tool_requests"] += tool_result.get("tool_execution_count", 0)
-                    if tool_result.get("tools_used"):
-                        self.performance_stats["tool_usage"]["successful_tool_executions"] += len(tool_result["tools_used"])
-                        self.performance_stats["tool_usage"]["unique_tools_used"].update(tool_result["tools_used"])
-                        self.performance_stats["tool_usage"]["tool_enhanced_sessions"] += 1
+                    # Track tool usage metrics with safe attribute access
+                    try:
+                        tool_count = tool_result.get("tool_execution_count", 0) if hasattr(tool_result, 'get') else 0
+                        self.performance_stats["tool_usage"]["total_tool_requests"] += tool_count
+                        
+                        tools_used = tool_result.get("tools_used") if hasattr(tool_result, 'get') else None
+                        if tools_used:
+                            self.performance_stats["tool_usage"]["successful_tool_executions"] += len(tools_used)
+                            self.performance_stats["tool_usage"]["unique_tools_used"].update(tools_used)
+                            self.performance_stats["tool_usage"]["tool_enhanced_sessions"] += 1
+                    except Exception as e:
+                        logger.debug(f"Error tracking tool usage metrics: {e}")
             
             # Execute with real ModelExecutor (fallback for non-tool models)
             execution_results = await executor.process(execution_request)
@@ -1133,13 +1159,23 @@ class EnhancedNWTNOrchestrator:
                 })() for r in tool_enhanced_results
             ]
             
+            # Helper function to safely get values from mixed result types
+            def safe_get_value(obj, key, default=None):
+                """Get value from either object attribute or dictionary key"""
+                if hasattr(obj, key):
+                    return getattr(obj, key, default)
+                elif hasattr(obj, 'get'):
+                    return obj.get(key, default)
+                else:
+                    return default
+            
             # Process results and track API usage
-            successful_results = [r for r in all_results if getattr(r, 'success', r.get('success', False))]
-            total_tokens = sum(getattr(r, 'tokens_used', 100) for r in successful_results)
+            successful_results = [r for r in all_results if safe_get_value(r, 'success', False)]
+            total_tokens = sum(safe_get_value(r, 'tokens_used', 100) for r in successful_results)
             
             # Calculate tool usage cost
             tool_cost_ftns = sum(
-                len(r.get("tools_used", [])) * 0.5  # 0.5 FTNS per tool usage
+                len(safe_get_value(r, "tools_used", [])) * 0.5  # 0.5 FTNS per tool usage
                 for r in tool_enhanced_results
             )
             self.performance_stats["tool_usage"]["total_tool_cost_ftns"] += tool_cost_ftns
@@ -1152,11 +1188,11 @@ class EnhancedNWTNOrchestrator:
                 "total_count": len(all_results),
                 "context_used": total_tokens // 10,  # Convert tokens to context units
                 "models_used": model_assignments,
-                "confidence": sum(getattr(r, 'confidence', r.get('confidence', 0.8)) for r in successful_results) / max(len(successful_results), 1),
+                "confidence": sum(safe_get_value(r, 'confidence', 0.8) for r in successful_results) / max(len(successful_results), 1),
                 "api_calls": len(execution_results),
-                "tool_executions": sum(r.get("tool_execution_count", 0) for r in tool_enhanced_results),
+                "tool_executions": sum(safe_get_value(r, "tool_execution_count", 0) for r in tool_enhanced_results),
                 "tool_cost_ftns": tool_cost_ftns,
-                "processing_time": sum(getattr(r, 'execution_time', r.get('execution_time', 0.0)) for r in all_results)
+                "processing_time": sum(safe_get_value(r, 'execution_time', 0.0) for r in all_results)
             }
             
         except Exception as e:
@@ -1194,7 +1230,7 @@ class EnhancedNWTNOrchestrator:
                     # Prompt optimizer needs prompt and domain
                     response = await agent.safe_process({
                         "prompt": task,
-                        "domain": "general",
+                        "domain": "computer_science",
                         "task_type": "optimization"
                     }, context)
                 elif agent_type == AgentType.ROUTER:
@@ -1300,7 +1336,31 @@ class EnhancedNWTNOrchestrator:
             if "compiler" in agent_results and agent_results["compiler"].get("success"):
                 compiler_result = agent_results["compiler"].get("result", {})
                 if isinstance(compiler_result, dict) and "compiled_result" in compiler_result:
-                    return str(compiler_result["compiled_result"])
+                    compiled_data = compiler_result["compiled_result"]
+                    # Extract meaningful text from the compiled result
+                    if isinstance(compiled_data, dict):
+                        # Try to extract narrative or summary content
+                        text_parts = []
+                        if "executive_summary" in compiled_data:
+                            text_parts.append(f"Executive Summary: {compiled_data['executive_summary']}")
+                        if "detailed_narrative" in compiled_data:
+                            text_parts.append(f"Analysis: {compiled_data['detailed_narrative']}")
+                        if "key_findings" in compiled_data:
+                            findings = compiled_data["key_findings"]
+                            if isinstance(findings, list) and findings:
+                                text_parts.append(f"Key Findings:\n" + "\n".join(f"• {finding}" for finding in findings))
+                        if "recommendations" in compiled_data:
+                            recommendations = compiled_data["recommendations"] 
+                            if isinstance(recommendations, list) and recommendations:
+                                text_parts.append(f"Recommendations:\n" + "\n".join(f"• {rec}" for rec in recommendations))
+                        
+                        if text_parts:
+                            return "\n\n".join(text_parts)
+                        else:
+                            # Fallback: use string representation if no structured content found
+                            return str(compiled_data)
+                    else:
+                        return str(compiled_data)
                 elif hasattr(compiler_result, 'compiled_result'):
                     return str(compiler_result.compiled_result)
             
@@ -1351,7 +1411,7 @@ class EnhancedNWTNOrchestrator:
             confidences = []
             weights = {
                 "architect": 0.15,
-                "prompt_optimizer": 0.10,
+                "prompter": 0.10,
                 "router": 0.15,
                 "executor": 0.40,
                 "compiler": 0.20
@@ -1484,7 +1544,7 @@ class EnhancedNWTNOrchestrator:
                         f"Tool execution costs for {agent_name}"
                     )
                     
-            elif agent_name in ["architect", "router", "prompt_optimizer", "compiler"]:
+            elif agent_name in ["architect", "router", "prompter", "compiler"]:
                 # Agent coordination costs
                 spending_amount = 5.0  # Fixed cost per agent
                 spending_category = SpendingCategory.AGENT_COORDINATION
@@ -1798,7 +1858,7 @@ class EnhancedNWTNOrchestrator:
             
             # Determine which models need tool access
             models_with_tools = {}
-            for model_id in ["gpt-4", "claude-3-sonnet"]:  # Example models
+            for model_id in ["claude-3-sonnet", "claude-3-opus"]:  # Use Claude models only
                 recommended_tools = await self.router.get_tools_for_model(model_id, initial_prompt)
                 if recommended_tools:
                     models_with_tools[model_id] = recommended_tools

@@ -34,7 +34,7 @@ from prsm.core.models import (
     PRSMBaseModel, TimestampMixin, AgentType, TaskStatus, SafetyLevel
 )
 from prsm.context.selective_parallelism_engine import (
-    ExecutionStrategy, TaskDefinition, ParallelismDecision, SelectiveParallelismEngine
+    ExecutionStrategy, TaskDefinition, ParallelismDecision, SelectiveParallelismEngine, TaskComplexity
 )
 from prsm.scheduling.critical_path_calculator import (
     CriticalPathCalculator, ResourceConstraint
@@ -964,6 +964,19 @@ class WorkflowScheduler(TimestampMixin):
         except Exception as e:
             logger.error("Error deallocating workflow resources", error=str(e))
     
+    def _estimate_task_complexity(self, estimated_duration_seconds: float) -> TaskComplexity:
+        """Estimate task complexity based on estimated duration"""
+        if estimated_duration_seconds < 1:
+            return TaskComplexity.TRIVIAL
+        elif estimated_duration_seconds < 10:
+            return TaskComplexity.SIMPLE
+        elif estimated_duration_seconds < 60:
+            return TaskComplexity.MODERATE
+        elif estimated_duration_seconds < 600:  # 10 minutes
+            return TaskComplexity.COMPLEX
+        else:
+            return TaskComplexity.INTENSIVE
+    
     async def _execute_workflow_steps(self, workflow: ScheduledWorkflow) -> Dict[str, Any]:
         """Execute all steps in a workflow"""
         try:
@@ -975,10 +988,12 @@ class WorkflowScheduler(TimestampMixin):
                 # Convert to TaskDefinitions for parallelism analysis
                 task_definitions = []
                 for step in workflow.steps:
+                    duration_seconds = step.estimated_duration.total_seconds()
                     task_def = TaskDefinition(
                         task_name=step.step_name,
                         agent_type=step.agent_type,
-                        estimated_duration=step.estimated_duration.total_seconds(),
+                        complexity=self._estimate_task_complexity(duration_seconds),
+                        estimated_duration=duration_seconds,
                         input_dependencies=step.depends_on,
                         output_dependents=step.blocks
                     )

@@ -189,6 +189,25 @@ class AuditLogger:
         
         self.log_event(event)
     
+    async def log_security_event(self, event_type: str, user_id: str,
+                                details: Dict[str, Any], security_level: str = "info") -> None:
+        """Log a security event with details"""
+        try:
+            level = EventLevel(security_level.lower())
+        except ValueError:
+            level = EventLevel.INFO
+        
+        event = SecurityEvent(
+            event_type=event_type,
+            level=level,
+            user_id=user_id,
+            platform=details.get("platform", "unknown"),
+            description=f"Security event: {event_type}",
+            metadata=details
+        )
+        
+        self.log_event(event)
+    
     def log_import_security_check(self, user_id: str, platform: str,
                                 content_id: str, passed: bool, issues: List[str]) -> None:
         """Log overall import security validation"""

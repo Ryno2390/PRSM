@@ -33,6 +33,7 @@ from ..ipfs.content_verification import ContentVerificationSystem, VerificationR
 from .hybrid_architecture import SOC, SOCType, ConfidenceLevel, HybridNWTNEngine
 from .world_model_engine import WorldModelEngine
 from ..embeddings.semantic_embedding_engine import SemanticEmbeddingEngine, EmbeddingSearchQuery, EmbeddingSpace
+from ..provenance.enhanced_provenance_system import EnhancedProvenanceSystem
 
 logger = structlog.get_logger(__name__)
 
@@ -145,12 +146,14 @@ class NWTNKnowledgeCorpusInterface:
                  content_addressing: ContentAddressingSystem,
                  content_verification: ContentVerificationSystem,
                  world_model: WorldModelEngine,
-                 embedding_engine: SemanticEmbeddingEngine = None):
+                 embedding_engine: SemanticEmbeddingEngine = None,
+                 provenance_system: EnhancedProvenanceSystem = None):
         
         self.content_addressing = content_addressing
         self.content_verification = content_verification
         self.world_model = world_model
         self.embedding_engine = embedding_engine
+        self.provenance_system = provenance_system or EnhancedProvenanceSystem()
         
         # Corpus indexing
         self.content_index: Dict[str, Dict[str, Any]] = {}
@@ -173,7 +176,7 @@ class NWTNKnowledgeCorpusInterface:
     
     async def query_corpus(self, query: CorpusSearchQuery) -> CorpusQueryResult:
         """
-        Query the knowledge corpus for relevant content
+        Query the knowledge corpus for relevant content with provenance tracking
         
         Args:
             query: Search query specification
@@ -183,7 +186,7 @@ class NWTNKnowledgeCorpusInterface:
         """
         start_time = datetime.now()
         
-        logger.info("Processing corpus query",
+        logger.info("Processing corpus query with provenance tracking",
                    query_id=query.query_id,
                    search_type=query.search_type.value,
                    domain=query.domain)
@@ -195,13 +198,16 @@ class NWTNKnowledgeCorpusInterface:
             # Step 2: Verify content authenticity
             verified_results = await self._verify_search_results(search_results)
             
-            # Step 3: Generate SOCs from content
+            # Step 3: Track content access for provenance
+            await self._track_content_access(verified_results, query)
+            
+            # Step 4: Generate SOCs from content
             enriched_results = await self._enrich_with_socs(verified_results, query)
             
-            # Step 4: Synthesize knowledge insights
+            # Step 5: Synthesize knowledge insights
             synthesized_knowledge = await self._synthesize_corpus_knowledge(enriched_results, query)
             
-            # Step 5: Calculate metrics
+            # Step 6: Calculate metrics
             search_time = (datetime.now() - start_time).total_seconds()
             
             result = CorpusQueryResult(
@@ -236,6 +242,76 @@ class NWTNKnowledgeCorpusInterface:
                         query_id=query.query_id,
                         error=str(e))
             raise
+    
+    async def _track_content_access(self, search_results: List[CorpusSearchResult], query: CorpusSearchQuery):
+        """
+        Track content access events for provenance and royalty calculation
+        
+        This method records which pieces of content are accessed during corpus queries
+        and enables attribution tracking and creator compensation.
+        
+        Args:
+            search_results: List of content items accessed during search
+            query: Original search query that triggered the access
+        """
+        try:
+            for result in search_results:
+                try:
+                    # Extract content identifier from the result
+                    content_id = result.content_cid
+                    
+                    # Convert CID to UUID for provenance system
+                    if isinstance(content_id, str):
+                        # Create deterministic UUID from CID
+                        hash_bytes = hashlib.sha256(content_id.encode()).digest()[:16]
+                        content_uuid = uuid4()  # We'll use the hash to create a deterministic UUID
+                        content_uuid = content_uuid.__class__(bytes=hash_bytes)
+                    else:
+                        content_uuid = content_id
+                    
+                    # Get user context from query if available
+                    user_id = getattr(query, 'user_id', 'nwtn_system')
+                    session_id = uuid4()  # Generate session ID for this query
+                    
+                    # Track the content access
+                    await self.provenance_system.track_content_usage(
+                        content_id=content_uuid,
+                        user_id=user_id,
+                        session_id=session_id,
+                        usage_type="knowledge_retrieval",
+                        context={
+                            "query_text": query.query_text,
+                            "search_type": query.search_type.value,
+                            "domain": query.domain,
+                            "relevance_score": result.relevance_score,
+                            "trust_score": result.trust_score,
+                            "content_category": result.content_category.value if hasattr(result, 'content_category') else 'unknown',
+                            "system": "NWTN_knowledge_corpus"
+                        }
+                    )
+                    
+                    logger.debug("Content access tracked for provenance",
+                               content_cid=content_id,
+                               user_id=user_id,
+                               relevance_score=result.relevance_score,
+                               query_id=query.query_id)
+                
+                except Exception as access_error:
+                    logger.warning("Failed to track content access for provenance",
+                                 content_cid=getattr(result, 'content_cid', 'unknown'),
+                                 query_id=query.query_id,
+                                 error=str(access_error))
+                    # Continue processing other content items even if one fails
+                    continue
+            
+            logger.info("Content access tracking completed",
+                       query_id=query.query_id,
+                       items_tracked=len(search_results))
+                       
+        except Exception as e:
+            logger.error("Content access tracking failed",
+                        query_id=query.query_id,
+                        error=str(e))
     
     async def _search_content(self, query: CorpusSearchQuery) -> List[CorpusSearchResult]:
         """Search for relevant content in the corpus"""
