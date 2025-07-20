@@ -1,0 +1,8 @@
+{
+  "processed_count": 2000,
+  "current_batch": 1,
+  "total_papers": 149726,
+  "timestamp": "2025-07-20T12:33:46.746449+00:00",
+  "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+  "embedding_dimension": 384
+}
