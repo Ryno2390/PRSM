@@ -1,0 +1,12 @@
+{
+  "execution_id": "916ce108-cb1c-4594-b9ec-2e73ca140f9f",
+  "query": "What are the key architectural improvements in modern transformer models for handling long sequences?",
+  "thinking_mode": "intermediate",
+  "completed_at": "2025-07-21T13:34:19.668252+00:00",
+  "duration_hours": 0.0005228577719794379,
+  "confidence_score": 0.0,
+  "ftns_tokens_distributed": 0.0,
+  "papers_analyzed": 0,
+  "final_answer": "",
+  "citations_count": 0
+}

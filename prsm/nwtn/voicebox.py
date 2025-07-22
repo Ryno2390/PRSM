@@ -69,14 +69,20 @@ from datetime import datetime, timezone
 import structlog
 from pydantic import BaseModel, Field
 
-from prsm.nwtn.meta_reasoning_engine import MetaReasoningEngine, MetaReasoningResult
+from prsm.nwtn.meta_reasoning_engine import MetaReasoningEngine, MetaReasoningResult, ThinkingMode
+from prsm.nwtn.config import VerbosityLevel
+from prsm.nwtn.breakthrough_modes import (
+    BreakthroughMode, breakthrough_mode_manager, get_breakthrough_mode_config, suggest_breakthrough_mode
+)
 from prsm.core.config import get_settings
 from prsm.core.database_service import get_database_service
 from prsm.tokenomics.ftns_service import FTNSService
 from prsm.core.models import FTNSTransaction
+from prsm.tokenomics.enhanced_pricing_engine import calculate_query_cost, get_pricing_preview, PricingCalculation
 from prsm.nwtn.content_royalty_engine import ContentRoyaltyEngine, QueryComplexity
 from prsm.nwtn.external_storage_config import get_external_knowledge_base
 from prsm.provenance.enhanced_provenance_system import EnhancedProvenanceSystem
+from prsm.nwtn.content_grounding_synthesizer import ContentGroundingSynthesizer
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -158,7 +164,7 @@ class SourceLink:
     
 @dataclass
 class VoiceboxResponse:
-    """Complete voicebox response to user"""
+    """Complete voicebox response to user with enhanced token-based pricing details"""
     response_id: str
     query_id: str
     natural_language_response: str
@@ -172,6 +178,21 @@ class VoiceboxResponse:
     attribution_summary: str = ""
     royalties_distributed: Dict[str, float] = field(default_factory=dict)
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    
+    # Enhanced token-based pricing details
+    pricing_calculation: Optional[PricingCalculation] = None
+    base_computational_tokens: int = 0
+    reasoning_multiplier: float = 1.0
+    verbosity_factor: float = 1.0
+    market_rate: float = 1.0
+    quality_bonus: float = 1.0
+    cost_breakdown: Dict[str, Any] = field(default_factory=dict)
+    
+    # Breakthrough mode details
+    breakthrough_mode: str = "balanced"
+    breakthrough_intensity: str = ""
+    candidate_distribution: Dict[str, float] = field(default_factory=dict)
+    mode_features: Dict[str, bool] = field(default_factory=dict)
 
 
 class NWTNVoicebox:
@@ -192,6 +213,7 @@ class NWTNVoicebox:
         self.content_royalty_engine = None  # Will be initialized async
         self.provenance_system = None  # Will be initialized async
         self.external_knowledge_base = None  # Will be initialized async
+        self.content_grounding_synthesizer = None  # Will be initialized async
         
         # User API configurations
         self.user_api_configs: Dict[str, APIConfiguration] = {}
@@ -238,6 +260,9 @@ class NWTNVoicebox:
             
             # Initialize external knowledge base for Ferrari fuel line
             self.external_knowledge_base = await get_external_knowledge_base()
+            
+            # Initialize content grounding synthesizer
+            self.content_grounding_synthesizer = ContentGroundingSynthesizer(self.external_knowledge_base)
             
             # Initialize default Claude API configuration
             self._initialize_default_api_config()
@@ -299,7 +324,7 @@ class NWTNVoicebox:
         query: str,
         context: Optional[Dict[str, Any]] = None
     ) -> VoiceboxResponse:
-        """Process natural language query through complete NWTN pipeline"""
+        """Process natural language query through complete NWTN pipeline with breakthrough mode support"""
         try:
             start_time = datetime.now(timezone.utc)
             query_id = str(uuid4())
@@ -308,8 +333,15 @@ class NWTNVoicebox:
             if user_id not in self.user_api_configs:
                 raise ValueError("User has not configured API key. Please configure your API key first.")
             
+            # Determine breakthrough mode
+            breakthrough_mode = self._determine_breakthrough_mode(query, context)
+            breakthrough_config = get_breakthrough_mode_config(breakthrough_mode)
+            
+            # Create enhanced context with breakthrough mode
+            enhanced_context = breakthrough_mode_manager.create_reasoning_context(breakthrough_mode, context or {})
+            
             # Analyze query complexity and requirements
-            analysis = await self._analyze_query(query_id, query, context)
+            analysis = await self._analyze_query(query_id, query, enhanced_context)
             self.active_queries[query_id] = analysis
             
             # Check if clarification is needed
@@ -321,16 +353,37 @@ class NWTNVoicebox:
             if user_balance < analysis.estimated_cost_ftns:
                 raise ValueError(f"Insufficient FTNS balance: {user_balance} < {analysis.estimated_cost_ftns}")
             
-            # Process query through 8-step NWTN reasoning system
-            reasoning_result = await self._process_through_nwtn(query_id, analysis, context)
+            # Process query through 8-step NWTN reasoning system with breakthrough mode
+            reasoning_result = await self._process_through_nwtn(query_id, analysis, enhanced_context)
+            
+            # Extract verbosity and thinking mode from enhanced context
+            verbosity_level_str = enhanced_context.get("verbosity_level", "STANDARD")
+            thinking_mode_str = enhanced_context.get("thinking_mode", "INTERMEDIATE")
+            
+            # Convert to enums
+            try:
+                verbosity_level = VerbosityLevel[verbosity_level_str.upper()]
+                thinking_mode = ThinkingMode[thinking_mode_str.upper()]
+            except KeyError:
+                verbosity_level = VerbosityLevel.STANDARD
+                thinking_mode = ThinkingMode.INTERMEDIATE
+            
+            # Calculate precise FTNS cost using token-based pricing
+            pricing_calculation = await calculate_query_cost(
+                query=query,
+                thinking_mode=thinking_mode,
+                verbosity_level=verbosity_level,
+                query_id=query_id,
+                user_tier=context.get("user_tier", "standard") if context else "standard"
+            )
             
             # Translate structured insights to natural language
             natural_response = await self._translate_to_natural_language(
-                user_id, query, reasoning_result, analysis
+                user_id, query, reasoning_result, analysis, verbosity_level_str
             )
             
-            # Calculate actual costs and charge user
-            actual_cost = await self._calculate_actual_cost(analysis, reasoning_result)
+            # Use precise token-based cost
+            actual_cost = pricing_calculation.total_ftns_cost
             # Create a transaction to charge the user
             transaction = FTNSTransaction(
                 from_user=user_id,
@@ -348,7 +401,7 @@ class NWTNVoicebox:
             attribution_summary = await self._generate_attribution_summary(reasoning_result, source_links)
             royalties_summary = await self._get_royalty_summary(reasoning_result)
             
-            # Create enhanced response with source access
+            # Create enhanced response with source access and token-based pricing details
             processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             response = VoiceboxResponse(
                 response_id=str(uuid4()),
@@ -357,12 +410,29 @@ class NWTNVoicebox:
                 structured_insights=reasoning_result,
                 reasoning_trace=reasoning_result.reasoning_results if reasoning_result else [],
                 processing_time_seconds=processing_time,
-                total_cost_ftns=actual_cost,
+                total_cost_ftns=float(actual_cost),
                 confidence_score=reasoning_result.meta_confidence if reasoning_result else 0.0,
                 used_reasoning_modes=reasoning_result.reasoning_path if reasoning_result else [],
                 source_links=source_links,
                 attribution_summary=attribution_summary,
-                royalties_distributed=royalties_summary
+                royalties_distributed=royalties_summary,
+                # Enhanced token-based pricing details
+                pricing_calculation=pricing_calculation,
+                base_computational_tokens=pricing_calculation.base_computational_tokens,
+                reasoning_multiplier=pricing_calculation.reasoning_multiplier,
+                verbosity_factor=pricing_calculation.verbosity_factor,
+                market_rate=pricing_calculation.market_rate,
+                quality_bonus=pricing_calculation.quality_bonus,
+                cost_breakdown=pricing_calculation.cost_breakdown,
+                # Breakthrough mode details
+                breakthrough_mode=breakthrough_mode.value,
+                breakthrough_intensity=breakthrough_mode_manager._calculate_breakthrough_intensity(breakthrough_config),
+                candidate_distribution=breakthrough_config.candidate_distribution.__dict__,
+                mode_features={
+                    "assumption_challenging": breakthrough_config.assumption_challenging_enabled,
+                    "wild_hypothesis": breakthrough_config.wild_hypothesis_enabled,
+                    "impossibility_exploration": breakthrough_config.impossibility_exploration_enabled
+                }
             )
             
             # Store interaction in database
@@ -378,6 +448,100 @@ class NWTNVoicebox:
         except Exception as e:
             logger.error(f"Failed to process query: {e}")
             raise
+    
+    async def get_pricing_preview(
+        self,
+        query: str,
+        thinking_mode: str = "INTERMEDIATE",
+        verbosity_level: str = "STANDARD"
+    ) -> Dict[str, Any]:
+        """Get pricing preview for query using enhanced token-based pricing"""
+        try:
+            # Convert string parameters to enums
+            try:
+                thinking_mode_enum = ThinkingMode[thinking_mode.upper()]
+                verbosity_level_enum = VerbosityLevel[verbosity_level.upper()]
+            except KeyError:
+                thinking_mode_enum = ThinkingMode.INTERMEDIATE
+                verbosity_level_enum = VerbosityLevel.STANDARD
+            
+            # Get pricing preview
+            preview = await get_pricing_preview(
+                query=query,
+                thinking_mode=thinking_mode_enum,
+                verbosity_level=verbosity_level_enum
+            )
+            
+            return {
+                "estimated_cost": preview["estimated_cost"],
+                "cost_breakdown": preview["cost_breakdown"],
+                "estimated_response_tokens": preview["estimated_response_tokens"],
+                "pricing_tier": preview["pricing_tier"],
+                "market_rate_category": preview["market_rate_category"],
+                "pricing_explanation": {
+                    "thinking_mode": thinking_mode,
+                    "thinking_multiplier": f"{preview['cost_breakdown']['reasoning_multiplier']}x",
+                    "verbosity_level": verbosity_level,
+                    "verbosity_multiplier": f"{preview['cost_breakdown']['verbosity_factor']}x",
+                    "market_conditions": preview["cost_breakdown"]["market_conditions"]["rate_category"],
+                    "base_tokens": preview["cost_breakdown"]["base_tokens"]
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get pricing preview: {e}")
+            return {
+                "estimated_cost": 10.0,
+                "error": str(e),
+                "pricing_explanation": "Error calculating preview"
+            }
+    
+    async def get_breakthrough_modes_info(self) -> Dict[str, Any]:
+        """Get information about all available breakthrough modes"""
+        try:
+            modes_info = breakthrough_mode_manager.get_all_modes_info()
+            
+            return {
+                "available_modes": modes_info,
+                "default_mode": "balanced",
+                "mode_selection_help": {
+                    "conservative": "Choose for medical, safety, regulatory, or high-stakes decisions",
+                    "balanced": "Choose for business, academic, or general research questions",
+                    "creative": "Choose for innovation, R&D, or brainstorming sessions",
+                    "revolutionary": "Choose for moonshot projects or paradigm-shifting challenges"
+                },
+                "pricing_impact": {
+                    "conservative": "0.8x complexity multiplier (lower cost)",
+                    "balanced": "1.0x complexity multiplier (standard cost)",
+                    "creative": "1.3x complexity multiplier (higher cost)",
+                    "revolutionary": "1.8x complexity multiplier (premium cost)"
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get breakthrough modes info: {e}")
+            return {"error": str(e)}
+    
+    async def suggest_breakthrough_mode_for_query(self, query: str) -> Dict[str, Any]:
+        """Get breakthrough mode suggestion for a specific query"""
+        try:
+            suggested_mode = suggest_breakthrough_mode(query)
+            mode_config = get_breakthrough_mode_config(suggested_mode)
+            
+            return {
+                "suggested_mode": suggested_mode.value,
+                "mode_name": mode_config.name,
+                "description": mode_config.description,
+                "reasoning": f"Suggested based on query analysis",
+                "use_cases": mode_config.use_cases[:3],
+                "complexity_multiplier": mode_config.complexity_multiplier,
+                "estimated_time": breakthrough_mode_manager._estimate_processing_time(mode_config),
+                "breakthrough_intensity": breakthrough_mode_manager._calculate_breakthrough_intensity(mode_config)
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to suggest breakthrough mode: {e}")
+            return {"error": str(e)}
     
     async def provide_clarification(
         self,
@@ -677,10 +841,21 @@ class NWTNVoicebox:
             if context:
                 nwtn_context.update(context)
             
+            # Map reasoning depth to ThinkingMode
+            depth_mapping = {
+                "QUICK": ThinkingMode.QUICK,
+                "STANDARD": ThinkingMode.INTERMEDIATE, 
+                "DEEP": ThinkingMode.DEEP
+            }
+            
+            reasoning_depth = context.get("reasoning_depth", "STANDARD") if context else "STANDARD"
+            thinking_mode = depth_mapping.get(reasoning_depth, ThinkingMode.INTERMEDIATE)
+            
             # Process through meta-reasoning engine
             result = await self.meta_reasoning_engine.meta_reason(
                 query=analysis.original_query,
-                context=nwtn_context
+                context=nwtn_context,
+                thinking_mode=thinking_mode
             )
             
             # Add comprehensive compatibility attributes for voicebox
@@ -782,12 +957,14 @@ class NWTNVoicebox:
         user_id: str,
         original_query: str,
         reasoning_result: MetaReasoningResult,
-        analysis: QueryAnalysis
+        analysis: QueryAnalysis,
+        verbosity_level: str = "STANDARD"
     ) -> str:
-        """Translate structured insights to natural language response with attribution"""
+        """Translate structured insights to natural language response with grounded content"""
         try:
-            # Generate source attribution for content used in reasoning
-            attribution_text = await self._generate_attribution_text(reasoning_result)
+            logger.info("Starting grounded natural language translation",
+                       verbosity_level=verbosity_level,
+                       user_id=user_id)
             
             # Determine which API configuration to use
             api_config = None
@@ -802,20 +979,43 @@ class NWTNVoicebox:
                 api_config = self.default_api_config
                 logger.debug(f"Using default {api_config.provider.value} API configuration")
             
-            # If we have an API configuration, use it
+            # If we have an API configuration, use grounded synthesis
             if api_config:
-                # Prepare enhanced translation prompt with attribution
-                translation_prompt = self._build_translation_prompt_with_attribution(
-                    original_query, reasoning_result, analysis, attribution_text
+                # Get target token count for verbosity level
+                target_tokens = self._get_target_tokens_for_verbosity(verbosity_level)
+                
+                # Extract retrieved papers from reasoning result
+                retrieved_papers = await self._extract_retrieved_papers(reasoning_result)
+                
+                # Use content grounding synthesizer to prepare grounded content
+                grounding_result = await self.content_grounding_synthesizer.prepare_grounded_synthesis(
+                    reasoning_result=reasoning_result,
+                    target_tokens=target_tokens,
+                    retrieved_papers=retrieved_papers,
+                    verbosity_level=verbosity_level
                 )
                 
-                # Call the LLM API
+                logger.info("Content grounding completed",
+                           source_papers=len(grounding_result.source_papers),
+                           grounding_quality=grounding_result.grounding_quality,
+                           content_tokens=grounding_result.content_tokens_estimate)
+                
+                # Call the LLM API with grounded content
                 natural_response = await self._call_user_llm(
-                    api_config, translation_prompt
+                    api_config, grounding_result.grounded_content
                 )
+                
+                # Add Works Cited section based on actual papers used
+                works_cited = self._generate_works_cited_from_grounded_papers(grounding_result.source_papers)
+                if works_cited:
+                    natural_response += f"\n\n## Works Cited\n\n{works_cited}"
                 
                 # Calculate and distribute usage royalties
                 await self._distribute_usage_royalties(reasoning_result, user_id)
+                
+                logger.info("Grounded natural language translation completed",
+                           response_length=len(natural_response),
+                           papers_cited=len(grounding_result.source_papers))
                 
                 return natural_response
             
@@ -829,7 +1029,7 @@ class NWTNVoicebox:
                 return fallback_response
             
         except Exception as e:
-            logger.error(f"Failed to translate to natural language: {e}")
+            logger.error(f"Failed to translate to natural language with grounding: {e}")
             # Fallback to structured response, but still try to distribute royalties
             try:
                 await self._distribute_usage_royalties(reasoning_result, user_id)
@@ -1469,6 +1669,27 @@ Generate your response with proper attribution:"""
             logger.error(f"Failed to generate attribution summary: {e}")
             return "This response was generated using NWTN's verified knowledge sources."
     
+    def _determine_breakthrough_mode(self, query: str, context: Optional[Dict[str, Any]]) -> BreakthroughMode:
+        """Determine the appropriate breakthrough mode for a query"""
+        try:
+            # Check if user explicitly specified a mode
+            if context and "breakthrough_mode" in context:
+                mode_str = context["breakthrough_mode"].upper()
+                try:
+                    return BreakthroughMode[mode_str]
+                except KeyError:
+                    logger.warning(f"Unknown breakthrough mode '{mode_str}', using suggestion")
+            
+            # Use AI suggestion based on query content
+            suggested_mode = suggest_breakthrough_mode(query)
+            logger.info(f"Suggested breakthrough mode '{suggested_mode.value}' for query")
+            
+            return suggested_mode
+            
+        except Exception as e:
+            logger.error(f"Failed to determine breakthrough mode: {e}")
+            return BreakthroughMode.BALANCED  # Safe default
+    
     async def _get_royalty_summary(self, reasoning_result: MetaReasoningResult) -> Dict[str, float]:
         """
         Get summary of royalties distributed for this reasoning session
@@ -1511,6 +1732,116 @@ Generate your response with proper attribution:"""
         except Exception as e:
             logger.error(f"Failed to get royalty summary: {e}")
             return {}
+    
+    def _get_target_tokens_for_verbosity(self, verbosity_level: str) -> int:
+        """Get target token count for verbosity level"""
+        verbosity_tokens = {
+            "BRIEF": 500,
+            "STANDARD": 1000,
+            "DETAILED": 2000,
+            "COMPREHENSIVE": 3500,
+            "ACADEMIC": 4000
+        }
+        return verbosity_tokens.get(verbosity_level, 1000)
+    
+    async def _extract_retrieved_papers(self, reasoning_result: MetaReasoningResult) -> List[Dict[str, Any]]:
+        """Extract retrieved papers from reasoning result"""
+        try:
+            # Priority 1: Check if reasoning result has external_papers (from MetaReasoningEngine)
+            if hasattr(reasoning_result, 'external_papers') and reasoning_result.external_papers:
+                logger.info(f"Found {len(reasoning_result.external_papers)} external papers in reasoning result")
+                return reasoning_result.external_papers
+                
+            # Priority 2: Check if reasoning result has retrieved_papers
+            if hasattr(reasoning_result, 'retrieved_papers') and reasoning_result.retrieved_papers:
+                logger.info(f"Found {len(reasoning_result.retrieved_papers)} retrieved papers in reasoning result")
+                return reasoning_result.retrieved_papers
+            
+            # Priority 3: Try to get papers from external knowledge base directly
+            if hasattr(self, 'external_knowledge_base') and self.external_knowledge_base and hasattr(reasoning_result, 'original_query'):
+                logger.info("No papers in reasoning result, searching external knowledge base directly")
+                try:
+                    papers = await self.external_knowledge_base.search_papers(
+                        reasoning_result.original_query, max_results=10
+                    )
+                    if papers:
+                        logger.info(f"Found {len(papers)} papers via direct search")
+                        return papers
+                except Exception as search_error:
+                    logger.warning(f"Direct external search failed: {search_error}")
+            
+            # Fallback: extract from content_sources if available (but search for real papers)
+            if hasattr(reasoning_result, 'content_sources') and reasoning_result.content_sources:
+                papers = []
+                for i, source in enumerate(reasoning_result.content_sources):
+                    # Try to search external knowledge base for this specific paper
+                    if hasattr(self, 'external_knowledge_base') and self.external_knowledge_base:
+                        try:
+                            # Extract title for search
+                            if " by " in source:
+                                title, authors = source.split(" by ", 1)
+                            else:
+                                title = source
+                                authors = "Unknown"
+                            
+                            # Search for the specific paper
+                            search_results = await self.external_knowledge_base.search_papers(title, max_results=1)
+                            if search_results:
+                                papers.extend(search_results)
+                                continue
+                        except Exception as search_error:
+                            logger.warning(f"Failed to search for paper '{source}': {search_error}")
+                    
+                    # Fallback: create placeholder if can't find real paper
+                    paper = {
+                        'arxiv_id': f'placeholder_{i}',
+                        'title': source.split(" by ")[0] if " by " in source else source,
+                        'authors': source.split(" by ")[1] if " by " in source else "Unknown",
+                        'abstract': f'Content from {source}',
+                        'score': 0.8
+                    }
+                    papers.append(paper)
+                
+                logger.info(f"Extracted {len(papers)} papers from content_sources")
+                return papers
+            
+            logger.warning("No papers found in any source")
+            return []
+            
+        except Exception as e:
+            logger.warning(f"Failed to extract retrieved papers: {e}")
+            return []
+    
+    def _generate_works_cited_from_grounded_papers(self, source_papers: List) -> str:
+        """Generate Works Cited section from grounded papers"""
+        try:
+            if not source_papers:
+                return ""
+            
+            citations = []
+            for i, paper in enumerate(source_papers[:15], 1):  # Limit to 15 citations
+                # Format citation in academic style
+                authors = getattr(paper, 'authors', 'Unknown Author')
+                title = getattr(paper, 'title', 'Untitled')
+                arxiv_id = getattr(paper, 'arxiv_id', '')
+                publish_date = getattr(paper, 'publish_date', '2023')
+                
+                # Format year from publish_date
+                year = publish_date[:4] if len(publish_date) >= 4 else publish_date
+                
+                # Create APA-style citation
+                if arxiv_id:
+                    citation = f"{i}. {authors} ({year}). {title}. arXiv:{arxiv_id}."
+                else:
+                    citation = f"{i}. {authors} ({year}). {title}."
+                
+                citations.append(citation)
+            
+            return "\n".join(citations)
+            
+        except Exception as e:
+            logger.warning(f"Failed to generate works cited: {e}")
+            return ""
 
 
 # Global voicebox service instance

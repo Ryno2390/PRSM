@@ -13,17 +13,44 @@ import os
 import sqlite3
 import pickle
 import json
+import asyncio
+import aiohttp
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from uuid import UUID
+from datetime import datetime
 import logging
 import structlog
+
+# PDF processing imports
+try:
+    import PyPDF2
+    from PyPDF2 import PdfReader
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
+
+# Enhanced embedding imports
+try:
+    import numpy as np
+    from sentence_transformers import SentenceTransformer
+    EMBEDDING_AVAILABLE = True
+except ImportError:
+    EMBEDDING_AVAILABLE = False
 
 # Import data models for proper deserialization
 from prsm.nwtn.data_models import PaperData, PaperEmbedding, SemanticSearchResult, RetrievedPaper
 
 logger = structlog.get_logger(__name__)
+
+# Log availability of optional dependencies
+if not PDF_AVAILABLE:
+    logger.warning("PyPDF2 not available - PDF processing disabled")
+    
+if not EMBEDDING_AVAILABLE:
+    logger.warning("Embedding libraries not available - enhanced embeddings disabled")
 
 @dataclass
 class ExternalStorageConfig:
@@ -33,13 +60,16 @@ class ExternalStorageConfig:
     external_drive_path: str = "/Volumes/My Passport"
     storage_root: str = "PRSM_Storage"
     
-    # Content directories
-    content_dir: str = "PRSM_Content"
-    embeddings_dir: str = "PRSM_Embeddings"
-    cache_dir: str = "PRSM_Cache"
-    backup_dir: str = "PRSM_Backup"
+    # Content directories (Updated July 21, 2025 - Organized by pipeline stages)
+    content_dir: str = "02_PROCESSED_CONTENT"
+    embeddings_dir: str = "03_EMBEDDINGS_NWTN_SEARCH"
+    cache_dir: str = "99_SYSTEM_CACHE"
+    backup_dir: str = "99_SYSTEM_BACKUPS"
+    raw_papers_dir: str = "01_RAW_PAPERS"
+    world_model_dir: str = "04_WORLD_MODEL_KNOWLEDGE"
+    reasoning_indices_dir: str = "05_REASONING_INDICES"
     
-    # Database file
+    # Database file (now in raw papers directory)
     storage_db: str = "storage.db"
     
     # Connection settings
@@ -54,7 +84,11 @@ class ExternalStorageConfig:
         self.embeddings_path = self.storage_path / self.embeddings_dir
         self.cache_path = self.storage_path / self.cache_dir
         self.backup_path = self.storage_path / self.backup_dir
-        self.db_path = self.storage_path / self.storage_db
+        self.raw_papers_path = self.storage_path / self.raw_papers_dir
+        self.world_model_path = self.storage_path / self.world_model_dir
+        self.reasoning_indices_path = self.storage_path / self.reasoning_indices_dir
+        # Database is now in the raw papers directory
+        self.db_path = self.raw_papers_path / self.storage_db
         
         # Initialize storage manager for this config
         self.storage_manager = None
@@ -277,6 +311,208 @@ class ExternalStorageConfig:
             selected_papers.append(paper)
         
         return selected_papers
+    
+    async def download_all_pdfs_batch(self, batch_size: int = 50, max_concurrent: int = 10) -> Dict[str, Any]:
+        """
+        Download all PDFs for papers in the corpus and process them with full content
+        
+        Args:
+            batch_size: Number of papers to process in each batch
+            max_concurrent: Maximum concurrent downloads
+            
+        Returns:
+            Dict with download statistics and results
+        """
+        logger.info("🚀 Starting batch PDF download for complete corpus", 
+                   total_papers=149726, batch_size=batch_size, max_concurrent=max_concurrent)
+        
+        # Get all papers that don't have full content yet
+        cursor = self.storage_manager.storage_db.cursor()
+        cursor.execute("""
+            SELECT arxiv_id, title FROM arxiv_papers 
+            WHERE has_full_content = 0 OR has_full_content IS NULL
+            ORDER BY publish_date DESC
+        """)
+        
+        papers_to_download = cursor.fetchall()
+        total_papers = len(papers_to_download)
+        
+        logger.info(f"📊 Found {total_papers} papers without full content")
+        
+        # Initialize statistics
+        stats = {
+            'total_papers': total_papers,
+            'downloaded': 0,
+            'processed': 0,
+            'failed': 0,
+            'skipped': 0,
+            'total_content_size': 0,
+            'average_processing_time': 0.0,
+            'batch_results': []
+        }
+        
+        # Process in batches
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
+        for batch_start in range(0, total_papers, batch_size):
+            batch_end = min(batch_start + batch_size, total_papers)
+            current_batch = papers_to_download[batch_start:batch_end]
+            
+            logger.info(f"📦 Processing batch {batch_start//batch_size + 1}/{(total_papers + batch_size - 1)//batch_size}", 
+                       papers_in_batch=len(current_batch))
+            
+            batch_start_time = asyncio.get_event_loop().time()
+            
+            # Process batch concurrently
+            batch_tasks = [
+                self._download_and_process_paper_with_semaphore(semaphore, paper[0], paper[1])
+                for paper in current_batch
+            ]
+            
+            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+            
+            # Process batch results
+            batch_stats = {
+                'batch_number': batch_start//batch_size + 1,
+                'downloaded': 0,
+                'processed': 0,
+                'failed': 0,
+                'skipped': 0,
+                'processing_time': asyncio.get_event_loop().time() - batch_start_time
+            }
+            
+            for result in batch_results:
+                if isinstance(result, Exception):
+                    batch_stats['failed'] += 1
+                    stats['failed'] += 1
+                elif result is None:
+                    batch_stats['skipped'] += 1
+                    stats['skipped'] += 1
+                else:
+                    if result.get('downloaded'):
+                        batch_stats['downloaded'] += 1
+                        stats['downloaded'] += 1
+                    if result.get('processed'):
+                        batch_stats['processed'] += 1
+                        stats['processed'] += 1
+                        stats['total_content_size'] += result.get('content_size', 0)
+            
+            stats['batch_results'].append(batch_stats)
+            
+            # Update progress
+            progress_percent = ((batch_end) / total_papers) * 100
+            logger.info(f"✅ Batch {batch_stats['batch_number']} completed", 
+                       progress=f"{progress_percent:.1f}%",
+                       downloaded=batch_stats['downloaded'],
+                       processed=batch_stats['processed'],
+                       failed=batch_stats['failed'])
+            
+            # Small delay between batches to be respectful to arXiv
+            await asyncio.sleep(2)
+        
+        # Calculate final statistics
+        if stats['processed'] > 0:
+            stats['average_content_size'] = stats['total_content_size'] // stats['processed']
+            stats['success_rate'] = (stats['processed'] / total_papers) * 100
+        
+        logger.info("🎉 Batch PDF download completed!", 
+                   total_papers=total_papers,
+                   downloaded=stats['downloaded'],
+                   processed=stats['processed'],
+                   failed=stats['failed'],
+                   success_rate=f"{stats.get('success_rate', 0):.1f}%")
+        
+        return stats
+    
+    async def _download_and_process_paper_with_semaphore(
+        self, 
+        semaphore: asyncio.Semaphore, 
+        arxiv_id: str, 
+        title: str
+    ) -> Optional[Dict[str, Any]]:
+        """Download and process a single paper with semaphore control"""
+        async with semaphore:
+            try:
+                # Check if already processed
+                cursor = self.storage_manager.storage_db.cursor()
+                cursor.execute("""
+                    SELECT has_full_content FROM arxiv_papers 
+                    WHERE arxiv_id = ?
+                """, (arxiv_id,))
+                
+                row = cursor.fetchone()
+                if row and row[0] == 1:
+                    return {'skipped': True, 'reason': 'already_processed'}
+                
+                # Download PDF
+                logger.info(f"📥 Downloading PDF for {arxiv_id}", title=title[:50] + "...")
+                pdf_content = await self._download_arxiv_pdf(arxiv_id)
+                
+                if not pdf_content:
+                    logger.warning(f"❌ Failed to download PDF for {arxiv_id}")
+                    return {'downloaded': False, 'processed': False, 'error': 'download_failed'}
+                
+                # Process PDF content
+                logger.info(f"📝 Processing PDF content for {arxiv_id}")
+                structured_content = self._extract_text_from_pdf(pdf_content)
+                
+                if not structured_content or not structured_content.get('full_text'):
+                    logger.warning(f"❌ Failed to extract content from PDF for {arxiv_id}")
+                    return {'downloaded': True, 'processed': False, 'error': 'extraction_failed'}
+                
+                # Update database with full content
+                await self._store_full_paper_content(arxiv_id, structured_content)
+                
+                content_size = len(structured_content.get('full_text', ''))
+                logger.info(f"✅ Successfully processed {arxiv_id}", 
+                           content_size=content_size, 
+                           sections=len([s for s in ['introduction', 'methodology', 'results', 'discussion', 'conclusion'] 
+                                       if structured_content.get(s)]))
+                
+                return {
+                    'downloaded': True,
+                    'processed': True,
+                    'content_size': content_size,
+                    'sections_found': len([s for s in ['introduction', 'methodology', 'results', 'discussion', 'conclusion'] 
+                                         if structured_content.get(s)])
+                }
+                
+            except Exception as e:
+                logger.error(f"❌ Error processing {arxiv_id}: {e}")
+                return {'downloaded': False, 'processed': False, 'error': str(e)}
+    
+    async def _store_full_paper_content(self, arxiv_id: str, structured_content: Dict[str, str]):
+        """Store full paper content in database"""
+        cursor = self.storage_manager.storage_db.cursor()
+        
+        # Update the paper with full content
+        cursor.execute("""
+            UPDATE arxiv_papers SET
+                full_text = ?,
+                introduction = ?,
+                methodology = ?,
+                results = ?,
+                discussion = ?,
+                conclusion = ?,
+                paper_references = ?,
+                content_length = ?,
+                has_full_content = 1,
+                processed_date = datetime('now')
+            WHERE arxiv_id = ?
+        """, (
+            structured_content.get('full_text', ''),
+            structured_content.get('introduction', ''),
+            structured_content.get('methodology', ''),
+            structured_content.get('results', ''),
+            structured_content.get('discussion', ''),
+            structured_content.get('conclusion', ''),
+            structured_content.get('paper_references', ''),
+            len(structured_content.get('full_text', '')),
+            arxiv_id
+        ))
+        
+        self.storage_manager.storage_db.commit()
+        logger.debug(f"📝 Stored full content for {arxiv_id}")
     
     async def get_all_papers(self) -> List[Dict[str, Any]]:
         """Get all papers from external storage"""
@@ -807,11 +1043,259 @@ class ExternalKnowledgeBase:
         
         self.initialized = await self.storage_manager.initialize()
         
+        # Upgrade database schema for full content support and enhanced embeddings
+        if self.initialized:
+            await self._upgrade_schema_for_full_content()
+            await self._upgrade_schema_for_enhanced_embeddings()
+        
         logger.info("External knowledge base initialized",
                    available=self.initialized)
         
         return self.initialized
     
+    async def _upgrade_schema_for_full_content(self):
+        """Upgrade database schema to support full paper content"""
+        try:
+            if not self.storage_manager or not hasattr(self.storage_manager, 'storage_db'):
+                return
+                
+            cursor = self.storage_manager.storage_db.cursor()
+            
+            # Check if full content columns exist
+            cursor.execute("PRAGMA table_info(arxiv_papers)")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            new_columns = [
+                ('full_text', 'TEXT'),
+                ('introduction', 'TEXT'),
+                ('methodology', 'TEXT'),
+                ('results', 'TEXT'), 
+                ('discussion', 'TEXT'),
+                ('conclusion', 'TEXT'),
+                ('paper_references', 'TEXT'),
+                ('content_length', 'INTEGER'),
+                ('full_content_embedding', 'BLOB'),
+                ('has_full_content', 'BOOLEAN DEFAULT 0'),
+                ('pdf_processed_at', 'TIMESTAMP'),
+                ('processed_date', 'TEXT')
+            ]
+            
+            # Add missing columns
+            for col_name, col_type in new_columns:
+                if col_name not in columns:
+                    cursor.execute(f"ALTER TABLE arxiv_papers ADD COLUMN {col_name} {col_type}")
+                    logger.info(f"Added column {col_name} to arxiv_papers table")
+            
+            self.storage_manager.storage_db.commit()
+            logger.info("Database schema upgraded for full content support")
+            
+        except Exception as e:
+            logger.error(f"Failed to upgrade schema: {e}")
+    
+    async def _download_arxiv_pdf(self, arxiv_id: str) -> Optional[bytes]:
+        """Download PDF from arXiv for given paper ID"""
+        try:
+            if not arxiv_id:
+                return None
+                
+            # Format arXiv URL (without .pdf extension - arXiv redirects automatically)
+            pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(pdf_url) as response:
+                    if response.status == 200:
+                        pdf_content = await response.read()
+                        logger.info(f"Downloaded PDF for {arxiv_id}", size_kb=len(pdf_content)/1024)
+                        return pdf_content
+                    else:
+                        logger.warning(f"Failed to download PDF for {arxiv_id}", status=response.status)
+                        return None
+                        
+        except Exception as e:
+            logger.error(f"Error downloading PDF for {arxiv_id}: {e}")
+            return None
+    
+    def _extract_text_from_pdf(self, pdf_content: bytes) -> Optional[Dict[str, str]]:
+        """Extract structured text content from PDF bytes"""
+        if not PDF_AVAILABLE or not pdf_content:
+            return None
+            
+        try:
+            import io
+            pdf_file = io.BytesIO(pdf_content)
+            pdf_reader = PdfReader(pdf_file)
+            
+            # Extract all text
+            full_text = ""
+            for page in pdf_reader.pages:
+                try:
+                    page_text = page.extract_text()
+                    if page_text:
+                        full_text += page_text + "\n"
+                except Exception as e:
+                    logger.warning(f"Failed to extract text from page: {e}")
+                    continue
+            
+            if not full_text.strip():
+                logger.warning("No text extracted from PDF")
+                return None
+            
+            # Structure the content into sections
+            structured_content = self._structure_paper_content(full_text)
+            structured_content['full_text'] = full_text
+            
+            logger.info(f"Extracted text from PDF", 
+                       full_text_length=len(full_text),
+                       sections_found=len([k for k, v in structured_content.items() if v and k != 'full_text']))
+            
+            return structured_content
+            
+        except Exception as e:
+            logger.error(f"Error extracting text from PDF: {e}")
+            return None
+    
+    def _structure_paper_content(self, full_text: str) -> Dict[str, str]:
+        """Structure paper content into logical sections"""
+        sections = {
+            'introduction': '',
+            'methodology': '', 
+            'results': '',
+            'discussion': '',
+            'conclusion': '',
+            'paper_references': ''
+        }
+        
+        try:
+            # Simple heuristic-based section detection
+            text_lower = full_text.lower()
+            
+            # Find common section headers
+            section_patterns = {
+                'introduction': r'\b(introduction|1\.\s*introduction)\b',
+                'methodology': r'\b(method|methodology|methods|approach|2\.\s*method)\b',
+                'results': r'\b(results|findings|3\.\s*results)\b',
+                'discussion': r'\b(discussion|analysis|4\.\s*discussion)\b', 
+                'conclusion': r'\b(conclusion|conclusions|5\.\s*conclusion)\b',
+                'paper_references': r'\b(references|bibliography|reference)\b'
+            }
+            
+            # Extract sections using patterns
+            for section_name, pattern in section_patterns.items():
+                matches = list(re.finditer(pattern, text_lower))
+                if matches:
+                    start_idx = matches[0].start()
+                    # Find next section or end of text
+                    end_idx = len(full_text)
+                    for other_section, other_pattern in section_patterns.items():
+                        if other_section != section_name:
+                            other_matches = list(re.finditer(other_pattern, text_lower))
+                            for match in other_matches:
+                                if match.start() > start_idx and match.start() < end_idx:
+                                    end_idx = match.start()
+                    
+                    section_text = full_text[start_idx:end_idx].strip()
+                    if len(section_text) > 100:  # Minimum section length
+                        sections[section_name] = section_text[:2000]  # Limit section length
+            
+        except Exception as e:
+            logger.warning(f"Error structuring paper content: {e}")
+        
+        return sections
+    
+    def _generate_enhanced_embedding(self, paper_content: Dict[str, str]) -> Optional[bytes]:
+        """Generate enhanced embedding from full paper content"""
+        if not EMBEDDING_AVAILABLE:
+            return None
+            
+        try:
+            # Use pre-trained model for embeddings
+            model = SentenceTransformer('all-MiniLM-L6-v2')
+            
+            # Combine all available content
+            content_parts = []
+            if paper_content.get('full_text'):
+                # Use first 5000 chars of full text to avoid token limits
+                content_parts.append(paper_content['full_text'][:5000])
+            
+            for section in ['introduction', 'methodology', 'results', 'discussion', 'conclusion']:
+                if paper_content.get(section):
+                    content_parts.append(paper_content[section][:1000])
+            
+            combined_content = " ".join(content_parts)
+            if not combined_content.strip():
+                return None
+            
+            # Generate embedding
+            embedding = model.encode(combined_content)
+            
+            # Serialize embedding
+            embedding_bytes = pickle.dumps(embedding)
+            
+            logger.info(f"Generated enhanced embedding", 
+                       content_length=len(combined_content),
+                       embedding_shape=embedding.shape)
+            
+            return embedding_bytes
+            
+        except Exception as e:
+            logger.error(f"Error generating enhanced embedding: {e}")
+            return None
+    
+    async def _process_and_store_full_content(self, arxiv_id: str) -> bool:
+        """Download, process, and store full content for a paper"""
+        try:
+            # Check if already processed
+            cursor = self.storage_manager.storage_db.cursor()
+            cursor.execute("SELECT has_full_content FROM arxiv_papers WHERE arxiv_id = ?", (arxiv_id,))
+            row = cursor.fetchone()
+            
+            if row and row[0]:
+                logger.debug(f"Paper {arxiv_id} already has full content")
+                return True
+            
+            # Download PDF
+            logger.info(f"Downloading and processing PDF for {arxiv_id}")
+            pdf_content = await self._download_arxiv_pdf(arxiv_id)
+            if not pdf_content:
+                return False
+            
+            # Extract structured content
+            structured_content = self._extract_text_from_pdf(pdf_content)
+            if not structured_content:
+                return False
+            
+            # Generate enhanced embedding
+            enhanced_embedding = self._generate_enhanced_embedding(structured_content)
+            
+            # Store in database
+            cursor.execute("""
+                UPDATE arxiv_papers 
+                SET full_text = ?, introduction = ?, methodology = ?, results = ?, 
+                    discussion = ?, conclusion = ?, paper_references = ?, 
+                    full_content_embedding = ?, has_full_content = 1, 
+                    pdf_processed_at = ?
+                WHERE arxiv_id = ?
+            """, (
+                structured_content.get('full_text'),
+                structured_content.get('introduction'),
+                structured_content.get('methodology'), 
+                structured_content.get('results'),
+                structured_content.get('discussion'),
+                structured_content.get('conclusion'),
+                structured_content.get('paper_references'),
+                enhanced_embedding,
+                datetime.now().isoformat(),
+                arxiv_id
+            ))
+            
+            self.storage_manager.storage_db.commit()
+            
+            logger.info(f"Successfully processed and stored full content for {arxiv_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error processing full content for {arxiv_id}: {e}")
+            return False
     
     async def search_papers(self, query: str, max_results: int = 25) -> List[Dict[str, Any]]:
         """Search for papers by query"""
@@ -868,8 +1352,35 @@ class ExternalKnowledgeBase:
                 paper = dict(row)
                 paper['source'] = 'external_storage'
                 paper['relevance_score'] = 0.8  # Default relevance
+                
+                # Process full content if not already available
+                arxiv_id = paper.get('arxiv_id')
+                if arxiv_id and not paper.get('has_full_content'):
+                    try:
+                        # Asynchronously process PDF in background for top results
+                        if len(papers) < 5:  # Only process top 5 papers for performance
+                            logger.info(f"Processing full content for top result: {arxiv_id}")
+                            await self._process_and_store_full_content(arxiv_id)
+                            
+                            # Refresh paper data after processing
+                            cursor.execute("""
+                                SELECT id, title, abstract, authors, arxiv_id, publish_date, 
+                                       categories, domain, journal_ref, submitter, full_text,
+                                       introduction, methodology, results, discussion, 
+                                       conclusion, paper_references, has_full_content
+                                FROM arxiv_papers WHERE arxiv_id = ?
+                            """, (arxiv_id,))
+                            refreshed_row = cursor.fetchone()
+                            if refreshed_row:
+                                paper = dict(refreshed_row)
+                                paper['source'] = 'external_storage_enhanced'
+                                paper['relevance_score'] = 0.9  # Higher relevance for full content
+                    except Exception as e:
+                        logger.warning(f"Failed to process full content for {arxiv_id}: {e}")
+                
                 papers.append(paper)
             
+            logger.info(f"Search completed: {len(papers)} papers found, full content processed for top results")
             return papers
             
         except Exception as e:
@@ -911,6 +1422,520 @@ class ExternalKnowledgeBase:
             await self.initialize()
         
         return await self.storage_manager.get_storage_stats()
+    
+    async def download_all_pdfs_batch(self, batch_size: int = 50, max_concurrent: int = 10) -> Dict[str, Any]:
+        """
+        Download all PDFs for papers in the corpus and process them with full content
+        
+        Args:
+            batch_size: Number of papers to process in each batch
+            max_concurrent: Maximum concurrent downloads
+            
+        Returns:
+            Dict with download statistics and results
+        """
+        if not self.initialized:
+            await self.initialize()
+            
+        logger.info("🚀 Starting batch PDF download for complete corpus", 
+                   total_papers=149726, batch_size=batch_size, max_concurrent=max_concurrent)
+        
+        # Get all papers that don't have full content yet
+        cursor = self.storage_manager.storage_db.cursor()
+        cursor.execute("""
+            SELECT arxiv_id, title FROM arxiv_papers 
+            WHERE has_full_content = 0 OR has_full_content IS NULL
+            ORDER BY publish_date DESC
+        """)
+        
+        papers_to_download = cursor.fetchall()
+        total_papers = len(papers_to_download)
+        
+        logger.info(f"📊 Found {total_papers} papers without full content")
+        
+        # Initialize statistics
+        stats = {
+            'total_papers': total_papers,
+            'downloaded': 0,
+            'processed': 0,
+            'failed': 0,
+            'skipped': 0,
+            'total_content_size': 0,
+            'average_processing_time': 0.0,
+            'batch_results': []
+        }
+        
+        # Process in batches
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
+        for batch_start in range(0, total_papers, batch_size):
+            batch_end = min(batch_start + batch_size, total_papers)
+            current_batch = papers_to_download[batch_start:batch_end]
+            
+            logger.info(f"📦 Processing batch {batch_start//batch_size + 1}/{(total_papers + batch_size - 1)//batch_size}", 
+                       papers_in_batch=len(current_batch))
+            
+            batch_start_time = asyncio.get_event_loop().time()
+            
+            # Process batch concurrently
+            batch_tasks = [
+                self._download_and_process_paper_with_semaphore(semaphore, paper[0], paper[1])
+                for paper in current_batch
+            ]
+            
+            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+            
+            # Process batch results
+            batch_stats = {
+                'batch_number': batch_start//batch_size + 1,
+                'downloaded': 0,
+                'processed': 0,
+                'failed': 0,
+                'skipped': 0,
+                'processing_time': asyncio.get_event_loop().time() - batch_start_time
+            }
+            
+            for result in batch_results:
+                if isinstance(result, Exception):
+                    batch_stats['failed'] += 1
+                    stats['failed'] += 1
+                elif result is None:
+                    batch_stats['skipped'] += 1
+                    stats['skipped'] += 1
+                else:
+                    if result.get('downloaded'):
+                        batch_stats['downloaded'] += 1
+                        stats['downloaded'] += 1
+                    if result.get('processed'):
+                        batch_stats['processed'] += 1
+                        stats['processed'] += 1
+                        stats['total_content_size'] += result.get('content_size', 0)
+            
+            stats['batch_results'].append(batch_stats)
+            
+            # Update progress
+            progress_percent = ((batch_end) / total_papers) * 100
+            logger.info(f"✅ Batch {batch_stats['batch_number']} completed", 
+                       progress=f"{progress_percent:.1f}%",
+                       downloaded=batch_stats['downloaded'],
+                       processed=batch_stats['processed'],
+                       failed=batch_stats['failed'])
+            
+            # Small delay between batches to be respectful to arXiv
+            await asyncio.sleep(2)
+        
+        # Calculate final statistics
+        if stats['processed'] > 0:
+            stats['average_content_size'] = stats['total_content_size'] // stats['processed']
+            stats['success_rate'] = (stats['processed'] / total_papers) * 100
+        
+        logger.info("🎉 Batch PDF download completed!", 
+                   total_papers=total_papers,
+                   downloaded=stats['downloaded'],
+                   processed=stats['processed'],
+                   failed=stats['failed'],
+                   success_rate=f"{stats.get('success_rate', 0):.1f}%")
+        
+        return stats
+    
+    async def _download_and_process_paper_with_semaphore(
+        self, 
+        semaphore: asyncio.Semaphore, 
+        arxiv_id: str, 
+        title: str
+    ) -> Optional[Dict[str, Any]]:
+        """Download and process a single paper with semaphore control"""
+        async with semaphore:
+            try:
+                # Check if already processed
+                cursor = self.storage_manager.storage_db.cursor()
+                cursor.execute("""
+                    SELECT has_full_content FROM arxiv_papers 
+                    WHERE arxiv_id = ?
+                """, (arxiv_id,))
+                
+                row = cursor.fetchone()
+                if row and row[0] == 1:
+                    return {'skipped': True, 'reason': 'already_processed'}
+                
+                # Download PDF
+                logger.info(f"📥 Downloading PDF for {arxiv_id}", title=title[:50] + "...")
+                pdf_content = await self._download_arxiv_pdf(arxiv_id)
+                
+                if not pdf_content:
+                    logger.warning(f"❌ Failed to download PDF for {arxiv_id}")
+                    return {'downloaded': False, 'processed': False, 'error': 'download_failed'}
+                
+                # Process PDF content
+                logger.info(f"📝 Processing PDF content for {arxiv_id}")
+                structured_content = self._extract_text_from_pdf(pdf_content)
+                
+                if not structured_content or not structured_content.get('full_text'):
+                    logger.warning(f"❌ Failed to extract content from PDF for {arxiv_id}")
+                    return {'downloaded': True, 'processed': False, 'error': 'extraction_failed'}
+                
+                # Update database with full content
+                await self._store_full_paper_content(arxiv_id, structured_content)
+                
+                content_size = len(structured_content.get('full_text', ''))
+                logger.info(f"✅ Successfully processed {arxiv_id}", 
+                           content_size=content_size, 
+                           sections=len([s for s in ['introduction', 'methodology', 'results', 'discussion', 'conclusion'] 
+                                       if structured_content.get(s)]))
+                
+                return {
+                    'downloaded': True,
+                    'processed': True,
+                    'content_size': content_size,
+                    'sections_found': len([s for s in ['introduction', 'methodology', 'results', 'discussion', 'conclusion'] 
+                                         if structured_content.get(s)])
+                }
+                
+            except Exception as e:
+                logger.error(f"❌ Error processing {arxiv_id}: {e}")
+                return {'downloaded': False, 'processed': False, 'error': str(e)}
+    
+    async def _store_full_paper_content(self, arxiv_id: str, structured_content: Dict[str, str]):
+        """Store full paper content in database"""
+        cursor = self.storage_manager.storage_db.cursor()
+        
+        # Update the paper with full content
+        cursor.execute("""
+            UPDATE arxiv_papers SET
+                full_text = ?,
+                introduction = ?,
+                methodology = ?,
+                results = ?,
+                discussion = ?,
+                conclusion = ?,
+                paper_references = ?,
+                content_length = ?,
+                has_full_content = 1,
+                processed_date = datetime('now')
+            WHERE arxiv_id = ?
+        """, (
+            structured_content.get('full_text', ''),
+            structured_content.get('introduction', ''),
+            structured_content.get('methodology', ''),
+            structured_content.get('results', ''),
+            structured_content.get('discussion', ''),
+            structured_content.get('conclusion', ''),
+            structured_content.get('paper_references', ''),
+            len(structured_content.get('full_text', '')),
+            arxiv_id
+        ))
+        
+        self.storage_manager.storage_db.commit()
+        logger.debug(f"📝 Stored full content for {arxiv_id}")
+    
+    async def regenerate_all_embeddings_batch(self, batch_size: int = 100, max_concurrent: int = 20) -> Dict[str, Any]:
+        """
+        Regenerate enhanced embeddings for all papers with full content
+        
+        This creates rich, multi-level embeddings from complete paper content instead
+        of just abstracts, dramatically improving NWTN search quality.
+        
+        Args:
+            batch_size: Number of papers to process in each batch
+            max_concurrent: Maximum concurrent embedding generations
+            
+        Returns:
+            Dict with embedding generation statistics and results
+        """
+        if not self.initialized:
+            await self.initialize()
+            
+        logger.info("🧠 Starting enhanced embedding generation for full corpus", 
+                   batch_size=batch_size, max_concurrent=max_concurrent)
+        
+        # Get all papers with full content but outdated embeddings
+        cursor = self.storage_manager.storage_db.cursor()
+        cursor.execute("""
+            SELECT arxiv_id, title, full_text, introduction, methodology, 
+                   results, discussion, conclusion, abstract
+            FROM arxiv_papers 
+            WHERE has_full_content = 1 
+            AND (enhanced_embedding_generated IS NULL OR enhanced_embedding_generated = 0)
+            ORDER BY publish_date DESC
+        """)
+        
+        papers_to_reembed = cursor.fetchall()
+        total_papers = len(papers_to_reembed)
+        
+        logger.info(f"📊 Found {total_papers} papers needing enhanced embeddings")
+        
+        # Initialize statistics
+        stats = {
+            'total_papers': total_papers,
+            'embeddings_generated': 0,
+            'multi_level_embeddings': 0,
+            'failed': 0,
+            'skipped': 0,
+            'total_embedding_size': 0,
+            'processing_time': 0.0,
+            'batch_results': []
+        }
+        
+        # Process in batches with concurrency control
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
+        for batch_start in range(0, total_papers, batch_size):
+            batch_end = min(batch_start + batch_size, total_papers)
+            current_batch = papers_to_reembed[batch_start:batch_end]
+            
+            logger.info(f"🔢 Processing embedding batch {batch_start//batch_size + 1}/{(total_papers + batch_size - 1)//batch_size}", 
+                       papers_in_batch=len(current_batch))
+            
+            batch_start_time = asyncio.get_event_loop().time()
+            
+            # Generate embeddings concurrently
+            batch_tasks = [
+                self._generate_enhanced_embedding_with_semaphore(semaphore, paper)
+                for paper in current_batch
+            ]
+            
+            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+            
+            # Process batch results
+            batch_stats = {
+                'batch_number': batch_start//batch_size + 1,
+                'embeddings_generated': 0,
+                'multi_level_embeddings': 0,
+                'failed': 0,
+                'skipped': 0,
+                'processing_time': asyncio.get_event_loop().time() - batch_start_time
+            }
+            
+            for result in batch_results:
+                if isinstance(result, Exception):
+                    batch_stats['failed'] += 1
+                    stats['failed'] += 1
+                elif result is None:
+                    batch_stats['skipped'] += 1
+                    stats['skipped'] += 1
+                else:
+                    if result.get('embedding_generated'):
+                        batch_stats['embeddings_generated'] += 1
+                        stats['embeddings_generated'] += 1
+                        stats['total_embedding_size'] += result.get('embedding_size', 0)
+                    if result.get('multi_level'):
+                        batch_stats['multi_level_embeddings'] += 1
+                        stats['multi_level_embeddings'] += 1
+            
+            stats['batch_results'].append(batch_stats)
+            
+            # Update progress
+            progress_percent = ((batch_end) / total_papers) * 100
+            logger.info(f"✅ Embedding batch {batch_stats['batch_number']} completed", 
+                       progress=f"{progress_percent:.1f}%",
+                       embeddings_generated=batch_stats['embeddings_generated'],
+                       multi_level=batch_stats['multi_level_embeddings'],
+                       failed=batch_stats['failed'])
+            
+            # Small delay to prevent resource exhaustion
+            await asyncio.sleep(1)
+        
+        # Calculate final statistics
+        stats['processing_time'] = sum(b['processing_time'] for b in stats['batch_results'])
+        if stats['embeddings_generated'] > 0:
+            stats['average_embedding_size'] = stats['total_embedding_size'] // stats['embeddings_generated']
+            stats['success_rate'] = (stats['embeddings_generated'] / total_papers) * 100
+            stats['embeddings_per_second'] = stats['embeddings_generated'] / stats['processing_time'] if stats['processing_time'] > 0 else 0
+        
+        logger.info("🎉 Enhanced embedding generation completed!", 
+                   total_papers=total_papers,
+                   embeddings_generated=stats['embeddings_generated'],
+                   multi_level_embeddings=stats['multi_level_embeddings'],
+                   failed=stats['failed'],
+                   success_rate=f"{stats.get('success_rate', 0):.1f}%")
+        
+        return stats
+    
+    async def _generate_enhanced_embedding_with_semaphore(
+        self,
+        semaphore: asyncio.Semaphore,
+        paper: tuple
+    ) -> Optional[Dict[str, Any]]:
+        """Generate enhanced embeddings for a single paper with semaphore control"""
+        async with semaphore:
+            try:
+                arxiv_id = paper[0]
+                title = paper[1] 
+                full_text = paper[2]
+                introduction = paper[3]
+                methodology = paper[4]
+                results = paper[5]
+                discussion = paper[6]
+                conclusion = paper[7]
+                abstract = paper[8]
+                
+                logger.info(f"🧠 Generating enhanced embeddings for {arxiv_id}", 
+                           title=title[:50] + "..." if title else "No title")
+                
+                # Generate multi-level embeddings
+                embedding_results = await self._create_multi_level_embeddings({
+                    'arxiv_id': arxiv_id,
+                    'title': title,
+                    'abstract': abstract,
+                    'full_text': full_text,
+                    'introduction': introduction,
+                    'methodology': methodology,
+                    'results': results,
+                    'discussion': discussion,
+                    'conclusion': conclusion
+                })
+                
+                if not embedding_results:
+                    logger.warning(f"❌ Failed to generate embeddings for {arxiv_id}")
+                    return {'embedding_generated': False, 'error': 'generation_failed'}
+                
+                # Store embeddings in database
+                await self._store_enhanced_embeddings(arxiv_id, embedding_results)
+                
+                total_size = sum(len(emb) for emb in embedding_results.values() if emb)
+                embedding_count = len([emb for emb in embedding_results.values() if emb])
+                
+                logger.info(f"✅ Generated {embedding_count} embeddings for {arxiv_id}", 
+                           total_size=total_size,
+                           sections=list(embedding_results.keys()))
+                
+                return {
+                    'embedding_generated': True,
+                    'multi_level': embedding_count > 1,
+                    'embedding_size': total_size,
+                    'section_count': embedding_count
+                }
+                
+            except Exception as e:
+                logger.error(f"❌ Error generating embeddings for {paper[0]}: {e}")
+                return {'embedding_generated': False, 'error': str(e)}
+    
+    async def _create_multi_level_embeddings(self, paper_content: Dict[str, str]) -> Optional[Dict[str, bytes]]:
+        """Create multi-level embeddings from complete paper content"""
+        if not EMBEDDING_AVAILABLE:
+            logger.warning("Sentence transformers not available for enhanced embeddings")
+            return None
+            
+        try:
+            from sentence_transformers import SentenceTransformer
+            import pickle
+            
+            # Use high-quality embedding model
+            model = SentenceTransformer('all-MiniLM-L6-v2')
+            embeddings = {}
+            
+            # 1. Full paper embedding (complete content)
+            if paper_content.get('full_text'):
+                full_content = f"{paper_content['title']} {paper_content['abstract']} {paper_content['full_text']}"
+                if len(full_content) > 100:
+                    full_embedding = model.encode(full_content[:8000])  # Limit for model context
+                    embeddings['full_paper'] = pickle.dumps(full_embedding)
+            
+            # 2. Abstract embedding (for quick matching)
+            if paper_content.get('abstract'):
+                abstract_content = f"{paper_content['title']} {paper_content['abstract']}"
+                abstract_embedding = model.encode(abstract_content)
+                embeddings['abstract'] = pickle.dumps(abstract_embedding)
+            
+            # 3. Section-specific embeddings
+            sections = ['introduction', 'methodology', 'results', 'discussion', 'conclusion']
+            for section in sections:
+                section_text = paper_content.get(section, '')
+                if section_text and len(section_text) > 50:
+                    # Combine with title for context
+                    section_content = f"{paper_content['title']} - {section}: {section_text}"
+                    section_embedding = model.encode(section_content[:4000])
+                    embeddings[section] = pickle.dumps(section_embedding)
+            
+            # 4. Composite structured embedding (for comprehensive search)
+            structured_parts = []
+            if paper_content.get('introduction'):
+                structured_parts.append(f"Introduction: {paper_content['introduction'][:1000]}")
+            if paper_content.get('methodology'):
+                structured_parts.append(f"Methods: {paper_content['methodology'][:1000]}")
+            if paper_content.get('results'):
+                structured_parts.append(f"Results: {paper_content['results'][:1000]}")
+            if paper_content.get('conclusion'):
+                structured_parts.append(f"Conclusion: {paper_content['conclusion'][:1000]}")
+            
+            if structured_parts:
+                composite_content = f"{paper_content['title']} " + " ".join(structured_parts)
+                composite_embedding = model.encode(composite_content)
+                embeddings['structured_composite'] = pickle.dumps(composite_embedding)
+            
+            logger.debug(f"Generated {len(embeddings)} embeddings", 
+                        sections=list(embeddings.keys()))
+            
+            return embeddings if embeddings else None
+            
+        except Exception as e:
+            logger.error(f"Error creating multi-level embeddings: {e}")
+            return None
+    
+    async def _store_enhanced_embeddings(self, arxiv_id: str, embeddings: Dict[str, bytes]):
+        """Store enhanced embeddings in database"""
+        cursor = self.storage_manager.storage_db.cursor()
+        
+        # Update paper with enhanced embeddings
+        cursor.execute("""
+            UPDATE arxiv_papers SET
+                full_paper_embedding = ?,
+                abstract_embedding = ?,
+                introduction_embedding = ?,
+                methodology_embedding = ?,
+                results_embedding = ?,
+                discussion_embedding = ?,
+                conclusion_embedding = ?,
+                structured_composite_embedding = ?,
+                enhanced_embedding_generated = 1,
+                embedding_updated_date = datetime('now')
+            WHERE arxiv_id = ?
+        """, (
+            embeddings.get('full_paper'),
+            embeddings.get('abstract'),
+            embeddings.get('introduction'),
+            embeddings.get('methodology'),
+            embeddings.get('results'),
+            embeddings.get('discussion'),
+            embeddings.get('conclusion'),
+            embeddings.get('structured_composite'),
+            arxiv_id
+        ))
+        
+        self.storage_manager.storage_db.commit()
+        logger.debug(f"📝 Stored {len(embeddings)} enhanced embeddings for {arxiv_id}")
+    
+    async def _upgrade_schema_for_enhanced_embeddings(self):
+        """Upgrade database schema to support multi-level embeddings"""
+        try:
+            cursor = self.storage_manager.storage_db.cursor()
+            
+            # Add enhanced embedding columns
+            enhanced_embedding_columns = [
+                "ADD COLUMN full_paper_embedding BLOB",
+                "ADD COLUMN abstract_embedding BLOB", 
+                "ADD COLUMN introduction_embedding BLOB",
+                "ADD COLUMN methodology_embedding BLOB",
+                "ADD COLUMN results_embedding BLOB",
+                "ADD COLUMN discussion_embedding BLOB", 
+                "ADD COLUMN conclusion_embedding BLOB",
+                "ADD COLUMN structured_composite_embedding BLOB",
+                "ADD COLUMN enhanced_embedding_generated INTEGER DEFAULT 0",
+                "ADD COLUMN embedding_updated_date TEXT"
+            ]
+            
+            for column_def in enhanced_embedding_columns:
+                try:
+                    cursor.execute(f"ALTER TABLE arxiv_papers {column_def}")
+                except Exception as e:
+                    if "duplicate column name" not in str(e):
+                        logger.debug(f"Column may already exist: {e}")
+            
+            self.storage_manager.storage_db.commit()
+            logger.info("Database schema upgraded for enhanced embeddings")
+            
+        except Exception as e:
+            logger.error(f"Failed to upgrade schema for enhanced embeddings: {e}")
 
 
 # Global knowledge base instance
