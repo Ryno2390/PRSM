@@ -1,9 +1,11 @@
-# PRSM Tokenomics Overview
-**Complete Guide to FTNS Token Economics and Smart Contract Integration**
+# PRSM FTNS Token-Based Pricing System
+**Advanced Tokenomics with Computational Complexity and Market-Responsive Pricing**
 
 ## 🎯 Executive Summary
 
-The PRSM Fungible Tokens for Node Support (FTNS) creates a sustainable economic ecosystem for AI research collaboration through a production-ready token economy deployed on Polygon. This document clarifies the complete tokenomics model, from token mechanics to smart contract implementation.
+The PRSM Fungible Tokens for Node Support (FTNS) implements a sophisticated token-based pricing system that directly correlates costs with computational complexity, similar to LLM token pricing models. This system creates fair, transparent, and market-responsive pricing for NWTN deep reasoning queries while maintaining sustainable economic incentives.
+
+**Key Innovation**: FTNS pricing maps directly to computational units (tokens) with floating market rates, reasoning complexity multipliers, and quality-based bonuses - creating a self-regulating economy where complex multi-modal queries naturally cost more while market forces determine fair pricing.
 
 ## 🪙 FTNS Token Fundamentals
 
@@ -62,31 +64,118 @@ After 3 months:
 └── 200 FTNS → Staked Balance (if chosen)
 ```
 
-## 💰 Economic Model & Revenue Streams
+## 🧮 Token-Based Pricing Framework
 
-### Core Revenue Generation
+### Computational Token Mapping
 
-#### 1. **Transaction Fees** (85% of revenue)
-- **Marketplace Fee**: 2.5% on all resource transactions
-- **Context Allocation**: 0.1-10 FTNS per AI query
-- **Model Rental**: 2.5% platform fee
-- **Data Trading**: 1% fee on data purchases
+FTNS pricing directly correlates with computational complexity using token-equivalent units, similar to OpenAI/Anthropic pricing models:
 
-#### 2. **Premium Services** (10% of revenue)
-- **Priority Processing**: 2x processing priority for 50% fee premium
-- **Enhanced Support**: 24/7 support access for 100 FTNS/month
-- **Advanced Analytics**: Detailed usage metrics for 250 FTNS/month
-- **Custom Integration**: Enterprise API access for 1,000 FTNS/month
+```
+FTNS_Cost = Base_Computational_Tokens × Reasoning_Multiplier × Market_Rate × Quality_Bonus × Verbosity_Factor
 
-#### 3. **Governance Participation** (3% of revenue)
-- **Proposal Submission**: 100 FTNS per governance proposal
-- **Voting Participation**: 5 FTNS per vote cast
-- **Validator Operations**: Fee sharing for network validators
+Where:
+Base_Computational_Tokens = Estimated processing units for query execution
+Reasoning_Multiplier = Complexity scaling based on reasoning depth
+Market_Rate = Floating rate based on network supply/demand
+Quality_Bonus = Performance-based multiplier (0.8x - 1.5x)
+Verbosity_Factor = Output complexity scaling (0.5x - 3.0x)
+```
 
-#### 4. **Listing & Verification** (2% of revenue)
-- **Premium Model Listings**: 500 FTNS for featured placement
-- **Verification Services**: 1,000 FTNS for official verification badge
-- **Quality Certification**: 2,500 FTNS for quality assessment
+### Reasoning Complexity Multipliers
+
+| ThinkingMode | Base Multiplier | Description | Typical Use Cases |
+|--------------|----------------|-------------|-------------------|
+| **QUICK** | 1.0x | Fast inference, minimal reasoning | Simple queries, fact lookup |
+| **INTERMEDIATE** | 2.5x | Multi-step reasoning, moderate analysis | Research synthesis, comparison |
+| **DEEP** | 5.0x | Complex reasoning, multi-modal analysis | Novel research, deep analysis |
+
+### Verbosity Scaling Factors
+
+| Verbosity Level | Token Target | Cost Multiplier | Output Characteristics |
+|----------------|--------------|-----------------|----------------------|
+| **BRIEF** | 100-300 tokens | 0.5x | Concise, key points only |
+| **STANDARD** | 300-800 tokens | 1.0x | Balanced detail level |
+| **DETAILED** | 800-1,500 tokens | 1.5x | Comprehensive explanations |
+| **COMPREHENSIVE** | 1,500-3,000 tokens | 2.0x | Full analysis with examples |
+| **ACADEMIC** | 3,000+ tokens | 3.0x | Research-grade thoroughness |
+
+### Market-Responsive Rate System
+
+#### Floating Market Rates
+
+**Base Rate Calculation**:
+```
+Market_Rate = Base_Rate × (1 + Supply_Demand_Factor + Network_Congestion_Factor)
+
+Supply_Demand_Factor = (Active_Queries - Available_Capacity) / Available_Capacity
+Network_Congestion_Factor = Current_Load / Max_Capacity
+```
+
+**Rate Ranges**:
+- **Low Demand**: 0.8x - 1.0x base rate
+- **Normal Demand**: 1.0x - 1.2x base rate  
+- **High Demand**: 1.2x - 2.0x base rate
+- **Peak Congestion**: 2.0x - 3.0x base rate
+
+#### Quality Performance Bonuses
+
+| Performance Tier | Multiplier | Criteria |
+|-----------------|------------|----------|
+| **Standard** | 1.0x | Baseline performance |
+| **High Quality** | 1.15x | >90% accuracy, <5s response time |
+| **Premium** | 1.3x | >95% accuracy, <3s response time |
+| **Excellence** | 1.5x | >98% accuracy, <2s response time |
+
+### Example Pricing Calculations
+
+#### Simple Query Example
+```
+Query: "What is quantum computing?"
+- Base_Tokens: 50 (simple factual query)
+- ThinkingMode: QUICK (1.0x)
+- Verbosity: STANDARD (1.0x)
+- Market_Rate: 1.1x (normal demand)
+- Quality_Bonus: 1.0x (standard)
+
+FTNS_Cost = 50 × 1.0 × 1.1 × 1.0 × 1.0 = 55 FTNS
+```
+
+#### Complex Deep Reasoning Example
+```
+Query: "Analyze the implications of quantum error correction on 
+       near-term quantum advantage in cryptography"
+- Base_Tokens: 200 (complex analysis required)
+- ThinkingMode: DEEP (5.0x)
+- Verbosity: COMPREHENSIVE (2.0x)  
+- Market_Rate: 1.4x (high demand)
+- Quality_Bonus: 1.15x (high quality service)
+
+FTNS_Cost = 200 × 5.0 × 2.0 × 1.4 × 1.15 = 3,220 FTNS
+```
+
+### Revenue Distribution Model
+
+#### Primary Revenue Streams (Updated)
+
+1. **NWTN Query Processing** (60% of revenue)
+   - Token-based pricing for all reasoning queries
+   - Dynamic pricing based on complexity and demand
+   - Premium quality tiers with enhanced performance
+
+2. **Context Grounding Services** (25% of revenue)  
+   - PDF processing and embedding generation
+   - Paper retrieval and synthesis
+   - External knowledge integration
+
+3. **Marketplace Transactions** (10% of revenue)
+   - Model and data trading
+   - Computational resource rental
+   - Research collaboration tools
+
+4. **Governance & Staking** (5% of revenue)
+   - Governance participation fees
+   - Validator operations
+   - Staking rewards distribution
 
 ### Economic Sustainability Mechanisms
 
