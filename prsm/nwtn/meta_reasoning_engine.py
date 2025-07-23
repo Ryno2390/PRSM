@@ -45,19 +45,37 @@ import structlog
 from prsm.provenance.enhanced_provenance_system import EnhancedProvenanceSystem
 from prsm.tokenomics.ftns_service import FTNSService
 
-# Optional psutil import for memory monitoring
-try:
-    import psutil
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
+# Import modular reasoning components
+from .reasoning.types import (
+    ThinkingMode, ReasoningEngine, EngineHealthStatus,
+    EnginePerformanceMetrics, PerformanceMetric, PerformanceCategory,
+    PerformanceSnapshot, PerformanceProfile, FailureType, RecoveryAction,
+    FailureDetectionMode, FailureEvent, RecoveryStrategy,
+    LoadBalancingStrategy, LoadBalancingMode, EngineWorkload,
+    ReasoningRequest, ReasoningResponse
+)
+from .reasoning.monitoring import (
+    EngineHealthMonitor, PerformanceTracker, SystemHealthChecker
+)
+from .reasoning.routing import (
+    LoadBalancingMetrics, AdaptiveSelectionStrategy, ProblemType,
+    ContextualFactor, AdaptiveSelectionContext, EngineSelectionScore,
+    AdaptiveEngineSelector, LoadBalancer
+)
+from .reasoning.recovery import (
+    FailureDetector, CircuitBreaker, FailureRecoveryManager
+)
 
-# Optional cachetools import for advanced caching
-try:
-    from cachetools import LRUCache, TTLCache
-    CACHETOOLS_AVAILABLE = True
-except ImportError:
-    CACHETOOLS_AVAILABLE = False
+# Import plugin system for optional dependencies
+from prsm.plugins import get_plugin_manager, require_optional, has_optional_dependency
+
+# Optional dependencies using plugin system
+psutil = require_optional("psutil")
+PSUTIL_AVAILABLE = has_optional_dependency("psutil")
+
+# Optional cachetools import for advanced caching  
+from cachetools import LRUCache, TTLCache
+CACHETOOLS_AVAILABLE = True
 
 # Import all reasoning engines
 from prsm.nwtn.enhanced_deductive_reasoning import EnhancedDeductiveReasoningEngine
@@ -211,7 +229,7 @@ class EnginePerformanceMetrics:
         self._invalidate_cache()
         self._update_health_score()
     
-    def update_timeout_metrics(self):
+    def update_timeout_metrics(self) -> None:
         """Update metrics for timeout events"""
         self.timeout_executions += 1
         self.failed_executions += 1
@@ -226,7 +244,7 @@ class EnginePerformanceMetrics:
         self._invalidate_cache()
         self._update_health_score()
     
-    def _update_health_score(self):
+    def _update_health_score(self) -> None:
         """Update current health score based on performance"""
         if self.total_executions == 0:
             self.current_health_score = 1.0
@@ -256,14 +274,14 @@ class EnginePerformanceMetrics:
         # Add to history (deque automatically handles maxlen)
         self.health_history.append(self.current_health_score)
     
-    def _invalidate_cache(self):
+    def _invalidate_cache(self) -> None:
         """Invalidate performance metric caches"""
         self._cache_invalidated = True
         self._cached_success_rate = None
         self._cached_timeout_rate = None
         self._cached_failure_rate = None
     
-    def _update_cache(self):
+    def _update_cache(self) -> None:
         """Update cached performance metrics"""
         if not self._cache_invalidated:
             return
@@ -317,7 +335,7 @@ class EnginePerformanceMetrics:
 class EngineHealthMonitor:
     """Monitor and track health of reasoning engines"""
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.engine_metrics: Dict[ReasoningEngine, EnginePerformanceMetrics] = {}
         self.monitoring_enabled = True
         self.health_check_interval = 300  # 5 minutes
@@ -329,7 +347,7 @@ class EngineHealthMonitor:
     
     def record_execution(self, engine_type: ReasoningEngine, execution_time: float, 
                         quality_score: float, confidence_score: float, success: bool, 
-                        error_type: str = None):
+                        error_type: Optional[str] = None) -> None:
         """Record an execution result"""
         if not self.monitoring_enabled:
             return
@@ -341,7 +359,7 @@ class EngineHealthMonitor:
             execution_time, quality_score, confidence_score, success, error_type
         )
     
-    def record_timeout(self, engine_type: ReasoningEngine):
+    def record_timeout(self, engine_type: ReasoningEngine) -> None:
         """Record a timeout event"""
         if not self.monitoring_enabled:
             return
@@ -352,7 +370,7 @@ class EngineHealthMonitor:
         self.engine_metrics[engine_type].update_timeout_metrics()
     
     def record_engine_execution(self, engine_type: ReasoningEngine, execution_time: float, 
-                              success: bool, error: str = None):
+                              success: bool, error: Optional[str] = None) -> None:
         """Record engine execution result with simplified signature"""
         if not self.monitoring_enabled:
             return
@@ -494,20 +512,20 @@ class EngineHealthMonitor:
                 unhealthy_engines.append(engine_type)
         return unhealthy_engines
     
-    def enable_monitoring(self):
+    def enable_monitoring(self) -> None:
         """Enable health monitoring"""
         self.monitoring_enabled = True
     
-    def disable_monitoring(self):
+    def disable_monitoring(self) -> None:
         """Disable health monitoring"""
         self.monitoring_enabled = False
     
-    def reset_engine_metrics(self, engine_type: ReasoningEngine):
+    def reset_engine_metrics(self, engine_type: ReasoningEngine) -> None:
         """Reset metrics for a specific engine"""
         if engine_type in self.engine_metrics:
             self.engine_metrics[engine_type] = EnginePerformanceMetrics(engine_type)
     
-    def reset_all_metrics(self):
+    def reset_all_metrics(self) -> None:
         """Reset all engine metrics"""
         for engine_type in ReasoningEngine:
             self.engine_metrics[engine_type] = EnginePerformanceMetrics(engine_type)

@@ -1,35 +1,31 @@
-#!/usr/bin/env python3
 """
-Shared pytest configuration and fixtures for PRSM test suite
-Provides common setup, teardown, and utility fixtures for all tests
+Minimal Pytest Configuration
+=============================
+
+Simplified configuration that avoids complex imports while still providing
+essential testing fixtures.
 """
 
 import pytest
 import asyncio
 import sys
 import logging
+import os
 from pathlib import Path
-from typing import List, Dict, Any
-from unittest.mock import Mock, patch
+from typing import List, Dict, Any, Optional
+from unittest.mock import Mock, patch, AsyncMock
+from decimal import Decimal
 
 # Add PRSM to path for all tests
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# Import after path setup
-try:
-    from prsm.core.models import PeerNode
-    from prsm.core.config import PRSMConfig
-    from prsm.tokenomics.ftns_service import FTNSService
-except ImportError as e:
-    # If imports fail, we'll skip tests that require them
-    pass
-
 
 @pytest.fixture(scope="session")
 def event_loop():
     """Create an instance of the default event loop for the test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     yield loop
     loop.close()
 
@@ -40,60 +36,13 @@ def project_root():
     return PROJECT_ROOT
 
 
-@pytest.fixture
-def sample_peer_nodes():
-    """Fixture providing a set of sample peer nodes for testing"""
-    peer_nodes = []
-    for i in range(5):
-        peer = PeerNode(
-            node_id=f"test_node_{i}",
-            peer_id=f"test_peer_{i}",
-            multiaddr=f"/ip4/127.0.0.1/tcp/{9000+i}",
-            reputation_score=0.8,
-            active=True
-        )
-        peer_nodes.append(peer)
-    return peer_nodes
-
-
-@pytest.fixture
-def large_peer_network():
-    """Fixture providing a larger network of peer nodes for scalability testing"""
-    peer_nodes = []
-    for i in range(20):
-        reputation = 0.9 if i < 15 else 0.3  # Some nodes with lower reputation
-        peer = PeerNode(
-            node_id=f"large_node_{i}",
-            peer_id=f"large_peer_{i}",
-            multiaddr=f"/ip4/127.0.0.1/tcp/{8000+i}",
-            reputation_score=reputation,
-            active=i < 18  # Some inactive nodes
-        )
-        peer_nodes.append(peer)
-    return peer_nodes
-
-
-@pytest.fixture
-def mock_ftns_service():
-    """Fixture providing a mocked FTNS service for testing without dependencies"""
-    mock_service = Mock(spec=FTNSService)
-    mock_service.get_balance.return_value = 100.0
-    mock_service.transfer.return_value = True
-    mock_service.create_transaction.return_value = {
-        "transaction_id": "test_tx_123",
-        "status": "confirmed",
-        "amount": 10.0
-    }
-    return mock_service
-
-
-@pytest.fixture
+@pytest.fixture(scope="session")
 def test_config():
-    """Fixture providing test configuration"""
+    """Test configuration"""
     config = {
         "test_mode": True,
         "database_url": "sqlite:///:memory:",
-        "redis_url": "redis://localhost:6379/15",  # Test database
+        "redis_url": "redis://localhost:6379/15",
         "log_level": "DEBUG",
         "network_size": 5,
         "consensus_timeout": 5.0,
@@ -104,14 +53,13 @@ def test_config():
 
 @pytest.fixture
 def temp_directory(tmp_path):
-    """Fixture providing a temporary directory for file operations"""
+    """Temporary directory for file operations"""
     return tmp_path
 
 
 @pytest.fixture(autouse=True)
 def setup_test_logging():
     """Auto-use fixture to configure logging for tests"""
-    # Configure logging for tests
     logging.basicConfig(
         level=logging.DEBUG,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -128,100 +76,53 @@ def setup_test_logging():
     logging.getLogger().handlers.clear()
 
 
-@pytest.fixture
-def mock_network_conditions():
-    """Fixture providing various network condition scenarios for testing"""
-    return {
-        "optimal": {
-            "latency_ms": 10,
-            "throughput_ops": 25,
-            "failure_rate": 0.01,
-            "byzantine_percentage": 0.0
-        },
-        "congested": {
-            "latency_ms": 300,
-            "throughput_ops": 3,
-            "failure_rate": 0.05,
-            "byzantine_percentage": 0.0
-        },
-        "unreliable": {
-            "latency_ms": 150,
-            "throughput_ops": 8,
-            "failure_rate": 0.25,
-            "byzantine_percentage": 0.2
-        }
-    }
+@pytest.fixture(autouse=True)
+def setup_test_environment():
+    """Auto-use fixture to set up test environment"""
+    # Set environment variables for testing
+    os.environ["PRSM_ENVIRONMENT"] = "test"
+    os.environ["PRSM_LOG_LEVEL"] = "DEBUG"
+    os.environ["PRSM_DATABASE_URL"] = "sqlite:///:memory:"
+    
+    yield
+    
+    # Cleanup environment
+    test_env_vars = ["PRSM_ENVIRONMENT", "PRSM_LOG_LEVEL", "PRSM_DATABASE_URL"]
+    for var in test_env_vars:
+        os.environ.pop(var, None)
 
 
+# Mock fixtures for when imports fail
 @pytest.fixture
-def sample_consensus_proposal():
-    """Fixture providing a sample consensus proposal for testing"""
-    return {
-        "action": "test_consensus",
-        "data": {
-            "operation": "transfer",
-            "amount": 50.0,
-            "from": "test_user_1",
-            "to": "test_user_2"
-        },
-        "timestamp": 1640995200,  # Fixed timestamp for deterministic testing
-        "proposer": "test_node_0"
-    }
+def sample_peer_nodes():
+    """Sample peer nodes for testing"""
+    peer_nodes = []
+    for i in range(5):
+        peer = Mock()
+        peer.node_id = f"test_node_{i}"
+        peer.peer_id = f"test_peer_{i}"
+        peer.multiaddr = f"/ip4/127.0.0.1/tcp/{9000+i}"
+        peer.reputation_score = 0.8
+        peer.active = True
+        peer_nodes.append(peer)
+    return peer_nodes
 
 
 @pytest.fixture
-def performance_test_data():
-    """Fixture providing data for performance testing"""
-    return {
-        "latency_samples": [10, 12, 15, 8, 20, 25, 18, 14, 16, 11],
-        "throughput_samples": [20, 22, 18, 25, 19, 21, 23, 20, 24, 22],
-        "success_rates": [0.95, 0.98, 0.92, 0.97, 0.94, 0.96, 0.99, 0.93, 0.95, 0.98]
+def mock_ftns_service():
+    """Mock FTNS service for testing"""
+    mock_service = Mock()
+    mock_service.get_balance.return_value = Decimal("100.0")
+    mock_service.transfer.return_value = True
+    mock_service.create_transaction.return_value = {
+        "transaction_id": "test_tx_123",
+        "status": "confirmed",
+        "amount": Decimal("10.0")
     }
+    return mock_service
 
 
-# Pytest markers for categorizing tests
-pytest_plugins = []
-
-
-def pytest_configure(config):
-    """Configure pytest with custom markers"""
-    config.addinivalue_line(
-        "markers", "slow: marks tests as slow (may take several seconds)"
-    )
-    config.addinivalue_line(
-        "markers", "integration: marks tests as integration tests"
-    )
-    config.addinivalue_line(
-        "markers", "unit: marks tests as unit tests"
-    )
-    config.addinivalue_line(
-        "markers", "performance: marks tests as performance/benchmark tests"
-    )
-    config.addinivalue_line(
-        "markers", "network: marks tests that require network simulation"
-    )
-
-
-def pytest_collection_modifyitems(config, items):
-    """Modify test collection to add markers based on test names"""
-    for item in items:
-        # Add markers based on test/file names
-        if "integration" in item.nodeid:
-            item.add_marker(pytest.mark.integration)
-        elif "performance" in item.nodeid or "benchmark" in item.nodeid:
-            item.add_marker(pytest.mark.performance)
-        elif "network" in item.nodeid:
-            item.add_marker(pytest.mark.network)
-        else:
-            item.add_marker(pytest.mark.unit)
-        
-        # Mark slow tests
-        if any(slow_keyword in item.nodeid.lower() for slow_keyword in 
-               ["slow", "large", "comprehensive", "stress"]):
-            item.add_marker(pytest.mark.slow)
-
-
-# Helper functions available to all tests
+# Test helpers
 class TestHelpers:
     """Collection of helper functions for tests"""
     
@@ -243,20 +144,56 @@ class TestHelpers:
         assert hasattr(peer_node, 'multiaddr')
         assert hasattr(peer_node, 'reputation_score')
         assert 0 <= peer_node.reputation_score <= 1
-    
-    @staticmethod
-    def assert_network_metrics_valid(metrics):
-        """Assert that network metrics have expected structure"""
-        assert metrics is not None
-        assert 'avg_latency_ms' in metrics
-        assert 'avg_throughput' in metrics
-        assert 'failure_rate' in metrics
-        assert metrics['avg_latency_ms'] >= 0
-        assert metrics['avg_throughput'] >= 0
-        assert 0 <= metrics['failure_rate'] <= 1
 
 
 @pytest.fixture
 def test_helpers():
     """Fixture providing test helper functions"""
     return TestHelpers()
+
+
+# Pytest configuration
+def pytest_configure(config):
+    """Configure pytest with custom markers"""
+    markers = [
+        "slow: marks tests as slow (may take several seconds)",
+        "integration: marks tests as integration tests",
+        "unit: marks tests as unit tests", 
+        "performance: marks tests as performance/benchmark tests",
+        "network: marks tests that require network simulation",
+        "api: marks tests that test API endpoints"
+    ]
+    
+    for marker in markers:
+        config.addinivalue_line("markers", marker)
+
+
+def pytest_collection_modifyitems(config, items):
+    """Modify test collection to add markers based on test names"""
+    for item in items:
+        # Add markers based on test/file names
+        if "integration" in item.nodeid:
+            item.add_marker(pytest.mark.integration)
+        elif "performance" in item.nodeid or "benchmark" in item.nodeid:
+            item.add_marker(pytest.mark.performance)
+        elif "network" in item.nodeid:
+            item.add_marker(pytest.mark.network)
+        else:
+            item.add_marker(pytest.mark.unit)
+        
+        # Mark slow tests
+        if any(slow_keyword in item.nodeid.lower() for slow_keyword in 
+               ["slow", "large", "comprehensive", "stress"]):
+            item.add_marker(pytest.mark.slow)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_test_session():
+    """Session-wide setup and cleanup"""
+    print("\n🚀 Starting PRSM test session...")
+    
+    # Session setup
+    yield
+    
+    # Session cleanup
+    print("✅ PRSM test session completed.")

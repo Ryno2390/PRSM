@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+            color: white;
+            text-align: center;
+        }
+        
+        .header h1 {
+            margin: 0 0 10px 0;
+            font-size: 2.5em;
+            font-weight: 600;
+        }
+        
+        .header p {
+            margin: 0;
+            opacity: 0.9;
+            font-size: 1.2em;
+        }
+        
+        .playground {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        
+        .nav-tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+        }
+        
+        .nav-tab {
+            padding: 15px 25px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 16px;
+            font-weight: 500;
+            color: #6c757d;
+            transition: all 0.3s ease;
+        }
+        
+        .nav-tab.active {
+            background: white;
+            color: #495057;
+            border-bottom: 3px solid #007bff;
+        }
+        
+        .nav-tab:hover {
+            background: #e9ecef;
+            color: #495057;
+        }
+        
+        .tab-content {
+            display: none;
+            padding: 30px;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .endpoint-group {
+            margin-bottom: 30px;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .endpoint-header {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e9ecef;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .endpoint {
+            padding: 20px;
+            border-bottom: 1px solid #f8f9fa;
+        }
+        
+        .endpoint:last-child {
+            border-bottom: none;
+        }
+        
+        .method-url {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .method {
+            padding: 5px 12px;
+            border-radius: 4px;
+            font-weight: 600;
+            margin-right: 15px;
+            min-width: 60px;
+            text-align: center;
+            font-size: 12px;
+        }
+        
+        .method.get { background: #28a745; color: white; }
+        .method.post { background: #007bff; color: white; }
+        .method.put { background: #ffc107; color: black; }
+        .method.delete { background: #dc3545; color: white; }
+        
+        .url {
+            font-family: 'Monaco', 'Consolas', monospace;
+            background: #f8f9fa;
+            padding: 8px 12px;
+            border-radius: 4px;
+            flex: 1;
+            font-size: 14px;
+        }
+        
+        .description {
+            color: #6c757d;
+            margin-bottom: 15px;
+            line-height: 1.5;
+        }
+        
+        .try-it-form {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #495057;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .form-textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 14px;
+            min-height: 100px;
+            font-family: 'Monaco', 'Consolas', monospace;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        
+        .response-section {
+            margin-top: 20px;
+            padding: 20px;
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+        }
+        
+        .response-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .status-code {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 12px;
+        }
+        
+        .status-200 { background: #d4edda; color: #155724; }
+        .status-400 { background: #f8d7da; color: #721c24; }
+        .status-401 { background: #f8d7da; color: #721c24; }
+        .status-500 { background: #f8d7da; color: #721c24; }
+        
+        .response-body {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+        
+        .example-section {
+            margin-top: 15px;
+            padding: 15px;
+            background: #e7f3ff;
+            border-left: 4px solid #007bff;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .example-title {
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #0056b3;
+        }
+        
+        .code-block {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+        
+        .loading {
+            display: none;
+            color: #007bff;
+            font-style: italic;
+        }
+        
+        .error {
+            color: #dc3545;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 PRSM API Playground</h1>
+            <p>Interactive testing environment for the PRSM API</p>
+        </div>
+        
+        <div class="playground">
+            <div class="nav-tabs">
+                <button class="nav-tab active" onclick="showTab('authentication')">Authentication</button>
+                <button class="nav-tab" onclick="showTab('marketplace')">Marketplace</button>
+                <button class="nav-tab" onclick="showTab('sessions')">Sessions</button>
+                <button class="nav-tab" onclick="showTab('tasks')">Tasks</button>
+                <button class="nav-tab" onclick="showTab('tokens')">FTNS Tokens</button>
+            </div>
+            
+            <!-- Authentication Tab -->
+            <div id="authentication" class="tab-content active">
+                <div class="endpoint-group">
+                    <div class="endpoint-header">Authentication Endpoints</div>
+                    
+                    <div class="endpoint">
+                        <div class="method-url">
+                            <span class="method post">POST</span>
+                            <span class="url">/api/v1/auth/login</span>
+                        </div>
+                        <div class="description">
+                            Authenticate user and receive access tokens for API requests.
+                        </div>
+                        
+                        <div class="try-it-form">
+                            <div class="form-group">
+                                <label class="form-label">Email:</label>
+                                <input type="email" class="form-input" id="login-email" placeholder="researcher@university.edu">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Password:</label>
+                                <input type="password" class="form-input" id="login-password" placeholder="Enter your password">
+                            </div>
+                            <button class="btn btn-primary" onclick="tryLogin()">Try It Out</button>
+                            <div class="loading" id="login-loading">Authenticating...</div>
+                        </div>
+                        
+                        <div class="response-section" id="login-response" style="display: none;">
+                            <div class="response-header">
+                                <strong>Response:</strong>
+                                <span class="status-code" id="login-status"></span>
+                            </div>
+                            <div class="response-body" id="login-response-body"></div>
+                        </div>
+                        
+                        <div class="example-section">
+                            <div class="example-title">Example Request:</div>
+                            <div class="code-block">curl -X POST "{{ api_base_url }}api/v1/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "researcher@university.edu",
+    "password": "secure_password_123"
+  }'</div>
+                        </div>
+                    </div>
+                    
+                    <div class="endpoint">
+                        <div class="method-url">
+                            <span class="method post">POST</span>
+                            <span class="url">/api/v1/auth/register</span>
+                        </div>
+                        <div class="description">
+                            Register a new user account with PRSM.
+                        </div>
+                        
+                        <div class="try-it-form">
+                            <div class="form-group">
+                                <label class="form-label">Email:</label>
+                                <input type="email" class="form-input" id="register-email" placeholder="new.researcher@university.edu">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Password:</label>
+                                <input type="password" class="form-input" id="register-password" placeholder="Secure password">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Full Name:</label>
+                                <input type="text" class="form-input" id="register-name" placeholder="Dr. Jane Smith">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Organization:</label>
+                                <input type="text" class="form-input" id="register-org" placeholder="University of Science">
+                            </div>
+                            <button class="btn btn-primary" onclick="tryRegister()">Try It Out</button>
+                            <div class="loading" id="register-loading">Creating account...</div>
+                        </div>
+                        
+                        <div class="response-section" id="register-response" style="display: none;">
+                            <div class="response-header">
+                                <strong>Response:</strong>
+                                <span class="status-code" id="register-status"></span>
+                            </div>
+                            <div class="response-body" id="register-response-body"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Marketplace Tab -->
+            <div id="marketplace" class="tab-content">
+                <div class="endpoint-group">
+                    <div class="endpoint-header">Marketplace Endpoints</div>
+                    
+                    <div class="endpoint">
+                        <div class="method-url">
+                            <span class="method get">GET</span>
+                            <span class="url">/api/v1/marketplace/resources</span>
+                        </div>
+                        <div class="description">
+                            Search and discover resources in the PRSM marketplace.
+                        </div>
+                        
+                        <div class="try-it-form">
+                            <div class="form-group">
+                                <label class="form-label">Authorization Token:</label>
+                                <input type="text" class="form-input" id="marketplace-token" placeholder="Bearer token from login">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Search Query:</label>
+                                <input type="text" class="form-input" id="marketplace-query" placeholder="machine learning" value="machine learning">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Resource Type:</label>
+                                <select class="form-input" id="marketplace-type">
+                                    <option value="">All Types</option>
+                                    <option value="ai_model">AI Models</option>
+                                    <option value="dataset">Datasets</option>
+                                    <option value="tool">Tools</option>
+                                    <option value="compute_time">Compute Time</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Max Price (FTNS):</label>
+                                <input type="number" class="form-input" id="marketplace-price" placeholder="200" value="200">
+                            </div>
+                            <button class="btn btn-primary" onclick="tryMarketplaceSearch()">Search Resources</button>
+                            <div class="loading" id="marketplace-loading">Searching...</div>
+                        </div>
+                        
+                        <div class="response-section" id="marketplace-response" style="display: none;">
+                            <div class="response-header">
+                                <strong>Response:</strong>
+                                <span class="status-code" id="marketplace-status"></span>
+                            </div>
+                            <div class="response-body" id="marketplace-response-body"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Sessions Tab -->
+            <div id="sessions" class="tab-content">
+                <div class="endpoint-group">
+                    <div class="endpoint-header">Research Session Management</div>
+                    
+                    <div class="endpoint">
+                        <div class="method-url">
+                            <span class="method post">POST</span>
+                            <span class="url">/api/v1/sessions</span>
+                        </div>
+                        <div class="description">
+                            Create a new research session for collaborative work.
+                        </div>
+                        
+                        <div class="try-it-form">
+                            <div class="form-group">
+                                <label class="form-label">Authorization Token:</label>
+                                <input type="text" class="form-input" id="session-token" placeholder="Bearer token from login">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Session Title:</label>
+                                <input type="text" class="form-input" id="session-title" placeholder="Climate Change Analysis" value="Climate Change Analysis">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Description:</label>
+                                <textarea class="form-textarea" id="session-description" placeholder="Detailed description of the research session">Machine learning analysis of climate data to identify patterns and trends.</textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">FTNS Budget:</label>
+                                <input type="number" class="form-input" id="session-budget" placeholder="500" value="500">
+                            </div>
+                            <button class="btn btn-primary" onclick="tryCreateSession()">Create Session</button>
+                            <div class="loading" id="session-loading">Creating session...</div>
+                        </div>
+                        
+                        <div class="response-section" id="session-response" style="display: none;">
+                            <div class="response-header">
+                                <strong>Response:</strong>
+                                <span class="status-code" id="session-status"></span>
+                            </div>
+                            <div class="response-body" id="session-response-body"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Tasks Tab -->
+            <div id="tasks" class="tab-content">
+                <div class="endpoint-group">
+                    <div class="endpoint-header">Task Management</div>
+                    
+                    <div class="endpoint">
+                        <div class="method-url">
+                            <span class="method post">POST</span>
+                            <span class="url">/api/v1/tasks</span>
+                        </div>
+                        <div class="description">
+                            Create a new task within a research session.
+                        </div>
+                        
+                        <div class="try-it-form">
+                            <div class="form-group">
+                                <label class="form-label">Authorization Token:</label>
+                                <input type="text" class="form-input" id="task-token" placeholder="Bearer token from login">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Task Title:</label>
+                                <input type="text" class="form-input" id="task-title" placeholder="Data Preprocessing" value="Data Preprocessing">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Description:</label>
+                                <textarea class="form-textarea" id="task-description" placeholder="Task description">Clean and prepare climate dataset for machine learning analysis.</textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Session ID:</label>
+                                <input type="text" class="form-input" id="task-session" placeholder="session_123456789">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Estimated Cost (FTNS):</label>
+                                <input type="number" class="form-input" id="task-cost" placeholder="25" value="25">
+                            </div>
+                            <button class="btn btn-primary" onclick="tryCreateTask()">Create Task</button>
+                            <div class="loading" id="task-loading">Creating task...</div>
+                        </div>
+                        
+                        <div class="response-section" id="task-response" style="display: none;">
+                            <div class="response-header">
+                                <strong>Response:</strong>
+                                <span class="status-code" id="task-status"></span>
+                            </div>
+                            <div class="response-body" id="task-response-body"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- FTNS Tokens Tab -->
+            <div id="tokens" class="tab-content">
+                <div class="endpoint-group">
+                    <div class="endpoint-header">FTNS Token Management</div>
+                    
+                    <div class="endpoint">
+                        <div class="method-url">
+                            <span class="method get">GET</span>
+                            <span class="url">/api/v1/users/{user_id}/balance</span>
+                        </div>
+                        <div class="description">
+                            Get the current FTNS token balance for a user.
+                        </div>
+                        
+                        <div class="try-it-form">
+                            <div class="form-group">
+                                <label class="form-label">Authorization Token:</label>
+                                <input type="text" class="form-input" id="balance-token" placeholder="Bearer token from login">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">User ID:</label>
+                                <input type="text" class="form-input" id="balance-user-id" placeholder="123e4567-e89b-12d3-a456-426614174000">
+                            </div>
+                            <button class="btn btn-primary" onclick="tryGetBalance()">Get Balance</button>
+                            <div class="loading" id="balance-loading">Fetching balance...</div>
+                        </div>
+                        
+                        <div class="response-section" id="balance-response" style="display: none;">
+                            <div class="response-header">
+                                <strong>Response:</strong>
+                                <span class="status-code" id="balance-status"></span>
+                            </div>
+                            <div class="response-body" id="balance-response-body"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = '{{ api_base_url }}';
+        
+        function showTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+        }
+        
+        async function makeRequest(url, options = {}) {
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    }
+                });
+                
+                const data = await response.json();
+                return {
+                    status: response.status,
+                    data: data
+                };
+            } catch (error) {
+                return {
+                    status: 500,
+                    data: { error: error.message }
+                };
+            }
+        }
+        
+        function showResponse(elementPrefix, status, data) {
+            const responseElement = document.getElementById(`${elementPrefix}-response`);
+            const statusElement = document.getElementById(`${elementPrefix}-status`);
+            const bodyElement = document.getElementById(`${elementPrefix}-response-body`);
+            
+            responseElement.style.display = 'block';
+            statusElement.textContent = status;
+            statusElement.className = `status-code status-${Math.floor(status / 100) * 100}`;
+            bodyElement.textContent = JSON.stringify(data, null, 2);
+        }
+        
+        function showLoading(elementPrefix, show) {
+            const loadingElement = document.getElementById(`${elementPrefix}-loading`);
+            loadingElement.style.display = show ? 'block' : 'none';
+        }
+        
+        async function tryLogin() {
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            
+            if (!email || !password) {
+                alert('Please enter both email and password');
+                return;
+            }
+            
+            showLoading('login', true);
+            
+            const result = await makeRequest(`${API_BASE_URL}api/v1/auth/login`, {
+                method: 'POST',
+                body: JSON.stringify({ email, password })
+            });
+            
+            showLoading('login', false);
+            showResponse('login', result.status, result.data);
+            
+            // Store token for other requests
+            if (result.status === 200 && result.data.access_token) {
+                localStorage.setItem('prsm_token', result.data.access_token);
+                localStorage.setItem('prsm_user_id', result.data.user.id);
+                
+                // Auto-fill token fields
+                document.querySelectorAll('input[id$="-token"]').forEach(input => {
+                    input.value = result.data.access_token;
+                });
+                
+                // Auto-fill user ID field
+                const userIdField = document.getElementById('balance-user-id');
+                if (userIdField) {
+                    userIdField.value = result.data.user.id;
+                }
+            }
+        }
+        
+        async function tryRegister() {
+            const email = document.getElementById('register-email').value;
+            const password = document.getElementById('register-password').value;
+            const fullName = document.getElementById('register-name').value;
+            const organization = document.getElementById('register-org').value;
+            
+            if (!email || !password || !fullName) {
+                alert('Please fill in all required fields');
+                return;
+            }
+            
+            showLoading('register', true);
+            
+            const result = await makeRequest(`${API_BASE_URL}api/v1/auth/register`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    email,
+                    password,
+                    full_name: fullName,
+                    organization,
+                    role: 'researcher'
+                })
+            });
+            
+            showLoading('register', false);
+            showResponse('register', result.status, result.data);
+        }
+        
+        async function tryMarketplaceSearch() {
+            const token = document.getElementById('marketplace-token').value;
+            const query = document.getElementById('marketplace-query').value;
+            const resourceType = document.getElementById('marketplace-type').value;
+            const maxPrice = document.getElementById('marketplace-price').value;
+            
+            if (!token) {
+                alert('Please provide an authorization token');
+                return;
+            }
+            
+            showLoading('marketplace', true);
+            
+            const params = new URLSearchParams();
+            if (query) params.append('query', query);
+            if (resourceType) params.append('resource_type', resourceType);
+            if (maxPrice) params.append('max_price', maxPrice);
+            
+            const result = await makeRequest(`${API_BASE_URL}api/v1/marketplace/resources?${params}`, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            
+            showLoading('marketplace', false);
+            showResponse('marketplace', result.status, result.data);
+        }
+        
+        async function tryCreateSession() {
+            const token = document.getElementById('session-token').value;
+            const title = document.getElementById('session-title').value;
+            const description = document.getElementById('session-description').value;
+            const budget = document.getElementById('session-budget').value;
+            
+            if (!token || !title) {
+                alert('Please provide a token and session title');
+                return;
+            }
+            
+            showLoading('session', true);
+            
+            const result = await makeRequest(`${API_BASE_URL}api/v1/sessions`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({
+                    title,
+                    description,
+                    ftns_budget: parseFloat(budget) || 0,
+                    tags: ['api-playground']
+                })
+            });
+            
+            showLoading('session', false);
+            showResponse('session', result.status, result.data);
+        }
+        
+        async function tryCreateTask() {
+            const token = document.getElementById('task-token').value;
+            const title = document.getElementById('task-title').value;
+            const description = document.getElementById('task-description').value;
+            const sessionId = document.getElementById('task-session').value;
+            const cost = document.getElementById('task-cost').value;
+            
+            if (!token || !title || !sessionId) {
+                alert('Please provide token, title, and session ID');
+                return;
+            }
+            
+            showLoading('task', true);
+            
+            const result = await makeRequest(`${API_BASE_URL}api/v1/tasks`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({
+                    title,
+                    description,
+                    session_id: sessionId,
+                    estimated_cost: parseFloat(cost) || 0,
+                    priority: 3
+                })
+            });
+            
+            showLoading('task', false);
+            showResponse('task', result.status, result.data);
+        }
+        
+        async function tryGetBalance() {
+            const token = document.getElementById('balance-token').value;
+            const userId = document.getElementById('balance-user-id').value;
+            
+            if (!token || !userId) {
+                alert('Please provide token and user ID');
+                return;
+            }
+            
+            showLoading('balance', true);
+            
+            const result = await makeRequest(`${API_BASE_URL}api/v1/users/${userId}/balance`, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            
+            showLoading('balance', false);
+            showResponse('balance', result.status, result.data);
+        }
+        
+        // Auto-fill tokens from localStorage
+        window.addEventListener('load', () => {
+            const storedToken = localStorage.getItem('prsm_token');
+            const storedUserId = localStorage.getItem('prsm_user_id');
+            
+            if (storedToken) {
+                document.querySelectorAll('input[id$="-token"]').forEach(input => {
+                    input.value = storedToken;
+                });
+            }
+            
+            if (storedUserId) {
+                const userIdField = document.getElementById('balance-user-id');
+                if (userIdField) {
+                    userIdField.value = storedUserId;
+                }
+            }
+        });
+    </script>
+</body>
+</html>
