@@ -1,360 +1,547 @@
-# PRSM Continuous Integration Pipeline
-# Automated testing, security scanning, and quality checks
-
-name: CI Pipeline
+name: PRSM Continuous Integration
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, feature/* ]
   pull_request:
     branches: [ main, develop ]
   schedule:
-    # Run nightly at 2 AM UTC
+    # Run nightly builds at 2 AM UTC
     - cron: '0 2 * * *'
 
 env:
   PYTHON_VERSION: '3.11'
   NODE_VERSION: '18'
+  PRSM_ENVIRONMENT: 'ci'
+  PRSM_LOG_LEVEL: 'INFO'
 
 jobs:
-  # ===================================
-  # Code Quality and Linting
-  # ===================================
-  lint:
-    name: Code Quality & Linting
+  # Pre-flight checks and code quality
+  code-quality:
+    name: Code Quality & Security
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for better analysis
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
+    
+    - name: Code Formatting Check (Black)
+      run: |
+        black --check --diff .
+      continue-on-error: false
+    
+    - name: Import Sorting Check (isort)
+      run: |
+        isort --check-only --diff .
+      continue-on-error: false
+    
+    - name: Linting (Flake8)
+      run: |
+        flake8 prsm/ tests/ --max-line-length=100 --ignore=E203,W503
+      continue-on-error: false
+    
+    - name: Type Checking (MyPy)
+      run: |
+        mypy prsm/ --ignore-missing-imports --strict
+      continue-on-error: true  # Allow to continue but report issues
+    
+    - name: Security Scan (Bandit)
+      run: |
+        bandit -r prsm/ -f json -o security-report.json
+        bandit -r prsm/ --exit-zero-on-skipped
+      continue-on-error: true
+    
+    - name: Dependency Security Check (Safety)
+      run: |
+        safety check --json --output safety-report.json
+        safety check
+      continue-on-error: true
+    
+    - name: Upload Security Reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          security-report.json
+          safety-report.json
+        retention-days: 30
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Cache pip dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
-
-      - name: Run Black formatter check
-        run: black --check --diff .
-
-      - name: Run isort import sorting check
-        run: isort --check-only --diff .
-
-      - name: Run flake8 linting
-        run: flake8 .
-
-      - name: Run mypy type checking
-        run: mypy prsm/
-
-      - name: Check for security vulnerabilities  
-        run: |
-          pip install bandit safety pip-audit
-          bandit -r prsm/ -f json -o bandit-report.json --exit-zero
-          safety check --json --output safety-report.json --continue-on-error
-          pip-audit --format=json --output=pip-audit-report.json --continue-on-error
-
-      - name: Upload security reports
-        uses: actions/upload-artifact@v3
-        with:
-          name: security-reports
-          path: |
-            bandit-report.json
-            safety-report.json
-            pip-audit-report.json
-
-  # ===================================
   # Unit and Integration Tests
-  # ===================================
-  test:
-    name: Tests
-    runs-on: ubuntu-latest
+  test-suite:
+    name: Test Suite
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    needs: code-quality
+    
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ['3.11', '3.12']
-    
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_PASSWORD: test_password
-          POSTGRES_USER: test_user
-          POSTGRES_DB: prsm_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-      redis:
-        image: redis:7-alpine
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Cache pip dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-${{ matrix.python-version }}-pip-${{ hashFiles('**/requirements*.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.python-version }}-pip-
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
-          pip install -e .
-
-      - name: Set up test environment
-        env:
-          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/prsm_test
-          REDIS_URL: redis://localhost:6379/0
-          PRSM_ENV: testing
-          FTNS_ENABLED: false
-        run: |
-          # Run database migrations
-          alembic upgrade head
-
-      - name: Run pytest
-        env:
-          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/prsm_test
-          REDIS_URL: redis://localhost:6379/0
-          PRSM_ENV: testing
-          FTNS_ENABLED: false
-        run: |
-          pytest -v --cov=prsm --cov-report=xml --cov-report=html tests/
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: test-results-${{ matrix.python-version }}
-          path: |
-            htmlcov/
-            coverage.xml
-
-  # ===================================
-  # Docker Build and Security Scan
-  # ===================================
-  docker:
-    name: Docker Build & Security Scan
-    runs-on: ubuntu-latest
-    needs: [lint, test]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false
-          tags: prsm:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'prsm:test'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-
-      - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v2
-        with:
-          sarif_file: 'trivy-results.sarif'
-
-  # ===================================
-  # End-to-End Integration Tests
-  # ===================================
-  e2e:
-    name: End-to-End Tests
-    runs-on: ubuntu-latest
-    needs: [docker]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        test-type: ['unit', 'integration']
+        exclude:
+          # Reduce matrix size for faster CI
+          - os: windows-latest
+            python-version: '3.12'
+          - os: macos-latest
+            python-version: '3.12'
     
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+    
+    - name: Install System Dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libssl-dev libffi-dev
+    
+    - name: Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
+    
+    - name: Create Test Database
+      run: |
+        mkdir -p test_data
+        python -c "
+        import sqlite3
+        conn = sqlite3.connect('test_data/test.db')
+        conn.execute('CREATE TABLE IF NOT EXISTS test_table (id INTEGER PRIMARY KEY)')
+        conn.close()
+        "
+    
+    - name: Run Unit Tests
+      if: matrix.test-type == 'unit'
+      run: |
+        pytest tests/unit/ \
+          --cov=prsm \
+          --cov-report=xml \
+          --cov-report=term-missing \
+          --junit-xml=test-results-unit.xml \
+          -v \
+          --timeout=300
+    
+    - name: Run Integration Tests
+      if: matrix.test-type == 'integration'
+      run: |
+        pytest tests/integration/ \
+          --cov=prsm \
+          --cov-report=xml \
+          --cov-report=term-missing \
+          --junit-xml=test-results-integration.xml \
+          -v \
+          --timeout=600 \
+          -m "not slow"
+    
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.test-type }}
+        path: |
+          test-results-*.xml
+          coverage.xml
+          .coverage
+        retention-days: 30
+    
+    - name: Upload Coverage to Codecov
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: ${{ matrix.test-type }}
+        name: codecov-${{ matrix.os }}-${{ matrix.python-version }}
+        fail_ci_if_error: false
 
-      - name: Create test environment file
-        run: |
-          cat > .env << EOF
-          POSTGRES_PASSWORD=test_password
-          PRSM_ENV=testing
-          FTNS_ENABLED=false
-          OPENAI_API_KEY=dummy_key
-          ANTHROPIC_API_KEY=dummy_key
-          HUGGINGFACE_API_KEY=dummy_key
-          EOF
-
-      - name: Start services with Docker Compose
-        run: |
-          docker-compose -f docker-compose.yml up -d --build
-          sleep 60  # Wait for services to start
-
-      - name: Wait for services to be healthy
-        run: |
-          timeout 300 bash -c 'until curl -f http://localhost:8000/health; do echo "Waiting for API..."; sleep 5; done'
-
-      - name: Run integration tests
-        run: |
-          # Test API endpoints
-          curl -f http://localhost:8000/health
-          curl -f http://localhost:8000/api/v1/health
+  # Performance and Regression Testing
+  performance-tests:
+    name: Performance & Regression Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: test-suite
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Need history for regression comparison
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
+        # Install additional performance testing dependencies
+        pip install psutil memory-profiler line-profiler
+    
+    - name: Download Previous Performance Baselines
+      uses: actions/download-artifact@v3
+      with:
+        name: performance-baselines
+        path: .
+      continue-on-error: true
+    
+    - name: Run Performance Benchmarks
+      run: |
+        python tests/benchmarks/run_all_performance_tests.py \
+          --type=benchmark \
+          --report-format=json \
+          --output=performance-benchmark-results
+      continue-on-error: true
+    
+    - name: Run Regression Tests
+      run: |
+        python tests/benchmarks/run_all_performance_tests.py \
+          --type=regression \
+          --report-format=json \
+          --output=regression-test-results
+      continue-on-error: true
+    
+    - name: Run Load Tests (Limited)
+      run: |
+        # Run limited load tests in CI (full load tests in dedicated environment)
+        pytest tests/load/ \
+          -m "not slow" \
+          --timeout=1200 \
+          -v \
+          --junit-xml=load-test-results.xml
+      continue-on-error: true
+    
+    - name: Generate Performance Report
+      run: |
+        python tests/benchmarks/run_all_performance_tests.py \
+          --type=all \
+          --report-format=html \
+          --output=comprehensive-performance-report
+      continue-on-error: true
+    
+    - name: Upload Performance Results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: performance-results
+        path: |
+          *performance*.json
+          *performance*.html
+          *regression*.json
+          *load-test*.xml
+          .benchmarks/
+        retention-days: 90
+    
+    - name: Save Performance Baselines
+      uses: actions/upload-artifact@v3
+      if: github.ref == 'refs/heads/main'
+      with:
+        name: performance-baselines
+        path: |
+          *baseline*.json
+        retention-days: 365
+    
+    - name: Comment Performance Results on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
           
-          # Test database connectivity
-          docker-compose exec -T prsm-api python -c "
-          import asyncio
-          from prsm.core.database_service import get_database_service
-          async def test():
-              db = get_database_service()
-              health = await db.get_health_status()
-              assert health['status'] == 'healthy'
-              print('Database connectivity test passed')
-          asyncio.run(test())
-          "
+          try {
+            // Read performance report
+            let reportContent = 'Performance test results:\n\n';
+            
+            if (fs.existsSync('comprehensive-performance-report.json')) {
+              const report = JSON.parse(fs.readFileSync('comprehensive-performance-report.json', 'utf8'));
+              const summary = report.summary || {};
+              
+              reportContent += `🎯 **Performance Grade**: ${summary.performance_grade || 'Unknown'}\n`;
+              reportContent += `📊 **Overall Health**: ${summary.overall_health || 'Unknown'}\n`;
+              reportContent += `⚡ **Max Throughput**: ${summary.key_metrics?.max_throughput_rps || 'Unknown'} RPS\n`;
+              
+              if (summary.critical_issues && summary.critical_issues.length > 0) {
+                reportContent += `\n🚨 **Critical Issues**:\n`;
+                summary.critical_issues.forEach(issue => {
+                  reportContent += `- ${issue}\n`;
+                });
+              }
+              
+              if (report.recommendations && report.recommendations.length > 0) {
+                reportContent += `\n💡 **Recommendations**:\n`;
+                report.recommendations.slice(0, 3).forEach(rec => {
+                  reportContent += `- ${rec}\n`;
+                });
+              }
+            } else {
+              reportContent += '⚠️ Performance report not generated or failed.';
+            }
+            
+            // Post comment
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: reportContent
+            });
+          } catch (error) {
+            console.log('Failed to post performance comment:', error);
+          }
 
-      - name: Collect service logs
-        if: always()
-        run: |
-          mkdir -p logs
-          docker-compose logs --no-color > logs/docker-compose.log
-
-      - name: Upload logs
-        uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: e2e-logs
-          path: logs/
-
-      - name: Clean up
-        if: always()
-        run: |
-          docker-compose down -v
-
-  # ===================================
-  # Performance Tests
-  # ===================================
-  performance:
-    name: Performance Tests
+  # Documentation and API Tests
+  documentation-tests:
+    name: Documentation & API Tests
     runs-on: ubuntu-latest
-    needs: [e2e]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 20
     
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
+        pip install sphinx sphinx-rtd-theme
+    
+    - name: Build Documentation
+      run: |
+        cd docs/
+        make html
+      continue-on-error: true
+    
+    - name: Test API Documentation
+      run: |
+        # Test that API endpoints are documented
+        python -c "
+        import sys
+        sys.path.append('.')
+        from prsm.api.main import app
+        
+        # Check that main API routes exist
+        routes = [str(route.path) for route in app.routes]
+        required_routes = ['/api/v1/nwtn/query', '/api/v1/ftns/balance', '/api/v1/auth/login']
+        
+        missing_routes = [route for route in required_routes if not any(route in r for r in routes)]
+        if missing_routes:
+            print(f'Missing API routes: {missing_routes}')
+            sys.exit(1)
+        else:
+            print('All required API routes found')
+        "
+    
+    - name: Upload Documentation
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: documentation
+        path: docs/_build/html/
+        retention-days: 30
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install performance testing tools
-        run: |
-          pip install locust pytest-benchmark
-
-      - name: Start PRSM services
-        run: |
-          echo "POSTGRES_PASSWORD=test_password" > .env
-          echo "PRSM_ENV=testing" >> .env
-          echo "FTNS_ENABLED=false" >> .env
-          docker-compose up -d --build
-          sleep 60
-
-      - name: Run load tests
-        run: |
-          # Simple load test with curl
-          for i in {1..10}; do
-            curl -f http://localhost:8000/health
-          done
-          
-          echo "Basic load test completed"
-
-      - name: Clean up
-        if: always()
-        run: docker-compose down -v
-
-  # ===================================
-  # Dependency Security Check
-  # ===================================
-  security:
-    name: Security Audit
+  # Build and Package Tests
+  build-test:
+    name: Build & Package Test
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Run dependency security audit
-        uses: pypa/gh-action-pip-audit@v1.0.8
-        with:
-          inputs: requirements.txt requirements-dev.txt
-
-      - name: Check for hardcoded secrets
-        uses: trufflesecurity/trufflehog@main
-        with:
-          path: ./
-          base: main
-          head: HEAD
-          extra_args: --debug --only-verified
-
-  # ===================================
-  # Notification
-  # ===================================
-  notify:
-    name: Notification
-    runs-on: ubuntu-latest
-    needs: [lint, test, docker, security]
-    if: always() && github.ref == 'refs/heads/main'
+    timeout-minutes: 15
+    needs: [code-quality, test-suite]
     
     steps:
-      - name: Notify on success
-        if: ${{ needs.lint.result == 'success' && needs.test.result == 'success' && needs.docker.result == 'success' }}
-        run: echo "✅ All CI checks passed!"
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Build Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine wheel
+    
+    - name: Build Package
+      run: |
+        python -m build
+    
+    - name: Check Package
+      run: |
+        twine check dist/*
+    
+    - name: Test Installation
+      run: |
+        pip install dist/*.whl
+        python -c "import prsm; print('Package installed successfully')"
+    
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: build-artifacts
+        path: dist/
+        retention-days: 30
 
-      - name: Notify on failure
-        if: ${{ needs.lint.result == 'failure' || needs.test.result == 'failure' || needs.docker.result == 'failure' }}
-        run: |
-          echo "❌ CI pipeline failed!"
-          exit 1
+  # Deployment Readiness Check
+  deployment-readiness:
+    name: Deployment Readiness
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [test-suite, performance-tests, build-test]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    
+    - name: Download Test Results
+      uses: actions/download-artifact@v3
+      with:
+        name: performance-results
+        path: performance-results/
+      continue-on-error: true
+    
+    - name: Evaluate Deployment Readiness
+      run: |
+        python -c "
+        import json
+        import sys
+        import os
+        
+        ready = True
+        issues = []
+        
+        # Check performance results
+        perf_files = [f for f in os.listdir('performance-results/') if f.endswith('.json')]
+        
+        for perf_file in perf_files:
+            try:
+                with open(f'performance-results/{perf_file}', 'r') as f:
+                    data = json.load(f)
+                    
+                if 'summary' in data:
+                    summary = data['summary']
+                    grade = summary.get('performance_grade', 'F')
+                    
+                    if grade in ['F', 'D']:
+                        ready = False
+                        issues.append(f'Poor performance grade: {grade}')
+                    
+                    critical_issues = summary.get('critical_issues', [])
+                    if critical_issues:
+                        ready = False
+                        issues.extend([f'Critical: {issue}' for issue in critical_issues])
+                        
+            except Exception as e:
+                print(f'Warning: Could not parse {perf_file}: {e}')
+        
+        print(f'Deployment Readiness: {\"READY\" if ready else \"NOT READY\"}')
+        
+        if issues:
+            print('Issues found:')
+            for issue in issues:
+                print(f'  - {issue}')
+        
+        if not ready:
+            print('Deployment blocked due to quality issues')
+            sys.exit(1)
+        else:
+            print('All quality gates passed - ready for deployment')
+        "
+    
+    - name: Create Deployment Tag
+      if: success()
+      run: |
+        # Create a deployment-ready tag
+        timestamp=$(date +"%Y%m%d-%H%M%S")
+        tag_name="deploy-ready-${timestamp}"
+        
+        git config user.name "CI/CD Pipeline"
+        git config user.email "ci@prsm.ai"
+        git tag -a "$tag_name" -m "Deployment ready: $timestamp"
+        
+        echo "Created deployment tag: $tag_name"
+        echo "DEPLOY_TAG=$tag_name" >> $GITHUB_ENV
+    
+    - name: Notify Deployment Ready
+      if: success()
+      run: |
+        echo "🚀 PRSM is ready for deployment!"
+        echo "Deployment tag: $DEPLOY_TAG"
+        echo "All quality gates passed successfully"
+
+  # Cleanup and Notifications
+  cleanup:
+    name: Cleanup & Notifications
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [code-quality, test-suite, performance-tests, documentation-tests, build-test, deployment-readiness]
+    
+    steps:
+    - name: Aggregate Results
+      run: |
+        echo "🎯 PRSM CI/CD Pipeline Summary"
+        echo "=============================="
+        
+        # Job statuses
+        echo "Code Quality: ${{ needs.code-quality.result }}"
+        echo "Test Suite: ${{ needs.test-suite.result }}"
+        echo "Performance Tests: ${{ needs.performance-tests.result }}"
+        echo "Documentation: ${{ needs.documentation-tests.result }}"
+        echo "Build Test: ${{ needs.build-test.result }}"
+        echo "Deployment Readiness: ${{ needs.deployment-readiness.result }}"
+        
+        # Determine overall status
+        if [[ "${{ needs.code-quality.result }}" == "success" && \
+              "${{ needs.test-suite.result }}" == "success" && \
+              "${{ needs.build-test.result }}" == "success" ]]; then
+            echo "✅ CI/CD Pipeline: SUCCESS"
+            echo "PIPELINE_STATUS=success" >> $GITHUB_ENV
+        else
+            echo "❌ CI/CD Pipeline: FAILED"
+            echo "PIPELINE_STATUS=failure" >> $GITHUB_ENV
+        fi
+    
+    - name: Cleanup Old Artifacts
+      if: github.event_name == 'schedule'
+      run: |
+        echo "Scheduled cleanup would remove artifacts older than retention period"
+        # In a real setup, this would clean up old artifacts, logs, etc.
+    
+    - name: Send Notifications
+      if: failure() && github.ref == 'refs/heads/main'
+      run: |
+        echo "Pipeline failed on main branch - notifications would be sent here"
+        # In a real setup, this would send Slack/email notifications

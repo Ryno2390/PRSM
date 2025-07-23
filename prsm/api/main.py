@@ -64,6 +64,19 @@ from prsm.security.middleware import (
     SecurityHeadersMiddleware as EnhancedSecurityHeaders,
     RateLimitingMiddleware, RequestValidationMiddleware
 )
+from prsm.security.advanced_rate_limiting import (
+    initialize_rate_limiter, get_rate_limiter, RateLimitMiddleware
+)
+from prsm.security.enhanced_authentication import (
+    initialize_auth_system, get_auth_system
+)
+from prsm.security.security_monitoring import (
+    initialize_security_monitor, get_security_monitor, shutdown_security_monitor
+)
+from prsm.security.security_analytics import (
+    initialize_security_analytics, get_security_analytics, shutdown_security_analytics,
+    create_security_analytics_endpoints
+)
 
 
 # Configure structured logging
@@ -84,7 +97,7 @@ class WebSocketManager:
     - Automatic cleanup and reconnection handling
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         # Active connections: user_id -> Set[WebSocket]
         self.active_connections: Dict[str, Set[WebSocket]] = {}
         # Conversation subscriptions: conversation_id -> Set[WebSocket]
@@ -92,7 +105,7 @@ class WebSocketManager:
         # Connection metadata: WebSocket -> Dict[str, Any]
         self.connection_metadata: Dict[WebSocket, Dict[str, Any]] = {}
         
-    async def connect(self, websocket: WebSocket, user_id: str, connection_type: str = "general"):
+    async def connect(self, websocket: WebSocket, user_id: str, connection_type: str = "general") -> None:
         """Accept new WebSocket connection"""
         await websocket.accept()
         
@@ -122,7 +135,7 @@ class WebSocketManager:
             "message": "Real-time connection established"
         }, websocket)
     
-    async def disconnect(self, websocket: WebSocket):
+    async def disconnect(self, websocket: WebSocket) -> None:
         """Handle WebSocket disconnection"""
         if websocket not in self.connection_metadata:
             return
@@ -153,7 +166,7 @@ class WebSocketManager:
                    user_id=user_id,
                    total_connections=len(self.connection_metadata))
     
-    async def subscribe_to_conversation(self, websocket: WebSocket, conversation_id: str):
+    async def subscribe_to_conversation(self, websocket: WebSocket, conversation_id: str) -> None:
         """Subscribe WebSocket to conversation updates"""
         if conversation_id not in self.conversation_subscriptions:
             self.conversation_subscriptions[conversation_id] = set()
@@ -171,7 +184,7 @@ class WebSocketManager:
                     conversation_id=conversation_id,
                     subscribers=len(self.conversation_subscriptions[conversation_id]))
     
-    async def unsubscribe_from_conversation(self, websocket: WebSocket, conversation_id: str):
+    async def unsubscribe_from_conversation(self, websocket: WebSocket, conversation_id: str) -> None:
         """Unsubscribe WebSocket from conversation updates"""
         if conversation_id in self.conversation_subscriptions:
             self.conversation_subscriptions[conversation_id].discard(websocket)
@@ -185,7 +198,7 @@ class WebSocketManager:
             if "subscriptions" in metadata:
                 metadata["subscriptions"].discard(conversation_id)
     
-    async def send_personal_message(self, message: Dict[str, Any], websocket: WebSocket):
+    async def send_personal_message(self, message: Dict[str, Any], websocket: WebSocket) -> None:
         """Send message to specific WebSocket connection"""
         try:
             await websocket.send_text(json.dumps(message))
@@ -198,7 +211,7 @@ class WebSocketManager:
             logger.error("Failed to send personal message", error=str(e))
             await self.disconnect(websocket)
     
-    async def send_to_user(self, message: Dict[str, Any], user_id: str):
+    async def send_to_user(self, message: Dict[str, Any], user_id: str) -> None:
         """Send message to all connections for a specific user"""
         if user_id in self.active_connections:
             disconnected = []
@@ -213,7 +226,7 @@ class WebSocketManager:
             for ws in disconnected:
                 await self.disconnect(ws)
     
-    async def broadcast_to_conversation(self, message: Dict[str, Any], conversation_id: str):
+    async def broadcast_to_conversation(self, message: Dict[str, Any], conversation_id: str) -> None:
         """Send message to all subscribers of a conversation"""
         if conversation_id in self.conversation_subscriptions:
             disconnected = []
@@ -230,7 +243,7 @@ class WebSocketManager:
             for ws in disconnected:
                 await self.disconnect(ws)
     
-    async def broadcast_to_all(self, message: Dict[str, Any]):
+    async def broadcast_to_all(self, message: Dict[str, Any]) -> None:
         """Send message to all connected clients"""
         disconnected = []
         for websocket in self.connection_metadata.keys():
@@ -316,6 +329,30 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("⚠️ Secure credential management initialization incomplete")
         
+        # 🛡️ Initialize advanced security systems
+        try:
+            # Initialize enhanced authentication system
+            jwt_secret = settings.jwt_secret or "development-secret-key"
+            await initialize_auth_system(redis_manager.client, jwt_secret)
+            logger.info("✅ Enhanced authentication system initialized")
+            
+            # Initialize advanced rate limiting
+            await initialize_rate_limiter(redis_manager.client)
+            logger.info("✅ Advanced rate limiting system initialized")
+            
+            # Initialize security monitoring
+            await initialize_security_monitor(redis_manager.client)
+            logger.info("✅ Security monitoring system initialized")
+            
+            # Initialize security analytics
+            await initialize_security_analytics(redis_manager.client)
+            logger.info("✅ Security analytics system initialized")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Some security systems failed to initialize: {e}")
+            if settings.is_production:
+                raise
+        
         # 📊 Start background monitoring tasks
         # await start_background_tasks()
         
@@ -350,21 +387,41 @@ async def lifespan(app: FastAPI):
         # 📊 Stop background tasks
         # await stop_background_tasks()
         
+        # 🛡️ Shutdown security systems
+        try:
+            await shutdown_security_monitor()
+            await shutdown_security_analytics()
+            logger.info("✅ Security systems shutdown completed")
+        except Exception as e:
+            logger.error("❌ Error shutting down security systems", error=str(e))
+        
         logger.info("✅ PRSM API server shutdown completed")
         
     except Exception as e:
         logger.error("❌ Error during shutdown", error=str(e))
 
 
-# Create FastAPI application
+# Import enhanced OpenAPI configuration and documentation UI
+from prsm.api.openapi_config import custom_openapi_schema, API_TAGS_METADATA
+from prsm.api.docs_ui import create_enhanced_docs_ui
+
+# Import API versioning system
+from prsm.api.versioning import VersioningMiddleware, version_negotiator
+from prsm.api.compatibility import CompatibilityMiddleware, compatibility_engine
+from prsm.api.version_schemas import create_version_specific_docs_endpoints
+from prsm.api.migration import create_migration_endpoints
+
+# Create FastAPI application with enhanced OpenAPI documentation
 app = FastAPI(
     title="PRSM API",
     description="Protocol for Recursive Scientific Modeling - API for decentralized AI collaboration",
     version="0.1.0",
-    docs_url="/docs",  # Always available for developer experience
-    redoc_url="/redoc",  # Always available for developer experience
+    docs_url="/docs",  # Enhanced interactive documentation
+    redoc_url="/redoc",  # Enhanced alternative documentation
+    openapi_url="/openapi.json",  # OpenAPI schema endpoint
     lifespan=lifespan,
-    # Enhanced OpenAPI configuration for better documentation
+    # Enhanced OpenAPI metadata
+    openapi_tags=API_TAGS_METADATA,
     contact={
         "name": "PRSM API Support",
         "email": "api-support@prsm.org",
@@ -380,6 +437,19 @@ app = FastAPI(
         {"url": "http://localhost:8000", "description": "Development server"}
     ]
 )
+
+# Apply custom OpenAPI schema
+app.openapi = lambda: custom_openapi_schema(app)
+
+# Add API versioning and compatibility middleware
+versioning_middleware = VersioningMiddleware(version_negotiator)
+compatibility_middleware = CompatibilityMiddleware(compatibility_engine)
+
+app.middleware("http")(versioning_middleware)
+app.middleware("http")(compatibility_middleware)
+
+logger.info("✅ API versioning and compatibility middleware enabled")
+
 # Add enhanced security middleware stack (order matters - most specific first)
 from prsm.security import RequestLimitsMiddleware, request_limits_config
 
@@ -387,10 +457,22 @@ from prsm.security import RequestLimitsMiddleware, request_limits_config
 app.add_middleware(RequestLimitsMiddleware, config=request_limits_config)
 app.add_middleware(AuthMiddleware, rate_limit_requests=100, rate_limit_window=60)
 
-# Enhanced security middleware stack
+# Enhanced security middleware stack (order matters - most specific first)
 app.add_middleware(RequestValidationMiddleware)
-app.add_middleware(RateLimitingMiddleware) 
+app.add_middleware(RateLimitingMiddleware)
 app.add_middleware(EnhancedSecurityHeaders)
+
+# Add advanced rate limiting middleware after initialization
+@app.on_event("startup")
+async def add_advanced_rate_limiting():
+    """Add advanced rate limiting middleware after Redis is initialized"""
+    try:
+        rate_limiter = get_rate_limiter()
+        rate_limit_middleware = RateLimitMiddleware(rate_limiter)
+        app.middleware("http")(rate_limit_middleware)
+        logger.info("✅ Advanced rate limiting middleware enabled")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not enable advanced rate limiting: {e}")
 
 logger.info("Enhanced security middleware stack initialized",
            middleware_count=3,
@@ -2057,6 +2139,22 @@ logger.info("✅ Cryptography API endpoints enabled")
 logger.info("✅ Governance API endpoints enabled")
 logger.info("✅ Mainnet Deployment API endpoints enabled")
 logger.info("✅ UI API endpoints enabled")
+
+# Add enhanced documentation UI
+create_enhanced_docs_ui(app)
+logger.info("✅ Enhanced API documentation UI enabled")
+
+# Add version-specific documentation endpoints
+create_version_specific_docs_endpoints(app)
+logger.info("✅ Version-specific documentation endpoints enabled")
+
+# Add migration endpoints
+create_migration_endpoints(app)
+logger.info("✅ API migration endpoints enabled")
+
+# Add security analytics endpoints
+create_security_analytics_endpoints(app)
+logger.info("✅ Security analytics endpoints enabled")
 
 # Include additional routers when implemented
 # app.include_router(nwtn_router, prefix="/nwtn", tags=["NWTN"])

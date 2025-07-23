@@ -1,0 +1,103 @@
+# PRSM Development Dependencies
+# ==========================================
+# This file extracts development dependencies from pyproject.toml
+# for compatibility with CI/CD systems that expect requirements files
+
+# Testing Framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.12.0
+pytest-cov>=4.1.0
+pytest-timeout>=2.2.0
+pytest-xdist>=3.5.0
+
+# Testing Utilities
+factory-boy>=3.3.0
+faker>=20.1.0
+responses>=0.24.0
+httpx>=0.25.0
+
+# Code Quality and Formatting
+black>=23.12.0
+isort>=5.13.0
+flake8>=6.1.0
+mypy>=1.8.0
+bandit>=1.7.5
+safety>=3.0.0
+
+# Pre-commit hooks
+pre-commit>=3.6.0
+
+# Performance and Load Testing
+psutil>=5.9.0
+memory-profiler>=0.61.0
+line-profiler>=4.1.0
+locust>=2.17.0
+
+# Security Testing
+bandit>=1.7.5
+safety>=3.0.0
+
+# Development Tools
+ipython>=8.18.0
+ipdb>=0.13.13
+rich>=13.7.0
+click>=8.1.0
+
+# Containerization
+docker>=6.1.0
+
+# Documentation
+mkdocs>=1.5.0
+mkdocs-material>=9.4.0
+mkdocstrings[python]>=0.24.0
+sphinx>=7.2.0
+sphinx-rtd-theme>=2.0.0
+
+# Database Tools
+alembic>=1.13.0
+
+# Environment Management
+python-dotenv>=1.0.0
+
+# HTTP Client for Testing
+requests>=2.31.0
+aiohttp>=3.9.0
+
+# Type Checking Support
+types-requests>=2.31.0
+types-redis>=4.6.0
+types-python-dateutil>=2.8.0
+
+# Notebook Support (if needed for analysis)
+jupyter>=1.0.0
+notebook>=7.0.0
+
+# Additional Analysis Tools
+pandas>=2.1.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Async Testing
+asyncio-mqtt>=0.16.0
+aiofiles>=23.2.1
+
+# Mock and Patch Tools
+pytest-mock>=3.12.0
+responses>=0.24.0
+
+# Coverage and Quality Reporting
+coverage[toml]>=7.3.0
+codecov>=2.1.13
+
+# Build Tools
+build>=1.0.0
+twine>=4.0.0
+wheel>=0.42.0
+
+# Environment Variable Loading
+python-decouple>=3.8
+
+# Additional Development Utilities
+tox>=4.11.0
+watchdog>=3.0.0

@@ -1,0 +1,1277 @@
+openapi: 3.0.3
+info:
+  title: PRSM API
+  description: |
+    # Protocol for Recursive Scientific Modeling (PRSM) API
+
+    ## Overview
+    PRSM is a comprehensive decentralized AI framework designed for scientific discovery and collaboration. 
+    This API provides access to advanced AI orchestration, distributed computing, and tokenized research economics.
+
+    ## Key Features
+    - 🧠 **NWTN (Neural Work Token Network)**: AI orchestration and multi-agent reasoning
+    - 💰 **FTNS Token Economy**: Native cryptocurrency integration with marketplace
+    - 🔬 **Research Tools**: Session management and collaborative research features
+    - 🏪 **Universal Marketplace**: Trade AI models, datasets, tools, and more
+    - 🔐 **Enterprise Security**: JWT authentication, rate limiting, and audit trails
+
+    ## Getting Started
+    1. Register an account or login to receive access tokens
+    2. Include `Authorization: Bearer <token>` header in requests
+    3. Explore the interactive playground at `/docs/playground`
+
+    ## Support
+    - **Documentation**: [https://docs.prsm.org](https://docs.prsm.org)
+    - **Community**: [https://community.prsm.org](https://community.prsm.org)
+    - **Support**: [api-support@prsm.org](mailto:api-support@prsm.org)
+
+  version: "0.1.0"
+  contact:
+    name: PRSM API Support
+    email: api-support@prsm.org
+    url: https://developers.prsm.org
+  license:
+    name: MIT License
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.prsm.org
+    description: Production server
+  - url: https://staging-api.prsm.org
+    description: Staging server
+  - url: http://localhost:8000
+    description: Development server
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "JWT Bearer token authentication. Include the token in the Authorization header as 'Bearer <token>'"
+    
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: "API Key authentication for service-to-service communication"
+
+  schemas:
+    # Common Response Models
+    APIResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          description: Whether the request was successful
+        message:
+          type: string
+          description: Human-readable message
+        timestamp:
+          type: string
+          format: date-time
+          description: Response timestamp
+        request_id:
+          type: string
+          format: uuid
+          description: Unique request identifier
+
+    ErrorResponse:
+      allOf:
+        - $ref: '#/components/schemas/APIResponse'
+        - type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error_code:
+              type: string
+              description: Machine-readable error code
+            details:
+              type: object
+              description: Additional error details
+
+    PaginatedResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: {}
+          description: Array of items
+        total:
+          type: integer
+          description: Total number of items
+        page:
+          type: integer
+          description: Current page number
+        per_page:
+          type: integer
+          description: Items per page
+        has_next:
+          type: boolean
+          description: Whether there are more pages
+        has_prev:
+          type: boolean
+          description: Whether there are previous pages
+
+    # Authentication Models
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: researcher@university.edu
+          description: User email address
+        password:
+          type: string
+          example: secure_password_123
+          description: User password
+        remember_me:
+          type: boolean
+          default: false
+          description: Whether to extend session duration
+
+    LoginResponse:
+      allOf:
+        - $ref: '#/components/schemas/APIResponse'
+        - type: object
+          properties:
+            access_token:
+              type: string
+              description: JWT access token
+            refresh_token:
+              type: string
+              description: JWT refresh token
+            token_type:
+              type: string
+              example: bearer
+              description: Token type
+            expires_in:
+              type: integer
+              example: 3600
+              description: Token expiration time in seconds
+            user:
+              $ref: '#/components/schemas/User'
+
+    RegisterRequest:
+      type: object
+      required: [email, password, full_name]
+      properties:
+        email:
+          type: string
+          format: email
+          example: new.researcher@university.edu
+          description: User email
+        password:
+          type: string
+          example: secure_password_123
+          description: Password (minimum 8 characters)
+        full_name:
+          type: string
+          example: Dr. Jane Smith
+          description: Full name
+        organization:
+          type: string
+          example: University of Science
+          description: Organization or institution
+        role:
+          type: string
+          example: researcher
+          enum: [researcher, developer, enterprise]
+          description: Requested user role
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique user identifier
+        email:
+          type: string
+          format: email
+          description: User email address
+        full_name:
+          type: string
+          description: User's full name
+        role:
+          type: string
+          enum: [guest, researcher, developer, enterprise, admin]
+          description: User role
+        ftns_balance:
+          type: number
+          format: float
+          description: Current FTNS token balance
+        created_at:
+          type: string
+          format: date-time
+          description: Account creation timestamp
+
+    # Marketplace Models
+    ResourceType:
+      type: string
+      enum:
+        - ai_model
+        - dataset
+        - tool
+        - compute_time
+        - storage
+        - api_access
+        - research_paper
+        - template
+        - plugin
+      description: Type of marketplace resource
+
+    MarketplaceResource:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique resource identifier
+        title:
+          type: string
+          example: Advanced NLP Model
+          description: Resource title
+        description:
+          type: string
+          description: Detailed resource description
+        resource_type:
+          $ref: '#/components/schemas/ResourceType'
+        price:
+          type: number
+          format: float
+          example: 50.0
+          description: Price in FTNS tokens
+        seller_id:
+          type: string
+          description: Seller user ID
+        seller_name:
+          type: string
+          example: AI Research Lab
+          description: Seller display name
+        rating:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 5
+          example: 4.8
+          description: Average rating (0-5)
+        reviews_count:
+          type: integer
+          example: 25
+          description: Number of reviews
+        created_at:
+          type: string
+          format: date-time
+          description: Resource creation timestamp
+        updated_at:
+          type: string
+          format: date-time
+          description: Last update timestamp
+        tags:
+          type: array
+          items:
+            type: string
+          example: ["nlp", "transformer", "pytorch"]
+          description: Resource tags
+
+    MarketplaceSearchResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginatedResponse'
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/MarketplaceResource'
+            filters_applied:
+              type: object
+              description: Applied search filters
+            suggestions:
+              type: array
+              items:
+                type: string
+              description: Search suggestions
+
+    # FTNS Token Models
+    FTNSBalance:
+      type: object
+      properties:
+        user_id:
+          type: string
+          description: User identifier
+        available_balance:
+          type: number
+          format: float
+          example: 1250.75
+          description: Available FTNS tokens
+        locked_balance:
+          type: number
+          format: float
+          example: 250.0
+          description: Locked FTNS tokens (in escrow)
+        total_balance:
+          type: number
+          format: float
+          example: 1500.75
+          description: Total FTNS tokens
+        last_updated:
+          type: string
+          format: date-time
+          description: Last balance update timestamp
+
+    FTNSTransaction:
+      type: object
+      properties:
+        transaction_id:
+          type: string
+          description: Unique transaction identifier
+        from_user_id:
+          type: string
+          nullable: true
+          description: Sender user ID
+        to_user_id:
+          type: string
+          nullable: true
+          description: Recipient user ID
+        amount:
+          type: number
+          format: float
+          example: 75.0
+          description: Transaction amount in FTNS
+        transaction_type:
+          type: string
+          example: purchase
+          description: Type of transaction
+        description:
+          type: string
+          example: AI Model Purchase
+          description: Transaction description
+        status:
+          type: string
+          example: completed
+          enum: [pending, completed, failed, cancelled]
+          description: Transaction status
+        created_at:
+          type: string
+          format: date-time
+          description: Transaction creation timestamp
+
+    # Session and Task Models
+    ResearchSession:
+      type: object
+      properties:
+        session_id:
+          type: string
+          description: Unique session identifier
+        title:
+          type: string
+          example: Climate Change ML Analysis
+          description: Session title
+        description:
+          type: string
+          description: Session description
+        owner_id:
+          type: string
+          description: Session owner user ID
+        collaborators:
+          type: array
+          items:
+            type: string
+          description: List of collaborator user IDs
+        status:
+          type: string
+          example: active
+          enum: [draft, active, paused, completed, archived]
+          description: Session status
+        created_at:
+          type: string
+          format: date-time
+          description: Session creation timestamp
+        last_activity:
+          type: string
+          format: date-time
+          description: Last activity timestamp
+        ftns_budget:
+          type: number
+          format: float
+          example: 500.0
+          description: Allocated FTNS budget
+        ftns_spent:
+          type: number
+          format: float
+          example: 125.0
+          description: FTNS tokens spent
+
+    TaskHierarchy:
+      type: object
+      properties:
+        task_id:
+          type: string
+          description: Unique task identifier
+        parent_task_id:
+          type: string
+          nullable: true
+          description: Parent task ID
+        title:
+          type: string
+          example: Data Preprocessing
+          description: Task title
+        description:
+          type: string
+          description: Task description
+        status:
+          type: string
+          example: in_progress
+          enum: [pending, in_progress, completed, failed, cancelled]
+          description: Task status
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 5
+          example: 3
+          description: Task priority (1-5)
+        estimated_cost:
+          type: number
+          format: float
+          example: 25.0
+          description: Estimated FTNS cost
+        actual_cost:
+          type: number
+          format: float
+          nullable: true
+          description: Actual FTNS cost
+        subtasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskHierarchy'
+
+    # Health and Monitoring Models
+    SystemHealth:
+      type: object
+      properties:
+        status:
+          type: string
+          example: healthy
+          enum: [healthy, degraded, unhealthy]
+          description: Overall system status
+        timestamp:
+          type: string
+          format: date-time
+          description: Health check timestamp
+        components:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+                enum: [healthy, degraded, unhealthy]
+              response_time_ms:
+                type: number
+                format: float
+          description: Individual component statuses
+        response_time_ms:
+          type: number
+          format: float
+          example: 245.5
+          description: Health check response time
+
+  responses:
+    BadRequest:
+      description: Bad Request - Invalid input parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            message: Invalid request parameters
+            error_code: INVALID_INPUT
+            timestamp: "2024-01-15T10:00:00Z"
+
+    Unauthorized:
+      description: Unauthorized - Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            message: Authentication required
+            error_code: UNAUTHORIZED
+
+    Forbidden:
+      description: Forbidden - Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            message: Insufficient permissions
+            error_code: FORBIDDEN
+
+    NotFound:
+      description: Not Found - Resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            message: Resource not found
+            error_code: NOT_FOUND
+
+    RateLimited:
+      description: Too Many Requests - Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorResponse'
+              - type: object
+                properties:
+                  retry_after:
+                    type: integer
+                    example: 60
+                    description: Seconds to wait before retrying
+          example:
+            success: false
+            message: Rate limit exceeded
+            error_code: RATE_LIMITED
+            retry_after: 60
+
+    InternalError:
+      description: Internal Server Error - Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            success: false
+            message: Internal server error
+            error_code: INTERNAL_ERROR
+            request_id: "550e8400-e29b-41d4-a716-446655440000"
+
+paths:
+  # Root and Health Endpoints
+  /:
+    get:
+      summary: API Root Information
+      description: Get basic API information and feature flags
+      tags: [Core API]
+      security: []
+      responses:
+        '200':
+          description: API information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    example: PRSM API
+                  version:
+                    type: string
+                    example: "0.1.0"
+                  description:
+                    type: string
+                    example: Protocol for Recursive Scientific Modeling
+                  environment:
+                    type: string
+                    example: production
+                  status:
+                    type: string
+                    example: operational
+                  features:
+                    type: object
+                    properties:
+                      nwtn_enabled:
+                        type: boolean
+                      ftns_enabled:
+                        type: boolean
+                      p2p_enabled:
+                        type: boolean
+
+  /health:
+    get:
+      summary: System Health Check
+      description: Comprehensive health check of all PRSM subsystems
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: System health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemHealth'
+              example:
+                status: healthy
+                timestamp: "2024-01-15T10:00:00Z"
+                components:
+                  database:
+                    status: healthy
+                    response_time_ms: 15.2
+                  redis:
+                    status: healthy
+                    response_time_ms: 8.1
+                  ipfs:
+                    status: healthy
+                    response_time_ms: 45.6
+                  vector_db:
+                    status: healthy
+                    response_time_ms: 23.4
+                response_time_ms: 245.5
+
+  # Authentication Endpoints
+  /api/v1/auth/register:
+    post:
+      summary: Register New User
+      description: Create a new user account with PRSM
+      tags: [Authentication]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              email: "researcher@university.edu"
+              password: "secure_password_123"
+              full_name: "Dr. Jane Smith"
+              organization: "University of Science"
+              role: "researcher"
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: User already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/login:
+    post:
+      summary: User Login
+      description: Authenticate user and receive access tokens
+      tags: [Authentication]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: "researcher@university.edu"
+              password: "secure_password_123"
+              remember_me: true
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              example:
+                success: true
+                message: "Login successful"
+                timestamp: "2024-01-15T10:00:00Z"
+                access_token: "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+                refresh_token: "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9..."
+                token_type: "bearer"
+                expires_in: 3600
+                user:
+                  id: "123e4567-e89b-12d3-a456-426614174000"
+                  email: "researcher@university.edu"
+                  role: "researcher"
+                  ftns_balance: 1000.0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/auth/refresh:
+    post:
+      summary: Refresh Access Token
+      description: Use refresh token to obtain new access token
+      tags: [Authentication]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+                  description: Valid refresh token
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                    example: bearer
+                  expires_in:
+                    type: integer
+                    example: 3600
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/logout:
+    post:
+      summary: User Logout
+      description: Invalidate current session and tokens
+      tags: [Authentication]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # Marketplace Endpoints
+  /api/v1/marketplace/resources:
+    get:
+      summary: Search Marketplace Resources
+      description: Search and discover resources in the PRSM marketplace
+      tags: [Marketplace]
+      parameters:
+        - name: query
+          in: query
+          description: Search query string
+          schema:
+            type: string
+            example: "machine learning"
+        - name: resource_type
+          in: query
+          description: Filter by resource type
+          schema:
+            $ref: '#/components/schemas/ResourceType'
+        - name: max_price
+          in: query
+          description: Maximum price in FTNS tokens
+          schema:
+            type: number
+            format: float
+            example: 200.0
+        - name: min_rating
+          in: query
+          description: Minimum rating (0-5)
+          schema:
+            type: number
+            format: float
+            minimum: 0
+            maximum: 5
+            example: 4.0
+        - name: tags
+          in: query
+          description: Comma-separated tags
+          schema:
+            type: string
+            example: "nlp,transformer"
+        - name: page
+          in: query
+          description: Page number
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: per_page
+          in: query
+          description: Items per page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketplaceSearchResponse'
+              example:
+                items:
+                  - id: "res_123456789"
+                    title: "Advanced Computer Vision Model"
+                    description: "State-of-the-art CNN for image classification"
+                    resource_type: "ai_model"
+                    price: 120.0
+                    seller_name: "Vision Lab"
+                    rating: 4.8
+                    reviews_count: 15
+                    tags: ["computer-vision", "cnn", "pytorch"]
+                    created_at: "2024-01-10T08:00:00Z"
+                total: 45
+                page: 1
+                per_page: 20
+                has_next: true
+                has_prev: false
+                filters_applied:
+                  query: "machine learning"
+                  resource_type: "ai_model"
+                  max_price: 200.0
+                suggestions: ["deep learning", "neural networks"]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/marketplace/resources/{resource_id}:
+    get:
+      summary: Get Resource Details
+      description: Get detailed information about a specific marketplace resource
+      tags: [Marketplace]
+      parameters:
+        - name: resource_id
+          in: path
+          required: true
+          description: Resource identifier
+          schema:
+            type: string
+            example: "res_123456789"
+      responses:
+        '200':
+          description: Resource details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketplaceResource'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/marketplace/resources/{resource_id}/purchase:
+    post:
+      summary: Purchase Resource
+      description: Purchase a marketplace resource using FTNS tokens
+      tags: [Marketplace]
+      parameters:
+        - name: resource_id
+          in: path
+          required: true
+          description: Resource identifier
+          schema:
+            type: string
+            example: "res_123456789"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payment_method]
+              properties:
+                payment_method:
+                  type: string
+                  enum: [ftns_balance, ftns_escrow]
+                  example: "ftns_balance"
+                  description: Payment method to use
+      responses:
+        '200':
+          description: Purchase successful
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      transaction:
+                        $ref: '#/components/schemas/FTNSTransaction'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          description: Insufficient funds
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # FTNS Token Endpoints
+  /api/v1/users/{user_id}/balance:
+    get:
+      summary: Get FTNS Balance
+      description: Get the current FTNS token balance for a user
+      tags: [FTNS Tokens]
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          description: User identifier
+          schema:
+            type: string
+            format: uuid
+            example: "123e4567-e89b-12d3-a456-426614174000"
+      responses:
+        '200':
+          description: Current balance information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FTNSBalance'
+              example:
+                user_id: "123e4567-e89b-12d3-a456-426614174000"
+                available_balance: 1250.75
+                locked_balance: 250.0
+                total_balance: 1500.75
+                last_updated: "2024-01-15T10:00:00Z"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/transactions:
+    get:
+      summary: Get Transaction History
+      description: Retrieve transaction history for the authenticated user
+      tags: [FTNS Tokens]
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of transactions to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Number of transactions to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: transaction_type
+          in: query
+          description: Filter by transaction type
+          schema:
+            type: string
+            enum: [purchase, sale, transfer, reward, fee]
+      responses:
+        '200':
+          description: Transaction history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transactions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FTNSTransaction'
+                  total:
+                    type: integer
+                  has_more:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # Session Management Endpoints
+  /api/v1/sessions:
+    get:
+      summary: List Research Sessions
+      description: Get a list of research sessions for the authenticated user
+      tags: [Sessions]
+      parameters:
+        - name: status
+          in: query
+          description: Filter by session status
+          schema:
+            type: string
+            enum: [draft, active, paused, completed, archived]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: List of sessions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ResearchSession'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      summary: Create Research Session
+      description: Create a new research session for collaborative work
+      tags: [Sessions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                  example: "Climate Change Analysis"
+                  description: Session title
+                description:
+                  type: string
+                  example: "Machine learning analysis of climate data"
+                  description: Session description
+                collaborators:
+                  type: array
+                  items:
+                    type: string
+                  example: ["user_id_1", "user_id_2"]
+                  description: List of collaborator user IDs
+                ftns_budget:
+                  type: number
+                  format: float
+                  example: 500.0
+                  description: Allocated FTNS budget
+                tags:
+                  type: array
+                  items:
+                    type: string
+                  example: ["climate", "machine-learning"]
+                  description: Session tags
+      responses:
+        '201':
+          description: Session created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      session:
+                        $ref: '#/components/schemas/ResearchSession'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/sessions/{session_id}:
+    get:
+      summary: Get Session Details
+      description: Get detailed information about a specific research session
+      tags: [Sessions]
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          description: Session identifier
+          schema:
+            type: string
+            example: "session_123456789"
+      responses:
+        '200':
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResearchSession'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # Task Management Endpoints
+  /api/v1/tasks:
+    get:
+      summary: List Tasks
+      description: Get a list of tasks with filtering options
+      tags: [Tasks]
+      parameters:
+        - name: session_id
+          in: query
+          description: Filter by session ID
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter by task status
+          schema:
+            type: string
+            enum: [pending, in_progress, completed, failed, cancelled]
+        - name: priority
+          in: query
+          description: Filter by priority level
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5
+      responses:
+        '200':
+          description: List of tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TaskHierarchy'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      summary: Create Task
+      description: Create a new task within a research session
+      tags: [Tasks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, session_id]
+              properties:
+                title:
+                  type: string
+                  example: "Data Preprocessing"
+                  description: Task title
+                description:
+                  type: string
+                  example: "Clean and prepare dataset for analysis"
+                  description: Task description
+                session_id:
+                  type: string
+                  example: "session_123456789"
+                  description: Parent session ID
+                parent_task_id:
+                  type: string
+                  nullable: true
+                  description: Parent task ID for subtasks
+                estimated_cost:
+                  type: number
+                  format: float
+                  example: 25.0
+                  description: Estimated FTNS cost
+                priority:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                  example: 3
+                  description: Task priority (1-5)
+      responses:
+        '201':
+          description: Task created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/APIResponse'
+                  - type: object
+                    properties:
+                      task:
+                        $ref: '#/components/schemas/TaskHierarchy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/tasks/{task_id}:
+    get:
+      summary: Get Task Details
+      description: Get detailed task information including subtasks
+      tags: [Tasks]
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          description: Task identifier
+          schema:
+            type: string
+            example: "task_123456789"
+      responses:
+        '200':
+          description: Task details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskHierarchy'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+tags:
+  - name: Core API
+    description: Main PRSM functionality and system information
+  - name: Authentication
+    description: User authentication, authorization, and session management
+  - name: Marketplace
+    description: Universal resource marketplace with FTNS token economy
+  - name: Sessions
+    description: Research session tracking and management
+  - name: Tasks
+    description: Task execution, monitoring, and hierarchical decomposition
+  - name: FTNS Tokens
+    description: Token transactions, balance management, and payment processing
+  - name: Health
+    description: System health monitoring, diagnostics, and operational status
+
+externalDocs:
+  description: PRSM API Documentation
+  url: https://docs.prsm.org
