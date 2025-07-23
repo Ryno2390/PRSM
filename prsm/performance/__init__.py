@@ -20,38 +20,167 @@ Integration with PRSM:
 - Enhances WebSocket scaling in api/websocket_auth.py
 """
 
+# Legacy imports (maintained for backward compatibility)
 from .load_testing import LoadTestSuite, LoadTestResult, LoadTestConfig
 from .scaling import AutoScaler, ScalingPolicy, HorizontalScaler, ScalingMetric, ScalingTrigger
 from .caching import CacheManager, CDNIntegration, DistributedCache, CacheConfig
 from .optimization import PerformanceOptimizer, QueryOptimizer, APIOptimizer
 from .monitoring import APMIntegration, DistributedTracing, MetricsCollector
 
+# New advanced performance optimization components
+from .caching_system import (
+    ComprehensiveCacheManager,
+    CacheLayer,
+    CacheStrategy,
+    CacheKey,
+    initialize_cache_system,
+    get_cache_manager,
+    shutdown_cache_system,
+    cache_result
+)
+
+from .cache_invalidation import (
+    CacheInvalidationManager,
+    InvalidationEvent,
+    InvalidationScope,
+    InvalidationRule,
+    initialize_invalidation_manager,
+    get_invalidation_manager,
+    shutdown_invalidation_manager
+)
+
+from .cache_monitoring import (
+    CacheHealthMonitor,
+    initialize_cache_monitoring,
+    get_cache_monitor,
+    shutdown_cache_monitoring
+)
+
+from .database_optimization import (
+    AdvancedConnectionPool,
+    QueryOptimizer as AdvancedQueryOptimizer,
+    DatabaseConfig,
+    ConnectionRole,
+    QueryType,
+    initialize_database_optimization,
+    get_connection_pool,
+    shutdown_database_optimization,
+    execute_read_query,
+    execute_write_query,
+    execute_analytical_query,
+    get_database_session
+)
+
+from .db_monitoring import (
+    DatabaseMonitor,
+    AlertSeverity,
+    MetricType,
+    initialize_database_monitoring,
+    get_database_monitor,
+    shutdown_database_monitoring
+)
+
+from .indexing_strategies import (
+    IndexAnalyzer,
+    IndexType,
+    IndexRecommendation,
+    initialize_index_analyzer,
+    get_index_analyzer,
+    shutdown_index_analyzer
+)
+
+from .replica_manager import (
+    ReplicaManager,
+    LoadBalancingStrategy,
+    ReplicaStatus,
+    initialize_replica_manager,
+    get_replica_manager,
+    shutdown_replica_manager,
+    get_optimal_read_replica
+)
+
 __all__ = [
-    # Load Testing
+    # Legacy components (backward compatibility)
     "LoadTestSuite",
     "LoadTestResult", 
     "LoadTestConfig",
-    
-    # Scaling
     "AutoScaler",
     "ScalingPolicy",
     "HorizontalScaler",
     "ScalingMetric",
     "ScalingTrigger",
-    
-    # Caching
     "CacheManager",
     "CDNIntegration", 
     "DistributedCache",
     "CacheConfig",
-    
-    # Optimization
     "PerformanceOptimizer",
     "QueryOptimizer",
     "APIOptimizer",
-    
-    # Monitoring
     "APMIntegration",
     "DistributedTracing",
-    "MetricsCollector"
+    "MetricsCollector",
+    
+    # Advanced Caching System
+    "ComprehensiveCacheManager",
+    "CacheLayer",
+    "CacheStrategy", 
+    "CacheKey",
+    "initialize_cache_system",
+    "get_cache_manager",
+    "shutdown_cache_system",
+    "cache_result",
+    
+    # Cache Invalidation
+    "CacheInvalidationManager",
+    "InvalidationEvent",
+    "InvalidationScope",
+    "InvalidationRule",
+    "initialize_invalidation_manager",
+    "get_invalidation_manager",
+    "shutdown_invalidation_manager",
+    
+    # Cache Monitoring
+    "CacheHealthMonitor",
+    "initialize_cache_monitoring",
+    "get_cache_monitor",
+    "shutdown_cache_monitoring",
+    
+    # Advanced Database Optimization
+    "AdvancedConnectionPool",
+    "AdvancedQueryOptimizer",
+    "DatabaseConfig",
+    "ConnectionRole",
+    "QueryType",
+    "initialize_database_optimization",
+    "get_connection_pool",
+    "shutdown_database_optimization",
+    "execute_read_query",
+    "execute_write_query",
+    "execute_analytical_query",
+    "get_database_session",
+    
+    # Database Monitoring
+    "DatabaseMonitor",
+    "AlertSeverity",
+    "MetricType",
+    "initialize_database_monitoring",
+    "get_database_monitor",
+    "shutdown_database_monitoring",
+    
+    # Index Analysis
+    "IndexAnalyzer",
+    "IndexType",
+    "IndexRecommendation",
+    "initialize_index_analyzer",
+    "get_index_analyzer",
+    "shutdown_index_analyzer",
+    
+    # Replica Management
+    "ReplicaManager",
+    "LoadBalancingStrategy",
+    "ReplicaStatus",
+    "initialize_replica_manager",
+    "get_replica_manager",
+    "shutdown_replica_manager",
+    "get_optimal_read_replica"
 ]

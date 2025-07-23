@@ -1202,15 +1202,32 @@ class EmbeddingGenerator:
     """
     
     def __init__(self):
-        self.model_name = settings.embedding_model
-        self.dimension = settings.embedding_dimensions
+        from prsm.core.config import get_settings_safe
+        settings = get_settings_safe()
+        
+        if settings:
+            self.model_name = settings.embedding_model
+            self.dimension = settings.embedding_dimensions
+        else:
+            # Fallback defaults
+            self.model_name = "text-embedding-3-small"
+            self.dimension = 1536
+            
         self.client = None
     
     async def initialize(self):
         """Initialize embedding client"""
         try:
             import openai
-            self.client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+            from prsm.core.config import get_settings_safe
+            settings = get_settings_safe()
+            api_key = settings.openai_api_key if settings else None
+            
+            if not api_key:
+                logger.warning("OpenAI API key not available, embedding client not initialized")
+                return
+                
+            self.client = openai.AsyncOpenAI(api_key=api_key)
             logger.info("Embedding generator initialized", model=self.model_name)
         except ImportError:
             raise RuntimeError("OpenAI client not installed. Run: pip install openai")
@@ -1286,5 +1303,12 @@ class EmbeddingGenerator:
             return None
 
 
-# Global embedding generator
-embedding_generator = EmbeddingGenerator()
+# Global embedding generator - lazy initialization
+embedding_generator = None
+
+def get_embedding_generator():
+    """Get global embedding generator instance with lazy initialization"""
+    global embedding_generator
+    if embedding_generator is None:
+        embedding_generator = EmbeddingGenerator()
+    return embedding_generator

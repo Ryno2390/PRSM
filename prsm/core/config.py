@@ -316,10 +316,33 @@ class PRSMSettings(BaseSettings):
 @lru_cache()
 def get_settings() -> PRSMSettings:
     """
-    Get cached settings instance
+    Get cached settings instance with error handling
     """
-    return PRSMSettings()
+    try:
+        return PRSMSettings()
+    except Exception as e:
+        print(f"Warning: Failed to load settings: {e}")
+        # Return a minimal default settings instance
+        return PRSMSettings(
+            embedding_model="text-embedding-3-small",
+            embedding_dimensions=1536,
+            database_url="sqlite:///./prsm_test.db",
+            environment=Environment.DEVELOPMENT
+        )
 
 
-# Global settings instance
-settings = get_settings()
+def get_settings_safe() -> Optional[PRSMSettings]:
+    """
+    Get settings instance safely, returning None if initialization fails
+    """
+    try:
+        return get_settings()
+    except Exception:
+        return None
+
+
+# Global settings instance with safe initialization
+try:
+    settings = get_settings()
+except Exception:
+    settings = None

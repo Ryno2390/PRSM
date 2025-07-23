@@ -1,0 +1,91 @@
+# PRSM Production Dependencies
+# ==========================================
+# This file extracts production dependencies from pyproject.toml
+# for compatibility with CI/CD systems and Docker builds
+
+# Core Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Async & Concurrency
+asyncio-mqtt>=0.16.0
+aiofiles>=23.2.1
+aiohttp>=3.9.0
+
+# Database & Storage
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+redis>=5.0.0
+psycopg2-binary>=2.9.0
+asyncpg>=0.29.0
+
+# IPFS & Distributed Storage
+ipfshttpclient>=0.8.0a2
+py-multiaddr>=0.0.3
+py-multicodec>=0.2.1
+
+# AI & ML
+openai>=1.6.0
+anthropic>=0.8.0
+transformers>=4.36.0
+torch>=2.1.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+
+# Vector Database
+pinecone-client>=2.2.4
+weaviate-client>=3.25.0
+chromadb>=0.4.0
+
+# Cryptography & Security
+cryptography>=41.0.0
+pyjwt>=2.8.0
+bcrypt>=4.1.0
+passlib>=1.7.4
+python-jose>=3.3.0
+pyotp>=2.9.0
+qrcode>=7.4.2
+geoip2>=4.7.0
+
+# Enhanced Security Dependencies
+Jinja2>=3.1.2
+python-multipart>=0.0.6
+plotly>=5.17.0
+pandas>=2.1.0
+
+# Monitoring & Logging
+prometheus-client>=0.19.0
+structlog>=23.2.0
+rich>=13.7.0
+
+# Utilities
+click>=8.1.0
+python-dotenv>=1.0.0
+httpx>=0.25.0
+tenacity>=8.2.0
+psutil>=5.9.0
+
+# Additional Production Dependencies
+gunicorn>=21.2.0
+requests>=2.31.0
+jinja2>=3.1.0
+python-multipart>=0.0.6
+
+# Alerting and Notifications
+slack-sdk>=3.23.0
+twilio>=8.10.0
+pypd>=1.1.0
+httpx>=0.25.0
+
+# OpenTelemetry and Observability
+opentelemetry-api>=1.21.0
+opentelemetry-sdk>=1.21.0
+opentelemetry-instrumentation>=0.42b0
+opentelemetry-exporter-jaeger>=1.21.0
+opentelemetry-exporter-otlp>=1.21.0
+opentelemetry-instrumentation-redis>=0.42b0
+opentelemetry-instrumentation-sqlalchemy>=0.42b0
+opentelemetry-instrumentation-asyncpg>=0.42b0
+opentelemetry-instrumentation-fastapi>=0.42b0
