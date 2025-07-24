@@ -1,0 +1,213 @@
+{
+  "session_id": "10e4d83c-ff29-4858-970f-00caccbf565b",
+  "name": "SAS Partnership: Advanced Analytics for Quantum Algorithm Validation",
+  "description": "University-SAS Institute collaboration for Advanced Analytics for Quantum Algorithm Validation",
+  "session_type": "SessionType.INDUSTRY_PARTNERSHIP",
+  "owner": "sarah.chen@unc.edu",
+  "collaborators": {
+    "michael.johnson@sas.com": "RStudioAccessLevel.COLLABORATOR"
+  },
+  "created_at": "2025-07-24 16:28:36.949079",
+  "last_active": "2025-07-24 16:28:36.949079",
+  "r_version": "4.3.0",
+  "packages": [
+    {
+      "name": "tidyverse",
+      "version": "2.0.0",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Essential data manipulation and visualization",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "ggplot2",
+      "version": "3.4.2",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Grammar of graphics plotting system",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "dplyr",
+      "version": "1.1.2",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Data manipulation verbs",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "corrplot",
+      "version": "0.92",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Correlation matrix visualization",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "randomForest",
+      "version": "4.7-1.1",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Random forest machine learning",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "survival",
+      "version": "3.5-5",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Survival analysis",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "forecast",
+      "version": "8.21",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Time series forecasting",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "rmarkdown",
+      "version": "2.22",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Dynamic documents and reports",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "knitr",
+      "version": "1.43",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Literate programming",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "renv",
+      "version": "1.0.0",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Reproducible environments",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "shiny",
+      "version": "1.7.4",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Interactive web applications",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "plotly",
+      "version": "4.10.2",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Interactive visualizations",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "DT",
+      "version": "0.28",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Interactive data tables",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "haven",
+      "version": "2.5.2",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "SAS, SPSS, Stata data import",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "readxl",
+      "version": "1.4.2",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Excel file reading",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "RPostgreSQL",
+      "version": "0.7-5",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "PostgreSQL database connection",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "IRkernel",
+      "version": "1.3.2",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Jupyter R kernel integration",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "keyring",
+      "version": "1.3.1",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Secure credential management",
+      "dependencies": null,
+      "security_vetted": false
+    },
+    {
+      "name": "parallelly",
+      "version": "1.36.0",
+      "source": "PackageSource.CRAN",
+      "repository": null,
+      "required": true,
+      "description": "Parallel computing utilities",
+      "dependencies": null,
+      "security_vetted": false
+    }
+  ],
+  "working_directory": "rstudio_collaboration/sessions/10e4d83c-ff29-4858-970f-00caccbf565b",
+  "data_sources": [],
+  "security_level": "high",
+  "encrypted": true,
+  "access_controlled": true,
+  "active_users": [],
+  "shared_variables": {},
+  "execution_history": []
+}
