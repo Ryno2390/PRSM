@@ -1,0 +1,169 @@
+{
+  "R": {
+    "Version": "4.3.0",
+    "Repositories": [
+      {
+        "Name": "CRAN",
+        "URL": "https://cran.rstudio.com/"
+      },
+      {
+        "Name": "BioConductor",
+        "URL": "https://bioconductor.org/packages/3.17/bioc"
+      }
+    ]
+  },
+  "Packages": {
+    "tidyverse": {
+      "Package": "tidyverse",
+      "Version": "2.0.0",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_762ae5fa88b64b21"
+    },
+    "ggplot2": {
+      "Package": "ggplot2",
+      "Version": "3.4.2",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_1e8b8fc1abfc4cee"
+    },
+    "dplyr": {
+      "Package": "dplyr",
+      "Version": "1.1.2",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_54583d536e0348d8"
+    },
+    "corrplot": {
+      "Package": "corrplot",
+      "Version": "0.92",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_eb18660dfb894ead"
+    },
+    "randomForest": {
+      "Package": "randomForest",
+      "Version": "4.7-1.1",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_ddd621625c344822"
+    },
+    "survival": {
+      "Package": "survival",
+      "Version": "3.5-5",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_552991bdcbb348fc"
+    },
+    "forecast": {
+      "Package": "forecast",
+      "Version": "8.21",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_24c4f81516e14618"
+    },
+    "rmarkdown": {
+      "Package": "rmarkdown",
+      "Version": "2.22",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_c6270f2ae0dd4545"
+    },
+    "knitr": {
+      "Package": "knitr",
+      "Version": "1.43",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_05bb799f0f944602"
+    },
+    "renv": {
+      "Package": "renv",
+      "Version": "1.0.0",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_7269a38bf5fc4369"
+    },
+    "shiny": {
+      "Package": "shiny",
+      "Version": "1.7.4",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_1b57fc539a7f4ca4"
+    },
+    "plotly": {
+      "Package": "plotly",
+      "Version": "4.10.2",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_350b0f50554e4abb"
+    },
+    "DT": {
+      "Package": "DT",
+      "Version": "0.28",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_78e17af63e0246af"
+    },
+    "haven": {
+      "Package": "haven",
+      "Version": "2.5.2",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_a1a5c532f1f34bdd"
+    },
+    "readxl": {
+      "Package": "readxl",
+      "Version": "1.4.2",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_791836b0a6b14d62"
+    },
+    "RPostgreSQL": {
+      "Package": "RPostgreSQL",
+      "Version": "0.7-5",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_8bb4fbd0bd874574"
+    },
+    "IRkernel": {
+      "Package": "IRkernel",
+      "Version": "1.3.2",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_7cb620c075d345cf"
+    },
+    "keyring": {
+      "Package": "keyring",
+      "Version": "1.3.1",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_bfcdbdc3c5734a1c"
+    },
+    "parallelly": {
+      "Package": "parallelly",
+      "Version": "1.36.0",
+      "Source": "cran",
+      "Repository": "CRAN",
+      "Requirements": [],
+      "Hash": "sha256_3f68bfe0a76a4fab"
+    }
+  }
+}

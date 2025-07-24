@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRSM University Pilot - Interactive Demo</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .demo-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .demo-header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .demo-header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .demo-header .subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+
+        .scenario-selector {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .scenario-btn {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            padding: 15px 25px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .scenario-btn:hover, .scenario-btn.active {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.6);
+            transform: translateY(-2px);
+        }
+
+        .demo-workspace {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+            min-height: 700px;
+        }
+
+        .demo-nav {
+            background: #2c3e50;
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .demo-nav .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .security-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .security-level {
+            background: #27ae60;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+        }
+
+        .demo-content {
+            display: flex;
+            height: 650px;
+        }
+
+        .demo-sidebar {
+            width: 300px;
+            background: #f8f9fa;
+            border-right: 1px solid #dee2e6;
+            padding: 20px;
+        }
+
+        .demo-main {
+            flex: 1;
+            padding: 20px;
+            background: #fff;
+        }
+
+        .step-list {
+            list-style: none;
+        }
+
+        .step-item {
+            background: white;
+            margin-bottom: 10px;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #6c757d;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .step-item:hover {
+            transform: translateX(5px);
+        }
+
+        .step-item.active {
+            border-left-color: #007bff;
+            background: #e3f2fd;
+        }
+
+        .step-item.completed {
+            border-left-color: #28a745;
+            background: #d4edda;
+        }
+
+        .step-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .step-description {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .demo-panel {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .demo-panel.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .file-upload-area {
+            border: 2px dashed #007bff;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+            background: #f8f9ff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .file-upload-area:hover {
+            background: #e3f2fd;
+            border-color: #0056b3;
+        }
+
+        .shard-visualization {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .shard-item {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            position: relative;
+            animation: shardAppear 0.5s ease;
+        }
+
+        @keyframes shardAppear {
+            from { opacity: 0; transform: scale(0.8); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        .shard-item .shard-id {
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+
+        .shard-item .shard-status {
+            font-size: 0.8rem;
+            margin-top: 5px;
+        }
+
+        .collaborator-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .collaborator-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .collaborator-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        .collaborator-info {
+            flex: 1;
+        }
+
+        .collaborator-name {
+            font-weight: bold;
+        }
+
+        .collaborator-role {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .access-controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .access-tag {
+            background: #007bff;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+        }
+
+        .ai-analysis-panel {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+
+        .ai-analysis-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .ai-analysis-content {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+        }
+
+        .confidence-meter {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 10px 0;
+        }
+
+        .confidence-bar {
+            flex: 1;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .confidence-fill {
+            height: 100%;
+            background: #28a745;
+            border-radius: 4px;
+            width: 87%;
+            animation: fillBar 1s ease-out;
+        }
+
+        @keyframes fillBar {
+            from { width: 0%; }
+            to { width: 87%; }
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0056b3;
+            transform: translateY(-2px);
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #1e7e34;
+            transform: translateY(-2px);
+        }
+
+        .status-timeline {
+            margin: 20px 0;
+        }
+
+        .timeline-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 10px 0;
+            border-left: 2px solid #dee2e6;
+            padding-left: 20px;
+            margin-left: 10px;
+            position: relative;
+        }
+
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -6px;
+            top: 15px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #28a745;
+        }
+
+        .timeline-item.active::before {
+            background: #007bff;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+
+        .university-branding {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin: 20px 0;
+        }
+
+        .university-logo {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+
+        .unc-logo { background: #7BAFD4; }
+        .duke-logo { background: #012169; }
+        .ncstate-logo { background: #CC0000; }
+        .sas-logo { background: #0066CC; }
+
+        .demo-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .metric-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #007bff;
+        }
+
+        .metric-label {
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+        }
+
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            max-width: 500px;
+            width: 90%;
+            text-align: center;
+        }
+
+        @media (max-width: 768px) {
+            .demo-content {
+                flex-direction: column;
+                height: auto;
+            }
+            
+            .demo-sidebar {
+                width: 100%;
+            }
+            
+            .scenario-selector {
+                flex-direction: column;
+                align-items: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-container">
+        <div class="demo-header">
+            <h1><i class="fas fa-shield-alt"></i> PRSM University Pilot Demo</h1>
+            <p class="subtitle">Secure P2P Collaboration for Research Triangle Park</p>
+        </div>
+
+        <div class="scenario-selector">
+            <button class="scenario-btn active" data-scenario="quantum">
+                <i class="fas fa-atom"></i> Quantum Computing Research
+            </button>
+            <button class="scenario-btn" data-scenario="grant">
+                <i class="fas fa-university"></i> Multi-University Grant
+            </button>
+            <button class="scenario-btn" data-scenario="biotech">
+                <i class="fas fa-dna"></i> Biotech Drug Discovery
+            </button>
+        </div>
+
+        <div class="demo-workspace">
+            <div class="demo-nav">
+                <div class="logo">
+                    <i class="fas fa-network-wired"></i> PRSM Collaboration Platform
+                </div>
+                <div class="security-indicator">
+                    <i class="fas fa-shield-check"></i>
+                    <span class="security-level">HIGH SECURITY</span>
+                </div>
+            </div>
+
+            <div class="demo-content">
+                <div class="demo-sidebar">
+                    <h3>Demo Steps</h3>
+                    <ul class="step-list">
+                        <li class="step-item active" data-step="1">
+                            <div class="step-title">1. Create Secure Workspace</div>
+                            <div class="step-description">Set up collaboration environment</div>
+                        </li>
+                        <li class="step-item" data-step="2">
+                            <div class="step-title">2. Upload & Shard Files</div>
+                            <div class="step-description">Demonstrate cryptographic sharding</div>
+                        </li>
+                        <li class="step-item" data-step="3">
+                            <div class="step-title">3. Add Collaborators</div>
+                            <div class="step-description">Configure access permissions</div>
+                        </li>
+                        <li class="step-item" data-step="4">
+                            <div class="step-title">4. AI IP Analysis</div>
+                            <div class="step-description">NWTN market assessment</div>
+                        </li>
+                        <li class="step-item" data-step="5">
+                            <div class="step-title">5. Audit & Compliance</div>
+                            <div class="step-description">Review activity logs</div>
+                        </li>
+                    </ul>
+
+                    <div class="university-branding">
+                        <div class="university-logo unc-logo">UNC</div>
+                        <div class="university-logo duke-logo">DUKE</div>
+                        <div class="university-logo ncstate-logo">NCSU</div>
+                        <div class="university-logo sas-logo">SAS</div>
+                    </div>
+                </div>
+
+                <div class="demo-main">
+                    <!-- Step 1: Create Secure Workspace -->
+                    <div class="demo-panel active" id="step-1">
+                        <h2><i class="fas fa-plus-circle"></i> Create Secure Workspace</h2>
+                        <p>Setting up a high-security collaboration environment for quantum computing research between UNC Physics Department and SAS Institute.</p>
+                        
+                        <div class="demo-metrics">
+                            <div class="metric-card">
+                                <div class="metric-value">7</div>
+                                <div class="metric-label">Encryption Shards</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">5/7</div>
+                                <div class="metric-label">Required for Access</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">AES-256</div>
+                                <div class="metric-label">Encryption Standard</div>
+                            </div>
+                        </div>
+
+                        <div class="status-timeline">
+                            <div class="timeline-item active">
+                                <i class="fas fa-check-circle"></i>
+                                <span>Workspace initialized with high security settings</span>
+                            </div>
+                            <div class="timeline-item active">
+                                <i class="fas fa-key"></i>
+                                <span>Cryptographic keys generated for authorized users</span>
+                            </div>
+                            <div class="timeline-item active">
+                                <i class="fas fa-network-wired"></i>
+                                <span>P2P network nodes established</span>
+                            </div>
+                        </div>
+
+                        <div class="action-buttons">
+                            <button class="btn btn-primary" onclick="nextStep()">
+                                <i class="fas fa-arrow-right"></i> Continue to File Upload
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Upload & Shard Files -->
+                    <div class="demo-panel" id="step-2">
+                        <h2><i class="fas fa-upload"></i> Upload & Shard Files</h2>
+                        <p>Uploading proprietary quantum error correction algorithm and demonstrating cryptographic sharding.</p>
+
+                        <div class="file-upload-area" onclick="simulateFileUpload()">
+                            <i class="fas fa-file-code" style="font-size: 3rem; color: #007bff; margin-bottom: 15px;"></i>
+                            <h3>quantum_error_correction.py</h3>
+                            <p>Proprietary algorithm implementation (2.3 MB)</p>
+                            <p style="color: #007bff; margin-top: 10px;">Click to simulate file sharding</p>
+                        </div>
+
+                        <div class="shard-visualization" id="shard-container" style="display: none;">
+                            <!-- Shards will be generated here -->
+                        </div>
+
+                        <div class="action-buttons">
+                            <button class="btn btn-primary" onclick="nextStep()">
+                                <i class="fas fa-users"></i> Add Collaborators
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Add Collaborators -->
+                    <div class="demo-panel" id="step-3">
+                        <h2><i class="fas fa-users"></i> Add Collaborators</h2>
+                        <p>Configuring role-based access permissions for university researchers and industry evaluators.</p>
+
+                        <div class="collaborator-list">
+                            <div class="collaborator-item">
+                                <div class="collaborator-avatar">SC</div>
+                                <div class="collaborator-info">
+                                    <div class="collaborator-name">Dr. Sarah Chen</div>
+                                    <div class="collaborator-role">Principal Investigator - UNC Physics</div>
+                                </div>
+                                <div class="access-controls">
+                                    <span class="access-tag">View</span>
+                                    <span class="access-tag">Edit</span>
+                                    <span class="access-tag">Download</span>
+                                </div>
+                            </div>
+
+                            <div class="collaborator-item">
+                                <div class="collaborator-avatar">MJ</div>
+                                <div class="collaborator-info">
+                                    <div class="collaborator-name">Michael Johnson</div>
+                                    <div class="collaborator-role">Senior Researcher - SAS Institute</div>
+                                </div>
+                                <div class="access-controls">
+                                    <span class="access-tag">View</span>
+                                    <span class="access-tag">Comment</span>
+                                </div>
+                            </div>
+
+                            <div class="collaborator-item">
+                                <div class="collaborator-avatar">TT</div>
+                                <div class="collaborator-info">
+                                    <div class="collaborator-name">Tech Transfer Office</div>
+                                    <div class="collaborator-role">UNC Office of Technology Commercialization</div>
+                                </div>
+                                <div class="access-controls">
+                                    <span class="access-tag">View</span>
+                                    <span class="access-tag">Audit</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="action-buttons">
+                            <button class="btn btn-primary" onclick="nextStep()">
+                                <i class="fas fa-brain"></i> Run AI Analysis
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Step 4: AI IP Analysis -->
+                    <div class="demo-panel" id="step-4">
+                        <h2><i class="fas fa-brain"></i> AI IP Analysis</h2>
+                        <p>NWTN AI analyzing the quantum error correction algorithm for market potential and licensing value.</p>
+
+                        <div class="ai-analysis-panel">
+                            <div class="ai-analysis-header">
+                                <i class="fas fa-robot" style="font-size: 1.5rem;"></i>
+                                <h3>NWTN AI Market Assessment</h3>
+                            </div>
+                            <div class="ai-analysis-content">
+                                <h4>Intellectual Property Analysis Results</h4>
+                                
+                                <div class="confidence-meter">
+                                    <span>Confidence Score:</span>
+                                    <div class="confidence-bar">
+                                        <div class="confidence-fill"></div>
+                                    </div>
+                                    <span>87%</span>
+                                </div>
+
+                                <div style="margin: 15px 0;">
+                                    <strong>Market Potential:</strong> High - Quantum computing market growing at 32% CAGR<br>
+                                    <strong>Technology Readiness:</strong> TRL 6 - Technology demonstrated in relevant environment<br>
+                                    <strong>Commercial Applications:</strong> Quantum cloud services, research institutions, defense contractors<br>
+                                    <strong>Estimated Licensing Value:</strong> $2.5M - $5.2M initial deal + royalties<br>
+                                    <strong>Competitive Advantage:</strong> 40% error reduction over current methods
+                                </div>
+
+                                <div style="background: rgba(255,255,255,0.1); padding: 10px; border-radius: 5px; margin-top: 10px;">
+                                    <strong>Recommendation:</strong> Proceed with industry partnership. Strong patent potential with significant commercial applications in quantum cloud computing sector.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="action-buttons">
+                            <button class="btn btn-success" onclick="nextStep()">
+                                <i class="fas fa-chart-line"></i> View Audit Trail
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Step 5: Audit & Compliance -->
+                    <div class="demo-panel" id="step-5">
+                        <h2><i class="fas fa-clipboard-list"></i> Audit & Compliance</h2>
+                        <p>Complete activity log demonstrating full transparency and regulatory compliance for tech transfer legal requirements.</p>
+
+                        <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                            <h4><i class="fas fa-history"></i> Activity Timeline</h4>
+                            <div style="margin: 15px 0;">
+                                <div style="padding: 8px 0; border-bottom: 1px solid #dee2e6;">
+                                    <strong>2025-07-24 14:30:22</strong> - Dr. Sarah Chen created secure workspace "Quantum Error Correction Research"
+                                </div>
+                                <div style="padding: 8px 0; border-bottom: 1px solid #dee2e6;">
+                                    <strong>2025-07-24 14:31:15</strong> - Proprietary algorithm file uploaded and sharded (7 pieces)
+                                </div>
+                                <div style="padding: 8px 0; border-bottom: 1px solid #dee2e6;">
+                                    <strong>2025-07-24 14:32:03</strong> - Michael Johnson (SAS) added with view/comment permissions
+                                </div>
+                                <div style="padding: 8px 0; border-bottom: 1px solid #dee2e6;">
+                                    <strong>2025-07-24 14:33:47</strong> - NWTN AI analysis performed (confidence: 87%)
+                                </div>
+                                <div style="padding: 8px 0; border-bottom: 1px solid #dee2e6;">
+                                    <strong>2025-07-24 14:34:12</strong> - Tech Transfer Office granted audit access
+                                </div>
+                                <div style="padding: 8px 0;">
+                                    <strong>2025-07-24 14:35:00</strong> - Compliance report generated for legal review
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="demo-metrics">
+                            <div class="metric-card">
+                                <div class="metric-value">100%</div>
+                                <div class="metric-label">Activity Logged</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">0</div>
+                                <div class="metric-label">Security Breaches</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">3</div>
+                                <div class="metric-label">Compliance Checks Passed</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-value">2.1s</div>
+                                <div class="metric-label">File Access Time</div>
+                            </div>
+                        </div>
+
+                        <div class="action-buttons">
+                            <button class="btn btn-success" onclick="showCompletionModal()">
+                                <i class="fas fa-check-circle"></i> Demo Complete
+                            </button>
+                            <button class="btn btn-primary" onclick="resetDemo()">
+                                <i class="fas fa-redo"></i> Run Different Scenario
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Completion Modal -->
+    <div class="modal" id="completion-modal">
+        <div class="modal-content">
+            <h2><i class="fas fa-trophy" style="color: gold;"></i> Demo Complete!</h2>
+            <p>You've successfully demonstrated PRSM's P2P secure collaboration platform for university-industry research partnerships.</p>
+            <h3>Key Benefits Demonstrated:</h3>
+            <ul style="text-align: left; margin: 20px 0;">
+                <li>✅ Zero-server security with cryptographic sharding</li>
+                <li>✅ Graduated access control for IP protection</li>
+                <li>✅ AI-powered market analysis and valuation</li>
+                <li>✅ Complete audit trails for compliance</li>
+                <li>✅ Real-time collaboration capabilities</li>
+            </ul>
+            <p><strong>Ready to start your pilot program?</strong></p>
+            <div style="margin-top: 20px;">
+                <button class="btn btn-primary" onclick="closeModal()">Schedule Pilot Discussion</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentStep = 1;
+        let currentScenario = 'quantum';
+
+        // Scenario switching
+        document.querySelectorAll('.scenario-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.scenario-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentScenario = btn.dataset.scenario;
+                resetDemo();
+                updateScenarioContent();
+            });
+        });
+
+        // Step navigation
+        document.querySelectorAll('.step-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const step = parseInt(item.dataset.step);
+                goToStep(step);
+            });
+        });
+
+        function updateScenarioContent() {
+            const scenarios = {
+                quantum: {
+                    title: "Quantum Computing Research → Industry Partnership",
+                    participants: "UNC Physics Department + SAS Institute",
+                    workflow: "Research Paper → Algorithm Code → IP Evaluation → Licensing Deal"
+                },
+                grant: {
+                    title: "Multi-University Grant Collaboration",
+                    participants: "UNC + Duke + NC State + Industry Partner",
+                    workflow: "Joint Grant Proposal → Collaborative Research → IP Management"
+                },
+                biotech: {
+                    title: "Biotech Drug Discovery Partnership",
+                    participants: "Duke Medical + Durham Biotech Company",
+                    workflow: "Clinical Data → Analysis → Patent Evaluation → Licensing"
+                }
+            };
+            
+            // Update content based on scenario (simplified for demo)
+            console.log(`Switched to ${scenarios[currentScenario].title}`);
+        }
+
+        function nextStep() {
+            if (currentStep < 5) {
+                currentStep++;
+                goToStep(currentStep);
+            }
+        }
+
+        function goToStep(step) {
+            // Update step indicators
+            document.querySelectorAll('.step-item').forEach(item => {
+                const itemStep = parseInt(item.dataset.step);
+                item.classList.remove('active', 'completed');
+                
+                if (itemStep === step) {
+                    item.classList.add('active');
+                } else if (itemStep < step) {
+                    item.classList.add('completed');
+                }
+            });
+
+            // Show corresponding panel
+            document.querySelectorAll('.demo-panel').forEach(panel => {
+                panel.classList.remove('active');
+            });
+            
+            document.getElementById(`step-${step}`).classList.add('active');
+            currentStep = step;
+        }
+
+        function simulateFileUpload() {
+            const container = document.getElementById('shard-container');
+            container.innerHTML = '';
+            container.style.display = 'grid';
+
+            // Create 7 shards with animation delay
+            for (let i = 1; i <= 7; i++) {
+                setTimeout(() => {
+                    const shard = document.createElement('div');
+                    shard.className = 'shard-item';
+                    shard.innerHTML = `
+                        <div class="shard-id">Shard ${i}</div>
+                        <div class="shard-status">Encrypted & Distributed</div>
+                        <i class="fas fa-lock" style="margin-top: 10px;"></i>
+                    `;
+                    container.appendChild(shard);
+                }, i * 200);
+            }
+
+            // Update upload area after animation
+            setTimeout(() => {
+                document.querySelector('.file-upload-area').innerHTML = `
+                    <i class="fas fa-check-circle" style="font-size: 3rem; color: #28a745; margin-bottom: 15px;"></i>
+                    <h3>File Successfully Sharded!</h3>
+                    <p>7 encrypted pieces distributed across P2P network</p>
+                    <p style="color: #28a745; margin-top: 10px;">✓ Secure & Ready for Collaboration</p>
+                `;
+                document.querySelector('.file-upload-area').style.borderColor = '#28a745';
+                document.querySelector('.file-upload-area').style.background = '#d4edda';
+            }, 1500);
+        }
+
+        function showCompletionModal() {
+            document.getElementById('completion-modal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('completion-modal').classList.remove('active');
+        }
+
+        function resetDemo() {
+            currentStep = 1;
+            goToStep(1);
+            
+            // Reset file upload area
+            document.querySelector('.file-upload-area').innerHTML = `
+                <i class="fas fa-file-code" style="font-size: 3rem; color: #007bff; margin-bottom: 15px;"></i>
+                <h3>quantum_error_correction.py</h3>
+                <p>Proprietary algorithm implementation (2.3 MB)</p>
+                <p style="color: #007bff; margin-top: 10px;">Click to simulate file sharding</p>
+            `;
+            document.querySelector('.file-upload-area').style.borderColor = '#007bff';
+            document.querySelector('.file-upload-area').style.background = '#f8f9ff';
+            
+            // Hide shard visualization
+            document.getElementById('shard-container').style.display = 'none';
+        }
+
+        // Initialize demo
+        updateScenarioContent();
+    </script>
+</body>
+</html>

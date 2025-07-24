@@ -1,0 +1,807 @@
+<!-- Enhanced Collaboration Section with Secure Workspace Creation -->
+<!-- This enhances the existing collaboration-content section -->
+
+<section id="collaboration-content" class="content-section">
+    <div class="collaboration-workspace">
+        <!-- Enhanced Collaboration Header with Security Features -->
+        <div class="collaboration-header">
+            <div class="workspace-info">
+                <h4><i class="fas fa-shield-alt"></i> PRSM Secure Collaboration Hub</h4>
+                <p>Cryptographically secured real-time collaboration with P2P file sharding</p>
+                <div class="security-status">
+                    <span class="security-indicator active">
+                        <i class="fas fa-lock"></i> P2P Encryption Active
+                    </span>
+                    <span class="shard-status">
+                        <i class="fas fa-network-wired"></i> 7 Shards Distributed
+                    </span>
+                </div>
+            </div>
+            <div class="collaboration-actions">
+                <button class="action-btn primary" onclick="createSecureWorkspace()">
+                    <i class="fas fa-plus-shield"></i> New Secure Workspace
+                </button>
+                <button class="action-btn secondary" onclick="inviteTeamMember()">
+                    <i class="fas fa-user-plus"></i> Invite Member
+                </button>
+                <button class="action-btn tertiary" onclick="showSecuritySettings()">
+                    <i class="fas fa-cog"></i> Security Settings
+                </button>
+            </div>
+        </div>
+
+        <!-- Workspace Type Selector -->
+        <div class="workspace-type-selector">
+            <div class="workspace-types">
+                <div class="workspace-type-card active" data-type="university-industry">
+                    <div class="type-icon">
+                        <i class="fas fa-university"></i>
+                    </div>
+                    <div class="type-info">
+                        <h6>University-Industry</h6>
+                        <p>Secure IP evaluation and sponsored research</p>
+                        <span class="security-level high">High Security</span>
+                    </div>
+                </div>
+                <div class="workspace-type-card" data-type="research-consortium">
+                    <div class="type-icon">
+                        <i class="fas fa-flask"></i>
+                    </div>
+                    <div class="type-info">
+                        <h6>Research Consortium</h6>
+                        <p>Multi-institutional grant collaboration</p>
+                        <span class="security-level medium">Medium Security</span>
+                    </div>
+                </div>
+                <div class="workspace-type-card" data-type="standard">
+                    <div class="type-icon">
+                        <i class="fas fa-users"></i>
+                    </div>
+                    <div class="type-info">
+                        <h6>Standard Team</h6>
+                        <p>Regular team collaboration</p>
+                        <span class="security-level standard">Standard Security</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Collaboration Layout -->
+        <div class="collaboration-main">
+            <!-- Enhanced Left Sidebar with Security Features -->
+            <div class="collaboration-sidebar">
+                <!-- Secure Workspace Selector -->
+                <div class="workspace-selector">
+                    <div class="current-workspace">
+                        <div class="workspace-icon">
+                            <i class="fas fa-shield-alt"></i>
+                        </div>
+                        <div class="workspace-details">
+                            <h6>Quantum ML Research</h6>
+                            <span class="workspace-type">University-Industry</span>
+                            <div class="security-indicators">
+                                <span class="shard-count">7 shards</span>
+                                <span class="member-count">5 members</span>
+                            </div>
+                        </div>
+                        <button class="workspace-menu-btn">
+                            <i class="fas fa-ellipsis-v"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Enhanced Team Management -->
+                <div class="team-section">
+                    <div class="section-header">
+                        <h6><i class="fas fa-users-cog"></i> Team Members</h6>
+                        <span class="member-count-badge">5</span>
+                    </div>
+                    <div class="team-members-list">
+                        <div class="team-member">
+                            <div class="member-avatar">
+                                <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHZpZXdCb3g9IjAgMCAzMiAzMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiM0Rjc2REYiLz4KPHRleHQgeD0iMTYiIHk9IjIxIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9IkludGVyIiBmb250LXNpemU9IjEyIiBmb250LXdlaWdodD0iNjAwIj5TQzwvdGV4dD4KPC9zdmc+" alt="SC">
+                            </div>
+                            <div class="member-info">
+                                <span class="member-name">Dr. Sarah Chen</span>
+                                <span class="member-role">UNC Researcher</span>
+                                <div class="member-permissions">
+                                    <span class="permission-badge high">Full Access</span>
+                                </div>
+                            </div>
+                            <div class="member-status online"></div>
+                        </div>
+                        <div class="team-member">
+                            <div class="member-avatar">
+                                <div class="avatar-initials">MJ</div>
+                            </div>
+                            <div class="member-info">
+                                <span class="member-name">Michael Johnson</span>
+                                <span class="member-role">SAS Institute</span>
+                                <div class="member-permissions">
+                                    <span class="permission-badge medium">View + Comment</span>
+                                </div>
+                            </div>
+                            <div class="member-status online"></div>
+                        </div>
+                        <div class="team-member">
+                            <div class="member-avatar">
+                                <div class="avatar-initials">AR</div>
+                            </div>
+                            <div class="member-info">
+                                <span class="member-name">Dr. Alex Rodriguez</span>
+                                <span class="member-role">Duke Medical</span>
+                                <div class="member-permissions">
+                                    <span class="permission-badge restricted">Restricted</span>
+                                </div>
+                            </div>
+                            <div class="member-status away"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Security & Compliance Panel -->
+                <div class="security-panel">
+                    <div class="section-header">
+                        <h6><i class="fas fa-shield-check"></i> Security Status</h6>
+                    </div>
+                    <div class="security-metrics">
+                        <div class="security-metric">
+                            <div class="metric-icon">
+                                <i class="fas fa-key"></i>
+                            </div>
+                            <div class="metric-info">
+                                <span class="metric-label">Encryption</span>
+                                <span class="metric-value active">AES-256</span>
+                            </div>
+                        </div>
+                        <div class="security-metric">
+                            <div class="metric-icon">
+                                <i class="fas fa-network-wired"></i>
+                            </div>
+                            <div class="metric-info">
+                                <span class="metric-label">Shards</span>
+                                <span class="metric-value">7 distributed</span>
+                            </div>
+                        </div>
+                        <div class="security-metric">
+                            <div class="metric-icon">
+                                <i class="fas fa-clipboard-check"></i>
+                            </div>
+                            <div class="metric-info">
+                                <span class="metric-label">Compliance</span>
+                                <span class="metric-value compliant">HIPAA Ready</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Enhanced Central Content Area -->
+            <div class="collaboration-content">
+                <!-- Enhanced Collaboration Tabs -->
+                <div class="collab-tabs">
+                    <button class="collab-tab active" data-tab="secure-files" onclick="switchCollabTab('secure-files')">
+                        <i class="fas fa-folder-lock"></i> Secure Files
+                    </button>
+                    <button class="collab-tab" data-tab="jupyter" onclick="switchCollabTab('jupyter')">
+                        <i class="fas fa-code"></i> Jupyter
+                    </button>
+                    <button class="collab-tab" data-tab="chat" onclick="switchCollabTab('chat')">
+                        <i class="fas fa-comments"></i> Chat
+                    </button>
+                    <button class="collab-tab" data-tab="ip-evaluation" onclick="switchCollabTab('ip-evaluation')">
+                        <i class="fas fa-balance-scale"></i> IP Evaluation
+                    </button>
+                    <button class="collab-tab" data-tab="grant-writing" onclick="switchCollabTab('grant-writing')">
+                        <i class="fas fa-file-contract"></i> Grant Writing
+                    </button>
+                </div>
+
+                <!-- Secure Files Tab Content -->
+                <div id="secure-files-tab-content" class="collab-tab-content active">
+                    <div class="secure-files-container">
+                        <div class="files-header">
+                            <div class="files-controls">
+                                <button class="files-btn primary" onclick="uploadSecureFile()">
+                                    <i class="fas fa-upload"></i> Upload Secure File
+                                </button>
+                                <button class="files-btn secondary" onclick="createSharedFolder()">
+                                    <i class="fas fa-folder-plus"></i> New Folder
+                                </button>
+                                <div class="view-toggle">
+                                    <button class="view-btn active" data-view="grid">
+                                        <i class="fas fa-th"></i>
+                                    </button>
+                                    <button class="view-btn" data-view="list">
+                                        <i class="fas fa-list"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="security-filter">
+                                <select class="security-level-filter">
+                                    <option value="all">All Security Levels</option>
+                                    <option value="high">High Security</option>
+                                    <option value="medium">Medium Security</option>
+                                    <option value="standard">Standard</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="files-grid">
+                            <!-- Secure File Item -->
+                            <div class="file-item secure-high">
+                                <div class="file-preview">
+                                    <div class="file-icon">
+                                        <i class="fas fa-file-pdf"></i>
+                                        <div class="security-overlay">
+                                            <i class="fas fa-shield-alt"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="file-info">
+                                    <div class="file-name">Proprietary_Algorithm_v2.pdf</div>
+                                    <div class="file-meta">
+                                        <span class="file-size">2.4 MB</span>
+                                        <span class="file-modified">2 hours ago</span>
+                                    </div>
+                                    <div class="security-info">
+                                        <span class="shard-indicator">
+                                            <i class="fas fa-network-wired"></i> 7 shards
+                                        </span>
+                                        <span class="access-level high">High Security</span>
+                                    </div>
+                                </div>
+                                <div class="file-actions">
+                                    <button class="file-action-btn" title="View">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                    <button class="file-action-btn" title="Secure Share">
+                                        <i class="fas fa-share-alt"></i>
+                                    </button>
+                                    <button class="file-action-btn" title="Security Settings">
+                                        <i class="fas fa-cog"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Standard File Item -->
+                            <div class="file-item secure-medium">
+                                <div class="file-preview">
+                                    <div class="file-icon">
+                                        <i class="fas fa-file-code"></i>
+                                        <div class="security-overlay">
+                                            <i class="fas fa-lock"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="file-info">
+                                    <div class="file-name">research_notebook.ipynb</div>
+                                    <div class="file-meta">
+                                        <span class="file-size">856 KB</span>
+                                        <span class="file-modified">1 day ago</span>
+                                    </div>
+                                    <div class="security-info">
+                                        <span class="shard-indicator">
+                                            <i class="fas fa-network-wired"></i> 5 shards
+                                        </span>
+                                        <span class="access-level medium">Medium Security</span>
+                                    </div>
+                                </div>
+                                <div class="file-actions">
+                                    <button class="file-action-btn" title="Open in Jupyter">
+                                        <i class="fas fa-play"></i>
+                                    </button>
+                                    <button class="file-action-btn" title="Collaborate">
+                                        <i class="fas fa-users"></i>
+                                    </button>
+                                    <button class="file-action-btn" title="Download">
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- IP Evaluation Tab Content -->
+                <div id="ip-evaluation-tab-content" class="collab-tab-content">
+                    <div class="ip-evaluation-container">
+                        <div class="evaluation-header">
+                            <h5>Technology Transfer & IP Evaluation</h5>
+                            <p>Secure evaluation of intellectual property between universities and industry partners</p>
+                        </div>
+
+                        <div class="evaluation-workflow">
+                            <div class="workflow-step active">
+                                <div class="step-number">1</div>
+                                <div class="step-content">
+                                    <h6>Upload Research Assets</h6>
+                                    <p>Securely upload research papers, data, and prototypes</p>
+                                    <button class="step-action-btn">
+                                        <i class="fas fa-upload"></i> Upload Assets
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="workflow-step">
+                                <div class="step-number">2</div>
+                                <div class="step-content">
+                                    <h6>Set Evaluation Parameters</h6>
+                                    <p>Define access levels and evaluation criteria</p>
+                                    <button class="step-action-btn">
+                                        <i class="fas fa-cog"></i> Configure
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="workflow-step">
+                                <div class="step-number">3</div>
+                                <div class="step-content">
+                                    <h6>Invite Industry Partners</h6>
+                                    <p>Grant secure access to potential licensing partners</p>
+                                    <button class="step-action-btn">
+                                        <i class="fas fa-user-plus"></i> Invite Partners
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="workflow-step">
+                                <div class="step-number">4</div>
+                                <div class="step-content">
+                                    <h6>Track & Negotiate</h6>
+                                    <p>Monitor access and facilitate licensing discussions</p>
+                                    <button class="step-action-btn">
+                                        <i class="fas fa-chart-line"></i> View Analytics
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="active-evaluations">
+                            <h6>Active Evaluations</h6>
+                            <div class="evaluation-item">
+                                <div class="evaluation-info">
+                                    <h7>Quantum Error Correction Algorithm</h7>
+                                    <p>UNC Physics → SAS Institute</p>
+                                    <div class="evaluation-meta">
+                                        <span class="status evaluating">Under Evaluation</span>
+                                        <span class="timeline">Started 3 days ago</span>
+                                    </div>
+                                </div>
+                                <div class="evaluation-actions">
+                                    <button class="eval-btn">View Details</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Grant Writing Tab Content -->
+                <div id="grant-writing-tab-content" class="collab-tab-content">
+                    <div class="grant-writing-container">
+                        <div class="grant-header">
+                            <h5>Multi-Institutional Grant Collaboration</h5>
+                            <p>Secure collaborative grant writing across institutions</p>
+                        </div>
+
+                        <div class="grant-projects">
+                            <div class="grant-project-card">
+                                <div class="project-header">
+                                    <div class="project-info">
+                                        <h6>NSF Quantum Computing Initiative</h6>
+                                        <p>Multi-university quantum research consortium</p>
+                                    </div>
+                                    <div class="project-status">
+                                        <span class="status draft">Draft</span>
+                                        <span class="deadline">Due: March 15, 2025</span>
+                                    </div>
+                                </div>
+                                <div class="project-institutions">
+                                    <div class="institution-tag">UNC Chapel Hill</div>
+                                    <div class="institution-tag">Duke University</div>
+                                    <div class="institution-tag">NC State</div>
+                                    <div class="institution-tag">IBM Research</div>
+                                </div>
+                                <div class="project-progress">
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 65%"></div>
+                                    </div>
+                                    <span class="progress-text">65% Complete</span>
+                                </div>
+                                <div class="project-actions">
+                                    <button class="project-btn primary">Edit Proposal</button>
+                                    <button class="project-btn secondary">Review Budget</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Secure Workspace Creation Modal -->
+<div id="secure-workspace-modal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h5>Create Secure Workspace</h5>
+            <button class="modal-close" onclick="closeModal('secure-workspace-modal')">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <form id="secure-workspace-form">
+                <div class="form-group">
+                    <label for="workspace-name">Workspace Name</label>
+                    <input type="text" id="workspace-name" placeholder="e.g., Quantum ML Research Project">
+                </div>
+
+                <div class="form-group">
+                    <label for="workspace-type">Workspace Type</label>
+                    <select id="workspace-type">
+                        <option value="university-industry">University-Industry Partnership</option>
+                        <option value="research-consortium">Research Consortium</option>
+                        <option value="clinical-trial">Clinical Trial Collaboration</option>
+                        <option value="standard">Standard Team Workspace</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="security-level">Security Level</label>
+                    <div class="security-options">
+                        <div class="security-option">
+                            <input type="radio" id="security-high" name="security-level" value="high" checked>
+                            <label for="security-high">
+                                <div class="option-header">
+                                    <i class="fas fa-shield-alt"></i>
+                                    High Security
+                                </div>
+                                <p>7-shard encryption, perfect for IP-sensitive collaborations</p>
+                            </label>
+                        </div>
+                        <div class="security-option">
+                            <input type="radio" id="security-medium" name="security-level" value="medium">
+                            <label for="security-medium">
+                                <div class="option-header">
+                                    <i class="fas fa-lock"></i>
+                                    Medium Security
+                                </div>
+                                <p>5-shard encryption, suitable for most research collaborations</p>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="initial-members">Initial Team Members</label>
+                    <div class="member-input-container">
+                        <input type="email" id="member-email" placeholder="Enter email address">
+                        <button type="button" class="add-member-btn" onclick="addMember()">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                    <div class="members-list" id="members-list">
+                        <!-- Added members will appear here -->
+                    </div>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button class="btn secondary" onclick="closeModal('secure-workspace-modal')">Cancel</button>
+            <button class="btn primary" onclick="createWorkspace()">Create Secure Workspace</button>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Enhanced Collaboration Styles */
+.security-status {
+    display: flex;
+    gap: 15px;
+    margin-top: 10px;
+}
+
+.security-indicator, .shard-status {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.85rem;
+    color: var(--success-color);
+}
+
+.workspace-type-selector {
+    margin: 20px 0;
+    padding: 0 20px;
+}
+
+.workspace-types {
+    display: flex;
+    gap: 15px;
+    overflow-x: auto;
+}
+
+.workspace-type-card {
+    min-width: 200px;
+    padding: 15px;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.workspace-type-card.active {
+    border-color: var(--primary-color);
+    background: var(--primary-bg-light);
+}
+
+.security-level {
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.security-level.high {
+    background: #ff4444;
+    color: white;
+}
+
+.security-level.medium {
+    background: #ffaa00;
+    color: white;
+}
+
+.security-level.standard {
+    background: var(--primary-color);
+    color: white;
+}
+
+.security-panel {
+    margin-top: 20px;
+    padding: 15px;
+    background: var(--card-bg);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.security-metrics {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.security-metric {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.metric-icon {
+    width: 30px;
+    text-align: center;
+    color: var(--primary-color);
+}
+
+.metric-info {
+    flex: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.metric-value.active {
+    color: var(--success-color);
+    font-weight: 600;
+}
+
+.metric-value.compliant {
+    color: var(--success-color);
+    font-weight: 600;
+}
+
+.file-item.secure-high {
+    border-left: 4px solid #ff4444;
+}
+
+.file-item.secure-medium {
+    border-left: 4px solid #ffaa00;
+}
+
+.security-overlay {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background: var(--primary-color);
+    color: white;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+}
+
+.security-info {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 5px;
+}
+
+.shard-indicator {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.access-level {
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.evaluation-workflow {
+    display: flex;
+    gap: 20px;
+    margin: 30px 0;
+    overflow-x: auto;
+}
+
+.workflow-step {
+    min-width: 200px;
+    padding: 20px;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    text-align: center;
+}
+
+.workflow-step.active {
+    border-color: var(--primary-color);
+    background: var(--primary-bg-light);
+}
+
+.step-number {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 15px;
+    font-weight: 600;
+}
+
+.security-options {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.security-option {
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    padding: 15px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.security-option:has(input:checked) {
+    border-color: var(--primary-color);
+    background: var(--primary-bg-light);
+}
+
+.option-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    margin-bottom: 5px;
+}
+
+.member-input-container {
+    display: flex;
+    gap: 10px;
+}
+
+.add-member-btn {
+    padding: 8px 12px;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+</style>
+
+<script>
+// Enhanced Collaboration JavaScript Functions
+function createSecureWorkspace() {
+    document.getElementById('secure-workspace-modal').style.display = 'flex';
+}
+
+function closeModal(modalId) {
+    document.getElementById(modalId).style.display = 'none';
+}
+
+function addMember() {
+    const emailInput = document.getElementById('member-email');
+    const email = emailInput.value.trim();
+    
+    if (email && email.includes('@')) {
+        const membersList = document.getElementById('members-list');
+        const memberTag = document.createElement('div');
+        memberTag.className = 'member-tag';
+        memberTag.innerHTML = `
+            <span>${email}</span>
+            <button onclick="removeMember(this)" class="remove-member-btn">
+                <i class="fas fa-times"></i>
+            </button>
+        `;
+        membersList.appendChild(memberTag);
+        emailInput.value = '';
+    }
+}
+
+function removeMember(button) {
+    button.parentElement.remove();
+}
+
+function createWorkspace() {
+    const formData = new FormData(document.getElementById('secure-workspace-form'));
+    const workspaceName = document.getElementById('workspace-name').value;
+    const workspaceType = document.getElementById('workspace-type').value;
+    const securityLevel = document.querySelector('input[name="security-level"]:checked').value;
+    
+    // Collect member emails
+    const memberTags = document.querySelectorAll('.member-tag span');
+    const members = Array.from(memberTags).map(tag => tag.textContent);
+    
+    // Here you would integrate with the crypto_sharding.py backend
+    console.log('Creating secure workspace:', {
+        name: workspaceName,
+        type: workspaceType,
+        security: securityLevel,
+        members: members
+    });
+    
+    // Close modal and show success
+    closeModal('secure-workspace-modal');
+    alert('Secure workspace created successfully!');
+}
+
+function uploadSecureFile() {
+    // Integration point with crypto_sharding.py
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.onchange = function(event) {
+        const files = event.target.files;
+        console.log('Uploading secure files:', files);
+        // Here you would call the crypto sharding API
+        alert(`Uploading ${files.length} file(s) with cryptographic sharding...`);
+    };
+    input.click();
+}
+
+function switchCollabTab(tabName) {
+    // Hide all tab contents
+    document.querySelectorAll('.collab-tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    
+    // Remove active class from all tabs
+    document.querySelectorAll('.collab-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Show selected tab content
+    document.getElementById(tabName + '-tab-content').classList.add('active');
+    
+    // Add active class to selected tab
+    document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+}
+</script>
