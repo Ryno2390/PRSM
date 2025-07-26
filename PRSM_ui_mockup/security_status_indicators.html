@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRSM Security Status Indicators</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/security-indicators.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+    <!-- Security Status Dashboard -->
+    <div class="security-dashboard-container">
+        <!-- Security Overview Header -->
+        <div class="security-header">
+            <div class="header-info">
+                <h2><i class="fas fa-shield-check"></i> Security Status Dashboard</h2>
+                <p>Real-time monitoring of post-quantum cryptographic security measures</p>
+            </div>
+            <div class="overall-security-score">
+                <div class="score-circle">
+                    <svg viewBox="0 0 100 100" class="score-svg">
+                        <circle cx="50" cy="50" r="40" class="score-bg"></circle>
+                        <circle cx="50" cy="50" r="40" class="score-progress" style="stroke-dasharray: 251.2; stroke-dashoffset: 25.12;"></circle>
+                    </svg>
+                    <div class="score-text">
+                        <span class="score-value" id="overall-score">98.7</span>
+                        <span class="score-label">Security Score</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Security Status Grid -->
+        <div class="security-grid">
+            <!-- Post-Quantum Encryption Status -->
+            <div class="security-card critical">
+                <div class="card-header">
+                    <div class="card-icon">
+                        <i class="fas fa-atom"></i>
+                    </div>
+                    <div class="card-title">
+                        <h4>Post-Quantum Encryption</h4>
+                        <p>Kyber-1024 KEM Protection</p>
+                    </div>
+                    <div class="status-indicator active">
+                        <div class="status-dot"></div>
+                        <span>Active</span>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <div class="security-metrics">
+                        <div class="metric">
+                            <span class="metric-label">Algorithm:</span>
+                            <span class="metric-value">Kyber-1024</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Key Size:</span>
+                            <span class="metric-value">1568 bytes</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Last Rotation:</span>
+                            <span class="metric-value">2 hours ago</span>
+                        </div>
+                    </div>
+                    <div class="security-actions">
+                        <button class="action-btn primary" onclick="rotateKeys()">
+                            <i class="fas fa-sync-alt"></i> Rotate Keys
+                        </button>
+                        <button class="action-btn secondary" onclick="viewKeyDetails()">
+                            <i class="fas fa-info-circle"></i> Details
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Digital Signatures Status -->
+            <div class="security-card high">
+                <div class="card-header">
+                    <div class="card-icon">
+                        <i class="fas fa-signature"></i>
+                    </div>
+                    <div class="card-title">
+                        <h4>Digital Signatures</h4>
+                        <p>ML-DSA Quantum-Resistant</p>
+                    </div>
+                    <div class="status-indicator active">
+                        <div class="status-dot"></div>
+                        <span>Active</span>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <div class="security-metrics">
+                        <div class="metric">
+                            <span class="metric-label">Algorithm:</span>
+                            <span class="metric-value">ML-DSA-87</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Signatures Today:</span>
+                            <span class="metric-value">1,247</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Verification Rate:</span>
+                            <span class="metric-value">99.9%</span>
+                        </div>
+                    </div>
+                    <div class="signature-health">
+                        <div class="health-bar">
+                            <div class="health-fill" style="width: 99.9%"></div>
+                        </div>
+                        <span class="health-label">Signature Health: Excellent</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Access Control Status -->
+            <div class="security-card medium">
+                <div class="card-header">
+                    <div class="card-icon">
+                        <i class="fas fa-user-shield"></i>
+                    </div>
+                    <div class="card-title">
+                        <h4>Access Control</h4>
+                        <p>Multi-Signature Authorization</p>
+                    </div>
+                    <div class="status-indicator warning">
+                        <div class="status-dot"></div>
+                        <span>2 Pending</span>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <div class="access-stats">
+                        <div class="stat-item">
+                            <div class="stat-number">847</div>
+                            <div class="stat-label">Active Rules</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number">23</div>
+                            <div class="stat-label">Authorized Users</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-number">2</div>
+                            <div class="stat-label">Pending Approvals</div>
+                        </div>
+                    </div>
+                    <div class="pending-approvals">
+                        <div class="approval-item">
+                            <span class="approval-user">Dr. Chen</span>
+                            <span class="approval-action">File Access Request</span>
+                            <div class="approval-actions">
+                                <button class="approve-btn" onclick="approveAccess('chen-001')">
+                                    <i class="fas fa-check"></i>
+                                </button>
+                                <button class="deny-btn" onclick="denyAccess('chen-001')">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Shard Integrity Status -->
+            <div class="security-card high">
+                <div class="card-header">
+                    <div class="card-icon">
+                        <i class="fas fa-puzzle-piece"></i>
+                    </div>
+                    <div class="card-title">
+                        <h4>Shard Integrity</h4>
+                        <p>Merkle Tree Validation</p>
+                    </div>
+                    <div class="status-indicator active">
+                        <div class="status-dot"></div>
+                        <span>Verified</span>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <div class="integrity-overview">
+                        <div class="integrity-stat">
+                            <div class="stat-icon verified">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <div class="stat-info">
+                                <span class="stat-value">1,247</span>
+                                <span class="stat-label">Verified Shards</span>
+                            </div>
+                        </div>
+                        <div class="integrity-stat">
+                            <div class="stat-icon corrupted">
+                                <i class="fas fa-exclamation-triangle"></i>
+                            </div>
+                            <div class="stat-info">
+                                <span class="stat-value">1</span>
+                                <span class="stat-label">Corrupted Shards</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="integrity-actions">
+                        <button class="action-btn primary" onclick="validateAllShards()">
+                            <i class="fas fa-search"></i> Full Validation
+                        </button>
+                        <button class="action-btn warning" onclick="repairCorrupted()">
+                            <i class="fas fa-tools"></i> Repair
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Network Security Status -->
+            <div class="security-card medium">
+                <div class="card-header">
+                    <div class="card-icon">
+                        <i class="fas fa-network-wired"></i>
+                    </div>
+                    <div class="card-title">
+                        <h4>Network Security</h4>
+                        <p>P2P Connection Protection</p>
+                    </div>
+                    <div class="status-indicator active">
+                        <div class="status-dot"></div>
+                        <span>Secure</span>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <div class="network-stats">
+                        <div class="network-metric">
+                            <i class="fas fa-lock"></i>
+                            <span>TLS 1.3 Encryption</span>
+                            <div class="metric-status active"></div>
+                        </div>
+                        <div class="network-metric">
+                            <i class="fas fa-shield-virus"></i>
+                            <span>DDoS Protection</span>
+                            <div class="metric-status active"></div>
+                        </div>
+                        <div class="network-metric">
+                            <i class="fas fa-user-secret"></i>
+                            <span>Anonymous Routing</span>
+                            <div class="metric-status active"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Threat Detection Status -->
+            <div class="security-card critical">
+                <div class="card-header">
+                    <div class="card-icon">
+                        <i class="fas fa-radar"></i>
+                    </div>
+                    <div class="card-title">
+                        <h4>Threat Detection</h4>
+                        <p>AI-Powered Security Analysis</p>
+                    </div>
+                    <div class="status-indicator warning">
+                        <div class="status-dot"></div>
+                        <span>2 Alerts</span>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <div class="threat-alerts">
+                        <div class="alert-item high">
+                            <div class="alert-icon">
+                                <i class="fas fa-exclamation-triangle"></i>
+                            </div>
+                            <div class="alert-content">
+                                <div class="alert-title">Suspicious Activity</div>
+                                <div class="alert-description">Unauthorized access attempt from unknown peer</div>
+                                <div class="alert-time">2 minutes ago</div>
+                            </div>
+                            <button class="investigate-btn" onclick="investigateThreat('threat-001')">
+                                <i class="fas fa-search"></i>
+                            </button>
+                        </div>
+                        <div class="alert-item medium">
+                            <div class="alert-icon">
+                                <i class="fas fa-info-circle"></i>
+                            </div>
+                            <div class="alert-content">
+                                <div class="alert-title">Unusual Network Pattern</div>
+                                <div class="alert-description">Abnormal data transfer detected</div>
+                                <div class="alert-time">15 minutes ago</div>
+                            </div>
+                            <button class="investigate-btn" onclick="investigateThreat('threat-002')">
+                                <i class="fas fa-search"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Security Timeline -->
+        <div class="security-timeline">
+            <div class="timeline-header">
+                <h4><i class="fas fa-history"></i> Security Events Timeline</h4>
+                <div class="timeline-filters">
+                    <button class="filter-btn active" data-filter="all">All Events</button>
+                    <button class="filter-btn" data-filter="critical">Critical</button>
+                    <button class="filter-btn" data-filter="warnings">Warnings</button>
+                    <button class="filter-btn" data-filter="info">Info</button>
+                </div>
+            </div>
+            <div class="timeline-content">
+                <div class="timeline-item critical">
+                    <div class="timeline-time">2 min ago</div>
+                    <div class="timeline-icon">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <div class="timeline-content-text">
+                        <strong>Threat Blocked</strong> - Unauthorized access attempt blocked by access control system
+                    </div>
+                </div>
+                <div class="timeline-item info">
+                    <div class="timeline-time">1 hour ago</div>
+                    <div class="timeline-icon">
+                        <i class="fas fa-key"></i>
+                    </div>
+                    <div class="timeline-content-text">
+                        <strong>Key Rotation</strong> - Successfully rotated post-quantum encryption keys
+                    </div>
+                </div>
+                <div class="timeline-item info">
+                    <div class="timeline-time">3 hours ago</div>
+                    <div class="timeline-icon">
+                        <i class="fas fa-user-check"></i>
+                    </div>
+                    <div class="timeline-content-text">
+                        <strong>Access Granted</strong> - New team member authenticated and granted access
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/security-indicators.js"></script>
+</body>
+</html>
