@@ -609,7 +609,7 @@ PRSM offers more than an alternative—it offers the infrastructure for AI's muc
 ¹⁴ [The Billion-Dollar Price Tag of Building AI](https://time.com/6984292/cost-artificial-intelligence-compute-epoch-report/) - TIME (2024)
 ¹⁵ [The cost of training AI could soon become too much to bear](https://fortune.com/2024/04/04/ai-training-costs-how-much-is-too-much-openai-gpt-anthropic-microsoft/) - Fortune (2024)
 ¹⁶ [Comparison of AI Models across Intelligence, Performance, Price](https://artificialanalysis.ai/models) - Artificial Analysis (2024)
-¹⁷ Udandarao, V., Prabhu, A., Ghosh, A., Sharma, Y., Torr, P. H., Bibi, A., Albanie, S., & Bethge, M. (2024). No "Zero-Shot" Without Exponential Data: Pretraining Concept Frequency Determines Multimodal Model Performance. *Conference on Neural Information Processing Systems (NeurIPS 2024)*. arXiv:2404.04125v3.
+¹⁷ Udandarao, V., Prabhu, A., Ghosh, A., Sharma, Y., Torr, P. H., Bibi, A., Albanie, S., & Bethge, M. (2024). No "Zero-Shot" Without Exponential Data: Pretraining Concept Frequency Determines Multimodal Model Performance. *Conference on Neural Information Processing Systems (NeurIPS 2024)*. arXiv:2404.04125v3. For an accessible video explanation of the paper's key findings, see: [YouTube Explainer](https://www.youtube.com/watch?v=dDUC-LqVrPU&t=401s)
 
 ---
 
