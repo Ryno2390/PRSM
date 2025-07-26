@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRSM P2P Network Dashboard</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/p2p-dashboard.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+    <!-- P2P Network Status Dashboard -->
+    <div class="p2p-dashboard-container">
+        <!-- Dashboard Header -->
+        <div class="dashboard-header">
+            <div class="header-info">
+                <h2><i class="fas fa-network-wired"></i> P2P Network Dashboard</h2>
+                <p>Real-time monitoring of your distributed collaboration network</p>
+            </div>
+            <div class="header-controls">
+                <div class="network-status-indicator" id="network-status">
+                    <div class="status-dot connected"></div>
+                    <span>Connected</span>
+                </div>
+                <button class="refresh-btn" onclick="refreshNetworkData()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+        </div>
+
+        <!-- Network Overview Cards -->
+        <div class="network-overview">
+            <div class="overview-card">
+                <div class="card-icon">
+                    <i class="fas fa-users"></i>
+                </div>
+                <div class="card-content">
+                    <h3 id="active-peers">47</h3>
+                    <p>Active Peers</p>
+                    <span class="trend positive">+3 from yesterday</span>
+                </div>
+            </div>
+            
+            <div class="overview-card">
+                <div class="card-icon">
+                    <i class="fas fa-server"></i>
+                </div>
+                <div class="card-content">
+                    <h3 id="shard-count">1,248</h3>
+                    <p>Distributed Shards</p>
+                    <span class="trend neutral">Stable</span>
+                </div>
+            </div>
+            
+            <div class="overview-card">
+                <div class="card-icon">
+                    <i class="fas fa-shield-alt"></i>
+                </div>
+                <div class="card-content">
+                    <h3 id="security-score">98.7%</h3>
+                    <p>Security Score</p>
+                    <span class="trend positive">Excellent</span>
+                </div>
+            </div>
+            
+            <div class="overview-card">
+                <div class="card-icon">
+                    <i class="fas fa-tachometer-alt"></i>
+                </div>
+                <div class="card-content">
+                    <h3 id="avg-latency">45ms</h3>
+                    <p>Avg Latency</p>
+                    <span class="trend positive">-12ms</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Dashboard Grid -->
+        <div class="dashboard-grid">
+            <!-- Network Topology Visualization -->
+            <div class="dashboard-panel network-topology">
+                <div class="panel-header">
+                    <h4><i class="fas fa-project-diagram"></i> Network Topology</h4>
+                    <div class="panel-controls">
+                        <select id="topology-view">
+                            <option value="geographic">Geographic View</option>
+                            <option value="logical">Logical Connections</option>
+                            <option value="performance">Performance Based</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <div class="topology-map" id="topology-map">
+                        <!-- Interactive network visualization -->
+                        <div class="node-cluster">
+                            <div class="network-node self" data-node-id="self">
+                                <i class="fas fa-desktop"></i>
+                                <span class="node-label">You</span>
+                                <div class="node-stats">
+                                    <span class="upload-speed">↑ 25 MB/s</span>
+                                    <span class="download-speed">↓ 50 MB/s</span>
+                                </div>
+                            </div>
+                            
+                            <div class="network-node peer high-reputation" data-node-id="peer1">
+                                <i class="fas fa-laptop"></i>
+                                <span class="node-label">Stanford-Lab-01</span>
+                                <div class="reputation-badge">★ 4.8</div>
+                            </div>
+                            
+                            <div class="network-node peer medium-reputation" data-node-id="peer2">
+                                <i class="fas fa-server"></i>
+                                <span class="node-label">MIT-Research-03</span>
+                                <div class="reputation-badge">★ 4.2</div>
+                            </div>
+                            
+                            <div class="network-node peer high-reputation" data-node-id="peer3">
+                                <i class="fas fa-university"></i>
+                                <span class="node-label">Duke-Medical-02</span>
+                                <div class="reputation-badge">★ 4.9</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Connection Lines -->
+                        <svg class="connection-overlay">
+                            <line class="connection strong" x1="150" y1="150" x2="300" y2="100"></line>
+                            <line class="connection medium" x1="150" y1="150" x2="250" y2="250"></line>
+                            <line class="connection strong" x1="150" y1="150" x2="400" y2="200"></line>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Peer List -->
+            <div class="dashboard-panel peer-list">
+                <div class="panel-header">
+                    <h4><i class="fas fa-list"></i> Connected Peers</h4>
+                    <div class="panel-controls">
+                        <input type="text" placeholder="Search peers..." class="search-input">
+                        <button class="filter-btn" onclick="togglePeerFilters()">
+                            <i class="fas fa-filter"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <div class="peer-filters" id="peer-filters" style="display: none;">
+                        <div class="filter-group">
+                            <label>Region:</label>
+                            <select id="region-filter">
+                                <option value="all">All Regions</option>
+                                <option value="us-east">US East</option>
+                                <option value="us-west">US West</option>
+                                <option value="europe">Europe</option>
+                                <option value="asia">Asia</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Reputation:</label>
+                            <select id="reputation-filter">
+                                <option value="all">All Levels</option>
+                                <option value="high">High (4.0+)</option>
+                                <option value="medium">Medium (3.0-4.0)</option>
+                                <option value="low">Low (<3.0)</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="peer-table-container">
+                        <table class="peer-table">
+                            <thead>
+                                <tr>
+                                    <th>Node</th>
+                                    <th>Reputation</th>
+                                    <th>Latency</th>
+                                    <th>Bandwidth</th>
+                                    <th>Shards</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="peer-table-body">
+                                <tr class="peer-row" data-peer-id="stanford-lab-01">
+                                    <td>
+                                        <div class="peer-info">
+                                            <i class="fas fa-laptop peer-icon"></i>
+                                            <div>
+                                                <strong>Stanford-Lab-01</strong>
+                                                <small>us-west-1</small>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="reputation-score high">
+                                            <span class="score">4.8</span>
+                                            <div class="stars">★★★★★</div>
+                                        </div>
+                                    </td>
+                                    <td><span class="latency good">23ms</span></td>
+                                    <td><span class="bandwidth high">↑45 ↓89 MB/s</span></td>
+                                    <td><span class="shard-count">127</span></td>
+                                    <td><span class="status-badge online">Online</span></td>
+                                </tr>
+                                
+                                <tr class="peer-row" data-peer-id="mit-research-03">
+                                    <td>
+                                        <div class="peer-info">
+                                            <i class="fas fa-server peer-icon"></i>
+                                            <div>
+                                                <strong>MIT-Research-03</strong>
+                                                <small>us-east-1</small>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="reputation-score medium">
+                                            <span class="score">4.2</span>
+                                            <div class="stars">★★★★☆</div>
+                                        </div>
+                                    </td>
+                                    <td><span class="latency good">67ms</span></td>
+                                    <td><span class="bandwidth medium">↑23 ↓45 MB/s</span></td>
+                                    <td><span class="shard-count">89</span></td>
+                                    <td><span class="status-badge online">Online</span></td>
+                                </tr>
+                                
+                                <tr class="peer-row" data-peer-id="duke-medical-02">
+                                    <td>
+                                        <div class="peer-info">
+                                            <i class="fas fa-university peer-icon"></i>
+                                            <div>
+                                                <strong>Duke-Medical-02</strong>
+                                                <small>us-east-1</small>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="reputation-score high">
+                                            <span class="score">4.9</span>
+                                            <div class="stars">★★★★★</div>
+                                        </div>
+                                    </td>
+                                    <td><span class="latency excellent">12ms</span></td>
+                                    <td><span class="bandwidth high">↑67 ↓123 MB/s</span></td>
+                                    <td><span class="shard-count">203</span></td>
+                                    <td><span class="status-badge online">Online</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Network Performance Metrics -->
+            <div class="dashboard-panel performance-metrics">
+                <div class="panel-header">
+                    <h4><i class="fas fa-chart-line"></i> Performance Metrics</h4>
+                    <div class="panel-controls">
+                        <select id="metrics-timeframe">
+                            <option value="1h">Last Hour</option>
+                            <option value="6h">Last 6 Hours</option>
+                            <option value="24h">Last 24 Hours</option>
+                            <option value="7d">Last 7 Days</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <div class="metrics-grid">
+                        <div class="metric-item">
+                            <h6>Throughput</h6>
+                            <div class="metric-chart">
+                                <canvas id="throughput-chart" width="200" height="100"></canvas>
+                            </div>
+                            <div class="metric-value">
+                                <span class="current-value">127 MB/s</span>
+                                <span class="trend positive">+15%</span>
+                            </div>
+                        </div>
+                        
+                        <div class="metric-item">
+                            <h6>Network Latency</h6>
+                            <div class="metric-chart">
+                                <canvas id="latency-chart" width="200" height="100"></canvas>
+                            </div>
+                            <div class="metric-value">
+                                <span class="current-value">45ms</span>
+                                <span class="trend positive">-12ms</span>
+                            </div>
+                        </div>
+                        
+                        <div class="metric-item">
+                            <h6>Success Rate</h6>
+                            <div class="metric-chart">
+                                <canvas id="success-chart" width="200" height="100"></canvas>
+                            </div>
+                            <div class="metric-value">
+                                <span class="current-value">99.2%</span>
+                                <span class="trend neutral">Stable</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Security Status -->
+            <div class="dashboard-panel security-status">
+                <div class="panel-header">
+                    <h4><i class="fas fa-shield-alt"></i> Security Status</h4>
+                    <div class="panel-controls">
+                        <button class="security-scan-btn" onclick="runSecurityScan()">
+                            <i class="fas fa-search"></i> Run Scan
+                        </button>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <div class="security-overview">
+                        <div class="security-metric">
+                            <div class="metric-header">
+                                <i class="fas fa-key"></i>
+                                <span>Post-Quantum Encryption</span>
+                            </div>
+                            <div class="metric-status active">
+                                <i class="fas fa-check-circle"></i> Active
+                            </div>
+                        </div>
+                        
+                        <div class="security-metric">
+                            <div class="metric-header">
+                                <i class="fas fa-users-cog"></i>
+                                <span>Access Control</span>
+                            </div>
+                            <div class="metric-status active">
+                                <i class="fas fa-check-circle"></i> 847 Rules Active
+                            </div>
+                        </div>
+                        
+                        <div class="security-metric">
+                            <div class="metric-header">
+                                <i class="fas fa-fingerprint"></i>
+                                <span>Integrity Validation</span>
+                            </div>
+                            <div class="metric-status active">
+                                <i class="fas fa-check-circle"></i> 99.9% Verified
+                            </div>
+                        </div>
+                        
+                        <div class="security-metric">
+                            <div class="metric-header">
+                                <i class="fas fa-eye"></i>
+                                <span>Threat Detection</span>
+                            </div>
+                            <div class="metric-status warning">
+                                <i class="fas fa-exclamation-triangle"></i> 2 Alerts
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="recent-alerts">
+                        <h6>Recent Security Events</h6>
+                        <div class="alert-list">
+                            <div class="alert-item warning">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <div class="alert-content">
+                                    <strong>Suspicious Activity</strong>
+                                    <p>Node 'unknown-peer-127' attempted unauthorized access</p>
+                                    <small>2 minutes ago</small>
+                                </div>
+                            </div>
+                            
+                            <div class="alert-item info">
+                                <i class="fas fa-info-circle"></i>
+                                <div class="alert-content">
+                                    <strong>Key Rotation</strong>
+                                    <p>Successfully rotated encryption keys for workspace 'Quantum-ML'</p>
+                                    <small>1 hour ago</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions Panel -->
+        <div class="quick-actions-panel">
+            <h4><i class="fas fa-bolt"></i> Quick Actions</h4>
+            <div class="action-buttons">
+                <button class="action-btn primary" onclick="optimizeNetwork()">
+                    <i class="fas fa-rocket"></i> Optimize Network
+                </button>
+                <button class="action-btn secondary" onclick="exportNetworkData()">
+                    <i class="fas fa-download"></i> Export Data
+                </button>
+                <button class="action-btn secondary" onclick="showNetworkSettings()">
+                    <i class="fas fa-cog"></i> Settings
+                </button>
+                <button class="action-btn danger" onclick="emergencyDisconnect()">
+                    <i class="fas fa-power-off"></i> Emergency Disconnect
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Network Settings Modal -->
+    <div class="modal-overlay" id="network-settings-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4><i class="fas fa-cog"></i> Network Settings</h4>
+                <button class="modal-close" onclick="closeModal('network-settings-modal')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h6>Connection Preferences</h6>
+                    <div class="setting-item">
+                        <label>Maximum Peers:</label>
+                        <input type="number" value="50" min="10" max="100">
+                    </div>
+                    <div class="setting-item">
+                        <label>Preferred Regions:</label>
+                        <select multiple>
+                            <option value="us-east">US East</option>
+                            <option value="us-west" selected>US West</option>
+                            <option value="europe">Europe</option>
+                            <option value="asia">Asia</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h6>Security Settings</h6>
+                    <div class="setting-item">
+                        <label>Minimum Reputation Score:</label>
+                        <input type="range" min="0" max="5" step="0.1" value="3.0">
+                        <span class="range-value">3.0</span>
+                    </div>
+                    <div class="setting-item">
+                        <label>
+                            <input type="checkbox" checked>
+                            Require post-quantum encryption
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn secondary" onclick="closeModal('network-settings-modal')">Cancel</button>
+                <button class="btn primary" onclick="saveNetworkSettings()">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/p2p-dashboard.js"></script>
+</body>
+</html>
