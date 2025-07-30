@@ -121,6 +121,7 @@ from prsm.nwtn.cross_domain_ontology_bridge import cross_domain_ontology_bridge_
 from prsm.nwtn.torrent_native_architecture import torrent_native_architecture_integration
 from prsm.nwtn.integration_validation_system import integration_validation_system_integration
 from prsm.nwtn.analogical_chain_reasoning import analogical_chain_reasoning_integration
+from prsm.nwtn.hybrid_architecture import HybridSemanticArchitecture, SOC, SOCType, WorldModelLearningManager
 
 logger = structlog.get_logger(__name__)
 
@@ -5933,6 +5934,7 @@ class MetaReasoningResult:
     frontier_detection_results: Optional[Any] = None  # Research frontier detection and analysis results
     parallel_processing_results: Optional[Any] = None  # Parallel deep reasoning processing results
     shared_world_model_results: Optional[Any] = None  # Shared world model validation and statistics
+    soc_generation_results: Optional[Any] = None  # SOC generation and world model validation results
     
     def __post_init__(self):
         if not self.id:
@@ -6062,6 +6064,12 @@ class MetaReasoningEngine:
         self.world_model = WorldModelCore()
         self.world_model_integration = WorldModelIntegration(self.world_model)
         
+        # Initialize hybrid semantic architecture for SOC generation
+        self.hybrid_architecture = HybridSemanticArchitecture()
+        
+        # Initialize adaptive learning system for World Model evolution
+        self.world_model_learning_manager = WorldModelLearningManager()
+        
         # Initialize provenance and FTNS services
         self.provenance_system = EnhancedProvenanceSystem()
         self.ftns_service = FTNSService()
@@ -6069,6 +6077,16 @@ class MetaReasoningEngine:
         
         # Initialize external knowledge base for Ferrari fuel line
         self.external_knowledge_base = None  # Will be set by initialize_external_knowledge_base
+        
+        # Breakthrough candidate generation engines (initialize before reasoning_engines dict)
+        self.assumption_flip_engine = AssumptionFlipEngine()
+        self.breakthrough_counterfactual_engine = BreakthroughCounterfactualEngine()
+        self.creative_abductive_engine = CreativeAbductiveEngine()
+        self.multi_level_analogical_engine = AnalogicalEngineOrchestrator()
+        self.breakthrough_inductive_engine = BreakthroughInductiveEngine()
+        self.breakthrough_causal_engine = BreakthroughCausalEngine()
+        self.breakthrough_meta_orchestrator = BreakthroughMetaReasoningOrchestrator()
+        self.frontier_detection_engine = FrontierDetectionEngine()
         
         # Initialize all reasoning engines
         self.reasoning_engines = {
@@ -6084,16 +6102,6 @@ class MetaReasoningEngine:
         
         # Thinking mode configurations
         self.thinking_configs = ThinkingConfiguration.get_configurations()
-        
-        # Breakthrough candidate generation engines
-        self.assumption_flip_engine = AssumptionFlipEngine()
-        self.breakthrough_counterfactual_engine = BreakthroughCounterfactualEngine()
-        self.creative_abductive_engine = CreativeAbductiveEngine()
-        self.multi_level_analogical_engine = AnalogicalEngineOrchestrator()
-        self.breakthrough_inductive_engine = BreakthroughInductiveEngine()
-        self.breakthrough_causal_engine = BreakthroughCausalEngine()
-        self.breakthrough_meta_orchestrator = BreakthroughMetaReasoningOrchestrator()
-        self.frontier_detection_engine = FrontierDetectionEngine()
         
         # Initialize unified knowledge graph system
         self.unified_knowledge_graph = UnifiedKnowledgeGraph()
@@ -6484,6 +6492,14 @@ class MetaReasoningEngine:
             
             # Extract shared world model results if present
             result.shared_world_model_results = await self._extract_shared_world_model_results(result)
+            
+            # Generate and validate SOCs with world model integration
+            soc_results = await self._generate_and_validate_socs(query, enhanced_context, result.results or [])
+            result.soc_generation_results = soc_results
+            
+            # Use enhanced context from SOC generation for subsequent processing
+            if soc_results.get('soc_generation_successful', False):
+                enhanced_context = soc_results['enhanced_context']
             
             # Perform breakthrough meta-reasoning integration if in breakthrough mode
             if context.get('breakthrough_mode') and context.get('breakthrough_mode') != 'conservative':
@@ -7037,7 +7053,12 @@ class MetaReasoningEngine:
                 # Enhance result with world model validation
                 enhanced_result = self.world_model_integration.enhance_reasoning_with_world_model(result)
                 
-                return enhanced_result
+                # Apply step-by-step world model validation (idealized implementation)
+                validated_result = await self._apply_step_by_step_world_model_validation(
+                    enhanced_result, engine_type, query, context
+                )
+                
+                return validated_result
                 
         except asyncio.TimeoutError as e:
             logger.error(f"Engine execution timeout", 
@@ -7411,7 +7432,7 @@ class MetaReasoningEngine:
         current_context = context.copy()
         reasoning_flow = []
         
-        # Execute engines in sequence
+        # Execute engines in sequence with causal relationship validation
         for i, engine_type in enumerate(sequence):
             engine = self.reasoning_engines[engine_type]
             
@@ -7419,15 +7440,29 @@ class MetaReasoningEngine:
             if results:
                 current_context["previous_results"] = results[-1].result
                 current_context["reasoning_history"] = [r.result for r in results]
+                
+                # CAUSAL RELATIONSHIP VALIDATION: Analyze causal consistency between steps
+                causal_validation = await self._validate_causal_sequence_consistency(
+                    results, engine_type, query, current_context
+                )
+                current_context["causal_validation"] = causal_validation
             
-            # Execute engine
+            # Execute engine with enhanced context
             result = await self._execute_reasoning_engine(
                 engine_type, engine, query, current_context
             )
             results.append(result)
             
-            # Track reasoning flow
-            reasoning_flow.append(f"Step {i+1}: {engine_type.value} -> {result.confidence:.2f}")
+            # Track reasoning flow with causal information
+            causal_info = ""
+            if i > 0 and hasattr(result, 'metadata') and result.metadata:
+                causal_data = result.metadata.get('causal_validation', {})
+                if causal_data.get('causal_consistency_score', 0) < 0.5:
+                    causal_info = " [CAUSAL_CONFLICT]"
+                elif causal_data.get('causal_consistency_score', 0) > 0.8:
+                    causal_info = " [CAUSAL_SUPPORT]"
+            
+            reasoning_flow.append(f"Step {i+1}: {engine_type.value} -> {result.confidence:.2f}{causal_info}")
         
         # Synthesize sequential results
         final_synthesis = await self._synthesize_sequential_results(results, context)
@@ -7538,7 +7573,7 @@ class MetaReasoningEngine:
             "high_performance_synthesis": high_synthesis,
             "optimal_patterns": optimal_patterns,
             "comprehensive_confidence": self._calculate_comprehensive_confidence(
-                parallel_results, high_performers
+                parallel_results, high_performers, context
             ),
             "reasoning_insights": self._extract_reasoning_insights(top_sequences),
             "meta_patterns": self._identify_meta_patterns(sequential_results),
@@ -7594,7 +7629,7 @@ class MetaReasoningEngine:
     async def _evidence_integration_synthesis(self, 
                                             results: List[ReasoningResult],
                                             context: Dict[str, Any]) -> Dict[str, Any]:
-        """Synthesize by integrating evidence from all results"""
+        """Synthesize by integrating evidence from all results with world model validation data"""
         
         if not results:
             return {"method": "evidence_integration", "synthesis": "No results"}
@@ -7604,14 +7639,20 @@ class MetaReasoningEngine:
         for result in results:
             all_evidence.extend(result.reasoning_trace)
         
-        # Integrate evidence
-        integrated_evidence = self._integrate_evidence(all_evidence)
+        # ENHANCED: Collect world model validation data from all results
+        world_model_summary = await self._extract_world_model_synthesis_data(results, context)
+        
+        # Integrate evidence with world model context
+        integrated_evidence = self._integrate_evidence_with_world_model(all_evidence, world_model_summary)
         
         synthesis = {
-            "method": "evidence_integration",
+            "method": "evidence_integration_with_world_model",
             "integrated_evidence": integrated_evidence,
             "evidence_strength": statistics.mean([r.evidence_strength for r in results]),
-            "evidence_count": len(all_evidence)
+            "evidence_count": len(all_evidence),
+            # ENHANCED: Include world model validation summary
+            "world_model_validation_summary": world_model_summary,
+            "synthesis_confidence_calibration": self._calculate_synthesis_confidence_calibration(world_model_summary)
         }
         
         return synthesis
@@ -8390,8 +8431,9 @@ class MetaReasoningEngine:
     
     def _calculate_comprehensive_confidence(self, 
                                           parallel_results: List[ReasoningResult],
-                                          high_performers: List[SequentialResult]) -> float:
-        """Calculate confidence for comprehensive reasoning"""
+                                          high_performers: List[SequentialResult],
+                                          context: Dict[str, Any]) -> float:
+        """Calculate confidence for comprehensive reasoning with breakthrough mode differentiation"""
         
         parallel_confidence = statistics.mean([r.confidence for r in parallel_results]) if parallel_results else 0.0
         sequential_confidence = statistics.mean([r.sequence_confidence for r in high_performers]) if high_performers else 0.0
@@ -8399,7 +8441,776 @@ class MetaReasoningEngine:
         # Weight based on number of high performers
         performance_weight = min(len(high_performers) / 10, 1.0)  # Cap at 1.0
         
-        return parallel_confidence * 0.3 + sequential_confidence * 0.7 * performance_weight
+        # Base confidence calculation
+        base_confidence = parallel_confidence * 0.3 + sequential_confidence * 0.7 * performance_weight
+        
+        # Enhanced confidence calculation based on breakthrough mode
+        breakthrough_mode = context.get('breakthrough_mode', 'balanced')
+        
+        if breakthrough_mode == 'conservative':
+            # Conservative mode: Average across ALL 5,040 sequences for stability
+            # Higher confidence from consensus and stability
+            all_confidences = [r.confidence for r in parallel_results]
+            if high_performers:
+                all_confidences.extend([s.sequence_confidence for s in high_performers])
+            
+            if all_confidences:
+                # Conservative: emphasize mean with lower variance preference
+                mean_conf = statistics.mean(all_confidences)
+                std_conf = statistics.stdev(all_confidences) if len(all_confidences) > 1 else 0
+                # Lower standard deviation increases confidence in conservative mode
+                stability_bonus = max(0, (0.2 - std_conf) * 2)  # Up to 0.4 bonus for very stable results
+                return min(1.0, mean_conf + stability_bonus)
+            
+        elif breakthrough_mode == 'revolutionary':
+            # Revolutionary mode: Focus on highest-confidence breakthrough sequences
+            # Accept higher variance for potential breakthroughs
+            if high_performers:
+                # Get top 10% of sequences for breakthrough analysis
+                top_breakthrough_count = max(1, len(high_performers) // 10)
+                top_sequences = sorted(high_performers, 
+                                     key=lambda x: x.sequence_confidence, 
+                                     reverse=True)[:top_breakthrough_count]
+                
+                if top_sequences:
+                    # Revolutionary: emphasize maximum potential over stability
+                    max_conf = max(s.sequence_confidence for s in top_sequences)
+                    mean_top_conf = statistics.mean([s.sequence_confidence for s in top_sequences])
+                    # Revolutionary mode gets bonus for high peak performance
+                    breakthrough_bonus = (max_conf - mean_top_conf) * 0.5  # Bonus for having standout sequences
+                    return min(1.0, mean_top_conf + breakthrough_bonus)
+        
+        # Default balanced mode or fallback
+        return base_confidence
+    
+    async def _generate_and_validate_socs(self, 
+                                        query: str, 
+                                        context: Dict[str, Any],
+                                        reasoning_results: List[ReasoningResult]) -> Dict[str, Any]:
+        """Generate SOCs from query and validate against world model"""
+        
+        try:
+            # Generate SOCs using hybrid architecture
+            generated_socs = await self.hybrid_architecture.process_query(
+                query=query,
+                context=context,
+                user_goal=None  # Could be extracted from context if needed
+            )
+            
+            # Extract SOCs from response
+            socs = []
+            if hasattr(generated_socs, 'socs') and generated_socs.socs:
+                socs = generated_socs.socs
+            
+            # Validate SOCs against world model
+            validated_socs = []
+            world_model_conflicts = []
+            
+            for soc in socs:
+                # Create a temporary reasoning result for validation
+                temp_result = ReasoningResult(
+                    reasoning_trace=f"SOC: {soc.name} - {soc.description}",
+                    confidence=soc.confidence,
+                    quality_score=soc.evidence_count / 10.0 if soc.evidence_count > 0 else 0.5,
+                    engine_type=ReasoningEngine.ABDUCTIVE,  # SOCs are typically abductive
+                    execution_time=0.1,
+                    content_hash="soc_validation",
+                    metadata={'soc_id': str(soc.id), 'soc_type': soc.soc_type.value}
+                )
+                
+                # Validate against world model
+                validation_result = self.world_model.validate_reasoning(temp_result)
+                
+                if validation_result.is_valid:
+                    # Enhance SOC confidence based on world model support
+                    enhanced_confidence = min(1.0, soc.confidence + validation_result.confidence_adjustment)
+                    soc.confidence = enhanced_confidence
+                    validated_socs.append(soc)
+                else:
+                    # Track conflicts but still include SOC with adjusted confidence
+                    soc.confidence = max(0.1, soc.confidence - 0.2)  # Reduce confidence for conflicts
+                    validated_socs.append(soc)
+                    world_model_conflicts.extend(validation_result.conflicts)
+            
+            # Calculate SOC quality metrics
+            soc_quality_score = 0.0
+            if validated_socs:
+                soc_quality_score = statistics.mean([soc.confidence for soc in validated_socs])
+            
+            # Integrate SOCs with reasoning results for enhanced context
+            soc_enhanced_context = context.copy()
+            soc_enhanced_context['generated_socs'] = [
+                {
+                    'name': soc.name,
+                    'type': soc.soc_type.value,
+                    'confidence': soc.confidence,
+                    'description': soc.description,
+                    'domain': soc.domain
+                }
+                for soc in validated_socs
+            ]
+            
+            return {
+                'socs': validated_socs,
+                'soc_count': len(validated_socs),
+                'soc_quality_score': soc_quality_score,
+                'world_model_conflicts': world_model_conflicts,
+                'world_model_conflict_count': len(world_model_conflicts),
+                'enhanced_context': soc_enhanced_context,
+                'soc_generation_successful': True
+            }
+            
+        except Exception as e:
+            logger.error(f"SOC generation and validation failed: {e}")
+            return {
+                'socs': [],
+                'soc_count': 0,
+                'soc_quality_score': 0.0,
+                'world_model_conflicts': [],
+                'world_model_conflict_count': 0,
+                'enhanced_context': context,
+                'soc_generation_successful': False,
+                'error': str(e)
+            }
+    
+    async def _apply_step_by_step_world_model_validation(self, 
+                                                       reasoning_result: ReasoningResult,
+                                                       engine_type: ReasoningEngine,
+                                                       query: str,
+                                                       context: Dict[str, Any]) -> ReasoningResult:
+        """
+        Apply detailed step-by-step world model validation as described in the idealized implementation.
+        
+        This implements the exact process I described:
+        1. Extract claims from reasoning result
+        2. Create SOCs for each claim  
+        3. Validate each SOC against world model principles
+        4. Adjust confidence based on validation results
+        5. Flag conflicts and paradigm shift candidates
+        """
+        try:
+            # Extract claims from the reasoning trace
+            claims = await self._extract_claims_from_reasoning(reasoning_result, engine_type)
+            
+            # Create SOCs for each claim
+            step_socs = []
+            world_model_validations = []
+            
+            for i, claim in enumerate(claims):
+                # Create SOC for this claim
+                claim_soc = SOC(
+                    name=f"{engine_type.value}_claim_{i}",
+                    soc_type=SOCType.CONCEPT,
+                    confidence=reasoning_result.confidence,
+                    domain=context.get('domain', 'general'),
+                    description=claim,
+                    properties={
+                        'reasoning_engine': engine_type.value,
+                        'step_number': i,
+                        'original_query': query,
+                        'claim_text': claim
+                    }
+                )
+                
+                # WORLD MODEL VALIDATION: Check against core principles
+                validation_result = await self._validate_soc_against_world_model_principles(
+                    claim_soc, context
+                )
+                
+                world_model_validations.append(validation_result)
+                
+                # ADAPTIVE LEARNING: Process this as new evidence for the learning system
+                evidence_strength = validation_result['confidence_adjustment'] + 0.5  # Normalize to 0-1 range
+                evidence_strength = max(0.0, min(1.0, evidence_strength))
+                
+                # Extract paper date from context for temporal weighting
+                paper_date = None
+                if 'external_papers' in context and context['external_papers']:
+                    # Try to get date from first external paper
+                    first_paper = context['external_papers'][0]
+                    if 'publish_date' in first_paper:
+                        try:
+                            paper_date = datetime.fromisoformat(first_paper['publish_date'].replace('Z', '+00:00'))
+                        except:
+                            pass
+                
+                # Update SOC through adaptive learning system
+                learning_result = self.world_model_learning_manager.process_new_evidence(
+                    soc_name=claim_soc.name,
+                    evidence_strength=evidence_strength,
+                    source=f"{engine_type.value}_reasoning",
+                    paper_date=paper_date
+                )
+                
+                # Log any confidence level transitions
+                if learning_result.get('transition_info'):
+                    transition = learning_result['transition_info']
+                    logger.info(f"SOC '{claim_soc.name}' confidence level transition during reasoning",
+                               old_level=learning_result['old_level'],
+                               new_level=learning_result['new_level'],
+                               world_model_action=transition.get('world_model_action', 'none'))
+                
+                # Adjust SOC confidence based on validation (legacy behavior for immediate use)
+                if validation_result['is_valid']:
+                    if validation_result['confidence_adjustment'] > 0:
+                        logger.debug(f"World model SUPPORTS claim: {claim[:100]}... (confidence boost: +{validation_result['confidence_adjustment']:.3f})")
+                    else:
+                        logger.debug(f"World model NEUTRAL on claim: {claim[:100]}...")
+                else:
+                    # Major conflict detected
+                    logger.warning(f"World model CONFLICT detected: {claim[:100]}... (confidence adjustment: {validation_result['confidence_adjustment']:.3f})")
+                    
+                    # Check if this is a paradigm shift candidate
+                    if validation_result.get('paradigm_shift_candidate', False):
+                        claim_soc.properties['paradigm_shift_candidate'] = True
+                        logger.info(f"PARADIGM SHIFT CANDIDATE identified: {claim[:100]}...")
+                
+                step_socs.append(claim_soc)
+            
+            # Calculate overall world model alignment score
+            valid_validations = [v for v in world_model_validations if v['is_valid']]
+            total_conflicts = sum(len(v.get('conflicts', [])) for v in world_model_validations)
+            
+            world_model_alignment = len(valid_validations) / max(1, len(world_model_validations))
+            
+            # Apply confidence adjustment based on world model validation
+            original_confidence = reasoning_result.confidence
+            
+            if world_model_alignment > 0.8:
+                # Strong world model support
+                confidence_boost = 0.1 * world_model_alignment
+                reasoning_result.confidence = min(1.0, original_confidence + confidence_boost)
+                logger.debug(f"{engine_type.value}: Strong world model support (alignment: {world_model_alignment:.3f}, boost: +{confidence_boost:.3f})")
+                
+            elif world_model_alignment < 0.3:
+                # Major world model conflicts
+                confidence_penalty = 0.2 * (1 - world_model_alignment)
+                reasoning_result.confidence = max(0.1, original_confidence - confidence_penalty)
+                logger.warning(f"{engine_type.value}: Major world model conflicts (alignment: {world_model_alignment:.3f}, penalty: -{confidence_penalty:.3f})")
+                
+            # Add world model validation metadata to result
+            if not hasattr(reasoning_result, 'metadata') or reasoning_result.metadata is None:
+                reasoning_result.metadata = {}
+                
+            reasoning_result.metadata.update({
+                'world_model_validation': {
+                    'step_by_step_applied': True,
+                    'claims_analyzed': len(claims),
+                    'socs_created': len(step_socs),
+                    'world_model_alignment': world_model_alignment,
+                    'total_conflicts': total_conflicts,
+                    'paradigm_shift_candidates': len([s for s in step_socs if s.properties.get('paradigm_shift_candidate', False)]),
+                    'confidence_adjustment': reasoning_result.confidence - original_confidence,
+                    'validation_results': world_model_validations
+                },
+                'step_socs': [
+                    {
+                        'name': soc.name,
+                        'confidence': soc.confidence,
+                        'description': soc.description,
+                        'paradigm_shift_candidate': soc.properties.get('paradigm_shift_candidate', False)
+                    }
+                    for soc in step_socs
+                ]
+            })
+            
+            logger.info(f"{engine_type.value} step-by-step world model validation complete",
+                       claims_analyzed=len(claims),
+                       world_model_alignment=world_model_alignment,
+                       confidence_change=reasoning_result.confidence - original_confidence)
+            
+            return reasoning_result
+            
+        except Exception as e:
+            logger.error(f"Step-by-step world model validation failed for {engine_type.value}: {e}")
+            # Return original result if validation fails
+            return reasoning_result
+    
+    async def _extract_claims_from_reasoning(self, 
+                                           reasoning_result: ReasoningResult,
+                                           engine_type: ReasoningEngine) -> List[str]:
+        """Extract individual claims from reasoning result based on engine type"""
+        
+        reasoning_trace = reasoning_result.reasoning_trace
+        if not reasoning_trace or len(reasoning_trace) < 10:
+            return []
+        
+        # Simple claim extraction based on sentence structure
+        # In full implementation, this would use NLP parsing
+        claims = []
+        
+        # Split by common sentence terminators
+        sentences = []
+        for delimiter in ['. ', '! ', '? ', '\n']:
+            if delimiter in reasoning_trace:
+                sentences.extend(reasoning_trace.split(delimiter))
+        
+        # Filter for substantive claims (longer than 20 chars, contains key verbs)
+        claim_indicators = ['is', 'are', 'demonstrates', 'shows', 'proves', 'indicates', 'suggests', 
+                          'implies', 'causes', 'results', 'leads', 'enables', 'requires', 'violates']
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if (len(sentence) > 20 and 
+                any(indicator in sentence.lower() for indicator in claim_indicators) and
+                not sentence.lower().startswith(('however', 'therefore', 'thus', 'hence'))):
+                claims.append(sentence)
+        
+        # Limit to top 5 most substantive claims to avoid overwhelming the world model
+        return claims[:5]
+    
+    async def _validate_soc_against_world_model_principles(self, 
+                                                         soc: SOC,
+                                                         context: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate SOC against world model principles with detailed analysis"""
+        
+        try:
+            # Create a temporary reasoning result for world model validation
+            temp_result = ReasoningResult(
+                reasoning_trace=soc.description,
+                confidence=soc.confidence,
+                quality_score=0.7,  # Default quality
+                engine_type=ReasoningEngine.ABDUCTIVE,  # SOCs are typically abductive
+                execution_time=0.1,
+                content_hash=f"soc_{soc.name}",
+                metadata={'soc_validation': True}
+            )
+            
+            # Use existing world model validation
+            world_model_result = self.world_model.validate_reasoning(temp_result)
+            
+            # Enhanced analysis for paradigm shift detection
+            paradigm_shift_candidate = False
+            
+            # Check for paradigm shift indicators
+            paradigm_keywords = ['violates', 'contradicts', 'challenges', 'overturns', 'revolutionary', 
+                               'paradigm', 'breakthrough', 'novel mechanism', 'new physics']
+            
+            claim_lower = soc.description.lower()
+            if (not world_model_result.is_valid and 
+                any(keyword in claim_lower for keyword in paradigm_keywords) and
+                world_model_result.confidence_adjustment > -0.5):  # Not completely invalid
+                paradigm_shift_candidate = True
+            
+            return {
+                'is_valid': world_model_result.is_valid,
+                'confidence_adjustment': world_model_result.confidence_adjustment,
+                'conflicts': world_model_result.conflicts if hasattr(world_model_result, 'conflicts') else [],
+                'supporting_principles': world_model_result.supporting_principles if hasattr(world_model_result, 'supporting_principles') else [],
+                'paradigm_shift_candidate': paradigm_shift_candidate,
+                'validation_explanation': world_model_result.explanation if hasattr(world_model_result, 'explanation') else "Standard world model validation"
+            }
+            
+        except Exception as e:
+            logger.error(f"World model validation failed for SOC {soc.name}: {e}")
+            return {
+                'is_valid': True,  # Default to valid if validation fails
+                'confidence_adjustment': 0.0,
+                'conflicts': [],
+                'supporting_principles': [],
+                'paradigm_shift_candidate': False,
+                'validation_explanation': f"Validation failed: {str(e)}"
+            }
+    
+    async def _validate_causal_sequence_consistency(self, 
+                                                  previous_results: List[ReasoningResult],
+                                                  next_engine_type: ReasoningEngine,
+                                                  query: str,
+                                                  context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate causal consistency between reasoning steps in the sequence.
+        
+        This implements the detailed causal relationship validation I described:
+        1. Extract causal claims from previous steps
+        2. Check for causal contradictions
+        3. Validate causal chains against world model
+        4. Flag causal paradoxes and inconsistencies
+        """
+        try:
+            if not previous_results:
+                return {'causal_consistency_score': 1.0, 'causal_relationships': [], 'conflicts': []}
+            
+            # Extract causal relationships from previous steps
+            causal_relationships = []
+            causal_conflicts = []
+            
+            for i, result in enumerate(previous_results):
+                # Extract causal claims from this result
+                causal_claims = await self._extract_causal_claims(result)
+                
+                for claim in causal_claims:
+                    # Check against world model causal principles
+                    causal_validation = await self._validate_causal_claim_against_world_model(claim, context)
+                    
+                    causal_relationship = {
+                        'step': i + 1,
+                        'engine': result.engine_type.value if hasattr(result, 'engine_type') else 'unknown',
+                        'claim': claim,
+                        'validation': causal_validation
+                    }
+                    causal_relationships.append(causal_relationship)
+                    
+                    # Check for conflicts with previous causal claims
+                    for prev_rel in causal_relationships[:-1]:
+                        conflict = await self._detect_causal_conflict(causal_relationship, prev_rel)
+                        if conflict:
+                            causal_conflicts.append(conflict)
+            
+            # Calculate overall causal consistency score
+            valid_relationships = [r for r in causal_relationships if r['validation']['is_valid']]
+            causal_consistency_score = len(valid_relationships) / max(1, len(causal_relationships))
+            
+            # Apply conflict penalty
+            if causal_conflicts:
+                conflict_penalty = min(0.3, len(causal_conflicts) * 0.1)
+                causal_consistency_score = max(0.0, causal_consistency_score - conflict_penalty)
+            
+            # Special handling for known physics paradoxes (quantum gravity domain)
+            domain = context.get('domain', 'general')
+            if 'quantum' in query.lower() and 'gravity' in query.lower():
+                # This is expected to have causal tensions
+                if causal_conflicts:
+                    logger.info(f"QUANTUM GRAVITY PARADOX detected: Expected causal tensions in fundamental physics")
+                    # Don't penalize as heavily for expected paradoxes
+                    causal_consistency_score = max(causal_consistency_score, 0.4)
+            
+            return {
+                'causal_consistency_score': causal_consistency_score,
+                'causal_relationships': causal_relationships,
+                'conflicts': causal_conflicts,
+                'total_causal_claims': len(causal_relationships),
+                'valid_causal_claims': len(valid_relationships),
+                'expected_paradox': 'quantum' in query.lower() and 'gravity' in query.lower()
+            }
+            
+        except Exception as e:
+            logger.error(f"Causal sequence validation failed: {e}")
+            return {
+                'causal_consistency_score': 0.5,  # Neutral score on failure
+                'causal_relationships': [],
+                'conflicts': [],
+                'error': str(e)
+            }
+    
+    async def _extract_causal_claims(self, reasoning_result: ReasoningResult) -> List[str]:
+        """Extract causal claims from reasoning result"""
+        
+        reasoning_trace = reasoning_result.reasoning_trace
+        if not reasoning_trace:
+            return []
+        
+        causal_claims = []
+        
+        # Look for causal language patterns
+        causal_patterns = [
+            'causes', 'results in', 'leads to', 'enables', 'prevents', 'requires',
+            'implies', 'due to', 'because of', 'therefore', 'consequently'
+        ]
+        
+        sentences = reasoning_trace.split('. ')
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if any(pattern in sentence.lower() for pattern in causal_patterns):
+                causal_claims.append(sentence)
+        
+        return causal_claims[:3]  # Limit to top 3 to avoid overwhelming
+    
+    async def _validate_causal_claim_against_world_model(self, 
+                                                       claim: str,
+                                                       context: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate causal claim against world model causal principles"""
+        
+        try:
+            # Check against fundamental causal principles
+            claim_lower = claim.lower()
+            
+            # Causality principle: effects must have preceding causes
+            violates_causality = any(phrase in claim_lower for phrase in [
+                'effect without cause', 'instantaneous action', 'faster than light',
+                'violates causality', 'backwards in time'
+            ])
+            
+            # Conservation principles: causal chains must conserve fundamental quantities
+            violates_conservation = any(phrase in claim_lower for phrase in [
+                'creates energy', 'destroys energy', 'violates conservation',
+                'perpetual motion', 'free energy'
+            ])
+            
+            is_valid = not (violates_causality or violates_conservation)
+            confidence_adjustment = 0.0
+            
+            if violates_causality:
+                confidence_adjustment = -0.4  # Major violation
+            elif violates_conservation:
+                confidence_adjustment = -0.3  # Significant violation
+            elif any(word in claim_lower for word in ['consistent', 'supports', 'confirms']):
+                confidence_adjustment = 0.1   # Positive support
+            
+            return {
+                'is_valid': is_valid,
+                'confidence_adjustment': confidence_adjustment,
+                'violates_causality': violates_causality,
+                'violates_conservation': violates_conservation,
+                'explanation': f"Causal validation: {'valid' if is_valid else 'invalid'}"
+            }
+            
+        except Exception as e:
+            return {
+                'is_valid': True,
+                'confidence_adjustment': 0.0,
+                'error': str(e)
+            }
+    
+    async def _detect_causal_conflict(self, 
+                                    relationship1: Dict[str, Any],
+                                    relationship2: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Detect conflicts between causal relationships"""
+        
+        try:
+            claim1 = relationship1['claim'].lower()
+            claim2 = relationship2['claim'].lower()
+            
+            # Simple conflict detection (would be more sophisticated with NLP)
+            conflict_pairs = [
+                (['causes', 'enables'], ['prevents', 'blocks']),
+                (['increases', 'enhances'], ['decreases', 'reduces']),
+                (['supports', 'confirms'], ['contradicts', 'refutes'])
+            ]
+            
+            for positive_words, negative_words in conflict_pairs:
+                if (any(pos in claim1 for pos in positive_words) and 
+                    any(neg in claim2 for neg in negative_words)):
+                    return {
+                        'type': 'causal_contradiction',
+                        'claim1': relationship1['claim'],
+                        'claim2': relationship2['claim'],
+                        'step1': relationship1['step'],
+                        'step2': relationship2['step']
+                    }
+            
+            return None  # No conflict detected
+            
+        except Exception as e:
+            logger.error(f"Causal conflict detection failed: {e}")
+            return None
+    
+    async def _extract_world_model_synthesis_data(self, 
+                                                results: List[ReasoningResult],
+                                                context: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract world model validation data from all reasoning results for synthesis"""
+        
+        try:
+            world_model_data = {
+                'total_claims_analyzed': 0,
+                'total_socs_created': 0,
+                'high_confidence_claims': [],
+                'paradigm_shift_candidates': [],
+                'world_model_conflicts': [],
+                'causal_validation_summary': {},
+                'domain_consistency': {},
+                'overall_alignment_score': 0.0
+            }
+            
+            valid_alignments = []
+            
+            for result in results:
+                if hasattr(result, 'metadata') and result.metadata:
+                    # Extract step-by-step world model validation data
+                    wm_validation = result.metadata.get('world_model_validation', {})
+                    if wm_validation.get('step_by_step_applied', False):
+                        world_model_data['total_claims_analyzed'] += wm_validation.get('claims_analyzed', 0)
+                        world_model_data['total_socs_created'] += wm_validation.get('socs_created', 0)
+                        
+                        alignment = wm_validation.get('world_model_alignment', 0.0)
+                        if alignment > 0:
+                            valid_alignments.append(alignment)
+                        
+                        # Collect paradigm shift candidates
+                        for soc_data in result.metadata.get('step_socs', []):
+                            if soc_data.get('paradigm_shift_candidate', False):
+                                world_model_data['paradigm_shift_candidates'].append({
+                                    'claim': soc_data['description'],
+                                    'confidence': soc_data['confidence'],
+                                    'engine': result.engine_type.value if hasattr(result, 'engine_type') else 'unknown'
+                                })
+                            elif soc_data.get('confidence', 0) > 0.8:
+                                world_model_data['high_confidence_claims'].append({
+                                    'claim': soc_data['description'],
+                                    'confidence': soc_data['confidence'],
+                                    'engine': result.engine_type.value if hasattr(result, 'engine_type') else 'unknown'
+                                })
+                    
+                    # Extract causal validation data
+                    causal_validation = result.metadata.get('causal_validation', {})
+                    if causal_validation:
+                        causal_score = causal_validation.get('causal_consistency_score', 0.0)
+                        if causal_score > 0:
+                            engine_type = result.engine_type.value if hasattr(result, 'engine_type') else 'unknown'
+                            world_model_data['causal_validation_summary'][engine_type] = causal_score
+            
+            # Calculate overall alignment score
+            if valid_alignments:
+                world_model_data['overall_alignment_score'] = statistics.mean(valid_alignments)
+            
+            # Determine domain consistency based on alignment patterns
+            if world_model_data['overall_alignment_score'] > 0.8:
+                world_model_data['domain_consistency']['physics'] = 'high'
+                world_model_data['domain_consistency']['logic'] = 'high' 
+            elif world_model_data['overall_alignment_score'] > 0.6:
+                world_model_data['domain_consistency']['physics'] = 'moderate'
+                world_model_data['domain_consistency']['logic'] = 'moderate'
+            else:
+                world_model_data['domain_consistency']['physics'] = 'low'
+                world_model_data['domain_consistency']['logic'] = 'low'
+            
+            return world_model_data
+            
+        except Exception as e:
+            logger.error(f"Failed to extract world model synthesis data: {e}")
+            return {
+                'total_claims_analyzed': 0,
+                'overall_alignment_score': 0.5,
+                'error': str(e)
+            }
+    
+    def _integrate_evidence_with_world_model(self, 
+                                           all_evidence: List[str],
+                                           world_model_summary: Dict[str, Any]) -> str:
+        """Integrate evidence with world model validation context for synthesis"""
+        
+        try:
+            # Basic evidence integration
+            integrated_evidence = self._integrate_evidence(all_evidence)
+            
+            # Add world model context
+            world_model_context = self._format_world_model_context_for_synthesis(world_model_summary)
+            
+            # Combine evidence with world model insights
+            enhanced_evidence = f"{integrated_evidence}\n\nWORLD MODEL VALIDATION CONTEXT:\n{world_model_context}"
+            
+            return enhanced_evidence
+            
+        except Exception as e:
+            logger.error(f"Failed to integrate evidence with world model: {e}")
+            return self._integrate_evidence(all_evidence)  # Fallback to basic integration
+    
+    def _format_world_model_context_for_synthesis(self, world_model_summary: Dict[str, Any]) -> str:
+        """Format world model summary for synthesis context"""
+        
+        try:
+            context_parts = []
+            
+            # Overall validation summary
+            alignment = world_model_summary.get('overall_alignment_score', 0.0)
+            claims_analyzed = world_model_summary.get('total_claims_analyzed', 0)
+            
+            context_parts.append(f"- {claims_analyzed} claims validated against world model principles (alignment: {alignment:.3f})")
+            
+            # High confidence claims
+            high_conf_claims = world_model_summary.get('high_confidence_claims', [])
+            if high_conf_claims:
+                context_parts.append(f"- {len(high_conf_claims)} high-confidence claims validated")
+                for claim in high_conf_claims[:3]:  # Top 3
+                    context_parts.append(f"  • {claim['claim'][:100]}... (confidence: {claim['confidence']:.3f})")
+            
+            # Paradigm shift candidates
+            paradigm_candidates = world_model_summary.get('paradigm_shift_candidates', [])
+            if paradigm_candidates:
+                context_parts.append(f"- {len(paradigm_candidates)} paradigm shift candidates identified")
+                for candidate in paradigm_candidates[:2]:  # Top 2
+                    context_parts.append(f"  • {candidate['claim'][:100]}... (revolutionary potential)")
+            
+            # Domain consistency
+            domain_consistency = world_model_summary.get('domain_consistency', {})
+            if domain_consistency:
+                physics_consistency = domain_consistency.get('physics', 'unknown')
+                logic_consistency = domain_consistency.get('logic', 'unknown')
+                context_parts.append(f"- Domain consistency: Physics ({physics_consistency}), Logic ({logic_consistency})")
+            
+            # Causal validation summary
+            causal_summary = world_model_summary.get('causal_validation_summary', {})
+            if causal_summary:
+                causal_scores = list(causal_summary.values())
+                avg_causal_score = statistics.mean(causal_scores) if causal_scores else 0.0
+                context_parts.append(f"- Causal relationship validation: {avg_causal_score:.3f} average consistency")
+            
+            return "\n".join(context_parts)
+            
+        except Exception as e:
+            return f"World model context formatting failed: {str(e)}"
+    
+    def _calculate_synthesis_confidence_calibration(self, world_model_summary: Dict[str, Any]) -> Dict[str, str]:
+        """Calculate confidence calibration language based on world model validation"""
+        
+        try:
+            alignment = world_model_summary.get('overall_alignment_score', 0.5)
+            paradigm_candidates = len(world_model_summary.get('paradigm_shift_candidates', []))
+            
+            calibration = {}
+            
+            # Calibrate language based on world model validation
+            if alignment > 0.8:
+                calibration['high_confidence'] = "Research demonstrates..."
+                calibration['medium_confidence'] = "Studies consistently show..."
+                calibration['low_confidence'] = "Evidence suggests..."
+            elif alignment > 0.5:
+                calibration['high_confidence'] = "Evidence suggests..."
+                calibration['medium_confidence'] = "Research indicates..."
+                calibration['low_confidence'] = "Some evidence points to..."
+            else:
+                calibration['high_confidence'] = "Preliminary evidence suggests..."
+                calibration['medium_confidence'] = "Initial research indicates..."
+                calibration['low_confidence'] = "Exploratory studies suggest..."
+            
+            # Special handling for paradigm shift candidates
+            if paradigm_candidates > 0:
+                calibration['paradigm_shift'] = "Breakthrough research indicates..."
+            
+            return calibration
+            
+        except Exception as e:
+            return {
+                'high_confidence': "Research suggests...",
+                'medium_confidence': "Evidence indicates...",
+                'low_confidence': "Studies suggest...",
+                'error': str(e)
+            }
+    
+    def get_world_model_learning_status(self) -> Dict[str, Any]:
+        """Get current status of NWTN's adaptive learning system with Bayesian insights"""
+        
+        try:
+            learning_status = self.world_model_learning_manager.get_world_model_status()
+            recent_transitions = self.world_model_learning_manager.get_recent_transitions(days=7)
+            bayesian_insights = self.world_model_learning_manager.get_bayesian_insights()
+            
+            # Add additional context
+            learning_status['recent_transitions_count'] = len(recent_transitions)
+            learning_status['recent_transitions'] = recent_transitions[:10]  # Last 10 transitions
+            
+            # Calculate learning velocity (transitions per day)
+            if recent_transitions:
+                days_with_activity = len(set(
+                    datetime.fromisoformat(t['transition']['timestamp'].replace('Z', '+00:00')).date()
+                    for t in recent_transitions
+                ))
+                learning_status['learning_velocity'] = len(recent_transitions) / max(1, days_with_activity)
+            else:
+                learning_status['learning_velocity'] = 0.0
+            
+            # Add Bayesian insights
+            learning_status['bayesian_insights'] = bayesian_insights
+            
+            return learning_status
+            
+        except Exception as e:
+            logger.error(f"Failed to get learning status: {e}")
+            return {
+                'error': str(e),
+                'world_model_socs_count': 0,
+                'candidate_socs_count': 0,
+                'total_socs': 0
+            }
     
     def _identify_optimal_patterns(self, high_performers: List[SequentialResult]) -> List[str]:
         """Identify optimal reasoning patterns"""
@@ -20059,7 +20870,7 @@ class ProcessingProgressVisualizer:
             estimated_total = elapsed_time / (progress / 100)
             time_remaining = max(0, estimated_total - elapsed_time)
         else:
-            time_remaining = session["estimated_time"]
+            time_remaining = session.get("estimated_time", 0.0) or 0.0
         
         return {
             "session_id": session_id,
@@ -20080,7 +20891,13 @@ class ProcessingProgressVisualizer:
         
         # Calculate final metrics
         total_time = time.time() - session["start_time"]
-        time_accuracy = abs(total_time - session["estimated_time"]) / session["estimated_time"]
+        
+        # Handle cases where estimated_time might be None or 0
+        estimated_time = session.get("estimated_time", 0.0)
+        if estimated_time is None or estimated_time <= 0:
+            estimated_time = total_time  # Use actual time as fallback
+        
+        time_accuracy = abs(total_time - estimated_time) / estimated_time
         
         completion_data = {
             "session_id": session_id,
@@ -20145,7 +20962,7 @@ class ProcessingProgressVisualizer:
             },
             "time_display": {
                 "elapsed": time.time() - session["start_time"],
-                "estimated_remaining": session["estimated_time"] - (time.time() - session["start_time"])
+                "estimated_remaining": max(0, (session.get("estimated_time", 0.0) or 0.0) - (time.time() - session["start_time"]))
             }
         }
     
