@@ -87,10 +87,10 @@ class AnalogicalElement:
 @dataclass
 class AnalogicalLink:
     """Represents a link between two elements in an analogical chain"""
-    id: str = field(default_factory=lambda: str(uuid4()))
     source_element: AnalogicalElement
     target_element: AnalogicalElement
     relation_type: AnalogicalRelationType
+    id: str = field(default_factory=lambda: str(uuid4()))
     similarity_score: float = 0.0
     confidence: float = 0.0
     evidence: List[str] = field(default_factory=list)
@@ -101,8 +101,8 @@ class AnalogicalLink:
 @dataclass
 class AnalogicalChain:
     """Represents a complete analogical reasoning chain"""
-    id: str = field(default_factory=lambda: str(uuid4()))
     chain_type: ChainType
+    id: str = field(default_factory=lambda: str(uuid4()))
     elements: List[AnalogicalElement] = field(default_factory=list)
     links: List[AnalogicalLink] = field(default_factory=list)
     source_query: str = ""

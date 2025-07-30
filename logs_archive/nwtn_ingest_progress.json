@@ -1,0 +1,9 @@
+{
+  "total_papers": 189882,
+  "processed": 49631,
+  "embeddings_generated": 49631,
+  "content_hashes_created": 49631,
+  "provenance_records_created": 49631,
+  "errors": 140251,
+  "start_time": 1753626097.9737868
+}

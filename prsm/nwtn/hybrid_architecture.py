@@ -21,9 +21,10 @@ import json
 import logging
 from typing import Dict, List, Optional, Any, Tuple, Union, Set
 from uuid import UUID, uuid4
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from enum import Enum
 from decimal import Decimal
+import statistics
 
 import structlog
 from pydantic import BaseModel, Field
@@ -139,37 +140,384 @@ class SOC(PRSMBaseModel):
     properties: Dict[str, Any] = Field(default_factory=dict)
     relationships: Dict[str, float] = Field(default_factory=dict)  # SOC_ID -> weight
     
-    # Learning tracking
+    # Enhanced learning tracking
     evidence_count: int = Field(default=0)
     update_count: int = Field(default=0)
     last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    
+    # Adaptive learning system
+    learning_history: List[Dict[str, Any]] = Field(default_factory=list)
+    temporal_decay_rate: float = Field(default=0.95)  # How much to discount older evidence
+    confidence_level_history: List[Dict[str, Any]] = Field(default_factory=list)  # Track level transitions
+    promotion_threshold: float = Field(default=0.85)  # Threshold for level promotion
+    demotion_threshold: float = Field(default=0.3)   # Threshold for level demotion
+    
+    # World model integration status
+    world_model_candidate: bool = Field(default=False)  # Candidate for world model inclusion
+    world_model_inclusion_date: Optional[datetime] = None
     
     # Domain context
     domain: str = Field(default="general")
     tags: List[str] = Field(default_factory=list)
     
-    def update_confidence(self, new_evidence: float, weight: float = 1.0):
-        """Update confidence using Bayesian updating"""
+    def update_confidence(self, new_evidence: float, weight: float = 1.0, source: str = "unknown", paper_date: Optional[datetime] = None):
+        """
+        Update confidence using adaptive Bayesian updating with temporal weighting
+        
+        Args:
+            new_evidence: Evidence strength (0.0 to 1.0)
+            weight: Base weight for this evidence
+            source: Source of evidence (for tracking)
+            paper_date: Date of source paper (for temporal weighting)
+        """
         prior = self.confidence
-        likelihood = new_evidence
         
-        # Bayesian update with weighted evidence
-        posterior = (prior * weight + likelihood) / (weight + 1)
-        self.confidence = max(0.0, min(1.0, posterior))
+        # Apply temporal weighting - recent findings weighted more heavily
+        temporal_weight = self._calculate_temporal_weight(paper_date) if paper_date else 1.0
+        effective_weight = weight * temporal_weight
         
-        # Update confidence level based on threshold
-        if self.confidence >= 0.9:
-            self.confidence_level = ConfidenceLevel.CORE
-        elif self.confidence >= 0.7:
-            self.confidence_level = ConfidenceLevel.VALIDATED
-        elif self.confidence >= 0.5:
-            self.confidence_level = ConfidenceLevel.INTERMEDIATE
-        else:
-            self.confidence_level = ConfidenceLevel.TENABLE
-            
+        # TRUE BAYESIAN UPDATE: P(H|E) = P(E|H) * P(H) / P(E)
+        bayesian_result = self._bayesian_update(prior, new_evidence, effective_weight, source)
+        old_confidence = self.confidence
+        self.confidence = bayesian_result['posterior_probability']
+        
+        # Record learning history with Bayesian metrics
+        learning_event = {
+            'timestamp': datetime.now(timezone.utc),
+            'prior_confidence': prior,
+            'new_evidence': new_evidence,
+            'source': source,
+            'temporal_weight': temporal_weight,
+            'effective_weight': effective_weight,
+            'posterior_confidence': self.confidence,
+            'paper_date': paper_date.isoformat() if paper_date else None,
+            # Enhanced Bayesian tracking
+            'bayesian_metrics': bayesian_result,
+            'confidence_change': self.confidence - prior,
+            'evidence_strength_assessment': self._assess_evidence_strength(new_evidence, source),
+            'uncertainty_estimate': bayesian_result.get('uncertainty', 0.1)
+        }
+        self.learning_history.append(learning_event)
+        
+        # Update tracking metrics
         self.evidence_count += 1
         self.update_count += 1
         self.last_updated = datetime.now(timezone.utc)
+        
+        # Check for confidence level transitions
+        old_level = self.confidence_level
+        new_level = self._determine_confidence_level()
+        
+        if new_level != old_level:
+            self._handle_confidence_level_transition(old_level, new_level, learning_event)
+        
+        self.confidence_level = new_level
+    
+    def _calculate_temporal_weight(self, paper_date: datetime) -> float:
+        """Calculate temporal weight - more recent papers weighted more heavily"""
+        if not paper_date:
+            return 1.0
+        
+        now = datetime.now(timezone.utc)
+        # Handle timezone-naive dates
+        if paper_date.tzinfo is None:
+            paper_date = paper_date.replace(tzinfo=timezone.utc)
+        
+        days_ago = (now - paper_date).days
+        
+        # Exponential decay: weight = decay_rate^(days_ago / 365)
+        # Recent papers (last year) maintain most of their weight
+        # Older papers gradually lose influence
+        temporal_weight = self.temporal_decay_rate ** (days_ago / 365.0)
+        
+        # Minimum weight of 0.1 for very old papers (still have some influence)
+        return max(0.1, temporal_weight)
+    
+    def _determine_confidence_level(self) -> ConfidenceLevel:
+        """Determine confidence level based on adaptive thresholds"""
+        
+        # Dynamic thresholds based on evidence count and consistency
+        evidence_bonus = min(0.05, self.evidence_count * 0.001)  # Small bonus for more evidence
+        
+        # Check recent evidence consistency
+        consistency_bonus = self._calculate_consistency_bonus()
+        
+        effective_confidence = self.confidence + evidence_bonus + consistency_bonus
+        
+        # CORE level (World Model candidates) - very high bar
+        if effective_confidence >= 0.92 and self.evidence_count >= 10:
+            return ConfidenceLevel.CORE
+        # VALIDATED level - high confidence, well-supported
+        elif effective_confidence >= 0.75 and self.evidence_count >= 5:
+            return ConfidenceLevel.VALIDATED
+        # INTERMEDIATE level - moderate confidence
+        elif effective_confidence >= 0.5 and self.evidence_count >= 2:
+            return ConfidenceLevel.INTERMEDIATE
+        # TENABLE level - low confidence, tentative
+        else:
+            return ConfidenceLevel.TENABLE
+    
+    def _calculate_consistency_bonus(self) -> float:
+        """Calculate bonus based on consistency of recent evidence"""
+        if len(self.learning_history) < 3:
+            return 0.0
+        
+        # Look at last 5 evidence updates
+        recent_evidence = [event['new_evidence'] for event in self.learning_history[-5:]]
+        
+        if len(recent_evidence) < 2:
+            return 0.0
+        
+        # Calculate standard deviation of recent evidence
+        import statistics
+        try:
+            std_dev = statistics.stdev(recent_evidence)
+            # Bonus for consistent evidence (low standard deviation)
+            consistency_bonus = max(0.0, (0.3 - std_dev) * 0.1)  # Up to 0.03 bonus
+            return consistency_bonus
+        except:
+            return 0.0
+    
+    def _handle_confidence_level_transition(self, old_level: ConfidenceLevel, new_level: ConfidenceLevel, learning_event: Dict[str, Any]):
+        """Handle transitions between confidence levels"""
+        
+        transition_event = {
+            'timestamp': datetime.now(timezone.utc),
+            'old_level': old_level.value,
+            'new_level': new_level.value,
+            'confidence_at_transition': self.confidence,
+            'evidence_count_at_transition': self.evidence_count,
+            'trigger_event': learning_event
+        }
+        
+        self.confidence_level_history.append(transition_event)
+        
+        # Special handling for CORE level promotion (World Model inclusion)
+        if new_level == ConfidenceLevel.CORE and old_level != ConfidenceLevel.CORE:
+            self.world_model_candidate = True
+            logger.info(f"SOC '{self.name}' promoted to CORE level - World Model candidate",
+                       confidence=self.confidence,
+                       evidence_count=self.evidence_count)
+        
+        # Handle demotion from CORE level (World Model removal)
+        elif old_level == ConfidenceLevel.CORE and new_level != ConfidenceLevel.CORE:
+            self.world_model_candidate = False
+            if self.world_model_inclusion_date:
+                logger.warning(f"SOC '{self.name}' demoted from CORE level - World Model removal candidate",
+                              confidence=self.confidence,
+                              evidence_count=self.evidence_count)
+        
+        logger.debug(f"SOC '{self.name}' confidence level transition: {old_level.value} → {new_level.value}",
+                    confidence=self.confidence,
+                    evidence_count=self.evidence_count)
+    
+    def _bayesian_update(self, prior: float, evidence: float, weight: float, source: str) -> Dict[str, Any]:
+        """
+        Sophisticated Bayesian updating for SOC confidence
+        
+        Implements proper Bayesian reasoning: P(H|E) = P(E|H) * P(H) / P(E)
+        Where:
+        - H = Hypothesis (SOC is true)
+        - E = Evidence (new observation)
+        - P(H) = Prior probability (current confidence)
+        - P(E|H) = Likelihood (probability of observing evidence if hypothesis is true)
+        - P(E) = Marginal probability (overall probability of observing evidence)
+        """
+        
+        # Calculate likelihood P(E|H) based on evidence strength and source credibility
+        likelihood_true = self._calculate_likelihood_if_true(evidence, source)
+        likelihood_false = self._calculate_likelihood_if_false(evidence, source)
+        
+        # Calculate source credibility adjustment
+        source_credibility = self._calculate_source_credibility(source)
+        
+        # Adjust likelihoods based on source credibility
+        likelihood_true *= source_credibility
+        likelihood_false *= (1.0 - source_credibility)
+        
+        # Prior probabilities
+        prior_true = prior  # P(H) = current confidence
+        prior_false = 1.0 - prior  # P(¬H) = 1 - current confidence
+        
+        # Calculate marginal probability P(E) using law of total probability
+        # P(E) = P(E|H) * P(H) + P(E|¬H) * P(¬H)
+        marginal_probability = (likelihood_true * prior_true) + (likelihood_false * prior_false)
+        
+        # Avoid division by zero
+        if marginal_probability == 0:
+            marginal_probability = 0.001
+        
+        # Calculate posterior using Bayes' theorem
+        # P(H|E) = P(E|H) * P(H) / P(E)
+        posterior_true = (likelihood_true * prior_true) / marginal_probability
+        
+        # Apply temporal weighting to the Bayesian update
+        # More recent evidence gets higher influence on the posterior
+        temporal_adjustment = weight / (weight + 1.0)  # Normalize weight influence
+        final_posterior = prior_true * (1 - temporal_adjustment) + posterior_true * temporal_adjustment
+        
+        # Ensure posterior is in valid range [0, 1]
+        final_posterior = max(0.0, min(1.0, final_posterior))
+        
+        # Calculate uncertainty (epistemic uncertainty based on evidence quality)
+        uncertainty = self._calculate_bayesian_uncertainty(
+            likelihood_true, likelihood_false, prior_true, marginal_probability, source
+        )
+        
+        # Calculate information gain (KL divergence between prior and posterior)
+        information_gain = self._calculate_information_gain(prior_true, final_posterior)
+        
+        return {
+            'posterior_probability': final_posterior,
+            'likelihood_if_true': likelihood_true,
+            'likelihood_if_false': likelihood_false,
+            'marginal_probability': marginal_probability,
+            'source_credibility': source_credibility,
+            'information_gain': information_gain,
+            'uncertainty': uncertainty,
+            'bayesian_factor': likelihood_true / max(likelihood_false, 0.001),  # Bayes factor
+            'confidence_change': final_posterior - prior_true,
+            'temporal_adjustment_applied': temporal_adjustment
+        }
+    
+    def _calculate_likelihood_if_true(self, evidence: float, source: str) -> float:
+        """Calculate P(E|H) - probability of observing this evidence if hypothesis is true"""
+        
+        # Evidence strength is the primary factor
+        base_likelihood = evidence
+        
+        # CORRECTED: Adjust based on source QUALITY, not reasoning method
+        source_lower = source.lower()
+        if 'world_model' in source_lower:
+            # World model validation is highly reliable for consistency
+            base_likelihood = min(0.95, base_likelihood + 0.2)
+        elif any(src_type in source_lower for src_type in ['peer_reviewed', 'journal']):
+            # Peer-reviewed sources are highly reliable
+            base_likelihood = min(0.90, base_likelihood + 0.15)
+        elif any(src_type in source_lower for src_type in ['conference', 'preprint', 'arxiv']):
+            # Academic sources (not yet fully peer-reviewed) are quite reliable
+            base_likelihood = min(0.85, base_likelihood + 0.1)
+        elif any(reasoning_type in source_lower for reasoning_type in 
+                ['deductive', 'inductive', 'abductive', 'causal', 'probabilistic', 'analogical', 'counterfactual']):
+            # All NWTN reasoning engines are equally capable - no bias
+            base_likelihood = min(0.80, base_likelihood + 0.05)
+        # No adjustment for other sources - evidence strength speaks for itself
+        
+        return max(0.05, min(0.95, base_likelihood))  # Keep in reasonable range
+    
+    def _calculate_likelihood_if_false(self, evidence: float, source: str) -> float:
+        """Calculate P(E|¬H) - probability of observing this evidence if hypothesis is false"""
+        
+        # If hypothesis is false, we expect evidence to be weaker
+        base_likelihood = 1.0 - evidence
+        
+        # CORRECTED: Adjust based on source QUALITY for contradiction reliability
+        source_lower = source.lower()
+        if 'world_model' in source_lower:
+            # If world model contradicts, it's very reliable
+            base_likelihood = min(0.90, base_likelihood + 0.3)
+        elif any(src_type in source_lower for src_type in ['peer_reviewed', 'journal']):
+            # Peer-reviewed contradiction is quite reliable
+            base_likelihood = min(0.85, base_likelihood + 0.2)
+        elif any(reasoning_type in source_lower for reasoning_type in 
+                ['deductive', 'inductive', 'abductive', 'causal', 'probabilistic', 'analogical', 'counterfactual']):
+            # All reasoning engines can produce errors equally - no bias
+            base_likelihood = min(0.70, base_likelihood + 0.1)
+        
+        return max(0.05, min(0.95, base_likelihood))
+    
+    def _calculate_source_credibility(self, source: str) -> float:
+        """
+        Calculate credibility of evidence source based on ACTUAL source quality,
+        not reasoning method (which are all equally valid approaches)
+        """
+        
+        source_lower = source.lower()
+        
+        # CORRECTED: Source credibility based on evidence origin, not reasoning type
+        if 'world_model' in source_lower:
+            return 0.95  # NWTN's own World Model (for consistency checks)
+        elif 'peer_reviewed' in source_lower or 'journal' in source_lower:
+            return 0.90  # Peer-reviewed academic papers
+        elif 'conference' in source_lower or 'proceedings' in source_lower:
+            return 0.85  # Conference papers and proceedings
+        elif 'preprint' in source_lower or 'arxiv' in source_lower:
+            return 0.75  # Preprint servers (not yet peer-reviewed)
+        elif 'book' in source_lower or 'textbook' in source_lower:
+            return 0.80  # Academic books and textbooks
+        elif 'thesis' in source_lower or 'dissertation' in source_lower:
+            return 0.70  # PhD theses and dissertations
+        elif 'patent' in source_lower:
+            return 0.65  # Patent documents (technical but commercial bias)
+        elif 'website' in source_lower or 'blog' in source_lower:
+            return 0.40  # Web sources (variable quality)
+        elif 'wikipedia' in source_lower:
+            return 0.60  # Wikipedia (crowd-sourced, generally reliable)
+        elif any(reasoning_type in source_lower for reasoning_type in 
+                ['deductive', 'inductive', 'abductive', 'causal', 'probabilistic', 'analogical', 'counterfactual']):
+            # All reasoning types are equally valid - credibility comes from evidence source, not method
+            return 0.75  # Default for NWTN reasoning engines (good but not perfect)
+        else:
+            return 0.50  # Unknown sources get neutral credibility
+    
+    def _calculate_bayesian_uncertainty(self, likelihood_true: float, likelihood_false: float, 
+                                      prior: float, marginal: float, source: str) -> float:
+        """Calculate epistemic uncertainty in the Bayesian update"""
+        
+        # Uncertainty increases when:
+        # 1. Likelihoods are similar (ambiguous evidence)
+        # 2. Source credibility is low
+        # 3. Marginal probability is high (evidence is common)
+        
+        likelihood_similarity = 1.0 - abs(likelihood_true - likelihood_false)
+        source_credibility = self._calculate_source_credibility(source)
+        evidence_commonality = marginal
+        
+        # Combine uncertainty factors
+        uncertainty = (
+            likelihood_similarity * 0.4 +  # Ambiguous evidence increases uncertainty
+            (1.0 - source_credibility) * 0.4 +  # Low credibility increases uncertainty
+            evidence_commonality * 0.2  # Common evidence provides less certainty
+        )
+        
+        return max(0.01, min(0.5, uncertainty))  # Reasonable uncertainty range
+    
+    def _calculate_information_gain(self, prior: float, posterior: float) -> float:
+        """Calculate information gain (KL divergence) from Bayesian update"""
+        
+        # Information gain measures how much the evidence changed our beliefs
+        # Higher gain = more informative evidence
+        
+        if prior == 0 or prior == 1 or posterior == 0 or posterior == 1:
+            return 0.0  # Avoid log(0)
+        
+        # KL divergence: D(P||Q) = P * log(P/Q) + (1-P) * log((1-P)/(1-Q))
+        try:
+            import math
+            kl_divergence = (
+                posterior * math.log(posterior / prior) +
+                (1 - posterior) * math.log((1 - posterior) / (1 - prior))
+            )
+            return max(0.0, kl_divergence)
+        except:
+            return abs(posterior - prior)  # Fallback to simple difference
+    
+    def _assess_evidence_strength(self, evidence: float, source: str) -> str:
+        """Assess the strength of evidence for logging purposes"""
+        
+        strength = evidence * self._calculate_source_credibility(source)
+        
+        if strength >= 0.8:
+            return "very_strong"
+        elif strength >= 0.6:
+            return "strong"
+        elif strength >= 0.4:
+            return "moderate"
+        elif strength >= 0.2:
+            return "weak"
+        else:
+            return "very_weak"
 
 
 class ExperimentResult(PRSMBaseModel):
@@ -406,6 +754,281 @@ class BayesianSearchEngine:
             from_agent=result.agent_id,
             information_value=result.information_value
         )
+
+
+class WorldModelLearningManager:
+    """
+    Manages NWTN's adaptive learning system for World Model evolution
+    
+    Implements the hierarchical confidence system where:
+    - TENABLE: Low confidence, tentative knowledge (newly discovered)
+    - INTERMEDIATE: Medium confidence, some validation (repeated findings)
+    - VALIDATED: High confidence, well-supported (strong evidence base)
+    - CORE: Highest confidence, fundamental truth (World Model inclusion)
+    
+    Features:
+    - Temporal weighting (recent findings weighted more heavily)
+    - Confidence level transitions with thresholds
+    - World Model inclusion/exclusion based on evidence
+    - Learning history tracking
+    """
+    
+    def __init__(self):
+        self.world_model_socs: Dict[str, SOC] = {}  # SOCs in the World Model (CORE level)
+        self.candidate_socs: Dict[str, SOC] = {}    # Candidates for World Model inclusion
+        self.learning_metrics = {
+            'total_socs': 0,
+            'promotions_to_core': 0,
+            'demotions_from_core': 0,
+            'recent_evidence_processed': 0,
+            'temporal_adjustments_made': 0
+        }
+        
+    def process_new_evidence(self, soc_name: str, evidence_strength: float, 
+                           source: str, paper_date: Optional[datetime] = None) -> Dict[str, Any]:
+        """
+        Process new evidence for a SOC with the adaptive learning system
+        
+        Returns information about any confidence level transitions
+        """
+        try:
+            # Get or create SOC
+            if soc_name not in self.candidate_socs and soc_name not in self.world_model_socs:
+                # Create new SOC with TENABLE confidence level
+                new_soc = SOC(
+                    name=soc_name,
+                    soc_type=SOCType.CONCEPT,
+                    confidence=0.3,  # Start with low confidence
+                    confidence_level=ConfidenceLevel.TENABLE,
+                    domain="general"
+                )
+                self.candidate_socs[soc_name] = new_soc
+                logger.info(f"Created new SOC: {soc_name} at TENABLE level")
+            
+            # Get the SOC (whether from candidates or world model)
+            soc = self.candidate_socs.get(soc_name) or self.world_model_socs.get(soc_name)
+            if not soc:
+                return {'error': 'Failed to create or retrieve SOC'}
+            
+            # Record pre-update state
+            old_confidence = soc.confidence
+            old_level = soc.confidence_level
+            
+            # Update confidence with new evidence
+            soc.update_confidence(evidence_strength, weight=1.0, source=source, paper_date=paper_date)
+            
+            # Check for level transitions
+            transition_info = None
+            if soc.confidence_level != old_level:
+                transition_info = self._handle_soc_level_transition(soc, old_level, soc.confidence_level)
+            
+            # Update metrics
+            self.learning_metrics['recent_evidence_processed'] += 1
+            if paper_date:
+                self.learning_metrics['temporal_adjustments_made'] += 1
+            
+            return {
+                'soc_name': soc_name,
+                'old_confidence': old_confidence,
+                'new_confidence': soc.confidence,
+                'old_level': old_level.value,
+                'new_level': soc.confidence_level.value,
+                'transition_info': transition_info,
+                'evidence_count': soc.evidence_count,
+                'temporal_weight_applied': soc.learning_history[-1]['temporal_weight'] if soc.learning_history else 1.0
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to process evidence for SOC {soc_name}: {e}")
+            return {'error': str(e)}
+    
+    def _handle_soc_level_transition(self, soc: SOC, old_level: ConfidenceLevel, new_level: ConfidenceLevel) -> Dict[str, Any]:
+        """Handle transitions between confidence levels"""
+        
+        transition_info = {
+            'transition_type': f"{old_level.value}_to_{new_level.value}",
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'confidence_at_transition': soc.confidence,
+            'evidence_count': soc.evidence_count
+        }
+        
+        # PROMOTION TO CORE LEVEL (World Model inclusion)
+        if new_level == ConfidenceLevel.CORE and old_level != ConfidenceLevel.CORE:
+            self._promote_to_world_model(soc)
+            transition_info['world_model_action'] = 'inclusion'
+            self.learning_metrics['promotions_to_core'] += 1
+            
+        # DEMOTION FROM CORE LEVEL (World Model exclusion)
+        elif old_level == ConfidenceLevel.CORE and new_level != ConfidenceLevel.CORE:
+            self._demote_from_world_model(soc)
+            transition_info['world_model_action'] = 'exclusion'
+            self.learning_metrics['demotions_from_core'] += 1
+            
+        # OTHER TRANSITIONS (between TENABLE, INTERMEDIATE, VALIDATED)
+        else:
+            transition_info['world_model_action'] = 'none'
+            
+        logger.info(f"SOC '{soc.name}' confidence level transition",
+                   old_level=old_level.value,
+                   new_level=new_level.value,
+                   confidence=soc.confidence,
+                   world_model_action=transition_info['world_model_action'])
+        
+        return transition_info
+    
+    def _promote_to_world_model(self, soc: SOC):
+        """Promote SOC to World Model (CORE level)"""
+        
+        # Move from candidates to world model
+        if soc.name in self.candidate_socs:
+            del self.candidate_socs[soc.name]
+        
+        self.world_model_socs[soc.name] = soc
+        soc.world_model_inclusion_date = datetime.now(timezone.utc)
+        
+        logger.warning(f"🌟 WORLD MODEL INCLUSION: SOC '{soc.name}' promoted to CORE level",
+                      confidence=soc.confidence,
+                      evidence_count=soc.evidence_count,
+                      domain=soc.domain)
+    
+    def _demote_from_world_model(self, soc: SOC):
+        """Demote SOC from World Model (remove from CORE level)"""
+        
+        # Move from world model back to candidates
+        if soc.name in self.world_model_socs:
+            del self.world_model_socs[soc.name]
+        
+        self.candidate_socs[soc.name] = soc
+        soc.world_model_inclusion_date = None
+        soc.world_model_candidate = False
+        
+        logger.warning(f"📉 WORLD MODEL EXCLUSION: SOC '{soc.name}' demoted from CORE level",
+                      confidence=soc.confidence,
+                      evidence_count=soc.evidence_count,
+                      new_level=soc.confidence_level.value)
+    
+    def get_world_model_status(self) -> Dict[str, Any]:
+        """Get current status of the World Model learning system"""
+        
+        return {
+            'world_model_socs_count': len(self.world_model_socs),
+            'candidate_socs_count': len(self.candidate_socs),
+            'total_socs': len(self.world_model_socs) + len(self.candidate_socs),
+            'confidence_level_distribution': self._get_confidence_level_distribution(),
+            'learning_metrics': self.learning_metrics.copy(),
+            'world_model_soc_names': list(self.world_model_socs.keys())
+        }
+    
+    def _get_confidence_level_distribution(self) -> Dict[str, int]:
+        """Get distribution of SOCs across confidence levels"""
+        
+        distribution = {level.value: 0 for level in ConfidenceLevel}
+        
+        all_socs = {**self.world_model_socs, **self.candidate_socs}
+        for soc in all_socs.values():
+            distribution[soc.confidence_level.value] += 1
+            
+        return distribution
+    
+    def get_recent_transitions(self, days: int = 7) -> List[Dict[str, Any]]:
+        """Get recent confidence level transitions"""
+        
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+        recent_transitions = []
+        
+        all_socs = {**self.world_model_socs, **self.candidate_socs}
+        for soc in all_socs.values():
+            for transition in soc.confidence_level_history:
+                transition_date = datetime.fromisoformat(transition['timestamp'].replace('Z', '+00:00'))
+                if transition_date >= cutoff_date:
+                    recent_transitions.append({
+                        'soc_name': soc.name,
+                        'transition': transition,
+                        'current_confidence': soc.confidence,
+                        'current_level': soc.confidence_level.value
+                    })
+        
+        # Sort by timestamp (most recent first)
+        recent_transitions.sort(key=lambda x: x['transition']['timestamp'], reverse=True)
+        return recent_transitions
+    
+    def get_bayesian_insights(self) -> Dict[str, Any]:
+        """Get insights from the Bayesian learning system"""
+        
+        try:
+            all_socs = {**self.world_model_socs, **self.candidate_socs}
+            
+            # Analyze information gains across all SOCs
+            high_info_gain_socs = []
+            low_uncertainty_socs = []
+            strong_evidence_socs = []
+            
+            for soc in all_socs.values():
+                if soc.learning_history:
+                    recent_events = soc.learning_history[-5:]  # Last 5 updates
+                    
+                    # Find SOCs with high information gain
+                    avg_info_gain = statistics.mean([
+                        event.get('bayesian_metrics', {}).get('information_gain', 0)
+                        for event in recent_events
+                        if 'bayesian_metrics' in event
+                    ]) if recent_events else 0
+                    
+                    if avg_info_gain > 0.1:
+                        high_info_gain_socs.append({
+                            'name': soc.name,
+                            'avg_information_gain': avg_info_gain,
+                            'confidence': soc.confidence,
+                            'level': soc.confidence_level.value
+                        })
+                    
+                    # Find SOCs with low uncertainty (high confidence)
+                    avg_uncertainty = statistics.mean([
+                        event.get('uncertainty_estimate', 0.5)
+                        for event in recent_events
+                    ]) if recent_events else 0.5
+                    
+                    if avg_uncertainty < 0.1:
+                        low_uncertainty_socs.append({
+                            'name': soc.name,
+                            'avg_uncertainty': avg_uncertainty,
+                            'confidence': soc.confidence,
+                            'level': soc.confidence_level.value
+                        })
+                    
+                    # Find SOCs with consistently strong evidence
+                    strong_evidence_count = sum([
+                        1 for event in recent_events
+                        if event.get('evidence_strength_assessment') in ['strong', 'very_strong']
+                    ])
+                    
+                    if strong_evidence_count >= 3:
+                        strong_evidence_socs.append({
+                            'name': soc.name,
+                            'strong_evidence_count': strong_evidence_count,
+                            'confidence': soc.confidence,
+                            'level': soc.confidence_level.value
+                        })
+            
+            # Sort by relevance
+            high_info_gain_socs.sort(key=lambda x: x['avg_information_gain'], reverse=True)
+            low_uncertainty_socs.sort(key=lambda x: x['avg_uncertainty'])
+            strong_evidence_socs.sort(key=lambda x: x['strong_evidence_count'], reverse=True)
+            
+            return {
+                'high_information_gain_socs': high_info_gain_socs[:10],
+                'low_uncertainty_socs': low_uncertainty_socs[:10],
+                'strong_evidence_socs': strong_evidence_socs[:10],
+                'bayesian_learning_active': True,
+                'total_socs_analyzed': len(all_socs)
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to generate Bayesian insights: {e}")
+            return {
+                'error': str(e),
+                'bayesian_learning_active': False
+            }
 
 
 class SOCManager:

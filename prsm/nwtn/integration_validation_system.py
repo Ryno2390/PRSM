@@ -129,8 +129,8 @@ class BenchmarkResult:
 @dataclass
 class ValidationChallenge:
     """Represents a validation challenge for testing breakthrough capabilities"""
-    challenge_id: str = field(default_factory=lambda: str(uuid4()))
     challenge_type: ValidationChallengeType
+    challenge_id: str = field(default_factory=lambda: str(uuid4()))
     challenge_name: str = ""
     description: str = ""
     expected_breakthrough_indicators: List[str] = field(default_factory=list)

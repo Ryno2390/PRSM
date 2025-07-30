@@ -266,7 +266,7 @@ def get_breakthrough_mode():
         else:
             print("⚠️  Please enter a valid choice (1-4)")
 
-def display_pipeline_summary(query, depth, verbosity, breakthrough_mode):
+async def display_pipeline_summary(query, depth, verbosity, breakthrough_mode):
     """Display pipeline execution summary"""
     print("🚀 PIPELINE EXECUTION SUMMARY")
     print("-" * 40)
@@ -511,7 +511,7 @@ async def main():
         breakthrough_mode = get_breakthrough_mode()
         
         # Display summary and confirm
-        if not display_pipeline_summary(query, depth, verbosity, breakthrough_mode):
+        if not await display_pipeline_summary(query, depth, verbosity, breakthrough_mode):
             print("❌ Pipeline execution cancelled by user")
             return
         

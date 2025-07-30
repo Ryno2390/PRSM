@@ -57,12 +57,13 @@ class ExternalStorageConfig:
     """Configuration for external storage access"""
     
     # External drive paths
-    external_drive_path: str = "/Volumes/My Passport"
-    storage_root: str = "PRSM_Storage"
+    external_drive_path: str = "/Users/ryneschultz/Documents/GitHub"
+    storage_root: str = "PRSM_Storage_Local"
     
-    # Content directories (Updated July 21, 2025 - Organized by pipeline stages)
-    content_dir: str = "02_PROCESSED_CONTENT"
-    embeddings_dir: str = "03_EMBEDDINGS_NWTN_SEARCH"
+    # Content directories (Updated for NWTN_READY structure)
+    content_dir: str = "03_NWTN_READY/content_hashes"
+    embeddings_dir: str = "03_NWTN_READY/embeddings"
+    provenance_dir: str = "03_NWTN_READY/provenance"
     cache_dir: str = "99_SYSTEM_CACHE"
     backup_dir: str = "99_SYSTEM_BACKUPS"
     raw_papers_dir: str = "01_RAW_PAPERS"
@@ -82,6 +83,7 @@ class ExternalStorageConfig:
         self.storage_path = Path(self.external_drive_path) / self.storage_root
         self.content_path = self.storage_path / self.content_dir
         self.embeddings_path = self.storage_path / self.embeddings_dir
+        self.provenance_path = self.storage_path / self.provenance_dir
         self.cache_path = self.storage_path / self.cache_dir
         self.backup_path = self.storage_path / self.backup_dir
         self.raw_papers_path = self.storage_path / self.raw_papers_dir
@@ -97,7 +99,10 @@ class ExternalStorageConfig:
     @property
     def is_available(self) -> bool:
         """Check if external storage is available"""
-        return self.storage_path.exists() and self.db_path.exists()
+        # For NWTN-ready data, we need embeddings, content_hashes, and provenance
+        return (self.storage_path.exists() and 
+                self.embeddings_path.exists() and 
+                self.content_path.exists())
     
     @property
     def embeddings_count(self) -> int:
@@ -532,18 +537,121 @@ class ExternalStorageConfig:
         return all_papers
     
     async def search_papers(self, query: str, max_results: int = 25) -> List[Dict[str, Any]]:
-        """Search for papers by query using improved domain-aware search"""
+        """Search for papers using advanced semantic similarity on 384-dimensional embeddings"""
         
-        # Try database search first if available
+        # First try semantic embedding search for conceptual relationships
+        try:
+            semantic_results = await self._semantic_similarity_search(query, max_results)
+            if semantic_results:
+                logger.info(f"Semantic search returned {len(semantic_results)} papers with similarity scores")
+                return semantic_results
+        except Exception as e:
+            logger.warning(f"Semantic search failed, falling back to database search: {e}")
+        
+        # Fallback to database search if available
         if self.storage_manager and hasattr(self.storage_manager, 'storage_db') and self.storage_manager.storage_db:
             try:
                 return await self._search_papers_database(query, max_results)
             except Exception as e:
-                logger.warning(f"Database search failed, falling back to in-memory search: {e}")
+                logger.warning(f"Database search failed, falling back to NWTN file-based search: {e}")
         
-        # Fallback to in-memory search
-        return await self._search_papers_memory(query, max_results)
+        # Final fallback to file-based search
+        return await self._search_nwtn_files(query, max_results)
     
+    async def _semantic_similarity_search(self, query: str, max_results: int) -> List[Dict[str, Any]]:
+        """Search papers using 384-dimensional embedding similarity for conceptual relationships"""
+        
+        if not EMBEDDING_AVAILABLE:
+            raise Exception("Embedding libraries not available for semantic search")
+        
+        try:
+            # Initialize embedding model if not already done
+            if not hasattr(self, '_embedding_model') or self._embedding_model is None:
+                from sentence_transformers import SentenceTransformer
+                self._embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+                logger.info("Initialized SentenceTransformer for semantic search")
+            
+            # Generate query embedding (384-dimensional vector)
+            query_embedding = self._embedding_model.encode(query)
+            logger.info(f"Generated query embedding: {len(query_embedding)} dimensions")
+            
+            # Load embeddings from NWTN storage and compute similarity
+            similar_papers = []
+            embeddings_processed = 0
+            
+            # Search through embedding files in 03_NWTN_READY/embeddings/
+            embedding_files = list(self.embeddings_path.glob("*.json"))
+            
+            for embedding_file in embedding_files[:1000]:  # Limit for performance
+                try:
+                    with open(embedding_file, 'r') as f:
+                        embedding_data = json.load(f)
+                    
+                    if 'embedding_vector' in embedding_data:
+                        paper_embedding = np.array(embedding_data['embedding_vector'])
+                        
+                        # Calculate cosine similarity
+                        similarity = np.dot(query_embedding, paper_embedding) / (
+                            np.linalg.norm(query_embedding) * np.linalg.norm(paper_embedding)
+                        )
+                        
+                        # Only keep papers above similarity threshold
+                        if similarity > 0.3:  # Configurable threshold
+                            # Load full paper content from 02_PROCESSED_CONTENT
+                            paper_content = await self._load_full_paper_content(embedding_data.get('arxiv_id'))
+                            
+                            similar_papers.append({
+                                'arxiv_id': embedding_data.get('arxiv_id', ''),
+                                'title': paper_content.get('title', '') if paper_content else embedding_data.get('content_sections', {}).get('title', ''),
+                                'abstract': paper_content.get('abstract', '') if paper_content else embedding_data.get('content_sections', {}).get('abstract', ''),
+                                'similarity_score': float(similarity),
+                                'relevance_score': float(similarity) * embedding_data.get('quality_score', 0.5),
+                                'paper_metadata': embedding_data.get('paper_metadata', {}),
+                                'full_content': paper_content,
+                                'source': 'semantic_embedding_search'
+                            })
+                        
+                        embeddings_processed += 1
+                        
+                except Exception as e:
+                    logger.debug(f"Error processing embedding file {embedding_file}: {e}")
+                    continue
+            
+            # Sort by relevance score (similarity * quality)
+            similar_papers.sort(key=lambda x: x['relevance_score'], reverse=True)
+            
+            logger.info(f"Semantic search processed {embeddings_processed} embeddings, found {len(similar_papers)} similar papers")
+            return similar_papers[:max_results]
+            
+        except Exception as e:
+            logger.error(f"Semantic similarity search failed: {e}")
+            raise
+    
+    async def _load_full_paper_content(self, arxiv_id: str) -> Dict[str, Any]:
+        """Load full paper content from 02_PROCESSED_CONTENT for complete access"""
+        
+        if not arxiv_id:
+            return {}
+        
+        try:
+            # Look in 02_PROCESSED_CONTENT directory
+            processed_content_dir = self.storage_path / "02_PROCESSED_CONTENT"
+            content_file = processed_content_dir / f"{arxiv_id}.json"
+            
+            if content_file.exists():
+                with open(content_file, 'r') as f:
+                    content_data = json.load(f)
+                
+                logger.debug(f"Loaded full content for {arxiv_id}: {len(content_data.get('full_text', ''))} characters")
+                return content_data
+            else:
+                logger.debug(f"No processed content file found for {arxiv_id}")
+                return {}
+                
+        except Exception as e:
+            logger.error(f"Error loading full paper content for {arxiv_id}: {e}")
+            return {}
+
     async def _search_papers_database(self, query: str, max_results: int) -> List[Dict[str, Any]]:
         """Search papers using database with better domain matching"""
         
@@ -723,6 +831,185 @@ class ExternalStorageConfig:
         
         return min(relevance_score, 10.0)  # Cap at 10.0
     
+    async def _search_nwtn_files(self, query: str, max_results: int = 25) -> List[Dict[str, Any]]:
+        """Search papers using NWTN-ready file structure and processed content"""
+        try:
+            logger.info("Searching NWTN-ready files and processed content", query=query, max_results=max_results)
+            
+            # Extract search terms
+            query_terms = self._extract_search_terms(query)
+            domain_focus = self._determine_domain_focus(query)
+            
+            # Check if processed content is available (preferred)
+            processed_content_path = self.storage_path / "02_PROCESSED_CONTENT"
+            if processed_content_path.exists():
+                logger.info("Using processed content for search", path=str(processed_content_path))
+                return await self._search_processed_content(query_terms, domain_focus, max_results, processed_content_path)
+            
+            # Fallback to NWTN provenance files (slower)
+            if not self.provenance_path.exists():
+                logger.warning("No search sources available", 
+                             processed_path=str(processed_content_path),
+                             provenance_path=str(self.provenance_path))
+                return []
+            
+            logger.info("Falling back to NWTN provenance file search")
+            return await self._search_provenance_files(query_terms, domain_focus, max_results)
+            
+        except Exception as e:
+            logger.error(f"NWTN file search failed: {e}")
+            return []
+    
+    async def _load_paper_batch_for_search(
+        self, 
+        paper_files: List[Path], 
+        query_terms: List[str], 
+        domain_focus: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """Load a batch of papers and calculate relevance scores"""
+        batch_papers = []
+        
+        for paper_file in paper_files:
+            try:
+                # Load provenance file
+                with open(paper_file, 'r') as f:
+                    provenance = json.load(f)
+                
+                arxiv_id = provenance.get('arxiv_id', '')
+                if not arxiv_id:
+                    continue
+                
+                # Load metadata from ArXiv API or extract from filename pattern
+                paper_data = await self._get_paper_metadata_from_arxiv(arxiv_id)
+                
+                if paper_data and self._paper_matches_query(paper_data, query_terms, domain_focus):
+                    relevance_score = self._calculate_paper_relevance(paper_data, query_terms, domain_focus)
+                    paper_data['relevance_score'] = relevance_score
+                    paper_data['source'] = 'nwtn_files'
+                    batch_papers.append(paper_data)
+                    
+            except Exception as e:
+                logger.debug(f"Failed to process paper file {paper_file}: {e}")
+                continue
+        
+        return batch_papers
+    
+    async def _get_paper_metadata_from_arxiv(self, arxiv_id: str) -> Optional[Dict[str, Any]]:
+        """Get paper metadata directly from arXiv API for NWTN file-based search"""
+        try:
+            # Use arXiv API to get metadata
+            import aiohttp
+            
+            url = f"http://export.arxiv.org/api/query?id_list={arxiv_id}&start=0&max_results=1"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        import xml.etree.ElementTree as ET
+                        content = await response.text()
+                        root = ET.fromstring(content)
+                        
+                        # Parse arXiv XML response
+                        entry = root.find("{http://www.w3.org/2005/Atom}entry")
+                        if entry is not None:
+                            title = entry.find("{http://www.w3.org/2005/Atom}title").text.strip() if entry.find("{http://www.w3.org/2005/Atom}title") is not None else ""
+                            
+                            # Get abstract
+                            summary = entry.find("{http://www.w3.org/2005/Atom}summary")
+                            abstract = summary.text.strip() if summary is not None else ""
+                            
+                            # Get authors
+                            authors = []
+                            for author in entry.findall("{http://www.w3.org/2005/Atom}author"):
+                                name = author.find("{http://www.w3.org/2005/Atom}name")
+                                if name is not None:
+                                    authors.append(name.text.strip())
+                            
+                            # Get categories
+                            categories = []
+                            for category in entry.findall('{http://arxiv.org/schemas/atom}category'):
+                                cat_term = category.get('term')
+                                if cat_term:
+                                    categories.append(cat_term)
+                            
+                            # Get published date
+                            published = entry.find("{http://www.w3.org/2005/Atom}published")
+                            publish_date = published.text.strip()[:10] if published is not None else ""
+                            
+                            # Map categories to domain
+                            domain = self._map_categories_to_domain(categories)
+                            
+                            return {
+                                'arxiv_id': arxiv_id,
+                                'title': title,
+                                'abstract': abstract,
+                                'authors': ', '.join(authors),
+                                'categories': categories,
+                                'domain': domain,
+                                'publish_date': publish_date,
+                                'journal_ref': '',
+                                'submitter': authors[0] if authors else ''
+                            }
+                            
+        except Exception as e:
+            logger.debug(f"Failed to fetch arXiv metadata for {arxiv_id}: {e}")
+        
+        return None
+    
+    def _map_categories_to_domain(self, categories: List[str]) -> str:
+        """Map arXiv categories to domain"""
+        if not categories:
+            return "multidisciplinary"
+        
+        primary_category = categories[0]
+        
+        domain_mapping = {
+            "cs.": "computer_science",
+            "math.": "mathematics", 
+            "physics.": "physics",
+            "stat.": "statistics",
+            "q-bio.": "biology",
+            "q-fin.": "finance",
+            "econ.": "economics",
+            "astro-ph": "astronomy",
+            "cond-mat": "physics",
+            "gr-qc": "physics",
+            "hep-": "physics",
+            "math-ph": "physics",
+            "nlin": "physics",
+            "nucl-": "physics",
+            "quant-ph": "physics"
+        }
+        
+        for prefix, mapped_domain in domain_mapping.items():
+            if primary_category.startswith(prefix):
+                return mapped_domain
+        
+        return "multidisciplinary"
+    
+    def _paper_matches_query(
+        self, 
+        paper: Dict[str, Any], 
+        query_terms: List[str], 
+        domain_focus: Optional[str]
+    ) -> bool:
+        """Check if paper matches search query terms"""
+        if not query_terms:
+            return True
+            
+        title = paper.get('title', '').lower()
+        abstract = paper.get('abstract', '').lower()
+        categories = [cat.lower() for cat in paper.get('categories', [])]
+        
+        # Check if any query term matches
+        for term in query_terms:
+            if (term in title or 
+                term in abstract or 
+                any(term in cat for cat in categories)):
+                return True
+        
+        return False
+    
     async def initialize(self) -> bool:
         """Initialize external storage configuration"""
         if not self.storage_manager:
@@ -730,6 +1017,210 @@ class ExternalStorageConfig:
         
         self.initialized = True  # For testing, always return True
         return True
+    
+    async def _search_processed_content(
+        self, 
+        query_terms: List[str], 
+        domain_focus: Optional[str], 
+        max_results: int,
+        processed_path: Path
+    ) -> List[Dict[str, Any]]:
+        """Search papers using local processed content (fast, no API calls)"""
+        try:
+            # Get all JSON files
+            json_files = list(processed_path.glob("*.json"))
+            logger.info(f"Found {len(json_files)} processed papers to search")
+            
+            scored_papers = []
+            batch_size = 500  # Larger batches for local file processing
+            
+            for i in range(0, min(len(json_files), 10000), batch_size):  # Limit to 10K for performance
+                batch_files = json_files[i:i+batch_size]
+                batch_papers = await self._process_content_batch(batch_files, query_terms, domain_focus)
+                scored_papers.extend(batch_papers)
+                
+                # Keep top candidates for memory efficiency
+                if len(scored_papers) > max_results * 5:
+                    scored_papers.sort(key=lambda x: x['relevance_score'], reverse=True)
+                    scored_papers = scored_papers[:max_results * 3]
+            
+            # Final sort and return
+            scored_papers.sort(key=lambda x: x['relevance_score'], reverse=True)
+            logger.info(f"Processed content search completed: {len(scored_papers)} relevant papers found")
+            return scored_papers[:max_results]
+            
+        except Exception as e:
+            logger.error(f"Processed content search failed: {e}")
+            return []
+    
+    async def _process_content_batch(
+        self, 
+        json_files: List[Path], 
+        query_terms: List[str], 
+        domain_focus: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """Process a batch of JSON files from processed content"""
+        batch_papers = []
+        
+        for json_file in json_files:
+            try:
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    paper_data = json.load(f)
+                
+                # Check if paper matches query
+                if self._paper_matches_processed_content(paper_data, query_terms, domain_focus):
+                    # Calculate relevance score
+                    relevance_score = self._calculate_processed_content_relevance(paper_data, query_terms, domain_focus)
+                    
+                    # Standardize paper format for compatibility
+                    standardized_paper = {
+                        'arxiv_id': paper_data.get('arxiv_id', ''),
+                        'title': paper_data.get('title', ''),
+                        'abstract': paper_data.get('abstract', ''),
+                        'authors': paper_data.get('authors', ''),  # Will be extracted from title if needed
+                        'categories': self._extract_categories_from_arxiv_id(paper_data.get('arxiv_id', '')),
+                        'domain': self._determine_domain_from_arxiv_id(paper_data.get('arxiv_id', '')),
+                        'publish_date': self._extract_date_from_arxiv_id(paper_data.get('arxiv_id', '')),
+                        'journal_ref': '',
+                        'submitter': '',
+                        'relevance_score': relevance_score,
+                        'source': 'processed_content',
+                        'content_length': paper_data.get('content_length', 0),
+                        'full_text_available': True,
+                        'introduction': paper_data.get('introduction', ''),
+                        'full_text_preview': paper_data.get('full_text_preview', '')
+                    }
+                    batch_papers.append(standardized_paper)
+                    
+            except Exception as e:
+                logger.debug(f"Failed to process {json_file}: {e}")
+                continue
+        
+        return batch_papers
+    
+    def _paper_matches_processed_content(
+        self, 
+        paper_data: Dict[str, Any], 
+        query_terms: List[str], 
+        domain_focus: Optional[str]
+    ) -> bool:
+        """Check if processed paper matches search query"""
+        if not query_terms:
+            return True
+        
+        # Search in title, abstract, and introduction
+        title = paper_data.get('title', '').lower()
+        abstract = paper_data.get('abstract', '').lower()
+        introduction = paper_data.get('introduction', '').lower()
+        full_text_preview = paper_data.get('full_text_preview', '').lower()
+        
+        # Check if any query term matches
+        for term in query_terms:
+            if (term in title or 
+                term in abstract or 
+                term in introduction or
+                term in full_text_preview):
+                return True
+        
+        return False
+    
+    def _calculate_processed_content_relevance(
+        self, 
+        paper_data: Dict[str, Any], 
+        query_terms: List[str], 
+        domain_focus: Optional[str]
+    ) -> float:
+        """Calculate relevance score for processed content"""
+        if not query_terms:
+            return 0.5
+        
+        title = paper_data.get('title', '').lower()
+        abstract = paper_data.get('abstract', '').lower()
+        introduction = paper_data.get('introduction', '').lower()
+        full_text_preview = paper_data.get('full_text_preview', '').lower()
+        
+        relevance_score = 0.0
+        
+        # Score based on where terms appear
+        for term in query_terms:
+            if term in title:
+                relevance_score += 5.0  # Title matches are most important
+            if term in abstract:
+                relevance_score += 3.0  # Abstract matches are very important
+            if term in introduction:
+                relevance_score += 2.0  # Introduction matches are important
+            if term in full_text_preview:
+                relevance_score += 1.0  # Full text matches are helpful
+        
+        # Normalize by query length
+        if query_terms:
+            relevance_score = relevance_score / len(query_terms)
+        
+        # Boost for content length (more complete papers)
+        content_length = paper_data.get('content_length', 0)
+        if content_length > 10000:  # Substantial papers
+            relevance_score *= 1.2
+        elif content_length > 50000:  # Very comprehensive papers
+            relevance_score *= 1.5
+        
+        return min(relevance_score, 15.0)  # Cap at 15.0 for processed content
+    
+    def _extract_categories_from_arxiv_id(self, arxiv_id: str) -> List[str]:
+        """Extract likely categories from arXiv ID pattern"""
+        if not arxiv_id:
+            return []
+        
+        # Map common arXiv ID prefixes to categories
+        category_mapping = {
+            '07': ['physics.', 'quant-ph'],  # 2007 era - physics/quantum
+            '08': ['physics.', 'math.'],     # 2008 era - physics/math  
+            '09': ['cs.', 'stat.'],          # 2009 era - cs/stats
+            '10': ['cs.', 'math.'],          # 2010 era - cs/math
+            '11': ['physics.', 'math.'],     # 2011 era - physics/math
+            '12': ['cs.', 'physics.'],       # 2012 era - cs/physics
+            '13': ['cs.', 'stat.'],          # 2013 era - cs/stats
+            '14': ['cs.', 'physics.'],       # 2014 era - cs/physics
+            '15': ['cs.', 'physics.']        # 2015 era - cs/physics
+        }
+        
+        year_prefix = arxiv_id[:2]
+        return category_mapping.get(year_prefix, ['multidisciplinary'])
+    
+    def _determine_domain_from_arxiv_id(self, arxiv_id: str) -> str:
+        """Determine domain from arXiv ID pattern"""
+        categories = self._extract_categories_from_arxiv_id(arxiv_id)
+        if not categories:
+            return "multidisciplinary"
+        
+        primary_cat = categories[0]
+        if primary_cat.startswith('cs.'):
+            return "computer_science"
+        elif primary_cat.startswith('math.'):
+            return "mathematics"
+        elif primary_cat.startswith('physics.') or primary_cat == 'quant-ph':
+            return "physics"
+        elif primary_cat.startswith('stat.'):
+            return "statistics"
+        else:
+            return "multidisciplinary"
+    
+    def _extract_date_from_arxiv_id(self, arxiv_id: str) -> str:
+        """Extract approximate date from arXiv ID"""
+        if not arxiv_id or len(arxiv_id) < 4:
+            return "2010-01-01"  # Default fallback
+        
+        try:
+            year_part = arxiv_id[:2]
+            month_part = arxiv_id[2:4] if len(arxiv_id) >= 4 else "01"
+            
+            # Convert 2-digit year to 4-digit
+            year = 2000 + int(year_part) if int(year_part) >= 0 else 2010
+            month = min(max(int(month_part), 1), 12)  # Ensure valid month
+            
+            return f"{year:04d}-{month:02d}-01"
+            
+        except ValueError:
+            return "2010-01-01"
 
 
 class ExternalStorageManager:
@@ -754,18 +1245,27 @@ class ExternalStorageManager:
                              storage_path=str(self.config.storage_path))
                 return False
             
-            # Connect to SQLite database
-            self.db_connection = sqlite3.connect(str(self.config.db_path))
-            self.db_connection.row_factory = sqlite3.Row
-            self.storage_db = self.db_connection  # Set alias
-            
-            # Verify database structure
-            cursor = self.db_connection.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            tables = [row[0] for row in cursor.fetchall()]
+            # Try to connect to SQLite database if it exists
+            db_available = False
+            if self.config.db_path.exists():
+                try:
+                    self.db_connection = sqlite3.connect(str(self.config.db_path))
+                    self.db_connection.row_factory = sqlite3.Row
+                    self.storage_db = self.db_connection  # Set alias
+                    
+                    # Verify database structure
+                    cursor = self.db_connection.cursor()
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                    tables = [row[0] for row in cursor.fetchall()]
+                    db_available = True
+                    logger.info("Database connected successfully", tables=tables)
+                except Exception as db_e:
+                    logger.warning("Database connection failed, proceeding without DB", error=str(db_e))
+            else:
+                logger.info("No database found, using NWTN-ready files directly")
             
             logger.info("External storage connected successfully",
-                       tables=tables,
+                       db_available=db_available,
                        embeddings_count=self.config.embeddings_count,
                        total_size_gb=self.config.total_size_gb)
             
@@ -1302,6 +1802,19 @@ class ExternalKnowledgeBase:
         if not self.initialized:
             await self.initialize()
         
+        # Check if we have database connection
+        if self.storage_manager and hasattr(self.storage_manager, 'db_connection') and self.storage_manager.db_connection:
+            return await self._search_papers_database_method(query, max_results)
+        
+        # Use the same NWTN file search as ExternalStorageConfig
+        if hasattr(self.storage_manager, 'config'):
+            return await self.storage_manager.config._search_nwtn_files(query, max_results)
+        
+        logger.warning("No search method available for external knowledge base")
+        return []
+    
+    async def _search_papers_database_method(self, query: str, max_results: int) -> List[Dict[str, Any]]:
+        """Search for papers using database connection"""
         # Extract key terms from the query (remove common question words)
         import re
         
@@ -1314,9 +1827,6 @@ class ExternalKnowledgeBase:
         
         # Simple text search implementation
         try:
-            if not self.storage_manager.db_connection:
-                return []
-            
             cursor = self.storage_manager.db_connection.cursor()
             
             # Build search query for multiple terms
@@ -1627,6 +2137,34 @@ class ExternalKnowledgeBase:
         
         self.storage_manager.storage_db.commit()
         logger.debug(f"📝 Stored full content for {arxiv_id}")
+    
+    async def _search_provenance_files(
+        self, 
+        query_terms: List[str], 
+        domain_focus: Optional[str], 
+        max_results: int
+    ) -> List[Dict[str, Any]]:
+        """Fallback search using NWTN provenance files (slower, requires API calls)"""
+        # This is the original slower method - keeping it as fallback
+        paper_files = list(self.provenance_path.glob("*.json"))
+        logger.info(f"Found {len(paper_files)} NWTN-ready papers to search")
+        
+        scored_papers = []
+        batch_size = 100
+        
+        for i in range(0, min(len(paper_files), 5000), batch_size):  # Limit to 5000 for performance
+            batch_files = paper_files[i:i+batch_size]
+            batch_papers = await self._load_paper_batch_for_search(batch_files, query_terms, domain_focus)
+            scored_papers.extend(batch_papers)
+            
+            # Sort and keep only top candidates during processing for memory efficiency
+            if len(scored_papers) > max_results * 3:
+                scored_papers.sort(key=lambda x: x['relevance_score'], reverse=True)
+                scored_papers = scored_papers[:max_results * 2]
+        
+        # Final sort and return top results
+        scored_papers.sort(key=lambda x: x['relevance_score'], reverse=True)
+        return scored_papers[:max_results]
     
     async def regenerate_all_embeddings_batch(self, batch_size: int = 100, max_concurrent: int = 20) -> Dict[str, Any]:
         """

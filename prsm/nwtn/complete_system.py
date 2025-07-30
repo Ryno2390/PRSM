@@ -78,7 +78,7 @@ from datetime import datetime, timezone
 import structlog
 
 from prsm.nwtn.voicebox import NWTNVoicebox, LLMProvider, VoiceboxResponse, QueryComplexity
-from prsm.nwtn.multi_modal_reasoning_engine import MultiModalReasoningEngine
+from prsm.nwtn.meta_reasoning_engine import MetaReasoningEngine
 from prsm.tokenomics.ftns_service import FTNSService
 from prsm.core.config import get_settings
 
@@ -147,8 +147,8 @@ class NWTNCompleteSystem:
             
             # Initialize Multi-Modal Reasoning Engine
             logger.info("🧠 Initializing Multi-Modal Reasoning Engine...")
-            self.multi_modal_engine = MultiModalReasoningEngine()
-            await self.multi_modal_engine.initialize()
+            self.multi_modal_engine = MetaReasoningEngine()
+            await self.multi_modal_engine.initialize_external_knowledge_base()
             
             # Initialize FTNS Service
             logger.info("💰 Initializing FTNS Service...")
