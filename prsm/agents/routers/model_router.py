@@ -601,17 +601,17 @@ class ModelRouter(BaseAgent):
         return candidates
     
     async def _discover_p2p_candidates(self, task_description: str) -> List[ModelCandidate]:
-        """Discover candidates from P2P network"""
+        """Discover candidates from P2P network - Using Claude API as primary model"""
         candidates = []
         
-        # Simulate P2P model discovery
+        # Use Claude-3.5-Sonnet as the primary model instead of invalid p2p models
         p2p_models = [
             {
-                "model_id": "p2p_specialist_01",
-                "name": "Community Specialist",
-                "specialization": "research",
-                "performance_score": 0.75,
-                "estimated_latency": 5.0
+                "model_id": "claude-3-5-sonnet-20241022",
+                "name": "Claude-3.5-Sonnet via NWTN",
+                "specialization": "general",
+                "performance_score": 0.95,
+                "estimated_latency": 2.0
             }
         ]
         

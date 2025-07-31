@@ -14,12 +14,27 @@ from dataclasses import dataclass
 from enum import Enum
 
 from prsm.core.models import ArchitectTask, TaskHierarchy, TaskStatus, AgentType
-from prsm.core.config import get_settings
 from prsm.agents.base import BaseAgent
 
+# Safe settings import with fallback
+try:
+    from prsm.core.config import get_settings
+    settings = get_settings()
+    if settings is None:
+        raise Exception("Settings is None")
+except Exception:
+    # Fallback settings for architect components
+    class FallbackArchitectSettings:
+        def __init__(self):
+            self.max_decomposition_depth = 5
+            self.max_parallel_tasks = 10
+            self.agent_timeout_seconds = 300
+            self.environment = "development"
+            self.debug = True
+    
+    settings = FallbackArchitectSettings()
 
 logger = structlog.get_logger(__name__)
-settings = get_settings()
 
 
 class DecompositionStrategy(str, Enum):

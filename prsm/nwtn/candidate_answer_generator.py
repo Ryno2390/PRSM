@@ -23,6 +23,9 @@ import re
 import os
 
 from prsm.nwtn.content_analyzer import ContentAnalysisResult, ContentSummary, ExtractedConcept, ContentQuality
+from prsm.nwtn.meta_reasoning_engine import MetaReasoningEngine, MetaReasoningResult
+from prsm.nwtn.reasoning.types import ReasoningMode, ThinkingMode
+from prsm.nwtn.breakthrough_modes import BreakthroughModeConfig, BreakthroughMode
 
 logger = structlog.get_logger(__name__)
 
@@ -88,6 +91,18 @@ class CandidateGenerationResult:
     diversity_metrics: Dict[str, float]
     quality_distribution: Dict[CandidateType, int]
     generation_id: str = field(default_factory=lambda: str(uuid4()))
+    
+    @property
+    def candidates(self) -> List[CandidateAnswer]:
+        """Compatibility property - returns candidate_answers"""
+        return self.candidate_answers
+    
+    @property
+    def confidence(self) -> float:
+        """Overall confidence score across all candidates"""
+        if not self.candidate_answers:
+            return 0.0
+        return sum(c.confidence_score for c in self.candidate_answers) / len(self.candidate_answers)
 
 
 class ConceptSynthesizer:
@@ -233,8 +248,10 @@ class CandidateAnswerGenerator:
     from analyzed research corpus for NWTN System 1 → System 2 → Attribution pipeline
     """
     
-    def __init__(self, concept_synthesizer: Optional[ConceptSynthesizer] = None):
+    def __init__(self, concept_synthesizer: Optional[ConceptSynthesizer] = None,
+                 meta_reasoning_engine: Optional[MetaReasoningEngine] = None):
         self.concept_synthesizer = concept_synthesizer or ConceptSynthesizer()
+        self.meta_reasoning_engine = meta_reasoning_engine
         self.initialized = False
         
         # Generation parameters
@@ -273,8 +290,16 @@ class CandidateAnswerGenerator:
     async def initialize(self):
         """Initialize the candidate answer generator"""
         try:
+            # Initialize MetaReasoningEngine if not provided
+            if self.meta_reasoning_engine is None:
+                self.meta_reasoning_engine = MetaReasoningEngine()
+                await self.meta_reasoning_engine.initialize()
+            elif not self.meta_reasoning_engine.initialized:
+                await self.meta_reasoning_engine.initialize()
+            
             self.initialized = True
-            logger.info("Candidate answer generator initialized")
+            logger.info("Candidate answer generator initialized", 
+                       meta_reasoning_enabled=True)
             return True
         except Exception as e:
             logger.error(f"Failed to initialize candidate answer generator: {e}")
@@ -373,6 +398,75 @@ class CandidateAnswerGenerator:
             logger.error(f"Candidate generation failed: {e}")
             return self._empty_result(content_analysis.query)
     
+    async def _generate_creative_reasoning(self, query: str, sources: List[ContentSummary], 
+                                         answer_type: CandidateType) -> Optional[MetaReasoningResult]:
+        """
+        Generate creative reasoning using MetaReasoningEngine in System 1 mode
+        
+        This leverages the dual-system architecture where System 1 provides
+        divergent, high-risk exploration for candidate generation
+        """
+        if not self.meta_reasoning_engine:
+            return None
+            
+        try:
+            # Select breakthrough mode based on answer type
+            breakthrough_config = self._select_breakthrough_mode_for_type(answer_type)
+            
+            # Build context from sources
+            context = self._build_reasoning_context(sources, answer_type)
+            
+            # Generate creative reasoning using System 1 mode
+            reasoning_result = await self.meta_reasoning_engine.meta_reason(
+                query=query,
+                context=context,
+                thinking_mode=ThinkingMode.QUICK,  # Start with quick mode for System 1 brainstorming
+                reasoning_mode=ReasoningMode.SYSTEM1_CREATIVE,
+                breakthrough_config=breakthrough_config
+            )
+            
+            return reasoning_result
+            
+        except Exception as e:
+            logger.warning(f"Creative reasoning generation failed: {e}")
+            return None
+    
+    def _select_breakthrough_mode_for_type(self, answer_type: CandidateType) -> BreakthroughModeConfig:
+        """Select appropriate breakthrough mode based on answer type"""
+        if answer_type == CandidateType.SYNTHESIS:
+            return BreakthroughMode.CREATIVE.get_config()  # High creativity for synthesis
+        elif answer_type == CandidateType.THEORETICAL:
+            return BreakthroughMode.REVOLUTIONARY.get_config()  # Maximum creativity for theory
+        elif answer_type == CandidateType.APPLIED:
+            return BreakthroughMode.BALANCED.get_config()  # Balanced for applications
+        elif answer_type == CandidateType.METHODOLOGICAL:
+            return BreakthroughMode.BALANCED.get_config()  # Balanced for methods
+        else:
+            return BreakthroughMode.CREATIVE.get_config()  # Default to creative
+    
+    def _build_reasoning_context(self, sources: List[ContentSummary], 
+                               answer_type: CandidateType) -> Dict[str, Any]:
+        """Build context dictionary for meta-reasoning"""
+        context = {
+            "answer_type": answer_type.value,
+            "source_count": len(sources),
+            "sources": []
+        }
+        
+        for source in sources:
+            source_context = {
+                "title": source.title,
+                "quality_score": source.quality_score,
+                "main_contributions": source.main_contributions,
+                "key_concepts": [c.concept for c in source.key_concepts if c.confidence > 0.5],
+                "methodologies": source.methodologies,
+                "findings": source.findings,
+                "applications": source.applications
+            }
+            context["sources"].append(source_context)
+        
+        return context
+    
     async def _generate_single_candidate(self, 
                                        query: str,
                                        papers: List[ContentSummary],
@@ -391,14 +485,28 @@ class CandidateAnswerGenerator:
             for paper in selected_sources:
                 all_concepts.extend(paper.key_concepts)
             
-            # Generate reasoning chain
+            # Generate enhanced reasoning using both creative meta-reasoning and concept synthesis
+            creative_reasoning = await self._generate_creative_reasoning(query, selected_sources, answer_type)
             reasoning_chain = self.concept_synthesizer.synthesize_concepts(all_concepts, answer_type)
+            
+            # Enhance reasoning chain with creative meta-reasoning insights
+            if creative_reasoning and creative_reasoning.final_reasoning:
+                # Integrate meta-reasoning insights into the reasoning chain
+                meta_insights = creative_reasoning.final_reasoning.split('\n')[:3]  # Top 3 insights
+                for insight in meta_insights:
+                    if insight.strip() and len(insight.strip()) > 10:
+                        reasoning_chain.append(f"Meta-reasoning suggests: {insight.strip()}")
+                        
+            # Limit reasoning chain to prevent overwhelming candidates
+            reasoning_chain = reasoning_chain[:5]
             
             # Generate answer text using Claude API
             answer_text = await self._generate_answer_text(query, selected_sources, reasoning_chain, answer_type)
             
-            # Calculate confidence
-            confidence_score = self._calculate_candidate_confidence(selected_sources, reasoning_chain, answer_type)
+            # Calculate confidence (enhanced with meta-reasoning quality)
+            confidence_score = self._calculate_candidate_confidence(
+                selected_sources, reasoning_chain, answer_type, creative_reasoning
+            )
             
             # Create source contributions
             source_contributions = self._create_source_contributions(selected_sources, all_concepts, answer_type)
@@ -409,6 +517,11 @@ class CandidateAnswerGenerator:
             # Identify strengths and limitations
             strengths = self._identify_strengths(selected_sources, answer_type)
             limitations = self._identify_limitations(selected_sources, answer_type)
+            
+            # Enhanced generation method string indicating System 1 meta-reasoning integration
+            generation_method = f"system1_meta_reasoning_{answer_type.value}"
+            if creative_reasoning:
+                generation_method += f"_breakthrough_{creative_reasoning.engine_performance['primary_engine'] if 'primary_engine' in creative_reasoning.engine_performance else 'enhanced'}"
             
             candidate = CandidateAnswer(
                 candidate_id=str(uuid4()),
@@ -422,7 +535,7 @@ class CandidateAnswerGenerator:
                 strengths=strengths,
                 limitations=limitations,
                 diversity_score=0.0,  # Will be calculated later
-                generation_method=f"system1_brainstorming_{answer_type.value}"
+                generation_method=generation_method
             )
             
             return candidate
@@ -720,7 +833,8 @@ Generate your response now:"""
     
     def _calculate_candidate_confidence(self, sources: List[ContentSummary], 
                                       reasoning_chain: List[str], 
-                                      answer_type: CandidateType) -> float:
+                                      answer_type: CandidateType,
+                                      meta_reasoning: Optional[MetaReasoningResult] = None) -> float:
         """Calculate confidence score for candidate answer"""
         confidence = 0.5  # Base confidence
         
@@ -747,6 +861,18 @@ Generate your response now:"""
         
         reliability_bonus = type_reliability.get(answer_type, 0.5) * 0.1
         confidence += reliability_bonus
+        
+        # Meta-reasoning quality bonus (System 1 creative enhancement)
+        if meta_reasoning:
+            # Use confidence score from meta-reasoning if available
+            if hasattr(meta_reasoning, 'confidence') and meta_reasoning.confidence > 0:
+                meta_confidence_bonus = meta_reasoning.confidence * 0.15  # 15% weight for meta-reasoning
+                confidence += meta_confidence_bonus
+            
+            # Reasoning quality bonus based on insights
+            if meta_reasoning.final_reasoning and len(meta_reasoning.final_reasoning) > 50:
+                reasoning_quality_bonus = 0.1  # Bonus for substantial reasoning content
+                confidence += reasoning_quality_bonus
         
         return max(0.0, min(1.0, confidence))
     
@@ -945,8 +1071,8 @@ Generate your response now:"""
 
 
 # Factory function for easy instantiation
-async def create_candidate_generator() -> CandidateAnswerGenerator:
-    """Create and initialize a candidate answer generator"""
-    generator = CandidateAnswerGenerator()
+async def create_candidate_generator(meta_reasoning_engine: Optional[MetaReasoningEngine] = None) -> CandidateAnswerGenerator:
+    """Create and initialize a candidate answer generator with System 1 → System 2 dual architecture"""
+    generator = CandidateAnswerGenerator(meta_reasoning_engine=meta_reasoning_engine)
     await generator.initialize()
     return generator

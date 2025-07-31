@@ -31,12 +31,16 @@ Usage:
 import asyncio
 import json
 import math
+import numpy as np
+from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Set
 from dataclasses import dataclass, field
 from enum import Enum
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
 from collections import defaultdict
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.cluster import DBSCAN
 
 import structlog
 from pydantic import BaseModel, Field
@@ -130,6 +134,31 @@ class AnalogicalMapping:
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+@dataclass
+class DomainBoundary:
+    """Represents a boundary between domains in embedding space"""
+    domain_a: str
+    domain_b: str
+    boundary_id: str = field(default_factory=lambda: str(uuid4()))
+    boundary_strength: float = 0.0  # How distinct the domains are
+    bridging_papers: List[Dict[str, Any]] = field(default_factory=list)  # Papers that cross the boundary
+    boundary_concepts: List[str] = field(default_factory=list)  # Concepts that define the boundary
+    permeability: float = 0.0  # How easily ideas cross this boundary
+    breakthrough_potential: float = 0.0  # Potential for breakthroughs across this boundary
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+@dataclass 
+class EmbeddingCluster:
+    """Represents a cluster of papers in embedding space"""
+    cluster_id: str = field(default_factory=lambda: str(uuid4()))
+    center_embedding: Optional[np.ndarray] = None
+    papers: List[Dict[str, Any]] = field(default_factory=list)
+    dominant_domain: str = ""
+    mixed_domains: List[str] = field(default_factory=list)
+    avg_quality_score: float = 0.0
+    conceptual_coherence: float = 0.0
+    breakthrough_indicators: List[str] = field(default_factory=list)
+
 class BreakthroughInsight(BaseModel):
     """A potential breakthrough insight discovered through analogical reasoning"""
     
@@ -156,6 +185,11 @@ class BreakthroughInsight(BaseModel):
     potential_applications: List[str] = Field(default_factory=list)
     related_unsolved_problems: List[str] = Field(default_factory=list)
     
+    # Enhanced with embedding analysis
+    embedding_based_evidence: List[str] = Field(default_factory=list)
+    domain_boundary_crossing: Optional[str] = None
+    conceptual_bridge_strength: float = Field(default=0.0, ge=0.0, le=1.0)
+    
     # Metadata
     discovered_by: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -169,7 +203,7 @@ class AnalogicalBreakthroughEngine:
     mapping successful patterns from well-understood domains to less-understood ones.
     """
     
-    def __init__(self):
+    def __init__(self, embeddings_path: str = None):
         self.model_executor = ModelExecutor(agent_id="analogical_breakthrough_engine")
         self.world_model = WorldModelEngine()
         
@@ -177,6 +211,12 @@ class AnalogicalBreakthroughEngine:
         self.domain_patterns: Dict[str, List[AnalogicalPattern]] = defaultdict(list)
         self.successful_mappings: List[AnalogicalMapping] = []
         self.breakthrough_insights: List[BreakthroughInsight] = []
+        
+        # Embedding-based components
+        self.embeddings_path = embeddings_path or "/Users/ryneschultz/Documents/GitHub/PRSM_Storage_Local/03_NWTN_READY/embeddings"
+        self.embedding_clusters: List[EmbeddingCluster] = []
+        self.domain_boundaries: List[DomainBoundary] = []
+        self.embedding_cache: Dict[str, Dict[str, Any]] = {}
         
         # Domain knowledge bases
         self.domain_knowledge = {
@@ -188,12 +228,14 @@ class AnalogicalBreakthroughEngine:
             "computer_science": self._load_cs_patterns()
         }
         
-        # Breakthrough thresholds
+        # Enhanced breakthrough thresholds
         self.novelty_threshold = 0.7
         self.confidence_threshold = 0.6
         self.impact_threshold = 0.5
+        self.boundary_crossing_bonus = 0.2  # Bonus for cross-domain insights
+        self.embedding_similarity_threshold = 0.4
         
-        logger.info("Initialized Analogical Breakthrough Engine")
+        logger.info("Initialized Enhanced Analogical Breakthrough Engine with embedding integration")
     
     async def discover_cross_domain_insights(
         self, 
@@ -245,6 +287,474 @@ class AnalogicalBreakthroughEngine:
         )
         
         return testable_insights
+    
+    async def analyze_domain_boundaries(self, sample_size: int = 1000) -> List[DomainBoundary]:
+        """Analyze domain boundaries in embedding space using 100K embeddings"""
+        try:
+            # Load sample of embeddings
+            embedding_data = await self._load_embedding_sample(sample_size)
+            
+            if len(embedding_data) < 50:
+                logger.warning("Insufficient embedding data for boundary analysis")
+                return []
+            
+            # Cluster embeddings to find domain boundaries
+            clusters = await self._cluster_embeddings(embedding_data)
+            
+            # Identify domain boundaries between clusters
+            boundaries = await self._identify_domain_boundaries(clusters)
+            
+            # Analyze boundary characteristics
+            for boundary in boundaries:
+                boundary.boundary_strength = await self._calculate_boundary_strength(boundary, clusters)
+                boundary.permeability = await self._calculate_boundary_permeability(boundary, embedding_data)
+                boundary.breakthrough_potential = await self._calculate_boundary_breakthrough_potential(boundary)
+            
+            # Store results
+            self.domain_boundaries = boundaries
+            self.embedding_clusters = clusters
+            
+            logger.info("Domain boundary analysis completed",
+                       num_boundaries=len(boundaries),
+                       num_clusters=len(clusters),
+                       avg_breakthrough_potential=np.mean([b.breakthrough_potential for b in boundaries]))
+            
+            return boundaries
+            
+        except Exception as e:
+            logger.error("Failed to analyze domain boundaries", error=str(e))
+            return []
+    
+    async def _load_embedding_sample(self, sample_size: int) -> List[Dict[str, Any]]:
+        """Load a representative sample of embeddings from all domains"""
+        embeddings_dir = Path(self.embeddings_path)
+        
+        if not embeddings_dir.exists():
+            logger.warning("Embeddings directory not found", path=str(embeddings_dir))
+            return []
+        
+        # Get all embedding files
+        embedding_files = list(embeddings_dir.glob("*.json"))
+        
+        if len(embedding_files) == 0:
+            logger.warning("No embedding files found")
+            return []
+        
+        # Sample files randomly
+        sample_files = np.random.choice(embedding_files, 
+                                      size=min(sample_size, len(embedding_files)), 
+                                      replace=False)
+        
+        embedding_data = []
+        for file_path in sample_files:
+            try:
+                with open(file_path, 'r') as f:
+                    data = json.load(f)
+                
+                # Validate embedding data
+                if (data.get('embedding_vector') and 
+                    data.get('paper_metadata') and 
+                    len(data['embedding_vector']) > 0):
+                    embedding_data.append(data)
+                    
+            except Exception as e:
+                continue
+        
+        logger.info("Loaded embedding sample", 
+                   sample_size=len(embedding_data),
+                   total_files=len(embedding_files))
+        
+        return embedding_data
+    
+    async def _cluster_embeddings(self, embedding_data: List[Dict[str, Any]]) -> List[EmbeddingCluster]:
+        """Cluster embeddings to identify conceptual regions"""
+        if len(embedding_data) < 10:
+            return []
+        
+        # Extract embeddings and metadata
+        embeddings = []
+        papers = []
+        
+        for data in embedding_data:
+            embedding_vector = np.array(data['embedding_vector'])
+            if len(embedding_vector) > 0:
+                embeddings.append(embedding_vector)
+                papers.append(data)
+        
+        if len(embeddings) < 10:
+            return []
+        
+        embeddings_matrix = np.stack(embeddings)
+        
+        # Use DBSCAN for clustering (handles noise and varying cluster sizes)
+        clustering = DBSCAN(eps=0.3, min_samples=5, metric='cosine')
+        cluster_labels = clustering.fit_predict(embeddings_matrix)
+        
+        # Create clusters
+        clusters = []
+        unique_labels = set(cluster_labels)
+        
+        for label in unique_labels:
+            if label == -1:  # Skip noise points
+                continue
+                
+            # Get papers in this cluster
+            cluster_indices = np.where(cluster_labels == label)[0]
+            cluster_papers = [papers[i] for i in cluster_indices]
+            cluster_embeddings = [embeddings[i] for i in cluster_indices]
+            
+            # Calculate cluster properties
+            center_embedding = np.mean(cluster_embeddings, axis=0)
+            
+            # Determine dominant domain
+            domains = [self._classify_paper_domain(paper) for paper in cluster_papers]
+            domain_counts = {domain: domains.count(domain) for domain in set(domains)}
+            dominant_domain = max(domain_counts.items(), key=lambda x: x[1])[0]
+            
+            # Identify mixed domains (domains with >10% representation)
+            total_papers = len(cluster_papers)
+            mixed_domains = [domain for domain, count in domain_counts.items() 
+                           if count / total_papers > 0.1 and domain != dominant_domain]
+            
+            # Calculate quality metrics
+            quality_scores = [paper.get('paper_metadata', {}).get('quality_score', 0.0) 
+                            for paper in cluster_papers]
+            avg_quality = np.mean(quality_scores) if quality_scores else 0.0
+            
+            # Detect breakthrough indicators
+            breakthrough_indicators = await self._detect_breakthrough_indicators(cluster_papers)
+            
+            cluster = EmbeddingCluster(
+                cluster_id=f"cluster_{label}",
+                center_embedding=center_embedding,
+                papers=cluster_papers,
+                dominant_domain=dominant_domain,
+                mixed_domains=mixed_domains,
+                avg_quality_score=avg_quality,
+                conceptual_coherence=self._calculate_cluster_coherence(cluster_embeddings),
+                breakthrough_indicators=breakthrough_indicators
+            )
+            
+            clusters.append(cluster)
+        
+        logger.info("Embedding clustering completed",
+                   num_clusters=len(clusters),
+                   avg_papers_per_cluster=np.mean([len(c.papers) for c in clusters]))
+        
+        return clusters
+    
+    def _classify_paper_domain(self, paper_data: Dict[str, Any]) -> str:
+        """Classify paper domain based on metadata and content"""
+        paper_metadata = paper_data.get('paper_metadata', {})
+        content_sections = paper_data.get('content_sections', {})
+        
+        # Check metadata domain first
+        domain = paper_metadata.get('domain', '').lower()
+        if domain:
+            return domain
+        
+        # Analyze content for domain classification
+        domain_keywords = {
+            'physics': ['quantum', 'particle', 'relativity', 'mechanics', 'electromagnetic'],
+            'mathematics': ['theorem', 'proof', 'topology', 'algebra', 'geometry'],
+            'computer_science': ['algorithm', 'computation', 'neural', 'software', 'data'],
+            'biology': ['protein', 'dna', 'evolution', 'cellular', 'organism'],
+            'chemistry': ['molecular', 'reaction', 'catalyst', 'compound', 'synthesis'],
+            'astronomy': ['stellar', 'galaxy', 'cosmology', 'planetary', 'telescope'],
+            'finance': ['market', 'trading', 'portfolio', 'risk', 'economic']
+        }
+        
+        # Combine title and abstract for classification
+        text = ' '.join([
+            content_sections.get('title', ''),
+            content_sections.get('abstract', '')
+        ]).lower()
+        
+        domain_scores = {}
+        for domain, keywords in domain_keywords.items():
+            score = sum(1 for keyword in keywords if keyword in text)
+            if score > 0:
+                domain_scores[domain] = score
+        
+        if domain_scores:
+            return max(domain_scores.items(), key=lambda x: x[1])[0]
+        
+        return 'general'
+    
+    def _calculate_cluster_coherence(self, embeddings: List[np.ndarray]) -> float:
+        """Calculate conceptual coherence of a cluster"""
+        if len(embeddings) < 2:
+            return 1.0
+        
+        # Calculate pairwise similarities within cluster
+        similarities = []
+        for i in range(len(embeddings)):
+            for j in range(i + 1, len(embeddings)):
+                sim = cosine_similarity([embeddings[i]], [embeddings[j]])[0][0]
+                similarities.append(sim)
+        
+        return np.mean(similarities) if similarities else 0.0
+    
+    async def _detect_breakthrough_indicators(self, papers: List[Dict[str, Any]]) -> List[str]:
+        """Detect indicators of breakthrough potential in paper cluster"""
+        indicators = []
+        
+        # Check for interdisciplinary mix
+        domains = [self._classify_paper_domain(paper) for paper in papers]
+        unique_domains = set(domains)
+        if len(unique_domains) > 1:
+            indicators.append(f"interdisciplinary_mix_{len(unique_domains)}_domains")
+        
+        # Check for high-quality papers
+        quality_scores = [paper.get('paper_metadata', {}).get('quality_score', 0.0) 
+                         for paper in papers]
+        avg_quality = np.mean(quality_scores) if quality_scores else 0.0
+        if avg_quality > 10.0:  # Based on our quality scoring system
+            indicators.append("high_quality_cluster")
+        
+        # Check for recent papers (indicating active research area)
+        recent_papers = 0
+        for paper in papers:
+            metadata = paper.get('paper_metadata', {})
+            publish_date = metadata.get('publish_date', '')
+            if publish_date and publish_date.startswith(('2020', '2021', '2022', '2023', '2024')):
+                recent_papers += 1
+        
+        if recent_papers / len(papers) > 0.5:
+            indicators.append("active_research_area")
+        
+        # Check for novel terminology (indication of emerging concepts)
+        all_titles = [paper.get('content_sections', {}).get('title', '') for paper in papers]
+        combined_text = ' '.join(all_titles).lower()
+        
+        # Look for technical terms that might indicate novel concepts
+        novel_indicators = ['novel', 'new', 'first', 'breakthrough', 'innovative', 'unprecedented']
+        if any(indicator in combined_text for indicator in novel_indicators):
+            indicators.append("novel_terminology_present")
+        
+        return indicators
+    
+    async def _identify_domain_boundaries(self, clusters: List[EmbeddingCluster]) -> List[DomainBoundary]:
+        """Identify boundaries between domain clusters"""
+        boundaries = []
+        
+        # Find boundaries between clusters with different dominant domains
+        for i, cluster_a in enumerate(clusters):
+            for cluster_b in clusters[i + 1:]:
+                if cluster_a.dominant_domain != cluster_b.dominant_domain:
+                    # Calculate boundary characteristics
+                    boundary = DomainBoundary(
+                        domain_a=cluster_a.dominant_domain,
+                        domain_b=cluster_b.dominant_domain
+                    )
+                    
+                    # Find papers that bridge the domains
+                    boundary.bridging_papers = await self._find_bridging_papers(cluster_a, cluster_b)
+                    
+                    # Extract boundary-defining concepts
+                    boundary.boundary_concepts = await self._extract_boundary_concepts(cluster_a, cluster_b)
+                    
+                    boundaries.append(boundary)
+        
+        return boundaries
+    
+    async def _find_bridging_papers(self, cluster_a: EmbeddingCluster, cluster_b: EmbeddingCluster) -> List[Dict[str, Any]]:
+        """Find papers that bridge between two domain clusters"""
+        bridging_papers = []
+        
+        # Look for papers in cluster_a that are similar to cluster_b center
+        for paper in cluster_a.papers:
+            paper_embedding = np.array(paper['embedding_vector'])
+            similarity = cosine_similarity([paper_embedding], [cluster_b.center_embedding])[0][0]
+            
+            if similarity > self.embedding_similarity_threshold:
+                bridging_papers.append(paper)
+        
+        # Look for papers in cluster_b that are similar to cluster_a center
+        for paper in cluster_b.papers:
+            paper_embedding = np.array(paper['embedding_vector'])
+            similarity = cosine_similarity([paper_embedding], [cluster_a.center_embedding])[0][0]
+            
+            if similarity > self.embedding_similarity_threshold:
+                bridging_papers.append(paper)
+        
+        return bridging_papers[:10]  # Limit to top 10 bridging papers
+    
+    async def _extract_boundary_concepts(self, cluster_a: EmbeddingCluster, cluster_b: EmbeddingCluster) -> List[str]:
+        """Extract concepts that define the boundary between clusters"""
+        concepts = []
+        
+        # Extract key terms from papers in both clusters
+        terms_a = set()
+        terms_b = set()
+        
+        for paper in cluster_a.papers[:10]:  # Sample papers
+            content = paper.get('content_sections', {})
+            text = ' '.join([content.get('title', ''), content.get('abstract', '')]).lower()
+            words = [word.strip('.,!?;:') for word in text.split() if len(word) > 4]
+            terms_a.update(words)
+        
+        for paper in cluster_b.papers[:10]:  # Sample papers
+            content = paper.get('content_sections', {})
+            text = ' '.join([content.get('title', ''), content.get('abstract', '')]).lower()
+            words = [word.strip('.,!?;:') for word in text.split() if len(word) > 4]
+            terms_b.update(words)
+        
+        # Find terms that appear in both domains (boundary concepts)
+        common_terms = terms_a & terms_b
+        
+        # Filter for meaningful terms
+        stop_words = {'these', 'those', 'they', 'them', 'their', 'there', 'where', 'when', 'what', 'which', 'with', 'from'}
+        meaningful_terms = [term for term in common_terms if term not in stop_words]
+        
+        return meaningful_terms[:10]  # Return top 10 boundary concepts
+    
+    async def _calculate_boundary_strength(self, boundary: DomainBoundary, clusters: List[EmbeddingCluster]) -> float:
+        """Calculate how distinct the boundary between domains is"""
+        # Find clusters for the two domains
+        cluster_a = next((c for c in clusters if c.dominant_domain == boundary.domain_a), None)
+        cluster_b = next((c for c in clusters if c.dominant_domain == boundary.domain_b), None)
+        
+        if not cluster_a or not cluster_b:
+            return 0.0
+        
+        # Calculate distance between cluster centers
+        center_distance = 1.0 - cosine_similarity([cluster_a.center_embedding], [cluster_b.center_embedding])[0][0]
+        
+        # Factor in cluster coherence (more coherent clusters = stronger boundary)
+        coherence_factor = (cluster_a.conceptual_coherence + cluster_b.conceptual_coherence) / 2
+        
+        # Boundary strength combines distance and coherence
+        strength = center_distance * coherence_factor
+        
+        return min(strength, 1.0)
+    
+    async def _calculate_boundary_permeability(self, boundary: DomainBoundary, embedding_data: List[Dict[str, Any]]) -> float:
+        """Calculate how easily ideas cross this boundary"""
+        # High permeability = many bridging papers
+        # Low permeability = few bridging papers
+        
+        total_papers_in_domains = 0
+        for paper in embedding_data:
+            domain = self._classify_paper_domain(paper)
+            if domain in [boundary.domain_a, boundary.domain_b]:
+                total_papers_in_domains += 1
+        
+        if total_papers_in_domains == 0:
+            return 0.0
+        
+        # Permeability is inverse of boundary strength, adjusted by bridging papers
+        bridging_ratio = len(boundary.bridging_papers) / max(total_papers_in_domains, 1)
+        base_permeability = 1.0 - boundary.boundary_strength
+        
+        # Boost permeability if there are many bridging papers
+        permeability = base_permeability + (bridging_ratio * 0.3)
+        
+        return min(permeability, 1.0)
+    
+    async def _calculate_boundary_breakthrough_potential(self, boundary: DomainBoundary) -> float:
+        """Calculate breakthrough potential across this boundary"""
+        factors = []
+        
+        # High permeability suggests ideas can cross easily
+        factors.append(boundary.permeability * 0.3)
+        
+        # Moderate boundary strength is optimal (too weak = no distinction, too strong = no crossing)
+        optimal_strength = 0.6
+        strength_factor = 1.0 - abs(boundary.boundary_strength - optimal_strength)
+        factors.append(strength_factor * 0.3)
+        
+        # More bridging papers = higher potential
+        bridging_factor = min(len(boundary.bridging_papers) * 0.1, 0.4)
+        factors.append(bridging_factor)
+        
+        # Bonus for certain domain combinations
+        high_potential_pairs = {
+            ('physics', 'biology'), ('biology', 'physics'),
+            ('computer_science', 'biology'), ('biology', 'computer_science'),
+            ('mathematics', 'physics'), ('physics', 'mathematics'),
+            ('chemistry', 'biology'), ('biology', 'chemistry')
+        }
+        
+        domain_pair = (boundary.domain_a, boundary.domain_b)
+        if domain_pair in high_potential_pairs:
+            factors.append(0.2)
+        
+        return min(sum(factors), 1.0)
+    
+    async def discover_cross_domain_insights_enhanced(
+        self, 
+        source_domain: str, 
+        target_domain: str,
+        focus_area: str = None,
+        use_embeddings: bool = True
+    ) -> List[BreakthroughInsight]:
+        """Enhanced cross-domain insight discovery with embedding analysis"""
+        
+        logger.info("Starting enhanced cross-domain insight discovery",
+                   source_domain=source_domain,
+                   target_domain=target_domain,
+                   use_embeddings=use_embeddings)
+        
+        # Run traditional analogical analysis
+        traditional_insights = await self.discover_cross_domain_insights(source_domain, target_domain, focus_area)
+        
+        if not use_embeddings:
+            return traditional_insights
+        
+        # Enhance with embedding-based analysis
+        enhanced_insights = []
+        
+        # Analyze domain boundary if not already done
+        if not self.domain_boundaries:
+            await self.analyze_domain_boundaries()
+        
+        # Find relevant domain boundary
+        relevant_boundary = next(
+            (b for b in self.domain_boundaries 
+             if (b.domain_a == source_domain and b.domain_b == target_domain) or
+                (b.domain_a == target_domain and b.domain_b == source_domain)), 
+            None
+        )
+        
+        for insight in traditional_insights:
+            # Enhance insight with embedding evidence
+            embedding_evidence = []
+            conceptual_bridge_strength = 0.0
+            
+            if relevant_boundary:
+                # Add boundary crossing information
+                insight.domain_boundary_crossing = f"{relevant_boundary.domain_a}↔{relevant_boundary.domain_b}"
+                
+                # Calculate conceptual bridge strength
+                conceptual_bridge_strength = relevant_boundary.breakthrough_potential
+                
+                # Add embedding-based evidence
+                if relevant_boundary.bridging_papers:
+                    embedding_evidence.append(f"Found {len(relevant_boundary.bridging_papers)} papers bridging {source_domain} and {target_domain}")
+                
+                if relevant_boundary.boundary_concepts:
+                    embedding_evidence.append(f"Shared concepts: {', '.join(relevant_boundary.boundary_concepts[:5])}")
+                
+                embedding_evidence.append(f"Boundary permeability: {relevant_boundary.permeability:.2f}")
+                embedding_evidence.append(f"Cross-domain breakthrough potential: {relevant_boundary.breakthrough_potential:.2f}")
+            
+            # Update insight with embedding analysis
+            insight.embedding_based_evidence = embedding_evidence
+            insight.conceptual_bridge_strength = conceptual_bridge_strength
+            
+            # Boost novelty score if high boundary crossing potential
+            if conceptual_bridge_strength > 0.7:
+                insight.novelty_score = min(insight.novelty_score + self.boundary_crossing_bonus, 1.0)
+            
+            enhanced_insights.append(insight)
+        
+        logger.info("Enhanced cross-domain analysis completed",
+                   traditional_insights=len(traditional_insights),
+                   enhanced_insights=len(enhanced_insights),
+                   boundary_analysis=relevant_boundary is not None)
+        
+        return enhanced_insights
     
     async def _extract_domain_patterns(self, domain: str) -> List[AnalogicalPattern]:
         """Extract successful patterns from a source domain"""

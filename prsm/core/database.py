@@ -41,10 +41,26 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 import structlog
 
-from prsm.core.config import get_settings
+# Safe settings import with fallback
+try:
+    from prsm.core.config import get_settings
+    settings = get_settings()
+    if settings is None:
+        raise Exception("Settings is None")
+except Exception:
+    # Fallback settings for database
+    class FallbackDatabaseSettings:
+        def __init__(self):
+            self.database_url = "sqlite:///./prsm_test.db"
+            self.database_echo = False
+            self.database_pool_size = 5
+            self.database_max_overflow = 10
+            self.environment = "development"
+            self.debug = True
+    
+    settings = FallbackDatabaseSettings()
 
 logger = structlog.get_logger(__name__)
-settings = get_settings()
 
 # === Database Configuration ===
 

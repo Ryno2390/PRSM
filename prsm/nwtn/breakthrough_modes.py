@@ -71,6 +71,31 @@ class CrossDomainBridgeConfig:
     domain_expertise_weighting: bool = True   # Weight by domain expertise
 
 @dataclass
+class ReasoningEngineConfig:
+    """Configuration for the 7 reasoning engines in System 1 (Creative) and System 2 (Validation) modes"""
+    
+    # System 1 (Creative Generation) Parameters - Control creativity and exploration
+    analogical_creativity: float = 0.5          # Analogical reasoning creativity (0.2-0.9)
+    deductive_speculation: float = 0.3          # Deductive reasoning speculation level (0.1-0.8)  
+    inductive_boldness: float = 0.4             # Inductive reasoning boldness (0.2-0.9)
+    abductive_novelty: float = 0.5              # Abductive reasoning novelty seeking (0.2-0.9)
+    counterfactual_extremeness: float = 0.3     # Counterfactual reasoning extremeness (0.1-0.9)
+    probabilistic_tail_exploration: float = 0.4 # Probabilistic reasoning tail exploration (0.1-0.9)
+    causal_mechanism_novelty: float = 0.5       # Causal reasoning mechanism novelty (0.2-0.9)
+    
+    # System 2 (Validation) Parameters - Control rigor and validation
+    validation_strictness: float = 0.7          # Overall validation strictness (0.3-0.9)
+    evidence_requirement: float = 0.6           # Evidence quality requirement (0.3-0.9)
+    logical_rigor: float = 0.8                  # Logical consistency requirement (0.5-0.9)
+    consistency_enforcement: float = 0.7        # Cross-engine consistency enforcement (0.3-0.9)
+    contradiction_tolerance: float = 0.3        # Tolerance for contradictions (0.1-0.8)
+    
+    # Cross-System Parameters - Control interaction between System 1 and System 2
+    creative_validation_balance: float = 0.5    # Balance between creativity and validation (0.1-0.9)
+    system_transition_threshold: float = 0.6    # Threshold for System 1 → System 2 transition (0.3-0.9)
+    reasoning_depth_multiplier: float = 1.0     # Multiplier for reasoning depth (0.5-2.0)
+
+@dataclass
 class IntegrationValidationConfig:
     """Configuration for integration and validation system"""
     validation_strictness: str = "moderate"      # "strict", "moderate", "permissive" 
@@ -114,6 +139,7 @@ class BreakthroughModeConfig:
     contrarian_config: ContrarianAnalysisConfig = field(default_factory=ContrarianAnalysisConfig)
     bridge_config: CrossDomainBridgeConfig = field(default_factory=CrossDomainBridgeConfig)
     validation_config: IntegrationValidationConfig = field(default_factory=IntegrationValidationConfig)
+    reasoning_engine_config: ReasoningEngineConfig = field(default_factory=ReasoningEngineConfig)
 
 class BreakthroughModeManager:
     """Manages breakthrough mode configurations and applies them to NWTN reasoning"""
@@ -187,6 +213,26 @@ class BreakthroughModeManager:
                 validation_timeout_seconds=600,      # Allow thorough validation
                 benchmark_comparison_enabled=True,   # Enable benchmarking
                 impossible_problem_testing=False     # No impossible problems
+            ),
+            reasoning_engine_config=ReasoningEngineConfig(
+                # System 1 (Creative) - Conservative parameters
+                analogical_creativity=0.3,           # Low creativity for established approaches
+                deductive_speculation=0.2,           # Minimal speculation
+                inductive_boldness=0.2,              # Conservative induction
+                abductive_novelty=0.3,               # Low novelty seeking
+                counterfactual_extremeness=0.2,      # Minimal counterfactual exploration
+                probabilistic_tail_exploration=0.2,  # Focus on high-probability outcomes
+                causal_mechanism_novelty=0.3,        # Conservative causal reasoning
+                # System 2 (Validation) - Strict parameters  
+                validation_strictness=0.9,           # Maximum validation rigor
+                evidence_requirement=0.9,            # High evidence standards
+                logical_rigor=0.9,                   # Maximum logical consistency
+                consistency_enforcement=0.9,         # Strict consistency enforcement
+                contradiction_tolerance=0.1,         # Minimal contradiction tolerance
+                # Cross-System - Conservative balance
+                creative_validation_balance=0.2,     # Heavy emphasis on validation
+                system_transition_threshold=0.8,     # High threshold for creative ideas
+                reasoning_depth_multiplier=1.2       # Thorough but not excessive reasoning
             )
         )
         
@@ -254,6 +300,26 @@ class BreakthroughModeManager:
                 validation_timeout_seconds=300,      # Standard validation time
                 benchmark_comparison_enabled=True,   # Enable benchmarking
                 impossible_problem_testing=False     # No impossible problems
+            ),
+            reasoning_engine_config=ReasoningEngineConfig(
+                # System 1 (Creative) - Balanced parameters
+                analogical_creativity=0.5,           # Moderate creativity
+                deductive_speculation=0.3,           # Conservative speculation
+                inductive_boldness=0.4,              # Moderate inductive reasoning
+                abductive_novelty=0.5,               # Balanced novelty seeking
+                counterfactual_extremeness=0.3,      # Moderate counterfactual exploration
+                probabilistic_tail_exploration=0.4,  # Balanced probability exploration
+                causal_mechanism_novelty=0.5,        # Moderate causal innovation
+                # System 2 (Validation) - Balanced parameters
+                validation_strictness=0.7,           # Standard validation rigor
+                evidence_requirement=0.6,            # Moderate evidence standards
+                logical_rigor=0.8,                   # Good logical consistency
+                consistency_enforcement=0.7,         # Standard consistency enforcement
+                contradiction_tolerance=0.3,         # Moderate contradiction tolerance
+                # Cross-System - Balanced approach
+                creative_validation_balance=0.5,     # Equal emphasis on creativity and validation
+                system_transition_threshold=0.6,     # Standard threshold for creative ideas
+                reasoning_depth_multiplier=1.0       # Standard reasoning depth
             )
         )
         
@@ -322,6 +388,26 @@ class BreakthroughModeManager:
                 validation_timeout_seconds=180,      # Shorter validation time
                 benchmark_comparison_enabled=True,   # Enable benchmarking
                 impossible_problem_testing=False     # No impossible problems
+            ),
+            reasoning_engine_config=ReasoningEngineConfig(
+                # System 1 (Creative) - High creativity parameters
+                analogical_creativity=0.7,           # High creativity for novel connections
+                deductive_speculation=0.5,           # Moderate speculation
+                inductive_boldness=0.6,              # Bold inductive leaps
+                abductive_novelty=0.7,               # High novelty seeking
+                counterfactual_extremeness=0.5,      # Moderate counterfactual exploration
+                probabilistic_tail_exploration=0.6,  # Explore low-probability high-impact scenarios
+                causal_mechanism_novelty=0.7,        # Novel causal mechanisms
+                # System 2 (Validation) - Relaxed parameters for creativity
+                validation_strictness=0.6,           # Relaxed validation to allow creativity
+                evidence_requirement=0.5,            # Lower evidence standards
+                logical_rigor=0.7,                   # Good but not excessive logical consistency
+                consistency_enforcement=0.5,         # Relaxed consistency for creative ideas
+                contradiction_tolerance=0.7,         # High tolerance for creative contradictions
+                # Cross-System - Creative emphasis
+                creative_validation_balance=0.7,     # Heavy emphasis on creativity
+                system_transition_threshold=0.4,     # Low threshold for creative ideas
+                reasoning_depth_multiplier=1.3       # Deeper reasoning for creative exploration
             )
         )
         
@@ -390,6 +476,26 @@ class BreakthroughModeManager:
                 validation_timeout_seconds=120,      # Fastest validation time
                 benchmark_comparison_enabled=True,   # Enable benchmarking
                 impossible_problem_testing=True     # Enable impossible problem testing
+            ),
+            reasoning_engine_config=ReasoningEngineConfig(
+                # System 1 (Creative) - Maximum creativity parameters
+                analogical_creativity=0.9,           # Maximum creativity for breakthrough connections
+                deductive_speculation=0.8,           # High speculation
+                inductive_boldness=0.9,              # Maximum inductive boldness
+                abductive_novelty=0.9,               # Maximum novelty seeking
+                counterfactual_extremeness=0.9,      # Extreme counterfactual exploration
+                probabilistic_tail_exploration=0.9,  # Maximum tail exploration for breakthroughs
+                causal_mechanism_novelty=0.9,        # Revolutionary causal mechanisms
+                # System 2 (Validation) - Minimal constraints for maximum creativity
+                validation_strictness=0.4,           # Minimal validation to preserve breakthroughs
+                evidence_requirement=0.3,            # Minimal evidence requirements
+                logical_rigor=0.5,                   # Relaxed logical consistency
+                consistency_enforcement=0.3,         # Minimal consistency enforcement
+                contradiction_tolerance=0.8,         # Maximum tolerance for contradictions
+                # Cross-System - Revolutionary emphasis
+                creative_validation_balance=0.9,     # Maximum emphasis on creativity
+                system_transition_threshold=0.2,     # Very low threshold for creative ideas
+                reasoning_depth_multiplier=1.8       # Maximum reasoning depth for breakthroughs
             )
         )
         
@@ -594,6 +700,26 @@ class BreakthroughModeManager:
                 "validation_timeout_seconds": config.validation_config.validation_timeout_seconds,
                 "benchmark_comparison_enabled": config.validation_config.benchmark_comparison_enabled,
                 "impossible_problem_testing": config.validation_config.impossible_problem_testing
+            },
+            "reasoning_engines": {
+                # System 1 (Creative Generation) Parameters
+                "analogical_creativity": config.reasoning_engine_config.analogical_creativity,
+                "deductive_speculation": config.reasoning_engine_config.deductive_speculation,
+                "inductive_boldness": config.reasoning_engine_config.inductive_boldness,
+                "abductive_novelty": config.reasoning_engine_config.abductive_novelty,
+                "counterfactual_extremeness": config.reasoning_engine_config.counterfactual_extremeness,
+                "probabilistic_tail_exploration": config.reasoning_engine_config.probabilistic_tail_exploration,
+                "causal_mechanism_novelty": config.reasoning_engine_config.causal_mechanism_novelty,
+                # System 2 (Validation) Parameters
+                "validation_strictness": config.reasoning_engine_config.validation_strictness,
+                "evidence_requirement": config.reasoning_engine_config.evidence_requirement,
+                "logical_rigor": config.reasoning_engine_config.logical_rigor,
+                "consistency_enforcement": config.reasoning_engine_config.consistency_enforcement,
+                "contradiction_tolerance": config.reasoning_engine_config.contradiction_tolerance,
+                # Cross-System Parameters
+                "creative_validation_balance": config.reasoning_engine_config.creative_validation_balance,
+                "system_transition_threshold": config.reasoning_engine_config.system_transition_threshold,
+                "reasoning_depth_multiplier": config.reasoning_engine_config.reasoning_depth_multiplier
             }
         }
     
@@ -602,7 +728,8 @@ class BreakthroughModeManager:
                           analogical_overrides: Optional[Dict[str, Any]] = None,
                           contrarian_overrides: Optional[Dict[str, Any]] = None,
                           bridge_overrides: Optional[Dict[str, Any]] = None,
-                          validation_overrides: Optional[Dict[str, Any]] = None) -> BreakthroughModeConfig:
+                          validation_overrides: Optional[Dict[str, Any]] = None,
+                          reasoning_engine_overrides: Optional[Dict[str, Any]] = None) -> BreakthroughModeConfig:
         """Create a custom breakthrough mode with user-specified overrides"""
         
         base_config = self.get_mode_config(base_mode)
@@ -632,6 +759,12 @@ class BreakthroughModeManager:
                 if hasattr(validation_config, key):
                     setattr(validation_config, key, value)
         
+        reasoning_engine_config = ReasoningEngineConfig(**base_config.reasoning_engine_config.__dict__)
+        if reasoning_engine_overrides:
+            for key, value in reasoning_engine_overrides.items():
+                if hasattr(reasoning_engine_config, key):
+                    setattr(reasoning_engine_config, key, value)
+        
         # Create custom config with overrides
         custom_config = BreakthroughModeConfig(
             mode=BreakthroughMode.CUSTOM,
@@ -652,7 +785,8 @@ class BreakthroughModeManager:
             analogical_config=analogical_config,
             contrarian_config=contrarian_config,
             bridge_config=bridge_config,
-            validation_config=validation_config
+            validation_config=validation_config,
+            reasoning_engine_config=reasoning_engine_config
         )
         
         return custom_config
@@ -681,6 +815,16 @@ class BreakthroughModeManager:
         # Validate integration config
         if not (60 <= config.validation_config.validation_timeout_seconds <= 600):
             warnings.append("Validation timeout outside recommended range (60-600 seconds)")
+        
+        # Validate reasoning engine config
+        if not (0.2 <= config.reasoning_engine_config.analogical_creativity <= 0.9):
+            warnings.append("Analogical creativity outside recommended range (0.2-0.9)")
+        if not (0.1 <= config.reasoning_engine_config.deductive_speculation <= 0.8):
+            warnings.append("Deductive speculation outside recommended range (0.1-0.8)")
+        if not (0.3 <= config.reasoning_engine_config.validation_strictness <= 0.9):
+            warnings.append("Validation strictness outside recommended range (0.3-0.9)")
+        if not (0.5 <= config.reasoning_engine_config.reasoning_depth_multiplier <= 2.0):
+            warnings.append("Reasoning depth multiplier outside recommended range (0.5-2.0)")
         
         return {
             "warnings": warnings,

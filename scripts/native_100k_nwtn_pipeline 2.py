@@ -23,17 +23,6 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import sys
 import argparse
 
-# Set comprehensive offline mode to avoid ALL HuggingFace API errors
-os.environ['HF_HUB_OFFLINE'] = '1'
-os.environ['TRANSFORMERS_OFFLINE'] = '1'
-os.environ['HF_DATASETS_OFFLINE'] = '1'
-os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
-os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = '1'
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-# Disable all network calls
-os.environ['HF_DISABLE_TELEMETRY'] = '1'
-os.environ['DISABLE_TELEMETRY'] = '1'
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -161,21 +150,15 @@ def process_paper_worker(args: Tuple[Dict[str, Any], str, str]) -> Tuple[bool, s
     paper_data, processed_dir, nwtn_dir = args
     
     try:
-        # Initialize embedding model in worker process (comprehensive offline mode)
+        # Initialize embedding model in worker process (offline mode to avoid 429 errors)
         import os
-        os.environ['HF_HUB_OFFLINE'] = '1'
         os.environ['TRANSFORMERS_OFFLINE'] = '1'
         os.environ['HF_DATASETS_OFFLINE'] = '1'
-        os.environ['HF_HUB_DISABLE_TELEMETRY'] = '1'
-        os.environ['HF_HUB_DISABLE_PROGRESS_BARS'] = '1'
-        os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-        os.environ['HF_DISABLE_TELEMETRY'] = '1'
-        os.environ['DISABLE_TELEMETRY'] = '1'
         from sentence_transformers import SentenceTransformer
         embedding_model = SentenceTransformer('all-MiniLM-L6-v2', use_auth_token=False)
         hash_generator = PostQuantumContentHashGenerator("sha3_256")
         
-        arxiv_id = paper_data.get('arxiv_id') or (paper_data.get('id', '') or '').replace('arxiv:', '')
+        arxiv_id = paper_data.get('arxiv_id') or paper_data.get('id', '').replace('arxiv:', '')
         if not arxiv_id:
             return False, f"No arXiv ID found", {}
             
@@ -185,16 +168,16 @@ def process_paper_worker(args: Tuple[Dict[str, Any], str, str]) -> Tuple[bool, s
         if processed_file.exists() and embedding_file.exists():
             return True, f"Already processed: {arxiv_id}", {"skipped": True}
             
-        # Extract and prepare content sections (handle None values)
+        # Extract and prepare content sections
         content_sections = {
-            'title': paper_data.get('title') or '',
-            'abstract': paper_data.get('abstract') or '',
-            'introduction': paper_data.get('introduction') or '',
-            'methodology': paper_data.get('methodology') or '',
-            'results': paper_data.get('results') or '',
-            'discussion': paper_data.get('discussion') or '',
-            'conclusion': paper_data.get('conclusion') or '',
-            'full_text': paper_data.get('full_text') or ''
+            'title': paper_data.get('title', ''),
+            'abstract': paper_data.get('abstract', ''),
+            'introduction': paper_data.get('introduction', ''),
+            'methodology': paper_data.get('methodology', ''),
+            'results': paper_data.get('results', ''),
+            'discussion': paper_data.get('discussion', ''),
+            'conclusion': paper_data.get('conclusion', ''),
+            'full_text': paper_data.get('full_text', '')
         }
         
         # Create comprehensive content for embedding and hashing
@@ -214,15 +197,15 @@ def process_paper_worker(args: Tuple[Dict[str, Any], str, str]) -> Tuple[bool, s
         # Calculate quality score
         quality_score = calculate_paper_quality_score(paper_data)
         
-        # Prepare metadata (handle None values)
+        # Prepare metadata
         paper_metadata = {
-            'domain': paper_data.get('domain') or '',
-            'categories': paper_data.get('categories') or '',
-            'publish_date': paper_data.get('publish_date') or '',
-            'authors': paper_data.get('authors') or '',
-            'journal_ref': paper_data.get('journal_ref') or '',
-            'content_length': paper_data.get('content_length') or len(full_content),
-            'has_full_content': paper_data.get('has_full_content') or False,
+            'domain': paper_data.get('domain', ''),
+            'categories': paper_data.get('categories', ''),
+            'publish_date': paper_data.get('publish_date', ''),
+            'authors': paper_data.get('authors', ''),
+            'journal_ref': paper_data.get('journal_ref', ''),
+            'content_length': paper_data.get('content_length', len(full_content)),
+            'has_full_content': paper_data.get('has_full_content', False),
             'quality_score': quality_score
         }
         
@@ -270,7 +253,7 @@ def process_paper_worker(args: Tuple[Dict[str, Any], str, str]) -> Tuple[bool, s
             "full_text_preview": content_sections['full_text'][:3000],  # Preview for compatibility
             "full_text": content_sections['full_text'],  # Complete full text
             "content_length": len(full_content),
-            "page_count": (paper_data.get('content_length') or 0) // 2000,  # Estimate
+            "page_count": paper_data.get('content_length', 0) // 2000,  # Estimate
             "processed_at": time.time(),
             "metadata": paper_metadata,
             "source_database": "native_sqlite"
@@ -313,8 +296,8 @@ class Native100KNWTNPipeline:
         self.nwtn_dir = Path("/Users/ryneschultz/Documents/GitHub/PRSM_Storage_Local/03_NWTN_READY")
         self.progress_file = "/Users/ryneschultz/Documents/GitHub/PRSM/native_100k_progress.json"
         
-        # Configuration (limited to 2 workers to prevent system freezing)
-        self.num_workers = num_workers or 2
+        # Configuration
+        self.num_workers = num_workers or max(1, mp.cpu_count() - 1)
         self.target_papers = target_papers
         
         # Create directories for both processed content and NWTN ready
@@ -355,43 +338,16 @@ class Native100KNWTNPipeline:
             json.dump(self.stats, f, indent=2)
     
     def select_best_papers(self) -> List[Dict[str, Any]]:
-        """Select the best papers from database, excluding already processed ones"""
-        
-        # First, count existing processed papers
-        existing_count = len(list(Path(self.nwtn_dir / "embeddings").glob("*.json")))
-        needed_papers = self.target_papers - existing_count
-        
-        logger.info(f"📊 Existing processed papers: {existing_count:,}")
-        logger.info(f"🎯 Need {needed_papers:,} more papers to reach {self.target_papers:,} total")
-        
-        if needed_papers <= 0:
-            logger.info(f"✅ Already have {existing_count:,} papers (target: {self.target_papers:,})")
-            return []
-        
-        # Get list of already processed arxiv_ids to exclude
-        processed_ids = set()
-        for embedding_file in Path(self.nwtn_dir / "embeddings").glob("*.json"):
-            arxiv_id = embedding_file.stem
-            processed_ids.add(arxiv_id)
-        
-        logger.info(f"🔍 Selecting {needed_papers:,} NEW papers from database (excluding {len(processed_ids):,} already processed)...")
+        """Select the best 100K papers from database"""
+        logger.info(f"🔍 Selecting best {self.target_papers:,} papers from database...")
         
         # Connect to database
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row  # Enable column access by name
         cursor = conn.cursor()
         
-        # Create a placeholder string for the NOT IN clause
-        if processed_ids:
-            placeholders = ','.join(['?' for _ in processed_ids])
-            excluded_clause = f"AND arxiv_id NOT IN ({placeholders})"
-            excluded_params = list(processed_ids)
-        else:
-            excluded_clause = ""
-            excluded_params = []
-        
-        # Complex query to select diverse, high-quality papers, excluding already processed ones
-        query = f"""
+        # Complex query to select diverse, high-quality papers
+        query = """
         WITH ranked_papers AS (
             SELECT *,
                    CASE 
@@ -416,7 +372,6 @@ class Native100KNWTNPipeline:
             WHERE title IS NOT NULL 
               AND abstract IS NOT NULL
               AND LENGTH(abstract) > 100
-              {excluded_clause}
         )
         SELECT *,
                (recency_score + content_score + embedding_score + length_score) as total_score
@@ -425,9 +380,7 @@ class Native100KNWTNPipeline:
         LIMIT ?
         """
         
-        # Execute query with excluded IDs and limit
-        params = excluded_params + [needed_papers]
-        cursor.execute(query, params)
+        cursor.execute(query, (self.target_papers,))
         papers = [dict(row) for row in cursor.fetchall()]
         
         conn.close()

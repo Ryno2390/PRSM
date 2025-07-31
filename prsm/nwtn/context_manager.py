@@ -12,11 +12,27 @@ from datetime import datetime, timezone
 import math
 
 from prsm.core.models import PRSMSession, ContextUsage, TaskStatus
-from prsm.core.config import get_settings
 from prsm.tokenomics.ftns_service import FTNSService
 
+# Safe settings import with fallback
+try:
+    from prsm.core.config import get_settings
+    settings = get_settings()
+    if settings is None:
+        raise Exception("Settings is None")
+except Exception:
+    # Fallback settings for context manager
+    class FallbackContextSettings:
+        def __init__(self):
+            self.ftns_enabled = False  # Disable FTNS for testing
+            self.nwtn_min_context_cost = 10
+            self.agent_timeout_seconds = 300
+            self.environment = "development"
+            self.debug = True
+    
+    settings = FallbackContextSettings()
+
 logger = structlog.get_logger(__name__)
-settings = get_settings()
 
 
 class ContextManager:
