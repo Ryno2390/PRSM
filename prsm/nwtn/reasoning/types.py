@@ -32,6 +32,12 @@ class ReasoningEngine(Enum):
     GOOGLE = "google"
 
 
+class ReasoningMode(Enum):
+    """System 1 vs System 2 reasoning mode differentiation"""
+    SYSTEM1_CREATIVE = "system1_creative"      # Divergent, high-risk exploration for candidate generation
+    SYSTEM2_VALIDATION = "system2_validation"  # Convergent, rigorous testing for evaluation
+
+
 class EngineHealthStatus(Enum):
     """Health status of reasoning engines"""
     HEALTHY = "healthy"

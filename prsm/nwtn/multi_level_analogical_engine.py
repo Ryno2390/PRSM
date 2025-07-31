@@ -17,12 +17,16 @@ Expected Impact: 3-5x improvement in cross-domain synthesis quality
 import asyncio
 import numpy as np
 import time
+import json
+from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Set, Union
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime, timezone
 from uuid import uuid4
 import structlog
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.cluster import KMeans
 
 logger = structlog.get_logger(__name__)
 
@@ -850,13 +854,444 @@ class EffectivenessEvaluator:
         
         return min(1.0, 0.5 + evidence_strength + effectiveness_count * 0.1)
 
+@dataclass
+class CrossDomainBridge:
+    """Represents a conceptual bridge between different domains"""
+    source_domain: str
+    target_domain: str
+    bridge_id: str = field(default_factory=lambda: str(uuid4()))
+    conceptual_similarity: float = 0.0
+    structural_isomorphism: float = 0.0
+    bridging_papers: List[Dict[str, Any]] = field(default_factory=list)
+    shared_concepts: List[str] = field(default_factory=list)
+    cross_domain_insights: List[str] = field(default_factory=list)
+    breakthrough_potential: float = 0.0
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+class CrossDomainAnalogicalEngine:
+    """Cross-domain analogical reasoning using 100K embeddings for breakthrough discovery"""
+    
+    def __init__(self, embeddings_path: str = None):
+        """Initialize with path to 100K embeddings directory"""
+        self.embeddings_path = embeddings_path or "/Users/ryneschultz/Documents/GitHub/PRSM_Storage_Local/03_NWTN_READY/embeddings"
+        self.embedding_cache = {}
+        self.domain_clusters = {}
+        self.cross_domain_bridges = []
+        self._initialize_domain_mapping()
+    
+    def _initialize_domain_mapping(self):
+        """Initialize domain classification mapping"""
+        self.domain_keywords = {
+            'physics': ['quantum', 'particle', 'relativity', 'mechanics', 'thermodynamics', 'electromagnetic', 'optics'],
+            'mathematics': ['theorem', 'proof', 'topology', 'algebra', 'geometry', 'analysis', 'statistics'],
+            'computer_science': ['algorithm', 'computation', 'machine learning', 'neural network', 'optimization', 'software'],
+            'biology': ['protein', 'dna', 'evolution', 'genetics', 'cellular', 'molecular', 'organism'],
+            'astronomy': ['stellar', 'galaxy', 'cosmology', 'black hole', 'planetary', 'universe', 'telescope'],  
+            'finance': ['market', 'trading', 'risk', 'portfolio', 'derivative', 'economics', 'investment'],
+            'chemistry': ['molecular', 'reaction', 'catalyst', 'polymer', 'organic', 'inorganic', 'synthesis']
+        }
+    
+    async def find_conceptual_bridges(self, query: str, domain_distribution: Dict[str, int]) -> List[CrossDomainBridge]:
+        """Find papers conceptually similar across different domains using 100K embeddings"""
+        try:
+            # Load relevant embeddings based on domain distribution
+            domain_embeddings = await self._load_domain_embeddings(domain_distribution)
+            
+            if not domain_embeddings:
+                logger.warning("No embeddings loaded for cross-domain analysis")
+                return []
+            
+            # Create query embedding representation
+            query_vector = await self._create_query_embedding(query, domain_embeddings)
+            
+            # Find cross-domain conceptual similarities
+            bridges = await self._discover_cross_domain_bridges(
+                query_vector, domain_embeddings, domain_distribution
+            )
+            
+            # Enhance bridges with structural isomorphism analysis
+            for bridge in bridges:
+                bridge.structural_isomorphism = await self._analyze_structural_isomorphism(
+                    bridge.bridging_papers
+                )
+                bridge.breakthrough_potential = self._calculate_breakthrough_potential(bridge)
+            
+            # Sort by breakthrough potential
+            bridges.sort(key=lambda b: b.breakthrough_potential, reverse=True)
+            
+            logger.info("Cross-domain bridges discovered",
+                       bridge_count=len(bridges),
+                       top_similarity=bridges[0].conceptual_similarity if bridges else 0.0)
+            
+            return bridges[:5]  # Return top 5 bridges
+            
+        except Exception as e:
+            logger.error("Failed to find conceptual bridges", error=str(e))
+            return []
+    
+    async def _load_domain_embeddings(self, domain_distribution: Dict[str, int]) -> Dict[str, List[Dict[str, Any]]]:
+        """Load embeddings from specified domains with sampling"""
+        domain_embeddings = {}
+        embeddings_dir = Path(self.embeddings_path)
+        
+        if not embeddings_dir.exists():
+            logger.warning("Embeddings directory not found", path=str(embeddings_dir))
+            return {}
+        
+        # Sample papers from each domain
+        for domain, count in domain_distribution.items():
+            domain_papers = []
+            sample_size = min(50, max(10, count // 10))  # Sample 10-50 papers per domain
+            
+            # Load embedding files
+            embedding_files = list(embeddings_dir.glob("*.json"))
+            sampled_files = np.random.choice(embedding_files, 
+                                           size=min(sample_size * 3, len(embedding_files)), 
+                                           replace=False)
+            
+            for file_path in sampled_files:
+                try:
+                    with open(file_path, 'r') as f:
+                        embedding_data = json.load(f)
+                    
+                    # Check if paper belongs to current domain
+                    if self._classify_paper_domain(embedding_data) == domain:
+                        domain_papers.append(embedding_data)
+                        
+                    if len(domain_papers) >= sample_size:
+                        break
+                        
+                except Exception as e:
+                    continue
+            
+            if domain_papers:
+                domain_embeddings[domain] = domain_papers
+                logger.debug("Loaded domain embeddings", 
+                           domain=domain, 
+                           paper_count=len(domain_papers))
+        
+        return domain_embeddings
+    
+    def _classify_paper_domain(self, embedding_data: Dict[str, Any]) -> str:
+        """Classify paper domain based on content"""
+        content_sections = embedding_data.get('content_sections', {})
+        paper_metadata = embedding_data.get('paper_metadata', {})
+        
+        # Check categories first
+        categories = paper_metadata.get('categories', '').lower()
+        domain = paper_metadata.get('domain', '').lower()
+        
+        if domain and domain in self.domain_keywords:
+            return domain
+        
+        # Analyze content for domain classification
+        all_text = ' '.join([
+            content_sections.get('title', ''),
+            content_sections.get('abstract', ''),
+            categories
+        ]).lower()
+        
+        domain_scores = {}
+        for domain, keywords in self.domain_keywords.items():
+            score = sum(1 for keyword in keywords if keyword in all_text)
+            if score > 0:
+                domain_scores[domain] = score
+        
+        if domain_scores:
+            return max(domain_scores.items(), key=lambda x: x[1])[0]
+        
+        return 'general'
+    
+    async def _create_query_embedding(self, query: str, domain_embeddings: Dict[str, List[Dict[str, Any]]]) -> np.ndarray:
+        """Create a composite embedding representation for the query"""
+        # For now, create a simple average embedding from similar papers
+        # In a full implementation, this would use the same embedding model
+        
+        query_lower = query.lower()
+        relevant_embeddings = []
+        
+        for domain, papers in domain_embeddings.items():
+            for paper in papers[:5]:  # Sample from each domain
+                content = ' '.join([
+                    paper.get('content_sections', {}).get('title', ''),
+                    paper.get('content_sections', {}).get('abstract', '')
+                ]).lower()
+                
+                # Simple relevance check
+                query_words = set(query_lower.split())
+                content_words = set(content.split())
+                overlap = len(query_words & content_words)
+                
+                if overlap > 1:  # Some relevance threshold
+                    embedding_vector = paper.get('embedding_vector', [])
+                    if embedding_vector:
+                        relevant_embeddings.append(np.array(embedding_vector))
+        
+        if relevant_embeddings:
+            return np.mean(relevant_embeddings, axis=0)
+        else:
+            # Return zero vector if no relevant embeddings found
+            return np.zeros(384)  # Standard sentence transformer dimension
+    
+    async def _discover_cross_domain_bridges(self, 
+                                           query_vector: np.ndarray,
+                                           domain_embeddings: Dict[str, List[Dict[str, Any]]],
+                                           domain_distribution: Dict[str, int]) -> List[CrossDomainBridge]:
+        """Discover conceptual bridges between different domains"""
+        bridges = []
+        domains = list(domain_embeddings.keys())
+        
+        # Find bridges between each pair of domains
+        for i, source_domain in enumerate(domains):
+            for target_domain in domains[i+1:]:
+                if source_domain == target_domain:
+                    continue
+                
+                bridge = await self._find_domain_pair_bridge(
+                    source_domain, target_domain,
+                    domain_embeddings[source_domain],
+                    domain_embeddings[target_domain],
+                    query_vector
+                )
+                
+                if bridge and bridge.conceptual_similarity > 0.3:  # Threshold for meaningful similarity
+                    bridges.append(bridge)
+        
+        return bridges
+    
+    async def _find_domain_pair_bridge(self, 
+                                     source_domain: str,
+                                     target_domain: str,
+                                     source_papers: List[Dict[str, Any]],
+                                     target_papers: List[Dict[str, Any]],
+                                     query_vector: np.ndarray) -> Optional[CrossDomainBridge]:
+        """Find conceptual bridge between a specific pair of domains"""
+        
+        # Calculate similarities between papers across domains
+        best_pairs = []
+        
+        for source_paper in source_papers[:20]:  # Limit for performance
+            source_embedding = np.array(source_paper.get('embedding_vector', []))
+            if len(source_embedding) == 0:
+                continue
+                
+            for target_paper in target_papers[:20]:
+                target_embedding = np.array(target_paper.get('embedding_vector', []))
+                if len(target_embedding) == 0:
+                    continue
+                
+                # Calculate conceptual similarity
+                similarity = cosine_similarity([source_embedding], [target_embedding])[0][0]
+                
+                if similarity > 0.4:  # Threshold for cross-domain similarity
+                    best_pairs.append({
+                        'source_paper': source_paper,
+                        'target_paper': target_paper,
+                        'similarity': similarity
+                    })
+        
+        if not best_pairs:
+            return None
+        
+        # Sort by similarity and take top pairs
+        best_pairs.sort(key=lambda x: x['similarity'], reverse=True)
+        top_pairs = best_pairs[:3]
+        
+        # Create bridge
+        bridge = CrossDomainBridge(
+            source_domain=source_domain,
+            target_domain=target_domain,
+            conceptual_similarity=np.mean([pair['similarity'] for pair in top_pairs]),
+            bridging_papers=[pair['source_paper'] for pair in top_pairs] + 
+                           [pair['target_paper'] for pair in top_pairs]
+        )
+        
+        # Extract shared concepts
+        bridge.shared_concepts = await self._extract_shared_concepts(top_pairs)
+        
+        # Generate cross-domain insights
+        bridge.cross_domain_insights = await self._generate_bridge_insights(bridge, top_pairs)
+        
+        return bridge
+    
+    async def _extract_shared_concepts(self, paper_pairs: List[Dict[str, Any]]) -> List[str]:
+        """Extract shared concepts between cross-domain paper pairs"""
+        shared_concepts = []
+        
+        for pair in paper_pairs:
+            source_content = self._extract_paper_concepts(pair['source_paper'])
+            target_content = self._extract_paper_concepts(pair['target_paper'])
+            
+            # Find conceptual overlap
+            common_concepts = set(source_content) & set(target_content)
+            shared_concepts.extend(list(common_concepts))
+        
+        # Return most frequent shared concepts
+        concept_counts = {}
+        for concept in shared_concepts:
+            concept_counts[concept] = concept_counts.get(concept, 0) + 1
+        
+        return [concept for concept, count in 
+                sorted(concept_counts.items(), key=lambda x: x[1], reverse=True)[:5]]
+    
+    def _extract_paper_concepts(self, paper: Dict[str, Any]) -> List[str]:
+        """Extract key concepts from a paper"""
+        content_sections = paper.get('content_sections', {})
+        
+        # Extract key terms from title and abstract
+        text = ' '.join([
+            content_sections.get('title', ''),
+            content_sections.get('abstract', '')
+        ]).lower()
+        
+        # Simple concept extraction (could be enhanced with NLP)
+        concepts = []
+        for word in text.split():
+            if len(word) > 5 and word.isalpha():  # Filter for meaningful terms
+                concepts.append(word)
+        
+        return concepts[:10]  # Return top concepts
+    
+    async def _generate_bridge_insights(self, 
+                                      bridge: CrossDomainBridge, 
+                                      paper_pairs: List[Dict[str, Any]]) -> List[str]:
+        """Generate insights about the cross-domain bridge"""
+        insights = []
+        
+        insights.append(f"Strong conceptual similarity ({bridge.conceptual_similarity:.2f}) between "
+                       f"{bridge.source_domain} and {bridge.target_domain} domains")
+        
+        if bridge.shared_concepts:
+            insights.append(f"Key bridging concepts: {', '.join(bridge.shared_concepts[:3])}")
+        
+        # Analyze paper relationships
+        if len(paper_pairs) > 1:
+            insights.append(f"Multiple cross-domain connections identified ({len(paper_pairs)} paper pairs)")
+        
+        # Domain-specific insights
+        domain_pair = (bridge.source_domain, bridge.target_domain)
+        if domain_pair in [('physics', 'mathematics'), ('mathematics', 'physics')]:
+            insights.append("Mathematical formalism provides structural bridges between physical phenomena")
+        elif domain_pair in [('biology', 'computer_science'), ('computer_science', 'biology')]:
+            insights.append("Information processing principles apply across biological and computational systems")
+        elif domain_pair in [('physics', 'finance'), ('finance', 'physics')]:
+            insights.append("Stochastic processes and statistical mechanics inform financial modeling")
+        
+        return insights
+    
+    async def _analyze_structural_isomorphism(self, papers: List[Dict[str, Any]]) -> float:
+        """Analyze structural isomorphism between papers from different domains"""
+        if len(papers) < 2:
+            return 0.0
+        
+        # Simple structural analysis based on content organization
+        structures = []
+        for paper in papers:
+            content_sections = paper.get('content_sections', {})
+            structure = {
+                'has_methodology': bool(content_sections.get('methodology', '').strip()),
+                'has_results': bool(content_sections.get('results', '').strip()),
+                'has_discussion': bool(content_sections.get('discussion', '').strip()),
+                'abstract_length': len(content_sections.get('abstract', '')),
+                'content_ratio': len(content_sections.get('full_text', '')) / max(1, len(content_sections.get('abstract', '')))
+            }
+            structures.append(structure)
+        
+        # Calculate structural similarity
+        if len(structures) >= 2:
+            # Simple structural similarity metric
+            struct1, struct2 = structures[0], structures[1]
+            similarities = []
+            
+            # Boolean field similarities
+            for field in ['has_methodology', 'has_results', 'has_discussion']:
+                similarities.append(1.0 if struct1[field] == struct2[field] else 0.0)
+            
+            # Numerical field similarities
+            if struct1['abstract_length'] > 0 and struct2['abstract_length'] > 0:
+                length_sim = 1.0 - abs(struct1['abstract_length'] - struct2['abstract_length']) / max(struct1['abstract_length'], struct2['abstract_length'])
+                similarities.append(max(0.0, length_sim))
+            
+            return np.mean(similarities) if similarities else 0.0
+        
+        return 0.0
+    
+    def _calculate_breakthrough_potential(self, bridge: CrossDomainBridge) -> float:
+        """Calculate breakthrough potential of a cross-domain bridge"""
+        factors = [
+            bridge.conceptual_similarity * 0.3,  # Higher similarity = higher potential
+            bridge.structural_isomorphism * 0.2,  # Structural alignment matters
+            len(bridge.shared_concepts) * 0.1,    # More shared concepts = more potential
+            len(bridge.cross_domain_insights) * 0.1,  # Rich insights indicate potential
+            self._domain_combination_bonus(bridge.source_domain, bridge.target_domain) * 0.3
+        ]
+        
+        return min(1.0, sum(factors))
+    
+    def _domain_combination_bonus(self, domain1: str, domain2: str) -> float:
+        """Bonus for promising domain combinations"""
+        high_potential_combinations = {
+            ('physics', 'biology'): 0.9,  # Biophysics
+            ('mathematics', 'biology'): 0.8,  # Mathematical biology
+            ('computer_science', 'biology'): 0.9,  # Computational biology
+            ('physics', 'finance'): 0.7,  # Econophysics
+            ('mathematics', 'finance'): 0.8,  # Mathematical finance
+            ('computer_science', 'finance'): 0.8,  # Algorithmic trading
+            ('physics', 'mathematics'): 0.9,  # Mathematical physics
+            ('chemistry', 'biology'): 0.8,  # Biochemistry
+            ('computer_science', 'mathematics'): 0.7,  # Computational mathematics
+        }
+        
+        # Check both orderings
+        pair1 = (domain1, domain2)
+        pair2 = (domain2, domain1)
+        
+        return high_potential_combinations.get(pair1, 
+               high_potential_combinations.get(pair2, 0.5))  # Default moderate potential
+    
+    async def generate_cross_domain_mappings(self, 
+                                           query: str, 
+                                           context: Dict[str, Any],
+                                           max_mappings: int = 3) -> List[AnalogicalMapping]:
+        """Generate cross-domain analogical mappings using embedding analysis"""
+        
+        # Extract domain distribution from context
+        domain_distribution = context.get('domain_distribution', {
+            'physics': 100, 'mathematics': 50, 'computer_science': 30,
+            'biology': 40, 'astronomy': 20, 'finance': 10
+        })
+        
+        # Find cross-domain bridges
+        bridges = await self.find_conceptual_bridges(query, domain_distribution)
+        
+        # Convert bridges to analogical mappings
+        mappings = []
+        for bridge in bridges[:max_mappings]:
+            mapping = AnalogicalMapping(
+                level=AnalogicalLevel.STRUCTURAL,  # Cross-domain is structural-level
+                mapping_type=AnalogicalMappingType.SYSTEM_MAPPING,
+                source_domain=bridge.source_domain,
+                target_domain=bridge.target_domain,
+                explanation=f"Cross-domain analysis reveals strong conceptual bridges between "
+                           f"{bridge.source_domain} and {bridge.target_domain} (similarity: {bridge.conceptual_similarity:.2f}). "
+                           f"{' '.join(bridge.cross_domain_insights[:2])}",
+                structural_consistency=bridge.structural_isomorphism,
+                confidence=bridge.breakthrough_potential,
+                novelty_score=0.9,  # Cross-domain mappings have high novelty
+                supporting_evidence=bridge.cross_domain_insights
+            )
+            mappings.append(mapping)
+        
+        return mappings
+
 class AnalogicalEngineOrchestrator:
     """Main orchestrator for multi-level analogical reasoning"""
     
-    def __init__(self):
+    def __init__(self, embeddings_path: str = None):
         self.surface_engine = SurfaceAnalogicalEngine()
         self.structural_engine = StructuralAnalogicalEngine()
         self.pragmatic_engine = PragmaticAnalogicalEngine()
+        self.cross_domain_engine = CrossDomainAnalogicalEngine(embeddings_path)
     
     async def process_analogical_query(self, 
                                      query: str, 
@@ -888,6 +1323,13 @@ class AnalogicalEngineOrchestrator:
                     query, context, max_mappings=5
                 )
             
+            # Generate cross-domain mappings using 100K embeddings
+            cross_domain_mappings = await self.cross_domain_engine.generate_cross_domain_mappings(
+                query, context, max_mappings=3
+            )
+            # Add cross-domain mappings to structural mappings (they are structural-level)
+            result.structural_mappings.extend(cross_domain_mappings)
+            
             # Generate cross-level insights
             result.cross_level_insights = await self._generate_cross_level_insights(result)
             
@@ -904,6 +1346,7 @@ class AnalogicalEngineOrchestrator:
                        surface_count=len(result.surface_mappings),
                        structural_count=len(result.structural_mappings),
                        pragmatic_count=len(result.pragmatic_mappings),
+                       cross_domain_count=len(cross_domain_mappings),
                        synthesis_quality=result.synthesis_quality,
                        processing_time=result.processing_time)
             

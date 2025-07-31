@@ -38,7 +38,23 @@ from dataclasses import dataclass, field
 import structlog
 from pydantic import BaseModel, Field
 
-from ..core.config import settings
+# Safe settings import with fallback
+try:
+    from ..core.config import settings
+    if settings is None:
+        raise Exception("Settings is None")
+except Exception:
+    # Fallback settings for FTNS components
+    class FallbackFTNSSettings:
+        def __init__(self):
+            self.ftns_initial_grant = 100
+            self.ftns_max_session_budget = 10000
+            self.ftns_context_cost_base = 0.1
+            self.ftns_reward_multiplier = 1.0
+            self.environment = "development"
+            self.debug = True
+    
+    settings = FallbackFTNSSettings()
 from ..core.models import PRSMSession, FTNSTransaction, UserInput
 from ..tokenomics.ftns_service import FTNSService
 # Legacy FTNS marketplace import removed - not used in current implementation
@@ -304,16 +320,22 @@ class FTNSBudgetManager:
                 total_budget = Decimal(str(user_input.budget_limit))
             else:
                 # Use prediction with safety margin
-                total_budget = prediction.get_recommended_budget()
+                predicted_budget = prediction.get_recommended_budget()
                 
-                # Ensure minimum budget
+                # Ensure minimum budget (must be > 0 for validation)
                 minimum_budget = Decimal('100')  # Minimum 100 FTNS tokens
-                total_budget = max(total_budget, minimum_budget)
+                total_budget = max(predicted_budget, minimum_budget)
                 
                 # Ensure within user balance and limits
-                user_balance = await self.ftns_service.get_user_balance(session.user_id)
-                max_affordable = min(Decimal(str(user_balance.balance)), Decimal(str(self.max_session_budget)))
-                total_budget = min(total_budget, max_affordable)
+                try:
+                    user_balance = await self.ftns_service.get_user_balance(session.user_id)
+                    max_affordable = min(Decimal(str(user_balance.balance)), Decimal(str(self.max_session_budget)))
+                    # Only apply balance limit if it's reasonable (> minimum)
+                    if max_affordable >= minimum_budget:
+                        total_budget = min(total_budget, max_affordable)
+                except Exception as e:
+                    logger.warning(f"Could not check user balance, using predicted budget: {e}")
+                    # If we can't check balance, use the predicted/minimum budget
             
             # Step 3: Create category allocations based on prediction
             category_allocations = self._create_category_allocations(

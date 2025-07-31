@@ -47,7 +47,7 @@ from prsm.tokenomics.ftns_service import FTNSService
 
 # Import modular reasoning components
 from .reasoning.types import (
-    ThinkingMode, ReasoningEngine, EngineHealthStatus,
+    ThinkingMode, ReasoningEngine, ReasoningMode, EngineHealthStatus,
     EnginePerformanceMetrics, PerformanceMetric, PerformanceCategory,
     PerformanceSnapshot, PerformanceProfile, FailureType, RecoveryAction,
     FailureDetectionMode, FailureEvent, RecoveryStrategy,
@@ -104,7 +104,7 @@ from prsm.nwtn.enhanced_analogical_reasoning import AnalogicalReasoningEngine
 
 # Import breakthrough mode and contrarian systems
 from prsm.nwtn.breakthrough_modes import (
-    BreakthroughMode, breakthrough_mode_manager, 
+    BreakthroughMode, BreakthroughModeConfig, breakthrough_mode_manager, 
     get_breakthrough_mode_config, suggest_breakthrough_mode
 )
 from prsm.nwtn.contrarian_candidate_engine import (
@@ -121,7 +121,7 @@ from prsm.nwtn.cross_domain_ontology_bridge import cross_domain_ontology_bridge_
 from prsm.nwtn.torrent_native_architecture import torrent_native_architecture_integration
 from prsm.nwtn.integration_validation_system import integration_validation_system_integration
 from prsm.nwtn.analogical_chain_reasoning import analogical_chain_reasoning_integration
-from prsm.nwtn.hybrid_architecture import HybridSemanticArchitecture, SOC, SOCType, WorldModelLearningManager
+from prsm.nwtn.hybrid_architecture import HybridNWTNEngine, SOC, SOCType, WorldModelLearningManager
 
 logger = structlog.get_logger(__name__)
 
@@ -6064,8 +6064,11 @@ class MetaReasoningEngine:
         self.world_model = WorldModelCore()
         self.world_model_integration = WorldModelIntegration(self.world_model)
         
+        # Track initialization state
+        self.initialized = False
+        
         # Initialize hybrid semantic architecture for SOC generation
-        self.hybrid_architecture = HybridSemanticArchitecture()
+        self.hybrid_architecture = HybridNWTNEngine()
         
         # Initialize adaptive learning system for World Model evolution
         self.world_model_learning_manager = WorldModelLearningManager()
@@ -6174,6 +6177,13 @@ class MetaReasoningEngine:
                    pattern_recognizer_enabled=self.pattern_recognizer.enabled,
                    context_passing_enabled=self.context_passing_engine.enabled)
     
+    async def initialize(self):
+        """Initialize the meta-reasoning engine (compatibility method)"""
+        # The engine is already initialized in __init__, so just mark as initialized
+        self.initialized = True
+        logger.info("MetaReasoningEngine initialization completed")
+        return True
+    
     async def initialize_external_knowledge_base(self):
         """Initialize external knowledge base for Ferrari fuel line"""
         try:
@@ -6190,7 +6200,9 @@ class MetaReasoningEngine:
                          context: Dict[str, Any],
                          thinking_mode: ThinkingMode = ThinkingMode.QUICK,
                          custom_config: Optional[ThinkingConfiguration] = None,
-                         include_world_model: bool = True) -> MetaReasoningResult:
+                         include_world_model: bool = True,
+                         reasoning_mode: ReasoningMode = ReasoningMode.SYSTEM2_VALIDATION,
+                         breakthrough_config: Optional['BreakthroughModeConfig'] = None) -> MetaReasoningResult:
         """
         Perform meta-reasoning across multiple reasoning engines
         
@@ -6199,6 +6211,9 @@ class MetaReasoningEngine:
             context: Additional context and constraints
             thinking_mode: The depth of reasoning (quick/intermediate/deep)
             custom_config: Optional custom configuration
+            include_world_model: Whether to include world model validation
+            reasoning_mode: System 1 (creative) vs System 2 (validation) mode
+            breakthrough_config: Optional breakthrough mode configuration
             
         Returns:
             Complete meta-reasoning result with synthesis
@@ -6239,6 +6254,13 @@ class MetaReasoningEngine:
         logger.info("Progress session started", 
                    progress_session_id=progress_session_id,
                    expected_session_id=session_id)
+        
+        # Configure reasoning engines based on reasoning mode and breakthrough config
+        reasoning_engine_params = self._configure_reasoning_engines(reasoning_mode, breakthrough_config)
+        logger.info("Reasoning engines configured", 
+                   reasoning_mode=reasoning_mode.value,
+                   has_breakthrough_config=breakthrough_config is not None,
+                   engine_params_count=len(reasoning_engine_params))
         
         # Enhance context with world model knowledge if requested
         enhanced_context = context.copy() if context else {}
@@ -22463,6 +22485,95 @@ class ResultFormatter:
                 processing_time=0.0,
                 metadata={'recovery_mode': True, 'all_engines_failed': True}
             )
+    
+    def _configure_reasoning_engines(self, reasoning_mode: ReasoningMode, 
+                                   breakthrough_config: Optional['BreakthroughModeConfig']) -> Dict[str, Any]:
+        """
+        Configure reasoning engine parameters based on System 1/System 2 mode and breakthrough config
+        
+        Args:
+            reasoning_mode: System 1 (creative) vs System 2 (validation) mode
+            breakthrough_config: Optional breakthrough mode configuration
+            
+        Returns:
+            Dictionary of configured parameters for reasoning engines
+        """
+        # Default parameters
+        default_creative_params = {
+            'analogical_creativity': 0.5,
+            'deductive_speculation': 0.3,
+            'inductive_boldness': 0.4,
+            'abductive_novelty': 0.5,
+            'counterfactual_extremeness': 0.3,
+            'probabilistic_tail_exploration': 0.4,
+            'causal_mechanism_novelty': 0.5
+        }
+        
+        default_validation_params = {
+            'validation_strictness': 0.7,
+            'evidence_requirement': 0.6,
+            'logical_rigor': 0.8,
+            'consistency_enforcement': 0.7,
+            'contradiction_tolerance': 0.3
+        }
+        
+        # Get parameters from breakthrough config if available
+        if breakthrough_config and hasattr(breakthrough_config, 'reasoning_engine_config'):
+            engine_config = breakthrough_config.reasoning_engine_config
+            
+            if reasoning_mode == ReasoningMode.SYSTEM1_CREATIVE:
+                # Use System 1 (Creative) parameters from breakthrough config
+                configured_params = {
+                    'analogical_creativity': engine_config.analogical_creativity,
+                    'deductive_speculation': engine_config.deductive_speculation,
+                    'inductive_boldness': engine_config.inductive_boldness,
+                    'abductive_novelty': engine_config.abductive_novelty,
+                    'counterfactual_extremeness': engine_config.counterfactual_extremeness,
+                    'probabilistic_tail_exploration': engine_config.probabilistic_tail_exploration,
+                    'causal_mechanism_novelty': engine_config.causal_mechanism_novelty,
+                    'creative_validation_balance': engine_config.creative_validation_balance,
+                    'system_transition_threshold': engine_config.system_transition_threshold,
+                    'reasoning_depth_multiplier': engine_config.reasoning_depth_multiplier
+                }
+            else:
+                # Use System 2 (Validation) parameters from breakthrough config
+                configured_params = {
+                    'validation_strictness': engine_config.validation_strictness,
+                    'evidence_requirement': engine_config.evidence_requirement,
+                    'logical_rigor': engine_config.logical_rigor,
+                    'consistency_enforcement': engine_config.consistency_enforcement,
+                    'contradiction_tolerance': engine_config.contradiction_tolerance,
+                    'creative_validation_balance': engine_config.creative_validation_balance,
+                    'system_transition_threshold': engine_config.system_transition_threshold,
+                    'reasoning_depth_multiplier': engine_config.reasoning_depth_multiplier
+                }
+        else:
+            # Use default parameters based on reasoning mode
+            if reasoning_mode == ReasoningMode.SYSTEM1_CREATIVE:
+                configured_params = default_creative_params.copy()
+                configured_params.update({
+                    'creative_validation_balance': 0.7,  # High creativity emphasis
+                    'system_transition_threshold': 0.4,  # Low threshold for creative ideas
+                    'reasoning_depth_multiplier': 1.3    # Deeper exploration
+                })
+            else:
+                configured_params = default_validation_params.copy()
+                configured_params.update({
+                    'creative_validation_balance': 0.3,  # High validation emphasis
+                    'system_transition_threshold': 0.7,  # High threshold for validation
+                    'reasoning_depth_multiplier': 1.0    # Standard depth
+                })
+        
+        # Add reasoning mode and breakthrough mode information
+        configured_params['reasoning_mode'] = reasoning_mode.value
+        configured_params['breakthrough_mode'] = breakthrough_config.mode.value if breakthrough_config else 'none'
+        
+        logger.info("Reasoning engine parameters configured",
+                   reasoning_mode=reasoning_mode.value,
+                   breakthrough_mode=configured_params['breakthrough_mode'],
+                   param_count=len(configured_params))
+        
+        return configured_params
     
     def _get_memory_usage(self) -> float:
         """Get current memory usage of the meta-reasoning engine"""

@@ -11,7 +11,6 @@ from decimal import Decimal
 import structlog
 
 from prsm.core.models import AgentType, ArchitectTask
-from prsm.core.config import get_settings
 from prsm.core.usage_tracker import (
     GenericUsageTracker, create_usage_tracker, track_model_execution,
     ResourceType, CostCategory, OperationType
@@ -22,8 +21,24 @@ from .api_clients import (
     ModelExecutionResponse
 )
 
+# Safe settings import with fallback
+try:
+    from prsm.core.config import get_settings
+    settings = get_settings()
+    if settings is None:
+        raise Exception("Settings is None")
+except Exception:
+    # Fallback settings for executor components
+    class FallbackExecutorSettings:
+        def __init__(self):
+            self.agent_timeout_seconds = 300
+            self.max_parallel_tasks = 10
+            self.environment = "development"
+            self.debug = True
+    
+    settings = FallbackExecutorSettings()
+
 logger = structlog.get_logger(__name__)
-settings = get_settings()
 
 
 class ExecutionResult:

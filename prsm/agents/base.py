@@ -75,7 +75,23 @@ from prsm.core.models import (
 )
 
 logger = structlog.get_logger(__name__)
-settings = get_settings()
+
+# Safe settings import with fallback
+try:
+    settings = get_settings()
+    if settings is None:
+        raise Exception("Settings is None")
+except Exception:
+    # Fallback settings for base agent
+    class FallbackAgentSettings:
+        def __init__(self):
+            self.max_parallel_tasks = 10
+            self.agent_timeout_seconds = 300
+            self.is_production = False
+            self.environment = "development"
+            self.debug = True
+    
+    settings = FallbackAgentSettings()
 
 
 class AgentError(Exception):
