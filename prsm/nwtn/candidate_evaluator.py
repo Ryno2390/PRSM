@@ -29,8 +29,10 @@ from prsm.nwtn.meta_reasoning_engine import (
     MetaReasoningEngine,
     ThinkingMode,
     MetaReasoningResult,
-    ReasoningEngine
+    ReasoningEngine,
+    ReasoningMode
 )
+from prsm.nwtn.breakthrough_modes import BreakthroughModeConfig
 
 logger = structlog.get_logger(__name__)
 
@@ -86,6 +88,11 @@ class EvaluationResult:
     evaluation_summary: str
     source_lineage: Dict[str, List[str]]  # paper_id -> list of reasoning steps
     evaluation_id: str = field(default_factory=lambda: str(uuid4()))
+    
+    @property
+    def confidence(self) -> float:
+        """Compatibility property - returns overall_confidence"""
+        return self.overall_confidence
 
 
 class RelevanceScorer:
@@ -329,14 +336,18 @@ class CandidateEvaluator:
     async def evaluate_candidates(self, 
                                 candidate_result: CandidateGenerationResult,
                                 evaluation_criteria: Optional[List[EvaluationCriteria]] = None,
-                                thinking_mode: Optional[ThinkingMode] = None) -> EvaluationResult:
+                                thinking_mode: Optional[ThinkingMode] = None,
+                                context: Optional[Dict[str, Any]] = None,
+                                breakthrough_config: Optional[BreakthroughModeConfig] = None) -> EvaluationResult:
         """
-        Evaluate candidate answers using System 2 meta-reasoning
+        Evaluate candidate answers using System 2 meta-reasoning with breakthrough mode awareness
         
         Args:
             candidate_result: Result from CandidateAnswerGenerator
             evaluation_criteria: Criteria to evaluate (default: relevance, evidence, coherence, completeness)
             thinking_mode: Thinking mode for meta-reasoning (default: intermediate)
+            context: Additional context for evaluation
+            breakthrough_config: Breakthrough mode configuration for System 2 validation parameters
             
         Returns:
             EvaluationResult with ranked candidates and detailed evaluations
@@ -348,6 +359,34 @@ class CandidateEvaluator:
         
         criteria = evaluation_criteria or self.default_criteria
         thinking_mode = thinking_mode or self.default_thinking_mode
+        context = context or {}
+        
+        # Apply breakthrough mode configuration for System 2 validation
+        if breakthrough_config:
+            # Adjust evaluation strictness based on breakthrough mode
+            validation_strictness = breakthrough_config.reasoning_engine_config.validation_strictness
+            evidence_requirement = breakthrough_config.reasoning_engine_config.evidence_requirement
+            logical_rigor = breakthrough_config.reasoning_engine_config.logical_rigor
+            
+            # Enhanced criteria based on breakthrough mode
+            if validation_strictness > 0.7:  # High validation mode
+                if EvaluationCriteria.ACCURACY not in criteria:
+                    criteria.append(EvaluationCriteria.ACCURACY)
+                if EvaluationCriteria.RELIABILITY not in criteria:
+                    criteria.append(EvaluationCriteria.RELIABILITY)
+            
+            context.update({
+                "breakthrough_mode": True,
+                "validation_strictness": validation_strictness,
+                "evidence_requirement": evidence_requirement,
+                "logical_rigor": logical_rigor,
+                "reasoning_mode": ReasoningMode.SYSTEM2_VALIDATION
+            })
+            
+            logger.info("System 2 validation configured with breakthrough parameters",
+                       validation_strictness=validation_strictness,
+                       evidence_requirement=evidence_requirement,
+                       logical_rigor=logical_rigor)
         
         # Reset source tracking
         self.source_tracker.reset()
@@ -368,7 +407,9 @@ class CandidateEvaluator:
                         candidate_result.query,
                         candidate,
                         criteria,
-                        thinking_mode
+                        thinking_mode,
+                        context,
+                        breakthrough_config
                     )
                     candidate_evaluations.append(evaluation)
                     
@@ -442,7 +483,9 @@ class CandidateEvaluator:
                                        query: str,
                                        candidate: CandidateAnswer,
                                        criteria: List[EvaluationCriteria],
-                                       thinking_mode: ThinkingMode) -> CandidateEvaluation:
+                                       thinking_mode: ThinkingMode,
+                                       context: Optional[Dict[str, Any]] = None,
+                                       breakthrough_config: Optional[BreakthroughModeConfig] = None) -> CandidateEvaluation:
         """Evaluate a single candidate answer"""
         evaluation_start = datetime.now(timezone.utc)
         
@@ -458,8 +501,8 @@ class CandidateEvaluator:
                     elif criterion == EvaluationCriteria.EVIDENCE:
                         score = await self.confidence_scorer.score_confidence(query, candidate)
                     else:
-                        # For other criteria, use general meta-reasoning evaluation
-                        score = await self._evaluate_general_criterion(query, candidate, criterion, thinking_mode)
+                        # For other criteria, use breakthrough-enhanced meta-reasoning evaluation
+                        score = await self._evaluate_general_criterion(query, candidate, criterion, thinking_mode, context)
                     
                     evaluation_scores.append(score)
                     
@@ -507,16 +550,27 @@ class CandidateEvaluator:
             raise
     
     async def _evaluate_general_criterion(self, query: str, candidate: CandidateAnswer, 
-                                        criterion: EvaluationCriteria, thinking_mode: ThinkingMode) -> EvaluationScore:
+                                        criterion: EvaluationCriteria, thinking_mode: ThinkingMode,
+                                        context: Optional[Dict[str, Any]] = None) -> EvaluationScore:
         """Evaluate a general criterion using meta-reasoning"""
         try:
-            # Create evaluation context
-            context = {
+            # Create enhanced evaluation context with breakthrough parameters
+            eval_context = {
                 'evaluation_type': criterion.value,
                 'original_query': query,
                 'candidate_answer': candidate.answer_text,
                 'candidate_type': candidate.answer_type.value
             }
+            
+            # Add breakthrough mode context if available
+            if context:
+                eval_context.update(context)
+                
+                # Apply stricter evaluation for breakthrough modes
+                if context.get("breakthrough_mode") and context.get("validation_strictness", 0) > 0.7:
+                    eval_context['evaluation_strictness'] = 'high'
+                    eval_context['evidence_threshold'] = context.get("evidence_requirement", 0.6)
+                    eval_context['logical_rigor'] = context.get("logical_rigor", 0.8)
             
             # Create evaluation query
             criterion_queries = {
@@ -529,23 +583,48 @@ class CandidateEvaluator:
             
             evaluation_query = criterion_queries.get(criterion, f"Evaluate this answer for {criterion.value}: {candidate.answer_text}")
             
-            # Use meta-reasoning for evaluation
+            # Use breakthrough-enhanced meta-reasoning for evaluation
             reasoning_result = await self.meta_reasoning_engine.meta_reason(
                 query=evaluation_query,
-                context=context,
+                context=eval_context,
                 thinking_mode=thinking_mode,
+                reasoning_mode=eval_context.get("reasoning_mode", ReasoningMode.SYSTEM2_VALIDATION),
+                breakthrough_config=context.get("breakthrough_config") if context else None,
                 include_world_model=True
             )
             
-            # Extract score
+            # Extract and adjust score based on breakthrough parameters
             score = reasoning_result.confidence_score
+            
+            # Apply breakthrough mode adjustments to scoring
+            if context and context.get("breakthrough_mode"):
+                validation_strictness = context.get("validation_strictness", 0.7)
+                
+                # Apply stricter scoring thresholds for high validation modes
+                if validation_strictness > 0.8:
+                    # In conservative/high-validation modes, penalize lower scores more
+                    if score < 0.6:
+                        score *= 0.8  # Reduce score for borderline cases
+                elif validation_strictness < 0.5:
+                    # In creative/revolutionary modes, be more lenient with scores
+                    if score > 0.4:
+                        score = min(1.0, score * 1.1)  # Boost reasonable scores
+            
+            # Create breakthrough-enhanced reasoning description
+            reasoning_desc = f"{criterion.value.title()} assessment: {reasoning_result.synthesis_summary[:150]}..."
+            if context and context.get("breakthrough_mode"):
+                mode_info = f" [System 2 validation: strictness={context.get('validation_strictness', 0.7):.2f}]"
+                reasoning_desc += mode_info
             
             return EvaluationScore(
                 criterion=criterion,
                 score=score,
-                reasoning=f"{criterion.value.title()} assessment: {reasoning_result.synthesis_summary[:150]}...",
+                reasoning=reasoning_desc,
                 confidence=reasoning_result.confidence_score,
-                supporting_evidence=[f"Meta-reasoning engines: {len(reasoning_result.reasoning_results)}"]
+                supporting_evidence=[
+                    f"Meta-reasoning engines: {len(reasoning_result.reasoning_results)}",
+                    f"Breakthrough mode: {context.get('breakthrough_mode', False) if context else False}"
+                ]
             )
             
         except Exception as e:

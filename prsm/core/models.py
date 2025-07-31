@@ -105,20 +105,27 @@ class TaskStatus(str, Enum):
 
 
 class AgentType(str, Enum):
-    """Types of agents in the 5-layer PRSM architecture
+    """Types of agents in the PRSM architecture
     
-    The PRSM agent framework consists of five specialized agent types:
+    The PRSM agent framework consists of core and specialized agent types:
+    Core agents:
     - ARCHITECT: Recursively decompose complex tasks into subtasks
     - PROMPTER: Optimize prompts for specific domains and models
     - ROUTER: Select optimal models for each task based on capability
     - EXECUTOR: Execute tasks using distributed specialist models
     - COMPILER: Synthesize results hierarchically into coherent responses
+    
+    NWTN specialized agents:
+    - CANDIDATE_GENERATOR: Generate diverse candidate answers (System 1)
+    - CANDIDATE_EVALUATOR: Evaluate and validate candidates (System 2)
     """
     ARCHITECT = "architect"
     PROMPTER = "prompter"
     ROUTER = "router"
     EXECUTOR = "executor"
     COMPILER = "compiler"
+    CANDIDATE_GENERATOR = "candidate_generator"
+    CANDIDATE_EVALUATOR = "candidate_evaluator"
 
 
 class UserRole(str, Enum):
