@@ -199,3 +199,5 @@ out/
 # Build artifacts
 build/
 dist/
+# Archive folder - local backup only, not for repo
+archive/
