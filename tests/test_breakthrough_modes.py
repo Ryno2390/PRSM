@@ -171,7 +171,8 @@ async def test_enhanced_orchestrator_integration():
             prompt="What are the most promising approaches for improving transformer attention mechanisms?",
             preferences={
                 "test_mode": True,
-                "api_key": open('/Users/ryneschultz/Documents/GitHub/Anthropic_API_Key.txt').read().strip()
+                # Note: In production, API key should be loaded from environment variable
+                # "api_key": os.environ.get('ANTHROPIC_API_KEY')
             }
         )
         
