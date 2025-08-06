@@ -201,3 +201,21 @@ build/
 dist/
 # Archive folder - local backup only, not for repo
 archive/
+
+# NWTN Data Files - exclude corpus and processed data
+prsm/nwtn/corpus/
+prsm/nwtn/processed_corpus/
+utilities/knowledge_extraction/*.zim
+utilities/knowledge_extraction/wikipedia_*.zim
+**/embeddings/
+**/embeddings.db
+**/processed_data/
+**/raw_data/
+**/world_model_knowledge/
+**/structured_knowledge/
+*.zim
+
+# Large data files and results
+real_papers_progress.json
+integration_validation_report.json
+simplified_integration_validation_report.json
