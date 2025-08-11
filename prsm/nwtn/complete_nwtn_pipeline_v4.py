@@ -45,12 +45,22 @@ except ImportError:
 from pathlib import Path
 import hashlib
 
+# Import our advanced chunk classification and embedding systems
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+try:
+    from engines.chunk_classification_system import classify_paper_chunks, ChunkType, SemanticChunk
+    from engines.chunk_embedding_system import rank_and_select_chunks, ChunkSelectionResult
+    ADVANCED_CHUNKING_AVAILABLE = True
+    logger.info("Advanced chunking systems loaded successfully")
+except ImportError as e:
+    ADVANCED_CHUNKING_AVAILABLE = False
+    logger.warning(f"Advanced chunking systems not available: {e}")
 
 # Add current directory to path for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -64,7 +74,10 @@ from pipeline_health_monitor import PipelineHealthMonitor, AlertLevel
 
 # Import universal knowledge ingestion and breakthrough reasoning
 try:
-    from engines.universal_knowledge_ingestion_engine import UniversalIngestionEngine, ContentFormat
+    from engines.universal_knowledge_ingestion_engine import (
+        UniversalIngestionEngine, ContentFormat, WorldModelKnowledge, 
+        process_world_model_zim_files
+    )
     UNIVERSAL_INGESTION_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Universal knowledge ingestion engine not available: {e}")
@@ -334,17 +347,14 @@ class System1CandidateGenerator:
         return f"Breakthrough causal analysis of '{input_text[:50]}...' identifies key mechanistic relationships."
     
     async def _apply_enhanced_reasoning_simulation(self, engine_name: str, input_text: str, pdf_content: Dict[str, Any]) -> str:
-        """Real reasoning using Claude API with content grounding (replaces simulation)"""
+        """Real reasoning using Claude API with advanced meta-paper content grounding"""
         
-        # Extract relevant content snippets
-        content_snippets = []
-        if pdf_content:
-            for content_data in pdf_content.values():
-                if 'raw_content' in content_data and content_data['raw_content']:
-                    snippet = content_data['raw_content'][:200]
-                    content_snippets.append(snippet)
-        
-        content_context = " ".join(content_snippets[:3])  # Use top 3 content snippets
+        # Use advanced chunking system if available, otherwise fallback to original approach
+        if ADVANCED_CHUNKING_AVAILABLE and pdf_content:
+            content_context = await self._generate_meta_paper_context(input_text, pdf_content, engine_name)
+        else:
+            # Fallback to original snippet-based approach
+            content_context = self._generate_fallback_context(pdf_content)
         
         # Use real Claude API reasoning if available
         if ANTHROPIC_AVAILABLE:
@@ -420,6 +430,151 @@ Task: Provide a specific, actionable insight using {engine_name} reasoning. Be c
         }
         
         return reasoning_approaches.get(engine_name, f"Comprehensive {engine_name} analysis indicates that multi-faceted approaches addressing the core mechanisms are needed for effective problem resolution.")
+    
+    async def _generate_meta_paper_context(self, input_text: str, pdf_content: Dict[str, Any], reasoning_engine: str) -> str:
+        """Generate meta-paper context using advanced chunk classification and ranking"""
+        try:
+            # Extract all paper content for chunking
+            all_paper_content = ""
+            paper_metadata_list = []
+            
+            for paper_id, paper_data in pdf_content.items():
+                content = paper_data.get('content', '')
+                if content and len(content.strip()) > 100:  # Only include papers with substantial content
+                    all_paper_content += f"\n\n--- Paper {paper_id} ---\n{content}"
+                    
+                    paper_metadata_list.append({
+                        'paper_id': paper_id,
+                        'title': paper_data.get('title', f'Paper {paper_id}'),
+                        'authors': paper_data.get('authors', ['Unknown'])
+                    })
+            
+            if not all_paper_content.strip():
+                return self._generate_fallback_context(pdf_content)
+            
+            # Classify all content into semantic chunks
+            logger.info(f"Classifying content from {len(paper_metadata_list)} papers into semantic chunks...")
+            
+            # For simplicity, treat all papers as one large document for now
+            # In production, you'd want to classify each paper separately and merge results
+            classification_result = await classify_paper_chunks(
+                all_paper_content, 
+                {
+                    'paper_id': 'multi_paper_context',
+                    'title': f'Meta-paper from {len(paper_metadata_list)} sources',
+                    'authors': ['Multiple Authors']
+                },
+                chunk_size=300,
+                overlap=50
+            )
+            
+            if not classification_result.chunks:
+                return self._generate_fallback_context(pdf_content)
+            
+            logger.info(f"Classified {len(classification_result.chunks)} semantic chunks")
+            
+            # Rank and select optimal chunks for this query and reasoning engine
+            selection_result = await rank_and_select_chunks(
+                chunks=classification_result.chunks,
+                query=input_text,
+                reasoning_engine=reasoning_engine,
+                token_budget=1200,  # Reasonable budget for Claude API context
+                top_k=40
+            )
+            
+            logger.info(f"Selected {len(selection_result.selected_chunks)} chunks for meta-paper (token usage: {selection_result.token_usage})")
+            
+            # Assemble meta-paper context from selected chunks
+            meta_paper_sections = {}
+            
+            for chunk in selection_result.selected_chunks:
+                section_type = chunk.chunk_type.value
+                if section_type not in meta_paper_sections:
+                    meta_paper_sections[section_type] = []
+                
+                meta_paper_sections[section_type].append({
+                    'content': chunk.content,
+                    'confidence': chunk.confidence_score,
+                    'evidence': chunk.evidence_strength,
+                    'concepts': chunk.key_concepts[:3],  # Top 3 concepts
+                    'quantitative_data': chunk.quantitative_data[:2]  # Top 2 data points
+                })
+            
+            # Build coherent meta-paper summary organized by section type
+            meta_paper_context = f"Meta-Paper Context (from {len(paper_metadata_list)} papers, {len(selection_result.selected_chunks)} key insights):\n\n"
+            
+            # Order sections by importance for reasoning
+            section_priority = {
+                'results_quant': 1, 'key_findings': 2, 'methodology': 3, 
+                'abstract': 4, 'math': 5, 'algorithm': 6, 'metrics': 7
+            }
+            
+            ordered_sections = sorted(meta_paper_sections.items(), 
+                                    key=lambda x: section_priority.get(x[0], 10))
+            
+            for section_type, chunks in ordered_sections[:4]:  # Limit to top 4 section types
+                if not chunks:
+                    continue
+                    
+                section_name = section_type.replace('_', ' ').title()
+                meta_paper_context += f"## {section_name}:\n"
+                
+                # Include top 2 chunks from this section
+                for chunk_data in sorted(chunks, key=lambda x: x['confidence'], reverse=True)[:2]:
+                    meta_paper_context += f"• {chunk_data['content'][:200]}...\n"
+                    
+                    if chunk_data['quantitative_data']:
+                        for data_point in chunk_data['quantitative_data']:
+                            meta_paper_context += f"  Data: {data_point.get('context', 'N/A')}\n"
+                
+                meta_paper_context += "\n"
+            
+            # Add concept summary
+            all_concepts = set()
+            for chunk in selection_result.selected_chunks[:10]:  # Top 10 chunks
+                all_concepts.update(chunk.key_concepts)
+            
+            if all_concepts:
+                key_concepts = list(all_concepts)[:8]  # Top 8 concepts
+                meta_paper_context += f"Key Concepts: {', '.join(key_concepts)}\n\n"
+            
+            # Add relevance and diversity metrics
+            meta_paper_context += f"Context Quality: Avg Relevance {selection_result.average_relevance:.2f}, Diversity {selection_result.diversity_score:.2f}"
+            
+            # Ensure context isn't too long
+            if len(meta_paper_context) > 2000:
+                meta_paper_context = meta_paper_context[:1950] + "\n[Context truncated for length]"
+            
+            logger.info(f"Generated meta-paper context: {len(meta_paper_context)} characters")
+            return meta_paper_context
+            
+        except Exception as e:
+            logger.warning(f"Meta-paper generation failed: {e}")
+            return self._generate_fallback_context(pdf_content)
+    
+    def _generate_fallback_context(self, pdf_content: Dict[str, Any]) -> str:
+        """Generate fallback context using simple snippet extraction (original approach)"""
+        if not pdf_content:
+            return "No research context available."
+        
+        context_snippets = []
+        
+        for paper_id, paper_data in pdf_content.items():
+            content = paper_data.get('content', '')
+            if content:
+                # Extract first 200 characters (original approach)
+                snippet = content.strip()[:200]
+                if len(snippet) > 50:  # Only include substantial snippets
+                    title = paper_data.get('title', f'Paper {paper_id}')
+                    context_snippets.append(f"[{title[:50]}...]: {snippet}...")
+            
+            if len(context_snippets) >= 3:  # Limit to 3 papers for context
+                break
+        
+        if context_snippets:
+            return "Research Context:\n" + "\n\n".join(context_snippets)
+        else:
+            return "Limited research context available."
     
     def _calculate_confidence(self,
                             reasoning_chain: List[Dict[str, Any]],
@@ -702,10 +857,47 @@ class CompleteNWTNPipeline:
             # Pass breakthrough coordinator to System 1 for sophisticated reasoning
             self.system1_generator.breakthrough_coordinator = self.breakthrough_coordinator
         
+        # Initialize World Model knowledge base
+        self.world_model = None
+        self.world_model_initialized = False
+        
         # Initialize semantic retriever
         self.initialization_task = None
         
         logger.info("Complete NWTN Pipeline V4 initialized with full 9-step implementation")
+    
+    async def _initialize_world_model(self) -> bool:
+        """Initialize World Model from ZIM files for candidate scoring"""
+        
+        if self.world_model_initialized or not UNIVERSAL_INGESTION_AVAILABLE:
+            return self.world_model is not None
+        
+        try:
+            # Path to ZIM files for World Model
+            zim_directory = "/Users/ryneschultz/Documents/GitHub/PRSM/prsm/nwtn/processed_corpus/world_model_knowledge/raw_sources"
+            
+            if not os.path.exists(zim_directory):
+                logger.warning(f"ZIM directory not found for World Model: {zim_directory}")
+                self.world_model_initialized = True
+                return False
+            
+            logger.info(f"Initializing World Model from ZIM files: {zim_directory}")
+            
+            # Process ZIM files to build World Model
+            self.world_model = await process_world_model_zim_files(zim_directory)
+            
+            summary = self.world_model.get_world_model_summary()
+            logger.info(f"World Model initialized with {summary['total_domains']} domains, "
+                       f"{summary['total_concepts']} concepts, "
+                       f"quality: {summary['average_quality']:.3f}")
+            
+            self.world_model_initialized = True
+            return self.world_model is not None
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize World Model: {str(e)}")
+            self.world_model_initialized = True  # Don't retry
+            return False
     
     async def run_complete_pipeline(self, query: str, context_allocation: int = 1000) -> WisdomPackage:
         """
@@ -732,6 +924,9 @@ class CompleteNWTNPipeline:
                 initialization_success = await self.semantic_retriever.initialize()
                 if not initialization_success:
                     logger.warning("Semantic retriever initialization failed, using fallback")
+            
+            # Initialize World Model for candidate grounding
+            await self._initialize_world_model()
             
             # Step 2: Semantic Search
             logger.info("Step 2: Semantic Search (2,295 papers → 20 most relevant)")
@@ -872,34 +1067,121 @@ class CompleteNWTNPipeline:
                                     compressed_candidates: List[CandidateAnswer],
                                     query: str,
                                     pdf_content: Dict[str, Any]) -> Dict[str, Any]:
-        """System 2: Meta-reasoning evaluation and synthesis of compressed candidates"""
+        """System 2: Meta-reasoning evaluation and synthesis of compressed candidates with World Model scoring"""
         
         logger.info(f"System 2 meta-reasoning on {len(compressed_candidates)} compressed candidates")
         
-        # Rank candidates by confidence and evidence strength
-        ranked_candidates = sorted(compressed_candidates, key=lambda x: x.confidence_score, reverse=True)
+        # Apply World Model contradiction detection to candidates if available
+        world_model_results = {}
+        if self.world_model:
+            logger.info("Applying World Model contradiction detection to candidates")
+            for candidate in compressed_candidates:
+                try:
+                    contradiction_result = self.world_model.detect_contradictions(
+                        candidate.answer_text, 
+                        query
+                    )
+                    world_model_results[candidate.candidate_id] = contradiction_result
+                except Exception as e:
+                    logger.debug(f"World Model contradiction detection failed for candidate {candidate.candidate_id}: {e}")
+                    # Fallback result
+                    world_model_results[candidate.candidate_id] = {
+                        'has_contradictions': False,
+                        'contradiction_score': 0.0,
+                        'contradictions_found': [],
+                        'contradiction_confidence': 0.0,
+                        'facts_checked': 0
+                    }
+        
+        # Apply contradiction penalties to candidate confidence scores
+        enhanced_candidates = []
+        for candidate in compressed_candidates:
+            enhanced_confidence = candidate.confidence_score
+            
+            if candidate.candidate_id in world_model_results:
+                contradiction_result = world_model_results[candidate.candidate_id]
+                
+                # Apply penalties based on contradictions found
+                if contradiction_result['has_contradictions']:
+                    # Major contradiction penalty: 50% confidence reduction
+                    major_penalty = contradiction_result['major_contradictions'] * 0.5
+                    
+                    # Minor contradiction penalty: 20% confidence reduction  
+                    minor_penalty = contradiction_result['minor_contradictions'] * 0.2
+                    
+                    # Apply confidence-weighted penalty
+                    penalty_strength = contradiction_result['contradiction_confidence']
+                    total_penalty = (major_penalty + minor_penalty) * penalty_strength
+                    
+                    # Reduce confidence (never below 0.1)
+                    enhanced_confidence = max(0.1, candidate.confidence_score - total_penalty)
+                    
+                    # Log significant contradictions for debugging
+                    if contradiction_result['major_contradictions'] > 0:
+                        logger.info(f"Major contradictions found in candidate {candidate.candidate_id}: "
+                                  f"{contradiction_result['major_contradictions']} contradictions, "
+                                  f"confidence reduced from {candidate.confidence_score:.3f} to {enhanced_confidence:.3f}")
+                
+                # Create enhanced candidate with adjusted confidence
+                enhanced_candidate = CandidateAnswer(
+                    candidate_id=candidate.candidate_id,
+                    reasoning_engine_sequence=candidate.reasoning_engine_sequence,
+                    answer_text=candidate.answer_text,
+                    confidence_score=enhanced_confidence,
+                    supporting_evidence=candidate.supporting_evidence,
+                    content_sources=candidate.content_sources,
+                    generation_time=candidate.generation_time,
+                    content_hash=candidate.content_hash
+                )
+                enhanced_candidates.append(enhanced_candidate)
+            else:
+                enhanced_candidates.append(candidate)
+        
+        # Rank candidates by enhanced confidence scores
+        ranked_candidates = sorted(enhanced_candidates, key=lambda x: x.confidence_score, reverse=True)
         top_candidates = ranked_candidates[:10]  # Focus on top 10 candidates
         
         # Analyze candidate diversity and consistency
         reasoning_engine_usage = {}
-        for candidate in compressed_candidates:
+        for candidate in enhanced_candidates:
             for engine in candidate.reasoning_engine_sequence:
                 reasoning_engine_usage[engine] = reasoning_engine_usage.get(engine, 0) + 1
         
         # Identify consensus patterns
         answer_themes = self._identify_answer_themes(top_candidates)
         
+        # Calculate World Model contradiction statistics
+        world_model_stats = {}
+        if world_model_results:
+            all_results = list(world_model_results.values())
+            world_model_stats = {
+                'avg_contradiction_score': sum(r['contradiction_score'] for r in all_results) / len(all_results),
+                'avg_contradiction_confidence': sum(r['contradiction_confidence'] for r in all_results) / len(all_results),
+                'candidates_with_contradictions': sum(1 for r in all_results if r['has_contradictions']),
+                'total_major_contradictions': sum(r.get('major_contradictions', 0) for r in all_results),
+                'total_minor_contradictions': sum(r.get('minor_contradictions', 0) for r in all_results),
+                'avg_facts_checked': sum(r['facts_checked'] for r in all_results) / len(all_results),
+                'contradiction_types_found': self._analyze_contradiction_types(all_results),
+                'world_model_summary': self.world_model.get_world_model_summary() if self.world_model else {}
+            }
+        
         # Calculate meta-reasoning metrics
         meta_analysis = {
-            'total_candidates_analyzed': len(compressed_candidates),
+            'total_candidates_analyzed': len(enhanced_candidates),
             'top_candidates_selected': len(top_candidates),
             'reasoning_engine_usage': reasoning_engine_usage,
             'answer_themes': answer_themes,
             'consensus_strength': self._calculate_consensus_strength(top_candidates),
             'evidence_diversity': len(set(evidence for c in top_candidates for evidence in c.supporting_evidence)),
             'avg_confidence': sum(c.confidence_score for c in top_candidates) / len(top_candidates),
-            'synthesis_recommendation': self._generate_synthesis_recommendation(top_candidates)
+            'synthesis_recommendation': self._generate_synthesis_recommendation(top_candidates),
+            'world_model_integration': world_model_stats,
+            'world_model_enabled': self.world_model is not None
         }
+        
+        logger.info(f"Meta-reasoning complete with World Model integration. "
+                   f"Top candidate confidence: {top_candidates[0].confidence_score:.3f} "
+                   f"(World Model enabled: {self.world_model is not None})")
         
         return meta_analysis
     
@@ -962,6 +1244,18 @@ class CompleteNWTNPipeline:
         recommendation += f"Primary recommendation from highest-confidence candidate: {top_candidate.answer_text[:200]}..."
         
         return recommendation
+    
+    def _analyze_contradiction_types(self, contradiction_results: List[Dict[str, Any]]) -> Dict[str, int]:
+        """Analyze the types of contradictions found across candidates"""
+        
+        contradiction_types = {}
+        
+        for result in contradiction_results:
+            for contradiction in result.get('contradictions_found', []):
+                contradiction_type = contradiction.get('type', 'unknown')
+                contradiction_types[contradiction_type] = contradiction_types.get(contradiction_type, 0) + 1
+        
+        return contradiction_types
     
     async def _create_wisdom_package(self,
                                    query: str,

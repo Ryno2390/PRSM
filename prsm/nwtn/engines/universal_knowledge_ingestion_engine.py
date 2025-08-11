@@ -63,6 +63,23 @@ try:
 except ImportError:
     JUPYTER_AVAILABLE = False
 
+# ZIM file processing
+try:
+    from libzim.reader import Archive
+    from libzim.search import Query, Searcher
+    ZIM_AVAILABLE = True
+except ImportError:
+    try:
+        # Alternative: zimply library
+        import zimply
+        ZIM_AVAILABLE = True
+        ZIM_LIBRARY = "zimply"
+    except ImportError:
+        ZIM_AVAILABLE = False
+        ZIM_LIBRARY = None
+else:
+    ZIM_LIBRARY = "libzim"
+
 logger = structlog.get_logger(__name__)
 
 # Processing configuration
@@ -155,6 +172,9 @@ class ContentFormat(Enum):
     NOTION = "notion"
     SALESFORCE = "salesforce"
     JIRA = "jira"
+    
+    # Knowledge Bases & Archives
+    ZIM = "zim"  # Wikipedia/Knowledge archive format
 
 class SecurityClassification(Enum):
     """Security classification levels"""
@@ -1397,6 +1417,507 @@ class TechnicalProcessor:
         
         return sum(quality_factors) / len(quality_factors) if quality_factors else 0.5
 
+class ZIMProcessor:
+    """Processes ZIM archive files (Wikipedia and other knowledge bases)"""
+    
+    def __init__(self):
+        self.supported_formats = {ContentFormat.ZIM}
+    
+    async def process_content(self, content_path: str, content_format: ContentFormat) -> ProcessedContent:
+        """Process ZIM archive content for World Model knowledge extraction"""
+        
+        start_time = time.time()
+        
+        try:
+            if not ZIM_AVAILABLE:
+                raise ImportError("ZIM processing requires libzim or zimply library")
+            
+            # Check memory usage before processing
+            if not check_memory_usage():
+                logger.warning("Memory usage too high, deferring ZIM processing", path=content_path)
+                raise ResourceWarning("Memory usage exceeded threshold")
+            
+            # Generate safe filename and content hash
+            file_size = os.path.getsize(content_path) if os.path.exists(content_path) else 0
+            content_hash = hashlib.sha256(content_path.encode()).hexdigest()[:12]
+            short_filename, original_filename = generate_safe_filename(content_path, content_hash)
+            
+            # Create metadata
+            metadata = ContentMetadata(
+                source_path=content_path,
+                content_format=content_format,
+                size_bytes=file_size,
+                short_filename=short_filename,
+                original_filename=original_filename,
+                content_hash=content_hash
+            )
+            
+            # Process ZIM file with timeout protection
+            raw_content, structured_content = await safe_file_operation(
+                self._process_zim, content_path, timeout=600  # 10 minute timeout for large ZIM files
+            )
+            
+            # Extract knowledge entities from ZIM content
+            entities = await self._extract_zim_entities(structured_content, raw_content)
+            
+            # Update metadata
+            metadata.title = structured_content.get('title', os.path.basename(content_path))
+            metadata.processing_time = time.time() - start_time
+            metadata.quality_score = self._assess_zim_quality(structured_content)
+            
+            return ProcessedContent(
+                metadata=metadata,
+                raw_content=raw_content,
+                structured_content=structured_content,
+                extracted_entities=entities,
+                processing_status=ProcessingStatus.COMPLETED
+            )
+            
+        except Exception as e:
+            processing_time = time.time() - start_time
+            logger.error("ZIM processing failed", 
+                        content_path=content_path, 
+                        format=content_format.value, 
+                        error=str(e))
+            
+            metadata = ContentMetadata(
+                source_path=content_path,
+                content_format=content_format,
+                processing_time=processing_time
+            )
+            
+            return ProcessedContent(
+                metadata=metadata,
+                processing_status=ProcessingStatus.FAILED,
+                error_message=str(e)
+            )
+    
+    async def _process_zim(self, zim_path: str) -> Tuple[str, Dict[str, Any]]:
+        """Process ZIM archive file to extract World Model knowledge"""
+        
+        try:
+            if ZIM_LIBRARY == "libzim":
+                return await self._process_zim_libzim(zim_path)
+            elif ZIM_LIBRARY == "zimply":
+                return await self._process_zim_zimply(zim_path)
+            else:
+                raise ImportError("No ZIM library available")
+                
+        except Exception as e:
+            logger.error("ZIM processing failed", path=zim_path, error=str(e))
+            raise
+    
+    async def _process_zim_libzim(self, zim_path: str) -> Tuple[str, Dict[str, Any]]:
+        """Process ZIM file using libzim library"""
+        
+        try:
+            archive = Archive(zim_path)
+            
+            # Extract basic metadata (fix for libzim API)
+            try:
+                # Try to get metadata directly from archive
+                title = archive.metadata.get('Title', os.path.basename(zim_path))
+            except AttributeError:
+                # Fallback for different libzim versions
+                title = os.path.basename(zim_path)
+            
+            zim_metadata = {
+                'type': 'zim_archive',
+                'title': title,
+                'description': 'Wikipedia Archive',
+                'creator': 'Wikipedia',
+                'publisher': 'Kiwix',
+                'date': '2025',
+                'language': 'en',
+                'article_count': archive.entry_count if hasattr(archive, 'entry_count') else 0,
+                'size_bytes': os.path.getsize(zim_path)
+            }
+            
+            # Extract key articles for World Model
+            world_model_articles = []
+            raw_content_parts = [
+                f"ZIM Archive: {zim_metadata['title']}",
+                f"Description: {zim_metadata['description']}",
+                f"Articles: {zim_metadata['article_count']:,}",
+                f"Language: {zim_metadata['language']}",
+                ""
+            ]
+            
+            # Sample comprehensive articles for robust World Model (increased for production)
+            max_articles = 25000  # Allow up to 25k articles per ZIM file
+            articles_processed = 0
+            
+            # Priority patterns for World Model knowledge
+            priority_patterns = [
+                # Core scientific concepts
+                r'^(.*physics.*|.*chemistry.*|.*biology.*|.*mathematics.*)',
+                r'^(.*science.*|.*theory.*|.*principle.*|.*law.*)',
+                # Fundamental concepts
+                r'^(.*definition.*|.*concept.*|.*fundamental.*|.*basic.*)',
+                # Important topics  
+                r'^(.*important.*|.*major.*|.*significant.*|.*key.*)',
+                # Lists and categories
+                r'^(list.*|category.*|index.*)'
+            ]
+            
+            # Aggressive approach: extract much more content for comprehensive World Model
+            try:
+                # Get extensive samples for World Model completeness
+                total_entries = archive.entry_count if hasattr(archive, 'entry_count') else 1000
+                article_count = getattr(archive, 'article_count', total_entries // 2)
+                
+                # Scale extraction based on archive size - aim for 10,000-20,000 articles per domain
+                if article_count > 100000:  # Large archives (computer, medicine, math)
+                    target_articles = min(20000, max_articles)
+                    sample_size = min(100000, total_entries)  # Sample up to 100k entries
+                elif article_count > 50000:  # Medium archives
+                    target_articles = min(15000, max_articles) 
+                    sample_size = min(75000, total_entries)
+                else:  # Smaller archives
+                    target_articles = min(10000, max_articles)
+                    sample_size = min(50000, total_entries)
+                
+                logger.info(f"DEBUG: ZIM archive has {total_entries} entries ({article_count} articles), targeting {target_articles} extractions from {sample_size} samples")
+                
+                # Try to access articles using known titles first, then random
+                known_titles = [
+                    'Physics', 'Chemistry', 'Biology', 'Mathematics', 'Computer_science',
+                    'Algorithm', 'Machine_learning', 'Artificial_intelligence', 'Quantum_mechanics',
+                    'Relativity', 'Evolution', 'DNA', 'Cell', 'Protein', 'Calculus', 'Statistics'
+                ]
+                
+                # First try known article titles with namespace prefix
+                for test_title in known_titles:
+                    if articles_processed >= max_articles:
+                        break
+                    try:
+                        # Try with 'A/' namespace prefix for articles
+                        article_path = f'A/{test_title}'
+                        if archive.has_entry_by_path(article_path):
+                            entry = archive.get_entry_by_path(article_path)
+                            if not entry.is_redirect:
+                                item = entry.get_item()
+                                if item:
+                                    content_bytes = item.content
+                                    if content_bytes and len(content_bytes.tobytes()) > 500:
+                                        content_text = content_bytes.tobytes().decode('utf-8', errors='ignore')
+                                        clean_text = self._extract_text_from_html(content_text)
+                                        if len(clean_text.strip()) > 200:
+                                            article_data = {
+                                                'title': test_title,
+                                                'path': article_path,
+                                                'content': clean_text[:2000],
+                                                'word_count': len(clean_text.split()),
+                                                'snippet': clean_text[:200] + '...'
+                                            }
+                                            world_model_articles.append(article_data)
+                                            articles_processed += 1
+                                            logger.info(f"DEBUG: Successfully extracted known article '{test_title}' ({len(clean_text)} chars)")
+                    except Exception as e:
+                        logger.debug(f"Failed to get known article {test_title}: {e}")
+                        continue
+                
+                # Then use aggressive random sampling for comprehensive coverage  
+                random_attempts = 0
+                max_random_attempts = sample_size  # Use the scaled sample size
+                
+                logger.info(f"DEBUG: Starting aggressive random sampling - target: {target_articles}, max attempts: {max_random_attempts}")
+                
+                while articles_processed < target_articles and random_attempts < max_random_attempts:
+                    random_attempts += 1
+                    try:
+                        # Get a random entry from the archive
+                        entry = archive.get_random_entry()
+                        
+                        # Skip redirects and non-content entries
+                        if entry.is_redirect:
+                            continue
+                            
+                        title = entry.title
+                        if not title or title.startswith('File:') or title.startswith('Template:') or title.startswith('Category:'):
+                            continue
+                            
+                        # Get the item content
+                        item = entry.get_item()
+                        if not item:
+                            continue
+                            
+                        mimetype = item.mimetype if hasattr(item, 'mimetype') else 'unknown'
+                        if mimetype != 'text/html':
+                            continue
+                            
+                        # Extract content
+                        content = item.content.tobytes().decode('utf-8', errors='ignore')
+                        
+                        # Extract clean text from HTML
+                        clean_text = self._extract_text_from_html(content)
+                        if len(clean_text) > 100:  # Only include substantial articles
+                            article_data = {
+                                'title': title,
+                                'path': entry.get_path() if hasattr(entry, 'get_path') else '',
+                                'content': clean_text[:2000],  # Limit content size
+                                'word_count': len(clean_text.split()),
+                                'snippet': clean_text[:200] + '...'
+                            }
+                            world_model_articles.append(article_data)
+                            articles_processed += 1
+                            
+                            # Progress logging for aggressive extraction
+                            if articles_processed <= 10 or articles_processed % 1000 == 0:
+                                logger.info(f"DEBUG: Successfully extracted article '{title}' ({len(clean_text)} chars) - Progress: {articles_processed}/{target_articles}")
+                                if articles_processed <= 3:
+                                    logger.info(f"DEBUG: Content preview: {clean_text[:200]}...")
+                            
+                    except Exception as entry_error:
+                        # Skip problematic entries
+                        continue
+                        
+            except Exception as iteration_error:
+                logger.warning(f"ZIM iteration failed: {str(iteration_error)}")
+                # No fallback - we need real data only
+                world_model_articles = []
+                articles_processed = 0
+            
+            # Add article summaries to raw content
+            raw_content_parts.append(f"Processed Articles ({len(world_model_articles)}):")
+            for i, article in enumerate(world_model_articles[:10]):  # Show first 10 in raw content
+                raw_content_parts.append(f"{i+1}. {article['title']}")
+                raw_content_parts.append(f"   Words: {article['word_count']}")
+                raw_content_parts.append(f"   Preview: {article['content'][:200]}...")
+                raw_content_parts.append("")
+            
+            if len(world_model_articles) > 10:
+                raw_content_parts.append(f"... and {len(world_model_articles) - 10} more articles")
+            
+            structured_content = {
+                **zim_metadata,
+                'world_model_articles': world_model_articles,
+                'articles_processed': articles_processed,
+                'processing_stats': {
+                    'total_articles_available': zim_metadata['article_count'],
+                    'articles_processed': len(world_model_articles),
+                    'processing_ratio': len(world_model_articles) / max(zim_metadata['article_count'], 1)
+                }
+            }
+            
+            raw_content = '\n'.join(raw_content_parts)
+            
+            return raw_content, structured_content
+            
+        except Exception as e:
+            logger.error("libzim processing failed", error=str(e))
+            raise
+    
+    async def _process_zim_zimply(self, zim_path: str) -> Tuple[str, Dict[str, Any]]:
+        """Process ZIM file using zimply library (fallback)"""
+        
+        try:
+            import zimply
+            
+            zim_file = zimply.ZIMFile(zim_path)
+            
+            # Extract basic metadata
+            zim_metadata = {
+                'type': 'zim_archive',
+                'title': getattr(zim_file, 'title', os.path.basename(zim_path)),
+                'description': getattr(zim_file, 'description', ''),
+                'article_count': getattr(zim_file, 'article_count', 0),
+                'size_bytes': os.path.getsize(zim_path)
+            }
+            
+            raw_content_parts = [
+                f"ZIM Archive: {zim_metadata['title']}",
+                f"Articles: {zim_metadata['article_count']:,}",
+                ""
+            ]
+            
+            # Extract sample articles
+            world_model_articles = []
+            articles_to_process = min(100, zim_metadata.get('article_count', 0))  # Limit processing
+            
+            try:
+                for i, article in enumerate(zim_file):
+                    if i >= articles_to_process:
+                        break
+                    
+                    try:
+                        title = article.title
+                        content = article.content
+                        
+                        if title and content and len(content) > 100:
+                            clean_text = self._extract_text_from_html(content)
+                            if len(clean_text) > 50:
+                                article_data = {
+                                    'title': title,
+                                    'content': clean_text[:1000],  # Limit content
+                                    'word_count': len(clean_text.split())
+                                }
+                                world_model_articles.append(article_data)
+                                
+                    except Exception as article_error:
+                        logger.debug("Failed to process zimply article", error=str(article_error))
+                        continue
+                        
+            except Exception as iteration_error:
+                logger.warning("ZIM iteration failed", error=str(iteration_error))
+            
+            # Add to raw content
+            raw_content_parts.append(f"Sample Articles ({len(world_model_articles)}):")
+            for i, article in enumerate(world_model_articles[:5]):
+                raw_content_parts.append(f"{i+1}. {article['title']}")
+                raw_content_parts.append(f"   Preview: {article['content'][:200]}...")
+                raw_content_parts.append("")
+            
+            structured_content = {
+                **zim_metadata,
+                'world_model_articles': world_model_articles,
+                'articles_processed': len(world_model_articles)
+            }
+            
+            raw_content = '\n'.join(raw_content_parts)
+            
+            return raw_content, structured_content
+            
+        except Exception as e:
+            logger.error("zimply processing failed", error=str(e))
+            raise
+    
+    def _extract_text_from_html(self, html_content: str) -> str:
+        """Extract clean text from HTML content"""
+        
+        try:
+            if DOCUMENT_PROCESSORS_AVAILABLE:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(html_content, 'html.parser')
+                
+                # Remove script and style elements
+                for script in soup(["script", "style", "nav", "footer", "header"]):
+                    script.decompose()
+                
+                # Extract text
+                text = soup.get_text()
+                
+                # Clean up whitespace
+                lines = (line.strip() for line in text.splitlines())
+                chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                clean_text = '\n'.join(chunk for chunk in chunks if chunk)
+                
+                return clean_text
+            else:
+                # Fallback: simple tag removal
+                import re
+                clean_text = re.sub(r'<[^>]+>', '', html_content)
+                clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+                return clean_text
+                
+        except Exception as e:
+            logger.debug("HTML text extraction failed", error=str(e))
+            # Return original content with simple cleanup
+            import re
+            return re.sub(r'<[^>]+>', '', html_content)[:1000]
+    
+    async def _extract_zim_entities(self, structured_content: Dict[str, Any], raw_content: str) -> List[Dict[str, Any]]:
+        """Extract knowledge entities from ZIM content for World Model"""
+        
+        entities = []
+        
+        # Extract archive metadata entities
+        entities.append({
+            'type': 'knowledge_archive',
+            'value': structured_content.get('title', ''),
+            'metadata': {
+                'article_count': structured_content.get('article_count', 0),
+                'language': structured_content.get('language', 'en'),
+                'domain': self._detect_domain_from_title(structured_content.get('title', ''))
+            },
+            'confidence': 1.0
+        })
+        
+        # Extract article entities for World Model
+        for article in structured_content.get('world_model_articles', [])[:50]:  # Limit entities
+            entities.append({
+                'type': 'world_model_concept',
+                'value': article['title'],
+                'metadata': {
+                    'word_count': article['word_count'],
+                    'content_preview': article['content'][:200],
+                    'source_archive': structured_content.get('title', ''),
+                    'domain': self._detect_domain_from_title(structured_content.get('title', ''))
+                },
+                'confidence': 0.9
+            })
+        
+        # Extract domain-specific concepts
+        domain = self._detect_domain_from_title(structured_content.get('title', ''))
+        if domain:
+            entities.append({
+                'type': 'knowledge_domain',
+                'value': domain,
+                'metadata': {
+                    'article_count': len(structured_content.get('world_model_articles', [])),
+                    'source': 'wikipedia_zim'
+                },
+                'confidence': 0.95
+            })
+        
+        return entities
+    
+    def _detect_domain_from_title(self, title: str) -> str:
+        """Detect knowledge domain from ZIM archive title"""
+        
+        title_lower = title.lower()
+        
+        domain_patterns = {
+            'physics': ['physics', 'physical'],
+            'chemistry': ['chemistry', 'chemical'],
+            'biology': ['biology', 'biological', 'molcell'],
+            'medicine': ['medicine', 'medical'],
+            'mathematics': ['mathematics', 'mathematical', 'math'],
+            'astronomy': ['astronomy', 'astronomical'],
+            'computer_science': ['computer', 'computing']
+        }
+        
+        for domain, patterns in domain_patterns.items():
+            if any(pattern in title_lower for pattern in patterns):
+                return domain
+        
+        return 'general_knowledge'
+    
+    def _assess_zim_quality(self, structured_content: Dict[str, Any]) -> float:
+        """Assess ZIM content quality for World Model (0.0-1.0)"""
+        
+        quality_factors = []
+        
+        # Article count factor
+        article_count = len(structured_content.get('world_model_articles', []))
+        if article_count > 500:
+            quality_factors.append(1.0)
+        elif article_count > 100:
+            quality_factors.append(0.8)
+        elif article_count > 10:
+            quality_factors.append(0.6)
+        else:
+            quality_factors.append(0.3)
+        
+        # Content richness factor
+        total_words = sum(article.get('word_count', 0) for article in structured_content.get('world_model_articles', []))
+        if total_words > 50000:
+            quality_factors.append(1.0)
+        elif total_words > 10000:
+            quality_factors.append(0.8)
+        elif total_words > 1000:
+            quality_factors.append(0.6)
+        else:
+            quality_factors.append(0.4)
+        
+        # Metadata completeness factor
+        metadata_fields = ['title', 'description', 'language', 'article_count']
+        present_fields = sum(1 for field in metadata_fields if structured_content.get(field))
+        metadata_score = present_fields / len(metadata_fields)
+        quality_factors.append(metadata_score)
+        
+        return sum(quality_factors) / len(quality_factors) if quality_factors else 0.5
+
 class UniversalIngestionEngine:
     """Main orchestrator for universal knowledge ingestion"""
     
@@ -1405,12 +1926,14 @@ class UniversalIngestionEngine:
         self.document_processor = DocumentProcessor()
         self.structured_data_processor = StructuredDataProcessor()
         self.technical_processor = TechnicalProcessor()
+        self.zim_processor = ZIMProcessor()
         
         # Processor mapping
         self.processors = {
             **{fmt: self.document_processor for fmt in self.document_processor.supported_formats},
             **{fmt: self.structured_data_processor for fmt in self.structured_data_processor.supported_formats},
-            **{fmt: self.technical_processor for fmt in self.technical_processor.supported_formats}
+            **{fmt: self.technical_processor for fmt in self.technical_processor.supported_formats},
+            **{fmt: self.zim_processor for fmt in self.zim_processor.supported_formats}
         }
         
         # Thread pool for parallel processing
@@ -1634,7 +2157,8 @@ class UniversalIngestionEngine:
             '.c': ContentFormat.CODE,
             '.h': ContentFormat.CODE,
             '.rb': ContentFormat.CODE,
-            '.php': ContentFormat.CODE
+            '.php': ContentFormat.CODE,
+            '.zim': ContentFormat.ZIM
         }
         
         detected_format = extension_map.get(extension)
@@ -1763,6 +2287,623 @@ async def process_pdf_corpus(corpus_dir: str,
                 "Enhanced error reporting and recovery"
             ]
         }
+        
+    finally:
+        engine.shutdown()
+
+# World Model Knowledge Interface - Focused on Contradiction Detection
+class WorldModelKnowledge:
+    """World Model for detecting factual contradictions in candidate answers"""
+    
+    def __init__(self):
+        self.factual_assertions = {}     # fact_key -> assertion_data mapping
+        self.scientific_constants = {}   # constant_name -> value mapping
+        self.definitions = {}            # concept -> definition mapping
+        self.domain_facts = {}           # domain -> facts mapping
+        self.quality_threshold = 0.7     # Minimum quality for World Model facts
+        
+        # Contradiction detection patterns
+        self.contradiction_patterns = {
+            # Negation patterns
+            'negation': [
+                (r'(\w+) is not (\w+)', r'(\w+) is (\w+)'),
+                (r'(\w+) cannot (\w+)', r'(\w+) can (\w+)'),
+                (r'(\w+) never (\w+)', r'(\w+) always (\w+)'),
+                (r'(\w+) does not (\w+)', r'(\w+) does (\w+)')
+            ],
+            # Quantitative contradictions  
+            'quantitative': [
+                (r'(\w+) is (\d+\.?\d*)', r'different_numerical_value'),
+                (r'(\w+) equals (\d+\.?\d*)', r'different_numerical_value'),
+                (r'(\w+) measures (\d+\.?\d*)', r'different_numerical_value')
+            ],
+            # Categorical contradictions
+            'categorical': [
+                (r'(\w+) is a type of (\w+)', r'(\w+) is not a type of (\w+)'),
+                (r'(\w+) belongs to (\w+)', r'(\w+) does not belong to (\w+)')
+            ]
+        }
+        
+    def load_from_processed_content(self, processed_content_list: List[ProcessedContent]):
+        """Load World Model knowledge from processed ZIM content for contradiction detection"""
+        
+        logger.info("Building World Model contradiction detector from ZIM content")
+        
+        for content in processed_content_list:
+            if content.metadata.content_format == ContentFormat.ZIM and content.processing_status == ProcessingStatus.COMPLETED:
+                self._extract_factual_assertions(content)
+                
+        logger.info(f"World Model loaded: {len(self.factual_assertions)} facts, "
+                   f"{len(self.scientific_constants)} constants, "
+                   f"{len(self.definitions)} definitions")
+    
+    def _extract_factual_assertions(self, content: ProcessedContent):
+        """Extract factual assertions from ZIM content for contradiction detection"""
+        
+        structured_data = content.structured_content
+        domain = self._detect_domain(structured_data.get('title', ''))
+        
+        if domain not in self.domain_facts:
+            self.domain_facts[domain] = []
+        
+        # Process articles to extract facts
+        articles = structured_data.get('world_model_articles', [])
+        facts_extracted = 0
+        
+        # DEBUG: Show structured_data keys to understand the content
+        logger.info(f"DEBUG: Structured data keys: {list(structured_data.keys())}")
+        logger.info(f"DEBUG: Processing {len(articles)} articles from {domain} domain")
+        
+        # Additional DEBUG: Check if articles exist under different key
+        if len(articles) == 0:
+            logger.info(f"DEBUG: No 'world_model_articles' found. Checking other keys...")
+            for key, value in structured_data.items():
+                if isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
+                    logger.info(f"DEBUG: Found list data under key '{key}' with {len(value)} items")
+        
+        for article in articles:
+            if article.get('word_count', 0) < 50:  # Skip short articles
+                continue
+                
+            title = article['title']
+            content_text = article['content']
+            
+            # DEBUG: Log sample content to understand what we're working with
+            logger.info(f"DEBUG: Processing article '{title}' with {article.get('word_count', 0)} words")
+            logger.info(f"DEBUG: Content preview: {content_text[:300]}...")
+            
+            # Extract different types of factual assertions
+            article_facts = []
+            
+            # 1. Extract scientific constants and measurements
+            constants = self._extract_scientific_constants(title, content_text)
+            if constants:
+                logger.info(f"DEBUG: Found {len(constants)} scientific constants in '{title}': {[c['subject'] for c in constants]}")
+            article_facts.extend(constants)
+            
+            # 2. Extract definitional statements  
+            definitions = self._extract_definitions(title, content_text)
+            if definitions:
+                logger.info(f"DEBUG: Found {len(definitions)} definitions in '{title}': {[d['subject'] for d in definitions]}")
+            article_facts.extend(definitions)
+            
+            # 3. Extract categorical relationships
+            categories = self._extract_categorical_facts(title, content_text)
+            if categories:
+                logger.info(f"DEBUG: Found {len(categories)} categorical facts in '{title}': {[c['subject'] for c in categories]}")
+            article_facts.extend(categories)
+            
+            # 4. Extract quantitative facts
+            quantities = self._extract_quantitative_facts(title, content_text)
+            if quantities:
+                logger.info(f"DEBUG: Found {len(quantities)} quantitative facts in '{title}': {[q['subject'] for q in quantities]}")
+            article_facts.extend(quantities)
+            
+            # Store facts with metadata
+            for fact in article_facts:
+                fact_key = self._generate_fact_key(fact)
+                
+                self.factual_assertions[fact_key] = {
+                    **fact,
+                    'source_article': title,
+                    'source_domain': domain,
+                    'confidence': 0.9,  # High confidence for Wikipedia facts
+                    'source_archive': structured_data.get('title', '')
+                }
+                
+                # Also store in specialized indexes
+                if fact['type'] == 'scientific_constant':
+                    self.scientific_constants[fact['subject']] = fact['object']
+                elif fact['type'] == 'definition':
+                    self.definitions[fact['subject']] = fact['object']
+            
+            self.domain_facts[domain].extend(article_facts)
+            facts_extracted += len(article_facts)
+        
+        logger.info(f"Extracted {facts_extracted} factual assertions from {domain} domain")
+    
+    def _extract_scientific_constants(self, title: str, content: str) -> List[Dict[str, Any]]:
+        """Extract scientific constants and measurements"""
+        
+        facts = []
+        content_lower = content.lower()
+        
+        # Common scientific constants patterns
+        constant_patterns = [
+            # Speed of light
+            (r'speed of light.*?(\d+,?\d*,?\d*)\s*(m/s|meters per second|km/s)', 
+             'speed_of_light', 'physics'),
+            # Pi
+            (r'pi.*?(\d+\.\d+)', 'pi', 'mathematics'),
+            # Gravity
+            (r'gravitational.*?acceleration.*?(\d+\.\d+)\s*(m/s)', 
+             'gravitational_acceleration', 'physics'),
+            # Planck constant
+            (r'planck.*?constant.*?(\d+\.\d+e-?\d+)', 'planck_constant', 'physics'),
+            # Avogadro number
+            (r'avogadro.*?(\d+\.\d+e\+?\d+)', 'avogadro_number', 'chemistry')
+        ]
+        
+        for pattern, constant_name, domain in constant_patterns:
+            import re
+            matches = re.finditer(pattern, content_lower, re.IGNORECASE)
+            for match in matches:
+                value = match.group(1)
+                # Clean up numerical formatting
+                clean_value = value.replace(',', '')
+                
+                facts.append({
+                    'type': 'scientific_constant',
+                    'subject': constant_name,
+                    'predicate': 'equals',
+                    'object': clean_value,
+                    'domain': domain,
+                    'extraction_pattern': pattern
+                })
+        
+        return facts
+    
+    def _extract_definitions(self, title: str, content: str) -> List[Dict[str, Any]]:
+        """Extract definitional statements"""
+        
+        facts = []
+        
+        # Definition patterns
+        definition_patterns = [
+            r'([A-Z][a-z]+) is (a|an) ([^.]+)',
+            r'([A-Z][a-z]+) refers to ([^.]+)',
+            r'([A-Z][a-z]+) means ([^.]+)',
+            r'([A-Z][a-z]+) is defined as ([^.]+)'
+        ]
+        
+        import re
+        for pattern in definition_patterns:
+            matches = re.finditer(pattern, content, re.IGNORECASE)
+            for match in matches:
+                subject = match.group(1).lower()
+                definition = match.groups()[-1].strip()  # Last group
+                
+                # Filter out very long or short definitions
+                if 10 <= len(definition) <= 200:
+                    facts.append({
+                        'type': 'definition',
+                        'subject': subject,
+                        'predicate': 'is_defined_as',
+                        'object': definition,
+                        'domain': self._infer_domain_from_content(definition),
+                        'extraction_pattern': pattern
+                    })
+        
+        return facts
+    
+    def _extract_categorical_facts(self, title: str, content: str) -> List[Dict[str, Any]]:
+        """Extract categorical relationships (X is a type of Y)"""
+        
+        facts = []
+        
+        # Categorical patterns
+        categorical_patterns = [
+            r'([A-Z][a-z]+) is a type of ([^.]+)',
+            r'([A-Z][a-z]+) is a kind of ([^.]+)',
+            r'([A-Z][a-z]+) belongs to ([^.]+)',
+            r'([A-Z][a-z]+) is classified as ([^.]+)',
+            r'([A-Z][a-z]+) are ([^.]+)'  # Plural form
+        ]
+        
+        import re
+        for pattern in categorical_patterns:
+            matches = re.finditer(pattern, content, re.IGNORECASE)
+            for match in matches:
+                subject = match.group(1).lower()
+                category = match.group(2).strip()
+                
+                if 5 <= len(category) <= 100:  # Reasonable category length
+                    facts.append({
+                        'type': 'categorical',
+                        'subject': subject,
+                        'predicate': 'is_type_of',
+                        'object': category,
+                        'domain': self._infer_domain_from_content(category),
+                        'extraction_pattern': pattern
+                    })
+        
+        return facts
+    
+    def _extract_quantitative_facts(self, title: str, content: str) -> List[Dict[str, Any]]:
+        """Extract quantitative facts (measurements, dates, numbers)"""
+        
+        facts = []
+        
+        # Quantitative patterns
+        quantitative_patterns = [
+            # Temperatures
+            (r'([A-Z][a-z\s]+) (?:is|has|measures) (\d+\.?\d*)\s*(°C|°F|Kelvin|degrees)', 
+             'temperature'),
+            # Distances and sizes  
+            (r'([A-Z][a-z\s]+) (?:is|measures|spans) (\d+\.?\d*)\s*(km|miles|meters|m|cm)', 
+             'measurement'),
+            # Dates
+            (r'([A-Z][a-z\s]+) (?:was|occurred|happened) in (\d{4})', 
+             'date'),
+            # Weights and masses
+            (r'([A-Z][a-z\s]+) (?:weighs|has mass) (\d+\.?\d*)\s*(kg|pounds|grams)', 
+             'mass')
+        ]
+        
+        import re
+        for pattern, fact_type in quantitative_patterns:
+            matches = re.finditer(pattern, content, re.IGNORECASE)
+            for match in matches:
+                subject = match.group(1).strip().lower()
+                value = match.group(2)
+                unit = match.group(3) if len(match.groups()) > 2 else ''
+                
+                facts.append({
+                    'type': 'quantitative',
+                    'subject': subject,
+                    'predicate': fact_type,
+                    'object': f"{value} {unit}".strip(),
+                    'domain': self._infer_domain_from_content(subject),
+                    'extraction_pattern': pattern
+                })
+        
+        return facts
+    
+    def _generate_fact_key(self, fact: Dict[str, Any]) -> str:
+        """Generate unique key for factual assertion"""
+        return f"{fact['type']}:{fact['subject']}:{fact['predicate']}"
+    
+    def _infer_domain_from_content(self, content: str) -> str:
+        """Infer domain from content text"""
+        
+        content_lower = content.lower()
+        
+        domain_keywords = {
+            'physics': ['physics', 'force', 'energy', 'quantum', 'particle', 'wave'],
+            'chemistry': ['chemistry', 'chemical', 'molecule', 'atom', 'reaction'],
+            'biology': ['biology', 'cell', 'organism', 'species', 'evolution', 'dna'],
+            'mathematics': ['mathematics', 'equation', 'theorem', 'formula', 'number'],
+            'medicine': ['medicine', 'medical', 'disease', 'treatment', 'patient'],
+            'computer_science': ['computer', 'algorithm', 'programming', 'software'],
+            'astronomy': ['astronomy', 'planet', 'star', 'galaxy', 'space', 'universe']
+        }
+        
+        for domain, keywords in domain_keywords.items():
+            if any(keyword in content_lower for keyword in keywords):
+                return domain
+                
+        return 'general'
+    
+    def _detect_domain(self, title: str) -> str:
+        """Detect knowledge domain from title"""
+        
+        title_lower = title.lower()
+        domain_patterns = {
+            'physics': ['physics', 'physical'],
+            'chemistry': ['chemistry', 'chemical'], 
+            'biology': ['biology', 'biological', 'molcell'],
+            'medicine': ['medicine', 'medical'],
+            'mathematics': ['mathematics', 'mathematical', 'math'],
+            'astronomy': ['astronomy', 'astronomical'],
+            'computer_science': ['computer', 'computing']
+        }
+        
+        for domain, patterns in domain_patterns.items():
+            if any(pattern in title_lower for pattern in patterns):
+                return domain
+        
+        return 'general_knowledge'
+    
+    def detect_contradictions(self, candidate_text: str, query_context: str = "") -> Dict[str, Any]:
+        """Detect factual contradictions in candidate answer against World Model"""
+        
+        if not self.factual_assertions:
+            return {
+                'has_contradictions': False,
+                'contradiction_score': 0.0,
+                'contradictions_found': [],
+                'contradiction_confidence': 0.0,
+                'facts_checked': 0
+            }
+        
+        candidate_lower = candidate_text.lower()
+        contradictions_found = []
+        facts_checked = 0
+        
+        # Check each type of factual assertion for contradictions
+        
+        # 1. Check scientific constants
+        constant_contradictions = self._check_scientific_constant_contradictions(candidate_lower)
+        contradictions_found.extend(constant_contradictions)
+        
+        # 2. Check definitional contradictions
+        definition_contradictions = self._check_definition_contradictions(candidate_lower)
+        contradictions_found.extend(definition_contradictions)
+        
+        # 3. Check categorical contradictions
+        categorical_contradictions = self._check_categorical_contradictions(candidate_lower)
+        contradictions_found.extend(categorical_contradictions)
+        
+        # 4. Check quantitative contradictions
+        quantitative_contradictions = self._check_quantitative_contradictions(candidate_lower)
+        contradictions_found.extend(quantitative_contradictions)
+        
+        facts_checked = len(self.factual_assertions)
+        
+        # Calculate contradiction scores
+        contradiction_score = min(len(contradictions_found) / max(facts_checked, 1), 1.0)
+        has_contradictions = len(contradictions_found) > 0
+        
+        # Calculate confidence based on the quality of contradictions found
+        if contradictions_found:
+            avg_confidence = sum(c['confidence'] for c in contradictions_found) / len(contradictions_found)
+            contradiction_confidence = avg_confidence
+        else:
+            contradiction_confidence = 0.0
+        
+        return {
+            'has_contradictions': has_contradictions,
+            'contradiction_score': contradiction_score,
+            'contradictions_found': contradictions_found,
+            'contradiction_confidence': contradiction_confidence,
+            'facts_checked': facts_checked,
+            'major_contradictions': len([c for c in contradictions_found if c['severity'] == 'major']),
+            'minor_contradictions': len([c for c in contradictions_found if c['severity'] == 'minor'])
+        }
+    
+    def _check_scientific_constant_contradictions(self, candidate_text: str) -> List[Dict[str, Any]]:
+        """Check for contradictions with scientific constants"""
+        
+        contradictions = []
+        import re
+        
+        for constant_name, known_value in self.scientific_constants.items():
+            # Look for mentions of this constant with different values
+            constant_patterns = [
+                f"{constant_name.replace('_', ' ')}.*?is.*?(\\d+[.,]?\\d*[.,]?\\d*)",
+                f"{constant_name.replace('_', ' ')}.*?equals.*?(\\d+[.,]?\\d*[.,]?\\d*)",
+                f"{constant_name.replace('_', ' ')}.*?(\\d+[.,]?\\d*[.,]?\\d*)"
+            ]
+            
+            for pattern in constant_patterns:
+                matches = re.finditer(pattern, candidate_text, re.IGNORECASE)
+                for match in matches:
+                    claimed_value = match.group(1).replace(',', '')
+                    known_value_clean = str(known_value).replace(',', '')
+                    
+                    # Check if values are significantly different
+                    try:
+                        claimed_num = float(claimed_value)
+                        known_num = float(known_value_clean)
+                        
+                        # Allow for small rounding differences (1% tolerance)
+                        if abs(claimed_num - known_num) / known_num > 0.01:
+                            contradictions.append({
+                                'type': 'scientific_constant',
+                                'constant_name': constant_name,
+                                'claimed_value': claimed_value,
+                                'known_value': known_value,
+                                'severity': 'major',
+                                'confidence': 0.9,
+                                'description': f"Candidate claims {constant_name.replace('_', ' ')} is {claimed_value}, but it's actually {known_value}"
+                            })
+                    except ValueError:
+                        continue  # Skip if we can't parse numbers
+        
+        return contradictions
+    
+    def _check_definition_contradictions(self, candidate_text: str) -> List[Dict[str, Any]]:
+        """Check for contradictions with established definitions"""
+        
+        contradictions = []
+        import re
+        
+        for concept, known_definition in self.definitions.items():
+            # Look for alternative definitions of the same concept
+            definition_patterns = [
+                f"{concept} is (a|an) ([^.]+)",
+                f"{concept} refers to ([^.]+)",
+                f"{concept} means ([^.]+)"
+            ]
+            
+            for pattern in definition_patterns:
+                matches = re.finditer(pattern, candidate_text, re.IGNORECASE)
+                for match in matches:
+                    claimed_definition = match.groups()[-1].strip().lower()
+                    known_definition_lower = known_definition.lower()
+                    
+                    # Simple contradiction check (could be enhanced with embeddings)
+                    contradiction_indicators = [
+                        ('not', 'is'), ('never', 'always'), ('cannot', 'can'),
+                        ('false', 'true'), ('incorrect', 'correct')
+                    ]
+                    
+                    for neg, pos in contradiction_indicators:
+                        if ((neg in claimed_definition and pos in known_definition_lower) or
+                            (pos in claimed_definition and neg in known_definition_lower)):
+                            contradictions.append({
+                                'type': 'definition',
+                                'concept': concept,
+                                'claimed_definition': claimed_definition,
+                                'known_definition': known_definition,
+                                'severity': 'minor',
+                                'confidence': 0.7,
+                                'description': f"Candidate definition of '{concept}' contradicts established definition"
+                            })
+        
+        return contradictions
+    
+    def _check_categorical_contradictions(self, candidate_text: str) -> List[Dict[str, Any]]:
+        """Check for contradictions with categorical relationships"""
+        
+        contradictions = []
+        import re
+        
+        # Check against known categorical facts
+        for fact_key, fact_data in self.factual_assertions.items():
+            if fact_data['type'] != 'categorical':
+                continue
+                
+            subject = fact_data['subject']
+            known_category = fact_data['object']
+            
+            # Look for contradictory categorical statements (escape regex special chars)
+            escaped_subject = re.escape(subject)
+            escaped_category = re.escape(known_category)
+            contradiction_patterns = [
+                f"{escaped_subject} is not (a|an) {escaped_category}",
+                f"{escaped_subject} is not .*{escaped_category}",
+                f"{escaped_subject} does not belong to {escaped_category}",
+                f"{escaped_subject} is (a|an) (?!{escaped_category})([^.]+)"  # Different category
+            ]
+            
+            for pattern in contradiction_patterns:
+                matches = re.finditer(pattern, candidate_text, re.IGNORECASE)
+                for match in matches:
+                    contradictions.append({
+                        'type': 'categorical',
+                        'subject': subject,
+                        'claimed_category': match.groups()[-1] if match.groups() else 'negation',
+                        'known_category': known_category,
+                        'severity': 'minor',
+                        'confidence': 0.8,
+                        'description': f"Candidate contradicts categorical relationship: {subject} vs {known_category}"
+                    })
+        
+        return contradictions
+    
+    def _check_quantitative_contradictions(self, candidate_text: str) -> List[Dict[str, Any]]:
+        """Check for contradictions with quantitative facts"""
+        
+        contradictions = []
+        import re
+        
+        for fact_key, fact_data in self.factual_assertions.items():
+            if fact_data['type'] != 'quantitative':
+                continue
+                
+            subject = fact_data['subject']
+            known_value = fact_data['object']
+            
+            # Look for different quantitative claims about the same subject
+            quantity_patterns = [
+                f"{subject}.*?(\\d+\\.?\\d*)\\s*(\\w+)",
+                f"{subject}.*?is.*?(\\d+\\.?\\d*)\\s*(\\w+)",
+                f"{subject}.*?measures.*?(\\d+\\.?\\d*)\\s*(\\w+)"
+            ]
+            
+            for pattern in quantity_patterns:
+                matches = re.finditer(pattern, candidate_text, re.IGNORECASE)
+                for match in matches:
+                    claimed_value = f"{match.group(1)} {match.group(2)}".strip()
+                    
+                    # Simple string comparison (could be enhanced with unit conversion)
+                    if claimed_value.lower() != known_value.lower():
+                        contradictions.append({
+                            'type': 'quantitative',
+                            'subject': subject,
+                            'claimed_value': claimed_value,
+                            'known_value': known_value,
+                            'severity': 'minor',
+                            'confidence': 0.6,
+                            'description': f"Candidate claims {subject} is {claimed_value}, but known value is {known_value}"
+                        })
+        
+        return contradictions
+    
+    def get_world_model_summary(self) -> Dict[str, Any]:
+        """Get summary of World Model knowledge for contradiction detection"""
+        
+        # Count facts by type
+        fact_types = {}
+        for fact_data in self.factual_assertions.values():
+            fact_type = fact_data['type']
+            fact_types[fact_type] = fact_types.get(fact_type, 0) + 1
+        
+        # Count facts by domain
+        domain_counts = {}
+        for fact_data in self.factual_assertions.values():
+            domain = fact_data.get('source_domain', 'unknown')
+            domain_counts[domain] = domain_counts.get(domain, 0) + 1
+        
+        return {
+            'total_facts': len(self.factual_assertions),
+            'total_concepts': len(self.definitions),  # Add missing key
+            'scientific_constants': len(self.scientific_constants),
+            'definitions': len(self.definitions),
+            'fact_types': fact_types,
+            'domains': domain_counts,  # Add missing key
+            'domain_distribution': domain_counts,
+            'total_domains': len(domain_counts),
+            'average_quality': self.quality_threshold,  # Add missing key
+            'quality_threshold': self.quality_threshold,
+            'contradiction_detection_ready': len(self.factual_assertions) > 0
+        }
+
+# World Model Processing Functions
+async def process_world_model_zim_files(zim_directory: str, output_dir: Optional[str] = None) -> WorldModelKnowledge:
+    """Process ZIM files to build World Model knowledge base"""
+    
+    logger.info("Processing ZIM files for World Model", directory=zim_directory)
+    
+    # Find all ZIM files
+    zim_files = []
+    if os.path.exists(zim_directory):
+        for file in os.listdir(zim_directory):
+            if file.endswith('.zim'):
+                zim_files.append(os.path.join(zim_directory, file))
+    
+    if not zim_files:
+        logger.warning(f"No ZIM files found for World Model: {zim_directory}")
+        return WorldModelKnowledge()
+    
+    logger.info(f"Found {len(zim_files)} ZIM files for processing")
+    
+    # Create ingestion engine
+    engine = UniversalIngestionEngine()
+    
+    try:
+        # Process ZIM files
+        result = await engine.ingest_content(
+            content_paths=zim_files,
+            content_formats=None,  # Auto-detect
+            batch_size=1,  # Process ZIM files one at a time due to size
+            save_progress=True if output_dir else False,
+            output_dir=output_dir
+        )
+        
+        # Build World Model knowledge
+        world_model = WorldModelKnowledge()
+        world_model.load_from_processed_content(result.processed_content)
+        
+        summary = world_model.get_world_model_summary()
+        
+        logger.info(f"World Model processing complete: "
+                   f"{summary['total_domains']} domains, "
+                   f"{summary['total_facts']} facts, "
+                   f"{summary['scientific_constants']} constants")
+        
+        return world_model
         
     finally:
         engine.shutdown()
