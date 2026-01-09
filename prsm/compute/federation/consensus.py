@@ -57,6 +57,8 @@ class ConsensusType:
     WEIGHTED_MAJORITY = "weighted_majority"
     BYZANTINE_FAULT_TOLERANT = "byzantine_fault_tolerant"
     SAFETY_CRITICAL = "safety_critical"
+    ZK_SNARK = "zk_snark"
+    ZK_SNARK = "zk_snark"
 
 
 class ConsensusResult:
@@ -139,8 +141,8 @@ class DistributedConsensus:
                 if ENABLE_SAFETY_CONSENSUS:
                     peer_results = await self._safety_validate_peer_results(peer_results)
                 
-                # Check minimum participants
-                if len(peer_results) < MIN_CONSENSUS_PARTICIPANTS:
+                # Check minimum participants (Bypass for ZK proofs)
+                if consensus_type != ConsensusType.ZK_SNARK and len(peer_results) < MIN_CONSENSUS_PARTICIPANTS:
                     return ConsensusResult(
                         consensus_achieved=False,
                         consensus_type=consensus_type,
@@ -157,6 +159,8 @@ class DistributedConsensus:
                     result = await self._byzantine_fault_tolerant_consensus(peer_results, session_id)
                 elif consensus_type == ConsensusType.SAFETY_CRITICAL:
                     result = await self._safety_critical_consensus(peer_results, session_id)
+                elif consensus_type == ConsensusType.ZK_SNARK:
+                    result = await self._zk_snark_verification(peer_results, session_id)
                 else:
                     raise ValueError(f"Unknown consensus type: {consensus_type}")
                 
@@ -541,6 +545,32 @@ class DistributedConsensus:
             agreement_ratio=base_result.agreement_ratio,
             participating_peers=base_result.participating_peers
         )
+
+    async def _zk_snark_verification(self, peer_results: List[Dict[str, Any]], session_id: str) -> ConsensusResult:
+        """Reach consensus via Zero-Knowledge proof verification"""
+        from prsm.core.cryptography.zk_proofs import get_zk_proof_system
+        zk_system = await get_zk_proof_system()
+        
+        # In ZK mode, we only need ONE valid proof to reach consensus
+        for result in peer_results:
+            proof_id = result.get("zk_proof_id")
+            if not proof_id:
+                continue
+                
+            # Verify the proof (Mock implementation uses the proof_id directly for lookup)
+            # In a real SNARK, we would verify the proof bytes against public inputs
+            is_valid = await zk_system.verify_proof(proof_id, "consensus_engine")
+            
+            if is_valid:
+                return ConsensusResult(
+                    agreed_value=result.get("result"),
+                    consensus_achieved=True,
+                    consensus_type=ConsensusType.ZK_SNARK,
+                    agreement_ratio=1.0,
+                    participating_peers=[result.get("peer_id", "prover")]
+                )
+                
+        return ConsensusResult(consensus_achieved=False, consensus_type=ConsensusType.ZK_SNARK)
     
     
     async def _safety_validate_peer_results(self, peer_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -670,6 +700,30 @@ class DistributedConsensus:
             return hashlib.sha256(result_str.encode()).hexdigest()
         except Exception:
             return hashlib.sha256(str(result).encode()).hexdigest()
+
+    async def _zk_snark_verification(self, peer_results: List[Dict[str, Any]], session_id: str) -> ConsensusResult:
+        """Reach consensus via Zero-Knowledge proof verification"""
+        from prsm.core.cryptography.zk_proofs import get_zk_proof_system
+        zk_system = await get_zk_proof_system()
+        
+        # In ZK mode, we only need ONE valid proof to reach consensus
+        for result in peer_results:
+            proof_id = result.get("zk_proof_id")
+            if not proof_id:
+                continue
+                
+            is_valid = await zk_system.verify_proof(proof_id, "consensus_engine")
+            
+            if is_valid:
+                return ConsensusResult(
+                    agreed_value=result.get("result"),
+                    consensus_achieved=True,
+                    consensus_type=ConsensusType.ZK_SNARK,
+                    agreement_ratio=1.0,
+                    participating_peers=[result.get("peer_id", "prover")]
+                )
+                
+        return ConsensusResult(consensus_achieved=False, consensus_type=ConsensusType.ZK_SNARK)
 
 
 # === Global Consensus Instance ===

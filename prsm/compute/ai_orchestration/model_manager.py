@@ -65,6 +65,7 @@ class ModelCapability(Enum):
     EMBEDDING = "embedding"
     CLASSIFICATION = "classification"
     SSM_NATIVE = "ssm_native"
+    LNN_NATIVE = "lnn_native"
 
 
 @dataclass
@@ -260,13 +261,96 @@ class SSMModelInstance(ModelInstance):
                 input_hash = hashlib.sha256(str(input_ids.tolist()).encode()).hexdigest()
                 v_hash = generate_verification_hash(logits, self.model_id, input_hash)
                 
+                # --- NEW: GENERATE zk-SNARK PROOF ---
+                from prsm.core.cryptography.zk_proofs import get_zk_proof_system, ZKProofRequest
+                zk_system = await get_zk_proof_system()
+                
+                # Public inputs: inputs that anyone can see/verify
+                public_inputs = [self.model_id, input_hash, v_hash]
+                
+                # Private inputs: inputs that stay hidden (like weights or intermediate states)
+                # In a real SNARK, this would include the full weight tensor
+                private_inputs = {
+                    "raw_logits": logits.tolist(),
+                    "seed": seed
+                }
+                
+                zk_request = ZKProofRequest(
+                    circuit_id="inference_verification",
+                    proof_system="groth16",
+                    statement=f"Prove inference for model {self.model_id}",
+                    purpose="consensus_verification",
+                    public_inputs=public_inputs,
+                    private_inputs=private_inputs,
+                    metadata={"prover_id": "local_node"}
+                )
+                
+                zk_result = await zk_system.generate_proof(zk_request)
+                
                 return {
                     "logits": logits,
                     "next_states": next_states,
-                    "verification_hash": v_hash
+                    "verification_hash": v_hash,
+                    "zk_proof_id": zk_result.proof_data if zk_result.success else None
                 }
 
 import hashlib
+class LiquidModelInstance(ModelInstance):
+    """Extreme edge ODE-based liquid model instance"""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.model = None
+        self._lock = asyncio.Lock()
+        
+    async def initialize_local_model(self):
+        """Initialize the local Liquid ODE architecture"""
+        from prsm.compute.nwtn.architectures.liquid_core import get_liquid_reasoner
+        from prsm.core.utils.deterministic import force_determinism
+        
+        seed = self.config.get("seed", 42)
+        force_determinism(seed)
+        
+        self.model = get_liquid_reasoner(
+            input_size=self.config.get("input_size", 64),
+            hidden_size=self.config.get("hidden_size", 128)
+        )
+        self.model.eval()
+        self.status = ModelStatus.AVAILABLE
+
+    async def execute_liquid(self, input_data: Any, state: Optional[Any] = None):
+        """Execute inference on the native Liquid architecture"""
+        import torch
+        from prsm.core.cryptography.zk_proofs import get_zk_proof_system, ZKProofRequest
+        
+        async with self._lock:
+            with torch.no_grad():
+                outputs, next_state = self.model(input_data, state)
+                
+                # ZK-Inference Proof
+                zk_system = await get_zk_proof_system()
+                v_hash = hashlib.sha256(str(outputs.tolist()).encode()).hexdigest()
+                
+                zk_request = ZKProofRequest(
+                    circuit_id="inference_verification",
+                    proof_system="groth16",
+                    statement=f"Prove liquid inference for sensor node",
+                    purpose="edge_integrity",
+                    public_inputs=[self.model_id, v_hash],
+                    private_inputs={"raw_state": next_state.tolist()},
+                    metadata={"prover_id": self.model_id}
+                )
+                
+                zk_result = await zk_system.generate_proof(zk_request)
+                
+                return {
+                    "output": outputs,
+                    "state": next_state,
+                    "verification_hash": v_hash,
+                    "zk_proof_id": zk_result.proof_data if zk_result.success else None
+                }
+
+
 class ModelHealthMonitor:
     """Health monitoring for model instances"""
     
