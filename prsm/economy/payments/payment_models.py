@@ -17,7 +17,7 @@ from sqlalchemy import Column, String, DateTime, Text, Integer, Numeric, Boolean
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
-from ..core.database import Base
+from prsm.core.database import Base
 
 
 class PaymentMethod(str, Enum):

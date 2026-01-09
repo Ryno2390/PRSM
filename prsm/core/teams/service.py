@@ -12,9 +12,9 @@ from uuid import UUID, uuid4
 
 import structlog
 
-from ..core.models import FTNSTransaction
-from ..tokenomics.ftns_service import ftns_service
-from ..safety.monitor import SafetyMonitor
+from prsm.core.models import FTNSTransaction
+from prsm.economy.tokenomics.ftns_service import ftns_service
+from prsm.core.safety.monitor import SafetyMonitor
 from .models import (
     Team, TeamMember, TeamWallet, TeamTask, TeamInvitation,
     TeamRole, TeamMembershipStatus, TeamType, GovernanceModel, RewardPolicy

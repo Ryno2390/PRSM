@@ -33,10 +33,10 @@ try:
     from .p2p_network import P2PNetwork
 except ImportError:
     P2PNetwork = MockP2PNetwork
-from ..evolution.models import (
+from prsm.compute.evolution.models import (
     ComponentType, EvaluationResult, ModificationResult, SelectionStrategy
 )
-from ..evolution.archive import EvolutionArchive, SolutionNode, ArchiveStats
+from prsm.compute.evolution.archive import EvolutionArchive, SolutionNode, ArchiveStats
 
 logger = logging.getLogger(__name__)
 

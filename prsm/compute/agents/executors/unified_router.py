@@ -39,7 +39,7 @@ from .enhanced_anthropic_client import EnhancedAnthropicClient, ClaudeModel
 from .enhanced_ollama_client import EnhancedOllamaClient, OllamaModel
 from .openrouter_client import OpenRouterClient
 from prsm.core.usage_tracker import GenericUsageTracker, ResourceType, CostCategory, OperationType
-from ...config.model_config_manager import get_model_config_manager
+from prsm.core.config.model_config_manager import get_model_config_manager
 
 logger = structlog.get_logger(__name__)
 

@@ -1,110 +1,72 @@
 # PRSM: Protocol for Recursive Scientific Modeling
 
-**A decentralized AI framework for scientific discovery, leveraging edge computing, blockchain economics, and distributed storage.**
+**A decentralized AGI framework for verified scientific discovery.**
 
 ---
 
-## 🏗️ Project Architecture
+## 🏗️ Revolutionary Project Architecture
 
-PRSM has been refactored into a clean, domain-driven architecture to ensure scalability and maintainability.
+PRSM leverages three converged technologies to decentralize artificial intelligence:
 
-### 1. `prsm/compute/` (The "Brain")
-Contains all logic related to AI execution and distributed task processing.
-*   **`nwtn/`**: The core "Newton" reasoning engine and neuro-symbolic AI logic.
-*   **`network/`**: The **Distributed RLT Network** implementation. Handles P2P peer discovery, teacher coordination, and load balancing.
-*   **`agents/`**: Autonomous agents for specific scientific tasks.
+### 1. 🧠 Linear-Scaling Brain (SSM Core)
+*   **Tech:** State Space Models (SSM) inspired by Mamba/S4.
+*   **Advantage:** Replaces memory-heavy Transformers with $O(N)$ complexity. This enables complex scientific reasoning on edge nodes (laptops/mobiles) with a constant memory footprint.
+*   **Module:** `prsm/compute/nwtn/architectures/ssm_core.py`
 
-### 2. `prsm/economy/` (The "Ledger")
-Manages the economic incentives and value transfer within the network.
-*   **`blockchain/`**: The **FTNS Oracle** and smart contract integrations. Syncs off-chain state with Ethereum/Polygon/BSC.
-*   **`tokenomics/`**: Logic for token supply, inflation control, and staking rewards.
-*   **`marketplace/`**: Decentralized exchange for trading AI models and datasets.
+### 2. 🔗 Ledger of Truth (Deterministic Consensus)
+*   **Tech:** Deterministic PRNG + Quantized SHA-256 Hashing + Byzantine Fault Tolerance (BFT).
+*   **Advantage:** Ensures that every node reaches the *exact same* conclusion for a given seed. This creates a **Proof-of-Inference**, allowing the blockchain to reach consensus on task rewards without trust.
+*   **Module:** `prsm/core/utils/deterministic.py`
 
-### 3. `prsm/data/` (The "Memory")
-Handles decentralized storage and data ingestion.
-*   **`ipfs/`**: The **IPFS Client** for model sharding and content-addressed storage.
-*   **`ingestion/`**: Pipelines for processing scientific papers and datasets.
-*   **`storage/`**: Local and distributed persistence layers.
-
-### 4. `prsm/interface/` (The "Face")
-The interaction layer for users and external applications.
-*   **`api/`**: RESTful API endpoints for the PRSM platform.
-*   **`dashboard/`**: Real-time visualization of network health and compute tasks.
-*   **`cli.py`**: Command-line tools for node management.
-
-### 5. `prsm/core/` (The "Foundation")
-Shared utilities used across all domains.
-*   **`config/`**: Centralized configuration management.
-*   **`security/`**: Authentication, authorization, and cryptography primitives.
+### 3. 🔍 Exploratory Discovery (Search-Augmented Reasoning)
+*   **Tech:** Monte Carlo Tree Search (MCTS) + Value Functions.
+*   **Advantage:** Moves AI from "Predictive" (probabilistic guessing) to "Exploratory" (searching for proofs). NWTN explores a tree of hypotheses and prunes weak logical paths.
+*   **Module:** `prsm/compute/nwtn/engines/search_reasoning_engine.py`
 
 ---
 
-## 🚀 Getting Started
-
-### Prerequisites
-*   Python 3.10+
-*   Node.js & NPM (for smart contract tests)
-*   Docker (optional, for local IPFS/Blockchain nodes)
-
-### Installation
-
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/Ryno2390/PRSM.git
-    cd PRSM
-    ```
-
-2.  **Set up a Virtual Environment:**
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate
-    ```
-
-3.  **Install Dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    # Install additional core dependencies
-    pip install pyyaml structlog pydantic aiohttp aiofiles web3 eth-account hexbytes
-    ```
-
----
-
-## ✅ Verified Features
+## ✅ Verified Features & Tests
 
 The following core components have been tested and verified:
 
-### 1. Distributed Edge Computing (P2P)
-The **Distributed RLT Network** allows nodes to discover each other and share "teacher" capabilities.
+### 🚀 P2P Networking
+*   **Status:** ✅ Verified. Nodes discover peers and share specialized "Teacher" capabilities.
 *   **Test:** `tests/test_p2p_network.py`
-*   **Run:** `python tests/test_p2p_network.py`
-*   **Status:** ✅ Verified (Teacher registration & discovery works).
 
-### 2. Blockchain Economy
-The **FTNS Oracle** aggregates prices from multiple sources and syncs with the ledger.
+### 💎 Blockchain Oracle
+*   **Status:** ✅ Verified. Aggregates economic data and syncs with the FTNS ledger.
 *   **Test:** `tests/test_blockchain_oracle.py`
-*   **Run:** `python tests/test_blockchain_oracle.py`
-*   **Status:** ✅ Verified (Price aggregation & DB persistence works).
 
-### 3. Decentralized Storage (IPFS)
-The **IPFS Integration** enables adding and retrieving content via content addressing (CID).
+### 📦 Decentralized Storage
+*   **Status:** ✅ Verified. IPFS-based sharding and retrieval verified with mocked node.
 *   **Test:** `tests/test_ipfs_integration.py`
-*   **Run:** `python tests/test_ipfs_integration.py`
-*   **Status:** ✅ Verified (Content add/get with mocking works).
+
+### 🔢 Deterministic SSM
+*   **Status:** ✅ Verified. Confirmed that local generators and quantization enable identical inference hashes across instances.
+*   **Test:** `tests/test_deterministic_ssm.py`
+
+### 🌲 MCTS Reasoning
+*   **Status:** ✅ Verified. The engine successfully searches through a hypothesis space to find high-value scientific insights.
+*   **Test:** `tests/test_search_reasoning.py`
 
 ---
 
-## 📂 Legacy Content
-All original demos, archived scripts, and examples have been moved to the `examples_and_demos/` directory to keep the root clean.
+## 🚀 Usage
+
+1.  **Clone & Setup:**
+    ```bash
+    git clone https://github.com/Ryno2390/PRSM.git
+    python3 -m venv venv && source venv/bin/activate
+    pip install -r requirements.txt
+    pip install torch pyyaml structlog pydantic aiohttp aiofiles web3 eth-account hexbytes
+    ```
+
+2.  **Run Core Tests:**
+    ```bash
+    PYTHONPATH=. python3 tests/test_ssm_system.py
+    PYTHONPATH=. python3 tests/verify_consensus_logic.py
+    ```
 
 ---
 
-## 🤝 Contributing
-1.  Fork the repo.
-2.  Create a feature branch (`git checkout -b feature/amazing-feature`).
-3.  Commit your changes (`git commit -m 'Add some amazing feature'`).
-4.  Push to the branch (`git push origin feature/amazing-feature`).
-5.  Open a Pull Request.
-
----
-
-**© 2026 PRSM Project**
+**© 2026 PRSM Project - Decentralizing the Future of Science.**

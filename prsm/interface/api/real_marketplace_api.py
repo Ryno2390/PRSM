@@ -21,12 +21,12 @@ from fastapi import APIRouter, HTTPException, Depends, Query, Body, status, Requ
 from pydantic import BaseModel, Field
 import structlog
 
-from ..marketplace.real_marketplace_service import RealMarketplaceService
-from ..marketplace.models import (
+from prsm.economy.marketplace.real_marketplace_service import RealMarketplaceService
+from prsm.economy.marketplace.models import (
     CreateModelListingRequest, MarketplaceSearchFilters, MarketplaceStatsResponse
 )
 from ..auth import get_current_user
-from ..core.models import UserRole
+from prsm.core.models import UserRole
 from ..security.enhanced_authorization import (
     require_permission, get_enhanced_auth_manager, sanitize_request_data
 )

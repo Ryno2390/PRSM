@@ -24,12 +24,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, validator
 
 from ..auth import get_current_user
-from ..core.models import UserInput, PRSMSession
-from ..tokenomics.ftns_budget_manager import (
+from prsm.core.models import UserInput, PRSMSession
+from prsm.economy.tokenomics.ftns_budget_manager import (
     FTNSBudgetManager, FTNSBudget, BudgetExpandRequest, BudgetPrediction,
     SpendingCategory, BudgetStatus, get_ftns_budget_manager
 )
-from ..tokenomics.ftns_service import ftns_service
+from prsm.economy.tokenomics.ftns_service import ftns_service
 from ..nwtn.enhanced_orchestrator import get_enhanced_nwtn_orchestrator
 
 logger = structlog.get_logger(__name__)

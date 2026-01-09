@@ -21,8 +21,8 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.fernet import Fernet
 
-from ..core.database import db_manager
-from ..core.config import get_settings
+from prsm.core.database import db_manager
+from prsm.core.config import get_settings
 from .crypto_models import (
     KeyType, KeyUsage, CurveType, EncryptionAlgorithm,
     CryptoKey, CryptoKeyStore, KeyGenerationRequest

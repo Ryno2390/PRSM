@@ -35,9 +35,9 @@ from ..benchmarking.rlt_evaluation_benchmark import (
     RLTBenchmarkSuite, EvaluationProblem, TeachingEvaluationResult,
     BenchmarkSummary
 )
-from ..teachers.seal import SEALService, SEALConfig
-from ..teachers.rlt.quality_monitor import QualityMetrics, QualityMonitor
-from ..monitoring.rlt_performance_monitor import RLTPerformanceMonitor, RLTMetrics
+from prsm.compute.teachers.seal import SEALService, SEALConfig
+from prsm.compute.teachers.rlt.quality_monitor import QualityMetrics, QualityMonitor
+from prsm.core.monitoring.rlt_performance_monitor import RLTPerformanceMonitor, RLTMetrics
 
 logger = structlog.get_logger(__name__)
 
@@ -916,7 +916,7 @@ class RLTClaimsValidator:
     ):
         # Create default SEAL RLT teacher if none provided
         if rlt_teacher is None:
-            from ..teachers.seal import SEALService
+            from prsm.compute.teachers.seal import SEALService
             self.rlt_teacher = SEALService()
         else:
             self.rlt_teacher = rlt_teacher

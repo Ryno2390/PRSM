@@ -13,10 +13,10 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Any, Tuple
 from uuid import UUID, uuid4
 
-from ..core.config import settings
+from prsm.core.config import settings
 from ..auth.auth_manager import auth_manager
-from ..tokenomics.database_ftns_service import DatabaseFTNSService
-from ..governance.token_distribution import get_governance_distributor, GovernanceParticipantTier
+from prsm.economy.tokenomics.database_ftns_service import DatabaseFTNSService
+from prsm.economy.governance.token_distribution import get_governance_distributor, GovernanceParticipantTier
 from ..integrations.security.audit_logger import audit_logger
 from .models import (
     OnboardingStage, OnboardingProgress, OnboardingProgressResponse,

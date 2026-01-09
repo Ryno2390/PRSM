@@ -23,13 +23,13 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Any, Tuple, Union
 from uuid import UUID, uuid4
 
-from ..core.config import settings
-from ..core.models import (
+from prsm.core.config import settings
+from prsm.core.models import (
     PeerNode, AgentResponse, SafetyFlag, SafetyLevel
 )
-from ..safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-from ..safety.monitor import SafetyMonitor
-from ..tokenomics.ftns_service import ftns_service
+from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
+from prsm.core.safety.monitor import SafetyMonitor
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
 
 
 # === Consensus Configuration ===
@@ -92,6 +92,7 @@ class DistributedConsensus:
         self.active_consensus_sessions: Dict[str, Dict[str, Any]] = {}
         self.peer_reputations: Dict[str, float] = {}
         self.consensus_history: List[ConsensusResult] = []
+        self.ftns_service = get_ftns_service()
         
         # Safety integration
         self.circuit_breaker = CircuitBreakerNetwork()
@@ -300,7 +301,7 @@ class DistributedConsensus:
             for peer_id in failed_peers:
                 try:
                     # Penalty for Byzantine behavior
-                    await ftns_service.charge_context_access(peer_id, 1000)  # High penalty in context units
+                    self.ftns_service.deduct_tokens(peer_id, Decimal('1000'), description="Byzantine failure penalty")
                 except Exception as e:
                     print(f"⚠️ FTNS penalty failed for peer {peer_id}: {str(e)}")
             

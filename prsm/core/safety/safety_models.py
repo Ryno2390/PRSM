@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel, Field
 import uuid
 
-from ..evolution.models import RiskLevel, ComponentType
+from prsm.compute.evolution.models import RiskLevel, ComponentType
 
 
 class SafetyCheckType(str, Enum):

@@ -12,15 +12,15 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Any, Tuple
 from uuid import UUID, uuid4
 
-from ..core.config import settings
-from ..core.models import (
+from prsm.core.config import settings
+from prsm.core.models import (
     ArchitectTask, PeerNode, ModelShard, TeacherModel, ModelType,
     SafetyFlag, CircuitBreakerEvent, AgentResponse
 )
-from ..data_layer.enhanced_ipfs import get_ipfs_client
-from ..tokenomics.ftns_service import ftns_service
-from ..safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-from ..safety.monitor import SafetyMonitor
+from prsm.data.data_layer.enhanced_ipfs import get_ipfs_client
+from prsm.economy.tokenomics.ftns_service import ftns_service
+from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
+from prsm.core.safety.monitor import SafetyMonitor
 from .consensus import get_consensus, ConsensusType
 from ..performance.benchmark_collector import time_async_operation, get_global_collector
 

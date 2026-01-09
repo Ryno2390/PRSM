@@ -18,8 +18,8 @@ from web3.contract import Contract
 from web3.exceptions import BlockNotFound
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.database_service import DatabaseService
-from ..core.models import FTNSTransaction, FTNSWallet, Session as PRSMSession
+from prsm.core.database_service import DatabaseService
+from prsm.core.models import FTNSTransaction, FTNSWallet, Session as PRSMSession
 from .wallet_connector import Web3WalletConnector
 from .contract_interface import FTNSContractInterface
 

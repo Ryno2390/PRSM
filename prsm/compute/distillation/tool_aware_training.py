@@ -37,13 +37,13 @@ from enum import Enum
 import structlog
 from pydantic import BaseModel, Field
 
-from ..core.config import get_settings
-from ..core.models import TeacherModel, ModelType, TimestampMixin
+from prsm.core.config import get_settings
+from prsm.core.models import TeacherModel, ModelType, TimestampMixin
 from ..agents.routers.tool_router import ToolRouter, ToolRequest, MCPToolSpec, ToolType, ToolCapability
-from ..marketplace.real_marketplace_service import RealMarketplaceService
-from ..marketplace.database_models import MCPToolListing
+from prsm.economy.marketplace.real_marketplace_service import RealMarketplaceService
+from prsm.economy.marketplace.database_models import MCPToolListing
 from ..integrations.security.sandbox_manager import SandboxManager, ToolExecutionRequest
-from ..tokenomics.ftns_service import FTNSService
+from prsm.economy.tokenomics.ftns_service import FTNSService
 from .production_training_pipeline import ProductionTrainingPipeline, TeacherModelConnector, TrainingConfig
 
 logger = structlog.get_logger(__name__)

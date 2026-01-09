@@ -28,7 +28,7 @@ from ..config.integration_config import (
     SecurityConfig, RateLimitConfig, SecurityLevel
 )
 from ..models.integration_models import IntegrationPlatform
-from ...core.models import PRSMBaseModel
+from prsm.core.models import PRSMBaseModel
 
 
 # === API Models ===

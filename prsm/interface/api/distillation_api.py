@@ -25,7 +25,7 @@ from ..distillation.automated_distillation_engine import (
 )
 from ..auth import get_current_user
 from ..security.enhanced_authorization import get_enhanced_auth_manager
-from ..core.models import UserRole
+from prsm.core.models import UserRole
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()

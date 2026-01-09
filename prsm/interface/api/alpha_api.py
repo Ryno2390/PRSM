@@ -28,7 +28,7 @@ from ..alpha.user_management import (
     AlphaUserManager, AlphaUser, UserType, 
     get_alpha_manager, FeedbackEntry
 )
-from ..core.models import UserInput, PRSMResponse
+from prsm.core.models import UserInput, PRSMResponse
 
 router = APIRouter(prefix="/alpha", tags=["Alpha Program"])
 security = HTTPBearer()

@@ -16,7 +16,7 @@ from .clearing_engine import ChronosEngine
 from .wallet_manager import MultiSigWalletManager
 from .exchange_router import ExchangeRouter
 from .models import AssetType, SwapRequest, SwapType, TransactionStatus
-from ..core.ipfs_client import IPFSClient
+from prsm.core.ipfs_client import IPFSClient
 from ..auth import get_current_user
 
 

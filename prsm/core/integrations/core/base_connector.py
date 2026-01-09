@@ -27,7 +27,7 @@ from ..models.integration_models import (
     ImportRequest, ImportResult, SecurityScanResult, ProvenanceMetadata,
     ConnectorHealth, ImportStatus, SecurityRisk
 )
-from ...core.config import settings
+from prsm.core.config import settings
 
 
 class ConnectorStatus(str, Enum):

@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 import structlog
 
-from ..core.models import PRSMBaseModel
+from prsm.core.models import PRSMBaseModel
 from .models import TeacherAnalysis, DistillationRequest
 
 logger = structlog.get_logger(__name__)

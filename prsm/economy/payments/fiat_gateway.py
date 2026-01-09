@@ -19,7 +19,7 @@ import aiohttp
 import structlog
 from cryptography.fernet import Fernet
 
-from ..core.config import get_settings
+from prsm.core.config import get_settings
 from ..integrations.security.audit_logger import audit_logger
 from .payment_models import (
     PaymentMethod, PaymentStatus, FiatCurrency,

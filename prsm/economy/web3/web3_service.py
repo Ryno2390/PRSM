@@ -12,8 +12,8 @@ from decimal import Decimal
 from datetime import datetime
 import os
 
-from ..core.database_service import DatabaseService
-from ..core.config import get_settings
+from prsm.core.database_service import DatabaseService
+from prsm.core.config import get_settings
 from .wallet_connector import Web3WalletConnector, NetworkType, WalletInfo
 from .contract_interface import FTNSContractInterface
 from .event_monitor import Web3EventMonitor

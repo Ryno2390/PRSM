@@ -20,7 +20,7 @@ import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from .api_clients import BaseModelClient, ModelExecutionRequest, ModelExecutionResponse, ModelProvider
-from ...config.model_config_manager import get_model_config_manager
+from prsm.core.config.model_config_manager import get_model_config_manager
 
 logger = structlog.get_logger(__name__)
 

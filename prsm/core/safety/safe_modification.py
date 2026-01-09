@@ -24,7 +24,7 @@ from .safety_models import (
     EmergencyProtocol, SafetyMonitoringEvent, SystemCheckpoint,
     ConstraintViolationType
 )
-from ..evolution.models import (
+from prsm.compute.evolution.models import (
     ModificationProposal, ModificationResult, ComponentType, RiskLevel
 )
 

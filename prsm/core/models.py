@@ -70,7 +70,7 @@ from pydantic import BaseModel, Field, field_validator
 
 # Import FTNS models from tokenomics
 try:
-    from ..tokenomics.models import FTNSWallet
+    from prsm.economy.tokenomics.models import FTNSWallet
 except ImportError:
     # Fallback if tokenomics models not available
     FTNSWallet = None

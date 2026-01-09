@@ -22,8 +22,8 @@ from .models import (
     EvaluationResult, PerformanceStats, GenealogyTree, GenealogyNode, 
     ArchiveStats, SynchronizationResult
 )
-from ..core.ipfs_client import IPFSClient
-from ..core.database_service import DatabaseService
+from prsm.core.ipfs_client import IPFSClient
+from prsm.core.database_service import DatabaseService
 
 
 logger = logging.getLogger(__name__)

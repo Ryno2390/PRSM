@@ -27,7 +27,7 @@ from ..routers.rlt_enhanced_router import RLTTeacherSelection, RLTTeacherCandida
 from ...teachers.rlt.quality_monitor import QualityMetrics, QualityMonitor, MonitoringConfig
 from ...teachers.rlt.student_comprehension_evaluator import ComprehensionMetrics, EvaluationConfig
 from ...teachers.rlt.dense_reward_trainer import RLTTrainingConfig
-from ...core.models import (
+from prsm.core.models import (
     UserInput, PRSMSession, AgentResponse, ReasoningStep, 
     TaskStatus, ContextUsage
 )

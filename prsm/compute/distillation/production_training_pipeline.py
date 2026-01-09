@@ -35,10 +35,10 @@ except ImportError as e:
     print(f"⚠️ ML dependencies not fully installed: {e}")
     print("Install with: pip install torch transformers tensorflow datasets evaluate wandb")
 
-from ..core.config import settings
-from ..core.models import TeacherModel, ModelType
-from ..tokenomics.ftns_service import ftns_service
-from ..safety.monitor import SafetyMonitor
+from prsm.core.config import settings
+from prsm.core.models import TeacherModel, ModelType
+from prsm.economy.tokenomics.ftns_service import ftns_service
+from prsm.core.safety.monitor import SafetyMonitor
 from .models import (
     DistillationRequest, DistillationJob, TrainingMetrics, 
     ModelSize, OptimizationTarget, TrainingStrategy

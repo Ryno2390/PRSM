@@ -10,13 +10,13 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from uuid import UUID, uuid4
 
-from ..core.config import settings
-from ..core.models import (
+from prsm.core.config import settings
+from prsm.core.models import (
     PerformanceMetric, MetricType, ComparisonReport, 
     ImprovementOpportunity, ImprovementType, PerformanceAnalysis
 )
-from ..safety.monitor import SafetyMonitor
-from ..tokenomics.ftns_service import ftns_service
+from prsm.core.safety.monitor import SafetyMonitor
+from prsm.economy.tokenomics.ftns_service import ftns_service
 
 
 # === Performance Monitoring Configuration ===

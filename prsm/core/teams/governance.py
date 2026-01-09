@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 import structlog
 
-from ..governance.voting import get_token_weighted_voting
+from prsm.economy.governance.voting import get_token_weighted_voting
 from .models import (
     Team, TeamMember, TeamGovernance, TeamProposal, TeamVote,
     GovernanceModel, TeamRole, TeamMembershipStatus

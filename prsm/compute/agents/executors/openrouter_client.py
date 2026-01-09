@@ -43,7 +43,7 @@ from .api_clients import (
     ModelExecutionResponse,
     ModelProvider
 )
-from ...config.model_config_manager import get_model_config_manager, ModelConfiguration
+from prsm.core.config.model_config_manager import get_model_config_manager, ModelConfiguration
 
 logger = structlog.get_logger(__name__)
 

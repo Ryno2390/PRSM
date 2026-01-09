@@ -47,10 +47,10 @@ except ImportError:
     print("⚠️ Cryptography dependencies not available. Install: pip install pynacl merkletools")
     CRYPTO_AVAILABLE = False
 
-from ..core.config import settings
-from ..core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
-from ..safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-from ..safety.monitor import SafetyMonitor
+from prsm.core.config import settings
+from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
+from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
+from prsm.core.safety.monitor import SafetyMonitor
 
 logger = logging.getLogger(__name__)
 

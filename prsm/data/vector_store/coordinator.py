@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Any, Union
 import numpy as np
 
 from .base import PRSMVectorStore, ContentMatch, SearchFilters, VectorStoreConfig
-from ..core.config import get_settings
+from prsm.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

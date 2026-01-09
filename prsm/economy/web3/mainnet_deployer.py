@@ -19,7 +19,7 @@ from web3 import Web3
 from eth_account import Account
 import requests
 
-from ..core.config import get_settings
+from prsm.core.config import get_settings
 from ..integrations.security.audit_logger import audit_logger
 from .contract_deployer import FTNSContractDeployer
 from .web3_service import Web3ServiceManager

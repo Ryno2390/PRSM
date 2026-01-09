@@ -20,12 +20,12 @@ import structlog
 # Set precision for proposal calculations
 getcontext().prec = 18
 
-from ..core.config import settings
-from ..core.models import GovernanceProposal, Vote, PRSMBaseModel
-from ..tokenomics.ftns_service import ftns_service
-from ..safety.monitor import SafetyMonitor
-from ..safety.governance import SafetyGovernance
-from ..improvement.proposal_engine import ImprovementProposalEngine
+from prsm.core.config import settings
+from prsm.core.models import GovernanceProposal, Vote, PRSMBaseModel
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
+from prsm.core.safety.monitor import SafetyMonitor
+from prsm.core.safety.governance import SafetyGovernance
+from prsm.compute.improvement.proposal_engine import ImprovementProposalEngine
 
 logger = structlog.get_logger()
 
@@ -149,6 +149,7 @@ class ProposalManager:
     def __init__(self):
         self.manager_id = str(uuid4())
         self.logger = logger.bind(component="proposal_manager", manager_id=self.manager_id)
+        self.ftns_service = get_ftns_service()
         
         # Proposal management state
         self.proposals: Dict[UUID, GovernanceProposal] = {}
@@ -461,8 +462,8 @@ class ProposalManager:
                 return False
             
             # Get supporter's voting power
-            user_balance = await ftns_service.get_user_balance(supporter_id)
-            voting_power = min(user_balance.balance, 1000.0)  # Cap support power
+            balance = float(self.ftns_service.get_user_balance(supporter_id))
+            voting_power = min(balance, 1000.0)  # Cap support power
             
             support = ProposalSupport(
                 proposal_id=proposal_id,
@@ -549,8 +550,8 @@ class ProposalManager:
     async def _validate_proposer_credentials(self, proposer_id: str) -> bool:
         """Validate proposer has sufficient credentials"""
         # Check FTNS balance
-        user_balance = await ftns_service.get_user_balance(proposer_id)
-        if user_balance.balance < MIN_PROPOSER_BALANCE:
+        balance = float(self.ftns_service.get_user_balance(proposer_id))
+        if balance < MIN_PROPOSER_BALANCE:
             return False
         
         # Check community standing (simplified)

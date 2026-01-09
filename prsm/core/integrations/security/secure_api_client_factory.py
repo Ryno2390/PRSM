@@ -15,7 +15,7 @@ from enum import Enum
 
 from ..config.credential_manager import CredentialManager, CredentialType, CredentialData
 from ..models.integration_models import IntegrationPlatform
-from ...core.config import settings
+from prsm.core.config import settings
 from .audit_logger import audit_logger
 
 logger = structlog.get_logger(__name__)

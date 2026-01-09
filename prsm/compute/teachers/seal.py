@@ -46,8 +46,8 @@ except ImportError:
     raise ImportError("Transformers is required for SEAL implementation")
 
 # PRSM Core imports
-from ..core.models import TeacherModel, Curriculum, LearningSession, PRSMBaseModel
-from ..core.config import get_settings
+from prsm.core.models import TeacherModel, Curriculum, LearningSession, PRSMBaseModel
+from prsm.core.config import get_settings
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()

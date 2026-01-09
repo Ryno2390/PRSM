@@ -18,7 +18,7 @@ from .models import (
     StakingProgramStatus
 )
 from .clearing_engine import ChronosEngine
-from ..tokenomics.ftns_service import FTNSService
+from prsm.economy.tokenomics.ftns_service import FTNSService
 
 
 logger = logging.getLogger(__name__)

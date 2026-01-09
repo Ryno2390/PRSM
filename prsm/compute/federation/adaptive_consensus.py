@@ -13,11 +13,11 @@ from uuid import UUID, uuid4
 from enum import Enum
 import math
 
-from ..core.config import settings
-from ..core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
-from ..safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-from ..safety.monitor import SafetyMonitor
-from ..tokenomics.ftns_service import ftns_service
+from prsm.core.config import settings
+from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
+from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
+from prsm.core.safety.monitor import SafetyMonitor
+from prsm.economy.tokenomics.ftns_service import ftns_service
 from .consensus import DistributedConsensus, ConsensusResult, ConsensusType
 from .hierarchical_consensus import HierarchicalConsensusNetwork
 

@@ -27,15 +27,15 @@ except ImportError as e:
     print(f"⚠️ P2P dependencies not installed: {e}")
     print("Install with: pip install kademlia websockets pynacl merkletools")
 
-from ..core.config import settings
-from ..core.models import (
+from prsm.core.config import settings
+from prsm.core.models import (
     ArchitectTask, PeerNode, ModelShard, TeacherModel, ModelType,
     SafetyFlag, CircuitBreakerEvent, AgentResponse
 )
-from ..data_layer.enhanced_ipfs import get_ipfs_client
-from ..tokenomics.ftns_service import ftns_service
-from ..safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-from ..safety.monitor import SafetyMonitor
+from prsm.data.data_layer.enhanced_ipfs import get_ipfs_client
+from prsm.economy.tokenomics.ftns_service import ftns_service
+from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
+from prsm.core.safety.monitor import SafetyMonitor
 
 
 # === Production P2P Configuration ===

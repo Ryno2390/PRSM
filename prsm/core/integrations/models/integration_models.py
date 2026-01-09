@@ -19,7 +19,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
-from ...core.models import PRSMBaseModel, TimestampMixin
+from prsm.core.models import PRSMBaseModel, TimestampMixin
 
 
 # === Enums ===

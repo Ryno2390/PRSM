@@ -30,11 +30,11 @@ from .safety_models import (
     CapabilityBounds, ResourceLimits, BehavioralConstraints,
     SafetyStatus, RiskAssessment
 )
-from ..governance.dgm_governance import (
+from prsm.economy.governance.dgm_governance import (
     DGMGovernanceSystem, CommunityReviewSystem, GovernancePerformanceTracker,
     EvolutionGovernanceProposal, GovernanceDecisionType
 )
-from ..evolution.models import (
+from prsm.compute.evolution.models import (
     ModificationProposal, ComponentType, RiskLevel, ImpactLevel
 )
 

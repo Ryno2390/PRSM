@@ -40,9 +40,9 @@ from .scalable_p2p_network import (
     NodeStatus,
     P2PNode
 )
-from ..core.config import settings
-from ..core.models import PeerNode
-from ..safety.monitor import SafetyMonitor
+from prsm.core.config import settings
+from prsm.core.models import PeerNode
+from prsm.core.safety.monitor import SafetyMonitor
 
 logger = logging.getLogger(__name__)
 

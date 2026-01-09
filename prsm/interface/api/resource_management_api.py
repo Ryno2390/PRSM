@@ -28,8 +28,8 @@ from ..federation.distributed_resource_manager import (
     update_node_resource_settings, get_node_resource_profile,
     get_network_resource_summary, allocate_resources_for_computation
 )
-from ..core.models import UserInput
-from ..tokenomics.ftns_service import get_ftns_service
+from prsm.core.models import UserInput
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
 import structlog
 
 logger = structlog.get_logger(__name__)

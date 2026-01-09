@@ -29,7 +29,7 @@ import base64
 from pydantic import BaseModel, Field, SecretStr
 
 from ..models.integration_models import IntegrationPlatform
-from ...core.config import settings
+from prsm.core.config import settings
 
 
 class CredentialType(str):

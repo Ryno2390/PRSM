@@ -35,8 +35,8 @@ from dataclasses import dataclass, field
 import structlog
 from pydantic import BaseModel, Field
 
-from ..core.config import get_settings
-from ..core.models import TimestampMixin
+from prsm.core.config import get_settings
+from prsm.core.models import TimestampMixin
 from ..agents.routers.tool_router import ToolRouter, ToolType, ToolCapability, ToolSecurityLevel
 # Legacy marketplace import removed - not used in this module
 from .tool_aware_training import ToolTrainingStrategy, ToolUsagePattern, ToolTrainingExample

@@ -15,8 +15,8 @@ from uuid import UUID, uuid4
 # Set precision for financial calculations
 getcontext().prec = 18
 
-from ..core.config import settings
-from ..core.models import (
+from prsm.core.config import settings
+from prsm.core.models import (
     ImpactMetrics, DividendDistribution, RoyaltyPayment,
     FTNSTransaction, FTNSBalance
 )

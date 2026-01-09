@@ -27,7 +27,7 @@ from urllib.parse import urljoin
 import aiohttp
 from pydantic import BaseModel, Field
 
-from ..core.base_connector import BaseConnector, ConnectorStatus
+from prsm.core.base_connector import BaseConnector, ConnectorStatus
 from ..models.integration_models import (
     IntegrationPlatform, ConnectorConfig, IntegrationSource,
     LicenseType, SecurityRisk

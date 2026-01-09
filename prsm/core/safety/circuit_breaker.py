@@ -69,7 +69,7 @@ from enum import Enum
 import structlog
 
 from pydantic import Field, BaseModel
-from ..core.models import SafetyLevel, SafetyFlag, CircuitBreakerEvent, PRSMBaseModel
+from prsm.core.models import SafetyLevel, SafetyFlag, CircuitBreakerEvent, PRSMBaseModel
 
 logger = structlog.get_logger()
 

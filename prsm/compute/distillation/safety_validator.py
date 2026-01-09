@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 import structlog
 
-from ..safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
+from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
 from .models import SafetyAssessment, DistillationRequest
 
 logger = structlog.get_logger(__name__)

@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Any, Tuple, Deque
 from uuid import UUID, uuid4
 import structlog
 
-from ...core.models import PRSMBaseModel
+from prsm.core.models import PRSMBaseModel
 
 logger = structlog.get_logger()
 

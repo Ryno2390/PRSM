@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 import jwt
 
 from ..auth.auth_manager import AuthManager
-from ..core.database_service import DatabaseService
+from prsm.core.database_service import DatabaseService
 from .wallet_connector import Web3WalletConnector, WalletInfo, TransactionResult, NetworkType
 from .contract_interface import FTNSContractInterface, TokenBalance
 from .faucet_integration import PolygonFaucetIntegration, FaucetResult

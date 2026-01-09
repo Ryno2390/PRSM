@@ -11,15 +11,15 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from uuid import UUID, uuid4
 
-from ..core.config import settings
-from ..core.models import (
+from prsm.core.config import settings
+from prsm.core.models import (
     ImprovementProposal, ProposalStatus, TestResults, UpdatePackage,
     PerformanceMetric, MetricType
 )
-from ..safety.monitor import SafetyMonitor
-from ..safety.circuit_breaker import CircuitBreakerNetwork
+from prsm.core.safety.monitor import SafetyMonitor
+from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork
 from ..federation.consensus import DistributedConsensus
-from ..tokenomics.ftns_service import ftns_service
+from prsm.economy.tokenomics.ftns_service import ftns_service
 
 
 # === Evolution Configuration ===
