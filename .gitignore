@@ -219,3 +219,7 @@ utilities/knowledge_extraction/wikipedia_*.zim
 real_papers_progress.json
 integration_validation_report.json
 simplified_integration_validation_report.json
+
+# New Architecture Data Exclusions
+prsm/compute/nwtn/corpus/
+prsm/compute/nwtn/processed_corpus/

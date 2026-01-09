@@ -1,0 +1,55 @@
+{
+  "test_summary": {
+    "test_suite": "NWTN Simple Reliability Test",
+    "timestamp": "2025-08-11T14:23:43.680848+00:00",
+    "total_tests": 4,
+    "successful_tests": 0,
+    "success_rate": 0.0,
+    "total_execution_time": 0.0014526844024658203,
+    "test_environment": "development"
+  },
+  "test_results": {
+    "enhanced_semantic_retrieval": {
+      "success": false,
+      "error": "Logger._log() got an unexpected keyword argument 'alert_id'",
+      "execution_time": 0.00013184547424316406
+    },
+    "pipeline_reliability": {
+      "success": false,
+      "error": "Logger._log() got an unexpected keyword argument 'session_id'",
+      "execution_time": 2.6941299438476562e-05
+    },
+    "multi_layer_validation": {
+      "success": false,
+      "error": "Logger._log() got an unexpected keyword argument 'response_length'",
+      "execution_time": 0.0008089542388916016
+    },
+    "health_monitoring": {
+      "success": false,
+      "error": "Logger._log() got an unexpected keyword argument 'alert_id'",
+      "execution_time": 0.0004849433898925781
+    }
+  },
+  "reliability_assessment": [],
+  "infrastructure_status": {
+    "pipeline_executor": {
+      "working": false,
+      "description": "Pipeline execution with error handling and recovery"
+    },
+    "semantic_retriever": {
+      "working": false,
+      "description": "Enhanced semantic retrieval with corpus validation"
+    },
+    "validator": {
+      "working": false,
+      "description": "Multi-layer validation system for claim verification"
+    },
+    "health_monitor": {
+      "working": false,
+      "description": "Real-time pipeline health monitoring and alerting"
+    }
+  },
+  "recommendations": [
+    "Address failed tests: enhanced_semantic_retrieval, pipeline_reliability, multi_layer_validation, health_monitoring"
+  ]
+}

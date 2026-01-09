@@ -1,0 +1,74 @@
+{
+  "integration_summary": {
+    "total_tests": 4,
+    "successful_tests": 0,
+    "success_rate": 0.0,
+    "total_execution_time": 0.8576791286468506,
+    "integration_success": false
+  },
+  "test_results": {
+    "system_initialization": {
+      "success": false,
+      "execution_time": 0.8572568893432617,
+      "error": "'corpus_status'"
+    },
+    "complete_pipeline": {
+      "success": false,
+      "execution_time": 0.000179290771484375,
+      "pipeline_time": 0.00017118453979492188,
+      "pipeline_health_score": 0.0,
+      "final_answer_length": 56,
+      "papers_retrieved": 0,
+      "reasoning_engines_used": 0,
+      "candidates_generated": 0,
+      "validation_passed": false,
+      "full_result": {
+        "final_answer": "Pipeline execution encountered issues. Please try again.",
+        "success": false,
+        "session_id": "nwtn_session_1754923898",
+        "execution_metrics": {
+          "execution_time_seconds": 0.00013113021850585938,
+          "pipeline_health_score": 0.0,
+          "successful_components": 0,
+          "total_components": 1,
+          "pipeline_success_rate": 0.0
+        },
+        "semantic_analysis": {
+          "papers_searched": 0,
+          "papers_retrieved": 0,
+          "search_confidence": 0.0
+        },
+        "reasoning_analysis": {
+          "reasoning_engines_used": 0,
+          "candidates_generated": 0,
+          "breakthrough_insights": 0
+        },
+        "validation_analysis": {
+          "validation_passed": false,
+          "overall_confidence": 0.0,
+          "claims_extracted": 0,
+          "should_present_response": false
+        },
+        "component_status": {
+          "semantic_retrieval": {
+            "status": "failed",
+            "success": false,
+            "execution_time": 2.1e-05,
+            "fallback_used": false
+          }
+        }
+      }
+    },
+    "response_quality": {
+      "success": false,
+      "execution_time": 0.0,
+      "error": "Pipeline execution failed"
+    },
+    "complete_integration": {
+      "success": false,
+      "execution_time": 1.1920928955078125e-06,
+      "error": "Previous tests failed"
+    }
+  },
+  "timestamp": 1754923898.7962382
+}

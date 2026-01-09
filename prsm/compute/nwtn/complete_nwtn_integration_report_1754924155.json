@@ -1,0 +1,112 @@
+{
+  "integration_summary": {
+    "total_tests": 4,
+    "successful_tests": 2,
+    "success_rate": 0.5,
+    "total_execution_time": 2.1289520263671875,
+    "integration_success": false
+  },
+  "test_results": {
+    "system_initialization": {
+      "success": true,
+      "execution_time": 1.142200231552124,
+      "corpus_size": 0,
+      "health_monitoring_active": true
+    },
+    "complete_pipeline": {
+      "success": true,
+      "execution_time": 0.9864671230316162,
+      "pipeline_time": 0.9864568710327148,
+      "pipeline_health_score": 1.0,
+      "final_answer_length": 133,
+      "papers_retrieved": 20,
+      "reasoning_engines_used": 7,
+      "candidates_generated": 14,
+      "validation_passed": false,
+      "full_result": {
+        "final_answer": "Regarding your question about What are the most promising and innovative approac... Based on analysis of 20 relevant research papers,",
+        "success": true,
+        "session_id": "nwtn_session_1754924154",
+        "execution_metrics": {
+          "execution_time_seconds": 0.9864339828491211,
+          "pipeline_health_score": 1.0,
+          "successful_components": 5,
+          "total_components": 5,
+          "pipeline_success_rate": 1.0
+        },
+        "semantic_analysis": {
+          "papers_searched": 2295,
+          "papers_retrieved": 20,
+          "search_confidence": 1.0
+        },
+        "reasoning_analysis": {
+          "reasoning_engines_used": 7,
+          "candidates_generated": 14,
+          "enhanced_candidates": 7,
+          "content_grounded_candidates": 7,
+          "breakthrough_insights": 14,
+          "total_evidence_patterns": 225,
+          "full_content_utilized": true
+        },
+        "validation_analysis": {
+          "validation_passed": false,
+          "overall_confidence": 0.4,
+          "claims_extracted": 1,
+          "should_present_response": false
+        },
+        "component_status": {
+          "semantic_retrieval": {
+            "status": "completed",
+            "success": true,
+            "execution_time": 0.978051,
+            "fallback_used": false
+          },
+          "content_analysis": {
+            "status": "completed",
+            "success": true,
+            "execution_time": 0.002694,
+            "fallback_used": false
+          },
+          "candidate_generation": {
+            "status": "completed",
+            "success": true,
+            "execution_time": 0.004749,
+            "fallback_used": false
+          },
+          "meta_reasoning": {
+            "status": "completed",
+            "success": true,
+            "execution_time": 2.2e-05,
+            "fallback_used": false
+          },
+          "response_synthesis": {
+            "status": "completed",
+            "success": true,
+            "execution_time": 0.000699,
+            "fallback_used": false
+          }
+        }
+      }
+    },
+    "response_quality": {
+      "success": false,
+      "execution_time": 1.0967254638671875e-05,
+      "word_count": 20,
+      "sentence_count": 3,
+      "paragraph_count": 1,
+      "technical_terms": 0,
+      "breakthrough_indicators": 1,
+      "comprehensive": false,
+      "technical": false,
+      "innovative": true,
+      "structured": false,
+      "overall_quality": false
+    },
+    "complete_integration": {
+      "success": false,
+      "execution_time": 2.1457672119140625e-06,
+      "error": "Previous tests failed"
+    }
+  },
+  "timestamp": 1754924155.622653
+}

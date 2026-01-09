@@ -1,0 +1,102 @@
+{
+  "test_summary": {
+    "total_tests": 4,
+    "successful_tests": 4,
+    "success_rate": 1.0,
+    "total_execution_time": 0.8518178462982178,
+    "integration_success": true
+  },
+  "test_results": {
+    "initialization": {
+      "success": true,
+      "execution_time": 0.8313839435577393,
+      "components_ready": true
+    },
+    "context_rot_challenge": {
+      "success": true,
+      "execution_time": 0.02035689353942871,
+      "pipeline_health_score": 1.0,
+      "final_answer_length": 133,
+      "papers_retrieved": 20,
+      "reasoning_engines_used": 7,
+      "validation_passed": false,
+      "full_result": {
+        "final_answer": "Regarding your question about What are the most promising and innovative approac... Based on analysis of 20 relevant research papers,",
+        "success": true,
+        "session_id": "nwtn_session_1754923772",
+        "execution_metrics": {
+          "execution_time_seconds": 0.020328998565673828,
+          "pipeline_health_score": 1.0,
+          "successful_components": 5,
+          "total_components": 5,
+          "pipeline_success_rate": 1.0
+        },
+        "semantic_analysis": {
+          "papers_searched": 2295,
+          "papers_retrieved": 20,
+          "search_confidence": 1.0
+        },
+        "reasoning_analysis": {
+          "reasoning_engines_used": 7,
+          "candidates_generated": 7,
+          "breakthrough_insights": 6
+        },
+        "validation_analysis": {
+          "validation_passed": false,
+          "overall_confidence": 0.4,
+          "claims_extracted": 1,
+          "should_present_response": false
+        },
+        "component_status": {
+          "semantic_retrieval": {
+            "status": "completed",
+            "success": true,
+            "execution_time": 0.019373,
+            "fallback_used": false
+          },
+          "content_analysis": {
+            "status": "completed",
+            "success": true,
+            "execution_time": 4e-05,
+            "fallback_used": false
+          },
+          "candidate_generation": {
+            "status": "completed",
+            "success": true,
+            "execution_time": 2.3e-05,
+            "fallback_used": false
+          },
+          "meta_reasoning": {
+            "status": "completed",
+            "success": true,
+            "execution_time": 1.9e-05,
+            "fallback_used": false
+          },
+          "response_synthesis": {
+            "status": "completed",
+            "success": true,
+            "execution_time": 0.00069,
+            "fallback_used": false
+          }
+        }
+      }
+    },
+    "pipeline_health": {
+      "success": true,
+      "execution_time": 6.198883056640625e-05,
+      "overall_health": "healthy",
+      "healthy_components": 0,
+      "monitoring_active": true
+    },
+    "performance_metrics": {
+      "success": true,
+      "execution_time": 1.9073486328125e-06,
+      "total_pipeline_time": 0.02035689353942871,
+      "pipeline_health_score": 1.0,
+      "papers_retrieved": 20,
+      "reasoning_engines_used": 7,
+      "performance_rating": "good"
+    }
+  },
+  "timestamp": 1754923772.085817
+}
