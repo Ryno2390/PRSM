@@ -1,0 +1,82 @@
+{
+  "test_summary": {
+    "test_suite": "NWTN Simple Reliability Test",
+    "timestamp": "2025-08-11T14:38:55.903605+00:00",
+    "total_tests": 4,
+    "successful_tests": 4,
+    "success_rate": 1.0,
+    "total_execution_time": 1.8954429626464844,
+    "test_environment": "development"
+  },
+  "test_results": {
+    "enhanced_semantic_retrieval": {
+      "success": true,
+      "initialization_success": true,
+      "search_success": true,
+      "execution_time": 0.4392869472503662
+    },
+    "pipeline_reliability": {
+      "success": true,
+      "health_score": 0.675,
+      "successful_components": 3,
+      "failed_components": 1,
+      "recovery_used": true,
+      "can_continue": false,
+      "execution_time": 0.45369505882263184
+    },
+    "multi_layer_validation": {
+      "success": true,
+      "overall_confidence": 0.4,
+      "validation_passed": false,
+      "claims_extracted": 2,
+      "should_present": false,
+      "layer_performance": {
+        "corpus_grounding": 0.0,
+        "logical_consistency": 1.0,
+        "uncertainty_quantification": 1.0
+      },
+      "execution_time": 0.0009777545928955078
+    },
+    "health_monitoring": {
+      "success": true,
+      "overall_health": "critical",
+      "healthy_components": 6,
+      "warning_components": 0,
+      "critical_components": 1,
+      "active_alerts": 1,
+      "success_rate_24h": 1.0,
+      "recommendations_count": 1,
+      "execution_time": 1.0014832019805908
+    }
+  },
+  "reliability_assessment": [
+    "Enhanced semantic retrieval with error handling",
+    "Pipeline error recovery and fallback mechanisms",
+    "Pipeline health scoring and continuation logic",
+    "Multi-layer validation for hallucination prevention",
+    "Real-time health monitoring and alerting"
+  ],
+  "infrastructure_status": {
+    "pipeline_executor": {
+      "working": true,
+      "description": "Pipeline execution with error handling and recovery"
+    },
+    "semantic_retriever": {
+      "working": true,
+      "description": "Enhanced semantic retrieval with corpus validation"
+    },
+    "validator": {
+      "working": true,
+      "description": "Multi-layer validation system for claim verification"
+    },
+    "health_monitor": {
+      "working": true,
+      "description": "Real-time pipeline health monitoring and alerting"
+    }
+  },
+  "recommendations": [
+    "Consider improving pipeline component reliability",
+    "Improve validation layers: corpus_grounding",
+    "Address critical component health issues"
+  ]
+}

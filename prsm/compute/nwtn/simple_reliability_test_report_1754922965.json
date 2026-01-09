@@ -1,0 +1,76 @@
+{
+  "test_summary": {
+    "test_suite": "NWTN Simple Reliability Test",
+    "timestamp": "2025-08-11T14:36:05.226534+00:00",
+    "total_tests": 4,
+    "successful_tests": 1,
+    "success_rate": 0.25,
+    "total_execution_time": 1.9282886981964111,
+    "test_environment": "development"
+  },
+  "test_results": {
+    "enhanced_semantic_retrieval": {
+      "success": true,
+      "initialization_success": true,
+      "search_success": true,
+      "execution_time": 0.47227001190185547
+    },
+    "pipeline_reliability": {
+      "success": false,
+      "health_score": 0.675,
+      "successful_components": 3,
+      "failed_components": 1,
+      "recovery_used": true,
+      "can_continue": false,
+      "execution_time": 0.453615665435791
+    },
+    "multi_layer_validation": {
+      "success": false,
+      "overall_confidence": 0.4,
+      "validation_passed": false,
+      "claims_extracted": 2,
+      "should_present": false,
+      "layer_performance": {
+        "corpus_grounding": 0.0,
+        "logical_consistency": 1.0,
+        "uncertainty_quantification": 1.0
+      },
+      "execution_time": 0.0009379386901855469
+    },
+    "health_monitoring": {
+      "success": false,
+      "overall_health": "critical",
+      "healthy_components": 6,
+      "warning_components": 0,
+      "critical_components": 1,
+      "active_alerts": 1,
+      "success_rate_24h": 1.0,
+      "recommendations_count": 1,
+      "execution_time": 1.001465082168579
+    }
+  },
+  "reliability_assessment": [
+    "Enhanced semantic retrieval with error handling"
+  ],
+  "infrastructure_status": {
+    "pipeline_executor": {
+      "working": false,
+      "description": "Pipeline execution with error handling and recovery"
+    },
+    "semantic_retriever": {
+      "working": true,
+      "description": "Enhanced semantic retrieval with corpus validation"
+    },
+    "validator": {
+      "working": false,
+      "description": "Multi-layer validation system for claim verification"
+    },
+    "health_monitor": {
+      "working": false,
+      "description": "Real-time pipeline health monitoring and alerting"
+    }
+  },
+  "recommendations": [
+    "Address failed tests: pipeline_reliability, multi_layer_validation, health_monitoring"
+  ]
+}

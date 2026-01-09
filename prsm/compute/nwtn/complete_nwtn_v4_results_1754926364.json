@@ -1,0 +1,6513 @@
+{
+  "test_summary": {
+    "pipeline_version": "Complete NWTN V4",
+    "total_processing_time": 0.2956669330596924,
+    "validation_success_rate": 1.0,
+    "passed_validations": 8,
+    "total_validations": 8,
+    "test_timestamp": "2025-08-11T15:32:44.712792+00:00"
+  },
+  "candidate_statistics": {
+    "total_candidates_generated": 5040,
+    "reasoning_permutations_used": 5040,
+    "unique_reasoning_sequences": 5040,
+    "generation_success_rate": 1.0
+  },
+  "deduplication_statistics": {
+    "original_candidates": 5040,
+    "unique_candidates": 700,
+    "compression_ratio": 0.1388888888888889,
+    "duplicate_clusters": {
+      "cluster_0": [
+        "candidate_0000",
+        "candidate_0720",
+        "candidate_0960",
+        "candidate_1680"
+      ],
+      "cluster_1": [
+        "candidate_0001",
+        "candidate_0841",
+        "candidate_1705",
+        "candidate_2305"
+      ],
+      "cluster_2": [
+        "candidate_0002",
+        "candidate_0122",
+        "candidate_0266",
+        "candidate_1466"
+      ],
+      "cluster_3": [
+        "candidate_0003",
+        "candidate_0987"
+      ],
+      "cluster_4": [
+        "candidate_0004",
+        "candidate_1444",
+        "candidate_1564",
+        "candidate_1708",
+        "candidate_2164",
+        "candidate_2308",
+        "candidate_2404"
+      ],
+      "cluster_5": [
+        "candidate_0005",
+        "candidate_0019",
+        "candidate_0625",
+        "candidate_0859",
+        "candidate_1657",
+        "candidate_4345",
+        "candidate_4441",
+        "candidate_4561",
+        "candidate_0022",
+        "candidate_0142",
+        "candidate_0628",
+        "candidate_0862",
+        "candidate_1324",
+        "candidate_2044",
+        "candidate_2068",
+        "candidate_0027",
+        "candidate_0867",
+        "candidate_1443",
+        "candidate_1563",
+        "candidate_1587",
+        "candidate_0029",
+        "candidate_0245",
+        "candidate_0269",
+        "candidate_0749",
+        "candidate_0989",
+        "candidate_2165",
+        "candidate_0043",
+        "candidate_4327",
+        "candidate_4369",
+        "candidate_4705",
+        "candidate_0097",
+        "candidate_0139",
+        "candidate_0601",
+        "candidate_0739",
+        "candidate_0817",
+        "candidate_1459",
+        "candidate_4321",
+        "candidate_0100",
+        "candidate_0604",
+        "candidate_0103",
+        "candidate_1327",
+        "candidate_2785",
+        "candidate_0123",
+        "candidate_0147",
+        "candidate_0963",
+        "candidate_1683",
+        "candidate_2163",
+        "candidate_0125",
+        "candidate_0725",
+        "candidate_1565",
+        "candidate_1685",
+        "candidate_2309",
+        "candidate_2405",
+        "candidate_0149",
+        "candidate_1445",
+        "candidate_1469",
+        "candidate_2189",
+        "candidate_0163",
+        "candidate_0223",
+        "candidate_0283",
+        "candidate_0631",
+        "candidate_2419",
+        "candidate_4609",
+        "candidate_0217",
+        "candidate_1345",
+        "candidate_2065",
+        "candidate_4585",
+        "candidate_0220",
+        "candidate_1582",
+        "candidate_4324",
+        "candidate_4444",
+        "candidate_4588",
+        "candidate_0243",
+        "candidate_0723",
+        "candidate_0747",
+        "candidate_1707",
+        "candidate_2187",
+        "candidate_2403",
+        "candidate_0259",
+        "candidate_0337",
+        "candidate_0649",
+        "candidate_0763",
+        "candidate_1057",
+        "candidate_2179",
+        "candidate_2299",
+        "candidate_2761",
+        "candidate_4447",
+        "candidate_0267",
+        "candidate_0843",
+        "candidate_1467",
+        "candidate_2283",
+        "candidate_2307",
+        "candidate_2427",
+        "candidate_0343",
+        "candidate_1543",
+        "candidate_1777",
+        "candidate_2497",
+        "candidate_2767",
+        "candidate_4567",
+        "candidate_4687",
+        "candidate_0607",
+        "candidate_0823",
+        "candidate_0979",
+        "candidate_2377",
+        "candidate_4489",
+        "candidate_0655",
+        "candidate_1483",
+        "candidate_1699",
+        "candidate_4351",
+        "candidate_4729",
+        "candidate_0742",
+        "candidate_0820",
+        "candidate_0940",
+        "candidate_1540",
+        "candidate_1660",
+        "candidate_4348",
+        "candidate_4564",
+        "candidate_0845",
+        "candidate_0869",
+        "candidate_0965",
+        "candidate_1589",
+        "candidate_1709",
+        "candidate_2285",
+        "candidate_2429",
+        "candidate_0877",
+        "candidate_1597",
+        "candidate_1951",
+        "candidate_3775",
+        "candidate_3895",
+        "candidate_3991",
+        "candidate_4015",
+        "candidate_0880",
+        "candidate_0922",
+        "candidate_1600",
+        "candidate_2440",
+        "candidate_3754",
+        "candidate_3898",
+        "candidate_4018",
+        "candidate_0883",
+        "candidate_1063",
+        "candidate_1783",
+        "candidate_0886",
+        "candidate_0946",
+        "candidate_1066",
+        "candidate_1606",
+        "candidate_1666",
+        "candidate_2386",
+        "candidate_2446",
+        "candidate_2506",
+        "candidate_4714",
+        "candidate_0919",
+        "candidate_1717",
+        "candidate_1759",
+        "candidate_2695",
+        "candidate_0937",
+        "candidate_1537",
+        "candidate_2041",
+        "candidate_0943",
+        "candidate_1723",
+        "candidate_2071",
+        "candidate_2323",
+        "candidate_2791",
+        "candidate_4495",
+        "candidate_0997",
+        "candidate_1255",
+        "candidate_1639",
+        "candidate_2317",
+        "candidate_2437",
+        "candidate_1000",
+        "candidate_1762",
+        "candidate_3994",
+        "candidate_1003",
+        "candidate_1603",
+        "candidate_1663",
+        "candidate_2095",
+        "candidate_2383",
+        "candidate_2443",
+        "candidate_1006",
+        "candidate_1354",
+        "candidate_1726",
+        "candidate_4498",
+        "candidate_4594",
+        "candidate_4738",
+        "candidate_1039",
+        "candidate_1231",
+        "candidate_2671",
+        "candidate_3751",
+        "candidate_3871",
+        "candidate_1042",
+        "candidate_1720",
+        "candidate_1978",
+        "candidate_2698",
+        "candidate_3874",
+        "candidate_1234",
+        "candidate_1954",
+        "candidate_2362",
+        "candidate_2482",
+        "candidate_1258",
+        "candidate_1642",
+        "candidate_2320",
+        "candidate_2674",
+        "candidate_3778",
+        "candidate_1321",
+        "candidate_1579",
+        "candidate_4465",
+        "candidate_1348",
+        "candidate_1462",
+        "candidate_4468",
+        "candidate_1351",
+        "candidate_2503",
+        "candidate_4735",
+        "candidate_1369",
+        "candidate_2257",
+        "candidate_4681",
+        "candidate_1375",
+        "candidate_2815",
+        "candidate_4471",
+        "candidate_4591",
+        "candidate_4615",
+        "candidate_4711",
+        "candidate_1378",
+        "candidate_2074",
+        "candidate_2326",
+        "candidate_1786",
+        "candidate_2794",
+        "candidate_2818",
+        "candidate_1975",
+        "candidate_2359",
+        "candidate_2479",
+        "candidate_2047",
+        "candidate_2089",
+        "candidate_2809",
+        "candidate_2098",
+        "candidate_4474",
+        "candidate_4618",
+        "candidate_2203",
+        "candidate_2263",
+        "candidate_4375"
+      ],
+      "cluster_6": [
+        "candidate_0006",
+        "candidate_1080",
+        "candidate_1566"
+      ],
+      "cluster_7": [
+        "candidate_0007",
+        "candidate_0361",
+        "candidate_0385",
+        "candidate_1489",
+        "candidate_3145"
+      ],
+      "cluster_8": [
+        "candidate_0008",
+        "candidate_0170",
+        "candidate_1490",
+        "candidate_1826",
+        "candidate_2882",
+        "candidate_2906",
+        "candidate_3026",
+        "candidate_3146"
+      ],
+      "cluster_9": [
+        "candidate_0009",
+        "candidate_0051",
+        "candidate_0129",
+        "candidate_0171",
+        "candidate_0363",
+        "candidate_0387",
+        "candidate_0729",
+        "candidate_0771",
+        "candidate_0849",
+        "candidate_0891",
+        "candidate_1083",
+        "candidate_1107",
+        "candidate_1449",
+        "candidate_1491",
+        "candidate_1569",
+        "candidate_1611",
+        "candidate_1803",
+        "candidate_1827",
+        "candidate_2883",
+        "candidate_2907",
+        "candidate_3003",
+        "candidate_3027",
+        "candidate_3123",
+        "candidate_3147"
+      ],
+      "cluster_10": [
+        "candidate_0010",
+        "candidate_0052",
+        "candidate_0730",
+        "candidate_0850",
+        "candidate_1828",
+        "candidate_3004",
+        "candidate_3028",
+        "candidate_3124"
+      ],
+      "cluster_11": [
+        "candidate_0011",
+        "candidate_0053",
+        "candidate_0131",
+        "candidate_0173",
+        "candidate_0365",
+        "candidate_0389",
+        "candidate_0731",
+        "candidate_0773",
+        "candidate_0851",
+        "candidate_0893",
+        "candidate_1085",
+        "candidate_1109",
+        "candidate_1451",
+        "candidate_1493",
+        "candidate_1571",
+        "candidate_1613",
+        "candidate_1805",
+        "candidate_1829",
+        "candidate_2885",
+        "candidate_2909",
+        "candidate_3005",
+        "candidate_3029",
+        "candidate_3125",
+        "candidate_3149"
+      ],
+      "cluster_12": [
+        "candidate_0012",
+        "candidate_0072",
+        "candidate_0192",
+        "candidate_1200"
+      ],
+      "cluster_13": [
+        "candidate_0013",
+        "candidate_1201",
+        "candidate_1453",
+        "candidate_1513",
+        "candidate_1573",
+        "candidate_3865"
+      ],
+      "cluster_14": [
+        "candidate_0014",
+        "candidate_0134",
+        "candidate_0794",
+        "candidate_1922",
+        "candidate_3842"
+      ],
+      "cluster_15": [
+        "candidate_0015",
+        "candidate_0075",
+        "candidate_0135",
+        "candidate_0195",
+        "candidate_0483",
+        "candidate_0507",
+        "candidate_0735",
+        "candidate_0795",
+        "candidate_0855",
+        "candidate_0915",
+        "candidate_1203",
+        "candidate_1227",
+        "candidate_1455",
+        "candidate_1515",
+        "candidate_1575",
+        "candidate_1635",
+        "candidate_1923",
+        "candidate_1947",
+        "candidate_3603",
+        "candidate_3627",
+        "candidate_3723",
+        "candidate_3747",
+        "candidate_3843",
+        "candidate_3867"
+      ],
+      "cluster_16": [
+        "candidate_0016",
+        "candidate_0076",
+        "candidate_0136",
+        "candidate_0916",
+        "candidate_1636",
+        "candidate_1948",
+        "candidate_3724"
+      ],
+      "cluster_17": [
+        "candidate_0017",
+        "candidate_0077",
+        "candidate_0137",
+        "candidate_0197",
+        "candidate_0485",
+        "candidate_0509",
+        "candidate_0737",
+        "candidate_0797",
+        "candidate_0857",
+        "candidate_0917",
+        "candidate_1205",
+        "candidate_1229",
+        "candidate_1457",
+        "candidate_1517",
+        "candidate_1577",
+        "candidate_1637",
+        "candidate_1925",
+        "candidate_1949",
+        "candidate_3605",
+        "candidate_3629",
+        "candidate_3725",
+        "candidate_3749",
+        "candidate_3845",
+        "candidate_3869"
+      ],
+      "cluster_18": [
+        "candidate_0018",
+        "candidate_0738",
+        "candidate_0936",
+        "candidate_1458",
+        "candidate_1578",
+        "candidate_1656",
+        "candidate_4320",
+        "candidate_4584"
+      ],
+      "cluster_19": [
+        "candidate_0020",
+        "candidate_0140",
+        "candidate_0818",
+        "candidate_1538",
+        "candidate_2042",
+        "candidate_4322",
+        "candidate_4346",
+        "candidate_4442"
+      ],
+      "cluster_20": [
+        "candidate_0021",
+        "candidate_0099",
+        "candidate_0141",
+        "candidate_0219",
+        "candidate_0603",
+        "candidate_0627",
+        "candidate_0741",
+        "candidate_0819",
+        "candidate_0861",
+        "candidate_0939",
+        "candidate_1323",
+        "candidate_1347",
+        "candidate_1461",
+        "candidate_1539",
+        "candidate_1581",
+        "candidate_1659",
+        "candidate_2043",
+        "candidate_2067",
+        "candidate_4323",
+        "candidate_4347",
+        "candidate_4443",
+        "candidate_4467",
+        "candidate_4563",
+        "candidate_4587"
+      ],
+      "cluster_21": [
+        "candidate_0023",
+        "candidate_0101",
+        "candidate_0143",
+        "candidate_0221",
+        "candidate_0605",
+        "candidate_0629",
+        "candidate_0743",
+        "candidate_0821",
+        "candidate_0863",
+        "candidate_0941",
+        "candidate_1325",
+        "candidate_1349",
+        "candidate_1463",
+        "candidate_1541",
+        "candidate_1583",
+        "candidate_1661",
+        "candidate_2045",
+        "candidate_2069",
+        "candidate_4325",
+        "candidate_4349",
+        "candidate_4445",
+        "candidate_4469",
+        "candidate_4565",
+        "candidate_4589"
+      ],
+      "cluster_22": [
+        "candidate_0024",
+        "candidate_0120",
+        "candidate_0264",
+        "candidate_0744",
+        "candidate_0840",
+        "candidate_1464",
+        "candidate_1560",
+        "candidate_1704",
+        "candidate_2424"
+      ],
+      "cluster_23": [
+        "candidate_0025",
+        "candidate_0241",
+        "candidate_0265",
+        "candidate_0865",
+        "candidate_1441",
+        "candidate_2161",
+        "candidate_2185",
+        "candidate_2401"
+      ],
+      "cluster_24": [
+        "candidate_0026",
+        "candidate_0746",
+        "candidate_0842",
+        "candidate_1442",
+        "candidate_1586",
+        "candidate_2306"
+      ],
+      "cluster_25": [
+        "candidate_0028",
+        "candidate_0124",
+        "candidate_0148",
+        "candidate_0748",
+        "candidate_0964",
+        "candidate_1468",
+        "candidate_1588"
+      ],
+      "cluster_26": [
+        "candidate_0030",
+        "candidate_0054",
+        "candidate_0288",
+        "candidate_0750",
+        "candidate_1128",
+        "candidate_2166",
+        "candidate_2208",
+        "candidate_2328",
+        "candidate_2544",
+        "candidate_2928",
+        "candidate_3006",
+        "candidate_3264"
+      ],
+      "cluster_27": [
+        "candidate_0031",
+        "candidate_0055",
+        "candidate_0289",
+        "candidate_0409",
+        "candidate_0967",
+        "candidate_1087",
+        "candidate_2209",
+        "candidate_2545",
+        "candidate_2887",
+        "candidate_3241",
+        "candidate_3265"
+      ],
+      "cluster_28": [
+        "candidate_0032",
+        "candidate_1130",
+        "candidate_2930",
+        "candidate_3050"
+      ],
+      "cluster_29": [
+        "candidate_0033",
+        "candidate_0057",
+        "candidate_0249",
+        "candidate_0291",
+        "candidate_0369",
+        "candidate_0411",
+        "candidate_0753",
+        "candidate_0777",
+        "candidate_0969",
+        "candidate_1011",
+        "candidate_1089",
+        "candidate_1131",
+        "candidate_2169",
+        "candidate_2211",
+        "candidate_2289",
+        "candidate_2331",
+        "candidate_2523",
+        "candidate_2547",
+        "candidate_2889",
+        "candidate_2931",
+        "candidate_3009",
+        "candidate_3051",
+        "candidate_3243",
+        "candidate_3267"
+      ],
+      "cluster_30": [
+        "candidate_0034",
+        "candidate_0058",
+        "candidate_0250",
+        "candidate_0292",
+        "candidate_2170",
+        "candidate_2548"
+      ],
+      "cluster_31": [
+        "candidate_0035",
+        "candidate_0059",
+        "candidate_0251",
+        "candidate_0293",
+        "candidate_0371",
+        "candidate_0413",
+        "candidate_0755",
+        "candidate_0779",
+        "candidate_0971",
+        "candidate_1013",
+        "candidate_1091",
+        "candidate_1133",
+        "candidate_2171",
+        "candidate_2213",
+        "candidate_2291",
+        "candidate_2333",
+        "candidate_2525",
+        "candidate_2549",
+        "candidate_2891",
+        "candidate_2933",
+        "candidate_3011",
+        "candidate_3053",
+        "candidate_3245",
+        "candidate_3269"
+      ],
+      "cluster_32": [
+        "candidate_0036",
+        "candidate_1032",
+        "candidate_2232"
+      ],
+      "cluster_33": [
+        "candidate_0037",
+        "candidate_0757",
+        "candidate_2293",
+        "candidate_3607",
+        "candidate_3649"
+      ],
+      "cluster_34": [
+        "candidate_0038",
+        "candidate_2666"
+      ],
+      "cluster_35": [
+        "candidate_0039",
+        "candidate_0081",
+        "candidate_0255",
+        "candidate_0315",
+        "candidate_0489",
+        "candidate_0531",
+        "candidate_0759",
+        "candidate_0801",
+        "candidate_0975",
+        "candidate_1035",
+        "candidate_1209",
+        "candidate_1251",
+        "candidate_2175",
+        "candidate_2235",
+        "candidate_2295",
+        "candidate_2355",
+        "candidate_2643",
+        "candidate_2667",
+        "candidate_3609",
+        "candidate_3651",
+        "candidate_3729",
+        "candidate_3771",
+        "candidate_3963",
+        "candidate_3987"
+      ],
+      "cluster_36": [
+        "candidate_0040",
+        "candidate_3610"
+      ],
+      "cluster_37": [
+        "candidate_0041",
+        "candidate_0083",
+        "candidate_0257",
+        "candidate_0317",
+        "candidate_0491",
+        "candidate_0533",
+        "candidate_0761",
+        "candidate_0803",
+        "candidate_0977",
+        "candidate_1037",
+        "candidate_1211",
+        "candidate_1253",
+        "candidate_2177",
+        "candidate_2237",
+        "candidate_2297",
+        "candidate_2357",
+        "candidate_2645",
+        "candidate_2669",
+        "candidate_3611",
+        "candidate_3653",
+        "candidate_3731",
+        "candidate_3773",
+        "candidate_3965",
+        "candidate_3989"
+      ],
+      "cluster_38": [
+        "candidate_0042",
+        "candidate_0102",
+        "candidate_2376",
+        "candidate_4488",
+        "candidate_4680"
+      ],
+      "cluster_39": [
+        "candidate_0044",
+        "candidate_0338",
+        "candidate_0608",
+        "candidate_0980",
+        "candidate_1058",
+        "candidate_2258",
+        "candidate_4328",
+        "candidate_4448"
+      ],
+      "cluster_40": [
+        "candidate_0045",
+        "candidate_0105",
+        "candidate_0261",
+        "candidate_0339",
+        "candidate_0609",
+        "candidate_0651",
+        "candidate_0765",
+        "candidate_0825",
+        "candidate_0981",
+        "candidate_1059",
+        "candidate_1329",
+        "candidate_1371",
+        "candidate_2181",
+        "candidate_2259",
+        "candidate_2301",
+        "candidate_2379",
+        "candidate_2763",
+        "candidate_2787",
+        "candidate_4329",
+        "candidate_4371",
+        "candidate_4449",
+        "candidate_4491",
+        "candidate_4683",
+        "candidate_4707"
+      ],
+      "cluster_41": [
+        "candidate_0046",
+        "candidate_0340",
+        "candidate_1060",
+        "candidate_2182",
+        "candidate_4450"
+      ],
+      "cluster_42": [
+        "candidate_0047",
+        "candidate_0107",
+        "candidate_0263",
+        "candidate_0341",
+        "candidate_0611",
+        "candidate_0653",
+        "candidate_0767",
+        "candidate_0827",
+        "candidate_0983",
+        "candidate_1061",
+        "candidate_1331",
+        "candidate_1373",
+        "candidate_2183",
+        "candidate_2261",
+        "candidate_2303",
+        "candidate_2381",
+        "candidate_2765",
+        "candidate_2789",
+        "candidate_4331",
+        "candidate_4373",
+        "candidate_4451",
+        "candidate_4493",
+        "candidate_4685",
+        "candidate_4709"
+      ],
+      "cluster_43": [
+        "candidate_0048",
+        "candidate_0126",
+        "candidate_0726",
+        "candidate_0768",
+        "candidate_1488",
+        "candidate_1824",
+        "candidate_2904"
+      ],
+      "cluster_44": [
+        "candidate_0049",
+        "candidate_0127",
+        "candidate_0169",
+        "candidate_0727",
+        "candidate_0889",
+        "candidate_1447",
+        "candidate_1825",
+        "candidate_3001",
+        "candidate_3121"
+      ],
+      "cluster_45": [
+        "candidate_0050",
+        "candidate_0128",
+        "candidate_0386",
+        "candidate_0728",
+        "candidate_0848",
+        "candidate_0890",
+        "candidate_1082",
+        "candidate_1106",
+        "candidate_1448",
+        "candidate_1610",
+        "candidate_1802"
+      ],
+      "cluster_46": [
+        "candidate_0056",
+        "candidate_0290",
+        "candidate_0410",
+        "candidate_0968",
+        "candidate_2168",
+        "candidate_2210",
+        "candidate_2330",
+        "candidate_3008"
+      ],
+      "cluster_47": [
+        "candidate_0060",
+        "candidate_0432",
+        "candidate_1212",
+        "candidate_3072",
+        "candidate_3360",
+        "candidate_3612",
+        "candidate_3792"
+      ],
+      "cluster_48": [
+        "candidate_0061",
+        "candidate_0085",
+        "candidate_0373",
+        "candidate_0433",
+        "candidate_0493",
+        "candidate_0553",
+        "candidate_0781",
+        "candidate_0805",
+        "candidate_1093",
+        "candidate_1153",
+        "candidate_1213",
+        "candidate_1273",
+        "candidate_2893",
+        "candidate_2953",
+        "candidate_3013",
+        "candidate_3073",
+        "candidate_3361",
+        "candidate_3385",
+        "candidate_3613",
+        "candidate_3673",
+        "candidate_3733",
+        "candidate_3793",
+        "candidate_4081",
+        "candidate_4105"
+      ],
+      "cluster_49": [
+        "candidate_0062",
+        "candidate_0374",
+        "candidate_1094",
+        "candidate_3674"
+      ],
+      "cluster_50": [
+        "candidate_0063",
+        "candidate_0087",
+        "candidate_0375",
+        "candidate_0435",
+        "candidate_0495",
+        "candidate_0555",
+        "candidate_0783",
+        "candidate_0807",
+        "candidate_1095",
+        "candidate_1155",
+        "candidate_1215",
+        "candidate_1275",
+        "candidate_2895",
+        "candidate_2955",
+        "candidate_3015",
+        "candidate_3075",
+        "candidate_3363",
+        "candidate_3387",
+        "candidate_3615",
+        "candidate_3675",
+        "candidate_3735",
+        "candidate_3795",
+        "candidate_4083",
+        "candidate_4107"
+      ],
+      "cluster_51": [
+        "candidate_0064",
+        "candidate_0088",
+        "candidate_0376",
+        "candidate_0436",
+        "candidate_0496",
+        "candidate_0556",
+        "candidate_0784",
+        "candidate_0808",
+        "candidate_1096",
+        "candidate_1156",
+        "candidate_1216",
+        "candidate_1276",
+        "candidate_2896",
+        "candidate_2956",
+        "candidate_3016",
+        "candidate_3076",
+        "candidate_3364",
+        "candidate_3388",
+        "candidate_3616",
+        "candidate_3676",
+        "candidate_3736",
+        "candidate_3796",
+        "candidate_4084",
+        "candidate_4108"
+      ],
+      "cluster_52": [
+        "candidate_0065",
+        "candidate_0089",
+        "candidate_0377",
+        "candidate_0437",
+        "candidate_0497",
+        "candidate_0557",
+        "candidate_0785",
+        "candidate_0809",
+        "candidate_1097",
+        "candidate_1157",
+        "candidate_1217",
+        "candidate_1277",
+        "candidate_2897",
+        "candidate_2957",
+        "candidate_3017",
+        "candidate_3077",
+        "candidate_3365",
+        "candidate_3389",
+        "candidate_3617",
+        "candidate_3677",
+        "candidate_3737",
+        "candidate_3797",
+        "candidate_4085",
+        "candidate_4109"
+      ],
+      "cluster_53": [
+        "candidate_0066",
+        "candidate_0108",
+        "candidate_3480"
+      ],
+      "cluster_54": [
+        "candidate_0067",
+        "candidate_0109",
+        "candidate_0379",
+        "candidate_0457",
+        "candidate_0613",
+        "candidate_0673",
+        "candidate_0787",
+        "candidate_0829",
+        "candidate_1099",
+        "candidate_1177",
+        "candidate_1333",
+        "candidate_1393",
+        "candidate_2899",
+        "candidate_2977",
+        "candidate_3019",
+        "candidate_3097",
+        "candidate_3481",
+        "candidate_3505",
+        "candidate_4333",
+        "candidate_4393",
+        "candidate_4453",
+        "candidate_4513",
+        "candidate_4801",
+        "candidate_4825"
+      ],
+      "cluster_55": [
+        "candidate_0068",
+        "candidate_0110",
+        "candidate_0458",
+        "candidate_0674",
+        "candidate_0788",
+        "candidate_2900",
+        "candidate_3020",
+        "candidate_3506",
+        "candidate_4454"
+      ],
+      "cluster_56": [
+        "candidate_0069",
+        "candidate_0111",
+        "candidate_0381",
+        "candidate_0459",
+        "candidate_0615",
+        "candidate_0675",
+        "candidate_0789",
+        "candidate_0831",
+        "candidate_1101",
+        "candidate_1179",
+        "candidate_1335",
+        "candidate_1395",
+        "candidate_2901",
+        "candidate_2979",
+        "candidate_3021",
+        "candidate_3099",
+        "candidate_3483",
+        "candidate_3507",
+        "candidate_4335",
+        "candidate_4395",
+        "candidate_4455",
+        "candidate_4515",
+        "candidate_4803",
+        "candidate_4827"
+      ],
+      "cluster_57": [
+        "candidate_0070",
+        "candidate_0112",
+        "candidate_0382",
+        "candidate_0460",
+        "candidate_0616",
+        "candidate_0676",
+        "candidate_0790",
+        "candidate_0832",
+        "candidate_1102",
+        "candidate_1180",
+        "candidate_1336",
+        "candidate_1396",
+        "candidate_2902",
+        "candidate_2980",
+        "candidate_3022",
+        "candidate_3100",
+        "candidate_3484",
+        "candidate_3508",
+        "candidate_4336",
+        "candidate_4396",
+        "candidate_4456",
+        "candidate_4516",
+        "candidate_4804",
+        "candidate_4828"
+      ],
+      "cluster_58": [
+        "candidate_0071",
+        "candidate_0113",
+        "candidate_0383",
+        "candidate_0461",
+        "candidate_0617",
+        "candidate_0677",
+        "candidate_0791",
+        "candidate_0833",
+        "candidate_1103",
+        "candidate_1181",
+        "candidate_1337",
+        "candidate_1397",
+        "candidate_2903",
+        "candidate_2981",
+        "candidate_3023",
+        "candidate_3101",
+        "candidate_3485",
+        "candidate_3509",
+        "candidate_4337",
+        "candidate_4397",
+        "candidate_4457",
+        "candidate_4517",
+        "candidate_4805",
+        "candidate_4829"
+      ],
+      "cluster_59": [
+        "candidate_0073",
+        "candidate_0133",
+        "candidate_0481",
+        "candidate_0853",
+        "candidate_0913",
+        "candidate_3721"
+      ],
+      "cluster_60": [
+        "candidate_0074",
+        "candidate_0734",
+        "candidate_1454",
+        "candidate_1514",
+        "candidate_1634",
+        "candidate_1946"
+      ],
+      "cluster_61": [
+        "candidate_0078",
+        "candidate_0798",
+        "candidate_2172",
+        "candidate_2352"
+      ],
+      "cluster_62": [
+        "candidate_0079",
+        "candidate_0313",
+        "candidate_2233",
+        "candidate_2641"
+      ],
+      "cluster_63": [
+        "candidate_0080",
+        "candidate_0488",
+        "candidate_0758",
+        "candidate_1034",
+        "candidate_2234",
+        "candidate_2354",
+        "candidate_2642",
+        "candidate_3728"
+      ],
+      "cluster_64": [
+        "candidate_0082",
+        "candidate_0976",
+        "candidate_1036",
+        "candidate_2236",
+        "candidate_2356"
+      ],
+      "cluster_65": [
+        "candidate_0084",
+        "candidate_0372",
+        "candidate_0492",
+        "candidate_0552",
+        "candidate_1272",
+        "candidate_2952",
+        "candidate_3012",
+        "candidate_3384",
+        "candidate_4080",
+        "candidate_4104"
+      ],
+      "cluster_66": [
+        "candidate_0086",
+        "candidate_0434",
+        "candidate_0494",
+        "candidate_0554",
+        "candidate_1214",
+        "candidate_2894",
+        "candidate_2954",
+        "candidate_3074",
+        "candidate_3362",
+        "candidate_3386",
+        "candidate_4106"
+      ],
+      "cluster_67": [
+        "candidate_0090",
+        "candidate_0576",
+        "candidate_1218",
+        "candidate_1338",
+        "candidate_3618",
+        "candidate_3696",
+        "candidate_4944"
+      ],
+      "cluster_68": [
+        "candidate_0091",
+        "candidate_0115",
+        "candidate_0499",
+        "candidate_0577",
+        "candidate_0619",
+        "candidate_0697",
+        "candidate_0811",
+        "candidate_0835",
+        "candidate_1219",
+        "candidate_1297",
+        "candidate_1339",
+        "candidate_1417",
+        "candidate_3619",
+        "candidate_3697",
+        "candidate_3739",
+        "candidate_3817",
+        "candidate_4201",
+        "candidate_4225",
+        "candidate_4339",
+        "candidate_4417",
+        "candidate_4459",
+        "candidate_4537",
+        "candidate_4921",
+        "candidate_4945"
+      ],
+      "cluster_69": [
+        "candidate_0092",
+        "candidate_0500"
+      ],
+      "cluster_70": [
+        "candidate_0093",
+        "candidate_0117",
+        "candidate_0501",
+        "candidate_0579",
+        "candidate_0621",
+        "candidate_0699",
+        "candidate_0813",
+        "candidate_0837",
+        "candidate_1221",
+        "candidate_1299",
+        "candidate_1341",
+        "candidate_1419",
+        "candidate_3621",
+        "candidate_3699",
+        "candidate_3741",
+        "candidate_3819",
+        "candidate_4203",
+        "candidate_4227",
+        "candidate_4341",
+        "candidate_4419",
+        "candidate_4461",
+        "candidate_4539",
+        "candidate_4923",
+        "candidate_4947"
+      ],
+      "cluster_71": [
+        "candidate_0094",
+        "candidate_0118",
+        "candidate_0502",
+        "candidate_0580",
+        "candidate_0622",
+        "candidate_0700",
+        "candidate_0814",
+        "candidate_0838",
+        "candidate_1222",
+        "candidate_1300",
+        "candidate_1342",
+        "candidate_1420",
+        "candidate_3622",
+        "candidate_3700",
+        "candidate_3742",
+        "candidate_3820",
+        "candidate_4204",
+        "candidate_4228",
+        "candidate_4342",
+        "candidate_4420",
+        "candidate_4462",
+        "candidate_4540",
+        "candidate_4924",
+        "candidate_4948"
+      ],
+      "cluster_72": [
+        "candidate_0095",
+        "candidate_0119",
+        "candidate_0503",
+        "candidate_0581",
+        "candidate_0623",
+        "candidate_0701",
+        "candidate_0815",
+        "candidate_0839",
+        "candidate_1223",
+        "candidate_1301",
+        "candidate_1343",
+        "candidate_1421",
+        "candidate_3623",
+        "candidate_3701",
+        "candidate_3743",
+        "candidate_3821",
+        "candidate_4205",
+        "candidate_4229",
+        "candidate_4343",
+        "candidate_4421",
+        "candidate_4463",
+        "candidate_4541",
+        "candidate_4925",
+        "candidate_4949"
+      ],
+      "cluster_73": [
+        "candidate_0096",
+        "candidate_2064",
+        "candidate_4464",
+        "candidate_4560"
+      ],
+      "cluster_74": [
+        "candidate_0098",
+        "candidate_0740",
+        "candidate_0938",
+        "candidate_1658"
+      ],
+      "cluster_75": [
+        "candidate_0104",
+        "candidate_0260",
+        "candidate_2378",
+        "candidate_4370",
+        "candidate_4490",
+        "candidate_4706"
+      ],
+      "cluster_76": [
+        "candidate_0106",
+        "candidate_0262",
+        "candidate_0826",
+        "candidate_0982",
+        "candidate_2260"
+      ],
+      "cluster_77": [
+        "candidate_0114",
+        "candidate_0498",
+        "candidate_0618",
+        "candidate_1296",
+        "candidate_1416",
+        "candidate_4224",
+        "candidate_4536",
+        "candidate_4920"
+      ],
+      "cluster_78": [
+        "candidate_0116",
+        "candidate_0698",
+        "candidate_0836",
+        "candidate_1298",
+        "candidate_4202",
+        "candidate_4460"
+      ],
+      "cluster_79": [
+        "candidate_0121",
+        "candidate_0745",
+        "candidate_0985",
+        "candidate_1465",
+        "candidate_1561"
+      ],
+      "cluster_80": [
+        "candidate_0130",
+        "candidate_0172",
+        "candidate_1108",
+        "candidate_1612",
+        "candidate_1804",
+        "candidate_2884"
+      ],
+      "cluster_81": [
+        "candidate_0132",
+        "candidate_0852",
+        "candidate_1452",
+        "candidate_3840",
+        "candidate_3864"
+      ],
+      "cluster_82": [
+        "candidate_0138",
+        "candidate_0216",
+        "candidate_0624",
+        "candidate_1536"
+      ],
+      "cluster_83": [
+        "candidate_0144",
+        "candidate_0240",
+        "candidate_0864",
+        "candidate_1440",
+        "candidate_2400"
+      ],
+      "cluster_84": [
+        "candidate_0145",
+        "candidate_1585",
+        "candidate_2281"
+      ],
+      "cluster_85": [
+        "candidate_0146",
+        "candidate_0722",
+        "candidate_0962",
+        "candidate_1682",
+        "candidate_2282",
+        "candidate_2426"
+      ],
+      "cluster_86": [
+        "candidate_0150",
+        "candidate_0294",
+        "candidate_0390",
+        "candidate_1470",
+        "candidate_1806",
+        "candidate_2190",
+        "candidate_2214",
+        "candidate_2934",
+        "candidate_3126",
+        "candidate_3246"
+      ],
+      "cluster_87": [
+        "candidate_0151",
+        "candidate_1495"
+      ],
+      "cluster_88": [
+        "candidate_0152",
+        "candidate_0392",
+        "candidate_0416",
+        "candidate_1850",
+        "candidate_3128"
+      ],
+      "cluster_89": [
+        "candidate_0153",
+        "candidate_1809",
+        "candidate_2409",
+        "candidate_3291"
+      ],
+      "cluster_90": [
+        "candidate_0154",
+        "candidate_0274",
+        "candidate_1690",
+        "candidate_2218",
+        "candidate_2452",
+        "candidate_2530",
+        "candidate_2572",
+        "candidate_3172"
+      ],
+      "cluster_91": [
+        "candidate_0155",
+        "candidate_0395",
+        "candidate_1499",
+        "candidate_1811",
+        "candidate_2219",
+        "candidate_2411",
+        "candidate_3131",
+        "candidate_3251"
+      ],
+      "cluster_92": [
+        "candidate_0156",
+        "candidate_0276",
+        "candidate_1476",
+        "candidate_3654"
+      ],
+      "cluster_93": [
+        "candidate_0157",
+        "candidate_0511",
+        "candidate_1477",
+        "candidate_1969",
+        "candidate_2473",
+        "candidate_2689",
+        "candidate_3847",
+        "candidate_3889"
+      ],
+      "cluster_94": [
+        "candidate_0158",
+        "candidate_0278",
+        "candidate_2198",
+        "candidate_2240",
+        "candidate_2648",
+        "candidate_2690",
+        "candidate_3632"
+      ],
+      "cluster_95": [
+        "candidate_0159",
+        "candidate_0201",
+        "candidate_1479",
+        "candidate_1755"
+      ],
+      "cluster_96": [
+        "candidate_0160",
+        "candidate_0280",
+        "candidate_0514",
+        "candidate_2476",
+        "candidate_2650"
+      ],
+      "cluster_97": [
+        "candidate_0161",
+        "candidate_1523",
+        "candidate_1697",
+        "candidate_3659",
+        "candidate_4013"
+      ],
+      "cluster_98": [
+        "candidate_0162",
+        "candidate_0654",
+        "candidate_1698",
+        "candidate_2202",
+        "candidate_2262",
+        "candidate_4686"
+      ],
+      "cluster_99": [
+        "candidate_0164",
+        "candidate_0284",
+        "candidate_2264",
+        "candidate_4376",
+        "candidate_4610"
+      ],
+      "cluster_100": [
+        "candidate_0165",
+        "candidate_0345",
+        "candidate_1485",
+        "candidate_2499",
+        "candidate_2769",
+        "candidate_4569"
+      ],
+      "cluster_101": [
+        "candidate_0166",
+        "candidate_0286",
+        "candidate_0346",
+        "candidate_1486",
+        "candidate_2500",
+        "candidate_4732"
+      ],
+      "cluster_102": [
+        "candidate_0167",
+        "candidate_0227",
+        "candidate_2093",
+        "candidate_2771",
+        "candidate_4571"
+      ],
+      "cluster_103": [
+        "candidate_0168",
+        "candidate_0360",
+        "candidate_0846",
+        "candidate_0888",
+        "candidate_3024",
+        "candidate_3144"
+      ],
+      "cluster_104": [
+        "candidate_0174",
+        "candidate_1494",
+        "candidate_1728",
+        "candidate_2448",
+        "candidate_3168"
+      ],
+      "cluster_105": [
+        "candidate_0175",
+        "candidate_0295",
+        "candidate_1729",
+        "candidate_2935"
+      ],
+      "cluster_106": [
+        "candidate_0176",
+        "candidate_1496",
+        "candidate_2570",
+        "candidate_3248"
+      ],
+      "cluster_107": [
+        "candidate_0177",
+        "candidate_1731"
+      ],
+      "cluster_108": [
+        "candidate_0178",
+        "candidate_1474",
+        "candidate_1498",
+        "candidate_1810",
+        "candidate_1852",
+        "candidate_3250"
+      ],
+      "cluster_109": [
+        "candidate_0179",
+        "candidate_0275",
+        "candidate_1475",
+        "candidate_1733",
+        "candidate_2195",
+        "candidate_2531",
+        "candidate_2573",
+        "candidate_2939"
+      ],
+      "cluster_110": [
+        "candidate_0180",
+        "candidate_0396",
+        "candidate_0558",
+        "candidate_1812",
+        "candidate_1932",
+        "candidate_3912",
+        "candidate_4086"
+      ],
+      "cluster_111": [
+        "candidate_0181",
+        "candidate_0205",
+        "candidate_0397",
+        "candidate_0439",
+        "candidate_0517",
+        "candidate_0559",
+        "candidate_1501",
+        "candidate_1525",
+        "candidate_1813",
+        "candidate_1873",
+        "candidate_1933",
+        "candidate_1993",
+        "candidate_2917",
+        "candidate_2959",
+        "candidate_3133",
+        "candidate_3193",
+        "candidate_3367",
+        "candidate_3409",
+        "candidate_3637",
+        "candidate_3679",
+        "candidate_3853",
+        "candidate_3913",
+        "candidate_4087",
+        "candidate_4129"
+      ],
+      "cluster_112": [
+        "candidate_0182",
+        "candidate_0518",
+        "candidate_3134",
+        "candidate_3914",
+        "candidate_4088"
+      ],
+      "cluster_113": [
+        "candidate_0183",
+        "candidate_0399",
+        "candidate_1815",
+        "candidate_1935",
+        "candidate_3369",
+        "candidate_3639"
+      ],
+      "cluster_114": [
+        "candidate_0184",
+        "candidate_0208",
+        "candidate_0400",
+        "candidate_0442",
+        "candidate_0520",
+        "candidate_0562",
+        "candidate_1504",
+        "candidate_1528",
+        "candidate_1816",
+        "candidate_1876",
+        "candidate_1936",
+        "candidate_1996",
+        "candidate_2920",
+        "candidate_2962",
+        "candidate_3136",
+        "candidate_3196",
+        "candidate_3370",
+        "candidate_3412",
+        "candidate_3640",
+        "candidate_3682",
+        "candidate_3856",
+        "candidate_3916",
+        "candidate_4090",
+        "candidate_4132"
+      ],
+      "cluster_115": [
+        "candidate_0185",
+        "candidate_2963",
+        "candidate_3371",
+        "candidate_3857"
+      ],
+      "cluster_116": [
+        "candidate_0186",
+        "candidate_0228",
+        "candidate_0402",
+        "candidate_0462",
+        "candidate_3216"
+      ],
+      "cluster_117": [
+        "candidate_0187",
+        "candidate_0229",
+        "candidate_0403",
+        "candidate_0463",
+        "candidate_0637",
+        "candidate_0679",
+        "candidate_1507",
+        "candidate_1549",
+        "candidate_1819",
+        "candidate_1897",
+        "candidate_2053",
+        "candidate_2113",
+        "candidate_2923",
+        "candidate_2983",
+        "candidate_3139",
+        "candidate_3217",
+        "candidate_3487",
+        "candidate_3529",
+        "candidate_4357",
+        "candidate_4399",
+        "candidate_4573",
+        "candidate_4633",
+        "candidate_4807",
+        "candidate_4849"
+      ],
+      "cluster_118": [
+        "candidate_0188",
+        "candidate_0464",
+        "candidate_1898",
+        "candidate_2114",
+        "candidate_2924"
+      ],
+      "cluster_119": [
+        "candidate_0189",
+        "candidate_0465",
+        "candidate_1899",
+        "candidate_2115",
+        "candidate_2985",
+        "candidate_3531",
+        "candidate_4635",
+        "candidate_4851"
+      ],
+      "cluster_120": [
+        "candidate_0190",
+        "candidate_0232",
+        "candidate_0406",
+        "candidate_0466",
+        "candidate_0640",
+        "candidate_0682",
+        "candidate_1510",
+        "candidate_1552",
+        "candidate_1822",
+        "candidate_1900",
+        "candidate_2056",
+        "candidate_2116",
+        "candidate_2926",
+        "candidate_2986",
+        "candidate_3142",
+        "candidate_3220",
+        "candidate_3490",
+        "candidate_3532",
+        "candidate_4360",
+        "candidate_4402",
+        "candidate_4576",
+        "candidate_4636",
+        "candidate_4810",
+        "candidate_4852"
+      ],
+      "cluster_121": [
+        "candidate_0191",
+        "candidate_0407",
+        "candidate_0683",
+        "candidate_3221",
+        "candidate_3491",
+        "candidate_4811"
+      ],
+      "cluster_122": [
+        "candidate_0193",
+        "candidate_0793"
+      ],
+      "cluster_123": [
+        "candidate_0194",
+        "candidate_0482",
+        "candidate_0506",
+        "candidate_0914",
+        "candidate_1202",
+        "candidate_3746",
+        "candidate_3866"
+      ],
+      "cluster_124": [
+        "candidate_0196",
+        "candidate_0508",
+        "candidate_1204",
+        "candidate_1228",
+        "candidate_3844"
+      ],
+      "cluster_125": [
+        "candidate_0198",
+        "candidate_0318",
+        "candidate_0510",
+        "candidate_1968",
+        "candidate_2412",
+        "candidate_2646",
+        "candidate_3630"
+      ],
+      "cluster_126": [
+        "candidate_0199",
+        "candidate_0277",
+        "candidate_0535",
+        "candidate_1693",
+        "candidate_2197",
+        "candidate_2413",
+        "candidate_3631"
+      ],
+      "cluster_127": [
+        "candidate_0200",
+        "candidate_0512",
+        "candidate_1520",
+        "candidate_1928",
+        "candidate_2414",
+        "candidate_2474",
+        "candidate_3968"
+      ],
+      "cluster_128": [
+        "candidate_0202",
+        "candidate_0322",
+        "candidate_1930",
+        "candidate_3634"
+      ],
+      "cluster_129": [
+        "candidate_0203",
+        "candidate_0515",
+        "candidate_1481",
+        "candidate_1931",
+        "candidate_2693",
+        "candidate_3635",
+        "candidate_3971"
+      ],
+      "cluster_130": [
+        "candidate_0204",
+        "candidate_1524",
+        "candidate_1872",
+        "candidate_3132",
+        "candidate_3408",
+        "candidate_4128"
+      ],
+      "cluster_131": [
+        "candidate_0206",
+        "candidate_0560",
+        "candidate_3194",
+        "candidate_3368",
+        "candidate_4130"
+      ],
+      "cluster_132": [
+        "candidate_0207",
+        "candidate_0519",
+        "candidate_3411",
+        "candidate_4089",
+        "candidate_4131"
+      ],
+      "cluster_133": [
+        "candidate_0209",
+        "candidate_0401",
+        "candidate_0521",
+        "candidate_3137",
+        "candidate_3413",
+        "candidate_3641"
+      ],
+      "cluster_134": [
+        "candidate_0210",
+        "candidate_0582",
+        "candidate_1530",
+        "candidate_2058",
+        "candidate_4362",
+        "candidate_4578",
+        "candidate_4656",
+        "candidate_4968"
+      ],
+      "cluster_135": [
+        "candidate_0211",
+        "candidate_0235",
+        "candidate_0523",
+        "candidate_0583",
+        "candidate_0643",
+        "candidate_0703",
+        "candidate_1531",
+        "candidate_1555",
+        "candidate_1939",
+        "candidate_2017",
+        "candidate_2059",
+        "candidate_2137",
+        "candidate_3643",
+        "candidate_3703",
+        "candidate_3859",
+        "candidate_3937",
+        "candidate_4207",
+        "candidate_4249",
+        "candidate_4363",
+        "candidate_4423",
+        "candidate_4579",
+        "candidate_4657",
+        "candidate_4927",
+        "candidate_4969"
+      ],
+      "cluster_136": [
+        "candidate_0212",
+        "candidate_1556",
+        "candidate_2138",
+        "candidate_3644",
+        "candidate_3938",
+        "candidate_4208",
+        "candidate_4364",
+        "candidate_4658",
+        "candidate_4928"
+      ],
+      "cluster_137": [
+        "candidate_0213",
+        "candidate_0237",
+        "candidate_1533",
+        "candidate_3861",
+        "candidate_4365"
+      ],
+      "cluster_138": [
+        "candidate_0214",
+        "candidate_0238",
+        "candidate_0526",
+        "candidate_0586",
+        "candidate_0646",
+        "candidate_0706",
+        "candidate_1534",
+        "candidate_1558",
+        "candidate_1942",
+        "candidate_2020",
+        "candidate_2062",
+        "candidate_2140",
+        "candidate_3646",
+        "candidate_3706",
+        "candidate_3862",
+        "candidate_3940",
+        "candidate_4210",
+        "candidate_4252",
+        "candidate_4366",
+        "candidate_4426",
+        "candidate_4582",
+        "candidate_4660",
+        "candidate_4930",
+        "candidate_4972"
+      ],
+      "cluster_139": [
+        "candidate_0215",
+        "candidate_0527",
+        "candidate_0707",
+        "candidate_1559",
+        "candidate_3863",
+        "candidate_4931"
+      ],
+      "cluster_140": [
+        "candidate_0218",
+        "candidate_0626"
+      ],
+      "cluster_141": [
+        "candidate_0222",
+        "candidate_0282",
+        "candidate_1542",
+        "candidate_2496",
+        "candidate_4728"
+      ],
+      "cluster_142": [
+        "candidate_0224",
+        "candidate_0344",
+        "candidate_0656",
+        "candidate_1544",
+        "candidate_2204",
+        "candidate_2768",
+        "candidate_4730"
+      ],
+      "cluster_143": [
+        "candidate_0225",
+        "candidate_0633",
+        "candidate_2265",
+        "candidate_2421",
+        "candidate_2811"
+      ],
+      "cluster_144": [
+        "candidate_0226",
+        "candidate_0634",
+        "candidate_0658",
+        "candidate_2050",
+        "candidate_2206",
+        "candidate_4354"
+      ],
+      "cluster_145": [
+        "candidate_0230",
+        "candidate_1508",
+        "candidate_3140",
+        "candidate_3488",
+        "candidate_4634",
+        "candidate_4808"
+      ],
+      "cluster_146": [
+        "candidate_0231",
+        "candidate_0405",
+        "candidate_3489",
+        "candidate_4359",
+        "candidate_4575"
+      ],
+      "cluster_147": [
+        "candidate_0233",
+        "candidate_0467",
+        "candidate_2057",
+        "candidate_3143",
+        "candidate_4637"
+      ],
+      "cluster_148": [
+        "candidate_0234",
+        "candidate_0522",
+        "candidate_0642",
+        "candidate_2136",
+        "candidate_3642",
+        "candidate_4422"
+      ],
+      "cluster_149": [
+        "candidate_0236",
+        "candidate_0704",
+        "candidate_1532"
+      ],
+      "cluster_150": [
+        "candidate_0239",
+        "candidate_0587",
+        "candidate_2141",
+        "candidate_3707",
+        "candidate_4661",
+        "candidate_4973"
+      ],
+      "cluster_151": [
+        "candidate_0242",
+        "candidate_0986",
+        "candidate_1562",
+        "candidate_1706",
+        "candidate_2402"
+      ],
+      "cluster_152": [
+        "candidate_0244",
+        "candidate_1684",
+        "candidate_2188"
+      ],
+      "cluster_153": [
+        "candidate_0246",
+        "candidate_0248",
+        "candidate_0368",
+        "candidate_1088",
+        "candidate_2288",
+        "candidate_2522",
+        "candidate_3242",
+        "candidate_3266",
+        "candidate_0270",
+        "candidate_1686",
+        "candidate_2910",
+        "candidate_3288",
+        "candidate_0366",
+        "candidate_1008",
+        "candidate_3240",
+        "candidate_0408",
+        "candidate_0774",
+        "candidate_2286",
+        "candidate_2520",
+        "candidate_2886",
+        "candidate_0414",
+        "candidate_1848",
+        "candidate_2406",
+        "candidate_2526",
+        "candidate_0752",
+        "candidate_1010",
+        "candidate_2546",
+        "candidate_0776",
+        "candidate_2888",
+        "candidate_0870",
+        "candidate_1014",
+        "candidate_1710",
+        "candidate_1734",
+        "candidate_2454",
+        "candidate_3174",
+        "candidate_3294",
+        "candidate_0894",
+        "candidate_0990",
+        "candidate_1134",
+        "candidate_1614",
+        "candidate_2334",
+        "candidate_3030",
+        "candidate_0966",
+        "candidate_1086",
+        "candidate_3048",
+        "candidate_1110",
+        "candidate_2574",
+        "candidate_3150",
+        "candidate_1590",
+        "candidate_2310",
+        "candidate_2550",
+        "candidate_3270",
+        "candidate_1830",
+        "candidate_1854",
+        "candidate_2430",
+        "candidate_3054",
+        "candidate_2568"
+      ],
+      "cluster_154": [
+        "candidate_0247",
+        "candidate_0367",
+        "candidate_0751",
+        "candidate_2287",
+        "candidate_3049"
+      ],
+      "cluster_155": [
+        "candidate_0252",
+        "candidate_0312",
+        "candidate_0486",
+        "candidate_0528",
+        "candidate_0756",
+        "candidate_1206",
+        "candidate_1248",
+        "candidate_2292",
+        "candidate_2664",
+        "candidate_3726"
+      ],
+      "cluster_156": [
+        "candidate_0253",
+        "candidate_0529",
+        "candidate_0799",
+        "candidate_0973",
+        "candidate_1249",
+        "candidate_3769"
+      ],
+      "cluster_157": [
+        "candidate_0254",
+        "candidate_0974",
+        "candidate_3608",
+        "candidate_3650",
+        "candidate_3770",
+        "candidate_3962",
+        "candidate_3986"
+      ],
+      "cluster_158": [
+        "candidate_0256",
+        "candidate_0490",
+        "candidate_0802",
+        "candidate_2668",
+        "candidate_3772",
+        "candidate_3988"
+      ],
+      "cluster_159": [
+        "candidate_0258",
+        "candidate_0606",
+        "candidate_4446"
+      ],
+      "cluster_160": [
+        "candidate_0268",
+        "candidate_0724",
+        "candidate_0868",
+        "candidate_2428"
+      ],
+      "cluster_161": [
+        "candidate_0271",
+        "candidate_2191",
+        "candidate_2407",
+        "candidate_2569",
+        "candidate_2911",
+        "candidate_3127"
+      ],
+      "cluster_162": [
+        "candidate_0272",
+        "candidate_0296",
+        "candidate_2912",
+        "candidate_3170"
+      ],
+      "cluster_163": [
+        "candidate_0273",
+        "candidate_0297",
+        "candidate_0393",
+        "candidate_1473",
+        "candidate_1689",
+        "candidate_1851",
+        "candidate_2217",
+        "candidate_2571",
+        "candidate_2913",
+        "candidate_3129"
+      ],
+      "cluster_164": [
+        "candidate_0279",
+        "candidate_0537",
+        "candidate_1695",
+        "candidate_2415",
+        "candidate_2691",
+        "candidate_4011"
+      ],
+      "cluster_165": [
+        "candidate_0281",
+        "candidate_2417",
+        "candidate_2651"
+      ],
+      "cluster_166": [
+        "candidate_0285",
+        "candidate_2205",
+        "candidate_4353"
+      ],
+      "cluster_167": [
+        "candidate_0287",
+        "candidate_1781",
+        "candidate_2051",
+        "candidate_2813",
+        "candidate_4379"
+      ],
+      "cluster_168": [
+        "candidate_0298",
+        "candidate_0418",
+        "candidate_2914",
+        "candidate_2938"
+      ],
+      "cluster_169": [
+        "candidate_0299",
+        "candidate_0309",
+        "candidate_0471",
+        "candidate_2271",
+        "candidate_4383",
+        "candidate_0321",
+        "candidate_1971",
+        "candidate_2649",
+        "candidate_3633",
+        "candidate_3657",
+        "candidate_0351",
+        "candidate_0663",
+        "candidate_2775",
+        "candidate_3495",
+        "candidate_4815",
+        "candidate_0417",
+        "candidate_1497",
+        "candidate_2193",
+        "candidate_2451",
+        "candidate_3249",
+        "candidate_0419",
+        "candidate_1691",
+        "candidate_1853",
+        "candidate_2453",
+        "candidate_2915",
+        "candidate_3293",
+        "candidate_0429",
+        "candidate_2541",
+        "candidate_2619",
+        "candidate_4407",
+        "candidate_4695",
+        "candidate_4875",
+        "candidate_0513",
+        "candidate_1521",
+        "candidate_1929",
+        "candidate_2199",
+        "candidate_2241",
+        "candidate_2475",
+        "candidate_0639",
+        "candidate_0681",
+        "candidate_1509",
+        "candidate_1551",
+        "candidate_1821",
+        "candidate_2055",
+        "candidate_2925",
+        "candidate_0641",
+        "candidate_2987",
+        "candidate_0657",
+        "candidate_2091",
+        "candidate_4731",
+        "candidate_0687",
+        "candidate_2835",
+        "candidate_3339",
+        "candidate_4755",
+        "candidate_1511",
+        "candidate_2117",
+        "candidate_4361",
+        "candidate_4403",
+        "candidate_4577",
+        "candidate_1545",
+        "candidate_1701",
+        "candidate_1779",
+        "candidate_2049",
+        "candidate_4377",
+        "candidate_4611",
+        "candidate_4689",
+        "candidate_1553",
+        "candidate_1823",
+        "candidate_1901",
+        "candidate_2927",
+        "candidate_3533",
+        "candidate_4853",
+        "candidate_1747",
+        "candidate_2101",
+        "candidate_3307",
+        "candidate_4645",
+        "candidate_4765",
+        "candidate_1789",
+        "candidate_2587",
+        "candidate_2821",
+        "candidate_1867",
+        "candidate_2125",
+        "candidate_2845",
+        "candidate_3349",
+        "candidate_3541",
+        "candidate_4621",
+        "candidate_4741",
+        "candidate_1909",
+        "candidate_2467",
+        "candidate_3187",
+        "candidate_3229",
+        "candidate_3565",
+        "candidate_2229",
+        "candidate_2949",
+        "candidate_2991",
+        "candidate_3261",
+        "candidate_3555",
+        "candidate_2509",
+        "candidate_2629",
+        "candidate_4861",
+        "candidate_4885",
+        "candidate_2529",
+        "candidate_2937",
+        "candidate_3171",
+        "candidate_3141",
+        "candidate_4401",
+        "candidate_4809",
+        "candidate_3173",
+        "candidate_3219",
+        "candidate_3849",
+        "candidate_3891",
+        "candidate_3969"
+      ],
+      "cluster_170": [
+        "candidate_0300",
+        "candidate_0564",
+        "candidate_2244",
+        "candidate_3252"
+      ],
+      "cluster_171": [
+        "candidate_0301",
+        "candidate_0325",
+        "candidate_0421",
+        "candidate_0445",
+        "candidate_0541",
+        "candidate_0565",
+        "candidate_2221",
+        "candidate_2245",
+        "candidate_2533",
+        "candidate_2593",
+        "candidate_2653",
+        "candidate_2713",
+        "candidate_2941",
+        "candidate_2965",
+        "candidate_3253",
+        "candidate_3313",
+        "candidate_3373",
+        "candidate_3433",
+        "candidate_3661",
+        "candidate_3685",
+        "candidate_3973",
+        "candidate_4033",
+        "candidate_4093",
+        "candidate_4153"
+      ],
+      "cluster_172": [
+        "candidate_0302",
+        "candidate_2966"
+      ],
+      "cluster_173": [
+        "candidate_0303",
+        "candidate_3435",
+        "candidate_3663"
+      ],
+      "cluster_174": [
+        "candidate_0304",
+        "candidate_0328",
+        "candidate_0424",
+        "candidate_0448",
+        "candidate_0544",
+        "candidate_0568",
+        "candidate_2224",
+        "candidate_2248",
+        "candidate_2536",
+        "candidate_2596",
+        "candidate_2656",
+        "candidate_2716",
+        "candidate_2944",
+        "candidate_2968",
+        "candidate_3256",
+        "candidate_3316",
+        "candidate_3376",
+        "candidate_3436",
+        "candidate_3664",
+        "candidate_3688",
+        "candidate_3976",
+        "candidate_4036",
+        "candidate_4096",
+        "candidate_4156"
+      ],
+      "cluster_175": [
+        "candidate_0305",
+        "candidate_0329",
+        "candidate_0569",
+        "candidate_3257"
+      ],
+      "cluster_176": [
+        "candidate_0306",
+        "candidate_0468",
+        "candidate_2772",
+        "candidate_4692"
+      ],
+      "cluster_177": [
+        "candidate_0307",
+        "candidate_0349",
+        "candidate_0427",
+        "candidate_0469",
+        "candidate_0661",
+        "candidate_0685",
+        "candidate_2227",
+        "candidate_2269",
+        "candidate_2539",
+        "candidate_2617",
+        "candidate_2773",
+        "candidate_2833",
+        "candidate_2947",
+        "candidate_2989",
+        "candidate_3259",
+        "candidate_3337",
+        "candidate_3493",
+        "candidate_3553",
+        "candidate_4381",
+        "candidate_4405",
+        "candidate_4693",
+        "candidate_4753",
+        "candidate_4813",
+        "candidate_4873"
+      ],
+      "cluster_178": [
+        "candidate_0308",
+        "candidate_2270",
+        "candidate_2540",
+        "candidate_2948",
+        "candidate_4754"
+      ],
+      "cluster_179": [
+        "candidate_0310",
+        "candidate_0352",
+        "candidate_0430",
+        "candidate_0472",
+        "candidate_0664",
+        "candidate_0688",
+        "candidate_2230",
+        "candidate_2272",
+        "candidate_2542",
+        "candidate_2620",
+        "candidate_2776",
+        "candidate_2836",
+        "candidate_2950",
+        "candidate_2992",
+        "candidate_3262",
+        "candidate_3340",
+        "candidate_3496",
+        "candidate_3556",
+        "candidate_4384",
+        "candidate_4408",
+        "candidate_4696",
+        "candidate_4756",
+        "candidate_4816",
+        "candidate_4876"
+      ],
+      "cluster_180": [
+        "candidate_0311",
+        "candidate_0431",
+        "candidate_2231",
+        "candidate_2837",
+        "candidate_3497"
+      ],
+      "cluster_181": [
+        "candidate_0314",
+        "candidate_0530",
+        "candidate_1208",
+        "candidate_1250",
+        "candidate_2174"
+      ],
+      "cluster_182": [
+        "candidate_0316",
+        "candidate_0532",
+        "candidate_2176",
+        "candidate_2296",
+        "candidate_3652"
+      ],
+      "cluster_183": [
+        "candidate_0319",
+        "candidate_1519",
+        "candidate_1753",
+        "candidate_2647"
+      ],
+      "cluster_184": [
+        "candidate_0320",
+        "candidate_0536",
+        "candidate_1478",
+        "candidate_4010"
+      ],
+      "cluster_185": [
+        "candidate_0323",
+        "candidate_1757",
+        "candidate_2201",
+        "candidate_2243",
+        "candidate_2477",
+        "candidate_3893"
+      ],
+      "cluster_186": [
+        "candidate_0324",
+        "candidate_2592",
+        "candidate_3432",
+        "candidate_3972"
+      ],
+      "cluster_187": [
+        "candidate_0326",
+        "candidate_2654",
+        "candidate_2942",
+        "candidate_4094"
+      ],
+      "cluster_188": [
+        "candidate_0327",
+        "candidate_2223",
+        "candidate_2715",
+        "candidate_3375",
+        "candidate_4155"
+      ],
+      "cluster_189": [
+        "candidate_0330",
+        "candidate_0354",
+        "candidate_0708",
+        "candidate_2274",
+        "candidate_2736",
+        "candidate_2778",
+        "candidate_4212",
+        "candidate_4428",
+        "candidate_4932"
+      ],
+      "cluster_190": [
+        "candidate_0331",
+        "candidate_0355",
+        "candidate_0547",
+        "candidate_0589",
+        "candidate_0667",
+        "candidate_0709",
+        "candidate_2251",
+        "candidate_2275",
+        "candidate_2659",
+        "candidate_2737",
+        "candidate_2779",
+        "candidate_2857",
+        "candidate_3667",
+        "candidate_3709",
+        "candidate_3979",
+        "candidate_4057",
+        "candidate_4213",
+        "candidate_4273",
+        "candidate_4387",
+        "candidate_4429",
+        "candidate_4699",
+        "candidate_4777",
+        "candidate_4933",
+        "candidate_4993"
+      ],
+      "cluster_191": [
+        "candidate_0332",
+        "candidate_0356",
+        "candidate_3710",
+        "candidate_3980",
+        "candidate_4994"
+      ],
+      "cluster_192": [
+        "candidate_0333",
+        "candidate_0357",
+        "candidate_0549",
+        "candidate_4779"
+      ],
+      "cluster_193": [
+        "candidate_0334",
+        "candidate_0358",
+        "candidate_0550",
+        "candidate_0592",
+        "candidate_0670",
+        "candidate_0712",
+        "candidate_2254",
+        "candidate_2278",
+        "candidate_2662",
+        "candidate_2740",
+        "candidate_2782",
+        "candidate_2860",
+        "candidate_3670",
+        "candidate_3712",
+        "candidate_3982",
+        "candidate_4060",
+        "candidate_4216",
+        "candidate_4276",
+        "candidate_4390",
+        "candidate_4432",
+        "candidate_4702",
+        "candidate_4780",
+        "candidate_4936",
+        "candidate_4996"
+      ],
+      "cluster_194": [
+        "candidate_0335",
+        "candidate_0713",
+        "candidate_2663",
+        "candidate_4277"
+      ],
+      "cluster_195": [
+        "candidate_0336",
+        "candidate_0648",
+        "candidate_0822",
+        "candidate_2178",
+        "candidate_2760",
+        "candidate_4368"
+      ],
+      "cluster_196": [
+        "candidate_0342",
+        "candidate_1776",
+        "candidate_2088"
+      ],
+      "cluster_197": [
+        "candidate_0347",
+        "candidate_0635",
+        "candidate_1547",
+        "candidate_2501"
+      ],
+      "cluster_198": [
+        "candidate_0348",
+        "candidate_0660",
+        "candidate_0684",
+        "candidate_2226",
+        "candidate_2946",
+        "candidate_3552"
+      ],
+      "cluster_199": [
+        "candidate_0350",
+        "candidate_2774",
+        "candidate_2834",
+        "candidate_3338"
+      ],
+      "cluster_200": [
+        "candidate_0353",
+        "candidate_0665",
+        "candidate_2543",
+        "candidate_2951",
+        "candidate_3263",
+        "candidate_3341",
+        "candidate_4385",
+        "candidate_4697",
+        "candidate_4877"
+      ],
+      "cluster_201": [
+        "candidate_0359",
+        "candidate_2255",
+        "candidate_2741",
+        "candidate_3983",
+        "candidate_4703",
+        "candidate_4937"
+      ],
+      "cluster_202": [
+        "candidate_0362",
+        "candidate_0770",
+        "candidate_1568",
+        "candidate_3002"
+      ],
+      "cluster_203": [
+        "candidate_0364",
+        "candidate_1084",
+        "candidate_2908"
+      ],
+      "cluster_204": [
+        "candidate_0370",
+        "candidate_0778",
+        "candidate_2212",
+        "candidate_2332",
+        "candidate_3010"
+      ],
+      "cluster_205": [
+        "candidate_0378",
+        "candidate_0672",
+        "candidate_1176",
+        "candidate_2976",
+        "candidate_4800"
+      ],
+      "cluster_206": [
+        "candidate_0380",
+        "candidate_0830",
+        "candidate_2978",
+        "candidate_4394",
+        "candidate_4826"
+      ],
+      "cluster_207": [
+        "candidate_0384",
+        "candidate_1104",
+        "candidate_1446",
+        "candidate_1800"
+      ],
+      "cluster_208": [
+        "candidate_0388",
+        "candidate_0772"
+      ],
+      "cluster_209": [
+        "candidate_0391",
+        "candidate_0415",
+        "candidate_1471",
+        "candidate_1807",
+        "candidate_1849",
+        "candidate_2449",
+        "candidate_3247",
+        "candidate_3289"
+      ],
+      "cluster_210": [
+        "candidate_0394",
+        "candidate_2194",
+        "candidate_2410"
+      ],
+      "cluster_211": [
+        "candidate_0398",
+        "candidate_1814",
+        "candidate_1994",
+        "candidate_2918",
+        "candidate_3410",
+        "candidate_3638"
+      ],
+      "cluster_212": [
+        "candidate_0404",
+        "candidate_0638",
+        "candidate_1550"
+      ],
+      "cluster_213": [
+        "candidate_0412",
+        "candidate_0970",
+        "candidate_1132"
+      ],
+      "cluster_214": [
+        "candidate_0420",
+        "candidate_2532",
+        "candidate_3312",
+        "candidate_4032",
+        "candidate_4092"
+      ],
+      "cluster_215": [
+        "candidate_0422",
+        "candidate_0542",
+        "candidate_2246",
+        "candidate_2714",
+        "candidate_3254",
+        "candidate_3374",
+        "candidate_3662",
+        "candidate_3686",
+        "candidate_4154"
+      ],
+      "cluster_216": [
+        "candidate_0423",
+        "candidate_2655",
+        "candidate_2943"
+      ],
+      "cluster_217": [
+        "candidate_0425",
+        "candidate_2597",
+        "candidate_2657",
+        "candidate_2717",
+        "candidate_2969",
+        "candidate_3377",
+        "candidate_3437",
+        "candidate_3665",
+        "candidate_3689"
+      ],
+      "cluster_218": [
+        "candidate_0426",
+        "candidate_2268",
+        "candidate_2832",
+        "candidate_3492"
+      ],
+      "cluster_219": [
+        "candidate_0428",
+        "candidate_0470",
+        "candidate_2618",
+        "candidate_4406",
+        "candidate_4694",
+        "candidate_4874"
+      ],
+      "cluster_220": [
+        "candidate_0438",
+        "candidate_3192",
+        "candidate_3366",
+        "candidate_3636"
+      ],
+      "cluster_221": [
+        "candidate_0440",
+        "candidate_1502",
+        "candidate_1526",
+        "candidate_1874",
+        "candidate_3680"
+      ],
+      "cluster_222": [
+        "candidate_0441",
+        "candidate_2919",
+        "candidate_2961",
+        "candidate_3681",
+        "candidate_3855"
+      ],
+      "cluster_223": [
+        "candidate_0443",
+        "candidate_1529",
+        "candidate_1817",
+        "candidate_1937",
+        "candidate_1997",
+        "candidate_3197"
+      ],
+      "cluster_224": [
+        "candidate_0444",
+        "candidate_2940",
+        "candidate_2964",
+        "candidate_3684"
+      ],
+      "cluster_225": [
+        "candidate_0446",
+        "candidate_2222",
+        "candidate_3434",
+        "candidate_4034"
+      ],
+      "cluster_226": [
+        "candidate_0447",
+        "candidate_0543",
+        "candidate_2247",
+        "candidate_2535",
+        "candidate_2595",
+        "candidate_2967",
+        "candidate_3255",
+        "candidate_3687",
+        "candidate_3975",
+        "candidate_4095"
+      ],
+      "cluster_227": [
+        "candidate_0449",
+        "candidate_0545",
+        "candidate_2225",
+        "candidate_4037",
+        "candidate_4097",
+        "candidate_4157"
+      ],
+      "cluster_228": [
+        "candidate_0450",
+        "candidate_0474",
+        "candidate_0570",
+        "candidate_0594",
+        "candidate_0690",
+        "candidate_0714",
+        "candidate_2970",
+        "candidate_2994",
+        "candidate_3378",
+        "candidate_3456",
+        "candidate_3498",
+        "candidate_3576",
+        "candidate_3690",
+        "candidate_3714",
+        "candidate_4098",
+        "candidate_4176",
+        "candidate_4218",
+        "candidate_4296",
+        "candidate_4410",
+        "candidate_4434",
+        "candidate_4818",
+        "candidate_4896",
+        "candidate_4938",
+        "candidate_5016"
+      ],
+      "cluster_229": [
+        "candidate_0451",
+        "candidate_0475",
+        "candidate_0571",
+        "candidate_0595",
+        "candidate_0691",
+        "candidate_0715",
+        "candidate_2971",
+        "candidate_2995",
+        "candidate_3379",
+        "candidate_3457",
+        "candidate_3499",
+        "candidate_3577",
+        "candidate_3691",
+        "candidate_3715",
+        "candidate_4099",
+        "candidate_4177",
+        "candidate_4219",
+        "candidate_4297",
+        "candidate_4411",
+        "candidate_4435",
+        "candidate_4819",
+        "candidate_4897",
+        "candidate_4939",
+        "candidate_5017"
+      ],
+      "cluster_230": [
+        "candidate_0452",
+        "candidate_0476",
+        "candidate_0572",
+        "candidate_0596",
+        "candidate_0692",
+        "candidate_0716",
+        "candidate_2972",
+        "candidate_2996",
+        "candidate_3380",
+        "candidate_3458",
+        "candidate_3500",
+        "candidate_3578",
+        "candidate_3692",
+        "candidate_3716",
+        "candidate_4100",
+        "candidate_4178",
+        "candidate_4220",
+        "candidate_4298",
+        "candidate_4412",
+        "candidate_4436",
+        "candidate_4820",
+        "candidate_4898",
+        "candidate_4940",
+        "candidate_5018"
+      ],
+      "cluster_231": [
+        "candidate_0453",
+        "candidate_0693",
+        "candidate_0717",
+        "candidate_2973",
+        "candidate_3717",
+        "candidate_4221",
+        "candidate_5019"
+      ],
+      "cluster_232": [
+        "candidate_0454",
+        "candidate_0478",
+        "candidate_0574",
+        "candidate_0598",
+        "candidate_0694",
+        "candidate_0718",
+        "candidate_2974",
+        "candidate_2998",
+        "candidate_3382",
+        "candidate_3460",
+        "candidate_3502",
+        "candidate_3580",
+        "candidate_3694",
+        "candidate_3718",
+        "candidate_4102",
+        "candidate_4180",
+        "candidate_4222",
+        "candidate_4300",
+        "candidate_4414",
+        "candidate_4438",
+        "candidate_4822",
+        "candidate_4900",
+        "candidate_4942",
+        "candidate_5020"
+      ],
+      "cluster_233": [
+        "candidate_0455",
+        "candidate_3461",
+        "candidate_3695"
+      ],
+      "cluster_234": [
+        "candidate_0456",
+        "candidate_0828",
+        "candidate_1098",
+        "candidate_1332",
+        "candidate_4452"
+      ],
+      "cluster_235": [
+        "candidate_0473",
+        "candidate_4817"
+      ],
+      "cluster_236": [
+        "candidate_0477",
+        "candidate_3381",
+        "candidate_3459",
+        "candidate_4413",
+        "candidate_4821"
+      ],
+      "cluster_237": [
+        "candidate_0479",
+        "candidate_0575",
+        "candidate_2999",
+        "candidate_3503",
+        "candidate_3719",
+        "candidate_4823"
+      ],
+      "cluster_238": [
+        "candidate_0480",
+        "candidate_0732",
+        "candidate_0792",
+        "candidate_0912",
+        "candidate_1572",
+        "candidate_1632"
+      ],
+      "cluster_239": [
+        "candidate_0484",
+        "candidate_0796",
+        "candidate_1456",
+        "candidate_1516",
+        "candidate_1576",
+        "candidate_3628"
+      ],
+      "cluster_240": [
+        "candidate_0487",
+        "candidate_1207",
+        "candidate_2353",
+        "candidate_2665",
+        "candidate_3985"
+      ],
+      "cluster_241": [
+        "candidate_0504",
+        "candidate_1224",
+        "candidate_1920",
+        "candidate_1944",
+        "candidate_3600",
+        "candidate_3720"
+      ],
+      "cluster_242": [
+        "candidate_0505",
+        "candidate_1921",
+        "candidate_3625",
+        "candidate_3841"
+      ],
+      "cluster_243": [
+        "candidate_0516",
+        "candidate_1500",
+        "candidate_3678",
+        "candidate_3852"
+      ],
+      "cluster_244": [
+        "candidate_0524",
+        "candidate_0644",
+        "candidate_3860",
+        "candidate_4424",
+        "candidate_4580"
+      ],
+      "cluster_245": [
+        "candidate_0525",
+        "candidate_0705",
+        "candidate_4209",
+        "candidate_4929"
+      ],
+      "cluster_246": [
+        "candidate_0534",
+        "candidate_1692",
+        "candidate_2196",
+        "candidate_3846",
+        "candidate_3966"
+      ],
+      "cluster_247": [
+        "candidate_0538",
+        "candidate_1522",
+        "candidate_1696",
+        "candidate_1756",
+        "candidate_2416",
+        "candidate_3892",
+        "candidate_3970"
+      ],
+      "cluster_248": [
+        "candidate_0539",
+        "candidate_1973",
+        "candidate_3851"
+      ],
+      "cluster_249": [
+        "candidate_0540",
+        "candidate_2220",
+        "candidate_2652",
+        "candidate_2712",
+        "candidate_3372",
+        "candidate_3660",
+        "candidate_4152"
+      ],
+      "cluster_250": [
+        "candidate_0546",
+        "candidate_0666",
+        "candidate_4776"
+      ],
+      "cluster_251": [
+        "candidate_0548",
+        "candidate_2276",
+        "candidate_4274",
+        "candidate_4934"
+      ],
+      "cluster_252": [
+        "candidate_0551",
+        "candidate_2783",
+        "candidate_4061",
+        "candidate_4433"
+      ],
+      "cluster_253": [
+        "candidate_0561",
+        "candidate_1995",
+        "candidate_3135",
+        "candidate_3195"
+      ],
+      "cluster_254": [
+        "candidate_0563",
+        "candidate_1503",
+        "candidate_1527",
+        "candidate_1875",
+        "candidate_3915",
+        "candidate_1505",
+        "candidate_1877",
+        "candidate_2921",
+        "candidate_3683",
+        "candidate_3917",
+        "candidate_4091",
+        "candidate_4133"
+      ],
+      "cluster_255": [
+        "candidate_0566",
+        "candidate_2534",
+        "candidate_2594",
+        "candidate_3314",
+        "candidate_3974"
+      ],
+      "cluster_256": [
+        "candidate_0567",
+        "candidate_3315",
+        "candidate_4035"
+      ],
+      "cluster_257": [
+        "candidate_0573",
+        "candidate_0597",
+        "candidate_2997",
+        "candidate_3501",
+        "candidate_3579",
+        "candidate_3693"
+      ],
+      "cluster_258": [
+        "candidate_0578",
+        "candidate_3740",
+        "candidate_3818",
+        "candidate_4226",
+        "candidate_4538",
+        "candidate_4922",
+        "candidate_4946"
+      ],
+      "cluster_259": [
+        "candidate_0584",
+        "candidate_1940",
+        "candidate_2018",
+        "candidate_3704",
+        "candidate_4250",
+        "candidate_4970"
+      ],
+      "cluster_260": [
+        "candidate_0585",
+        "candidate_0645",
+        "candidate_2019"
+      ],
+      "cluster_261": [
+        "candidate_0588",
+        "candidate_2250",
+        "candidate_2856",
+        "candidate_3666"
+      ],
+      "cluster_262": [
+        "candidate_0590",
+        "candidate_2252",
+        "candidate_2780",
+        "candidate_2858"
+      ],
+      "cluster_263": [
+        "candidate_0591",
+        "candidate_2739",
+        "candidate_2859",
+        "candidate_4389",
+        "candidate_4935"
+      ],
+      "cluster_264": [
+        "candidate_0593",
+        "candidate_0671",
+        "candidate_2861",
+        "candidate_3713",
+        "candidate_4217",
+        "candidate_4391"
+      ],
+      "cluster_265": [
+        "candidate_0599",
+        "candidate_2975",
+        "candidate_4103",
+        "candidate_4439",
+        "candidate_4901"
+      ],
+      "cluster_266": [
+        "candidate_0600",
+        "candidate_1344",
+        "candidate_4344",
+        "candidate_4440"
+      ],
+      "cluster_267": [
+        "candidate_0602",
+        "candidate_0860",
+        "candidate_1580"
+      ],
+      "cluster_268": [
+        "candidate_0610",
+        "candidate_4330",
+        "candidate_4492"
+      ],
+      "cluster_269": [
+        "candidate_0612",
+        "candidate_2898",
+        "candidate_3018",
+        "candidate_3504",
+        "candidate_4824"
+      ],
+      "cluster_270": [
+        "candidate_0614",
+        "candidate_1100",
+        "candidate_1178",
+        "candidate_3098",
+        "candidate_4334",
+        "candidate_4514"
+      ],
+      "cluster_271": [
+        "candidate_0620",
+        "candidate_1220",
+        "candidate_1340",
+        "candidate_4340"
+      ],
+      "cluster_272": [
+        "candidate_0630",
+        "candidate_2046",
+        "candidate_2766",
+        "candidate_4350",
+        "candidate_4374",
+        "candidate_4566",
+        "candidate_4608"
+      ],
+      "cluster_273": [
+        "candidate_0632",
+        "candidate_1700",
+        "candidate_1778",
+        "candidate_2048",
+        "candidate_2090",
+        "candidate_2810",
+        "candidate_4352",
+        "candidate_4568",
+        "candidate_4688"
+      ],
+      "cluster_274": [
+        "candidate_0636",
+        "candidate_0678",
+        "candidate_3138",
+        "candidate_4356",
+        "candidate_4806"
+      ],
+      "cluster_275": [
+        "candidate_0647",
+        "candidate_2021",
+        "candidate_4367"
+      ],
+      "cluster_276": [
+        "candidate_0650",
+        "candidate_0764",
+        "candidate_1328",
+        "candidate_2180",
+        "candidate_2300",
+        "candidate_2762",
+        "candidate_2786",
+        "candidate_4682"
+      ],
+      "cluster_277": [
+        "candidate_0652",
+        "candidate_0766",
+        "candidate_1330",
+        "candidate_1372",
+        "candidate_2302",
+        "candidate_2764",
+        "candidate_4372",
+        "candidate_4708"
+      ],
+      "cluster_278": [
+        "candidate_0659",
+        "candidate_1487",
+        "candidate_4355",
+        "candidate_4613",
+        "candidate_4733"
+      ],
+      "cluster_279": [
+        "candidate_0662",
+        "candidate_2228",
+        "candidate_2990",
+        "candidate_3494",
+        "candidate_4382",
+        "candidate_4814"
+      ],
+      "cluster_280": [
+        "candidate_0668",
+        "candidate_2738",
+        "candidate_3668",
+        "candidate_4058",
+        "candidate_4214",
+        "candidate_4388",
+        "candidate_4430",
+        "candidate_4700"
+      ],
+      "cluster_281": [
+        "candidate_0669",
+        "candidate_2661",
+        "candidate_2781",
+        "candidate_3981"
+      ],
+      "cluster_282": [
+        "candidate_0680",
+        "candidate_1820",
+        "candidate_2054",
+        "candidate_3218",
+        "candidate_3530",
+        "candidate_4850"
+      ],
+      "cluster_283": [
+        "candidate_0686",
+        "candidate_3260",
+        "candidate_3554"
+      ],
+      "cluster_284": [
+        "candidate_0689",
+        "candidate_2621",
+        "candidate_3557",
+        "candidate_4409",
+        "candidate_4757"
+      ],
+      "cluster_285": [
+        "candidate_0695",
+        "candidate_0719",
+        "candidate_3581",
+        "candidate_4415",
+        "candidate_4943",
+        "candidate_5021"
+      ],
+      "cluster_286": [
+        "candidate_0696",
+        "candidate_0810",
+        "candidate_0834",
+        "candidate_3816",
+        "candidate_4338"
+      ],
+      "cluster_287": [
+        "candidate_0702",
+        "candidate_1554",
+        "candidate_1938",
+        "candidate_4206",
+        "candidate_4248"
+      ],
+      "cluster_288": [
+        "candidate_0710",
+        "candidate_2660",
+        "candidate_4778"
+      ],
+      "cluster_289": [
+        "candidate_0711",
+        "candidate_2253",
+        "candidate_3669",
+        "candidate_4995"
+      ],
+      "cluster_290": [
+        "candidate_0721",
+        "candidate_0961",
+        "candidate_1681",
+        "candidate_2425"
+      ],
+      "cluster_291": [
+        "candidate_0733",
+        "candidate_1225",
+        "candidate_1633",
+        "candidate_1945",
+        "candidate_3601",
+        "candidate_3745"
+      ],
+      "cluster_292": [
+        "candidate_0736",
+        "candidate_0856",
+        "candidate_3604"
+      ],
+      "cluster_293": [
+        "candidate_0754",
+        "candidate_0775",
+        "candidate_1009",
+        "candidate_2167",
+        "candidate_1012",
+        "candidate_1090",
+        "candidate_2290",
+        "candidate_2524",
+        "candidate_2890",
+        "candidate_2932",
+        "candidate_3052",
+        "candidate_3244",
+        "candidate_3268",
+        "candidate_1129",
+        "candidate_3007",
+        "candidate_2329",
+        "candidate_2521",
+        "candidate_2929"
+      ],
+      "cluster_294": [
+        "candidate_0760",
+        "candidate_1210",
+        "candidate_1252",
+        "candidate_2644",
+        "candidate_3730",
+        "candidate_3964"
+      ],
+      "cluster_295": [
+        "candidate_0762",
+        "candidate_1368",
+        "candidate_2298",
+        "candidate_2784",
+        "candidate_4704"
+      ],
+      "cluster_296": [
+        "candidate_0769",
+        "candidate_1105",
+        "candidate_1801",
+        "candidate_2905"
+      ],
+      "cluster_297": [
+        "candidate_0780",
+        "candidate_1152"
+      ],
+      "cluster_298": [
+        "candidate_0782",
+        "candidate_0806",
+        "candidate_1154",
+        "candidate_3014",
+        "candidate_3614"
+      ],
+      "cluster_299": [
+        "candidate_0786",
+        "candidate_1392",
+        "candidate_3096",
+        "candidate_4332",
+        "candidate_4392",
+        "candidate_4512"
+      ],
+      "cluster_300": [
+        "candidate_0800",
+        "candidate_2294"
+      ],
+      "cluster_301": [
+        "candidate_0804",
+        "candidate_1092"
+      ],
+      "cluster_302": [
+        "candidate_0812",
+        "candidate_1418",
+        "candidate_3620",
+        "candidate_3698",
+        "candidate_4418"
+      ],
+      "cluster_303": [
+        "candidate_0816",
+        "candidate_0858",
+        "candidate_1320",
+        "candidate_2040"
+      ],
+      "cluster_304": [
+        "candidate_0824",
+        "candidate_1370"
+      ],
+      "cluster_305": [
+        "candidate_0844",
+        "candidate_0988",
+        "candidate_2284"
+      ],
+      "cluster_306": [
+        "candidate_0847",
+        "candidate_1081",
+        "candidate_1567",
+        "candidate_1609",
+        "candidate_3025"
+      ],
+      "cluster_307": [
+        "candidate_0854",
+        "candidate_1226",
+        "candidate_1574",
+        "candidate_3602",
+        "candidate_3722"
+      ],
+      "cluster_308": [
+        "candidate_0866",
+        "candidate_2162",
+        "candidate_2186"
+      ],
+      "cluster_309": [
+        "candidate_0871",
+        "candidate_0991",
+        "candidate_1015",
+        "candidate_1615",
+        "candidate_1711",
+        "candidate_2311",
+        "candidate_3031",
+        "candidate_3271"
+      ],
+      "cluster_310": [
+        "candidate_0872",
+        "candidate_0896",
+        "candidate_3032",
+        "candidate_3176",
+        "candidate_3296"
+      ],
+      "cluster_311": [
+        "candidate_0873",
+        "candidate_1737"
+      ],
+      "cluster_312": [
+        "candidate_0874",
+        "candidate_1138",
+        "candidate_1858",
+        "candidate_3034",
+        "candidate_3154"
+      ],
+      "cluster_313": [
+        "candidate_0875",
+        "candidate_0899",
+        "candidate_1115",
+        "candidate_1739",
+        "candidate_2339",
+        "candidate_2555",
+        "candidate_3179"
+      ],
+      "cluster_314": [
+        "candidate_0876",
+        "candidate_1950",
+        "candidate_3750",
+        "candidate_4014"
+      ],
+      "cluster_315": [
+        "candidate_0878",
+        "candidate_1598",
+        "candidate_1640",
+        "candidate_2318",
+        "candidate_2360",
+        "candidate_3752",
+        "candidate_4016"
+      ],
+      "cluster_316": [
+        "candidate_0879",
+        "candidate_0999",
+        "candidate_1599",
+        "candidate_1977",
+        "candidate_2319",
+        "candidate_2481",
+        "candidate_3777",
+        "candidate_4017"
+      ],
+      "cluster_317": [
+        "candidate_0881",
+        "candidate_1001",
+        "candidate_1043",
+        "candidate_2321"
+      ],
+      "cluster_318": [
+        "candidate_0882",
+        "candidate_1350",
+        "candidate_1602",
+        "candidate_1662",
+        "candidate_1782",
+        "candidate_2502",
+        "candidate_2814",
+        "candidate_4710"
+      ],
+      "cluster_319": [
+        "candidate_0884",
+        "candidate_1064",
+        "candidate_1604",
+        "candidate_1724",
+        "candidate_2072",
+        "candidate_2792",
+        "candidate_4472"
+      ],
+      "cluster_320": [
+        "candidate_0885",
+        "candidate_0945",
+        "candidate_1005",
+        "candidate_1605",
+        "candidate_2325",
+        "candidate_2505",
+        "candidate_2793",
+        "candidate_4473",
+        "candidate_4497",
+        "candidate_4713"
+      ],
+      "cluster_321": [
+        "candidate_0887",
+        "candidate_0947",
+        "candidate_2075",
+        "candidate_4475",
+        "candidate_4499"
+      ],
+      "cluster_322": [
+        "candidate_0892",
+        "candidate_1450",
+        "candidate_1492",
+        "candidate_1570",
+        "candidate_3148"
+      ],
+      "cluster_323": [
+        "candidate_0895",
+        "candidate_1591",
+        "candidate_2455"
+      ],
+      "cluster_324": [
+        "candidate_0897",
+        "candidate_1017",
+        "candidate_1857",
+        "candidate_2553",
+        "candidate_2577",
+        "candidate_3057",
+        "candidate_3153"
+      ],
+      "cluster_325": [
+        "candidate_0898",
+        "candidate_1018",
+        "candidate_1618",
+        "candidate_1834",
+        "candidate_2314",
+        "candidate_3298"
+      ],
+      "cluster_326": [
+        "candidate_0900",
+        "candidate_1116",
+        "candidate_1236",
+        "candidate_3414",
+        "candidate_3756",
+        "candidate_3798",
+        "candidate_4134"
+      ],
+      "cluster_327": [
+        "candidate_0901",
+        "candidate_0925",
+        "candidate_1117",
+        "candidate_1159",
+        "candidate_1237",
+        "candidate_1279",
+        "candidate_1621",
+        "candidate_1645",
+        "candidate_1837",
+        "candidate_1879",
+        "candidate_1957",
+        "candidate_1999",
+        "candidate_3037",
+        "candidate_3079",
+        "candidate_3157",
+        "candidate_3199",
+        "candidate_3391",
+        "candidate_3415",
+        "candidate_3757",
+        "candidate_3799",
+        "candidate_3877",
+        "candidate_3919",
+        "candidate_4111",
+        "candidate_4135"
+      ],
+      "cluster_328": [
+        "candidate_0902",
+        "candidate_1838",
+        "candidate_2000",
+        "candidate_3758"
+      ],
+      "cluster_329": [
+        "candidate_0903",
+        "candidate_3759",
+        "candidate_3801"
+      ],
+      "cluster_330": [
+        "candidate_0904",
+        "candidate_0928",
+        "candidate_1120",
+        "candidate_1162",
+        "candidate_1240",
+        "candidate_1282",
+        "candidate_1624",
+        "candidate_1648",
+        "candidate_1840",
+        "candidate_1882",
+        "candidate_1960",
+        "candidate_2002",
+        "candidate_3040",
+        "candidate_3082",
+        "candidate_3160",
+        "candidate_3202",
+        "candidate_3394",
+        "candidate_3418",
+        "candidate_3760",
+        "candidate_3802",
+        "candidate_3880",
+        "candidate_3922",
+        "candidate_4114",
+        "candidate_4138"
+      ],
+      "cluster_331": [
+        "candidate_0905",
+        "candidate_3083",
+        "candidate_3419",
+        "candidate_3881",
+        "candidate_3923",
+        "candidate_4115",
+        "candidate_4139"
+      ],
+      "cluster_332": [
+        "candidate_0906",
+        "candidate_3534",
+        "candidate_4830"
+      ],
+      "cluster_333": [
+        "candidate_0907",
+        "candidate_0949",
+        "candidate_1123",
+        "candidate_1183",
+        "candidate_1357",
+        "candidate_1399",
+        "candidate_1627",
+        "candidate_1669",
+        "candidate_1843",
+        "candidate_1903",
+        "candidate_2077",
+        "candidate_2119",
+        "candidate_3043",
+        "candidate_3103",
+        "candidate_3163",
+        "candidate_3223",
+        "candidate_3511",
+        "candidate_3535",
+        "candidate_4477",
+        "candidate_4519",
+        "candidate_4597",
+        "candidate_4639",
+        "candidate_4831",
+        "candidate_4855"
+      ],
+      "cluster_334": [
+        "candidate_0908",
+        "candidate_1904",
+        "candidate_3104",
+        "candidate_3224",
+        "candidate_3512",
+        "candidate_4640"
+      ],
+      "cluster_335": [
+        "candidate_0909",
+        "candidate_1185",
+        "candidate_1629",
+        "candidate_2121",
+        "candidate_3045",
+        "candidate_3225",
+        "candidate_4641",
+        "candidate_4857"
+      ],
+      "cluster_336": [
+        "candidate_0910",
+        "candidate_0952",
+        "candidate_1126",
+        "candidate_1186",
+        "candidate_1360",
+        "candidate_1402",
+        "candidate_1630",
+        "candidate_1672",
+        "candidate_1846",
+        "candidate_1906",
+        "candidate_2080",
+        "candidate_2122",
+        "candidate_3046",
+        "candidate_3106",
+        "candidate_3166",
+        "candidate_3226",
+        "candidate_3514",
+        "candidate_3538",
+        "candidate_4480",
+        "candidate_4522",
+        "candidate_4600",
+        "candidate_4642",
+        "candidate_4834",
+        "candidate_4858"
+      ],
+      "cluster_337": [
+        "candidate_0911",
+        "candidate_1403",
+        "candidate_1907",
+        "candidate_3227",
+        "candidate_3515",
+        "candidate_4481",
+        "candidate_4835"
+      ],
+      "cluster_338": [
+        "candidate_0918",
+        "candidate_1038",
+        "candidate_1254",
+        "candidate_2478"
+      ],
+      "cluster_339": [
+        "candidate_0920",
+        "candidate_0998",
+        "candidate_1232",
+        "candidate_1256"
+      ],
+      "cluster_340": [
+        "candidate_0921",
+        "candidate_1719",
+        "candidate_1761",
+        "candidate_2361",
+        "candidate_2439",
+        "candidate_3873",
+        "candidate_3897"
+      ],
+      "cluster_341": [
+        "candidate_0923",
+        "candidate_1721",
+        "candidate_2675"
+      ],
+      "cluster_342": [
+        "candidate_0924",
+        "candidate_1278",
+        "candidate_1956",
+        "candidate_1998",
+        "candidate_3918"
+      ],
+      "cluster_343": [
+        "candidate_0926",
+        "candidate_1118",
+        "candidate_1160",
+        "candidate_1280",
+        "candidate_1646",
+        "candidate_3038"
+      ],
+      "cluster_344": [
+        "candidate_0927",
+        "candidate_1161",
+        "candidate_1647",
+        "candidate_3879",
+        "candidate_4137"
+      ],
+      "cluster_345": [
+        "candidate_0929",
+        "candidate_1241",
+        "candidate_1283",
+        "candidate_1625",
+        "candidate_3041",
+        "candidate_3203"
+      ],
+      "cluster_346": [
+        "candidate_0930",
+        "candidate_1422",
+        "candidate_2082",
+        "candidate_3822",
+        "candidate_4230",
+        "candidate_4254"
+      ],
+      "cluster_347": [
+        "candidate_0931",
+        "candidate_0955",
+        "candidate_1243",
+        "candidate_1303",
+        "candidate_1363",
+        "candidate_1423",
+        "candidate_1651",
+        "candidate_1675",
+        "candidate_1963",
+        "candidate_2023",
+        "candidate_2083",
+        "candidate_2143",
+        "candidate_3763",
+        "candidate_3823",
+        "candidate_3883",
+        "candidate_3943",
+        "candidate_4231",
+        "candidate_4255",
+        "candidate_4483",
+        "candidate_4543",
+        "candidate_4603",
+        "candidate_4663",
+        "candidate_4951",
+        "candidate_4975"
+      ],
+      "cluster_348": [
+        "candidate_0932",
+        "candidate_1304",
+        "candidate_2144",
+        "candidate_3764"
+      ],
+      "cluster_349": [
+        "candidate_0933",
+        "candidate_1245",
+        "candidate_2085",
+        "candidate_4233",
+        "candidate_4545",
+        "candidate_4605"
+      ],
+      "cluster_350": [
+        "candidate_0934",
+        "candidate_0958",
+        "candidate_1246",
+        "candidate_1306",
+        "candidate_1366",
+        "candidate_1426",
+        "candidate_1654",
+        "candidate_1678",
+        "candidate_1966",
+        "candidate_2026",
+        "candidate_2086",
+        "candidate_2146",
+        "candidate_3766",
+        "candidate_3826",
+        "candidate_3886",
+        "candidate_3946",
+        "candidate_4234",
+        "candidate_4258",
+        "candidate_4486",
+        "candidate_4546",
+        "candidate_4606",
+        "candidate_4666",
+        "candidate_4954",
+        "candidate_4978"
+      ],
+      "cluster_351": [
+        "candidate_0935",
+        "candidate_1247",
+        "candidate_1655",
+        "candidate_3767",
+        "candidate_3947",
+        "candidate_4955"
+      ],
+      "cluster_352": [
+        "candidate_0942",
+        "candidate_1374",
+        "candidate_2442",
+        "candidate_4470",
+        "candidate_4494",
+        "candidate_4734"
+      ],
+      "cluster_353": [
+        "candidate_0944",
+        "candidate_1004",
+        "candidate_2444"
+      ],
+      "cluster_354": [
+        "candidate_0948",
+        "candidate_1356",
+        "candidate_1626",
+        "candidate_1668",
+        "candidate_2076",
+        "candidate_4854"
+      ],
+      "cluster_355": [
+        "candidate_0950",
+        "candidate_1184",
+        "candidate_4598"
+      ],
+      "cluster_356": [
+        "candidate_0951",
+        "candidate_1401",
+        "candidate_2079",
+        "candidate_3105"
+      ],
+      "cluster_357": [
+        "candidate_0953",
+        "candidate_1127",
+        "candidate_1187",
+        "candidate_1631",
+        "candidate_1673",
+        "candidate_3167"
+      ],
+      "cluster_358": [
+        "candidate_0954",
+        "candidate_1650",
+        "candidate_1674",
+        "candidate_2142"
+      ],
+      "cluster_359": [
+        "candidate_0956",
+        "candidate_1244",
+        "candidate_1652",
+        "candidate_1676",
+        "candidate_2024",
+        "candidate_2084",
+        "candidate_3824",
+        "candidate_3884",
+        "candidate_3944",
+        "candidate_4544",
+        "candidate_4976"
+      ],
+      "cluster_360": [
+        "candidate_0957",
+        "candidate_4977"
+      ],
+      "cluster_361": [
+        "candidate_0959",
+        "candidate_1967",
+        "candidate_4259",
+        "candidate_4667"
+      ],
+      "cluster_362": [
+        "candidate_0972",
+        "candidate_3606",
+        "candidate_3960",
+        "candidate_3984"
+      ],
+      "cluster_363": [
+        "candidate_0978",
+        "candidate_1056",
+        "candidate_1326",
+        "candidate_2256",
+        "candidate_4326"
+      ],
+      "cluster_364": [
+        "candidate_0984",
+        "candidate_1584",
+        "candidate_2160",
+        "candidate_2184",
+        "candidate_2280"
+      ],
+      "cluster_365": [
+        "candidate_0992",
+        "candidate_1832",
+        "candidate_2456",
+        "candidate_2552",
+        "candidate_3272"
+      ],
+      "cluster_366": [
+        "candidate_0993",
+        "candidate_1617",
+        "candidate_2337",
+        "candidate_2457"
+      ],
+      "cluster_367": [
+        "candidate_0994",
+        "candidate_1714",
+        "candidate_2434",
+        "candidate_3178",
+        "candidate_3274"
+      ],
+      "cluster_368": [
+        "candidate_0995",
+        "candidate_1595",
+        "candidate_3035",
+        "candidate_3155"
+      ],
+      "cluster_369": [
+        "candidate_0996",
+        "candidate_1596",
+        "candidate_1716",
+        "candidate_2436",
+        "candidate_3774",
+        "candidate_3894",
+        "candidate_3990"
+      ],
+      "cluster_370": [
+        "candidate_1002",
+        "candidate_1062",
+        "candidate_1722",
+        "candidate_2070",
+        "candidate_2790",
+        "candidate_4614"
+      ],
+      "cluster_371": [
+        "candidate_1007",
+        "candidate_2099",
+        "candidate_2327",
+        "candidate_2447",
+        "candidate_4595"
+      ],
+      "cluster_372": [
+        "candidate_1016",
+        "candidate_1112",
+        "candidate_1712",
+        "candidate_2312",
+        "candidate_2336",
+        "candidate_2432"
+      ],
+      "cluster_373": [
+        "candidate_1019",
+        "candidate_1139",
+        "candidate_1619",
+        "candidate_1835",
+        "candidate_2315",
+        "candidate_3299"
+      ],
+      "cluster_374": [
+        "candidate_1020",
+        "candidate_1044",
+        "candidate_2598",
+        "candidate_2718",
+        "candidate_3276",
+        "candidate_4158"
+      ],
+      "cluster_375": [
+        "candidate_1021",
+        "candidate_1045",
+        "candidate_1141",
+        "candidate_1165",
+        "candidate_1261",
+        "candidate_1285",
+        "candidate_2341",
+        "candidate_2365",
+        "candidate_2557",
+        "candidate_2599",
+        "candidate_2677",
+        "candidate_2719",
+        "candidate_3061",
+        "candidate_3085",
+        "candidate_3277",
+        "candidate_3319",
+        "candidate_3397",
+        "candidate_3439",
+        "candidate_3781",
+        "candidate_3805",
+        "candidate_3997",
+        "candidate_4039",
+        "candidate_4117",
+        "candidate_4159"
+      ],
+      "cluster_376": [
+        "candidate_1022",
+        "candidate_1262",
+        "candidate_2720",
+        "candidate_3782",
+        "candidate_3998"
+      ],
+      "cluster_377": [
+        "candidate_1023",
+        "candidate_1047",
+        "candidate_1143",
+        "candidate_1167",
+        "candidate_2601",
+        "candidate_3999",
+        "candidate_4041"
+      ],
+      "cluster_378": [
+        "candidate_1024",
+        "candidate_1048",
+        "candidate_1144",
+        "candidate_1168",
+        "candidate_1264",
+        "candidate_1288",
+        "candidate_2344",
+        "candidate_2368",
+        "candidate_2560",
+        "candidate_2602",
+        "candidate_2680",
+        "candidate_2722",
+        "candidate_3064",
+        "candidate_3088",
+        "candidate_3280",
+        "candidate_3322",
+        "candidate_3400",
+        "candidate_3442",
+        "candidate_3784",
+        "candidate_3808",
+        "candidate_4000",
+        "candidate_4042",
+        "candidate_4120",
+        "candidate_4162"
+      ],
+      "cluster_379": [
+        "candidate_1025",
+        "candidate_1049",
+        "candidate_1145",
+        "candidate_2723",
+        "candidate_3401",
+        "candidate_3809",
+        "candidate_4163"
+      ],
+      "cluster_380": [
+        "candidate_1026",
+        "candidate_1068",
+        "candidate_1188",
+        "candidate_2796",
+        "candidate_3066",
+        "candidate_3108"
+      ],
+      "cluster_381": [
+        "candidate_1027",
+        "candidate_1069",
+        "candidate_1147",
+        "candidate_1189",
+        "candidate_1381",
+        "candidate_1405",
+        "candidate_2347",
+        "candidate_2389",
+        "candidate_2563",
+        "candidate_2623",
+        "candidate_2797",
+        "candidate_2839",
+        "candidate_3067",
+        "candidate_3109",
+        "candidate_3283",
+        "candidate_3343",
+        "candidate_3517",
+        "candidate_3559",
+        "candidate_4501",
+        "candidate_4525",
+        "candidate_4717",
+        "candidate_4759",
+        "candidate_4837",
+        "candidate_4879"
+      ],
+      "cluster_382": [
+        "candidate_1028",
+        "candidate_1148",
+        "candidate_2798",
+        "candidate_3068",
+        "candidate_4718",
+        "candidate_4760",
+        "candidate_4838",
+        "candidate_4880"
+      ],
+      "cluster_383": [
+        "candidate_1029",
+        "candidate_1071",
+        "candidate_1191",
+        "candidate_1383",
+        "candidate_2565",
+        "candidate_2625",
+        "candidate_2799",
+        "candidate_3285",
+        "candidate_4839"
+      ],
+      "cluster_384": [
+        "candidate_1030",
+        "candidate_1072",
+        "candidate_1150",
+        "candidate_1192",
+        "candidate_1384",
+        "candidate_1408",
+        "candidate_2350",
+        "candidate_2392",
+        "candidate_2566",
+        "candidate_2626",
+        "candidate_2800",
+        "candidate_2842",
+        "candidate_3070",
+        "candidate_3112",
+        "candidate_3286",
+        "candidate_3346",
+        "candidate_3520",
+        "candidate_3562",
+        "candidate_4504",
+        "candidate_4528",
+        "candidate_4720",
+        "candidate_4762",
+        "candidate_4840",
+        "candidate_4882"
+      ],
+      "cluster_385": [
+        "candidate_1031",
+        "candidate_1385",
+        "candidate_2393",
+        "candidate_2801",
+        "candidate_3521"
+      ],
+      "cluster_386": [
+        "candidate_1033",
+        "candidate_2173",
+        "candidate_3727",
+        "candidate_3961"
+      ],
+      "cluster_387": [
+        "candidate_1040",
+        "candidate_2672",
+        "candidate_2696",
+        "candidate_3896"
+      ],
+      "cluster_388": [
+        "candidate_1041",
+        "candidate_1233",
+        "candidate_1257",
+        "candidate_2673"
+      ],
+      "cluster_389": [
+        "candidate_1046",
+        "candidate_1142",
+        "candidate_1166",
+        "candidate_3278",
+        "candidate_3440"
+      ],
+      "cluster_390": [
+        "candidate_1050",
+        "candidate_2394",
+        "candidate_2802",
+        "candidate_4002",
+        "candidate_4548",
+        "candidate_4722"
+      ],
+      "cluster_391": [
+        "candidate_1051",
+        "candidate_1075",
+        "candidate_1267",
+        "candidate_1309",
+        "candidate_1387",
+        "candidate_1429",
+        "candidate_2371",
+        "candidate_2395",
+        "candidate_2683",
+        "candidate_2743",
+        "candidate_2803",
+        "candidate_2863",
+        "candidate_3787",
+        "candidate_3829",
+        "candidate_4003",
+        "candidate_4063",
+        "candidate_4237",
+        "candidate_4279",
+        "candidate_4507",
+        "candidate_4549",
+        "candidate_4723",
+        "candidate_4783",
+        "candidate_4957",
+        "candidate_4999"
+      ],
+      "cluster_392": [
+        "candidate_1052",
+        "candidate_2804",
+        "candidate_2864",
+        "candidate_4724"
+      ],
+      "cluster_393": [
+        "candidate_1053",
+        "candidate_2397",
+        "candidate_2745",
+        "candidate_4065",
+        "candidate_4785"
+      ],
+      "cluster_394": [
+        "candidate_1054",
+        "candidate_1078",
+        "candidate_1270",
+        "candidate_1312",
+        "candidate_1390",
+        "candidate_1432",
+        "candidate_2374",
+        "candidate_2398",
+        "candidate_2686",
+        "candidate_2746",
+        "candidate_2806",
+        "candidate_2866",
+        "candidate_3790",
+        "candidate_3832",
+        "candidate_4006",
+        "candidate_4066",
+        "candidate_4240",
+        "candidate_4282",
+        "candidate_4510",
+        "candidate_4552",
+        "candidate_4726",
+        "candidate_4786",
+        "candidate_4960",
+        "candidate_5002"
+      ],
+      "cluster_395": [
+        "candidate_1055",
+        "candidate_1271",
+        "candidate_1313",
+        "candidate_2687",
+        "candidate_2807",
+        "candidate_3791",
+        "candidate_4067",
+        "candidate_4241"
+      ],
+      "cluster_396": [
+        "candidate_1065",
+        "candidate_1665"
+      ],
+      "cluster_397": [
+        "candidate_1067",
+        "candidate_1355",
+        "candidate_1607",
+        "candidate_1667",
+        "candidate_2795",
+        "candidate_2819",
+        "candidate_4619"
+      ],
+      "cluster_398": [
+        "candidate_1070",
+        "candidate_1382",
+        "candidate_2390",
+        "candidate_2564",
+        "candidate_4502"
+      ],
+      "cluster_399": [
+        "candidate_1073",
+        "candidate_1151",
+        "candidate_1193",
+        "candidate_1409",
+        "candidate_2351",
+        "candidate_3287",
+        "candidate_4841"
+      ],
+      "cluster_400": [
+        "candidate_1074",
+        "candidate_1386",
+        "candidate_4062",
+        "candidate_4236"
+      ],
+      "cluster_401": [
+        "candidate_1076",
+        "candidate_1310",
+        "candidate_4064",
+        "candidate_4508",
+        "candidate_4784"
+      ],
+      "cluster_402": [
+        "candidate_1077",
+        "candidate_1269",
+        "candidate_2373",
+        "candidate_3789",
+        "candidate_4281"
+      ],
+      "cluster_403": [
+        "candidate_1079",
+        "candidate_1391",
+        "candidate_2375",
+        "candidate_2867",
+        "candidate_4007",
+        "candidate_4787",
+        "candidate_4961"
+      ],
+      "cluster_404": [
+        "candidate_1111",
+        "candidate_1735",
+        "candidate_1855",
+        "candidate_2431",
+        "candidate_3151"
+      ],
+      "cluster_405": [
+        "candidate_1113",
+        "candidate_1593",
+        "candidate_2313",
+        "candidate_2433",
+        "candidate_3033",
+        "candidate_3273",
+        "candidate_3297"
+      ],
+      "cluster_406": [
+        "candidate_1114",
+        "candidate_1594",
+        "candidate_2338",
+        "candidate_2458",
+        "candidate_2554",
+        "candidate_3058"
+      ],
+      "cluster_407": [
+        "candidate_1119",
+        "candidate_1281",
+        "candidate_1959",
+        "candidate_3393",
+        "candidate_3921"
+      ],
+      "cluster_408": [
+        "candidate_1121",
+        "candidate_1649",
+        "candidate_1961",
+        "candidate_3161",
+        "candidate_3761",
+        "candidate_3803"
+      ],
+      "cluster_409": [
+        "candidate_1122",
+        "candidate_1902",
+        "candidate_3162",
+        "candidate_3510",
+        "candidate_4518",
+        "candidate_4638"
+      ],
+      "cluster_410": [
+        "candidate_1124",
+        "candidate_1628",
+        "candidate_1670",
+        "candidate_2078",
+        "candidate_3164"
+      ],
+      "cluster_411": [
+        "candidate_1125",
+        "candidate_1359",
+        "candidate_1845",
+        "candidate_1905",
+        "candidate_3165",
+        "candidate_4599",
+        "candidate_1361",
+        "candidate_3047",
+        "candidate_3539",
+        "candidate_1671",
+        "candidate_3513",
+        "candidate_3537",
+        "candidate_4479",
+        "candidate_4521",
+        "candidate_4833",
+        "candidate_1847",
+        "candidate_2081",
+        "candidate_3107",
+        "candidate_4601",
+        "candidate_4859",
+        "candidate_2123",
+        "candidate_4523",
+        "candidate_4643"
+      ],
+      "cluster_412": [
+        "candidate_1135",
+        "candidate_2551",
+        "candidate_2575",
+        "candidate_3295"
+      ],
+      "cluster_413": [
+        "candidate_1136",
+        "candidate_1592",
+        "candidate_1616",
+        "candidate_1856",
+        "candidate_2576",
+        "candidate_3056"
+      ],
+      "cluster_414": [
+        "candidate_1137",
+        "candidate_1713",
+        "candidate_1833",
+        "candidate_3177"
+      ],
+      "cluster_415": [
+        "candidate_1140",
+        "candidate_1260",
+        "candidate_3060",
+        "candidate_4038"
+      ],
+      "cluster_416": [
+        "candidate_1146",
+        "candidate_3342",
+        "candidate_3558",
+        "candidate_4758"
+      ],
+      "cluster_417": [
+        "candidate_1149",
+        "candidate_3345",
+        "candidate_3561",
+        "candidate_4503",
+        "candidate_4761"
+      ],
+      "cluster_418": [
+        "candidate_1158",
+        "candidate_1878",
+        "candidate_3390",
+        "candidate_3876",
+        "candidate_4110"
+      ],
+      "cluster_419": [
+        "candidate_1163",
+        "candidate_1883"
+      ],
+      "cluster_420": [
+        "candidate_1164",
+        "candidate_2340",
+        "candidate_2364",
+        "candidate_2556",
+        "candidate_2676",
+        "candidate_3084",
+        "candidate_3438",
+        "candidate_3804"
+      ],
+      "cluster_421": [
+        "candidate_1169",
+        "candidate_2603",
+        "candidate_3281",
+        "candidate_3323"
+      ],
+      "cluster_422": [
+        "candidate_1170",
+        "candidate_1194",
+        "candidate_1290",
+        "candidate_1314",
+        "candidate_1410",
+        "candidate_1434",
+        "candidate_3090",
+        "candidate_3114",
+        "candidate_3402",
+        "candidate_3462",
+        "candidate_3522",
+        "candidate_3582",
+        "candidate_3810",
+        "candidate_3834",
+        "candidate_4122",
+        "candidate_4182",
+        "candidate_4242",
+        "candidate_4302",
+        "candidate_4530",
+        "candidate_4554",
+        "candidate_4842",
+        "candidate_4902",
+        "candidate_4962",
+        "candidate_5022"
+      ],
+      "cluster_423": [
+        "candidate_1171",
+        "candidate_1195",
+        "candidate_1291",
+        "candidate_1315",
+        "candidate_1411",
+        "candidate_1435",
+        "candidate_3091",
+        "candidate_3115",
+        "candidate_3403",
+        "candidate_3463",
+        "candidate_3523",
+        "candidate_3583",
+        "candidate_3811",
+        "candidate_3835",
+        "candidate_4123",
+        "candidate_4183",
+        "candidate_4243",
+        "candidate_4303",
+        "candidate_4531",
+        "candidate_4555",
+        "candidate_4843",
+        "candidate_4903",
+        "candidate_4963",
+        "candidate_5023"
+      ],
+      "cluster_424": [
+        "candidate_1172",
+        "candidate_1196",
+        "candidate_1292",
+        "candidate_1316",
+        "candidate_1412",
+        "candidate_1436",
+        "candidate_3092",
+        "candidate_3116",
+        "candidate_3404",
+        "candidate_3464",
+        "candidate_3524",
+        "candidate_3584",
+        "candidate_3812",
+        "candidate_3836",
+        "candidate_4124",
+        "candidate_4184",
+        "candidate_4244",
+        "candidate_4304",
+        "candidate_4532",
+        "candidate_4556",
+        "candidate_4844",
+        "candidate_4904",
+        "candidate_4964",
+        "candidate_5024"
+      ],
+      "cluster_425": [
+        "candidate_1173",
+        "candidate_1197",
+        "candidate_3585",
+        "candidate_4533"
+      ],
+      "cluster_426": [
+        "candidate_1174",
+        "candidate_1198",
+        "candidate_1294",
+        "candidate_1318",
+        "candidate_1414",
+        "candidate_1438",
+        "candidate_3094",
+        "candidate_3118",
+        "candidate_3406",
+        "candidate_3466",
+        "candidate_3526",
+        "candidate_3586",
+        "candidate_3814",
+        "candidate_3838",
+        "candidate_4126",
+        "candidate_4186",
+        "candidate_4246",
+        "candidate_4306",
+        "candidate_4534",
+        "candidate_4558",
+        "candidate_4846",
+        "candidate_4906",
+        "candidate_4966",
+        "candidate_5026"
+      ],
+      "cluster_427": [
+        "candidate_1175",
+        "candidate_1199",
+        "candidate_4127",
+        "candidate_4247",
+        "candidate_4307",
+        "candidate_4535"
+      ],
+      "cluster_428": [
+        "candidate_1182",
+        "candidate_1398",
+        "candidate_1842",
+        "candidate_2118",
+        "candidate_3042",
+        "candidate_3102",
+        "candidate_4596"
+      ],
+      "cluster_429": [
+        "candidate_1190",
+        "candidate_1406",
+        "candidate_2840",
+        "candidate_3344",
+        "candidate_3560"
+      ],
+      "cluster_430": [
+        "candidate_1230",
+        "candidate_1638",
+        "candidate_1974",
+        "candidate_2358"
+      ],
+      "cluster_431": [
+        "candidate_1235",
+        "candidate_1601",
+        "candidate_1955",
+        "candidate_1979",
+        "candidate_2483",
+        "candidate_3995"
+      ],
+      "cluster_432": [
+        "candidate_1238",
+        "candidate_1958",
+        "candidate_3200",
+        "candidate_4112",
+        "candidate_4136"
+      ],
+      "cluster_433": [
+        "candidate_1239",
+        "candidate_1839",
+        "candidate_3159",
+        "candidate_3201",
+        "candidate_3417",
+        "candidate_4113"
+      ],
+      "cluster_434": [
+        "candidate_1242",
+        "candidate_2022",
+        "candidate_4482",
+        "candidate_4662",
+        "candidate_4974"
+      ],
+      "cluster_435": [
+        "candidate_1259",
+        "candidate_1643",
+        "candidate_2699",
+        "candidate_3899",
+        "candidate_4019"
+      ],
+      "cluster_436": [
+        "candidate_1263",
+        "candidate_2679",
+        "candidate_3279",
+        "candidate_4161"
+      ],
+      "cluster_437": [
+        "candidate_1265",
+        "candidate_1289",
+        "candidate_2681",
+        "candidate_4001",
+        "candidate_4043"
+      ],
+      "cluster_438": [
+        "candidate_1266",
+        "candidate_1308",
+        "candidate_2682",
+        "candidate_3828",
+        "candidate_4782",
+        "candidate_4998"
+      ],
+      "cluster_439": [
+        "candidate_1268",
+        "candidate_2396",
+        "candidate_2684",
+        "candidate_3830",
+        "candidate_4004",
+        "candidate_4280",
+        "candidate_4550",
+        "candidate_5000"
+      ],
+      "cluster_440": [
+        "candidate_1274",
+        "candidate_3734",
+        "candidate_3794"
+      ],
+      "cluster_441": [
+        "candidate_1284",
+        "candidate_3396",
+        "candidate_3780"
+      ],
+      "cluster_442": [
+        "candidate_1286",
+        "candidate_2600",
+        "candidate_2678",
+        "candidate_3320",
+        "candidate_3398",
+        "candidate_3806",
+        "candidate_4160"
+      ],
+      "cluster_443": [
+        "candidate_1287",
+        "candidate_3441",
+        "candidate_3783",
+        "candidate_3807"
+      ],
+      "cluster_444": [
+        "candidate_1293",
+        "candidate_1413",
+        "candidate_3525",
+        "candidate_3837",
+        "candidate_4125",
+        "candidate_4305",
+        "candidate_4557",
+        "candidate_4845",
+        "candidate_4905"
+      ],
+      "cluster_445": [
+        "candidate_1295",
+        "candidate_1415",
+        "candidate_3119",
+        "candidate_3467",
+        "candidate_4847",
+        "candidate_5027"
+      ],
+      "cluster_446": [
+        "candidate_1302",
+        "candidate_1362",
+        "candidate_3762",
+        "candidate_3882",
+        "candidate_4542"
+      ],
+      "cluster_447": [
+        "candidate_1305",
+        "candidate_1425",
+        "candidate_1677",
+        "candidate_2145",
+        "candidate_4485",
+        "candidate_4665"
+      ],
+      "cluster_448": [
+        "candidate_1307",
+        "candidate_2087",
+        "candidate_3887",
+        "candidate_4487"
+      ],
+      "cluster_449": [
+        "candidate_1311",
+        "candidate_1389",
+        "candidate_2805",
+        "candidate_3831",
+        "candidate_4509"
+      ],
+      "cluster_450": [
+        "candidate_1317",
+        "candidate_3093",
+        "candidate_3117",
+        "candidate_4965"
+      ],
+      "cluster_451": [
+        "candidate_1319",
+        "candidate_3407",
+        "candidate_3839"
+      ],
+      "cluster_452": [
+        "candidate_1322",
+        "candidate_1346",
+        "candidate_1460",
+        "candidate_2066",
+        "candidate_4466",
+        "candidate_4562",
+        "candidate_4586"
+      ],
+      "cluster_453": [
+        "candidate_1334",
+        "candidate_3482",
+        "candidate_4802"
+      ],
+      "cluster_454": [
+        "candidate_1352",
+        "candidate_4592",
+        "candidate_4736"
+      ],
+      "cluster_455": [
+        "candidate_1353",
+        "candidate_1785",
+        "candidate_2445",
+        "candidate_4593"
+      ],
+      "cluster_456": [
+        "candidate_1358",
+        "candidate_1400",
+        "candidate_2120",
+        "candidate_3044",
+        "candidate_3536",
+        "candidate_4478",
+        "candidate_4832"
+      ],
+      "cluster_457": [
+        "candidate_1364",
+        "candidate_1424",
+        "candidate_4604",
+        "candidate_1962",
+        "candidate_3942",
+        "candidate_4602",
+        "candidate_4950",
+        "candidate_1964",
+        "candidate_4232",
+        "candidate_4256",
+        "candidate_4484",
+        "candidate_4664",
+        "candidate_4952"
+      ],
+      "cluster_458": [
+        "candidate_1365",
+        "candidate_1653",
+        "candidate_1965",
+        "candidate_2025",
+        "candidate_3825"
+      ],
+      "cluster_459": [
+        "candidate_1367",
+        "candidate_3827",
+        "candidate_4235",
+        "candidate_4547",
+        "candidate_4979"
+      ],
+      "cluster_460": [
+        "candidate_1376",
+        "candidate_1664",
+        "candidate_1784",
+        "candidate_2096",
+        "candidate_2324",
+        "candidate_2384",
+        "candidate_2504",
+        "candidate_2816",
+        "candidate_4712"
+      ],
+      "cluster_461": [
+        "candidate_1377",
+        "candidate_1725",
+        "candidate_2385",
+        "candidate_4617",
+        "candidate_4737"
+      ],
+      "cluster_462": [
+        "candidate_1379",
+        "candidate_1727"
+      ],
+      "cluster_463": [
+        "candidate_1380",
+        "candidate_1404",
+        "candidate_2346",
+        "candidate_2388",
+        "candidate_4500",
+        "candidate_4836"
+      ],
+      "cluster_464": [
+        "candidate_1388",
+        "candidate_3788",
+        "candidate_4238"
+      ],
+      "cluster_465": [
+        "candidate_1394"
+      ],
+      "cluster_466": [
+        "candidate_1407",
+        "candidate_2349",
+        "candidate_2841",
+        "candidate_4719",
+        "candidate_4881"
+      ],
+      "cluster_467": [
+        "candidate_1427",
+        "candidate_1679",
+        "candidate_2027",
+        "candidate_2147",
+        "candidate_4607"
+      ],
+      "cluster_468": [
+        "candidate_1428",
+        "candidate_2862",
+        "candidate_3786",
+        "candidate_4956"
+      ],
+      "cluster_469": [
+        "candidate_1430",
+        "candidate_2372",
+        "candidate_2744",
+        "candidate_4958"
+      ],
+      "cluster_470": [
+        "candidate_1431",
+        "candidate_4239",
+        "candidate_4551",
+        "candidate_4725",
+        "candidate_5001"
+      ],
+      "cluster_471": [
+        "candidate_1433",
+        "candidate_4727"
+      ],
+      "cluster_472": [
+        "candidate_1437",
+        "candidate_3405",
+        "candidate_3465",
+        "candidate_4245",
+        "candidate_5025"
+      ],
+      "cluster_473": [
+        "candidate_1439",
+        "candidate_3095",
+        "candidate_3527",
+        "candidate_3587",
+        "candidate_4187"
+      ],
+      "cluster_474": [
+        "candidate_1472",
+        "candidate_1688",
+        "candidate_1730",
+        "candidate_2216"
+      ],
+      "cluster_475": [
+        "candidate_1480",
+        "candidate_1972",
+        "candidate_2200",
+        "candidate_2242",
+        "candidate_3658",
+        "candidate_3850",
+        "candidate_4012"
+      ],
+      "cluster_476": [
+        "candidate_1482",
+        "candidate_2418",
+        "candidate_2808"
+      ],
+      "cluster_477": [
+        "candidate_1484",
+        "candidate_2420"
+      ],
+      "cluster_478": [
+        "candidate_1506",
+        "candidate_1818",
+        "candidate_2052",
+        "candidate_3528",
+        "candidate_4398",
+        "candidate_4632",
+        "candidate_4848"
+      ],
+      "cluster_479": [
+        "candidate_1512",
+        "candidate_3624",
+        "candidate_3744"
+      ],
+      "cluster_480": [
+        "candidate_1518",
+        "candidate_1926",
+        "candidate_2238",
+        "candidate_2688"
+      ],
+      "cluster_481": [
+        "candidate_1535",
+        "candidate_2063",
+        "candidate_3647",
+        "candidate_3941",
+        "candidate_4211",
+        "candidate_4583"
+      ],
+      "cluster_482": [
+        "candidate_1546",
+        "candidate_4570",
+        "candidate_4690"
+      ],
+      "cluster_483": [
+        "candidate_1548",
+        "candidate_1896",
+        "candidate_2922",
+        "candidate_3486"
+      ],
+      "cluster_484": [
+        "candidate_1557",
+        "candidate_1941",
+        "candidate_2061",
+        "candidate_2139",
+        "candidate_4659"
+      ],
+      "cluster_485": [
+        "candidate_1608",
+        "candidate_2880",
+        "candidate_3000",
+        "candidate_3120"
+      ],
+      "cluster_486": [
+        "candidate_1620",
+        "candidate_1644",
+        "candidate_3078"
+      ],
+      "cluster_487": [
+        "candidate_1622",
+        "candidate_1880",
+        "candidate_3158",
+        "candidate_3416",
+        "candidate_3800",
+        "candidate_3920"
+      ],
+      "cluster_488": [
+        "candidate_1623",
+        "candidate_1881",
+        "candidate_2001",
+        "candidate_3039",
+        "candidate_3081"
+      ],
+      "cluster_489": [
+        "candidate_1641",
+        "candidate_3753",
+        "candidate_3993"
+      ],
+      "cluster_490": [
+        "candidate_1687",
+        "candidate_2215",
+        "candidate_2527",
+        "candidate_3169"
+      ],
+      "cluster_491": [
+        "candidate_1694",
+        "candidate_1754",
+        "candidate_1970",
+        "candidate_3848"
+      ],
+      "cluster_492": [
+        "candidate_1702",
+        "candidate_1780",
+        "candidate_2266",
+        "candidate_4378"
+      ],
+      "cluster_493": [
+        "candidate_1703",
+        "candidate_2207",
+        "candidate_2267",
+        "candidate_2423",
+        "candidate_4691"
+      ],
+      "cluster_494": [
+        "candidate_1715",
+        "candidate_1859",
+        "candidate_2459",
+        "candidate_2579"
+      ],
+      "cluster_495": [
+        "candidate_1718",
+        "candidate_1952",
+        "candidate_1976",
+        "candidate_2438",
+        "candidate_2480",
+        "candidate_3776"
+      ],
+      "cluster_496": [
+        "candidate_1732",
+        "candidate_3130",
+        "candidate_3292"
+      ],
+      "cluster_497": [
+        "candidate_1736",
+        "candidate_3152"
+      ],
+      "cluster_498": [
+        "candidate_1738",
+        "candidate_2578"
+      ],
+      "cluster_499": [
+        "candidate_1740",
+        "candidate_2460",
+        "candidate_2724",
+        "candidate_3204"
+      ],
+      "cluster_500": [
+        "candidate_1741",
+        "candidate_2005",
+        "candidate_2485",
+        "candidate_2701",
+        "candidate_3301"
+      ],
+      "cluster_501": [
+        "candidate_1742",
+        "candidate_1886",
+        "candidate_1982",
+        "candidate_2486",
+        "candidate_3326",
+        "candidate_3446",
+        "candidate_3902",
+        "candidate_3926"
+      ],
+      "cluster_502": [
+        "candidate_1743",
+        "candidate_1863",
+        "candidate_1983",
+        "candidate_2463",
+        "candidate_3327",
+        "candidate_3927",
+        "candidate_4047",
+        "candidate_4167"
+      ],
+      "cluster_503": [
+        "candidate_1744",
+        "candidate_1888",
+        "candidate_2464",
+        "candidate_2584",
+        "candidate_2728",
+        "candidate_3304",
+        "candidate_3424",
+        "candidate_4168"
+      ],
+      "cluster_504": [
+        "candidate_1745",
+        "candidate_1985",
+        "candidate_2609",
+        "candidate_3929"
+      ],
+      "cluster_505": [
+        "candidate_1746",
+        "candidate_2466",
+        "candidate_3228"
+      ],
+      "cluster_506": [
+        "candidate_1748",
+        "candidate_2630",
+        "candidate_3542"
+      ],
+      "cluster_507": [
+        "candidate_1749",
+        "candidate_1911",
+        "candidate_2631",
+        "candidate_2847",
+        "candidate_3231",
+        "candidate_3309"
+      ],
+      "cluster_508": [
+        "candidate_1750",
+        "candidate_2590",
+        "candidate_2824",
+        "candidate_3232",
+        "candidate_3544",
+        "candidate_3568"
+      ],
+      "cluster_509": [
+        "candidate_1751",
+        "candidate_1871",
+        "candidate_1913",
+        "candidate_2471",
+        "candidate_3191",
+        "candidate_3353",
+        "candidate_3545"
+      ],
+      "cluster_510": [
+        "candidate_1752",
+        "candidate_2472",
+        "candidate_3888",
+        "candidate_4008"
+      ],
+      "cluster_511": [
+        "candidate_1758",
+        "candidate_2316",
+        "candidate_2670",
+        "candidate_2694",
+        "candidate_3870"
+      ],
+      "cluster_512": [
+        "candidate_1760",
+        "candidate_3872",
+        "candidate_3992"
+      ],
+      "cluster_513": [
+        "candidate_1763",
+        "candidate_2363",
+        "candidate_2441",
+        "candidate_3755",
+        "candidate_3779",
+        "candidate_3875"
+      ],
+      "cluster_514": [
+        "candidate_1764",
+        "candidate_2004",
+        "candidate_3180",
+        "candidate_3324",
+        "candidate_4020"
+      ],
+      "cluster_515": [
+        "candidate_1765",
+        "candidate_1981",
+        "candidate_2725",
+        "candidate_3325",
+        "candidate_4021"
+      ],
+      "cluster_516": [
+        "candidate_1766",
+        "candidate_2702",
+        "candidate_2726",
+        "candidate_3206",
+        "candidate_3422"
+      ],
+      "cluster_517": [
+        "candidate_1767",
+        "candidate_1887",
+        "candidate_2607",
+        "candidate_3423",
+        "candidate_3903",
+        "candidate_4143"
+      ],
+      "cluster_518": [
+        "candidate_1768",
+        "candidate_2008",
+        "candidate_3208",
+        "candidate_3328",
+        "candidate_3448"
+      ],
+      "cluster_519": [
+        "candidate_1769",
+        "candidate_1865",
+        "candidate_3905",
+        "candidate_4169"
+      ],
+      "cluster_520": [
+        "candidate_1770",
+        "candidate_1794",
+        "candidate_2490",
+        "candidate_2826",
+        "candidate_4068"
+      ],
+      "cluster_521": [
+        "candidate_1771",
+        "candidate_2869",
+        "candidate_3949",
+        "candidate_4285"
+      ],
+      "cluster_522": [
+        "candidate_1772",
+        "candidate_2828",
+        "candidate_4028",
+        "candidate_4628",
+        "candidate_4790"
+      ],
+      "cluster_523": [
+        "candidate_1773",
+        "candidate_2493",
+        "candidate_3951"
+      ],
+      "cluster_524": [
+        "candidate_1774",
+        "candidate_2752",
+        "candidate_2830",
+        "candidate_3952",
+        "candidate_4264",
+        "candidate_4672"
+      ],
+      "cluster_525": [
+        "candidate_1775",
+        "candidate_1991",
+        "candidate_2033",
+        "candidate_2753",
+        "candidate_4265",
+        "candidate_4673",
+        "candidate_5009"
+      ],
+      "cluster_526": [
+        "candidate_1787",
+        "candidate_2387",
+        "candidate_2507",
+        "candidate_4715",
+        "candidate_4739"
+      ],
+      "cluster_527": [
+        "candidate_1788",
+        "candidate_2124",
+        "candidate_2508",
+        "candidate_2820",
+        "candidate_3186",
+        "candidate_3540",
+        "candidate_4740"
+      ],
+      "cluster_528": [
+        "candidate_1790",
+        "candidate_1868",
+        "candidate_2846",
+        "candidate_3230",
+        "candidate_3350",
+        "candidate_4886"
+      ],
+      "cluster_529": [
+        "candidate_1791",
+        "candidate_3567",
+        "candidate_4623",
+        "candidate_4767",
+        "candidate_4887"
+      ],
+      "cluster_530": [
+        "candidate_1792",
+        "candidate_1870",
+        "candidate_2632",
+        "candidate_2848",
+        "candidate_3310",
+        "candidate_4624",
+        "candidate_4744",
+        "candidate_4768"
+      ],
+      "cluster_531": [
+        "candidate_1793",
+        "candidate_3233",
+        "candidate_3569",
+        "candidate_4625",
+        "candidate_4769",
+        "candidate_4865",
+        "candidate_4889"
+      ],
+      "cluster_532": [
+        "candidate_1795",
+        "candidate_2029",
+        "candidate_2707",
+        "candidate_2749",
+        "candidate_2827",
+        "candidate_3907",
+        "candidate_4069",
+        "candidate_4261",
+        "candidate_4747",
+        "candidate_4789",
+        "candidate_5005"
+      ],
+      "cluster_533": [
+        "candidate_1796",
+        "candidate_2108",
+        "candidate_2150",
+        "candidate_2516",
+        "candidate_2708",
+        "candidate_2750",
+        "candidate_3908"
+      ],
+      "cluster_534": [
+        "candidate_1797",
+        "candidate_2751",
+        "candidate_4263",
+        "candidate_4671"
+      ],
+      "cluster_535": [
+        "candidate_1798",
+        "candidate_2494",
+        "candidate_2518",
+        "candidate_4030",
+        "candidate_4072",
+        "candidate_4630",
+        "candidate_4750",
+        "candidate_4792",
+        "candidate_5008"
+      ],
+      "cluster_536": [
+        "candidate_1799",
+        "candidate_4631"
+      ],
+      "cluster_537": [
+        "candidate_1808",
+        "candidate_2192",
+        "candidate_2408",
+        "candidate_2450",
+        "candidate_2528",
+        "candidate_2936",
+        "candidate_3290"
+      ],
+      "cluster_538": [
+        "candidate_1831",
+        "candidate_2335",
+        "candidate_3055",
+        "candidate_3175"
+      ],
+      "cluster_539": [
+        "candidate_1836",
+        "candidate_3036",
+        "candidate_3156",
+        "candidate_3198"
+      ],
+      "cluster_540": [
+        "candidate_1841",
+        "candidate_2003",
+        "candidate_3395"
+      ],
+      "cluster_541": [
+        "candidate_1844",
+        "candidate_4520",
+        "candidate_4856"
+      ],
+      "cluster_542": [
+        "candidate_1860",
+        "candidate_2484",
+        "candidate_3420",
+        "candidate_4140"
+      ],
+      "cluster_543": [
+        "candidate_1861",
+        "candidate_1885",
+        "candidate_3181",
+        "candidate_3925",
+        "candidate_4045"
+      ],
+      "cluster_544": [
+        "candidate_1862",
+        "candidate_2462",
+        "candidate_3302",
+        "candidate_4166"
+      ],
+      "cluster_545": [
+        "candidate_1864",
+        "candidate_2488",
+        "candidate_3184",
+        "candidate_3928",
+        "candidate_4024",
+        "candidate_4048"
+      ],
+      "cluster_546": [
+        "candidate_1866",
+        "candidate_1908",
+        "candidate_4620"
+      ],
+      "cluster_547": [
+        "candidate_1869",
+        "candidate_2103",
+        "candidate_2469",
+        "candidate_2511",
+        "candidate_2589"
+      ],
+      "cluster_548": [
+        "candidate_1884",
+        "candidate_2580",
+        "candidate_2604",
+        "candidate_3444",
+        "candidate_3900",
+        "candidate_4164"
+      ],
+      "cluster_549": [
+        "candidate_1889",
+        "candidate_2489",
+        "candidate_3185",
+        "candidate_3209"
+      ],
+      "cluster_550": [
+        "candidate_1890",
+        "candidate_1914",
+        "candidate_2010",
+        "candidate_2034",
+        "candidate_2130",
+        "candidate_2154",
+        "candidate_3210",
+        "candidate_3234",
+        "candidate_3426",
+        "candidate_3468",
+        "candidate_3546",
+        "candidate_3588",
+        "candidate_3930",
+        "candidate_3954",
+        "candidate_4146",
+        "candidate_4188",
+        "candidate_4266",
+        "candidate_4308",
+        "candidate_4650",
+        "candidate_4674",
+        "candidate_4866",
+        "candidate_4908",
+        "candidate_4986",
+        "candidate_5028"
+      ],
+      "cluster_551": [
+        "candidate_1891",
+        "candidate_1915",
+        "candidate_3427",
+        "candidate_3547",
+        "candidate_4147",
+        "candidate_4309",
+        "candidate_4909",
+        "candidate_5029"
+      ],
+      "cluster_552": [
+        "candidate_1892",
+        "candidate_1916",
+        "candidate_2012",
+        "candidate_2036",
+        "candidate_2132",
+        "candidate_2156",
+        "candidate_3212",
+        "candidate_3236",
+        "candidate_3428",
+        "candidate_3470",
+        "candidate_3548",
+        "candidate_3590",
+        "candidate_3932",
+        "candidate_3956",
+        "candidate_4148",
+        "candidate_4190",
+        "candidate_4268",
+        "candidate_4310",
+        "candidate_4652",
+        "candidate_4676",
+        "candidate_4868",
+        "candidate_4910",
+        "candidate_4988",
+        "candidate_5030"
+      ],
+      "cluster_553": [
+        "candidate_1893",
+        "candidate_3549",
+        "candidate_4149",
+        "candidate_4311",
+        "candidate_4653",
+        "candidate_4677"
+      ],
+      "cluster_554": [
+        "candidate_1894",
+        "candidate_3238",
+        "candidate_3472",
+        "candidate_4270",
+        "candidate_4870",
+        "candidate_5032"
+      ],
+      "cluster_555": [
+        "candidate_1895",
+        "candidate_1919",
+        "candidate_2015",
+        "candidate_3239",
+        "candidate_3959",
+        "candidate_4991",
+        "candidate_5033"
+      ],
+      "cluster_556": [
+        "candidate_1910",
+        "candidate_2102",
+        "candidate_2510",
+        "candidate_2588",
+        "candidate_3188",
+        "candidate_4622",
+        "candidate_4646",
+        "candidate_4766",
+        "candidate_4862"
+      ],
+      "cluster_557": [
+        "candidate_1912",
+        "candidate_2104",
+        "candidate_2512",
+        "candidate_3190",
+        "candidate_3352",
+        "candidate_4888"
+      ],
+      "cluster_558": [
+        "candidate_1917",
+        "candidate_2013",
+        "candidate_3237",
+        "candidate_3471",
+        "candidate_4989",
+        "candidate_5031"
+      ],
+      "cluster_559": [
+        "candidate_1918",
+        "candidate_3550",
+        "candidate_3934",
+        "candidate_4312"
+      ],
+      "cluster_560": [
+        "candidate_1924",
+        "candidate_3748",
+        "candidate_3868"
+      ],
+      "cluster_561": [
+        "candidate_1927",
+        "candidate_2239"
+      ],
+      "cluster_562": [
+        "candidate_1934",
+        "candidate_2960",
+        "candidate_3854"
+      ],
+      "cluster_563": [
+        "candidate_1943",
+        "candidate_4253",
+        "candidate_4427"
+      ],
+      "cluster_564": [
+        "candidate_1953",
+        "candidate_2697"
+      ],
+      "cluster_565": [
+        "candidate_1980",
+        "candidate_2700",
+        "candidate_3300",
+        "candidate_3924",
+        "candidate_4044"
+      ],
+      "cluster_566": [
+        "candidate_1984",
+        "candidate_3904"
+      ],
+      "cluster_567": [
+        "candidate_1986",
+        "candidate_2028",
+        "candidate_2106",
+        "candidate_4284"
+      ],
+      "cluster_568": [
+        "candidate_1987",
+        "candidate_2491",
+        "candidate_4669"
+      ],
+      "cluster_569": [
+        "candidate_1988",
+        "candidate_2030",
+        "candidate_2870",
+        "candidate_4070",
+        "candidate_4262"
+      ],
+      "cluster_570": [
+        "candidate_1989",
+        "candidate_2031",
+        "candidate_4071",
+        "candidate_5007"
+      ],
+      "cluster_571": [
+        "candidate_1990",
+        "candidate_2032",
+        "candidate_2110",
+        "candidate_2152",
+        "candidate_2710",
+        "candidate_4288"
+      ],
+      "cluster_572": [
+        "candidate_1992",
+        "candidate_2916",
+        "candidate_2958"
+      ],
+      "cluster_573": [
+        "candidate_2006",
+        "candidate_3182",
+        "candidate_4142"
+      ],
+      "cluster_574": [
+        "candidate_2007",
+        "candidate_2487",
+        "candidate_3303",
+        "candidate_4023"
+      ],
+      "cluster_575": [
+        "candidate_2009",
+        "candidate_2465",
+        "candidate_3305",
+        "candidate_3449",
+        "candidate_4025",
+        "candidate_4049",
+        "candidate_4145"
+      ],
+      "cluster_576": [
+        "candidate_2011",
+        "candidate_3235",
+        "candidate_4651",
+        "candidate_4675",
+        "candidate_4987"
+      ],
+      "cluster_577": [
+        "candidate_2014",
+        "candidate_2038",
+        "candidate_2134",
+        "candidate_3214",
+        "candidate_3430",
+        "candidate_4150",
+        "candidate_4990"
+      ],
+      "cluster_578": [
+        "candidate_2016",
+        "candidate_3702",
+        "candidate_3858",
+        "candidate_4926"
+      ],
+      "cluster_579": [
+        "candidate_2035",
+        "candidate_3211",
+        "candidate_3931",
+        "candidate_3955",
+        "candidate_4267"
+      ],
+      "cluster_580": [
+        "candidate_2037",
+        "candidate_3429",
+        "candidate_3591",
+        "candidate_3957",
+        "candidate_4269"
+      ],
+      "cluster_581": [
+        "candidate_2039",
+        "candidate_2135",
+        "candidate_3431",
+        "candidate_3593",
+        "candidate_4271"
+      ],
+      "cluster_582": [
+        "candidate_2060"
+      ],
+      "cluster_583": [
+        "candidate_2073",
+        "candidate_2097",
+        "candidate_2817"
+      ],
+      "cluster_584": [
+        "candidate_2092",
+        "candidate_2422",
+        "candidate_2770",
+        "candidate_2812",
+        "candidate_4612"
+      ],
+      "cluster_585": [
+        "candidate_2094",
+        "candidate_2322",
+        "candidate_2382",
+        "candidate_4590"
+      ],
+      "cluster_586": [
+        "candidate_2100",
+        "candidate_2628",
+        "candidate_3306",
+        "candidate_3348",
+        "candidate_4644",
+        "candidate_4884"
+      ],
+      "cluster_587": [
+        "candidate_2105",
+        "candidate_2129",
+        "candidate_2513",
+        "candidate_2591",
+        "candidate_2633",
+        "candidate_3311",
+        "candidate_4649",
+        "candidate_4745"
+      ],
+      "cluster_588": [
+        "candidate_2107",
+        "candidate_4027"
+      ],
+      "cluster_589": [
+        "candidate_2109",
+        "candidate_2151",
+        "candidate_2517",
+        "candidate_2709",
+        "candidate_2829",
+        "candidate_3909",
+        "candidate_4287",
+        "candidate_4629"
+      ],
+      "cluster_590": [
+        "candidate_2111",
+        "candidate_3911",
+        "candidate_4031",
+        "candidate_4793"
+      ],
+      "cluster_591": [
+        "candidate_2112",
+        "candidate_2982",
+        "candidate_4572"
+      ],
+      "cluster_592": [
+        "candidate_2126",
+        "candidate_2822",
+        "candidate_3308",
+        "candidate_3566"
+      ],
+      "cluster_593": [
+        "candidate_2127",
+        "candidate_2823",
+        "candidate_4647",
+        "candidate_4743",
+        "candidate_4863"
+      ],
+      "cluster_594": [
+        "candidate_2128",
+        "candidate_4864"
+      ],
+      "cluster_595": [
+        "candidate_2131",
+        "candidate_3589",
+        "candidate_4189",
+        "candidate_4867"
+      ],
+      "cluster_596": [
+        "candidate_2133",
+        "candidate_3213",
+        "candidate_3933",
+        "candidate_4869",
+        "candidate_4911"
+      ],
+      "cluster_597": [
+        "candidate_2148",
+        "candidate_3906",
+        "candidate_3948",
+        "candidate_4746",
+        "candidate_4788",
+        "candidate_5004"
+      ],
+      "cluster_598": [
+        "candidate_2149",
+        "candidate_2515",
+        "candidate_4627",
+        "candidate_4981"
+      ],
+      "cluster_599": [
+        "candidate_2153",
+        "candidate_2519",
+        "candidate_2711",
+        "candidate_2873",
+        "candidate_3953",
+        "candidate_4073",
+        "candidate_4289",
+        "candidate_4985"
+      ],
+      "cluster_600": [
+        "candidate_2155",
+        "candidate_3469"
+      ],
+      "cluster_601": [
+        "candidate_2157",
+        "candidate_4191"
+      ],
+      "cluster_602": [
+        "candidate_2158",
+        "candidate_4654"
+      ],
+      "cluster_603": [
+        "candidate_2159",
+        "candidate_3935",
+        "candidate_4151",
+        "candidate_4193",
+        "candidate_4313",
+        "candidate_4679",
+        "candidate_4871"
+      ],
+      "cluster_604": [
+        "candidate_2249",
+        "candidate_3317",
+        "candidate_3977"
+      ],
+      "cluster_605": [
+        "candidate_2273",
+        "candidate_2777",
+        "candidate_2993"
+      ],
+      "cluster_606": [
+        "candidate_2277",
+        "candidate_3711",
+        "candidate_4059",
+        "candidate_4215",
+        "candidate_4275",
+        "candidate_4431",
+        "candidate_4701"
+      ],
+      "cluster_607": [
+        "candidate_2279",
+        "candidate_3671",
+        "candidate_4781",
+        "candidate_4997"
+      ],
+      "cluster_608": [
+        "candidate_2304"
+      ],
+      "cluster_609": [
+        "candidate_2342",
+        "candidate_2366",
+        "candidate_3062",
+        "candidate_4040",
+        "candidate_4118"
+      ],
+      "cluster_610": [
+        "candidate_2343",
+        "candidate_2367",
+        "candidate_2559",
+        "candidate_3321",
+        "candidate_4119"
+      ],
+      "cluster_611": [
+        "candidate_2345",
+        "candidate_2369",
+        "candidate_2561",
+        "candidate_3065",
+        "candidate_3089",
+        "candidate_3443",
+        "candidate_3785"
+      ],
+      "cluster_612": [
+        "candidate_2348",
+        "candidate_2624",
+        "candidate_3110",
+        "candidate_3284"
+      ],
+      "cluster_613": [
+        "candidate_2370",
+        "candidate_2742",
+        "candidate_4278",
+        "candidate_4506"
+      ],
+      "cluster_614": [
+        "candidate_2380",
+        "candidate_2788",
+        "candidate_4684"
+      ],
+      "cluster_615": [
+        "candidate_2391",
+        "candidate_3111",
+        "candidate_3519",
+        "candidate_4527"
+      ],
+      "cluster_616": [
+        "candidate_2399",
+        "candidate_2747",
+        "candidate_3833",
+        "candidate_4511"
+      ],
+      "cluster_617": [
+        "candidate_2435",
+        "candidate_3059",
+        "candidate_3275"
+      ],
+      "cluster_618": [
+        "candidate_2461",
+        "candidate_2581",
+        "candidate_3205",
+        "candidate_3421",
+        "candidate_3445",
+        "candidate_4141",
+        "candidate_4165"
+      ],
+      "cluster_619": [
+        "candidate_2468",
+        "candidate_4742"
+      ],
+      "cluster_620": [
+        "candidate_2470",
+        "candidate_4648"
+      ],
+      "cluster_621": [
+        "candidate_2492",
+        "candidate_4670",
+        "candidate_4748",
+        "candidate_4982",
+        "candidate_5006"
+      ],
+      "cluster_622": [
+        "candidate_2495",
+        "candidate_2831",
+        "candidate_4751"
+      ],
+      "cluster_623": [
+        "candidate_2498"
+      ],
+      "cluster_624": [
+        "candidate_2514",
+        "candidate_4260"
+      ],
+      "cluster_625": [
+        "candidate_2537",
+        "candidate_2945"
+      ],
+      "cluster_626": [
+        "candidate_2538",
+        "candidate_2988",
+        "candidate_3336",
+        "candidate_4752",
+        "candidate_4812"
+      ],
+      "cluster_627": [
+        "candidate_2558",
+        "candidate_3086"
+      ],
+      "cluster_628": [
+        "candidate_2562",
+        "candidate_2838",
+        "candidate_4524",
+        "candidate_4878"
+      ],
+      "cluster_629": [
+        "candidate_2567",
+        "candidate_3347",
+        "candidate_3563",
+        "candidate_4505",
+        "candidate_4529"
+      ],
+      "cluster_630": [
+        "candidate_2582",
+        "candidate_2606",
+        "candidate_4022",
+        "candidate_4046"
+      ],
+      "cluster_631": [
+        "candidate_2583",
+        "candidate_2727",
+        "candidate_3183",
+        "candidate_3447"
+      ],
+      "cluster_632": [
+        "candidate_2585",
+        "candidate_2705",
+        "candidate_2729",
+        "candidate_3329",
+        "candidate_3425"
+      ],
+      "cluster_633": [
+        "candidate_2586",
+        "candidate_2844",
+        "candidate_3564",
+        "candidate_4764",
+        "candidate_4860"
+      ],
+      "cluster_634": [
+        "candidate_2605",
+        "candidate_3901"
+      ],
+      "cluster_635": [
+        "candidate_2608",
+        "candidate_2704",
+        "candidate_4144"
+      ],
+      "cluster_636": [
+        "candidate_2610",
+        "candidate_2634",
+        "candidate_2730",
+        "candidate_2754",
+        "candidate_2850",
+        "candidate_2874",
+        "candidate_3330",
+        "candidate_3354",
+        "candidate_3450",
+        "candidate_3474",
+        "candidate_3570",
+        "candidate_3594",
+        "candidate_4050",
+        "candidate_4074",
+        "candidate_4170",
+        "candidate_4194",
+        "candidate_4290",
+        "candidate_4314",
+        "candidate_4770",
+        "candidate_4794",
+        "candidate_4890",
+        "candidate_4914",
+        "candidate_5010",
+        "candidate_5034"
+      ],
+      "cluster_637": [
+        "candidate_2611",
+        "candidate_3571",
+        "candidate_4891"
+      ],
+      "cluster_638": [
+        "candidate_2612",
+        "candidate_2636",
+        "candidate_2732",
+        "candidate_2756",
+        "candidate_2852",
+        "candidate_2876",
+        "candidate_3332",
+        "candidate_3356",
+        "candidate_3452",
+        "candidate_3476",
+        "candidate_3572",
+        "candidate_3596",
+        "candidate_4052",
+        "candidate_4076",
+        "candidate_4172",
+        "candidate_4196",
+        "candidate_4292",
+        "candidate_4316",
+        "candidate_4772",
+        "candidate_4796",
+        "candidate_4892",
+        "candidate_4916",
+        "candidate_5012",
+        "candidate_5036"
+      ],
+      "cluster_639": [
+        "candidate_2613",
+        "candidate_3357",
+        "candidate_3573",
+        "candidate_3597",
+        "candidate_4197",
+        "candidate_4293"
+      ],
+      "cluster_640": [
+        "candidate_2614",
+        "candidate_3478",
+        "candidate_4198",
+        "candidate_4918"
+      ],
+      "cluster_641": [
+        "candidate_2615",
+        "candidate_2735",
+        "candidate_2855",
+        "candidate_3335"
+      ],
+      "cluster_642": [
+        "candidate_2616",
+        "candidate_3258",
+        "candidate_4380",
+        "candidate_4404",
+        "candidate_4872"
+      ],
+      "cluster_643": [
+        "candidate_2622",
+        "candidate_3282",
+        "candidate_3516",
+        "candidate_4716"
+      ],
+      "cluster_644": [
+        "candidate_2627",
+        "candidate_2843",
+        "candidate_4721",
+        "candidate_4763",
+        "candidate_4883"
+      ],
+      "cluster_645": [
+        "candidate_2635",
+        "candidate_4075",
+        "candidate_4171",
+        "candidate_4291",
+        "candidate_5011",
+        "candidate_5035"
+      ],
+      "cluster_646": [
+        "candidate_2637",
+        "candidate_2853",
+        "candidate_4317",
+        "candidate_4797",
+        "candidate_4893",
+        "candidate_4917"
+      ],
+      "cluster_647": [
+        "candidate_2638",
+        "candidate_3334",
+        "candidate_3358",
+        "candidate_4078"
+      ],
+      "cluster_648": [
+        "candidate_2639",
+        "candidate_2879",
+        "candidate_3575",
+        "candidate_4295",
+        "candidate_4319"
+      ],
+      "cluster_649": [
+        "candidate_2640",
+        "candidate_3648",
+        "candidate_3768"
+      ],
+      "cluster_650": [
+        "candidate_2658",
+        "candidate_4056",
+        "candidate_4386"
+      ],
+      "cluster_651": [
+        "candidate_2685",
+        "candidate_2865",
+        "candidate_4005",
+        "candidate_4959"
+      ],
+      "cluster_652": [
+        "candidate_2692",
+        "candidate_3655",
+        "candidate_3967",
+        "candidate_4009"
+      ],
+      "cluster_653": [
+        "candidate_2703",
+        "candidate_3207"
+      ],
+      "cluster_654": [
+        "candidate_2706",
+        "candidate_2748",
+        "candidate_2868",
+        "candidate_4026",
+        "candidate_4626",
+        "candidate_4668",
+        "candidate_4980"
+      ],
+      "cluster_655": [
+        "candidate_2721",
+        "candidate_3063",
+        "candidate_3087",
+        "candidate_3399"
+      ],
+      "cluster_656": [
+        "candidate_2731",
+        "candidate_2755",
+        "candidate_3475",
+        "candidate_4051"
+      ],
+      "cluster_657": [
+        "candidate_2733",
+        "candidate_2877",
+        "candidate_4053",
+        "candidate_4077",
+        "candidate_5037"
+      ],
+      "cluster_658": [
+        "candidate_2734",
+        "candidate_2758",
+        "candidate_3454",
+        "candidate_3574",
+        "candidate_4774",
+        "candidate_4798"
+      ],
+      "cluster_659": [
+        "candidate_2757",
+        "candidate_3333",
+        "candidate_3453",
+        "candidate_4773",
+        "candidate_5013"
+      ],
+      "cluster_660": [
+        "candidate_2759",
+        "candidate_3359",
+        "candidate_3479",
+        "candidate_4055",
+        "candidate_4919",
+        "candidate_5015",
+        "candidate_5039"
+      ],
+      "cluster_661": [
+        "candidate_2825",
+        "candidate_2849",
+        "candidate_3189",
+        "candidate_3351",
+        "candidate_3543"
+      ],
+      "cluster_662": [
+        "candidate_2851",
+        "candidate_3451",
+        "candidate_4195",
+        "candidate_4771",
+        "candidate_4795",
+        "candidate_4915"
+      ],
+      "cluster_663": [
+        "candidate_2854",
+        "candidate_4054",
+        "candidate_4174",
+        "candidate_4894",
+        "candidate_5014"
+      ],
+      "cluster_664": [
+        "candidate_2871",
+        "candidate_4029",
+        "candidate_4749",
+        "candidate_4791",
+        "candidate_4983"
+      ],
+      "cluster_665": [
+        "candidate_2872",
+        "candidate_3910",
+        "candidate_4984"
+      ],
+      "cluster_666": [
+        "candidate_2875",
+        "candidate_3331",
+        "candidate_3355",
+        "candidate_3595",
+        "candidate_4315"
+      ],
+      "cluster_667": [
+        "candidate_2878",
+        "candidate_3598",
+        "candidate_4294",
+        "candidate_4318",
+        "candidate_5038"
+      ],
+      "cluster_668": [
+        "candidate_2881",
+        "candidate_3222",
+        "candidate_4476"
+      ],
+      "cluster_669": [
+        "candidate_2892",
+        "candidate_3672",
+        "candidate_3732"
+      ],
+      "cluster_670": [
+        "candidate_2984",
+        "candidate_4358",
+        "candidate_4400",
+        "candidate_4574"
+      ],
+      "cluster_671": [
+        "candidate_3069",
+        "candidate_3071",
+        "candidate_3113"
+      ],
+      "cluster_672": [
+        "candidate_3080",
+        "candidate_3392",
+        "candidate_3878"
+      ],
+      "cluster_673": [
+        "candidate_3122"
+      ],
+      "cluster_674": [
+        "candidate_3215",
+        "candidate_3473",
+        "candidate_3551",
+        "candidate_4655"
+      ],
+      "cluster_675": [
+        "candidate_3318",
+        "candidate_3996",
+        "candidate_4116"
+      ],
+      "cluster_676": [
+        "candidate_3383",
+        "candidate_4181",
+        "candidate_4223",
+        "candidate_4301"
+      ],
+      "cluster_677": [
+        "candidate_3455",
+        "candidate_4199",
+        "candidate_4775",
+        "candidate_4799",
+        "candidate_4895"
+      ],
+      "cluster_678": [
+        "candidate_3477",
+        "candidate_4173"
+      ],
+      "cluster_679": [
+        "candidate_3518",
+        "candidate_4526"
+      ],
+      "cluster_680": [
+        "candidate_3592",
+        "candidate_3958",
+        "candidate_4192",
+        "candidate_4678",
+        "candidate_4912"
+      ],
+      "cluster_681": [
+        "candidate_3599",
+        "candidate_4079",
+        "candidate_4175"
+      ],
+      "cluster_682": [
+        "candidate_3626"
+      ],
+      "cluster_683": [
+        "candidate_3645",
+        "candidate_3705",
+        "candidate_3939",
+        "candidate_4251",
+        "candidate_4425",
+        "candidate_4581",
+        "candidate_4971"
+      ],
+      "cluster_684": [
+        "candidate_3656",
+        "candidate_3890"
+      ],
+      "cluster_685": [
+        "candidate_3708",
+        "candidate_3978",
+        "candidate_4272",
+        "candidate_4698",
+        "candidate_4992"
+      ],
+      "cluster_686": [
+        "candidate_3738",
+        "candidate_4200",
+        "candidate_4458"
+      ],
+      "cluster_687": [
+        "candidate_3765",
+        "candidate_3885",
+        "candidate_3945",
+        "candidate_4257",
+        "candidate_4953"
+      ],
+      "cluster_688": [
+        "candidate_3813",
+        "candidate_4185"
+      ],
+      "cluster_689": [
+        "candidate_3815",
+        "candidate_4559",
+        "candidate_4907",
+        "candidate_4967"
+      ],
+      "cluster_690": [
+        "candidate_3936"
+      ],
+      "cluster_691": [
+        "candidate_3950",
+        "candidate_4286"
+      ],
+      "cluster_692": [
+        "candidate_4082"
+      ],
+      "cluster_693": [
+        "candidate_4101",
+        "candidate_4179",
+        "candidate_4437",
+        "candidate_4899"
+      ],
+      "cluster_694": [
+        "candidate_4121"
+      ],
+      "cluster_695": [
+        "candidate_4283",
+        "candidate_4553",
+        "candidate_5003"
+      ],
+      "cluster_696": [
+        "candidate_4299",
+        "candidate_4941"
+      ],
+      "cluster_697": [
+        "candidate_4416"
+      ],
+      "cluster_698": [
+        "candidate_4496",
+        "candidate_4616"
+      ],
+      "cluster_699": [
+        "candidate_4913"
+      ]
+    },
+    "processing_time": 0.0333249568939209
+  },
+  "meta_reasoning_analysis": {
+    "total_candidates_analyzed": 700,
+    "top_candidates_selected": 10,
+    "reasoning_engine_usage": {
+      "deductive": 700,
+      "inductive": 700,
+      "probabilistic": 700,
+      "counterfactual": 700,
+      "causal": 700,
+      "analogical": 700,
+      "abductive": 700
+    },
+    "answer_themes": {
+      "context_preservation": 9,
+      "memory_systems": 0,
+      "attention_mechanisms": 6,
+      "adaptive_strategies": 3,
+      "predictive_modeling": 1
+    },
+    "consensus_strength": 0.595,
+    "evidence_diversity": 71,
+    "avg_confidence": 1.0,
+    "synthesis_recommendation": "Synthesize top 10 candidates with average confidence 1.000. Primary recommendation from highest-confidence candidate: Analogical reasoning: 'Counterfactual analysis: If 'Probabilistic reasoni...' is analogous to patterns in 'Research paper: Perception-Informed Neural Networks: Beyond. This work explores novel approac..."
+  },
+  "corpus_metadata": {
+    "total_papers_available": 20,
+    "papers_with_content_extracted": 5,
+    "total_content_words": 104,
+    "semantic_search_confidence": 1.0
+  },
+  "confidence_metrics": {
+    "average_candidate_confidence": 0.9877480158730159,
+    "max_candidate_confidence": 1.0,
+    "compressed_candidates_avg_confidence": 0.9999242857142857,
+    "meta_reasoning_confidence": 1.0
+  },
+  "processing_timeline": {
+    "step1_input": 0.0,
+    "step2_semantic_search": 0.017932891845703125,
+    "step3_content_analysis": 2.09808349609375e-05,
+    "step4_system1_generation": 0.06771707534790039,
+    "step5_deduplication": 0.03338193893432617,
+    "step6_meta_reasoning": 0.000392913818359375,
+    "step7_wisdom_package": 0.003818988800048828,
+    "step8_llm_integration": 1.6689300537109375e-05,
+    "step9_final_response": 0.2945418357849121
+  },
+  "final_answer_length": 2158,
+  "session_id": "nwtn_complete_1754926364"
+}

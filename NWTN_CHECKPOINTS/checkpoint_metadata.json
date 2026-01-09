@@ -1,0 +1,114 @@
+{
+  "created": "2025-08-10T19:47:15.657578",
+  "checkpoints": {
+    "voicebox_synthesis": [
+      {
+        "timestamp": "20250810_194726",
+        "run_id": "20250810_194726",
+        "file_path": "NWTN_CHECKPOINTS/voicebox_synthesis/voicebox_synthesis_20250810_194726.pkl",
+        "backup_path": "NWTN_CHECKPOINTS/voicebox_synthesis/voicebox_synthesis_20250810_194726_backup.pkl",
+        "file_size_bytes": 21368,
+        "backup_size_bytes": 21368,
+        "data_type": "PRSMResponse",
+        "verification_passed": true,
+        "created": "2025-08-10T19:47:26.969800"
+      },
+      {
+        "timestamp": "20250810_194954",
+        "run_id": "20250810_194954",
+        "file_path": "NWTN_CHECKPOINTS/voicebox_synthesis/voicebox_synthesis_20250810_194954.pkl",
+        "backup_path": "NWTN_CHECKPOINTS/voicebox_synthesis/voicebox_synthesis_20250810_194954_backup.pkl",
+        "file_size_bytes": 21367,
+        "backup_size_bytes": 21367,
+        "data_type": "PRSMResponse",
+        "verification_passed": true,
+        "created": "2025-08-10T19:49:54.082152"
+      },
+      {
+        "timestamp": "20250810_203810",
+        "run_id": "20250810_203810",
+        "file_path": "NWTN_CHECKPOINTS/voicebox_synthesis/voicebox_synthesis_20250810_203810.pkl",
+        "backup_path": "NWTN_CHECKPOINTS/voicebox_synthesis/voicebox_synthesis_20250810_203810_backup.pkl",
+        "file_size_bytes": 21367,
+        "backup_size_bytes": 21367,
+        "data_type": "PRSMResponse",
+        "verification_passed": true,
+        "created": "2025-08-10T20:38:10.169004"
+      },
+      {
+        "timestamp": "20250810_214733",
+        "run_id": "20250810_214733",
+        "file_path": "NWTN_CHECKPOINTS/voicebox_synthesis/voicebox_synthesis_20250810_214733.pkl",
+        "backup_path": "NWTN_CHECKPOINTS/voicebox_synthesis/voicebox_synthesis_20250810_214733_backup.pkl",
+        "file_size_bytes": 21368,
+        "backup_size_bytes": 21368,
+        "data_type": "PRSMResponse",
+        "verification_passed": true,
+        "created": "2025-08-10T21:47:33.236373"
+      },
+      {
+        "timestamp": "20250810_215632",
+        "run_id": "20250810_215632",
+        "file_path": "NWTN_CHECKPOINTS/voicebox_synthesis/voicebox_synthesis_20250810_215632.pkl",
+        "backup_path": "NWTN_CHECKPOINTS/voicebox_synthesis/voicebox_synthesis_20250810_215632_backup.pkl",
+        "file_size_bytes": 21367,
+        "backup_size_bytes": 21367,
+        "data_type": "PRSMResponse",
+        "verification_passed": true,
+        "created": "2025-08-10T21:56:32.518572"
+      }
+    ]
+  },
+  "pipeline_runs": {
+    "20250810_194726": {
+      "started": "2025-08-10T19:47:26.969811",
+      "steps_completed": [
+        {
+          "step": "voicebox_synthesis",
+          "timestamp": "20250810_194726",
+          "file_path": "NWTN_CHECKPOINTS/voicebox_synthesis/voicebox_synthesis_20250810_194726.pkl"
+        }
+      ]
+    },
+    "20250810_194954": {
+      "started": "2025-08-10T19:49:54.082166",
+      "steps_completed": [
+        {
+          "step": "voicebox_synthesis",
+          "timestamp": "20250810_194954",
+          "file_path": "NWTN_CHECKPOINTS/voicebox_synthesis/voicebox_synthesis_20250810_194954.pkl"
+        }
+      ]
+    },
+    "20250810_203810": {
+      "started": "2025-08-10T20:38:10.169018",
+      "steps_completed": [
+        {
+          "step": "voicebox_synthesis",
+          "timestamp": "20250810_203810",
+          "file_path": "NWTN_CHECKPOINTS/voicebox_synthesis/voicebox_synthesis_20250810_203810.pkl"
+        }
+      ]
+    },
+    "20250810_214733": {
+      "started": "2025-08-10T21:47:33.236385",
+      "steps_completed": [
+        {
+          "step": "voicebox_synthesis",
+          "timestamp": "20250810_214733",
+          "file_path": "NWTN_CHECKPOINTS/voicebox_synthesis/voicebox_synthesis_20250810_214733.pkl"
+        }
+      ]
+    },
+    "20250810_215632": {
+      "started": "2025-08-10T21:56:32.518583",
+      "steps_completed": [
+        {
+          "step": "voicebox_synthesis",
+          "timestamp": "20250810_215632",
+          "file_path": "NWTN_CHECKPOINTS/voicebox_synthesis/voicebox_synthesis_20250810_215632.pkl"
+        }
+      ]
+    }
+  }
+}

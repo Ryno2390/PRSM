@@ -1,0 +1,112 @@
+{
+  "integration_summary": {
+    "total_tests": 4,
+    "successful_tests": 2,
+    "success_rate": 0.5,
+    "total_execution_time": 2.053178071975708,
+    "integration_success": false
+  },
+  "test_results": {
+    "system_initialization": {
+      "success": true,
+      "execution_time": 1.0878889560699463,
+      "corpus_size": 0,
+      "health_monitoring_active": true
+    },
+    "complete_pipeline": {
+      "success": true,
+      "execution_time": 0.965034008026123,
+      "pipeline_time": 0.9650239944458008,
+      "pipeline_health_score": 1.0,
+      "final_answer_length": 273,
+      "papers_retrieved": 20,
+      "reasoning_engines_used": 5,
+      "candidates_generated": 5,
+      "validation_passed": false,
+      "full_result": {
+        "final_answer": "# Breakthrough Approaches for Context Rot Prevention in AI Systems\n\n**Research Foundation:** This analysis draws from 20 relevant research papers containing 20,663 words of academic content.\n\n**Content Analysis:** 49 extracted entities from 2 high-quality research papers.\n",
+        "success": true,
+        "session_id": "nwtn_session_1754924696",
+        "execution_metrics": {
+          "execution_time_seconds": 0.9650039672851562,
+          "pipeline_health_score": 1.0,
+          "successful_components": 5,
+          "total_components": 5,
+          "pipeline_success_rate": 1.0
+        },
+        "semantic_analysis": {
+          "papers_searched": 2295,
+          "papers_retrieved": 20,
+          "search_confidence": 1.0
+        },
+        "reasoning_analysis": {
+          "reasoning_engines_used": 5,
+          "candidates_generated": 5,
+          "enhanced_candidates": 0,
+          "content_grounded_candidates": 5,
+          "breakthrough_insights": 5,
+          "total_evidence_patterns": 0,
+          "full_content_utilized": true
+        },
+        "validation_analysis": {
+          "validation_passed": false,
+          "overall_confidence": 0.4,
+          "claims_extracted": 1,
+          "should_present_response": false
+        },
+        "component_status": {
+          "semantic_retrieval": {
+            "status": "completed",
+            "success": true,
+            "execution_time": 0.956381,
+            "fallback_used": false
+          },
+          "content_analysis": {
+            "status": "completed",
+            "success": true,
+            "execution_time": 0.002633,
+            "fallback_used": false
+          },
+          "candidate_generation": {
+            "status": "completed",
+            "success": true,
+            "execution_time": 0.005023,
+            "fallback_used": false
+          },
+          "meta_reasoning": {
+            "status": "completed",
+            "success": true,
+            "execution_time": 3.4e-05,
+            "fallback_used": false
+          },
+          "response_synthesis": {
+            "status": "completed",
+            "success": true,
+            "execution_time": 0.000738,
+            "fallback_used": false
+          }
+        }
+      }
+    },
+    "response_quality": {
+      "success": false,
+      "execution_time": 1.1920928955078125e-05,
+      "word_count": 36,
+      "sentence_count": 2,
+      "paragraph_count": 1,
+      "technical_terms": 3,
+      "breakthrough_indicators": 1,
+      "comprehensive": false,
+      "technical": true,
+      "innovative": true,
+      "structured": false,
+      "overall_quality": false
+    },
+    "complete_integration": {
+      "success": false,
+      "execution_time": 2.1457672119140625e-06,
+      "error": "Previous tests failed"
+    }
+  },
+  "timestamp": 1754924697.684299
+}

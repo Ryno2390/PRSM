@@ -569,7 +569,7 @@ A simple Hello World to test your PRSM installation
 """
 import asyncio
 from prsm.core.models import UserInput, PRSMSession
-from prsm.nwtn.orchestrator import NWTNOrchestrator
+from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
 
 async def main():
     print("🧠 Initializing PRSM...")
