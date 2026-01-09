@@ -35,7 +35,7 @@ except ImportError:
     DILITHIUM_AVAILABLE = False
     ML_DSA_44 = ML_DSA_65 = ML_DSA_87 = None
 
-# from ..core.models import PRSMBaseModel  # Optional import for integration
+# from prsm.core.models import PRSMBaseModel  # Optional import for integration
 
 
 class SecurityLevel(str, Enum):

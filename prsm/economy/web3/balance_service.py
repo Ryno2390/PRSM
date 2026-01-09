@@ -13,8 +13,8 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass
 import json
 
-from ..core.database_service import DatabaseService
-from ..core.models import FTNSWallet, FTNSTransaction
+from prsm.core.database_service import DatabaseService
+from prsm.core.models import FTNSWallet, FTNSTransaction
 from .wallet_connector import Web3WalletConnector
 from .contract_interface import FTNSContractInterface, TokenBalance
 

@@ -19,7 +19,7 @@ from .secure_api_client_factory import SecureClientType, secure_client_factory
 from ..config.credential_manager import CredentialManager, CredentialType
 from ..models.integration_models import IntegrationPlatform
 from .audit_logger import audit_logger
-from ...core.config import settings
+from prsm.core.config import settings
 
 logger = structlog.get_logger(__name__)
 

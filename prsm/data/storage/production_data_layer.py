@@ -42,9 +42,9 @@ except ImportError as e:
     print("Install with: pip install asyncpg redis pymilvus sqlalchemy alembic")
     STORAGE_DEPS_AVAILABLE = False
 
-from ..core.config import settings
-from ..core.models import PeerNode
-from ..safety.monitor import SafetyMonitor
+from prsm.core.config import settings
+from prsm.core.models import PeerNode
+from prsm.core.safety.monitor import SafetyMonitor
 
 logger = logging.getLogger(__name__)
 

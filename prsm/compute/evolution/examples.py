@@ -24,7 +24,7 @@ from .models import (
 try:
     from ..nwtn.orchestrator import TaskOrchestrator
     from ..agents.executors.unified_router import UnifiedModelRouter
-    from ..governance.voting import GovernanceSystem
+    from prsm.economy.governance.voting import GovernanceSystem
 except ImportError:
     # Mock classes for standalone testing
     class TaskOrchestrator:

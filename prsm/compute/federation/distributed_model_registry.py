@@ -23,13 +23,13 @@ try:
 except ImportError as e:
     print(f"⚠️ P2P dependencies not installed: {e}")
 
-from ..core.config import settings
-from ..core.models import (
+from prsm.core.config import settings
+from prsm.core.models import (
     TeacherModel, ModelType, PeerNode, ModelShard,
     FTNSTransaction, ProvenanceRecord
 )
-from ..data_layer.enhanced_ipfs import get_ipfs_client
-from ..tokenomics.ftns_service import ftns_service
+from prsm.data.data_layer.enhanced_ipfs import get_ipfs_client
+from prsm.economy.tokenomics.ftns_service import ftns_service
 from .enhanced_p2p_network import get_production_p2p_network
 
 

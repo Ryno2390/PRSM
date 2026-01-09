@@ -39,7 +39,7 @@ try:
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
 
-from ...core.models import PRSMBaseModel
+from prsm.core.models import PRSMBaseModel
 
 logger = structlog.get_logger()
 

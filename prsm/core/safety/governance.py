@@ -18,7 +18,7 @@ from enum import Enum
 import structlog
 
 from pydantic import Field, BaseModel, validator
-from ..core.models import SafetyLevel, SafetyFlag, GovernanceProposal, PRSMBaseModel
+from prsm.core.models import SafetyLevel, SafetyFlag, GovernanceProposal, PRSMBaseModel
 
 logger = structlog.get_logger()
 

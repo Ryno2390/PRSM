@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from ..core.integration_manager import integration_manager
+from prsm.core.integration_manager import integration_manager
 from ..connectors.github_connector import GitHubConnector
 from ..connectors.huggingface_connector import HuggingFaceConnector
 from ..connectors.ollama_connector import OllamaConnector
@@ -31,7 +31,7 @@ from ..models.integration_models import (
     ImportRequest, ImportResult, ImportStatus, ConnectorHealth,
     IntegrationStats
 )
-from ...core.models import PRSMBaseModel
+from prsm.core.models import PRSMBaseModel
 
 
 # === API Models ===

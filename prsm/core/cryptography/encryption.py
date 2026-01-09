@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
 from cryptography.fernet import Fernet
 
-from ..core.database import db_manager
+from prsm.core.database import db_manager
 from .key_management import get_key_manager
 from .crypto_models import (
     EncryptionAlgorithm, PrivacyLevel, KeyType,

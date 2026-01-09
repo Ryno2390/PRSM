@@ -19,12 +19,12 @@ from pydantic import BaseModel, Field
 import structlog
 from datetime import datetime, timezone
 
-from ..monitoring.enterprise_monitoring import (
+from prsm.core.monitoring.enterprise_monitoring import (
     get_monitoring, MetricType, AlertSeverity, MonitoringComponent
 )
 from ..auth import get_current_user
 from ..security.enhanced_authorization import get_enhanced_auth_manager
-from ..core.models import UserRole
+from prsm.core.models import UserRole
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()

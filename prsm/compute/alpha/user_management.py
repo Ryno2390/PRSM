@@ -28,9 +28,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 import structlog
 
-from ..core.database import db_manager
-from ..tokenomics.ftns_service import FTNSService
-from ..core.models import UserInput, PRSMResponse
+from prsm.core.database import db_manager
+from prsm.economy.tokenomics.ftns_service import FTNSService
+from prsm.core.models import UserInput, PRSMResponse
 
 logger = structlog.get_logger(__name__)
 

@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Any, Union
 
 import structlog
 
-from ..core.database import db_manager
+from prsm.core.database import db_manager
 from .crypto_models import (
     ZKProof, ZKProofRecord, ProofResult,
     ZKProofRequest

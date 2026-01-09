@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Any, Union
 import aiohttp
 import structlog
 
-from ..core.config import get_settings
+from prsm.core.config import get_settings
 from .payment_models import (
     FiatCurrency, CryptoCurrency, ExchangeRate, PaymentStatus
 )

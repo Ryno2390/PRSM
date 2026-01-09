@@ -24,8 +24,8 @@ import uuid
 import random
 from collections import defaultdict
 
-from ..evolution.models import ComponentType, EvaluationResult
-from ..evolution.archive import SolutionNode, EvolutionArchive
+from prsm.compute.evolution.models import ComponentType, EvaluationResult
+from prsm.compute.evolution.archive import SolutionNode, EvolutionArchive
 from .distributed_evolution import FederatedEvolutionSystem, NetworkEvolutionResult
 
 logger = logging.getLogger(__name__)

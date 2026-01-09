@@ -28,8 +28,8 @@ from ..models.integration_models import (
     IntegrationRecord, ImportStatus
 )
 from ..security.sandbox_manager import SandboxManager
-from ...core.config import settings
-from ...core.models import FTNSTransaction
+from prsm.core.config import settings
+from prsm.core.models import FTNSTransaction
 from ...tokenomics.ftns_service import ftns_service
 
 

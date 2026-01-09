@@ -36,13 +36,13 @@ from uuid import UUID, uuid4
 
 import structlog
 
-from ..core.models import PRSMBaseModel
-from ..core.config import get_settings
-from ..tokenomics.ftns_service import FTNSService
-from ..safety.circuit_breaker import CircuitBreakerNetwork
+from prsm.core.models import PRSMBaseModel
+from prsm.core.config import get_settings
+from prsm.economy.tokenomics.ftns_service import FTNSService
+from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork
 from ..federation.model_registry import ModelRegistry
-from ..data_layer.enhanced_ipfs import PRSMIPFSClient
-from ..governance.proposals import ProposalManager
+from prsm.data.data_layer.enhanced_ipfs import PRSMIPFSClient
+from prsm.economy.governance.proposals import ProposalManager
 
 from .models import (
     DistillationRequest, DistillationJob, DistillationJobStatus, DistillationStatus,

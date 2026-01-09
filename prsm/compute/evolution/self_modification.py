@@ -23,12 +23,12 @@ from .models import (
 )
 # Optional imports for safety and governance
 try:
-    from ..safety.monitor import SafetyMonitor
+    from prsm.core.safety.monitor import SafetyMonitor
 except ImportError:
     SafetyMonitor = None
 
 try:
-    from ..governance.voting import GovernanceSystem
+    from prsm.economy.governance.voting import GovernanceSystem
 except ImportError:
     GovernanceSystem = None
 

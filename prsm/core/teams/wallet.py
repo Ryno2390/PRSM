@@ -17,8 +17,8 @@ import structlog
 # Set precision for financial calculations
 getcontext().prec = 18
 
-from ..core.models import FTNSTransaction
-from ..tokenomics.ftns_service import ftns_service
+from prsm.core.models import FTNSTransaction
+from prsm.economy.tokenomics.ftns_service import ftns_service
 from .models import (
     Team, TeamMember, TeamWallet, TeamTask,
     TeamRole, RewardPolicy, TeamMembershipStatus

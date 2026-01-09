@@ -16,10 +16,10 @@ from typing import Dict, List, Optional, Any, Union
 import structlog
 from sqlalchemy.orm import Session
 
-from ..core.database import db_manager
-from ..core.config import get_settings
+from prsm.core.database import db_manager
+from prsm.core.config import get_settings
 from ..integrations.security.audit_logger import audit_logger
-from ..tokenomics.ftns_service import get_ftns_service
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from ..web3.web3_service import get_web3_service
 from .fiat_gateway import get_fiat_gateway
 from .crypto_exchange import get_crypto_exchange

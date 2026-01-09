@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
-from ..core.models import PRSMBaseModel, TimestampMixin
+from prsm.core.models import PRSMBaseModel, TimestampMixin
 
 
 class TrainingMetrics(BaseModel):

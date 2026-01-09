@@ -29,10 +29,10 @@ from collections import defaultdict, namedtuple
 
 import structlog
 
-from ..teachers.seal import SEALService, SEALConfig
-from ..teachers.rlt.student_comprehension_evaluator import ComprehensionMetrics, StudentComprehensionEvaluator
-from ..teachers.rlt.quality_monitor import QualityMetrics, QualityMonitor
-from ..monitoring.rlt_performance_monitor import RLTPerformanceMonitor, RLTMetrics
+from prsm.compute.teachers.seal import SEALService, SEALConfig
+from prsm.compute.teachers.rlt.student_comprehension_evaluator import ComprehensionMetrics, StudentComprehensionEvaluator
+from prsm.compute.teachers.rlt.quality_monitor import QualityMetrics, QualityMonitor
+from prsm.core.monitoring.rlt_performance_monitor import RLTPerformanceMonitor, RLTMetrics
 from .real_benchmark_suite import RealBenchmarkSuite, BenchmarkResult
 
 logger = structlog.get_logger(__name__)

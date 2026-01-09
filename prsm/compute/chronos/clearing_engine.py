@@ -19,7 +19,7 @@ from .models import (
 from .wallet_manager import MultiSigWalletManager
 from .exchange_router import ExchangeRouter
 from .hub_spoke_router import HubSpokeRouter
-from ..core.ipfs_client import IPFSClient
+from prsm.core.ipfs_client import IPFSClient
 
 
 logger = logging.getLogger(__name__)

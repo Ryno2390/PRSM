@@ -30,7 +30,7 @@ from .model_router import (
 from ...teachers.seal import SEALService, SEALConfig
 from ...teachers.rlt.dense_reward_trainer import RLTTrainingConfig
 from ...teachers.rlt.student_comprehension_evaluator import ComprehensionMetrics
-from ...core.models import TeacherModel, ModelType, AgentType
+from prsm.core.models import TeacherModel, ModelType, AgentType
 from ...federation.model_registry import ModelRegistry
 
 logger = structlog.get_logger(__name__)

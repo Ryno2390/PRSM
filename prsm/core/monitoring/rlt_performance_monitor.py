@@ -31,12 +31,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import structlog
 
-from ..teachers.rlt.quality_monitor import QualityMonitor, QualityMetrics, MonitoringConfig
-from ..teachers.rlt.student_comprehension_evaluator import ComprehensionMetrics, EvaluationConfig
-from ..teachers.rlt.dense_reward_trainer import RLTTrainingConfig
+from prsm.compute.teachers.rlt.quality_monitor import QualityMonitor, QualityMetrics, MonitoringConfig
+from prsm.compute.teachers.rlt.student_comprehension_evaluator import ComprehensionMetrics, EvaluationConfig
+from prsm.compute.teachers.rlt.dense_reward_trainer import RLTTrainingConfig
 from .metrics import MetricsCollector, SystemMetrics
-from ..safety.monitor import SafetyMonitor
-from ..safety.circuit_breaker import CircuitBreakerNetwork
+from prsm.core.safety.monitor import SafetyMonitor
+from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork
 
 logger = structlog.get_logger(__name__)
 

@@ -23,7 +23,7 @@ from ..models.integration_models import (
     IntegrationPlatform, ProvenanceMetadata, IntegrationSource,
     ImportRequest, ImportResult
 )
-from ...core.models import ProvenanceRecord, FTNSTransaction, RoyaltyPayment
+from prsm.core.models import ProvenanceRecord, FTNSTransaction, RoyaltyPayment
 from ...data_layer.enhanced_ipfs import get_ipfs_client
 from ...tokenomics.ftns_service import ftns_service
 

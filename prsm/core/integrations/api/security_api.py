@@ -18,7 +18,7 @@ from ..security.security_orchestrator import security_orchestrator, SecurityAsse
 from ..security.audit_logger import audit_logger, EventLevel
 from ..security.threat_detector import ThreatLevel
 from ..models.integration_models import SecurityRisk
-from ...core.models import PRSMBaseModel
+from prsm.core.models import PRSMBaseModel
 
 
 # === API Models ===

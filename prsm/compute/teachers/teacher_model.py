@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from uuid import UUID, uuid4
 import structlog
 
-from ..core.models import (
+from prsm.core.models import (
     TeacherModel, Curriculum, LearningSession, 
     ModelType, PRSMBaseModel
 )

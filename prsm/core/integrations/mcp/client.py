@@ -23,7 +23,7 @@ from .models import (
 from .tools import ToolRegistry
 from .session import SessionManager
 from .security import MCPSecurityManager
-from ...core.config import get_settings
+from prsm.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 

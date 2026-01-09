@@ -16,7 +16,7 @@ from sqlalchemy import Column, String, DateTime, Text, Integer, Boolean, Foreign
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
-from ..core.database import Base
+from prsm.core.database import Base
 
 
 class KeyType(str, Enum):

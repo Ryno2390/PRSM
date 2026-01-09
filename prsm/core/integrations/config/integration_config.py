@@ -22,7 +22,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field, validator, SecretStr
 
 from ..models.integration_models import IntegrationPlatform
-from ...core.config import settings
+from prsm.core.config import settings
 
 
 class SecurityLevel(str, Enum):

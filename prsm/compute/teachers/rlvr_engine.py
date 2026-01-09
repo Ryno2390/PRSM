@@ -25,7 +25,7 @@ import structlog
 import math
 
 from pydantic import Field
-from ..core.models import TeacherModel, LearningSession, PRSMBaseModel
+from prsm.core.models import TeacherModel, LearningSession, PRSMBaseModel
 from .teacher_model import TeachingOutcome, TeachingStrategy
 
 logger = structlog.get_logger()

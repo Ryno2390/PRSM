@@ -30,7 +30,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
-from ..core.models import BaseDBModel
+from prsm.core.models import BaseDBModel
 
 Base = declarative_base()
 

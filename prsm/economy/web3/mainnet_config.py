@@ -14,7 +14,7 @@ from pathlib import Path
 import json
 import os
 
-from ..core.config import get_settings
+from prsm.core.config import get_settings
 from ..integrations.security.audit_logger import audit_logger
 
 logger = structlog.get_logger(__name__)

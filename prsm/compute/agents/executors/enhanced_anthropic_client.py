@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import structlog
 
-from ...config.model_config_manager import get_model_config_manager
+from prsm.core.config.model_config_manager import get_model_config_manager
 
 logger = structlog.get_logger(__name__)
 

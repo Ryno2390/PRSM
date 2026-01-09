@@ -11,18 +11,18 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Tuple
 from uuid import UUID, uuid4
 
-from ..core.config import settings
-from ..core.models import (
+from prsm.core.config import settings
+from prsm.core.models import (
     ImprovementProposal, ImprovementType, ProposalStatus,
     SimulationResult, SafetyCheck, ImprovementOpportunity,
     PerformanceMetric, MetricType
 )
-from ..safety.monitor import SafetyMonitor
-from ..safety.circuit_breaker import CircuitBreakerNetwork
-from ..tokenomics.ftns_service import ftns_service
+from prsm.core.safety.monitor import SafetyMonitor
+from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
 
 
-# === Proposal Engine Configuration ===
+# --- Proposal Engine Configuration ---
 
 # Proposal generation settings
 MIN_CONFIDENCE_FOR_PROPOSAL = float(getattr(settings, "PRSM_MIN_PROPOSAL_CONFIDENCE", 0.6))
@@ -50,6 +50,7 @@ class ImprovementProposalEngine:
         # Component integration
         self.safety_monitor = SafetyMonitor()
         self.circuit_breaker = CircuitBreakerNetwork()
+        self.ftns_service = get_ftns_service()
         
         # Proposal storage
         self.proposals: Dict[UUID, ImprovementProposal] = {}

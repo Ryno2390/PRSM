@@ -32,8 +32,8 @@ from .knowledge_transfer import (
     CrossDomainKnowledgeTransferSystem, KnowledgeTransferRequest, KnowledgeTransferType,
     DomainType, AdaptedSolution
 )
-from ..evolution.models import ComponentType, EvaluationResult
-from ..evolution.archive import SolutionNode, EvolutionArchive
+from prsm.compute.evolution.models import ComponentType, EvaluationResult
+from prsm.compute.evolution.archive import SolutionNode, EvolutionArchive
 
 
 class MockP2PNetwork:

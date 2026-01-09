@@ -24,9 +24,9 @@ from enum import Enum
 # Set precision for governance calculations
 getcontext().prec = 18
 
-from ..core.config import settings
-from ..core.models import PRSMBaseModel
-from ..tokenomics.database_ftns_service import DatabaseFTNSService
+from prsm.core.config import settings
+from prsm.core.models import PRSMBaseModel
+from prsm.economy.tokenomics.database_ftns_service import DatabaseFTNSService
 from ..auth.auth_manager import auth_manager
 from ..integrations.security.audit_logger import audit_logger
 from .voting import get_token_weighted_voting

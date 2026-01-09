@@ -20,12 +20,12 @@ from pydantic import BaseModel, Field
 import structlog
 from datetime import datetime, timezone
 
-from ..marketplace.recommendation_engine import (
+from prsm.economy.marketplace.recommendation_engine import (
     get_recommendation_engine, RecommendationScore, RecommendationType, RecommendationContext
 )
 from ..auth import get_current_user
 from ..security.enhanced_authorization import get_enhanced_auth_manager
-from ..core.models import UserRole
+from prsm.core.models import UserRole
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()

@@ -21,10 +21,10 @@ import structlog
 # Set precision for voting calculations
 getcontext().prec = 18
 
-from ..core.config import settings
-from ..core.models import GovernanceProposal, Vote, PRSMBaseModel
-from ..tokenomics.ftns_service import ftns_service
-from ..safety.monitor import SafetyMonitor
+from prsm.core.config import settings
+from prsm.core.models import GovernanceProposal, Vote, PRSMBaseModel
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
+from prsm.core.safety.monitor import SafetyMonitor
 
 logger = structlog.get_logger()
 
@@ -153,6 +153,7 @@ class TokenWeightedVoting:
     def __init__(self):
         self.voting_id = str(uuid4())
         self.logger = logger.bind(component="token_weighted_voting", voting_id=self.voting_id)
+        self.ftns_service = get_ftns_service()
         
         # Voting state
         self.proposals: Dict[UUID, GovernanceProposal] = {}
@@ -213,7 +214,7 @@ class TokenWeightedVoting:
                     raise ValueError("Proposer not eligible to create proposals")
                 
                 # Charge proposal submission fee
-                proposal_fee_paid = await ftns_service.charge_context_access(proposer_id, int(PROPOSAL_SUBMISSION_FEE))
+                proposal_fee_paid = self.ftns_service.deduct_tokens(proposer_id, Decimal(str(PROPOSAL_SUBMISSION_FEE)), description="Proposal submission fee")
                 if not proposal_fee_paid:
                     raise ValueError("Insufficient FTNS balance for proposal submission fee")
                 
@@ -356,8 +357,7 @@ class TokenWeightedVoting:
                 return self.voting_power_cache[voter_id]
             
             # Get user's FTNS balance
-            user_balance = await ftns_service.get_user_balance(voter_id)
-            token_balance = user_balance.balance
+            token_balance = float(self.ftns_service.get_user_balance(voter_id))
             
             # Base voting power calculation
             if token_balance < MIN_VOTING_BALANCE:
@@ -694,15 +694,15 @@ class TokenWeightedVoting:
     async def _validate_proposer_eligibility(self, proposer_id: str) -> bool:
         """Validate if user is eligible to create proposals"""
         # Check minimum FTNS balance
-        user_balance = await ftns_service.get_user_balance(proposer_id)
-        if user_balance.balance < PROPOSAL_SUBMISSION_FEE:
+        balance = float(self.ftns_service.get_user_balance(proposer_id))
+        if balance < PROPOSAL_SUBMISSION_FEE:
             return False
         
         # Check for governance role or sufficient token balance
         if proposer_id in self.governance_roles:
             return True
         
-        if user_balance.balance >= MIN_VOTING_BALANCE * 10:  # 10x minimum for proposals
+        if balance >= MIN_VOTING_BALANCE * 10:  # 10x minimum for proposals
             return True
         
         return False

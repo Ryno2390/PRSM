@@ -45,8 +45,8 @@ import structlog
 from pydantic import BaseModel, Field
 
 from ..models.integration_models import SecurityRisk, LicenseType, SecurityScanResult
-from ...core.config import settings
-from ...core.models import TimestampMixin
+from prsm.core.config import settings
+from prsm.core.models import TimestampMixin
 # from ...safety.circuit_breaker import CircuitBreakerNetwork  # TODO: Integrate when needed
 
 logger = structlog.get_logger(__name__)

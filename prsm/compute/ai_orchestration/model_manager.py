@@ -64,6 +64,7 @@ class ModelCapability(Enum):
     MULTIMODAL = "multimodal"
     EMBEDDING = "embedding"
     CLASSIFICATION = "classification"
+    SSM_NATIVE = "ssm_native"
 
 
 @dataclass
@@ -204,7 +205,68 @@ class ModelInstance:
             "updated_at": self.updated_at.isoformat()
         }
 
+class SSMModelInstance(ModelInstance):
+    """Native SSM model instance for edge-efficient inference"""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.model = None
+        self.tokenizer = None
+        self._lock = asyncio.Lock()
+        
+    async def initialize_local_model(self):
+        """Initialize the local SSM model architecture"""
+        from prsm.compute.nwtn.architectures.ssm_core import get_ssm_reasoner
+        from prsm.core.utils.deterministic import force_determinism
+        
+        # Ensure identical weight initialization for consensus
+        seed = self.config.get("seed", 42)
+        force_determinism(seed)
+        
+        d_model = self.config.get("d_model", 512)
+        layers = self.config.get("layers", 6)
+        
+        self.model = get_ssm_reasoner(d_model=d_model, layers=layers)
+        self.model.eval()
+        
+        # In a real scenario, we'd load weights from IPFS/Torrent here
+        logger.info(f"Initialized native SSM model: {self.name}")
+        self.status = ModelStatus.AVAILABLE
 
+    async def execute_ssm(self, input_ids: Any, states: Optional[List] = None):
+        """Execute inference on the native SSM architecture"""
+        import torch
+        from prsm.core.utils.deterministic import generate_verification_hash
+        
+        # USE LOCAL GENERATOR TO PREVENT GLOBAL STATE POLLUTION
+        # This is the "Gold Standard" for decentralized AI consensus
+        seed = self.config.get("seed", 42)
+        generator = torch.Generator(device=input_ids.device)
+        generator.manual_seed(seed)
+        
+        async with self._lock:
+            with torch.no_grad():
+                # In a more complex model, we would pass 'generator' to 
+                # stochastic layers like Dropout. Our current SSM is 
+                # purely deterministic in its math, so any variance 
+                # comes from global state or library initialization.
+                
+                # Force deterministic algorithms for this scope
+                torch.use_deterministic_algorithms(True, warn_only=True)
+                
+                logits, next_states = self.model(input_ids, states)
+                
+                # Generate a verification hash for the blockchain layer
+                input_hash = hashlib.sha256(str(input_ids.tolist()).encode()).hexdigest()
+                v_hash = generate_verification_hash(logits, self.model_id, input_hash)
+                
+                return {
+                    "logits": logits,
+                    "next_states": next_states,
+                    "verification_hash": v_hash
+                }
+
+import hashlib
 class ModelHealthMonitor:
     """Health monitoring for model instances"""
     

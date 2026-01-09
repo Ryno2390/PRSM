@@ -18,10 +18,10 @@ import uuid
 
 from .voting import TokenWeightedVoting
 from .proposals import ProposalManager
-from ..evolution.models import (
+from prsm.compute.evolution.models import (
     ModificationProposal, EvaluationResult, ComponentType, RiskLevel
 )
-from ..safety.safety_models import (
+from prsm.core.safety.safety_models import (
     SafetyValidationResult, SafetyStatus
 )
 

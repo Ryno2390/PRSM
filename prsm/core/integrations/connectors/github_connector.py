@@ -26,12 +26,12 @@ from urllib.parse import quote
 
 import aiohttp
 
-from ..core.base_connector import BaseConnector, ConnectorStatus
+from prsm.core.base_connector import BaseConnector, ConnectorStatus
 from ..models.integration_models import (
     IntegrationPlatform, ConnectorConfig, IntegrationSource,
     ImportRequest, ImportResult, SecurityRisk, LicenseType
 )
-from ...core.config import settings
+from prsm.core.config import settings
 
 
 class GitHubConnector(BaseConnector):

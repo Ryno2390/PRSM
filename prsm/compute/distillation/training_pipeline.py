@@ -48,8 +48,8 @@ from uuid import UUID, uuid4
 
 import structlog
 
-from ..core.models import PRSMBaseModel
-from ..core.config import get_settings
+from prsm.core.models import PRSMBaseModel
+from prsm.core.config import get_settings
 from .models import (
     DistillationRequest, TeacherAnalysis, StudentArchitecture, TrainingConfig,
     TrainingStrategy, OptimizationTarget, ModelSize
