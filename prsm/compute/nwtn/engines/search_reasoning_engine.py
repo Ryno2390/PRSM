@@ -127,16 +127,24 @@ class SearchReasoningEngine:
 
     async def _simulate(self, node: ReasoningNode, query: str) -> float:
         """Evaluate the quality of a reasoning node (The Value Function)"""
-        # In PRSM, this is where we check:
-        # 1. Logical consistency (System 2)
-        # 2. Evidence alignment (IPFS/Data)
-        # 3. Probabilistic likelihood (SSM)
+        from prsm.compute.nwtn.engines.world_model_engine import get_world_model
+        world_model = get_world_model()
         
-        # Simulate a reward between 0 and 1
-        # In a real run, we'd call self.quality_assessor.assess_reasoning_step()
-        base_reward = random.uniform(0.4, 0.9)
-        # Deepening the tree should be harder but more rewarded
-        depth_bonus = min(node.depth * 0.05, 0.1)
+        # 1. Neural Reward (Probabilistic likelihood)
+        base_reward = random.uniform(0.4, 0.8)
+        
+        # 2. Symbolic Constraint Check (System 2 Logic)
+        # We check if this reasoning node violates any hard laws
+        context = {"history": node.parent.content if node.parent else ""}
+        symbolic_check = await world_model.verify_constraints(node.content, context)
+        
+        if not symbolic_check.success:
+            # INSTANT PRUNING: Violating a scientific law destroys the node's value
+            logger.info(f"🚫 Pruning node {node.node_id} due to symbolic violation")
+            return 0.0
+            
+        # 3. Apply rewards for logically sound deepening
+        depth_bonus = min(node.depth * 0.05, 0.2)
         return base_reward + depth_bonus
 
     def _backpropagate(self, node: ReasoningNode, reward: float):

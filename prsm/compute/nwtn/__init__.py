@@ -54,16 +54,14 @@ from .architectures.hybrid_architecture import (
 
 # World model engine
 from .engines.world_model_engine import (
-    WorldModelEngine,
-    DomainType,
-    CausalRelationType,
-    ValidationResult,
-    CausalRelation,
-    DomainModel,
-    create_world_model_engine,
-    create_domain_specialized_engine,
-    create_base_world_model
+    NeuroSymbolicEngine,
+    ScientificConstraint,
+    get_world_model
 )
+
+# Backward compatibility alias
+WorldModelEngine = NeuroSymbolicEngine
+
 
 # Note: BayesianSearchEngine components are archived as they are not currently used
 
@@ -84,12 +82,11 @@ __all__ = [
     "ExperimentType",
     
     # World model
+    "NeuroSymbolicEngine",
     "WorldModelEngine",
-    "DomainType",
-    "CausalRelationType",
-    "ValidationResult",
-    "CausalRelation",
-    "DomainModel",
+    "ScientificConstraint",
+    "get_world_model",
+
     
     # Note: Bayesian search, integration, and convenience functions are archived
     
