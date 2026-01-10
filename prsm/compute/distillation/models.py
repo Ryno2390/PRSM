@@ -66,6 +66,38 @@ class TrainingStrategy(str, Enum):
     CURRICULUM = "curriculum"
     SELF_SUPERVISED = "self_supervised"
     SWARM = "swarm"
+    SYNTHETIC_SELF_PLAY = "synthetic_self_play"
+
+
+class SyntheticTask(PRSMBaseModel):
+    """Task for generating synthetic reasoning data"""
+    task_id: UUID = Field(default_factory=uuid4)
+    seed_data_cid: str
+    domain: str
+    target_sample_count: int
+    validation_level: str = "neuro_symbolic"
+    photon_budget: int = 500
+    status: str = "pending"
+
+
+class SyntheticDataShard(PRSMBaseModel):
+    """A verified shard of synthetic reasoning data"""
+    shard_id: UUID = Field(default_factory=uuid4)
+    task_id: UUID
+    generator_node_id: str
+    content_hash: str
+    ipfs_cid: str
+    verification_score: float
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class DataLineageRecord(TimestampMixin):
+    """Tracks the lineage between real seed data and synthetic descendants"""
+    lineage_id: UUID = Field(default_factory=uuid4)
+    original_cid: str
+    synthetic_cid: str
+    contribution_ratio: float = 1.0  # Weight for royalty splitting
+    derivation_type: str = "distillation_expansion"
 
 
 class DistillationRequest(PRSMBaseModel):
