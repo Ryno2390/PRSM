@@ -22,6 +22,8 @@ from .models import (
 
 from prsm.compute.nwtn.architectures.ssm_core import SSMConfig, get_ssm_reasoner
 from prsm.compute.nwtn.architectures.liquid_core import get_liquid_reasoner
+from prsm.compute.nwtn.architectures.fsmn_core import get_fsmn_reasoner
+from prsm.compute.nwtn.architectures.sanm_core import get_sanm_reasoner
 
 logger = structlog.get_logger(__name__)
 
@@ -67,6 +69,8 @@ class ArchitectureGenerator:
                 "ssm_state_range": (8, 16),
                 "ssm_conv_range": (2, 4),
                 "liquid_hidden_range": (64, 128),
+                "fsmn_hidden_range": (128, 256),
+                "sanm_head_range": (4, 4),
                 "intermediate_factor": 2.0,
                 "max_parameters": 100_000_000  # 100M
             },
@@ -77,6 +81,8 @@ class ArchitectureGenerator:
                 "ssm_state_range": (16, 32),
                 "ssm_conv_range": (4, 4),
                 "liquid_hidden_range": (128, 256),
+                "fsmn_hidden_range": (256, 512),
+                "sanm_head_range": (8, 8),
                 "intermediate_factor": 3.0,
                 "max_parameters": 1_000_000_000  # 1B
             },
@@ -87,6 +93,8 @@ class ArchitectureGenerator:
                 "ssm_state_range": (32, 64),
                 "ssm_conv_range": (4, 8),
                 "liquid_hidden_range": (256, 512),
+                "fsmn_hidden_range": (512, 768),
+                "sanm_head_range": (12, 12),
                 "intermediate_factor": 4.0,
                 "max_parameters": 10_000_000_000  # 10B
             },
@@ -97,6 +105,8 @@ class ArchitectureGenerator:
                 "ssm_state_range": (64, 128),
                 "ssm_conv_range": (8, 8),
                 "liquid_hidden_range": (512, 1024),
+                "fsmn_hidden_range": (768, 1024),
+                "sanm_head_range": (16, 16),
                 "intermediate_factor": 4.0,
                 "max_parameters": 100_000_000_000  # 100B+
             }
@@ -277,6 +287,12 @@ class ArchitectureGenerator:
                 
             elif model_type == "liquid":
                 await self._generate_liquid_parameters(architecture, request, template, optimization_config)
+
+            elif model_type == "fsmn":
+                await self._generate_fsmn_parameters(architecture, request, template, optimization_config)
+
+            elif model_type == "sanm":
+                await self._generate_sanm_parameters(architecture, request, template, optimization_config)
             
             logger.info("Core parameters generated",
                        model_type=model_type,
@@ -321,6 +337,41 @@ class ArchitectureGenerator:
             "solver": "euler"
         })
 
+    async def _generate_fsmn_parameters(
+        self,
+        architecture: StudentArchitecture,
+        request: DistillationRequest,
+        template: Dict[str, Any],
+        optimization_config: Dict[str, float]
+    ):
+        """Generate FSMN-specific parameters"""
+        fsmn_hidden = await self._optimize_fsmn_hidden(template, optimization_config)
+        architecture.hidden_size = request.hidden_size or fsmn_hidden
+        architecture.config_overrides.update({
+            "lorder": 10,
+            "rorder": 2,
+            "lstride": 1,
+            "rstride": 1
+        })
+
+    async def _generate_sanm_parameters(
+        self,
+        architecture: StudentArchitecture,
+        request: DistillationRequest,
+        template: Dict[str, Any],
+        optimization_config: Dict[str, float]
+    ):
+        """Generate SANM-specific parameters"""
+        hidden_size = request.hidden_size or await self._optimize_hidden_size(template, optimization_config)
+        nhead = await self._optimize_sanm_heads(template, optimization_config)
+        
+        architecture.hidden_size = hidden_size
+        architecture.attention_heads = nhead
+        architecture.config_overrides.update({
+            "memory_kernel": 11,
+            "use_memory_block": True
+        })
+
     async def _add_domain_specific_components(
         self, 
         architecture: StudentArchitecture, 
@@ -343,7 +394,7 @@ class ArchitectureGenerator:
                 specialized_layers.append(layer_config)
             
             # Add pattern modifications based on architecture
-            if model_type == "transformer":
+            if model_type in ["transformer", "sanm"]:
                 attention_pattern = domain_pattern.get("attention_pattern", "standard")
                 if attention_pattern != "standard":
                     attention_config = {
@@ -514,6 +565,13 @@ class ArchitectureGenerator:
             elif model_type == "liquid":
                 # Continuous neurons ODE parameters
                 block_params = l * (3 * h * h + 3 * h)
+            elif model_type == "fsmn":
+                # Feedforward sequential memory (no attention)
+                # in_proj (h*h) + memory_blocks (h*kernel*2) + out_proj (h*h)
+                block_params = l * (2 * h * h + h * 20)
+            elif model_type == "sanm":
+                # Hybrid Attention + Memory
+                block_params = l * (5 * h * h + h * 11)
             else:
                 block_params = l * (h * h * 4) # Default fallback
                 
@@ -536,9 +594,11 @@ class ArchitectureGenerator:
             # SSMs and Liquids scale linearly with sequence length O(N)
             # Transformers scale quadratically O(N^2)
             base_speed = 1000
-            if model_type in ["ssm", "liquid"]:
+            if model_type in ["ssm", "liquid", "fsmn"]:
                 # 2x - 3x faster than Transformers for edge nodes
                 arch_multiplier = 2.5
+            elif model_type == "sanm":
+                arch_multiplier = 1.8
             else:
                 arch_multiplier = 1.0
                 
@@ -552,8 +612,8 @@ class ArchitectureGenerator:
             architecture.estimated_inference_speed = speed
             
             # Estimate memory usage
-            # SSMs have constant memory footprint for KV-cache
-            if model_type in ["ssm", "liquid"]:
+            # Non-transformers have constant memory footprint for KV-cache equivalent
+            if model_type in ["ssm", "liquid", "fsmn"]:
                 base_memory = size_mb * 1.1 
             else:
                 base_memory = size_mb * 1.5
@@ -572,9 +632,11 @@ class ArchitectureGenerator:
             else:
                 base_accuracy = 0.80
             
-            # SSMs are surprisingly good at long-range reasoning
+            # Specialized boosts
             if model_type == "ssm" and request.domain == "scientific_reasoning":
                 base_accuracy *= 1.02
+            elif model_type == "fsmn" and request.domain == "speech_processing":
+                base_accuracy *= 1.05
 
             predicted_accuracy = min(0.98, base_accuracy)
             architecture.predicted_accuracy = predicted_accuracy
@@ -610,6 +672,8 @@ class ArchitectureGenerator:
             
             if architecture.model_type == "ssm":
                 design_decisions["efficiency"] = "SSM architecture provides linear scaling for long-context scientific reasoning"
+            elif architecture.model_type == "fsmn":
+                design_decisions["latency"] = "FSMN provides non-recurrent memory for ultra-low-latency edge inference"
             
             # Trade-off analysis
             trade_off_analysis = {
@@ -648,6 +712,12 @@ class ArchitectureGenerator:
                     "model_type": "ssm",
                     "trade_offs": "3x faster inference, constant memory, experimental reasoning",
                     "use_case": "Extreme edge nodes with FTNS budget constraints"
+                })
+                alternatives.append({
+                    "name": "FSMN Low-Latency",
+                    "model_type": "fsmn",
+                    "trade_offs": "Ultra-low latency for short sequence signal reasoning",
+                    "use_case": "Real-time edge processing"
                 })
             
             # Speed-optimized alternative
@@ -728,3 +798,16 @@ class ArchitectureGenerator:
         if penalty < 1.0:
             return hidden_range[0]
         return hidden_range[1]
+
+    async def _optimize_fsmn_hidden(self, template: Dict[str, Any], optimization_config: Dict[str, float]) -> int:
+        """Optimize FSMN hidden dimension"""
+        hidden_range = template.get("fsmn_hidden_range", (256, 512))
+        penalty = optimization_config["parameter_penalty"]
+        if penalty < 1.0:
+            return hidden_range[0]
+        return hidden_range[1]
+
+    async def _optimize_sanm_heads(self, template: Dict[str, Any], optimization_config: Dict[str, float]) -> int:
+        """Optimize SANM attention heads"""
+        head_range = template.get("sanm_head_range", (8, 8))
+        return head_range[0]
