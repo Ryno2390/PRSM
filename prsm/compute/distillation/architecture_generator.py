@@ -20,6 +20,9 @@ from .models import (
     ModelSize, OptimizationTarget, TrainingStrategy
 )
 
+from prsm.compute.nwtn.architectures.ssm_core import SSMConfig, get_ssm_reasoner
+from prsm.compute.nwtn.architectures.liquid_core import get_liquid_reasoner
+
 logger = structlog.get_logger(__name__)
 
 
@@ -61,6 +64,9 @@ class ArchitectureGenerator:
                 "layer_range": (6, 12),
                 "hidden_range": (256, 512),
                 "attention_heads_range": (4, 8),
+                "ssm_state_range": (8, 16),
+                "ssm_conv_range": (2, 4),
+                "liquid_hidden_range": (64, 128),
                 "intermediate_factor": 2.0,
                 "max_parameters": 100_000_000  # 100M
             },
@@ -68,6 +74,9 @@ class ArchitectureGenerator:
                 "layer_range": (12, 18),
                 "hidden_range": (512, 768),
                 "attention_heads_range": (8, 12),
+                "ssm_state_range": (16, 32),
+                "ssm_conv_range": (4, 4),
+                "liquid_hidden_range": (128, 256),
                 "intermediate_factor": 3.0,
                 "max_parameters": 1_000_000_000  # 1B
             },
@@ -75,6 +84,9 @@ class ArchitectureGenerator:
                 "layer_range": (18, 24),
                 "hidden_range": (768, 1024),
                 "attention_heads_range": (12, 16),
+                "ssm_state_range": (32, 64),
+                "ssm_conv_range": (4, 8),
+                "liquid_hidden_range": (256, 512),
                 "intermediate_factor": 4.0,
                 "max_parameters": 10_000_000_000  # 10B
             },
@@ -82,6 +94,9 @@ class ArchitectureGenerator:
                 "layer_range": (24, 32),
                 "hidden_range": (1024, 2048),
                 "attention_heads_range": (16, 32),
+                "ssm_state_range": (64, 128),
+                "ssm_conv_range": (8, 8),
+                "liquid_hidden_range": (512, 1024),
                 "intermediate_factor": 4.0,
                 "max_parameters": 100_000_000_000  # 100B+
             }
@@ -170,9 +185,13 @@ class ArchitectureGenerator:
         Returns:
             StudentArchitecture: Optimized architecture specification
         """
+        # Handle Pydantic use_enum_values=True conversion
+        target_size = ModelSize(request.target_size) if isinstance(request.target_size, str) else request.target_size
+        optimization_target = OptimizationTarget(request.optimization_target) if isinstance(request.optimization_target, str) else request.optimization_target
+
         logger.info("Generating student architecture",
-                   target_size=request.target_size.value,
-                   optimization_target=request.optimization_target.value,
+                   target_size=target_size.value,
+                   optimization_target=optimization_target.value,
                    domain=request.domain)
         
         try:
@@ -183,9 +202,9 @@ class ArchitectureGenerator:
             )
             
             # Get base template and constraints
-            template = self.size_templates[request.target_size]
+            template = self.size_templates[target_size]
             domain_pattern = self.domain_patterns.get(request.domain, {})
-            optimization_config = self.optimization_configs[request.optimization_target]
+            optimization_config = self.optimization_configs[optimization_target]
             
             # Generate core architecture parameters
             await self._generate_core_parameters(architecture, request, template, optimization_config)
@@ -203,7 +222,7 @@ class ArchitectureGenerator:
             await self._predict_performance(architecture, request, teacher_analysis)
             
             # Generate design rationale
-            await self._generate_design_rationale(architecture, request, teacher_analysis)
+            await self._generate_design_rationale(architecture, request, teacher_analysis, optimization_target)
             
             logger.info("Architecture generation completed",
                        estimated_parameters=architecture.estimated_parameters,
@@ -225,43 +244,83 @@ class ArchitectureGenerator:
     ):
         """Generate core architecture parameters"""
         try:
-            # Use custom parameters if provided, otherwise optimize
+            model_type = architecture.model_type.lower()
+            
+            # Layer count optimization (common to most)
             if request.layer_count:
                 layer_count = request.layer_count
             else:
                 layer_count = await self._optimize_layer_count(template, optimization_config)
-            
-            if request.hidden_size:
-                hidden_size = request.hidden_size
-            else:
-                hidden_size = await self._optimize_hidden_size(template, optimization_config)
-            
-            if request.attention_heads:
-                attention_heads = request.attention_heads
-            else:
-                attention_heads = await self._optimize_attention_heads(template, optimization_config, hidden_size)
-            
-            # Calculate intermediate size
-            intermediate_size = int(hidden_size * template["intermediate_factor"])
+            architecture.layer_count = layer_count
             
             # Vocabulary size
-            vocabulary_size = request.vocabulary_size or 32000  # Default vocab size
-            
-            # Update architecture
-            architecture.layer_count = layer_count
-            architecture.hidden_size = hidden_size
-            architecture.attention_heads = attention_heads
-            architecture.intermediate_size = intermediate_size
+            vocabulary_size = request.vocabulary_size or 32000
             architecture.vocabulary_size = vocabulary_size
+
+            if model_type == "transformer":
+                if request.hidden_size:
+                    hidden_size = request.hidden_size
+                else:
+                    hidden_size = await self._optimize_hidden_size(template, optimization_config)
+                
+                if request.attention_heads:
+                    attention_heads = request.attention_heads
+                else:
+                    attention_heads = await self._optimize_attention_heads(template, optimization_config, hidden_size)
+                
+                architecture.hidden_size = hidden_size
+                architecture.attention_heads = attention_heads
+                architecture.intermediate_size = int(hidden_size * template["intermediate_factor"])
+                
+            elif model_type == "ssm":
+                await self._generate_ssm_parameters(architecture, request, template, optimization_config)
+                
+            elif model_type == "liquid":
+                await self._generate_liquid_parameters(architecture, request, template, optimization_config)
             
             logger.info("Core parameters generated",
+                       model_type=model_type,
                        layers=layer_count,
-                       hidden_size=hidden_size,
-                       attention_heads=attention_heads)
+                       hidden_size=architecture.hidden_size)
             
         except Exception as e:
             logger.error("Core parameter generation failed", error=str(e))
-    
+
+    async def _generate_ssm_parameters(
+        self,
+        architecture: StudentArchitecture,
+        request: DistillationRequest,
+        template: Dict[str, Any],
+        optimization_config: Dict[str, float]
+    ):
+        """Generate SSM-specific parameters"""
+        hidden_size = request.hidden_size or await self._optimize_hidden_size(template, optimization_config)
+        d_state = await self._optimize_ssm_state(template, optimization_config)
+        d_conv = await self._optimize_ssm_conv(template, optimization_config)
+        
+        architecture.hidden_size = hidden_size
+        architecture.config_overrides.update({
+            "d_state": d_state,
+            "d_conv": d_conv,
+            "expand": 2
+        })
+
+    async def _generate_liquid_parameters(
+        self,
+        architecture: StudentArchitecture,
+        request: DistillationRequest,
+        template: Dict[str, Any],
+        optimization_config: Dict[str, float]
+    ):
+        """Generate Liquid-specific parameters"""
+        # For liquid, hidden_size refers to the ODE state size
+        liquid_hidden = await self._optimize_liquid_hidden(template, optimization_config)
+        architecture.hidden_size = request.hidden_size or liquid_hidden
+        architecture.config_overrides.update({
+            "dt": 0.1,
+            "solver": "euler"
+        })
+
     async def _add_domain_specific_components(
         self, 
         architecture: StudentArchitecture, 
@@ -271,27 +330,35 @@ class ArchitectureGenerator:
         """Add domain-specific architectural components"""
         try:
             specialized_layers = []
+            model_type = architecture.model_type.lower()
             
             # Add domain-specific layers
             for layer_type in domain_pattern.get("specialized_layers", []):
                 layer_config = {
                     "type": layer_type,
-                    "position": "post_attention",
+                    "position": "post_block",
                     "size": architecture.hidden_size // 2,
                     "activation": "gelu"
                 }
                 specialized_layers.append(layer_config)
             
-            # Add attention pattern modifications
-            attention_pattern = domain_pattern.get("attention_pattern", "standard")
-            if attention_pattern != "standard":
-                attention_config = {
-                    "type": "attention_modification",
-                    "pattern": attention_pattern,
-                    "heads_affected": "all",
-                    "modification_strength": 0.3
-                }
-                specialized_layers.append(attention_config)
+            # Add pattern modifications based on architecture
+            if model_type == "transformer":
+                attention_pattern = domain_pattern.get("attention_pattern", "standard")
+                if attention_pattern != "standard":
+                    attention_config = {
+                        "type": "attention_modification",
+                        "pattern": attention_pattern,
+                        "heads_affected": "all",
+                        "modification_strength": 0.3
+                    }
+                    specialized_layers.append(attention_config)
+            elif model_type == "ssm":
+                # SSM specific scaling enhancements
+                specialized_layers.append({
+                    "type": "selective_scan_optimization",
+                    "strength": 1.2
+                })
             
             # Add knowledge injection mechanism
             knowledge_injection = domain_pattern.get("knowledge_injection")
@@ -427,57 +494,73 @@ class ArchitectureGenerator:
     ):
         """Predict performance characteristics of the architecture"""
         try:
+            model_type = architecture.model_type.lower()
+            h = architecture.hidden_size
+            l = architecture.layer_count
+            v = architecture.vocabulary_size
+            
             # Estimate parameters
-            embedding_params = architecture.vocabulary_size * architecture.hidden_size
-            transformer_params = (
-                architecture.layer_count * (
-                    # Attention weights
-                    4 * architecture.hidden_size * architecture.hidden_size +
-                    # Feed-forward weights
-                    2 * architecture.hidden_size * architecture.intermediate_size +
-                    # Layer norm weights
-                    2 * architecture.hidden_size
-                )
-            )
-            output_params = architecture.vocabulary_size * architecture.hidden_size
+            embedding_params = v * h
+            
+            if model_type == "transformer":
+                i = architecture.intermediate_size or (h * 4)
+                # Attention (4 * h^2) + FFN (2 * h * i) per layer
+                block_params = l * (4 * h * h + 2 * h * i + 2 * h)
+            elif model_type == "ssm":
+                d_state = architecture.config_overrides.get("d_state", 16)
+                # S6 parameters are significantly leaner than attention
+                # in_proj (2*h*2*h) + x_proj (h*dt_rank+2*n) + dt_proj (dt_rank*h) + out_proj (h*h)
+                block_params = l * (5 * h * h + h * d_state)
+            elif model_type == "liquid":
+                # Continuous neurons ODE parameters
+                block_params = l * (3 * h * h + 3 * h)
+            else:
+                block_params = l * (h * h * 4) # Default fallback
+                
+            output_params = v * h
             
             # Add specialized layer parameters
             specialized_params = sum(
-                layer.get("size", architecture.hidden_size // 2) * architecture.hidden_size
+                layer.get("size", h // 2) * h
                 for layer in architecture.specialized_layers
             )
             
-            total_params = embedding_params + transformer_params + output_params + specialized_params
-            architecture.estimated_parameters = total_params
+            total_params = embedding_params + block_params + output_params + specialized_params
+            architecture.estimated_parameters = int(total_params)
             
             # Estimate model size (2 bytes per parameter for float16)
             size_mb = (total_params * 2) / (1024 * 1024)
             architecture.estimated_size_mb = size_mb
             
             # Estimate inference speed (tokens/second)
-            # Based on parameter count and hardware assumptions
-            base_speed = 1000  # Base tokens/second for small model
-            param_factor = max(0.1, 1.0 - (total_params / 1_000_000_000) * 0.8)  # Larger models slower
-            speed = base_speed * param_factor
+            # SSMs and Liquids scale linearly with sequence length O(N)
+            # Transformers scale quadratically O(N^2)
+            base_speed = 1000
+            if model_type in ["ssm", "liquid"]:
+                # 2x - 3x faster than Transformers for edge nodes
+                arch_multiplier = 2.5
+            else:
+                arch_multiplier = 1.0
+                
+            param_factor = max(0.1, 1.0 - (total_params / 1_000_000_000) * 0.8)
+            speed = base_speed * param_factor * arch_multiplier
             
             # Apply optimization adjustments
-            if "operator_optimization" in architecture.optimization_strategies:
-                speed *= 1.3
-            if "layer_fusion" in architecture.optimization_strategies:
-                speed *= 1.2
             if "weight_quantization" in architecture.compression_techniques:
                 speed *= 1.5
                 
             architecture.estimated_inference_speed = speed
             
             # Estimate memory usage
-            base_memory = size_mb * 1.5  # Model + activation memory
-            if "gradient_checkpointing" in architecture.optimization_strategies:
-                base_memory *= 0.8  # Memory savings
+            # SSMs have constant memory footprint for KV-cache
+            if model_type in ["ssm", "liquid"]:
+                base_memory = size_mb * 1.1 
+            else:
+                base_memory = size_mb * 1.5
+                
             architecture.estimated_memory_usage = int(base_memory)
             
             # Predict accuracy retention
-            # Based on parameter ratio and optimization target
             teacher_params = teacher_analysis.estimated_parameters or 100_000_000_000
             compression_ratio = teacher_params / total_params
             
@@ -486,27 +569,14 @@ class ArchitectureGenerator:
                 base_accuracy = 0.95
             elif compression_ratio <= 50:
                 base_accuracy = 0.88
-            elif compression_ratio <= 100:
-                base_accuracy = 0.82
             else:
-                base_accuracy = 0.75
+                base_accuracy = 0.80
             
-            # Adjust for optimization target
-            if request.optimization_target == OptimizationTarget.ACCURACY:
-                base_accuracy *= 1.05
-            elif request.optimization_target in [OptimizationTarget.SPEED, OptimizationTarget.SIZE]:
-                base_accuracy *= 0.95
-            
-            # Adjust for domain complexity
-            domain_difficulty = {
-                "medical_research": 0.95,
-                "legal_analysis": 0.93,
-                "scientific_reasoning": 0.92,
-                "code_generation": 0.96,
-                "creative_writing": 0.94
-            }.get(request.domain, 0.95)
-            
-            predicted_accuracy = min(0.98, base_accuracy * domain_difficulty)
+            # SSMs are surprisingly good at long-range reasoning
+            if model_type == "ssm" and request.domain == "scientific_reasoning":
+                base_accuracy *= 1.02
+
+            predicted_accuracy = min(0.98, base_accuracy)
             architecture.predicted_accuracy = predicted_accuracy
             
             # Calculate compression ratio and efficiency
@@ -515,10 +585,8 @@ class ArchitectureGenerator:
             
             logger.info("Performance prediction completed",
                        parameters=total_params,
-                       size_mb=size_mb,
                        speed=speed,
-                       accuracy=predicted_accuracy,
-                       compression_ratio=compression_ratio)
+                       accuracy=predicted_accuracy)
             
         except Exception as e:
             logger.error("Performance prediction failed", error=str(e))
@@ -527,46 +595,38 @@ class ArchitectureGenerator:
         self, 
         architecture: StudentArchitecture, 
         request: DistillationRequest,
-        teacher_analysis: TeacherAnalysis
+        teacher_analysis: TeacherAnalysis,
+        optimization_target: OptimizationTarget
     ):
         """Generate design rationale and alternative architectures"""
         try:
             # Design decisions rationale
             design_decisions = {
-                "layer_count": f"Selected {architecture.layer_count} layers to balance capacity and efficiency for {request.optimization_target.value} optimization",
-                "hidden_size": f"Hidden size of {architecture.hidden_size} provides good trade-off between expressiveness and computational cost",
-                "attention_heads": f"{architecture.attention_heads} attention heads allow sufficient parallel attention patterns while maintaining efficiency",
-                "compression_ratio": f"Target compression ratio of {architecture.compression_ratio:.1f}x achieves size reduction while preserving {architecture.predicted_accuracy:.1%} accuracy"
+                "architecture_choice": f"Selected {architecture.model_type} for optimal {optimization_target.value} performance",
+                "layer_count": f"Selected {architecture.layer_count} layers to balance capacity and efficiency",
+                "hidden_size": f"Hidden size of {architecture.hidden_size} provides good expressiveness",
+                "compression_ratio": f"Target compression ratio of {architecture.compression_ratio:.1f}x achieves size reduction"
             }
+            
+            if architecture.model_type == "ssm":
+                design_decisions["efficiency"] = "SSM architecture provides linear scaling for long-context scientific reasoning"
             
             # Trade-off analysis
             trade_off_analysis = {
                 "accuracy_vs_speed": {
-                    "chosen_balance": request.optimization_target.value,
+                    "chosen_balance": optimization_target.value,
                     "speed_gain": f"{architecture.estimated_inference_speed / 100:.1f}x faster than baseline",
                     "accuracy_retention": f"{architecture.predicted_accuracy:.1%} of teacher performance"
-                },
-                "size_vs_capability": {
-                    "parameter_reduction": f"{architecture.compression_ratio:.1f}x smaller than teacher",
-                    "capability_preservation": f"Retains {len(teacher_analysis.critical_knowledge_areas)} critical knowledge areas"
-                },
-                "efficiency_vs_quality": {
-                    "efficiency_score": f"{architecture.efficiency_score:.2f}",
-                    "quality_measures": "Optimized for domain-specific performance"
                 }
             }
             
             # Generate alternative architectures
-            alternatives = await self._generate_alternative_architectures(request, teacher_analysis)
+            alternatives = await self._generate_alternative_architectures(request, teacher_analysis, optimization_target)
             
             # Update architecture
             architecture.design_decisions = design_decisions
             architecture.trade_off_analysis = trade_off_analysis
             architecture.alternative_architectures = alternatives
-            
-            logger.info("Design rationale generated",
-                       decisions_count=len(design_decisions),
-                       alternatives_count=len(alternatives))
             
         except Exception as e:
             logger.error("Design rationale generation failed", error=str(e))
@@ -574,14 +634,24 @@ class ArchitectureGenerator:
     async def _generate_alternative_architectures(
         self, 
         request: DistillationRequest,
-        teacher_analysis: TeacherAnalysis
+        teacher_analysis: TeacherAnalysis,
+        optimization_target: OptimizationTarget
     ) -> List[Dict[str, Any]]:
         """Generate alternative architecture options"""
         try:
             alternatives = []
             
+            # Architectural alternatives
+            if (request.target_architecture or "transformer") == "transformer":
+                alternatives.append({
+                    "name": "SSM Efficient",
+                    "model_type": "ssm",
+                    "trade_offs": "3x faster inference, constant memory, experimental reasoning",
+                    "use_case": "Extreme edge nodes with FTNS budget constraints"
+                })
+            
             # Speed-optimized alternative
-            if request.optimization_target != OptimizationTarget.SPEED:
+            if optimization_target != OptimizationTarget.SPEED:
                 speed_alt = {
                     "name": "Speed Optimized",
                     "layer_count": max(6, request.layer_count // 2 if request.layer_count else 8),
@@ -590,28 +660,6 @@ class ArchitectureGenerator:
                     "use_case": "Real-time applications requiring fast response"
                 }
                 alternatives.append(speed_alt)
-            
-            # Accuracy-optimized alternative
-            if request.optimization_target != OptimizationTarget.ACCURACY:
-                accuracy_alt = {
-                    "name": "Accuracy Optimized", 
-                    "layer_count": min(24, (request.layer_count or 12) + 4),
-                    "hidden_size": min(1024, (request.hidden_size or 512) + 256),
-                    "trade_offs": "5-10% higher accuracy, 2x more parameters",
-                    "use_case": "Applications where accuracy is paramount"
-                }
-                alternatives.append(accuracy_alt)
-            
-            # Balanced alternative
-            if request.optimization_target != OptimizationTarget.BALANCED:
-                balanced_alt = {
-                    "name": "Balanced",
-                    "layer_count": 12,
-                    "hidden_size": 512,
-                    "trade_offs": "Good balance of speed, accuracy, and size",
-                    "use_case": "General-purpose applications"
-                }
-                alternatives.append(balanced_alt)
             
             return alternatives
             
@@ -643,17 +691,15 @@ class ArchitectureGenerator:
         else:
             size = hidden_range[0] + int((hidden_range[1] - hidden_range[0]) * 0.7)
         
-        # Ensure divisible by attention heads
-        return (size // 64) * 64  # Round to nearest 64
+        return (size // 64) * 64 
     
     async def _optimize_attention_heads(self, template: Dict[str, Any], optimization_config: Dict[str, float], hidden_size: int) -> int:
         """Optimize number of attention heads"""
         heads_range = template["attention_heads_range"]
         penalty = optimization_config["attention_penalty"]
         
-        # Choose based on hidden size and optimization target
-        max_heads = min(heads_range[1], hidden_size // 64)  # Each head needs at least 64 dimensions
-        min_heads = max(heads_range[0], 4)  # Minimum 4 heads
+        max_heads = min(heads_range[1], hidden_size // 64)
+        min_heads = max(heads_range[0], 4)
         
         if penalty < 1.0:
             heads = min_heads + int((max_heads - min_heads) * 0.3)
@@ -661,3 +707,24 @@ class ArchitectureGenerator:
             heads = min_heads + int((max_heads - min_heads) * 0.7)
         
         return heads
+
+    async def _optimize_ssm_state(self, template: Dict[str, Any], optimization_config: Dict[str, float]) -> int:
+        """Optimize SSM state dimension"""
+        state_range = template.get("ssm_state_range", (16, 32))
+        penalty = optimization_config["parameter_penalty"]
+        if penalty < 1.0:
+            return state_range[0]
+        return state_range[1]
+
+    async def _optimize_ssm_conv(self, template: Dict[str, Any], optimization_config: Dict[str, float]) -> int:
+        """Optimize SSM convolution kernel size"""
+        conv_range = template.get("ssm_conv_range", (4, 4))
+        return conv_range[0]
+
+    async def _optimize_liquid_hidden(self, template: Dict[str, Any], optimization_config: Dict[str, float]) -> int:
+        """Optimize Liquid hidden state size"""
+        hidden_range = template.get("liquid_hidden_range", (128, 256))
+        penalty = optimization_config["parameter_penalty"]
+        if penalty < 1.0:
+            return hidden_range[0]
+        return hidden_range[1]

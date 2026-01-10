@@ -16,7 +16,7 @@ from prsm.core.models import (
     ImprovementOpportunity, ImprovementType, PerformanceAnalysis
 )
 from prsm.core.safety.monitor import SafetyMonitor
-from prsm.economy.tokenomics.ftns_service import ftns_service
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
 
 
 # === Performance Monitoring Configuration ===
@@ -156,8 +156,21 @@ class PerformanceMonitor:
             
             # Analyze each model's data
             for model_id, data_points in model_data.items():
+                # Standard metric-based opportunities
                 model_opportunities = await self._analyze_model_opportunities(model_id, data_points)
                 opportunities.extend(model_opportunities)
+
+                # Economic efficiency-based opportunities
+                # Extract all metrics for this model across data points
+                model_metrics = defaultdict(list)
+                for dp in data_points:
+                    dp_metrics = dp.get("metrics", {})
+                    for k, v in dp_metrics.items():
+                        model_metrics[k].append(v)
+                
+                econ_opportunity = await self._analyze_economic_efficiency(model_id, model_metrics)
+                if econ_opportunity:
+                    opportunities.append(econ_opportunity)
             
             # Sort by priority score
             opportunities.sort(key=lambda x: x.priority_score, reverse=True)
@@ -409,7 +422,9 @@ class PerformanceMonitor:
             "rating": MetricType.USER_SATISFACTION,
             "cost": MetricType.COST_EFFICIENCY,
             "cost_per_request": MetricType.COST_EFFICIENCY,
-            "efficiency": MetricType.COST_EFFICIENCY
+            "efficiency": MetricType.COST_EFFICIENCY,
+            "photon_cost": MetricType.COST_EFFICIENCY,
+            "economic_efficiency": MetricType.ECONOMIC_EFFICIENCY
         }
         return mapping.get(metric_name.lower())
     
@@ -423,9 +438,60 @@ class PerformanceMonitor:
             MetricType.RESOURCE_USAGE: "percentage",
             MetricType.ERROR_RATE: "percentage",
             MetricType.USER_SATISFACTION: "score",
-            MetricType.COST_EFFICIENCY: "cost_units"
+            MetricType.COST_EFFICIENCY: "photons",
+            MetricType.ECONOMIC_EFFICIENCY: "photons/inference"
         }
         return units.get(metric_type, "units")
+
+    async def _analyze_economic_efficiency(self, model_id: str, metrics: Dict[str, List[float]]) -> Optional[ImprovementOpportunity]:
+        """
+        Analyze the economic efficiency of a model.
+        Detects if a model is too expensive (in Photons/FTNS) for its performance.
+        """
+        try:
+            # We need accuracy, latency, and cost to calculate efficiency
+            acc_list = metrics.get("accuracy", [])
+            lat_list = metrics.get("latency", [])
+            cost_list = metrics.get("cost", metrics.get("photon_cost", []))
+
+            if not (acc_list and lat_list and cost_list):
+                return None
+
+            latest_acc = acc_list[-1]
+            latest_lat = lat_list[-1]
+            latest_cost = cost_list[-1]
+
+            # Efficiency = Accuracy / (Cost * Latency)
+            # We normalize Latency to seconds for the denominator
+            efficiency = latest_acc / (max(0.001, latest_cost) * max(0.001, latest_lat / 1000.0))
+            
+            # Threshold for efficiency alert (photons are expensive!)
+            # If cost > 50 photons per 90% accurate inference, consider it a regression
+            EFFICIENCY_THRESHOLD = 0.05 
+            
+            if efficiency < EFFICIENCY_THRESHOLD:
+                return ImprovementOpportunity(
+                    improvement_type=ImprovementType.ARCHITECTURE,
+                    target_component=model_id,
+                    current_performance=efficiency,
+                    expected_improvement=0.5, # Distillation to SSM usually gives 50%+ efficiency boost
+                    confidence=0.85,
+                    implementation_cost=0.3,
+                    priority_score=0.9, # High priority: saving Photons is key to the network economy
+                    description=f"Economic Efficiency regression detected ({efficiency:.4f}). High Photon cost per inference. Recommend autonomous distillation to SSM/Mamba architecture.",
+                    supporting_data={
+                        "efficiency_score": efficiency,
+                        "photon_cost": latest_cost,
+                        "accuracy": latest_acc,
+                        "latency_ms": latest_lat,
+                        "recommendation": "ssm_distillation"
+                    }
+                )
+            
+            return None
+        except Exception as e:
+            print(f"⚠️ Error analyzing economic efficiency: {e}")
+            return None
     
     
     async def _get_baseline_value(self, model_id: str, metric_type: MetricType) -> Optional[float]:

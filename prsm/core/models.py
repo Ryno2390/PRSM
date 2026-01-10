@@ -560,6 +560,7 @@ class MetricType(str, Enum):
     ERROR_RATE = "error_rate"
     USER_SATISFACTION = "user_satisfaction"
     COST_EFFICIENCY = "cost_efficiency"
+    ECONOMIC_EFFICIENCY = "economic_efficiency"
 
 
 class ImprovementType(str, Enum):

@@ -65,6 +65,7 @@ class TrainingStrategy(str, Enum):
     ADVERSARIAL = "adversarial"
     CURRICULUM = "curriculum"
     SELF_SUPERVISED = "self_supervised"
+    SWARM = "swarm"
 
 
 class DistillationRequest(PRSMBaseModel):
@@ -177,11 +178,14 @@ class StudentArchitecture(TimestampMixin):
     
     # Core architecture
     model_type: str = Field(default="transformer")
-    layer_count: int = Field(..., ge=1, le=50)
-    attention_heads: int = Field(..., ge=1, le=32)
-    hidden_size: int = Field(..., ge=128, le=4096)
-    intermediate_size: int = Field(..., ge=256, le=8192)
-    vocabulary_size: int = Field(..., ge=1000, le=100000)
+    layer_count: int = Field(default=0, ge=0, le=50)
+    attention_heads: Optional[int] = Field(default=None, ge=1, le=32)
+    hidden_size: int = Field(default=0, ge=0, le=4096)
+    intermediate_size: Optional[int] = Field(default=None, ge=256, le=8192)
+    vocabulary_size: int = Field(default=32000, ge=0, le=100000)
+    
+    # Architecture-specific parameters (SSM, Liquid, etc.)
+    config_overrides: Dict[str, Any] = Field(default_factory=dict)
     
     # Specialized components
     specialized_layers: List[Dict[str, Any]] = Field(default_factory=list)
@@ -189,15 +193,15 @@ class StudentArchitecture(TimestampMixin):
     optimization_strategies: List[str] = Field(default_factory=list)
     
     # Performance predictions
-    estimated_parameters: int = Field(..., ge=1000000)
-    estimated_size_mb: float = Field(..., ge=1.0)
-    estimated_inference_speed: float = Field(..., ge=1.0)  # tokens/second
-    estimated_memory_usage: int = Field(..., ge=100)       # MB
+    estimated_parameters: int = Field(default=0, ge=0)
+    estimated_size_mb: float = Field(default=0.0, ge=0.0)
+    estimated_inference_speed: float = Field(default=0.0, ge=0.0)  # tokens/second
+    estimated_memory_usage: int = Field(default=0, ge=0)       # MB
     
     # Quality predictions
-    predicted_accuracy: float = Field(ge=0.0, le=1.0)
-    compression_ratio: float = Field(ge=1.0, le=1000.0)
-    efficiency_score: float = Field(ge=0.0, le=1.0)
+    predicted_accuracy: float = Field(default=0.0, ge=0.0, le=1.0)
+    compression_ratio: float = Field(default=1.0, ge=1.0, le=1000.0)
+    efficiency_score: float = Field(default=0.0, ge=0.0, le=1.0)
     
     # Architecture rationale
     design_decisions: Dict[str, str] = Field(default_factory=dict)
