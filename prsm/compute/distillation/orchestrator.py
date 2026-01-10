@@ -47,9 +47,10 @@ from prsm.economy.governance.proposals import ProposalManager
 from .models import (
     DistillationRequest, DistillationJob, DistillationJobStatus, DistillationStatus,
     TeacherAnalysis, StudentArchitecture, TrainingConfig, QualityMetrics, SafetyAssessment,
-    OptimizationTarget, ModelSize, TrainingStrategy
+    OptimizationTarget, ModelSize, TrainingStrategy, SyntheticTask
 )
 from .swarm_trainer import get_swarm_orchestrator
+from ..data.synthetic_orchestrator import get_synthetic_orchestrator
 from .knowledge_extractor import KnowledgeExtractor
 from .architecture_generator import ArchitectureGenerator
 from .training_pipeline import TrainingPipeline
@@ -497,11 +498,37 @@ class DistillationOrchestrator:
     
     async def _execute_training(self, request: DistillationRequest,
                                config: TrainingConfig, job: DistillationJob) -> str:
-        """Execute distillation training (Swarm-aware)"""
+        """Execute distillation training (Swarm and Synthetic-aware)"""
         try:
             strategy = request.training_strategy
             
-            if strategy == TrainingStrategy.SWARM:
+            if strategy == TrainingStrategy.SYNTHETIC_SELF_PLAY:
+                logger.info("Initiating Synthetic Self-Play Cycle", job_id=job.job_id)
+                synthetic_orch = get_synthetic_orchestrator()
+                
+                # 1. Create a Synthetic Task to generate new training data
+                synth_task = SyntheticTask(
+                    seed_data_cid=request.custom_training_data or "base_scientific_corpus",
+                    domain=request.domain,
+                    target_sample_count=1000,
+                    photon_budget=request.budget_ftns // 2
+                )
+                
+                # 2. Run the Generation Swarm
+                await synthetic_orch.initiate_generation_swarm(synth_task)
+                verified_dataset_cids = synthetic_orch.get_verified_dataset(synth_task.task_id)
+                
+                logger.info("Synthetic data generation complete", 
+                            shard_count=len(verified_dataset_cids))
+                
+                # 3. Proceed with distillation using the NEW synthetic data
+                # We'll switch to SWARM strategy for the actual training part
+                request.training_strategy = TrainingStrategy.SWARM
+                request.custom_training_data = verified_dataset_cids[0] if verified_dataset_cids else None
+                
+                return await self._execute_training(request, config, job)
+
+            elif strategy == TrainingStrategy.SWARM:
                 logger.info("Initiating Federated Distillation Swarm", job_id=job.job_id)
                 swarm = get_swarm_orchestrator(job.job_id)
                 await swarm.initialize_swarm(leader_node_id=request.user_id, budget=request.budget_ftns)
