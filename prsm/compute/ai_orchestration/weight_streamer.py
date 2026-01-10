@@ -19,14 +19,19 @@ class WeightStreamer:
     """
     Manages the 'Working Set' of model weights in RAM.
     Acts as a bridge between the P2P storage and the Model Instance.
+    Supports both Layer-level and Expert-level (MoE) streaming.
     """
-    def __init__(self, ipfs_client, max_layers_in_ram: int = 2):
+    def __init__(self, ipfs_client, max_layers_in_ram: int = 2, max_experts_in_ram: int = 8):
         self.ipfs_client = ipfs_client
         self.max_layers_in_ram = max_layers_in_ram
+        self.max_experts_in_ram = max_experts_in_ram
         
-        # Mapping of layer_index -> StateDict
-        self.ram_cache: Dict[int, Any] = OrderedDict()
+        # Mapping of index -> StateDict
+        self.layer_cache: Dict[int, Any] = OrderedDict()
+        self.expert_cache: Dict[str, Any] = OrderedDict() # Key: "layer_idx:expert_idx"
+        
         self.layer_to_cid: Dict[int, str] = {}
+        self.expert_to_cid: Dict[str, str] = {} # Key: "layer_idx:expert_idx"
         
         # Synchronization
         self._lock = asyncio.Lock()
@@ -34,47 +39,73 @@ class WeightStreamer:
     def register_shards(self, shard_map: Dict[int, str]):
         """Register which IPFS CIDs correspond to which model layers"""
         self.layer_to_cid.update(shard_map)
-        logger.info(f"Registered {len(shard_map)} streamable shards")
+        logger.info(f"Registered {len(shard_map)} streamable layer shards")
 
-    async def get_layer(self, layer_index: int) -> torch.nn.Module:
+    def register_expert_shards(self, layer_idx: int, expert_map: Dict[int, str]):
+        """Register CIDs for specific experts within a layer (MoE)"""
+        for expert_idx, cid in expert_map.items():
+            key = f"{layer_idx}:{expert_idx}"
+            self.expert_to_cid[key] = cid
+        logger.info(f"Registered {len(expert_map)} expert shards for layer {layer_idx}")
+
+    async def get_layer(self, layer_index: int) -> Any:
         """
-        Retrieves a layer from RAM or streams it from the network.
-        Implements an LRU (Least Recently Used) eviction policy.
+        Retrieves a full layer from RAM or network.
         """
         async with self._lock:
-            if layer_index in self.ram_cache:
-                # Move to end (most recently used)
-                self.ram_cache.move_to_end(layer_index)
-                return self.ram_cache[layer_index]
+            if layer_index in self.layer_cache:
+                self.layer_cache.move_to_end(layer_index)
+                return self.layer_cache[layer_index]
 
-            # Cache Miss: Stream from network
             logger.info(f"📡 Streaming layer {layer_index} from network...")
             cid = self.layer_to_cid.get(layer_index)
             if not cid:
                 raise ValueError(f"No CID registered for layer {layer_index}")
 
-            # Retrieve from IPFS
             layer_data, _ = await self.ipfs_client.retrieve_with_provenance(cid)
+            layer_weights = self._reconstruct_weights(layer_data)
             
-            # Load into torch (mocking the tensor reconstruction)
-            # In production, this would use torch.load on the bytes
-            layer_weights = self._reconstruct_layer(layer_data)
-            
-            # Check for eviction
-            if len(self.ram_cache) >= self.max_layers_in_ram:
-                evicted_idx, _ = self.ram_cache.popitem(last=False)
-                logger.debug(f"🧹 Evicted layer {evicted_idx} from RAM to make space")
+            if len(self.layer_cache) >= self.max_layers_in_ram:
+                self.layer_cache.popitem(last=False)
 
-            self.ram_cache[layer_index] = layer_weights
+            self.layer_cache[layer_index] = layer_weights
             return layer_weights
 
-    def _reconstruct_layer(self, raw_data: bytes) -> Any:
+    async def get_expert(self, layer_index: int, expert_index: int) -> Any:
+        """
+        Retrieves a specific expert from RAM or network (MoE support).
+        This allows small nodes to only load the few experts they are compute-eligible for.
+        """
+        key = f"{layer_index}:{expert_index}"
+        async with self._lock:
+            if key in self.expert_cache:
+                self.expert_cache.move_to_end(key)
+                return self.expert_cache[key]
+
+            logger.info(f"🧩 Streaming expert {key} from network...")
+            cid = self.expert_to_cid.get(key)
+            if not cid:
+                # If we don't have a granular expert shard, we might need to load the whole layer
+                # But for MoE goals, we assume expert-sharding is enabled.
+                raise ValueError(f"No CID registered for expert {key}")
+
+            expert_data, _ = await self.ipfs_client.retrieve_with_provenance(cid)
+            expert_weights = self._reconstruct_weights(expert_data)
+            
+            if len(self.expert_cache) >= self.max_experts_in_ram:
+                evicted_key, _ = self.expert_cache.popitem(last=False)
+                logger.debug(f"🧹 Evicted expert {evicted_key} from RAM")
+
+            self.expert_cache[key] = expert_weights
+            return expert_weights
+
+    def _reconstruct_weights(self, raw_data: bytes) -> Any:
         """Reconstructs torch parameters from raw bytes"""
-        # Placeholder for actual deserialization
-        # return torch.load(io.BytesIO(raw_data))
-        return f"Tensor_Shard_{len(raw_data)}"
+        # In production: return torch.load(io.BytesIO(raw_data))
+        return f"Weight_Shard_{len(raw_data)}"
 
     def cleanup_caching(self):
         """Force clear RAM cache"""
-        self.ram_cache.clear()
+        self.layer_cache.clear()
+        self.expert_cache.clear()
         logger.info("RAM cache cleared")

@@ -49,6 +49,7 @@ from .models import (
     TeacherAnalysis, StudentArchitecture, TrainingConfig, QualityMetrics, SafetyAssessment,
     OptimizationTarget, ModelSize, TrainingStrategy
 )
+from .swarm_trainer import get_swarm_orchestrator
 from .knowledge_extractor import KnowledgeExtractor
 from .architecture_generator import ArchitectureGenerator
 from .training_pipeline import TrainingPipeline
@@ -495,12 +496,57 @@ class DistillationOrchestrator:
         )
     
     async def _execute_training(self, request: DistillationRequest,
-                              config: TrainingConfig, job: DistillationJob) -> str:
-        """Execute the training pipeline"""
-        return await self.training_pipeline.execute_training(
-            request, config, 
-            progress_callback=lambda p: self._update_training_progress(job, p)
-        )
+                               config: TrainingConfig, job: DistillationJob) -> str:
+        """Execute distillation training (Swarm-aware)"""
+        try:
+            strategy = request.training_strategy
+            
+            if strategy == TrainingStrategy.SWARM:
+                logger.info("Initiating Federated Distillation Swarm", job_id=job.job_id)
+                swarm = get_swarm_orchestrator(job.job_id)
+                await swarm.initialize_swarm(leader_node_id=request.user_id, budget=request.budget_ftns)
+                
+                # 1. Recruit peers (Mock recruitment of 3 nodes)
+                for i in range(3):
+                    await swarm.join_swarm(node_id=f"peer_node_{i}", capabilities={"compute": "high"})
+                
+                # 2. Distribute sharded tasks
+                assignments = await swarm.distribute_training_task(
+                    model_cid="base_student_cid",
+                    data_cid=request.custom_training_data or "default_distill_data"
+                )
+                
+                logger.info("Swarm tasks distributed", worker_count=len(assignments))
+                
+                # 3. Simulated aggregation (10 steps)
+                for step in range(10):
+                    updates = [{"node_id": f"peer_node_{i}", "loss": 0.5 - step*0.04} for i in range(3)]
+                    aggregated = await swarm.aggregate_gradients(updates)
+                    await self._update_training_progress(job, (step + 1) / 10.0)
+                
+                return f"swarm_distilled_model_{job.job_id.hex[:8]}"
+            else:
+                # Fallback to standard single-node training
+                from .production_training_pipeline import get_production_training_pipeline
+                pipeline = get_production_training_pipeline()
+                
+                # Start training and await status updates (simplified)
+                # In real scenario, the pipeline handles its own progress callbacks
+                training_job = await pipeline.start_training(request)
+                
+                # Monitor until completion
+                while True:
+                    status = await pipeline.get_job_status(str(training_job.job_id))
+                    if status and status.status == "completed":
+                        return status.model_path
+                    elif status and status.status == "failed":
+                        raise Exception(f"Training failed: {status.error_message}")
+                    
+                    await asyncio.sleep(5)
+                    
+        except Exception as e:
+            logger.error("Training execution failed", error=str(e))
+            raise
     
     async def _evaluate_model(self, model_id: str, request: DistillationRequest,
                             teacher_analysis: TeacherAnalysis) -> QualityMetrics:

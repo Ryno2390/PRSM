@@ -19,7 +19,9 @@ from prsm.core.models import (
 from prsm.core.safety.monitor import SafetyMonitor
 from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork
 from ..federation.consensus import DistributedConsensus
-from prsm.economy.tokenomics.ftns_service import ftns_service
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
+from prsm.compute.distillation.orchestrator import get_distillation_orchestrator
+from prsm.compute.distillation.models import DistillationRequest, ModelSize, OptimizationTarget
 
 
 # === Evolution Configuration ===
@@ -607,6 +609,33 @@ class EvolutionOrchestrator:
         }
         
         try:
+            # === NEW: Autonomous Distillation Trigger ===
+            # If this is an economic efficiency regression fix, trigger distillation
+            if proposal.improvement_type == "architecture" and \
+               proposal.supporting_data.get("recommendation") == "ssm_distillation":
+                
+                print(f"🚀 Autonomously triggering distillation for {proposal.target_component} due to economic regression")
+                
+                # Create distillation request based on the identified model
+                # We assume the target_component format is 'model_id:metric' or just 'model_id'
+                model_id = proposal.target_component.split(':')[0]
+                
+                request = DistillationRequest(
+                    user_id="PRSM_RSI_SYSTEM",
+                    teacher_model=model_id,
+                    domain="scientific_reasoning", # Default, ideally from metadata
+                    target_size="small",
+                    optimization_target="efficiency",
+                    target_architecture="ssm",
+                    budget_ftns=1000 # RSI has its own photon budget
+                )
+                
+                distiller = get_distillation_orchestrator()
+                # Create distillation job (don't await completion here, it's a background process)
+                asyncio.create_task(distiller.create_distillation(request))
+                
+                implementation_result["autonomous_job_triggered"] = True
+            
             # Gradual rollout implementation
             for rollout_percentage in ROLLOUT_PERCENTAGE_STEPS:
                 stage_result = await self._execute_rollout_stage(proposal, rollout_percentage)
