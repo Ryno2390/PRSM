@@ -26,6 +26,7 @@ from uuid import uuid4
 from enum import Enum
 import structlog
 from prsm.compute.nwtn.reasoning.s1_neuro_symbolic import NeuroSymbolicOrchestrator
+from prsm.economy.governance.resilience import ResilienceManager
 
 logger = structlog.get_logger(__name__)
 
@@ -178,6 +179,9 @@ class DistributedRLTNetwork:
 
         # Neuro-Symbolic Orchestrator for verifiable computation
         self.orchestrator = NeuroSymbolicOrchestrator(node_id=self.node_id)
+        
+        # Resilience and Governance
+        self.resilience_manager = ResilienceManager()
         
         # Initialize message handlers
         self._setup_message_handlers()
@@ -332,6 +336,17 @@ class DistributedRLTNetwork:
         # Select best node based on load balancing
         selected_node_id = self._select_best_node(candidate_nodes)
         
+        # 1. DYNAMIC PRICING: The Fairness Algorithm
+        # Calculate reward based on task complexity and node availability
+        complexity = task_context.get("complexity", 1.0)
+        fair_reward = self.resilience_manager.calculate_fairness_reward(complexity, len(candidate_nodes))
+        task_context["reward_incentive"] = float(fair_reward)
+        
+        # 2. VALIDATOR ROTATION: Select verification neighborhood via VRF
+        # We select 3 nodes to verify shards of the result later
+        other_nodes = [n for n in self.nodes.keys() if n != selected_node_id and n != self.node_id]
+        assigned_validators = self.resilience_manager.get_shuffled_validators(request_id, other_nodes)
+        
         # Send teacher request
         request_message = NetworkMessage(
             message_id=request_id,
@@ -341,7 +356,8 @@ class DistributedRLTNetwork:
             payload={
                 "teacher_type": teacher_type,
                 "task_context": task_context,
-                "request_id": request_id
+                "request_id": request_id,
+                "validators": assigned_validators
             }
         )
         
@@ -351,7 +367,8 @@ class DistributedRLTNetwork:
             "timeout": timeout,
             "teacher_type": teacher_type,
             "target_node": selected_node_id,
-            "task_context": task_context
+            "task_context": task_context,
+            "assigned_validators": assigned_validators
         }
         
         await self._send_message(request_message)
@@ -563,6 +580,12 @@ class DistributedRLTNetwork:
                     node_id=message.sender_id
                 )
                 payload["verified"] = False
+                
+                # 3. SLASHING: Penalize the dishonest node
+                self.resilience_manager.slash_node(
+                    node_id=message.sender_id,
+                    reason=f"Verification failure for request {request_id}"
+                )
             else:
                 payload["verified"] = True
                 logger.info(f"Verified computation for request {request_id}")
