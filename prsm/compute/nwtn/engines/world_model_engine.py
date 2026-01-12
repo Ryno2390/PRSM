@@ -123,5 +123,10 @@ class NeuroSymbolicEngine:
                 return False
         return True
 
+_world_model_instance: Optional[NeuroSymbolicEngine] = None
+
 def get_world_model() -> NeuroSymbolicEngine:
-    return NeuroSymbolicEngine()
+    global _world_model_instance
+    if _world_model_instance is None:
+        _world_model_instance = NeuroSymbolicEngine()
+    return _world_model_instance
