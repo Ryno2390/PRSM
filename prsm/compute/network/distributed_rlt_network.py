@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 from enum import Enum
 import structlog
+from prsm.compute.nwtn.reasoning.s1_neuro_symbolic import NeuroSymbolicOrchestrator
 
 logger = structlog.get_logger(__name__)
 
@@ -105,10 +106,12 @@ class NetworkMessage:
     payload: Dict[str, Any]
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     ttl: int = 300  # Time to live in seconds
+    visited_nodes: Set[str] = field(default_factory=set)
     
     def __post_init__(self):
         if not self.message_id:
             self.message_id = str(uuid4())
+        self.visited_nodes.add(self.sender_id)
     
     def is_expired(self) -> bool:
         """Check if message has expired"""
@@ -172,6 +175,9 @@ class DistributedRLTNetwork:
             'success_rate': [],
             'node_count': []
         }
+
+        # Neuro-Symbolic Orchestrator for verifiable computation
+        self.orchestrator = NeuroSymbolicOrchestrator(node_id=self.node_id)
         
         # Initialize message handlers
         self._setup_message_handlers()
@@ -344,7 +350,8 @@ class DistributedRLTNetwork:
             "start_time": time.time(),
             "timeout": timeout,
             "teacher_type": teacher_type,
-            "target_node": selected_node_id
+            "target_node": selected_node_id,
+            "task_context": task_context
         }
         
         await self._send_message(request_message)
@@ -437,8 +444,11 @@ class DistributedRLTNetwork:
     async def _broadcast_message(self, message: NetworkMessage):
         """Broadcast message to all nodes in network"""
         
-        for node_id in self.nodes:
-            if node_id != self.node_id:  # Don't send to self
+        # Mark local node as visited
+        message.visited_nodes.add(self.node_id)
+        
+        for node_id, node in self.nodes.items():
+            if node_id != self.node_id and node_id not in message.visited_nodes and node.status == NodeStatus.ONLINE:
                 message_copy = NetworkMessage(
                     message_id=message.message_id,
                     message_type=message.message_type,
@@ -446,7 +456,8 @@ class DistributedRLTNetwork:
                     recipient_id=node_id,
                     payload=message.payload.copy(),
                     timestamp=message.timestamp,
-                    ttl=message.ttl
+                    ttl=message.ttl,
+                    visited_nodes=message.visited_nodes.copy()
                 )
                 await self._send_message(message_copy)
     
@@ -511,13 +522,51 @@ class DistributedRLTNetwork:
             # Forward request to other nodes if possible
             await self._forward_teacher_request(message)
     
+    async def _forward_teacher_request(self, message: NetworkMessage):
+        """Forward a teacher request to other nodes (Simplified)"""
+        logger.debug(f"Forwarding teacher request {message.message_id}")
+        # In a real implementation, this would use a routing table or DHT
+        # Mark sender as visited so we don't send it back
+        message.visited_nodes.add(message.sender_id)
+        await self._broadcast_message(message)
+
     async def _handle_teacher_response(self, message: NetworkMessage):
-        """Handle teacher response"""
+        """Handle teacher response with verification"""
         
         payload = message.payload
         request_id = payload.get("request_id")
         
         if request_id in self.pending_responses:
+            # VERIFICATION: Solve the Oracle Problem
+            response_data = payload.get("response", {})
+            
+            # Reconstruct metadata for verification if it's missing but we have it locally
+            if "metadata" not in response_data:
+                response_data["metadata"] = {}
+            
+            # The validator knows what they asked for
+            local_request_info = self.pending_responses[request_id]
+            task_context = local_request_info.get("task_context", {})
+            
+            if "query" not in response_data["metadata"]:
+                response_data["metadata"]["query"] = task_context.get("query", "")
+            
+            # The validator must use the seed reported by the worker for this specific task
+            worker_seed = response_data["metadata"].get("seed", self.orchestrator.seed)
+
+            is_valid = await self.orchestrator.verify_remote_node(response_data, worker_seed)
+            
+            if not is_valid:
+                logger.error(
+                    "Oracle Verification Failed!", 
+                    request_id=request_id, 
+                    node_id=message.sender_id
+                )
+                payload["verified"] = False
+            else:
+                payload["verified"] = True
+                logger.info(f"Verified computation for request {request_id}")
+
             # Store response
             self.pending_responses[request_id]["response"] = payload
             logger.debug(f"Received response for request {request_id}")
@@ -616,21 +665,34 @@ class DistributedRLTNetwork:
             logger.debug(f"Registered teacher {teacher_type} from node {node_id}")
     
     async def _execute_teacher_locally(self, teacher_type: str, task_context: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute teacher locally (simulated)"""
+        """Execute teacher using Neuro-Symbolic Orchestrator (Verifiable)"""
         
-        # Simulate teacher execution with realistic results
-        await asyncio.sleep(0.1 + (hash(teacher_type) % 5) / 10.0)  # Variable delay
+        query = task_context.get("query", f"Task for {teacher_type}")
+        context_str = task_context.get("context", "")
+        
+        # Execute via orchestrator (System 1/2 layered inference)
+        solution = await self.orchestrator.solve_task(query, context_str)
         
         return {
             "teacher_type": teacher_type,
-            "explanation": f"Simulated explanation for {teacher_type}",
-            "quality_score": 0.7 + (hash(str(task_context)) % 30) / 100.0,
-            "confidence": 0.8 + (hash(teacher_type) % 20) / 100.0,
+            "output": solution["output"],
+            "input_hash": solution["input_hash"],
+            "verification_hash": solution["verification_hash"],
+            "trace": solution["trace"],
+            "reward": solution["reward"],
             "metadata": {
                 "processing_node": self.node_id,
-                "task_context": task_context
+                "mode": solution["mode"]
             }
         }
+
+    async def _verify_teacher_response(self, response_payload: Dict[str, Any]) -> bool:
+        """Verify the validity of a remote teacher's response using the orchestrator"""
+        # This handles the Oracle Problem by verifying the Proof of Useful Work
+        return await self.orchestrator.verify_remote_node(
+            task_data=response_payload,
+            seed=self.orchestrator.seed
+        )
     
     async def _health_check_loop(self):
         """Background health check loop"""

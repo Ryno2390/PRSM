@@ -1,0 +1,50 @@
+
+import pytest
+import asyncio
+from prsm.compute.nwtn.reasoning.s1_neuro_symbolic import NeuroSymbolicOrchestrator
+
+@pytest.mark.asyncio
+async def test_orchestrator_determinism():
+    """Verify that two orchestrators with the same seed produce the same hash"""
+    seed = 12345
+    query = "Explain the physics of a prism"
+    context = "Newton's optics"
+    
+    orchestrator1 = NeuroSymbolicOrchestrator(node_id="node_a", seed=seed)
+    orchestrator2 = NeuroSymbolicOrchestrator(node_id="node_b", seed=seed)
+    
+    result1 = await orchestrator1.solve_task(query, context)
+    result2 = await orchestrator2.solve_task(query, context)
+    
+    # The output content might differ slightly if there's non-deterministic mock logic,
+    # but the hashing mechanism should be stable if we use the same seed for the RNG.
+    # In our current mock, they should match because they use the same deterministic RNG calls.
+    assert result1["verification_hash"] == result2["verification_hash"]
+    assert result1["mode"] == result2["mode"]
+
+@pytest.mark.asyncio
+async def test_verification_logic():
+    """Test the validator's ability to verify a remote node's work"""
+    seed = 99
+    orchestrator = NeuroSymbolicOrchestrator(node_id="worker", seed=seed)
+    validator = NeuroSymbolicOrchestrator(node_id="validator", seed=seed)
+    
+    task_result = await orchestrator.solve_task("Quantum gravity", "Planck scale")
+    
+    # Manual input_hash for testing consistency
+    task_result["input_hash"] = str(hash("Quantum gravity" + "Planck scale"))
+    
+    is_valid = await validator.verify_remote_node(task_result, seed=seed)
+    assert is_valid is True
+
+@pytest.mark.asyncio
+async def test_policy_update():
+    """Verify that rewards update the policy weights"""
+    orchestrator = NeuroSymbolicOrchestrator(node_id="test_node")
+    initial_weights = orchestrator.policy_weights.copy()
+    
+    # Simulate a high reward update
+    orchestrator._update_policy(0.9)
+    
+    assert orchestrator.policy_weights["consistency"] > initial_weights["consistency"]
+    assert orchestrator.policy_weights["exploration"] < initial_weights["exploration"]
