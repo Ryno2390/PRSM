@@ -73,6 +73,16 @@ class InstitutionalParticipant(BaseModel):
     priority_access_level: int = Field(ge=1, le=5)
     sla_guarantees: Dict[str, Any] = Field(default_factory=dict)
 
+@dataclass
+class PrivateShard:
+    """A hybrid-permissioned gateway for institutions to run private research"""
+    shard_id: UUID
+    owner_id: UUID
+    institution_name: str
+    members: Set[str] # List of node_ids/agent_ids allowed in the shard
+    encryption_standard: str = "PQC-Kyber-1024"
+    is_active: bool = True
+    public_bridge_enabled: bool = False # If True, results can be minted as public IP-NFTs
 
 class InstitutionalGateway:
     """
@@ -84,6 +94,7 @@ class InstitutionalGateway:
     
     def __init__(self):
         self.participants: Dict[UUID, InstitutionalParticipant] = {}
+        self.private_shards: Dict[UUID, PrivateShard] = {}
         self.tier_quotas = {
             InstitutionTier.FRONTIER_LAB: 0.25,    # Max 25% network control
             InstitutionTier.ENTERPRISE: 0.45,      # Max 45% combined enterprise control
@@ -145,6 +156,23 @@ class InstitutionalGateway:
             return participant
         else:
             raise ValueError("Onboarding would violate decentralization constraints")
+
+    async def create_private_shard(self, participant_id: UUID, allowed_members: List[str]) -> PrivateShard:
+        """Creates a private, hybrid-permissioned shard for an institution"""
+        if participant_id not in self.participants:
+            raise ValueError("Institution must be onboarded first")
+            
+        participant = self.participants[participant_id]
+        shard_id = uuid4()
+        shard = PrivateShard(
+            shard_id=shard_id,
+            owner_id=participant_id,
+            institution_name=participant.institution_name,
+            members=set(allowed_members)
+        )
+        self.private_shards[shard_id] = shard
+        print(f"🔒 Private Shard created: {shard_id} for {participant.institution_name}")
+        return shard
     
     async def coordinate_competitive_dynamics(self) -> Dict[str, Any]:
         """
