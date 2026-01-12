@@ -15,6 +15,7 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from uuid import UUID, uuid4
 from decimal import Decimal
+from datetime import datetime, timezone
 
 from prsm.compute.nwtn.reasoning.s1_neuro_symbolic import NeuroSymbolicOrchestrator
 from prsm.knowledge_system import UnifiedKnowledgeSystem
@@ -66,13 +67,55 @@ class HypothesisGenerator:
         
         return [mock_hypothesis]
 
+@dataclass
+class PhysicalExperimentResult:
+    """Raw data from a robotic lab, including Digital Twin state"""
+    data_cid: str
+    lab_id: str
+    sensor_hashes: Dict[str, str] # Hashed state of humidity, temp, calibration
+    calibration_verified: bool
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+class LaASConnector:
+    """
+    Lab-as-a-Service (LaaS) Integration.
+    Connects PRSM hypotheses to physical robotic labs.
+    """
+    def __init__(self, treasury: Decimal):
+        self.treasury = treasury
+
+    async def request_physical_validation(self, hypothesis: Hypothesis) -> PhysicalExperimentResult:
+        """
+        Pays a robotic lab node to run a physical test.
+        """
+        cost = Decimal("500.0") # Base cost for a robotic run
+        if self.treasury < cost:
+            raise ValueError("Insufficient Moonshot Fund for physical validation")
+            
+        logger.info(f"🧪 Physical Validation Requested: {hypothesis.premise}")
+        # Simulated delay for robotic lab setup
+        await asyncio.sleep(1.0)
+        
+        # Digital Twin Provenance: Capture machine state hashes
+        return PhysicalExperimentResult(
+            data_cid=f"cid_phys_{uuid4()}",
+            lab_id="opentrons_node_01",
+            sensor_hashes={
+                "humidity": hashlib.sha256(b"45%").hexdigest(),
+                "temp": hashlib.sha256(b"22C").hexdigest(),
+                "calibration": "cal_hash_xyz"
+            },
+            calibration_verified=True
+        )
+
 class DiscoveryPipeline:
     """
     Orchestrates the 24/7 discovery machine.
     """
-    def __init__(self, orchestrator: NeuroSymbolicOrchestrator, ks: UnifiedKnowledgeSystem):
+    def __init__(self, orchestrator: NeuroSymbolicOrchestrator, ks: UnifiedKnowledgeSystem, treasury: Decimal):
         self.orchestrator = orchestrator
         self.generator = HypothesisGenerator(ks)
+        self.laas = LaASConnector(treasury)
         self.active_discoveries: Dict[UUID, Hypothesis] = {}
 
     async def run_discovery_cycle(self, domain: str):
@@ -97,7 +140,17 @@ class DiscoveryPipeline:
         # 3. Assess Impact
         impact_level = self.assess_breakthrough_impact(result)
         
-        if impact_level >= BreakthroughLevel.LEVEL_4:
+        phys_result = None
+        if impact_level == BreakthroughLevel.LEVEL_5:
+            # 4. REAL-WORLD ACTION: Trigger physical experiment
+            phys_result = await self.laas.request_physical_validation(hypo)
+            if phys_result.calibration_verified:
+                hypo.status = "physically_verified"
+                logger.info(f"🧬 PHYSICAL BREAKTHROUGH confirmed in lab {phys_result.lab_id}!")
+            else:
+                hypo.status = "failed_physical_validation"
+                logger.warning(f"❌ Physical hallucination detected: Calibration failure.")
+        elif impact_level >= BreakthroughLevel.LEVEL_4:
             hypo.status = "verified"
             logger.info(f"🏆 BREAKTHROUGH! Level {impact_level} discovery: {hypo.premise}")
         else:
@@ -106,7 +159,8 @@ class DiscoveryPipeline:
         return {
             "hypothesis": hypo,
             "result": result,
-            "impact_level": impact_level
+            "impact_level": impact_level,
+            "physical_validation": phys_result
         }
 
     def assess_breakthrough_impact(self, result: Dict[str, Any]) -> int:

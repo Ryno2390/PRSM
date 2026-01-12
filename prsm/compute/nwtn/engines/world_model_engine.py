@@ -22,6 +22,11 @@ class ScientificConstraint:
     validator: Callable[[Any, Dict[str, Any]], bool]
     severity: str = "critical" # critical, warning, advisory
 
+@dataclass
+class EthicalConstraint(ScientificConstraint):
+    """A hard ethical rule that cannot be bypassed by autonomous agents"""
+    category: str = "safety"
+
 class NeuroSymbolicEngine:
     """
     The 'System 2' of the NWTN brain.
@@ -29,6 +34,7 @@ class NeuroSymbolicEngine:
     """
     def __init__(self):
         self.constraints: Dict[str, ScientificConstraint] = {}
+        self.ethical_kill_switches: Dict[str, EthicalConstraint] = {}
         self._initialize_builtin_constraints()
 
     def _initialize_builtin_constraints(self):
@@ -48,17 +54,36 @@ class NeuroSymbolicEngine:
             validator=self._check_non_contradiction
         ))
 
+        # 3. ETHICAL KILL-SWITCHES
+        self.register_ethical_constraint(EthicalConstraint(
+            name="BIO_SAFETY_LEVEL_4",
+            description="RESTRICTED: Research involving high-risk pathogens is forbidden without explicit DAO override.",
+            validator=self._check_bio_safety,
+            category="biological"
+        ))
+
+    def register_ethical_constraint(self, constraint: EthicalConstraint):
+        self.ethical_kill_switches[constraint.name] = constraint
+        logger.info(f"Registered ethical kill-switch: {constraint.name}")
+
     def register_constraint(self, constraint: ScientificConstraint):
         self.constraints[constraint.name] = constraint
         logger.info(f"Registered symbolic constraint: {constraint.name}")
 
     async def verify_constraints(self, proposal: Any, context: Dict[str, Any]) -> ConstraintVerificationResult:
         """
-        Verify a neural proposal against all symbolic constraints.
-        Returns a granular verification result with assertions.
+        Verify a neural proposal against all symbolic and ethical constraints.
         """
         result = ConstraintVerificationResult(success=True)
         
+        # Check Ethical Kill-Switches FIRST
+        for name, constraint in self.ethical_kill_switches.items():
+            if not constraint.validator(proposal, context):
+                result.success = False
+                result.rejection_reason = f"🚫 ETHICAL KILL-SWITCH TRIGGERED [{name}]: {constraint.description}"
+                logger.critical(f"🚨 {result.rejection_reason}")
+                return result # Immediate halt
+
         for i, (name, constraint) in enumerate(self.constraints.items()):
             is_valid = constraint.validator(proposal, context)
             
@@ -74,6 +99,12 @@ class NeuroSymbolicEngine:
                 logger.warning(f"❌ Symbolic Rejection: {result.rejection_reason}")
 
         return result
+
+    def _check_bio_safety(self, proposal: Any, context: Dict[str, Any]) -> bool:
+        """Ethical check for restricted pathogens"""
+        restricted_agents = ["ebola", "smallpox", "anthrax", "sars-cov-2-enhanced"]
+        proposal_text = str(proposal).lower()
+        return not any(agent in proposal_text for agent in restricted_agents)
 
     def _check_non_contradiction(self, proposal: Any, context: Dict[str, Any]) -> bool:
         """Simple symbolic check for contradictory statements"""
