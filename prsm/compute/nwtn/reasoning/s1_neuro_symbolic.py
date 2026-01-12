@@ -17,16 +17,19 @@ import asyncio
 import time
 import logging
 import random
+import base64
+import structlog
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timezone
 
 import hashlib
 from prsm.core.utils.deterministic import get_local_generator, generate_verification_hash
 from prsm.core.cryptography.zk_proofs import get_zk_proof_system, ZKProofRequest
 from prsm.compute.nwtn.engines.search_reasoning_engine import ReasoningNode
+from prsm.core.cryptography.post_quantum import get_post_quantum_crypto, PostQuantumKeyPair
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 @dataclass
 class ReasoningStep:
@@ -81,6 +84,15 @@ class NeuroSymbolicOrchestrator:
         self.seed = seed
         self.rng = get_local_generator(seed)
         self.policy_weights: Dict[str, float] = {"exploration": 0.5, "consistency": 0.5}
+        
+        # PQC Infrastructure for Quantum-Resilient Provenance
+        try:
+            self.pq = get_post_quantum_crypto()
+            self.pq_keypair = self.pq.generate_keypair()
+        except Exception as e:
+            logger.warning(f"PQC not available: {e}. Falling back to classical.")
+            self.pq = None
+            self.pq_keypair = None
         
     def calculate_royalty_multiplier(self, trace: List[Dict[str, Any]], latest_versions: Dict[str, str]) -> float:
         """
@@ -139,6 +151,12 @@ class NeuroSymbolicOrchestrator:
             input_hash=input_hash
         )
         
+        # QUANTUM RESILIENCE: Sign the hash with PQC
+        pq_signature = None
+        if self.pq and self.pq_keypair:
+            pq_sig_obj = self.pq.sign_message(v_hash, self.pq_keypair)
+            pq_signature = pq_sig_obj.to_dict()
+
         # 4. REWARD FEEDBACK LOOP
         self._update_policy(reward)
         
@@ -147,13 +165,15 @@ class NeuroSymbolicOrchestrator:
             "output": final_content,
             "input_hash": input_hash,
             "verification_hash": v_hash,
+            "pq_signature": pq_signature,
             "trace": trace.get_full_trace(),
             "reward": reward,
             "mode": verification_mode,
             "metadata": {
                 "query": query,
                 "mode": verification_mode,
-                "seed": self.seed
+                "seed": self.seed,
+                "worker_pk": base64.b64encode(self.pq_keypair.public_key).decode() if self.pq_keypair else None
             }
         }
 
@@ -245,7 +265,20 @@ class NeuroSymbolicOrchestrator:
             input_hash=input_hash
         )
         
-        return (local_v_hash == task_data["verification_hash"]) and (task_data.get("reward", 0.0) > 0.0)
+        hash_match = (local_v_hash == task_data["verification_hash"])
+        
+        # QUANTUM RESILIENCE: Verify PQC signature if available
+        pq_valid = True
+        pq_sig_data = task_data.get("pq_signature")
+        if pq_sig_data and self.pq:
+            from prsm.core.cryptography.post_quantum import PostQuantumSignature
+            pq_sig = PostQuantumSignature.from_dict(pq_sig_data)
+            # In a real scenario, we'd fetch the worker's public key from the on-chain registry/NHI
+            worker_pk = task_data.get("metadata", {}).get("worker_pk")
+            if worker_pk:
+                pq_valid = self.pq.verify_signature(local_v_hash, pq_sig, base64.b64decode(worker_pk))
+
+        return hash_match and pq_valid and (task_data.get("reward", 0.0) > 0.0)
 
     async def _verify_data_zkp(self, provenance_hash: str, proof: Any) -> bool:
         """
