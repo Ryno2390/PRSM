@@ -30,7 +30,9 @@ echo "✅ PRSM Node image ready."
 
 # 4. Setup Local Python Environment (for non-Docker execution)
 echo "🐍 Setting up Local Python Environment..."
-if ! [ -x "$(command -v python3)" ]; then
+if [[ "$*" == *"--no-deps"* ]]; then
+  echo "⏭️ Skipping dependency installation (--no-deps active)."
+elif ! [ -x "$(command -v python3)" ]; then
   echo "❌ Error: Python 3 is not installed." >&2
 else
   python3 -m venv venv
