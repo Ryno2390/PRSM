@@ -15,32 +15,46 @@ from typing import Dict, List, Optional, Any, Tuple
 class CrossCoreGater(nn.Module):
     """
     Dynamic Gating Network for NWTN cores.
-    Uses a lightweight linear head to predict which core is best for the current token/context.
+    Uses a Non-Linear Statistical Head to predict the best core.
     """
     def __init__(self, d_model: int, num_cores: int = 3):
         super().__init__()
         self.d_model = d_model
         self.num_cores = num_cores
         
-        # Gating Head: predicts weights for each core
-        self.gate = nn.Linear(d_model, num_cores)
+        # Deep Gating Head: Input size is 2 * d_model
+        self.gate = nn.Sequential(
+            nn.Linear(d_model * 2, d_model),
+            nn.ReLU(),
+            nn.Linear(d_model, num_cores)
+        )
+        
+        # Xavier/Kaiming Initialization to prevent flatlining
+        for layer in self.gate:
+            if isinstance(layer, nn.Linear):
+                nn.init.kaiming_normal_(layer.weight)
         
         # Softmax for normalized probability distribution
         self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, return_logits: bool = False) -> torch.Tensor:
         """
-        Returns a probability distribution across cores.
+        Returns core weights (softmax) or raw logits.
         x: (batch, seq_len, d_model)
         """
-        # Global pooling across sequence to get context-aware weights
-        # (Or token-level gating if seq_len > 1)
         if x.dim() == 3:
-            context = torch.mean(x, dim=1) 
+            # Statistical Contextualization
+            mean = torch.mean(x, dim=1)
+            std = torch.std(x, dim=1)
+            context = torch.cat([mean, std], dim=-1)
         else:
-            context = x
+            # Fallback
+            context = torch.cat([x, torch.zeros_like(x)], dim=-1)
             
         gate_logits = self.gate(context)
+        
+        if return_logits:
+            return gate_logits
         return self.softmax(gate_logits)
 
 class HybridMultiCoreModel(nn.Module):
