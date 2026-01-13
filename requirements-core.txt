@@ -1,0 +1,12 @@
+# PRSM Core - Bootstrap Dependencies
+# These are enough to run the Wizard and the P2P Networking Layer
+click>=8.1.0
+rich>=13.7.0
+pydantic>=2.5.0
+structlog>=23.2.0
+python-dotenv>=1.0.0
+# Basic Networking
+aiohttp>=3.9.0
+websockets>=12.0
+# Basic Identity
+cryptography>=41.0.0
