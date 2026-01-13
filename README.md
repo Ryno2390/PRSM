@@ -4,6 +4,24 @@
 
 ---
 
+## ⚡ Zero-Friction Deployment (Join the Network in 2 Minutes)
+
+PRSM is designed for radical ease of entry. Connect your lab to the Universal Research Commons with just two steps:
+
+### Step 1: One-Command Installation
+Copy and paste this into your terminal:
+```bash
+curl -sSL https://prsm.network/install.sh | bash
+```
+
+### Step 2: The Terminal Wizard
+Activate your node and link your credentials:
+```bash
+prsm node start --wizard
+```
+
+---
+
 ## 🏗️ Revolutionary Project Architecture
 
 PRSM leverages three converged technologies to decentralize artificial intelligence:
@@ -22,6 +40,16 @@ PRSM leverages three converged technologies to decentralize artificial intellige
 *   **Tech:** Monte Carlo Tree Search (MCTS) + Value Functions.
 *   **Advantage:** Moves AI from "Predictive" (probabilistic guessing) to "Exploratory" (searching for proofs). NWTN explores a tree of hypotheses and prunes weak logical paths.
 *   **Module:** `prsm/compute/nwtn/engines/search_reasoning_engine.py`
+
+---
+
+## 🎓 Scientific Meritocracy
+
+PRSM moves beyond simple "token voting." We use a dual-bridge identity system:
+
+- **SRO (Scientific Reputation Oracle):** Link your ORCID and h-index to gain high-trust validation weight.
+- **NHI (Non-Human Identity):** Autonomous agents build their own on-chain reputation based on verified breakthroughs.
+- **High-Trust Shards:** Critical research is validated by verified human experts, while heavy-lifting compute remains decentralized.
 
 ---
 
