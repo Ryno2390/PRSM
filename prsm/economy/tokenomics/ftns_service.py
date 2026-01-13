@@ -121,6 +121,14 @@ class FTNSService:
             logger.info(f"✅ Successful stake: {amount} FTNS for {user_id}")
             return True
         return False
+
+    def burn_tokens(self, user_id: str, amount: Decimal, reason: str = "System Fee"):
+        """Permanently removes tokens from circulation (Deflationary mechanism)"""
+        if self.deduct_tokens(user_id, amount, description=f"BURN: {reason}"):
+            # In a real blockchain, this would send to a dead address (0x0...)
+            logger.info(f"🔥 BURNED {amount} FTNS for reason: {reason}")
+            return True
+        return False
     
     def get_user_balance(self, user_id: str) -> Decimal:
         """Get current FTNS balance for user"""
