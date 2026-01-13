@@ -29,6 +29,7 @@ from prsm.core.utils.deterministic import get_local_generator, generate_verifica
 from prsm.core.cryptography.zk_proofs import get_zk_proof_system, ZKProofRequest
 from prsm.compute.nwtn.engines.search_reasoning_engine import ReasoningNode
 from prsm.core.cryptography.post_quantum import get_post_quantum_crypto, PostQuantumKeyPair
+from prsm.compute.nwtn.reasoning.surprise_gating import SurpriseGater
 
 logger = structlog.get_logger(__name__)
 
@@ -44,24 +45,35 @@ class ReasoningStep:
     # Data Freshness & Provenance
     provenance_hash: Optional[str] = None
     data_version: str = "1.0.0"
+    
+    # Bayesian Surprise Gating
+    surprise_score: float = 1.0
 
 class ReasoningTrace:
     """A chronological record of the reasoning process for verification"""
-    def __init__(self, trace_id: str):
+    def __init__(self, trace_id: str, surprise_threshold: float = 0.0):
         self.trace_id = trace_id
         self.steps: List[ReasoningStep] = []
         self.start_time = time.time()
+        self.surprise_threshold = surprise_threshold
 
-    def add_step(self, action: str, content: str, metadata: Dict[str, Any] = None, provenance_hash: str = None, data_version: str = "1.0.0"):
+    def add_step(self, action: str, content: str, metadata: Dict[str, Any] = None, provenance_hash: str = None, data_version: str = "1.0.0", surprise_score: float = 1.0):
+        # SURPRISE GATING: Only preserve step if it exceeds threshold
+        if surprise_score < self.surprise_threshold:
+            logger.debug(f"🤫 Gating step '{action}': Low surprise ({surprise_score:.4f} < {self.surprise_threshold})")
+            return False
+
         step = ReasoningStep(
             timestamp=time.time() - self.start_time,
             action=action,
             content=content,
             metadata=metadata or {},
             provenance_hash=provenance_hash,
-            data_version=data_version
+            data_version=data_version,
+            surprise_score=surprise_score
         )
         self.steps.append(step)
+        return True
 
     def get_full_trace(self) -> List[Dict[str, Any]]:
         return [
@@ -71,7 +83,8 @@ class ReasoningTrace:
                 "c": s.content,
                 "m": s.metadata,
                 "p": s.provenance_hash,
-                "v": s.data_version
+                "v": s.data_version,
+                "s": s.surprise_score
             } for s in self.steps
         ]
 
@@ -123,6 +136,9 @@ class NeuroSymbolicOrchestrator:
         # FinOps Arbitrator
         self.arbitrator = StrategicResourceArbitrator(node_id)
         
+        # Bayesian Surprise Gating
+        self.gater = SurpriseGater(surprise_threshold=0.1)
+        
         # PQC Infrastructure for Quantum-Resilient Provenance
         try:
             self.pq = get_post_quantum_crypto()
@@ -148,17 +164,34 @@ class NeuroSymbolicOrchestrator:
         """
         Solves a task using layered inference and generates a verifiable trace.
         """
-        trace = ReasoningTrace(trace_id=f"trace_{int(time.time())}")
+        trace = ReasoningTrace(
+            trace_id=f"trace_{int(time.time())}", 
+            surprise_threshold=self.gater.surprise_threshold
+        )
         trace.add_step("INIT", f"Starting task for query: {query}", {"seed": self.seed})
         
         # FINOPS: Create research strategy
         strategy = await self.arbitrator.create_research_strategy(query)
-        trace.add_step("STRATEGY_PLANNED", f"Created plan {strategy.task_id}", {"estimated_cost": strategy.total_estimated_cost})
+        # Strategy planning is usually high surprise as it sets the stage
+        trace.add_step(
+            "STRATEGY_PLANNED", 
+            f"Created plan {strategy.task_id}", 
+            {"estimated_cost": strategy.total_estimated_cost},
+            surprise_score=1.0 
+        )
 
         # 1. LATENCY OPTIMIZATION: Layered Inference
         # System 1: Fast, intuitive proposal (System 1)
         s1_proposal = await self._system1_propose(query, context)
-        trace.add_step("S1_PROPOSAL", s1_proposal["content"], {"latency": s1_proposal["latency"]})
+        
+        # Calculate surprise relative to the initial query/context
+        s1_surprise = self.gater.calculate_surprise(query, s1_proposal["content"])
+        trace.add_step(
+            "S1_PROPOSAL", 
+            s1_proposal["content"], 
+            {"latency": s1_proposal["latency"]},
+            surprise_score=s1_surprise
+        )
         
         # 2. VERIFICATION: Deterministic Sampling
         # Use a standardized task-specific salt for the decision
@@ -175,14 +208,21 @@ class NeuroSymbolicOrchestrator:
         if verification_mode == "deep":
             # System 2: Deliberative search/verification
             s2_result = await self._system2_verify(s1_proposal["content"], query)
-            trace.add_step("S2_VERIFICATION", s2_result["content"], {"reward": s2_result["reward"]})
+            # Deep verification is almost always high surprise
+            trace.add_step(
+                "S2_VERIFICATION", 
+                s2_result["content"], 
+                {"reward": s2_result["reward"]},
+                surprise_score=0.9
+            )
             final_content = s2_result["content"]
             reward = s2_result["reward"]
         else:
             # Light Symbolic Check
             final_content = s1_proposal["content"]
             reward = 0.5 # Default reward for light check
-            trace.add_step("S2_LIGHT_CHECK", "Passed basic symbolic constraints")
+            # Light check surprise depends on how much it changes our confidence
+            trace.add_step("S2_LIGHT_CHECK", "Passed basic symbolic constraints", surprise_score=0.2)
 
         # 3. GENERATE PROOF OF USEFUL WORK
         # Generate a hash of the trace using the deterministic quantization
