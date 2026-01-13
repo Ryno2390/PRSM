@@ -199,8 +199,12 @@ class PRSM_SSM_Model(nn.Module):
         self.norm_f = nn.LayerNorm(config.d_model)
         self.lm_head = nn.Linear(config.d_model, vocab_size, bias=False)
         
-    def forward(self, input_ids: torch.Tensor, states: Optional[list] = None):
-        x = self.embedding(input_ids)
+    def forward(self, input_ids: torch.Tensor, states: Optional[list] = None, return_logits: bool = True):
+        if input_ids.dtype in [torch.long, torch.int, torch.int32, torch.int64]:
+            x = self.embedding(input_ids)
+        else:
+            # Already embedded
+            x = input_ids
         
         new_states = []
         for i, layer in enumerate(self.layers):
@@ -209,9 +213,12 @@ class PRSM_SSM_Model(nn.Module):
             new_states.append(new_layer_state)
             
         x = self.norm_f(x)
-        logits = self.lm_head(x)
         
-        return logits, new_states
+        if return_logits:
+            logits = self.lm_head(x)
+            return logits, new_states
+        else:
+            return x, new_states
 
 def get_ssm_reasoner(d_model=512, layers=6):
     """Factory function for creating an SSM reasoner"""
