@@ -72,6 +72,18 @@ class InstitutionalParticipant(BaseModel):
     royalty_share_percentage: float = Field(ge=0.0, le=100.0)
     priority_access_level: int = Field(ge=1, le=5)
     sla_guarantees: Dict[str, Any] = Field(default_factory=dict)
+    
+    # Production Federation
+    is_production_ready: bool = False
+    federation_token: Optional[str] = None
+
+@dataclass
+class ProductionFederationProtocol:
+    """Standardized protocol for Tier-1 research institutions"""
+    federation_id: UUID
+    allowed_domains: List[str]
+    bandwidth_priority: int = 5
+    cross_chain_settlement: bool = True
 
 @dataclass
 class PrivateShard:
@@ -173,6 +185,17 @@ class InstitutionalGateway:
         self.private_shards[shard_id] = shard
         print(f"🔒 Private Shard created: {shard_id} for {participant.institution_name}")
         return shard
+
+    async def activate_production_federation(self, participant_id: UUID) -> str:
+        """Upgrades an institution to the Production-Ready Federation tier"""
+        if participant_id not in self.participants:
+            raise ValueError("Participant not found")
+            
+        participant = self.participants[participant_id]
+        participant.is_production_ready = True
+        participant.federation_token = f"FED-{uuid4().hex[:12]}"
+        print(f"🎖️ PRODUCTION READY: {participant.institution_name} has joined the Global Federation.")
+        return participant.federation_token
     
     async def coordinate_competitive_dynamics(self) -> Dict[str, Any]:
         """
