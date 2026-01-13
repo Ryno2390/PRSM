@@ -179,6 +179,57 @@ class DiscoveryPipeline:
             return BreakthroughLevel.LEVEL_2
         return BreakthroughLevel.LEVEL_1
 
+@dataclass
+class ScientificChallenge:
+    """A global research goal announced via the Moonshot Fund"""
+    challenge_id: UUID
+    title: str
+    problem_statement: str
+    domain: str
+    reward_pool: Decimal
+    min_breakthrough_level: int = BreakthroughLevel.LEVEL_4
+    active: bool = True
+    submissions: List[Dict[str, Any]] = field(default_factory=list)
+
+class ChallengeManager:
+    """
+    Orchestrates community-wide discovery challenges.
+    """
+    def __init__(self, fund: 'MoonshotFund'):
+        self.fund = fund
+        self.challenges: Dict[UUID, ScientificChallenge] = {}
+
+    def announce_challenge(self, title: str, problem: str, domain: str, reward: Decimal) -> ScientificChallenge:
+        challenge_id = uuid4()
+        challenge = ScientificChallenge(
+            challenge_id=challenge_id,
+            title=title,
+            problem_statement=problem,
+            domain=domain,
+            reward_pool=reward
+        )
+        self.challenges[challenge_id] = challenge
+        logger.info(f"📢 NEW CHALLENGE: {title} | Reward: {reward} FTNS")
+        return challenge
+
+    async def evaluate_submission(self, challenge_id: UUID, node_id: str, result: Dict[str, Any]):
+        """Evaluates a node's submission against the challenge goals"""
+        if challenge_id not in self.challenges:
+            return False
+            
+        challenge = self.challenges[challenge_id]
+        # In production, this would use System 2 to verify the submission's logic
+        # against the challenge's problem statement.
+        
+        reward_score = result.get("reward", 0.0)
+        if reward_score >= 0.95: # Meets Level 5 criteria
+            logger.info(f"🌟 Challenge '{challenge.title}' met by {node_id}!")
+            payout = self.fund.calculate_impact_payout(BreakthroughLevel.LEVEL_5)
+            self.fund.distribute_payout(payout, [node_id])
+            challenge.active = False
+            return True
+        return False
+
 class MoonshotFund:
     """
     The 'AI Nobel' Prize Mechanism.
