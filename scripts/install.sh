@@ -37,8 +37,8 @@ elif ! [ -x "$(command -v python3)" ]; then
 else
   python3 -m venv venv
   ./venv/bin/pip install --upgrade pip
-  ./venv/bin/pip install -r requirements.txt
-  echo "✅ Python dependencies installed in ./venv"
+  ./venv/bin/pip install -r requirements-core.txt
+  echo "✅ Core dependencies installed in ./venv (Bootstrap Complete)."
 fi
 
 # 5. Initialize local config
