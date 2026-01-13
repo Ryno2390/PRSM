@@ -29,6 +29,11 @@ import statistics
 import structlog
 from pydantic import BaseModel, Field
 
+from prsm.compute.nwtn.architectures.gating_network import HybridMultiCoreModel, CrossCoreGater
+from prsm.compute.nwtn.architectures.ssm_core import get_ssm_reasoner
+from prsm.compute.nwtn.architectures.sanm_core import get_sanm_reasoner
+from prsm.compute.nwtn.architectures.fsmn_core import get_fsmn_reasoner
+
 from prsm.core.models import PRSMBaseModel, TimestampMixin
 from prsm.core.config import get_settings
 from prsm.compute.agents.executors.model_executor import ModelExecutor
@@ -1131,6 +1136,17 @@ class HybridNWTNEngine:
         self.soc_manager = SOCManager()
         self.world_model = WorldModelEngine()
         self.bayesian_search = BayesianSearchEngine(self.agent_id)
+        
+        # Multi-Core Neural Stack (MoE-style Gating)
+        d_model = 512
+        self.multi_core_stack = HybridMultiCoreModel(
+            cores={
+                "ssm": get_ssm_reasoner(d_model=d_model, layers=2),
+                "sanm": get_sanm_reasoner(d_model=d_model, nhead=8),
+                "fsmn": get_fsmn_reasoner(input_dim=d_model, hidden_dim=d_model)
+            },
+            d_model=d_model
+        )
         
         # System 1 components (existing PRSM infrastructure)
         self.model_executor = ModelExecutor(agent_id=self.agent_id)
