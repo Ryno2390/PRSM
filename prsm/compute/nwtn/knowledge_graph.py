@@ -11,7 +11,7 @@ Implements:
 import asyncio
 import logging
 from typing import Dict, List, Any, Optional, Set, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,15 @@ class DiscoveryUpdate:
     impact_level: int
     timestamp: datetime = datetime.now(timezone.utc)
 
+@dataclass
+class ReasoningIntervention:
+    """An agentic intervention in a live reasoning branch"""
+    trace_id: str
+    intervening_agent_id: str
+    suggestion: str
+    target_step_index: int
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
 class RecursiveKnowledgeGraph:
     """
     A distributed, living map of PRSM knowledge.
@@ -31,6 +40,14 @@ class RecursiveKnowledgeGraph:
     def __init__(self):
         self.subscribers: Dict[str, List[Callable]] = {} # domain -> callback functions
         self.knowledge_index: List[DiscoveryUpdate] = []
+        self.live_traces: Dict[str, List[ReasoningIntervention]] = {} # trace_id -> interventions
+
+    def submit_intervention(self, intervention: ReasoningIntervention):
+        """Allows an agent to suggest an improvement to a live reasoning branch"""
+        if intervention.trace_id not in self.live_traces:
+            self.live_traces[intervention.trace_id] = []
+        self.live_traces[intervention.trace_id].append(intervention)
+        logger.info(f"🤝 Intervention received for trace {intervention.trace_id} from {intervention.intervening_agent_id}")
 
     def subscribe(self, domain: str, callback: Callable):
         """Allows an agent/orchestrator to subscribe to domain updates"""
