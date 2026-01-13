@@ -30,6 +30,7 @@ from prsm.core.cryptography.zk_proofs import get_zk_proof_system, ZKProofRequest
 from prsm.compute.nwtn.engines.search_reasoning_engine import ReasoningNode
 from prsm.core.cryptography.post_quantum import get_post_quantum_crypto, PostQuantumKeyPair
 from prsm.compute.nwtn.reasoning.surprise_gating import SurpriseGater
+from prsm.core.security.audit_engine import SecurityAuditEngine
 
 logger = structlog.get_logger(__name__)
 
@@ -139,6 +140,9 @@ class NeuroSymbolicOrchestrator:
         # Bayesian Surprise Gating
         self.gater = SurpriseGater(surprise_threshold=0.1)
         
+        # Security Audit Engine
+        self.security_audit = SecurityAuditEngine()
+        
         # PQC Infrastructure for Quantum-Resilient Provenance
         try:
             self.pq = get_post_quantum_crypto()
@@ -162,16 +166,32 @@ class NeuroSymbolicOrchestrator:
 
     async def solve_task(self, query: str, context: str) -> Dict[str, Any]:
         """
-        Solves a task using layered inference and generates a verifiable trace.
+        Solves a task with integrated Security Gates.
         """
+        # SECURITY GATE 1: PII Sanitization
+        safe_query = self.security_audit.sanitize_pii(query)
+        safe_context = self.security_audit.sanitize_pii(context)
+        
         trace = ReasoningTrace(
             trace_id=f"trace_{int(time.time())}", 
             surprise_threshold=self.gater.surprise_threshold
         )
-        trace.add_step("INIT", f"Starting task for query: {query}", {"seed": self.seed})
+        trace.add_step("INIT", f"Starting task for query: {safe_query}", {"seed": self.seed})
         
+        # SECURITY GATE 2: Execution Safety Scan (for code-like proposals)
+        # We scan the query if it contains typical code indicators
+        if any(indicator in safe_query for indicator in ["import ", "def ", "class ", "print("]):
+            audit_result = self.security_audit.scan_code_safety(safe_query)
+            if not audit_result["is_safe"]:
+                trace.add_step("SECURITY_ABORT", "Blocked dangerous code pattern", audit_result)
+                return {
+                    "status": "security_violation",
+                    "audit_findings": audit_result,
+                    "trace": trace.get_full_trace()
+                }
+
         # FINOPS: Create research strategy
-        strategy = await self.arbitrator.create_research_strategy(query)
+        strategy = await self.arbitrator.create_research_strategy(safe_query)
         # Strategy planning is usually high surprise as it sets the stage
         trace.add_step(
             "STRATEGY_PLANNED", 

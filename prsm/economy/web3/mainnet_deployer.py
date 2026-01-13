@@ -20,7 +20,7 @@ from eth_account import Account
 import requests
 
 from prsm.core.config import get_settings
-from ..integrations.security.audit_logger import audit_logger
+from prsm.core.integrations.security.audit_logger import audit_logger
 from .contract_deployer import FTNSContractDeployer
 from .web3_service import Web3ServiceManager
 

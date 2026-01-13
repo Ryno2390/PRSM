@@ -24,8 +24,8 @@ from ..models.integration_models import (
     ImportRequest, ImportResult
 )
 from prsm.core.models import ProvenanceRecord, FTNSTransaction, RoyaltyPayment
-from ...data_layer.enhanced_ipfs import get_ipfs_client
-from ...tokenomics.ftns_service import ftns_service
+from prsm.core.ipfs_client import get_ipfs_client
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
 
 
 class ProvenanceEngine:
@@ -38,6 +38,7 @@ class ProvenanceEngine:
     
     def __init__(self):
         """Initialize the provenance engine"""
+        self.ftns_service = get_ftns_service()
         
         # Provenance tracking
         self.provenance_records: Dict[str, ProvenanceMetadata] = {}
@@ -341,11 +342,13 @@ class ProvenanceEngine:
         """
         try:
             # Use FTNS service to distribute rewards
-            transaction = await ftns_service.reward_contribution(
+            from ...tokenomics.ftns_service import FTNSTransactionType
+            transaction = self.ftns_service.award_tokens(
                 royalty.creator_id,
-                "creator_royalty",
-                royalty.total_amount,
-                {
+                FTNSTransactionType.DATA_CONTRIBUTION,
+                Decimal(str(royalty.total_amount)),
+                description=f"Creator royalty for {royalty.content_id}",
+                metadata={
                     "content_id": royalty.content_id,
                     "usage_period": f"{royalty.usage_period_start} to {royalty.usage_period_end}",
                     "total_usage": royalty.total_usage,

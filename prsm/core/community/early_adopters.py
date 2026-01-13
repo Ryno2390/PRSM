@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 from prsm.core.config import settings
 from prsm.economy.tokenomics.database_ftns_service import DatabaseFTNSService
 from prsm.economy.governance.token_distribution import get_governance_distributor, GovernanceParticipantTier
-from ..integrations.security.audit_logger import audit_logger
+from prsm.core.integrations.security.audit_logger import audit_logger
 from .models import (
     EarlyAdopterTier, EarlyAdopterProfile, EarlyAdopterRegistration,
     EarlyAdopterStatusResponse, UserInterest

@@ -17,7 +17,7 @@ from fastapi import Request, Response, HTTPException, status, WebSocket
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel, Field
 
-from ..integrations.security.audit_logger import audit_logger
+from prsm.core.integrations.security.audit_logger import audit_logger
 
 logger = structlog.get_logger(__name__)
 
