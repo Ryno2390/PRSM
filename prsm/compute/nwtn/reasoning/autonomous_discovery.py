@@ -232,11 +232,29 @@ class ChallengeManager:
 
 class MoonshotFund:
     """
-    The 'AI Nobel' Prize Mechanism.
-    Handles treasury payouts for Level 5 breakthroughs.
+    The 'AI Nobel' Prize Mechanism and Bug Bounty Program.
+    Handles treasury payouts for breakthroughs and security.
     """
     def __init__(self, treasury_balance: Decimal = Decimal("1000000.0")):
         self.treasury = treasury_balance
+        self.bug_bounty_active = True
+
+    def announce_bug_bounty(self, category: str, max_reward: Decimal):
+        logger.info(f"🐛 BUG BOUNTY ACTIVE: {category} | Max Reward: {max_reward} FTNS")
+
+    def process_bounty_claim(self, researcher_id: str, exploit_type: str, severity: str):
+        """High-tier rewards for bypassing PII or Sandbox"""
+        reward = Decimal("0.0")
+        if severity == "critical":
+            reward = self.treasury * Decimal("0.05") # 5% of fund for a sandbox escape
+        elif severity == "high":
+            reward = Decimal("5000.0")
+            
+        if reward > 0:
+            self.distribute_payout(reward, [researcher_id])
+            logger.info(f"✅ BOUNTY PAID: {reward} FTNS to {researcher_id} for {exploit_type}")
+            return True
+        return False
 
     def calculate_impact_payout(self, level: int) -> Decimal:
         if level == BreakthroughLevel.LEVEL_5:

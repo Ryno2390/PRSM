@@ -13,7 +13,7 @@ Core Functions:
 """
 
 import structlog
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from decimal import Decimal
 from datetime import datetime, timezone
@@ -56,6 +56,26 @@ class FTNSTransaction:
     balance_after: Decimal
 
 
+@dataclass
+class LaunchGuardrails:
+    """Capped Mainnet: Limits exposure during the first 90 days"""
+    start_time: datetime
+    global_stake_cap: Decimal = Decimal("1000000.0") # 1M FTNS total
+    user_stake_cap: Decimal = Decimal("10000.0")    # 10k FTNS per user
+    
+    def get_current_caps(self) -> Tuple[Decimal, Decimal]:
+        """Progressive Cap Schedule: Increases every 30 days"""
+        days_active = (datetime.now(timezone.utc) - self.start_time).days
+        
+        if days_active < 30:
+            return self.global_stake_cap, self.user_stake_cap
+        elif days_active < 60:
+            return self.global_stake_cap * 5, self.user_stake_cap * 5
+        elif days_active < 90:
+            return self.global_stake_cap * 10, self.user_stake_cap * 10
+        
+        return Decimal("Infinity"), Decimal("Infinity")
+
 class FTNSService:
     """
     FTNS Token Management Service
@@ -68,6 +88,8 @@ class FTNSService:
         """Initialize FTNS service"""
         self.user_balances: Dict[str, FTNSBalance] = {}
         self.transactions: List[FTNSTransaction] = []
+        self.total_staked = Decimal('0')
+        self.guardrails = LaunchGuardrails(start_time=datetime.now(timezone.utc))
         self.reward_rates = {
             FTNSTransactionType.TRAINING_REWARD: Decimal('10.0'),
             FTNSTransactionType.MODEL_IMPROVEMENT: Decimal('25.0'),
@@ -78,6 +100,27 @@ class FTNSService:
         }
         
         logger.info("FTNSService initialized", reward_rates=len(self.reward_rates))
+
+    def stake_tokens(self, user_id: str, amount: Decimal) -> bool:
+        """Stakes tokens while enforcing Launch Guardrails (Capped Mainnet)"""
+        global_cap, user_cap = self.guardrails.get_current_caps()
+        
+        # 1. Check User Cap
+        if amount > user_cap:
+            logger.warning(f"Stake denied: User cap exceeded. Max: {user_cap}")
+            return False
+            
+        # 2. Check Global Cap
+        if self.total_staked + amount > global_cap:
+            logger.warning(f"Stake denied: Global network cap reached. Max: {global_cap}")
+            return False
+            
+        # 3. Process Stake
+        if self.deduct_tokens(user_id, amount, description="Governance Stake"):
+            self.total_staked += amount
+            logger.info(f"✅ Successful stake: {amount} FTNS for {user_id}")
+            return True
+        return False
     
     def get_user_balance(self, user_id: str) -> Decimal:
         """Get current FTNS balance for user"""
@@ -124,12 +167,13 @@ class FTNSService:
                 self.user_balances[user_id] = balance_record
             
             # Create transaction record
+            tx_type_val = transaction_type.value if transaction_type else "unknown"
             transaction = FTNSTransaction(
                 transaction_id=f"ftns_{len(self.transactions) + 1:06d}",
                 user_id=user_id,
                 amount=award_amount,
                 transaction_type=transaction_type,
-                description=description or f"Reward for {transaction_type.value}",
+                description=description or f"Reward for {tx_type_val}",
                 timestamp=datetime.now(timezone.utc),
                 metadata=metadata or {},
                 balance_after=new_balance

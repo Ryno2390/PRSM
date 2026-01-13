@@ -26,6 +26,42 @@ class NodeStake:
     reputation_score: float = 1.0
     is_slashed: bool = False
 
+@dataclass
+class EmergencyInvariant:
+    """Mathematical triggers that allow Guardians to pause the network"""
+    name: str
+    condition: str
+    threshold: float
+    is_breached: bool = False
+
+class GuardianManager:
+    """
+    Seal 911: Emergency Response Team.
+    A group of trusted SRO-verified humans with multisig pause power.
+    """
+    def __init__(self, required_signatures: int = 3):
+        self.guardians: Set[str] = set() # SRO User IDs
+        self.required_signatures = required_signatures
+        self.network_paused: bool = False
+        self.invariants: List[EmergencyInvariant] = [
+            EmergencyInvariant("COLLUSION_SPIKE", "Unusual clustering of identical MCTS shards", 0.8),
+            EmergencyInvariant("TREASURY_DRAIN", "Rapid Moonshot Fund depletion", 0.2), # 20% drain/hr
+            EmergencyInvariant("PQC_MISMATCH", "Mismatch between classical and quantum provenance", 0.0)
+        ]
+
+    def register_guardian(self, user_id: str):
+        self.guardians.add(user_id)
+        logger.info(f"🛡️ New Guardian registered: {user_id}")
+
+    def emergency_pause(self, signatures: List[str], invariant_name: str):
+        """Triggers the Ethical Kill-Switch across the entire network"""
+        valid_signatures = [s for s in signatures if s in self.guardians]
+        if len(valid_signatures) >= self.required_signatures:
+            self.network_paused = True
+            logger.critical(f"🛑 NETWORK PAUSED by Seal 911! Trigger: {invariant_name}")
+            return True
+        return False
+
 class ResilienceManager:
     """
     Manages the security and resilience of the PRSM network.
@@ -34,6 +70,7 @@ class ResilienceManager:
         self.min_stake = min_stake
         self.stakes: Dict[str, NodeStake] = {}
         self.epoch_seed: str = str(uuid4()) # Updated periodically
+        self.guardians = GuardianManager()
         
     def register_node(self, node_id: str, amount: Decimal):
         """Register a node with a stake for Sybil resistance"""

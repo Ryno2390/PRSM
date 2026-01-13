@@ -11,7 +11,7 @@ The default export uses the database-backed service for production readiness.
 """
 
 # Import both services for flexibility
-from .ftns_service import FTNSService, ftns_service as simulation_ftns_service
+from .ftns_service import FTNSService, get_ftns_service
 from .database_ftns_service import DatabaseFTNSService, database_ftns_service
 
 # Export database service as default for production use
