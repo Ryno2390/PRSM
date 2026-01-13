@@ -89,3 +89,17 @@ opentelemetry-instrumentation-redis>=0.42b0
 opentelemetry-instrumentation-sqlalchemy>=0.42b0
 opentelemetry-instrumentation-asyncpg>=0.42b0
 opentelemetry-instrumentation-fastapi>=0.42b0
+
+# Economy & Blockchain
+web3>=6.11.0
+eth-account>=0.10.0
+hexbytes>=1.0.0
+merkletools>=1.0.3
+
+# Networking & P2P
+pynacl>=1.5.0
+websockets>=12.0
+
+# Security & Sanitization
+bleach>=6.1.0
+sentence-transformers>=2.2.2

@@ -9,7 +9,7 @@
 PRSM is designed for radical ease of entry. Connect your lab to the Universal Research Commons with just two steps:
 
 ### Step 1: One-Command Installation
-Copy and paste this into your terminal:
+Copy and paste this into your terminal (this will auto-detect your OS and install all necessary dependencies):
 ```bash
 curl -sSL https://prsm.network/install.sh | bash
 ```

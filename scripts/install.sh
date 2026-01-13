@@ -28,7 +28,18 @@ echo "📥 Pulling latest PRSM Node Image..."
 # docker pull ryno2390/prsm-node:latest || true
 echo "✅ PRSM Node image ready."
 
-# 4. Initialize local config
+# 4. Setup Local Python Environment (for non-Docker execution)
+echo "🐍 Setting up Local Python Environment..."
+if ! [ -x "$(command -v python3)" ]; then
+  echo "❌ Error: Python 3 is not installed." >&2
+else
+  python3 -m venv venv
+  ./venv/bin/pip install --upgrade pip
+  ./venv/bin/pip install -r requirements.txt
+  echo "✅ Python dependencies installed in ./venv"
+fi
+
+# 5. Initialize local config
 mkdir -p ~/.prsm
 if [ ! -f ~/.prsm/config.json ]; then
   echo "{\"node_id\": \"nhi_$(date +%s)\", \"auto_start\": true}" > ~/.prsm/config.json
