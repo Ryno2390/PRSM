@@ -21,7 +21,7 @@ from .real_marketplace_service import RealMarketplaceService
 
 # Initialize service
 marketplace_service = RealMarketplaceService()
-from ..integrations.security.audit_logger import audit_logger
+from prsm.core.integrations.security.audit_logger import audit_logger
 
 logger = structlog.get_logger(__name__)
 

@@ -15,7 +15,7 @@ import json
 import os
 
 from prsm.core.config import get_settings
-from ..integrations.security.audit_logger import audit_logger
+from prsm.core.integrations.security.audit_logger import audit_logger
 
 logger = structlog.get_logger(__name__)
 

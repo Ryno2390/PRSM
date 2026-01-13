@@ -28,7 +28,7 @@ from prsm.core.config import settings
 from prsm.core.models import PRSMBaseModel
 from prsm.economy.tokenomics.database_ftns_service import DatabaseFTNSService
 from ..auth.auth_manager import auth_manager
-from ..integrations.security.audit_logger import audit_logger
+from prsm.core.integrations.security.audit_logger import audit_logger
 from .voting import get_token_weighted_voting
 from .quadratic_voting import quadratic_voting
 from .proposals import get_proposal_manager

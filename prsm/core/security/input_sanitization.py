@@ -20,7 +20,7 @@ from fastapi import Request, HTTPException, status
 from fastapi.security.utils import get_authorization_scheme_param
 from pydantic import BaseModel, Field, validator
 
-from ..integrations.security.audit_logger import audit_logger
+from prsm.core.integrations.security.audit_logger import audit_logger
 
 logger = structlog.get_logger(__name__)
 

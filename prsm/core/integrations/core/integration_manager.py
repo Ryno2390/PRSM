@@ -30,7 +30,8 @@ from ..models.integration_models import (
 from ..security.sandbox_manager import SandboxManager
 from prsm.core.config import settings
 from prsm.core.models import FTNSTransaction
-from ...tokenomics.ftns_service import ftns_service
+from prsm.core.ipfs_client import get_ipfs_client
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
 
 
 class IntegrationManager:
@@ -43,6 +44,7 @@ class IntegrationManager:
     
     def __init__(self):
         """Initialize the integration manager"""
+        self.ftns_service = get_ftns_service()
         
         # Connector management
         self.connectors: Dict[IntegrationPlatform, BaseConnector] = {}
@@ -524,11 +526,12 @@ class IntegrationManager:
             reward_amount = 10.0  # Base reward amount (would be configurable)
             
             # Use FTNS service to distribute rewards
-            await ftns_service.reward_contribution(
+            from ...tokenomics.ftns_service import FTNSTransactionType
+            await self.ftns_service.award_tokens(
                 result.provenance.original_creator,
-                "integration_import",
-                reward_amount,
-                {
+                FTNSTransactionType.DATA_CONTRIBUTION,
+                Decimal(str(reward_amount)),
+                metadata={
                     "content_id": result.provenance.content_id,
                     "platform": result.provenance.platform_source.value,
                     "import_id": str(result.result_id)
