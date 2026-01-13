@@ -24,13 +24,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timezone
 
-import hashlib
-from prsm.core.utils.deterministic import get_local_generator, generate_verification_hash
-from prsm.core.cryptography.zk_proofs import get_zk_proof_system, ZKProofRequest
-from prsm.compute.nwtn.engines.search_reasoning_engine import ReasoningNode
-from prsm.core.cryptography.post_quantum import get_post_quantum_crypto, PostQuantumKeyPair
-from prsm.compute.nwtn.reasoning.surprise_gating import SurpriseGater
-from prsm.core.security.audit_engine import SecurityAuditEngine
+from prsm.core.utils.dependency_manager import DependencyManager
 
 logger = structlog.get_logger(__name__)
 
@@ -131,19 +125,24 @@ class NeuroSymbolicOrchestrator:
     def __init__(self, node_id: str, seed: int = 42):
         self.node_id = node_id
         self.seed = seed
-        self.rng = get_local_generator(seed)
         self.policy_weights: Dict[str, float] = {"exploration": 0.5, "consistency": 0.5}
+        self._initialized = False
         
-        # FinOps Arbitrator
-        self.arbitrator = StrategicResourceArbitrator(node_id)
+    def _lazy_init(self):
+        """Initializes heavy components after hydration"""
+        if self._initialized: return
         
-        # Bayesian Surprise Gating
+        # Core utils (Local imports to prevent eager loading)
+        from prsm.core.utils.deterministic import get_local_generator
+        from prsm.compute.nwtn.reasoning.surprise_gating import SurpriseGater
+        from prsm.core.security.audit_engine import SecurityAuditEngine
+        from prsm.core.cryptography.post_quantum import get_post_quantum_crypto
+
+        self.rng = get_local_generator(self.seed)
+        self.arbitrator = StrategicResourceArbitrator(self.node_id)
         self.gater = SurpriseGater(surprise_threshold=0.1)
-        
-        # Security Audit Engine
         self.security_audit = SecurityAuditEngine()
         
-        # PQC Infrastructure for Quantum-Resilient Provenance
         try:
             self.pq = get_post_quantum_crypto()
             self.pq_keypair = self.pq.generate_keypair()
@@ -151,6 +150,9 @@ class NeuroSymbolicOrchestrator:
             logger.warning(f"PQC not available: {e}. Falling back to classical.")
             self.pq = None
             self.pq_keypair = None
+            
+        self._initialized = True
+        logger.info(f"✨ Orchestrator {self.node_id} fully hydrated and initialized.")
         
     def calculate_royalty_multiplier(self, trace: List[Dict[str, Any]], latest_versions: Dict[str, str]) -> float:
         """
@@ -168,6 +170,14 @@ class NeuroSymbolicOrchestrator:
         """
         Solves a task with integrated Security Gates.
         """
+        # 0. LAZY HYDRATION: Ensure dependencies are ready
+        DependencyManager.ensure_scientific_stack()
+        self._lazy_init()
+        
+        # Local imports for heavy crypt/utils
+        import hashlib
+        from prsm.core.utils.deterministic import generate_verification_hash
+        
         # SECURITY GATE 1: PII Sanitization
         safe_query = self.security_audit.sanitize_pii(query)
         safe_context = self.security_audit.sanitize_pii(context)
@@ -291,7 +301,7 @@ class NeuroSymbolicOrchestrator:
 
     async def _system2_verify(self, proposal: str, query: str) -> Dict[str, Any]:
         """Deliberative verification layer (System 2)"""
-        # Here we would invoke the SearchReasoningEngine or MCTS
+        # Local imports for heavy components
         from prsm.compute.nwtn.engines.search_reasoning_engine import SearchReasoningEngine
         
         # Mocking MCTS call for the prototype
@@ -323,6 +333,10 @@ class NeuroSymbolicOrchestrator:
         
         Supports Sharded Verification: verify only a subset of the logic chain.
         """
+        # Local imports for heavy components
+        import hashlib
+        from prsm.core.utils.deterministic import get_local_generator, generate_verification_hash
+        
         # 1. ORACLE VERIFICATION: Partial Re-execution
         query = task_data.get("metadata", {}).get("query", "")
         task_salt = int(hashlib.sha256(query.encode()).hexdigest(), 16) % 10**8
