@@ -30,12 +30,12 @@ class MAOCCurriculum:
     def __init__(self, d_model: int = 512):
         self.d_model = d_model
 
-    def generate_blueprint_context(self, seq_len: int = 1024) -> GraduationSample:
-        """Forces SSM: Low-entropy, repetitive structural data"""
-        # Simulated 'blueprint' embedding (structured patterns)
+    def generate_blueprint_context(self, seq_len: int = 512) -> GraduationSample:
+        """Forces SSM: Extremely low-variance, repetitive structural data"""
+        # Low variance (mostly 0s and some 1s)
         data = torch.zeros(1, seq_len, self.d_model)
-        for i in range(0, seq_len, 16):
-            data[0, i:i+4, :] = 1.0 # Repetitive 'header' tokens
+        for i in range(0, seq_len, 128):
+            data[0, i:i+2, :] = 1.0
             
         return GraduationSample(
             input_data=data,
@@ -44,10 +44,10 @@ class MAOCCurriculum:
             description="Long-range Assembler Blueprint"
         )
 
-    def generate_logic_gate(self, seq_len: int = 128) -> GraduationSample:
-        """Forces SANM: High-entropy, complex branching logic"""
-        # Simulated 'logic' embedding (random but correlated pairs)
-        data = torch.randn(1, seq_len, self.d_model) * 2.0
+    def generate_logic_gate(self, seq_len: int = 512) -> GraduationSample:
+        """Forces SANM: High-entropy, high-variance complexity"""
+        # Very high variance compared to blueprint
+        data = torch.randn(1, seq_len, self.d_model) * 5.0
         
         return GraduationSample(
             input_data=data,
@@ -57,12 +57,12 @@ class MAOCCurriculum:
         )
 
     def generate_sensor_stream(self, seq_len: int = 512) -> GraduationSample:
-        """Forces FSMN: High-frequency oscillatory data (physics)"""
-        # Simulated 'vibration' embedding (sine waves + noise)
+        """Forces FSMN: Distinct oscillatory patterns (periodic variance)"""
+        # Lower frequency to distinguish from random noise (logic gate)
         t = torch.linspace(0, 10, seq_len)
-        signal = torch.sin(t).view(1, seq_len, 1).repeat(1, 1, self.d_model)
-        noise = torch.randn(1, seq_len, self.d_model) * 0.1
-        data = signal + noise
+        # Moderate variance with distinct periodicity
+        signal = torch.sin(t).view(1, seq_len, 1).repeat(1, 1, self.d_model) * 2.0
+        data = signal + torch.randn(1, seq_len, self.d_model) * 0.1
         
         return GraduationSample(
             input_data=data,
@@ -98,8 +98,10 @@ def run_graduation_bench():
         
         for sample in samples:
             optimizer.zero_grad()
-            core_weights = engine.multi_core_stack.gater(sample.input_data)
-            loss = criterion(core_weights, sample.target_labels)
+            # Gater returns (batch, num_cores) -> (1, 3)
+            # Use return_logits=True for CrossEntropyLoss
+            core_logits = engine.multi_core_stack.gater(sample.input_data, return_logits=True)
+            loss = criterion(core_logits, sample.target_labels)
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
