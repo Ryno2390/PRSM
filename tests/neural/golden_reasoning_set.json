@@ -1,0 +1,37 @@
+[
+  {
+    "id": "chem_001",
+    "domain": "Scientific",
+    "prompt": "Explain the mechanism of nucleophilic substitution in a generic SN2 reaction.",
+    "expected_concepts": ["backside attack", "inversion of configuration", "concerted mechanism", "steric hindrance"],
+    "reference_output": "In an SN2 reaction, the nucleophile attacks the electrophilic carbon from the side opposite to the leaving group (backside attack). This is a concerted, one-step process where bond breaking and bond forming occur simultaneously. As the reaction proceeds through a pentacoordinate transition state, the stereochemistry at the carbon center is inverted (Walden inversion). The rate of reaction is sensitive to steric hindrance at the electrophilic center."
+  },
+  {
+    "id": "fin_001",
+    "domain": "Financial",
+    "prompt": "Describe the impact of raising interest rates on bond prices.",
+    "expected_concepts": ["inverse relationship", "yield", "discount rate", "present value"],
+    "reference_output": "There is an inverse relationship between interest rates and bond prices. When interest rates rise, newly issued bonds offer higher yields, making existing bonds with lower coupons less attractive. Consequently, the price of existing bonds falls to increase their effective yield to match the market rate. Mathematically, the present value of the bond's future cash flows decreases as the discount rate (market interest rate) increases."
+  },
+  {
+    "id": "phys_001",
+    "domain": "Scientific",
+    "prompt": "What is the Heisenberg Uncertainty Principle?",
+    "expected_concepts": ["position", "momentum", "simultaneous", "precision"],
+    "reference_output": "The Heisenberg Uncertainty Principle states that it is impossible to simultaneously measure certain pairs of physical properties, such as position and momentum, with arbitrary precision. The more precisely one property is known, the less precisely the other can be known. This is a fundamental limit of nature, not a measurement error, arising from the wave-particle duality of matter."
+  },
+  {
+    "id": "bio_001",
+    "domain": "Scientific",
+    "prompt": "Explain the central dogma of molecular biology.",
+    "expected_concepts": ["DNA", "RNA", "protein", "transcription", "translation"],
+    "reference_output": "The central dogma of molecular biology describes the flow of genetic information within a biological system. It states that DNA is transcribed into RNA (transcription), and RNA is then translated into protein (translation). Thus, the information flows from DNA -> RNA -> Protein."
+  },
+  {
+    "id": "econ_001",
+    "domain": "Financial",
+    "prompt": "Define 'elasticity of demand'.",
+    "expected_concepts": ["sensitivity", "quantity demanded", "price change", "elastic", "inelastic"],
+    "reference_output": "Price elasticity of demand measures the sensitivity of the quantity demanded of a good to a change in its price. It is calculated as the percentage change in quantity demanded divided by the percentage change in price. If the absolute value is greater than 1, demand is elastic; if less than 1, it is inelastic."
+  }
+]

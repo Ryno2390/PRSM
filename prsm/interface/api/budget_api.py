@@ -29,7 +29,7 @@ from prsm.economy.tokenomics.ftns_budget_manager import (
     FTNSBudgetManager, FTNSBudget, BudgetExpandRequest, BudgetPrediction,
     SpendingCategory, BudgetStatus, get_ftns_budget_manager
 )
-from prsm.economy.tokenomics.ftns_service import ftns_service
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from ..nwtn.enhanced_orchestrator import get_enhanced_nwtn_orchestrator
 
 logger = structlog.get_logger(__name__)

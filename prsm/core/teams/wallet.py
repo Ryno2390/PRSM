@@ -18,7 +18,7 @@ import structlog
 getcontext().prec = 18
 
 from prsm.core.models import FTNSTransaction
-from prsm.economy.tokenomics.ftns_service import ftns_service
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from .models import (
     Team, TeamMember, TeamWallet, TeamTask,
     TeamRole, RewardPolicy, TeamMembershipStatus

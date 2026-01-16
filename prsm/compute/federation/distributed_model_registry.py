@@ -29,7 +29,7 @@ from prsm.core.models import (
     FTNSTransaction, ProvenanceRecord
 )
 from prsm.data.data_layer.enhanced_ipfs import get_ipfs_client
-from prsm.economy.tokenomics.ftns_service import ftns_service
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from .enhanced_p2p_network import get_production_p2p_network
 
 

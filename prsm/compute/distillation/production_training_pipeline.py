@@ -37,7 +37,7 @@ except ImportError as e:
 
 from prsm.core.config import settings
 from prsm.core.models import TeacherModel, ModelType
-from prsm.economy.tokenomics.ftns_service import ftns_service
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from prsm.core.safety.monitor import SafetyMonitor
 from .models import (
     DistillationRequest, DistillationJob, TrainingMetrics, 
