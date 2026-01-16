@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 import structlog
 
 from prsm.core.models import FTNSTransaction
-from prsm.economy.tokenomics.ftns_service import ftns_service
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from prsm.core.safety.monitor import SafetyMonitor
 from .models import (
     Team, TeamMember, TeamWallet, TeamTask, TeamInvitation,

@@ -133,39 +133,18 @@ class WisdomPackage:
     creation_timestamp: str
     
 
+from prsm.compute.candidates.system1 import System1CandidateGenerator as NewSystem1Generator
+
 class System1CandidateGenerator:
     """
-    System 1: Generates 5,040 candidate answers using 7! reasoning engine permutations
-    
-    The 7 reasoning engines are:
-    - Deductive, Inductive, Abductive, Causal, Probabilistic, Counterfactual, Analogical
-    
-    7! = 5,040 different permutations/sequences for comprehensive candidate generation
+    System 1: Generates candidate answers using the new Provider Pattern + Circuit Breaker.
+    (Legacy 5,040 permutation logic deprecated in favor of intelligent routing)
     """
     
     def __init__(self, breakthrough_coordinator: Optional[BreakthroughReasoningCoordinator] = None):
         self.breakthrough_coordinator = breakthrough_coordinator
-        
-        # The 7 core reasoning engines for permutation
-        self.reasoning_engines = [
-            "deductive",
-            "inductive", 
-            "abductive",
-            "causal",
-            "probabilistic",
-            "counterfactual",
-            "analogical"
-        ]
-        
-        # Pre-calculate all 5,040 permutations for efficiency
-        self.all_permutations = self._generate_all_permutations()
-        
-        logger.info(f"System 1 initialized: {len(self.all_permutations)} reasoning permutations ready")
-    
-    def _generate_all_permutations(self) -> List[List[str]]:
-        """Generate all 5,040 permutations of the 7 reasoning engines"""
-        import itertools
-        return list(itertools.permutations(self.reasoning_engines))
+        self.generator = NewSystem1Generator()
+        logger.info("System 1 initialized: using Provider Pattern with Circuit Breaker")
     
     async def generate_5040_candidates(self, 
                                      query: str,
@@ -173,448 +152,71 @@ class System1CandidateGenerator:
                                      semantic_results: List[PaperReference],
                                      progress_callback: Optional[callable] = None) -> List[CandidateAnswer]:
         """
-        Generate all 5,040 candidate answers using reasoning engine permutations
-        
-        Args:
-            query: User query
-            pdf_content: Extracted PDF content 
-            semantic_results: Semantic search results
-            progress_callback: Optional callback for progress reporting
-            
-        Returns:
-            List of 5,040 candidate answers
+        Generate candidate answers using the new engine.
+        Note: Method name kept as generate_5040_candidates for compatibility,
+        but now routes to the intelligent provider.
         """
         
-        logger.info(f"Starting System 1: Generating 5,040 candidates for query: {query[:100]}...")
+        logger.info(f"Starting System 1: Generating candidates for query: {query[:100]}...")
         start_time = time.time()
         
+        # In the new architecture, we generate a smaller number of high-quality proposals
+        # instead of 5,040 brute-force permutations.
         candidates = []
         
-        # Process in batches to manage memory and provide progress updates
-        batch_size = 100  # Process 100 candidates at a time
-        total_batches = math.ceil(len(self.all_permutations) / batch_size)
-        
-        for batch_idx in range(total_batches):
-            batch_start = batch_idx * batch_size
-            batch_end = min(batch_start + batch_size, len(self.all_permutations))
-            batch_permutations = self.all_permutations[batch_start:batch_end]
+        # Generate primary proposal
+        try:
+            # Prepare context from semantic results
+            context = self._prepare_context(pdf_content)
             
-            batch_candidates = await self._generate_candidate_batch(
-                query, pdf_content, semantic_results, batch_permutations, batch_start
+            # Use the new generator with circuit breaker
+            proposal = await self.generator.generate_proposal(query, context)
+            
+            # Map to CandidateAnswer format
+            candidate = CandidateAnswer(
+                candidate_id=f"candidate_provider_{int(time.time())}",
+                reasoning_engine_sequence=["provider_pattern", proposal.get("metadata", {}).get("model", "unknown")],
+                answer_text=proposal.get("content", ""),
+                confidence_score=0.85, # Base confidence for the new system
+                supporting_evidence=[f"Generated via {proposal.get('metadata', {}).get('hardware', 'unknown')}"],
+                content_sources=list(pdf_content.keys()),
+                generation_time=proposal.get("latency", 0.0),
+                content_hash=hashlib.sha256(proposal.get("content", "").encode()).hexdigest()[:16]
             )
+            candidates.append(candidate)
             
-            candidates.extend(batch_candidates)
-            
-            # Progress reporting
-            if progress_callback:
-                progress = (batch_idx + 1) / total_batches
-                await progress_callback(batch_end, len(self.all_permutations), progress)
-            
-            # Log progress every 500 candidates
-            if batch_end % 500 == 0 or batch_end >= len(self.all_permutations):
-                elapsed = time.time() - start_time
-                remaining = len(self.all_permutations) - batch_end
-                eta = (elapsed / batch_end) * remaining if batch_end > 0 else 0
-                logger.info(f"System 1 Progress: {batch_end:,}/{len(self.all_permutations):,} candidates ({100*batch_end/len(self.all_permutations):.1f}%) - ETA: {eta:.1f}s")
-        
+        except Exception as e:
+            logger.error(f"System 1 Generation Failed: {e}")
+            # Fallback
+            candidates.append(self._create_fallback_candidate(["fallback"], 0, query))
+
         total_time = time.time() - start_time
-        logger.info(f"System 1 Complete: Generated {len(candidates):,} candidates in {total_time:.2f}s ({len(candidates)/total_time:.1f} candidates/sec)")
+        logger.info(f"System 1 Complete: Generated {len(candidates)} high-quality candidates in {total_time:.2f}s")
         
         return candidates
-    
-    async def _generate_candidate_batch(self,
-                                      query: str,
-                                      pdf_content: Dict[str, Any],
-                                      semantic_results: List[PaperReference],
-                                      permutations: List[List[str]],
-                                      start_index: int) -> List[CandidateAnswer]:
-        """Generate a batch of candidates for the given permutations"""
-        
-        batch_start_time = time.time()
-        candidates = []
-        
-        for i, engine_sequence in enumerate(permutations):
-            candidate_start = time.time()
-            
-            try:
-                # Generate candidate using this specific reasoning engine sequence
-                candidate = await self._generate_single_candidate(
-                    query, pdf_content, semantic_results, engine_sequence, start_index + i
-                )
-                candidates.append(candidate)
-                
-            except Exception as e:
-                logger.debug(f"Failed to generate candidate {start_index + i}: {e}")
-                # Create a fallback candidate to maintain count integrity
-                fallback_candidate = self._create_fallback_candidate(
-                    engine_sequence, start_index + i, query
-                )
-                candidates.append(fallback_candidate)
-        
-        batch_time = time.time() - batch_start_time
-        logger.debug(f"Generated batch of {len(candidates)} candidates in {batch_time:.2f}s")
-        
-        return candidates
-    
-    async def _generate_single_candidate(self,
-                                       query: str,
-                                       pdf_content: Dict[str, Any],
-                                       semantic_results: List[PaperReference],
-                                       engine_sequence: List[str],
-                                       candidate_index: int) -> CandidateAnswer:
-        """Generate a single candidate answer using the specified reasoning engine sequence"""
-        
-        generation_start = time.time()
-        
-        # Apply reasoning engines in sequence
-        reasoning_chain = []
-        current_analysis = query
-        
-        for engine in engine_sequence:
-            # Apply each reasoning engine to build up the analysis
-            engine_result = await self._apply_reasoning_engine(
-                engine, current_analysis, pdf_content, semantic_results
-            )
-            reasoning_chain.append({
-                'engine': engine,
-                'input': current_analysis[:200] + "..." if len(current_analysis) > 200 else current_analysis,
-                'output': engine_result[:200] + "..." if len(engine_result) > 200 else engine_result
-            })
-            current_analysis = engine_result
-        
-        # Final candidate answer is the result of the complete reasoning chain
-        answer_text = current_analysis
-        
-        # Calculate confidence based on reasoning chain consistency and content grounding
-        confidence_score = self._calculate_confidence(reasoning_chain, pdf_content, semantic_results)
-        
-        # Extract supporting evidence from the reasoning chain
-        supporting_evidence = [step['output'][:100] for step in reasoning_chain if step['output']]
-        
-        # Identify content sources used
-        content_sources = list(pdf_content.keys()) if pdf_content else []
-        
-        # Generate content hash for deduplication
-        content_hash = hashlib.sha256(answer_text.encode()).hexdigest()[:16]
-        
-        generation_time = time.time() - generation_start
-        
-        candidate = CandidateAnswer(
-            candidate_id=f"candidate_{candidate_index:04d}",
-            reasoning_engine_sequence=list(engine_sequence),
-            answer_text=answer_text,
-            confidence_score=confidence_score,
-            supporting_evidence=supporting_evidence,
-            content_sources=content_sources,
-            generation_time=generation_time,
-            content_hash=content_hash
-        )
-        
-        return candidate
-    
-    async def _apply_reasoning_engine(self,
-                                    engine_name: str,
-                                    input_text: str,
-                                    pdf_content: Dict[str, Any],
-                                    semantic_results: List[PaperReference]) -> str:
-        """Apply a specific reasoning engine to the input"""
-        
-        try:
-            if self.breakthrough_coordinator:
-                # Use sophisticated reasoning engines when available
-                if engine_name == "abductive" and hasattr(self.breakthrough_coordinator, 'creative_abductive_engine'):
-                    # Use creative abductive engine
-                    return await self._apply_sophisticated_abductive(input_text, pdf_content)
-                elif engine_name == "causal" and hasattr(self.breakthrough_coordinator, 'breakthrough_causal_engine'):
-                    # Use breakthrough causal engine
-                    return await self._apply_sophisticated_causal(input_text, pdf_content)
-            
-            # Fallback to enhanced reasoning (now with real Claude API)
-            return await self._apply_enhanced_reasoning_simulation(engine_name, input_text, pdf_content)
-            
-        except Exception as e:
-            logger.debug(f"Reasoning engine {engine_name} failed: {e}")
-            return f"Enhanced {engine_name} analysis of: {input_text[:100]}... suggests contextual preservation strategies."
-    
-    async def _apply_sophisticated_abductive(self, input_text: str, pdf_content: Dict[str, Any]) -> str:
-        """Apply sophisticated abductive reasoning"""
-        # This would integrate with the creative abductive engine
-        return f"Creative abductive reasoning on '{input_text[:50]}...' reveals novel explanatory frameworks."
-    
-    async def _apply_sophisticated_causal(self, input_text: str, pdf_content: Dict[str, Any]) -> str:
-        """Apply sophisticated causal reasoning"""
-        # This would integrate with the breakthrough causal engine
-        return f"Breakthrough causal analysis of '{input_text[:50]}...' identifies key mechanistic relationships."
-    
-    async def _apply_enhanced_reasoning_simulation(self, engine_name: str, input_text: str, pdf_content: Dict[str, Any]) -> str:
-        """Real reasoning using Claude API with advanced meta-paper content grounding"""
-        
-        # Use advanced chunking system if available, otherwise fallback to original approach
-        if ADVANCED_CHUNKING_AVAILABLE and pdf_content:
-            content_context = await self._generate_meta_paper_context(input_text, pdf_content, engine_name)
-        else:
-            # Fallback to original snippet-based approach
-            content_context = self._generate_fallback_context(pdf_content)
-        
-        # Use real Claude API reasoning if available
-        if ANTHROPIC_AVAILABLE:
-            try:
-                api_key_path = "/Users/ryneschultz/Documents/GitHub/Anthropic_API_Key.txt"
-                if os.path.exists(api_key_path):
-                    with open(api_key_path, 'r') as f:
-                        api_key = f.read().strip()
-                    
-                    client = Anthropic(api_key=api_key)
-                    
-                    # Engine-specific system prompts for genuine reasoning
-                    system_prompts = {
-                        "deductive": "You are a deductive reasoning specialist. Apply strict logical inference from premises to conclusions. Use formal reasoning principles.",
-                        "inductive": "You are an inductive reasoning specialist. Identify patterns in observations to form general principles. Focus on evidence-based generalizations.",
-                        "abductive": "You are an abductive reasoning specialist. Find the best explanation for given observations. Consider multiple hypotheses.",
-                        "causal": "You are a causal reasoning specialist. Identify cause-and-effect relationships and underlying mechanisms.",
-                        "probabilistic": "You are a probabilistic reasoning specialist. Assess likelihood, uncertainty, and statistical relationships.",
-                        "counterfactual": "You are a counterfactual reasoning specialist. Analyze alternative scenarios and what-if situations.",
-                        "analogical": "You are an analogical reasoning specialist. Find meaningful structural parallels across different domains."
-                    }
-                    
-                    system_prompt = system_prompts.get(engine_name, f"You are a {engine_name} reasoning specialist.")
-                    
-                    user_prompt = f"""Apply {engine_name} reasoning to analyze this problem:
 
-Problem: {input_text}
+    def _prepare_context(self, pdf_content: Dict[str, Any]) -> str:
+        """Helper to flatten pdf_content into a string context"""
+        context_parts = []
+        for title, data in pdf_content.items():
+             context_parts.append(f"Source: {title}\n{data.get('raw_content', '')[:500]}...")
+        return "\n\n".join(context_parts)
 
-Research Context: {content_context if content_context else "Limited research context available"}
-
-Task: Provide a specific, actionable insight using {engine_name} reasoning. Be concise (2-3 sentences). Focus on what your reasoning method uniquely reveals about this problem."""
-                    
-                    message = client.messages.create(
-                        model="claude-3-5-sonnet-20241022",
-                        max_tokens=200,
-                        temperature=0.4,
-                        system=system_prompt,
-                        messages=[{"role": "user", "content": user_prompt}]
-                    )
-                    
-                    reasoning_result = message.content[0].text.strip()
-                    
-                    # Ensure reasonable length for candidate generation
-                    if len(reasoning_result) > 400:
-                        reasoning_result = reasoning_result[:397] + "..."
-                    
-                    return reasoning_result
-                    
-            except Exception as e:
-                logger.debug(f"Claude API reasoning failed for {engine_name}: {e}")
-        
-        # Fallback to improved template-based reasoning (better than pure simulation)
-        return self._fallback_enhanced_reasoning(engine_name, input_text, content_context)
-    
-    def _fallback_enhanced_reasoning(self, engine_name: str, input_text: str, content_context: str) -> str:
-        """Improved fallback reasoning when Claude API unavailable"""
-        
-        # More sophisticated reasoning frameworks than pure templates
-        reasoning_approaches = {
-            "deductive": f"Deductive analysis: Given the established principles in the problem '{input_text[:80]}...' and research evidence '{content_context[:120]}...', logical deduction indicates that systematic context preservation mechanisms are necessary to prevent degradation.",
-            
-            "inductive": f"Inductive reasoning: Examining patterns in '{input_text[:80]}...' and corroborating evidence from '{content_context[:120]}...', the general principle emerges that adaptive memory consolidation strategies are essential for maintaining system performance.",
-            
-            "abductive": f"Abductive inference: To best explain the phenomena described in '{input_text[:80]}...', considering the research context '{content_context[:120]}...', the most plausible hypothesis involves implementing dynamic attention reallocation frameworks.",
-            
-            "causal": f"Causal analysis: The problem '{input_text[:80]}...' causally connects to outcomes through mechanisms evidenced in '{content_context[:120]}...', indicating that hierarchical information filtering systems are required.",
-            
-            "probabilistic": f"Probabilistic reasoning: Given the statistical relationships in '{input_text[:80]}...' and supporting data '{content_context[:120]}...', there is high probability that predictive context modeling approaches will be effective.",
-            
-            "counterfactual": f"Counterfactual analysis: If conditions in '{input_text[:80]}...' were altered, based on '{content_context[:120]}...', alternative scenarios would require robust architectural modifications to maintain system integrity.",
-            
-            "analogical": f"Analogical reasoning: The structural patterns in '{input_text[:80]}...' parallel established frameworks in '{content_context[:120]}...', suggesting that proven context management strategies can be effectively adapted."
-        }
-        
-        return reasoning_approaches.get(engine_name, f"Comprehensive {engine_name} analysis indicates that multi-faceted approaches addressing the core mechanisms are needed for effective problem resolution.")
-    
-    async def _generate_meta_paper_context(self, input_text: str, pdf_content: Dict[str, Any], reasoning_engine: str) -> str:
-        """Generate meta-paper context using advanced chunk classification and ranking"""
-        try:
-            # Extract all paper content for chunking
-            all_paper_content = ""
-            paper_metadata_list = []
-            
-            for paper_id, paper_data in pdf_content.items():
-                content = paper_data.get('content', '')
-                if content and len(content.strip()) > 100:  # Only include papers with substantial content
-                    all_paper_content += f"\n\n--- Paper {paper_id} ---\n{content}"
-                    
-                    paper_metadata_list.append({
-                        'paper_id': paper_id,
-                        'title': paper_data.get('title', f'Paper {paper_id}'),
-                        'authors': paper_data.get('authors', ['Unknown'])
-                    })
-            
-            if not all_paper_content.strip():
-                return self._generate_fallback_context(pdf_content)
-            
-            # Classify all content into semantic chunks
-            logger.info(f"Classifying content from {len(paper_metadata_list)} papers into semantic chunks...")
-            
-            # For simplicity, treat all papers as one large document for now
-            # In production, you'd want to classify each paper separately and merge results
-            classification_result = await classify_paper_chunks(
-                all_paper_content, 
-                {
-                    'paper_id': 'multi_paper_context',
-                    'title': f'Meta-paper from {len(paper_metadata_list)} sources',
-                    'authors': ['Multiple Authors']
-                },
-                chunk_size=300,
-                overlap=50
-            )
-            
-            if not classification_result.chunks:
-                return self._generate_fallback_context(pdf_content)
-            
-            logger.info(f"Classified {len(classification_result.chunks)} semantic chunks")
-            
-            # Rank and select optimal chunks for this query and reasoning engine
-            selection_result = await rank_and_select_chunks(
-                chunks=classification_result.chunks,
-                query=input_text,
-                reasoning_engine=reasoning_engine,
-                token_budget=1200,  # Reasonable budget for Claude API context
-                top_k=40
-            )
-            
-            logger.info(f"Selected {len(selection_result.selected_chunks)} chunks for meta-paper (token usage: {selection_result.token_usage})")
-            
-            # Assemble meta-paper context from selected chunks
-            meta_paper_sections = {}
-            
-            for chunk in selection_result.selected_chunks:
-                section_type = chunk.chunk_type.value
-                if section_type not in meta_paper_sections:
-                    meta_paper_sections[section_type] = []
-                
-                meta_paper_sections[section_type].append({
-                    'content': chunk.content,
-                    'confidence': chunk.confidence_score,
-                    'evidence': chunk.evidence_strength,
-                    'concepts': chunk.key_concepts[:3],  # Top 3 concepts
-                    'quantitative_data': chunk.quantitative_data[:2]  # Top 2 data points
-                })
-            
-            # Build coherent meta-paper summary organized by section type
-            meta_paper_context = f"Meta-Paper Context (from {len(paper_metadata_list)} papers, {len(selection_result.selected_chunks)} key insights):\n\n"
-            
-            # Order sections by importance for reasoning
-            section_priority = {
-                'results_quant': 1, 'key_findings': 2, 'methodology': 3, 
-                'abstract': 4, 'math': 5, 'algorithm': 6, 'metrics': 7
-            }
-            
-            ordered_sections = sorted(meta_paper_sections.items(), 
-                                    key=lambda x: section_priority.get(x[0], 10))
-            
-            for section_type, chunks in ordered_sections[:4]:  # Limit to top 4 section types
-                if not chunks:
-                    continue
-                    
-                section_name = section_type.replace('_', ' ').title()
-                meta_paper_context += f"## {section_name}:\n"
-                
-                # Include top 2 chunks from this section
-                for chunk_data in sorted(chunks, key=lambda x: x['confidence'], reverse=True)[:2]:
-                    meta_paper_context += f"• {chunk_data['content'][:200]}...\n"
-                    
-                    if chunk_data['quantitative_data']:
-                        for data_point in chunk_data['quantitative_data']:
-                            meta_paper_context += f"  Data: {data_point.get('context', 'N/A')}\n"
-                
-                meta_paper_context += "\n"
-            
-            # Add concept summary
-            all_concepts = set()
-            for chunk in selection_result.selected_chunks[:10]:  # Top 10 chunks
-                all_concepts.update(chunk.key_concepts)
-            
-            if all_concepts:
-                key_concepts = list(all_concepts)[:8]  # Top 8 concepts
-                meta_paper_context += f"Key Concepts: {', '.join(key_concepts)}\n\n"
-            
-            # Add relevance and diversity metrics
-            meta_paper_context += f"Context Quality: Avg Relevance {selection_result.average_relevance:.2f}, Diversity {selection_result.diversity_score:.2f}"
-            
-            # Ensure context isn't too long
-            if len(meta_paper_context) > 2000:
-                meta_paper_context = meta_paper_context[:1950] + "\n[Context truncated for length]"
-            
-            logger.info(f"Generated meta-paper context: {len(meta_paper_context)} characters")
-            return meta_paper_context
-            
-        except Exception as e:
-            logger.warning(f"Meta-paper generation failed: {e}")
-            return self._generate_fallback_context(pdf_content)
-    
-    def _generate_fallback_context(self, pdf_content: Dict[str, Any]) -> str:
-        """Generate fallback context using simple snippet extraction (original approach)"""
-        if not pdf_content:
-            return "No research context available."
-        
-        context_snippets = []
-        
-        for paper_id, paper_data in pdf_content.items():
-            content = paper_data.get('content', '')
-            if content:
-                # Extract first 200 characters (original approach)
-                snippet = content.strip()[:200]
-                if len(snippet) > 50:  # Only include substantial snippets
-                    title = paper_data.get('title', f'Paper {paper_id}')
-                    context_snippets.append(f"[{title[:50]}...]: {snippet}...")
-            
-            if len(context_snippets) >= 3:  # Limit to 3 papers for context
-                break
-        
-        if context_snippets:
-            return "Research Context:\n" + "\n\n".join(context_snippets)
-        else:
-            return "Limited research context available."
-    
-    def _calculate_confidence(self,
-                            reasoning_chain: List[Dict[str, Any]],
-                            pdf_content: Dict[str, Any],
-                            semantic_results: List[PaperReference]) -> float:
-        """Calculate confidence score for a candidate based on reasoning chain and content grounding"""
-        
-        base_confidence = 0.6  # Base confidence for any generated candidate
-        
-        # Boost confidence for longer, more detailed reasoning chains
-        chain_bonus = min(0.2, len(reasoning_chain) * 0.03)
-        
-        # Boost confidence for content-grounded responses
-        content_bonus = 0.1 if pdf_content else 0.0
-        
-        # Boost confidence for semantic result integration
-        semantic_bonus = 0.1 if semantic_results else 0.0
-        
-        # Add small random variation to avoid identical confidence scores
-        import random
-        random_variation = random.uniform(-0.05, 0.05)
-        
-        final_confidence = min(1.0, base_confidence + chain_bonus + content_bonus + semantic_bonus + random_variation)
-        return round(final_confidence, 3)
-    
     def _create_fallback_candidate(self,
                                  engine_sequence: List[str],
                                  candidate_index: int,
                                  query: str) -> CandidateAnswer:
         """Create a fallback candidate when generation fails"""
         
-        fallback_text = f"Fallback analysis using {' → '.join(engine_sequence)} sequence suggests comprehensive context preservation strategies for: {query[:100]}..."
+        fallback_text = f"Fallback analysis for: {query[:100]}..."
         content_hash = hashlib.sha256(fallback_text.encode()).hexdigest()[:16]
         
         return CandidateAnswer(
             candidate_id=f"candidate_{candidate_index:04d}_fallback",
             reasoning_engine_sequence=list(engine_sequence),
             answer_text=fallback_text,
-            confidence_score=0.3,  # Lower confidence for fallback
-            supporting_evidence=[f"Fallback reasoning with {len(engine_sequence)} engines"],
+            confidence_score=0.3,
+            supporting_evidence=["System fallback"],
             content_sources=[],
             generation_time=0.001,
             content_hash=content_hash

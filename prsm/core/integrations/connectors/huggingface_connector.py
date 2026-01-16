@@ -26,7 +26,7 @@ from urllib.parse import quote
 
 import aiohttp
 
-from prsm.core.base_connector import BaseConnector, ConnectorStatus
+from prsm.core.integrations.core.base_connector import BaseConnector, ConnectorStatus
 from ..models.integration_models import (
     IntegrationPlatform, ConnectorConfig, IntegrationSource,
     ImportRequest, ImportResult, SecurityRisk, LicenseType

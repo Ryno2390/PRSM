@@ -18,7 +18,7 @@ from prsm.core.models import (
     SafetyFlag, CircuitBreakerEvent, AgentResponse
 )
 from prsm.data.data_layer.enhanced_ipfs import get_ipfs_client
-from prsm.economy.tokenomics.ftns_service import ftns_service
+from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
 from prsm.core.safety.monitor import SafetyMonitor
 from .consensus import get_consensus, ConsensusType

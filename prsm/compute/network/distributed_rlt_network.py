@@ -642,6 +642,11 @@ class DistributedRLTNetwork:
         action = payload.get("action")
         
         if action == "join_network":
+            # REGISTER FOR RESILIENCE: New nodes must stake
+            node_id = payload.get("node_info", {}).get("node_id")
+            if node_id:
+                from decimal import Decimal
+                self.resilience_manager.register_node(node_id, Decimal("500.0"))
             await self._handle_node_join(message)
         elif action == "teacher_registration":
             await self._handle_teacher_registration(message)
