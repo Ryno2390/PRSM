@@ -192,6 +192,23 @@ class PRSMSettings(BaseSettings):
     # === Monitoring & Metrics ===
     metrics_enabled: bool = Field(default=True, env="PRSM_METRICS_ENABLED")
     metrics_port: int = Field(default=9090, env="PRSM_METRICS_PORT")
+
+    # === TLS/SSL Configuration ===
+    tls_enabled: bool = Field(default=False, env="PRSM_TLS_ENABLED")
+    tls_mode: str = Field(default="verify-full", env="PRSM_TLS_MODE")
+    tls_min_version: str = Field(default="TLSv1.2", env="PRSM_TLS_MIN_VERSION")
+    tls_cert_file: Optional[str] = Field(default=None, env="PRSM_TLS_CERT_FILE")
+    tls_key_file: Optional[str] = Field(default=None, env="PRSM_TLS_KEY_FILE")
+    tls_ca_file: Optional[str] = Field(default=None, env="PRSM_TLS_CA_FILE")
+
+    # === HSTS Configuration ===
+    hsts_enabled: bool = Field(default=True, env="PRSM_HSTS_ENABLED")
+    hsts_max_age: int = Field(default=31536000, env="PRSM_HSTS_MAX_AGE")  # 1 year
+    hsts_include_subdomains: bool = Field(default=True, env="PRSM_HSTS_SUBDOMAINS")
+    hsts_preload: bool = Field(default=False, env="PRSM_HSTS_PRELOAD")
+
+    # === JWT Configuration (enhanced) ===
+    jwt_secret: Optional[str] = Field(default=None, env="PRSM_JWT_SECRET")
     
     # === Governance Configuration ===
     governance_enabled: bool = Field(default=True, env="PRSM_GOVERNANCE_ENABLED")

@@ -230,13 +230,46 @@ RESPONSE_EXAMPLES = {
 }
 
 
-# Standard Security Headers
+# Standard Security Headers (Production-grade)
+# These headers address OWASP security recommendations
 SECURITY_HEADERS = {
+    # Prevent MIME type sniffing attacks
     "X-Content-Type-Options": "nosniff",
+
+    # Prevent clickjacking attacks
     "X-Frame-Options": "DENY",
+
+    # XSS protection (legacy but still useful)
     "X-XSS-Protection": "1; mode=block",
+
+    # HSTS - Force HTTPS for 1 year including subdomains
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-    "Referrer-Policy": "strict-origin-when-cross-origin"
+
+    # Control referrer information
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+
+    # Permissions policy (replaces Feature-Policy)
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+
+    # Content Security Policy - Restrict content sources
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "font-src 'self'; "
+        "connect-src 'self' wss: https:; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    ),
+
+    # Cross-Origin policies for enhanced isolation
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+
+    # Prevent caching of sensitive API responses
+    "Cache-Control": "no-store, max-age=0"
 }
 
 

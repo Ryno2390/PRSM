@@ -13,10 +13,10 @@ from decimal import Decimal
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect
-from fastapi.security import HTTPBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
-import jwt
 
+from prsm.core.config import get_settings
 from ..auth.auth_manager import AuthManager
 from prsm.core.database_service import DatabaseService
 from .wallet_connector import Web3WalletConnector, WalletInfo, TransactionResult, NetworkType
@@ -125,14 +125,56 @@ connection_manager = Web3ConnectionManager()
 
 router = APIRouter(prefix="/web3", tags=["Web3 Integration"])
 security = HTTPBearer()
+settings = get_settings()
 
-async def get_current_user(token: str = Depends(security)) -> str:
-    """Get current user from JWT token"""
+
+async def get_current_user(token: HTTPAuthorizationCredentials = Depends(security)) -> str:
+    """
+    Get current user from JWT token with proper signature verification.
+
+    SECURITY FIX: Previously used verify_signature=False which allowed token forgery.
+    Now properly verifies JWT signature using configured secret key.
+    """
+    import jwt as pyjwt
+    from prsm.core.auth.jwt_handler import ALLOWED_ALGORITHMS
+
     try:
-        payload = jwt.decode(token.credentials, options={"verify_signature": False})
-        return payload.get("sub", "anonymous")
-    except Exception:
+        # Get the JWT secret from settings
+        jwt_secret = settings.jwt_secret or settings.secret_key
+
+        if not jwt_secret:
+            logger.error("JWT secret not configured")
+            raise HTTPException(status_code=500, detail="Authentication not configured")
+
+        # Decode with signature verification ENABLED
+        payload = pyjwt.decode(
+            token.credentials,
+            jwt_secret,
+            algorithms=ALLOWED_ALGORITHMS,
+            options={
+                "verify_signature": True,  # CRITICAL: Must be True
+                "verify_exp": True,
+                "verify_iat": True,
+                "require": ["exp", "sub"]
+            }
+        )
+
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token: missing subject")
+
+        return user_id
+
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except pyjwt.InvalidAlgorithmError:
+        raise HTTPException(status_code=401, detail="Invalid token algorithm")
+    except pyjwt.InvalidTokenError as e:
+        logger.warning(f"Invalid JWT token: {e}")
         raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        logger.error(f"JWT verification error: {e}")
+        raise HTTPException(status_code=401, detail="Authentication failed")
 
 @router.post("/connect")
 async def connect_wallet(

@@ -3,7 +3,16 @@ PRSM Security Module
 ===================
 
 Comprehensive security framework for PRSM including input sanitization,
-request size limits, and protection against common web application attacks.
+request size limits, TLS configuration, and protection against common
+web application attacks.
+
+Security Features:
+- Input sanitization and validation
+- Request size limits
+- TLS/SSL configuration for production
+- Secure models with validation
+- Rate limiting
+- Authentication and authorization
 """
 
 from .input_sanitization import (
@@ -22,6 +31,13 @@ from .secure_models import (
     SecureWebSocketMessage, SecureTransferRequest, SecureConversationMessage,
     SecureFileUpload, create_secure_user_input, create_secure_websocket_message,
     create_secure_transfer_request
+)
+
+from .tls_config import (
+    TLSConfig, TLSMode, TLSVersion,
+    get_tls_config, get_database_ssl_config, get_redis_ssl_config,
+    get_enhanced_security_headers, get_uvicorn_ssl_config,
+    validate_production_tls, create_ssl_context
 )
 
 __all__ = [
@@ -46,12 +62,24 @@ __all__ = [
     # Secure models
     "SecureBaseModel",
     "SecureUserInput",
-    "SecureCredentialData", 
+    "SecureCredentialData",
     "SecureWebSocketMessage",
     "SecureTransferRequest",
     "SecureConversationMessage",
     "SecureFileUpload",
     "create_secure_user_input",
     "create_secure_websocket_message",
-    "create_secure_transfer_request"
+    "create_secure_transfer_request",
+
+    # TLS configuration
+    "TLSConfig",
+    "TLSMode",
+    "TLSVersion",
+    "get_tls_config",
+    "get_database_ssl_config",
+    "get_redis_ssl_config",
+    "get_enhanced_security_headers",
+    "get_uvicorn_ssl_config",
+    "validate_production_tls",
+    "create_ssl_context"
 ]
