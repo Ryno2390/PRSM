@@ -253,23 +253,23 @@ def get_request_context(request: Request) -> Dict[str, Any]:
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Global rate limiting middleware"""
-    
+    """Global rate limiting middleware (in-memory fallback)"""
+
     def __init__(self, app, default_limit: int = 1000, window: int = 60):
         super().__init__(app)
         self.default_limit = default_limit
         self.window = window
         self._requests: Dict[str, list] = {}
-    
+
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         # Skip rate limiting for health checks and documentation
         if request.url.path in ["/health", "/docs", "/redoc", "/openapi.json"]:
             return await call_next(request)
-        
+
         # Get client identifier (IP address)
         client_id = request.client.host if request.client else "unknown"
         current_time = time.time()
-        
+
         # Clean old requests
         if client_id in self._requests:
             self._requests[client_id] = [
@@ -278,7 +278,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             ]
         else:
             self._requests[client_id] = []
-        
+
         # Check rate limit
         if len(self._requests[client_id]) >= self.default_limit:
             logger.warning(
@@ -291,24 +291,129 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     "request_id": getattr(request.state, 'request_id', None)
                 }
             )
-            
+
             from fastapi import HTTPException
             raise HTTPException(
                 status_code=429,
                 detail="Rate limit exceeded. Too many requests.",
                 headers={"Retry-After": str(self.window)}
             )
-        
+
         # Add current request
         self._requests[client_id].append(current_time)
-        
+
         # Process request
         response = await call_next(request)
-        
+
         # Add rate limit headers
         remaining = self.default_limit - len(self._requests[client_id])
         response.headers["X-RateLimit-Limit"] = str(self.default_limit)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
         response.headers["X-RateLimit-Reset"] = str(int(current_time + self.window))
-        
+
         return response
+
+
+def configure_middleware_stack(app) -> None:
+    """
+    Configure complete middleware stack for production PRSM API.
+
+    This function sets up all middleware in the correct order for:
+    - Security headers and CORS
+    - Request validation and rate limiting
+    - Logging and monitoring
+    - Authentication
+
+    Order is critical - middleware is applied in reverse order of addition.
+    """
+    from prsm.core.config import get_settings
+    settings = get_settings()
+
+    # === CORS Configuration ===
+    try:
+        from prsm.core.security.middleware import configure_cors
+        cors_config = configure_cors()
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_config["allow_origins"] if not settings.is_development else ["*"],
+            allow_credentials=cors_config["allow_credentials"],
+            allow_methods=cors_config["allow_methods"],
+            allow_headers=cors_config["allow_headers"],
+            expose_headers=cors_config.get("expose_headers", []),
+            max_age=cors_config.get("max_age", 600)
+        )
+        logger.info("CORS middleware configured")
+    except ImportError:
+        # Fallback CORS configuration
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=CORS_CONFIG["allow_origins"],
+            allow_credentials=CORS_CONFIG["allow_credentials"],
+            allow_methods=CORS_CONFIG["allow_methods"],
+            allow_headers=CORS_CONFIG["allow_headers"]
+        )
+        logger.info("CORS middleware configured (fallback)")
+
+    # === Gzip Compression ===
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+    # === Content Validation ===
+    app.add_middleware(ContentValidationMiddleware, max_request_size=10 * 1024 * 1024)
+
+    # === Request ID Assignment ===
+    app.add_middleware(RequestIDMiddleware)
+
+    # === Performance Monitoring ===
+    app.add_middleware(PerformanceMonitoringMiddleware, slow_request_threshold=1.0)
+
+    # === Request/Response Logging ===
+    app.add_middleware(LoggingMiddleware)
+
+    # === Security Headers ===
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    # === Enhanced Security Middleware ===
+    try:
+        from prsm.core.security.middleware import (
+            RequestValidationMiddleware,
+            RateLimitingMiddleware,
+            SecurityHeadersMiddleware as EnhancedSecurityHeaders
+        )
+        app.add_middleware(RequestValidationMiddleware)
+        app.add_middleware(RateLimitingMiddleware)
+        app.add_middleware(EnhancedSecurityHeaders)
+        logger.info("Enhanced security middleware configured")
+    except ImportError as e:
+        logger.warning(f"Enhanced security middleware not available: {e}")
+
+    # === Auth Middleware ===
+    try:
+        from prsm.core.auth.middleware import AuthMiddleware
+        app.add_middleware(AuthMiddleware, rate_limit_requests=100, rate_limit_window=60)
+        logger.info("Auth middleware configured")
+    except ImportError as e:
+        logger.warning(f"Auth middleware not available: {e}")
+
+    # === Request Limits Middleware ===
+    try:
+        from prsm.core.security import RequestLimitsMiddleware, request_limits_config
+        app.add_middleware(RequestLimitsMiddleware, config=request_limits_config)
+        logger.info("Request limits middleware configured")
+    except ImportError as e:
+        logger.warning(f"Request limits middleware not available: {e}")
+
+    # === API Versioning Middleware ===
+    try:
+        from prsm.interface.api.versioning import VersioningMiddleware, version_negotiator
+        from prsm.interface.api.compatibility import CompatibilityMiddleware, compatibility_engine
+
+        versioning_middleware = VersioningMiddleware(version_negotiator)
+        compatibility_middleware = CompatibilityMiddleware(compatibility_engine)
+
+        app.middleware("http")(versioning_middleware)
+        app.middleware("http")(compatibility_middleware)
+        logger.info("API versioning middleware configured")
+    except ImportError as e:
+        logger.warning(f"API versioning middleware not available: {e}")
+
+    logger.info("Complete middleware stack configured successfully")

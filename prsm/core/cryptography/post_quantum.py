@@ -2,12 +2,39 @@
 PRSM Post-Quantum Cryptography Module
 CRYSTALS-Dilithium / ML-DSA (FIPS 204) Implementation
 
+============================================================================
+WARNING: EXPERIMENTAL MODULE
+============================================================================
+
+This module is marked as EXPERIMENTAL and may not be enabled in production.
+The mock mode functionality has been DEPRECATED for security reasons.
+
+For production use, see:
+    prsm.core.cryptography.post_quantum_production
+
+That module provides:
+- No silent mock mode (operations fail if library unavailable)
+- Explicit mode selection (DISABLED, REAL, HYBRID)
+- liboqs-based implementation
+- Proper error handling
+
+Migration:
+    # Old (deprecated):
+    from prsm.core.cryptography.post_quantum import PostQuantumCrypto
+    pqc = PostQuantumCrypto()  # May silently use mock mode!
+
+    # New (recommended):
+    from prsm.core.cryptography.post_quantum_production import get_pqc_system, PQCMode
+    pqc = get_pqc_system(PQCMode.REAL)  # Fails if library unavailable
+
+============================================================================
+
 This module provides post-quantum digital signatures using the NIST-standardized
 ML-DSA (Module-Lattice-Based Digital Signature Algorithm) based on CRYSTALS-Dilithium.
 
 Security Levels:
 - ML-DSA-44: 128-bit post-quantum security (equivalent to AES-128)
-- ML-DSA-65: 192-bit post-quantum security (equivalent to AES-192) 
+- ML-DSA-65: 192-bit post-quantum security (equivalent to AES-192)
 - ML-DSA-87: 256-bit post-quantum security (equivalent to AES-256)
 
 Features:

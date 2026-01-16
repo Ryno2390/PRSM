@@ -670,19 +670,369 @@ class RateLimitMiddleware:
         response.headers["X-Threat-Level"] = threat["risk_level"]
 
 
+# ============================================================================
+# Sliding Window Rate Limiter
+# ============================================================================
+# More accurate than fixed window, prevents boundary bursting
+
+
+class SlidingWindowRateLimiter:
+    """
+    Production-grade sliding window rate limiter using Redis sorted sets.
+
+    This implementation is more accurate than fixed windows because it considers
+    the actual time of each request rather than just counting within time buckets.
+
+    Algorithm:
+    - Each request is stored as a member in a Redis sorted set with the timestamp as score
+    - To check the rate limit, we count members within the sliding window
+    - Old entries are automatically cleaned up using ZREMRANGEBYSCORE
+
+    Benefits over fixed window:
+    - No boundary burst problem
+    - More fair to users
+    - Accurate rate limiting across time boundaries
+    """
+
+    def __init__(self, redis_client: aioredis.Redis):
+        self.redis = redis_client
+        self.tier_configs = self._default_tier_configs()
+
+    def _default_tier_configs(self) -> Dict[str, Dict[str, int]]:
+        """Default rate limit configurations per tier."""
+        return {
+            "anonymous": {
+                "requests_per_minute": 10,
+                "requests_per_hour": 100,
+                "requests_per_day": 500,
+            },
+            "free": {
+                "requests_per_minute": 60,
+                "requests_per_hour": 1000,
+                "requests_per_day": 10000,
+            },
+            "pro": {
+                "requests_per_minute": 300,
+                "requests_per_hour": 10000,
+                "requests_per_day": 100000,
+            },
+            "enterprise": {
+                "requests_per_minute": 1000,
+                "requests_per_hour": 50000,
+                "requests_per_day": 500000,
+            },
+        }
+
+    async def check_rate_limit(
+        self,
+        identifier: str,
+        tier: str = "free",
+        endpoint: Optional[str] = None
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Check if a request should be allowed under the sliding window rate limit.
+
+        Args:
+            identifier: Unique identifier (user_id, IP, or combination)
+            tier: User tier (anonymous, free, pro, enterprise)
+            endpoint: Optional endpoint for endpoint-specific limits
+
+        Returns:
+            Tuple of (allowed: bool, limit_info: dict)
+        """
+        now = time.time()
+        tier_config = self.tier_configs.get(tier, self.tier_configs["free"])
+
+        limits_checked = {}
+        overall_allowed = True
+
+        # Check each time window
+        windows = [
+            ("minute", 60, tier_config["requests_per_minute"]),
+            ("hour", 3600, tier_config["requests_per_hour"]),
+            ("day", 86400, tier_config["requests_per_day"]),
+        ]
+
+        for window_name, window_seconds, limit in windows:
+            key = f"rate_limit:sliding:{identifier}:{window_name}"
+            if endpoint:
+                key = f"{key}:{endpoint}"
+
+            # Remove old entries outside the window
+            cutoff = now - window_seconds
+            await self.redis.zremrangebyscore(key, "-inf", cutoff)
+
+            # Count current requests in window
+            current_count = await self.redis.zcard(key)
+
+            allowed = current_count < limit
+            remaining = max(0, limit - current_count)
+
+            # Calculate when the oldest request will expire
+            if current_count >= limit:
+                oldest = await self.redis.zrange(key, 0, 0, withscores=True)
+                if oldest:
+                    oldest_time = oldest[0][1]
+                    reset_time = oldest_time + window_seconds
+                    retry_after = max(0, int(reset_time - now))
+                else:
+                    retry_after = window_seconds
+            else:
+                retry_after = 0
+
+            limits_checked[window_name] = {
+                "limit": limit,
+                "current": current_count,
+                "remaining": remaining,
+                "window_seconds": window_seconds,
+                "allowed": allowed,
+                "retry_after": retry_after,
+            }
+
+            if not allowed:
+                overall_allowed = False
+
+        # If allowed, record this request
+        if overall_allowed:
+            await self._record_request(identifier, now, endpoint)
+
+        return overall_allowed, {
+            "allowed": overall_allowed,
+            "tier": tier,
+            "identifier": identifier,
+            "limits": limits_checked,
+            "timestamp": now,
+        }
+
+    async def _record_request(
+        self,
+        identifier: str,
+        timestamp: float,
+        endpoint: Optional[str] = None
+    ) -> None:
+        """Record a request in all sliding windows."""
+        windows = ["minute", "hour", "day"]
+        ttls = [120, 7200, 172800]  # 2x the window size for cleanup
+
+        for window_name, ttl in zip(windows, ttls):
+            key = f"rate_limit:sliding:{identifier}:{window_name}"
+            if endpoint:
+                key = f"{key}:{endpoint}"
+
+            # Add the request with timestamp as score
+            # Using timestamp + random suffix as member to ensure uniqueness
+            member = f"{timestamp}:{time.time_ns()}"
+            await self.redis.zadd(key, {member: timestamp})
+            await self.redis.expire(key, ttl)
+
+    async def get_remaining(
+        self,
+        identifier: str,
+        tier: str = "free",
+        window: str = "minute"
+    ) -> int:
+        """Get remaining requests for a specific window."""
+        now = time.time()
+        tier_config = self.tier_configs.get(tier, self.tier_configs["free"])
+
+        window_config = {
+            "minute": (60, tier_config["requests_per_minute"]),
+            "hour": (3600, tier_config["requests_per_hour"]),
+            "day": (86400, tier_config["requests_per_day"]),
+        }
+
+        if window not in window_config:
+            return 0
+
+        window_seconds, limit = window_config[window]
+        key = f"rate_limit:sliding:{identifier}:{window}"
+
+        # Remove old entries
+        cutoff = now - window_seconds
+        await self.redis.zremrangebyscore(key, "-inf", cutoff)
+
+        # Count current
+        current = await self.redis.zcard(key)
+        return max(0, limit - current)
+
+    async def reset(self, identifier: str) -> None:
+        """Reset all rate limits for an identifier."""
+        pattern = f"rate_limit:sliding:{identifier}:*"
+        cursor = 0
+
+        while True:
+            cursor, keys = await self.redis.scan(cursor, match=pattern, count=100)
+            if keys:
+                await self.redis.delete(*keys)
+            if cursor == 0:
+                break
+
+    async def get_stats(self, identifier: str) -> Dict[str, Any]:
+        """Get current rate limit statistics for an identifier."""
+        now = time.time()
+        stats = {}
+
+        for window_name, window_seconds in [("minute", 60), ("hour", 3600), ("day", 86400)]:
+            key = f"rate_limit:sliding:{identifier}:{window_name}"
+
+            # Clean old entries
+            cutoff = now - window_seconds
+            await self.redis.zremrangebyscore(key, "-inf", cutoff)
+
+            # Get count
+            count = await self.redis.zcard(key)
+
+            # Get oldest and newest timestamps
+            oldest = await self.redis.zrange(key, 0, 0, withscores=True)
+            newest = await self.redis.zrange(key, -1, -1, withscores=True)
+
+            stats[window_name] = {
+                "count": count,
+                "oldest_request": oldest[0][1] if oldest else None,
+                "newest_request": newest[0][1] if newest else None,
+                "window_start": now - window_seconds,
+            }
+
+        return stats
+
+
+class SlidingWindowMiddleware:
+    """FastAPI middleware for sliding window rate limiting."""
+
+    def __init__(self, rate_limiter: SlidingWindowRateLimiter):
+        self.rate_limiter = rate_limiter
+
+    async def __call__(self, request: Request, call_next: Callable) -> Response:
+        """Process request with sliding window rate limiting."""
+        from fastapi.responses import JSONResponse
+
+        # Skip rate limiting for health checks and docs
+        if request.url.path in ["/health", "/docs", "/redoc", "/openapi.json"]:
+            return await call_next(request)
+
+        # Extract identifier
+        identifier = self._get_identifier(request)
+        tier = self._get_tier(request)
+
+        # Check rate limit
+        allowed, limit_info = await self.rate_limiter.check_rate_limit(
+            identifier=identifier,
+            tier=tier,
+            endpoint=request.url.path
+        )
+
+        if not allowed:
+            # Find the most restrictive limit
+            retry_after = 60
+            for window_info in limit_info["limits"].values():
+                if not window_info["allowed"]:
+                    retry_after = window_info["retry_after"]
+                    break
+
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "RATE_LIMIT_EXCEEDED",
+                    "message": "Rate limit exceeded. Please slow down your requests.",
+                    "details": limit_info,
+                    "retry_after": retry_after,
+                },
+                headers={
+                    "Retry-After": str(retry_after),
+                    "X-RateLimit-Algorithm": "sliding-window",
+                }
+            )
+
+        # Process request
+        response = await call_next(request)
+
+        # Add rate limit headers
+        self._add_headers(response, limit_info)
+
+        return response
+
+    def _get_identifier(self, request: Request) -> str:
+        """Get rate limit identifier from request."""
+        # Prefer user ID if authenticated
+        user_id = getattr(request.state, 'user_id', None)
+        if user_id:
+            return f"user:{user_id}"
+
+        # Fall back to IP address
+        ip = self._get_client_ip(request)
+        return f"ip:{ip}"
+
+    def _get_tier(self, request: Request) -> str:
+        """Get user tier from request."""
+        tier = getattr(request.state, 'user_tier', None)
+        if tier:
+            return tier.lower()
+
+        # Check if authenticated
+        user_id = getattr(request.state, 'user_id', None)
+        if user_id:
+            return "free"
+
+        return "anonymous"
+
+    def _get_client_ip(self, request: Request) -> str:
+        """Extract client IP from request headers."""
+        headers_to_check = [
+            'x-forwarded-for',
+            'x-real-ip',
+            'cf-connecting-ip',
+            'x-cluster-client-ip',
+        ]
+
+        for header in headers_to_check:
+            if header in request.headers:
+                ip = request.headers[header].split(',')[0].strip()
+                if ip:
+                    return ip
+
+        return request.client.host if request.client else "unknown"
+
+    def _add_headers(self, response: Response, limit_info: Dict[str, Any]) -> None:
+        """Add rate limit headers to response."""
+        response.headers["X-RateLimit-Algorithm"] = "sliding-window"
+        response.headers["X-RateLimit-Tier"] = limit_info["tier"]
+
+        # Add per-window headers
+        for window_name, info in limit_info["limits"].items():
+            prefix = f"X-RateLimit-{window_name.capitalize()}"
+            response.headers[f"{prefix}-Limit"] = str(info["limit"])
+            response.headers[f"{prefix}-Remaining"] = str(info["remaining"])
+            response.headers[f"{prefix}-Reset"] = str(int(limit_info["timestamp"] + info["window_seconds"]))
+
+
+# ============================================================================
+# Global Instances
+# ============================================================================
+
 # Global rate limiter instance (to be initialized with Redis connection)
 rate_limiter: Optional[AdaptiveRateLimiter] = None
+sliding_window_limiter: Optional[SlidingWindowRateLimiter] = None
 
 
 async def initialize_rate_limiter(redis_client: aioredis.Redis):
-    """Initialize the global rate limiter"""
-    global rate_limiter
+    """Initialize the global rate limiters"""
+    global rate_limiter, sliding_window_limiter
+
     rate_limiter = AdaptiveRateLimiter(redis_client)
-    logger.info("✅ Advanced rate limiter initialized")
+    sliding_window_limiter = SlidingWindowRateLimiter(redis_client)
+
+    logger.info("Advanced rate limiter initialized (adaptive + sliding window)")
 
 
 def get_rate_limiter() -> AdaptiveRateLimiter:
-    """Get the global rate limiter instance"""
+    """Get the global adaptive rate limiter instance"""
     if rate_limiter is None:
         raise RuntimeError("Rate limiter not initialized. Call initialize_rate_limiter() first.")
     return rate_limiter
+
+
+def get_sliding_window_limiter() -> SlidingWindowRateLimiter:
+    """Get the global sliding window rate limiter instance"""
+    if sliding_window_limiter is None:
+        raise RuntimeError("Rate limiter not initialized. Call initialize_rate_limiter() first.")
+    return sliding_window_limiter

@@ -224,11 +224,12 @@ class SAMLProvider:
 
 class OIDCProvider:
     """OpenID Connect SSO Provider"""
-    
+
     def __init__(self, config: SSOConfig):
         self.config = config
         self.discovery_document = None
         self.jwks = None
+        self._jwks_client = None  # PyJWT JWKS client for key retrieval
     
     async def initialize(self):
         """Initialize OIDC provider by fetching discovery document"""
@@ -243,12 +244,26 @@ class OIDCProvider:
                     else:
                         raise Exception(f"Failed to fetch OIDC discovery document: {response.status}")
                 
-                # Fetch JWKS
+                # Fetch JWKS and create JWT client for signature verification
                 if self.discovery_document and 'jwks_uri' in self.discovery_document:
-                    async with session.get(self.discovery_document['jwks_uri']) as jwks_response:
+                    jwks_uri = self.discovery_document['jwks_uri']
+                    async with session.get(jwks_uri) as jwks_response:
                         if jwks_response.status == 200:
                             self.jwks = await jwks_response.json()
-            
+
+                    # Create PyJWKClient for JWKS-based signature verification
+                    try:
+                        from jwt import PyJWKClient
+                        self._jwks_client = PyJWKClient(jwks_uri, cache_keys=True)
+                        logger.info("JWKS client initialized for signature verification",
+                                   provider=self.config.provider_name,
+                                   jwks_uri=jwks_uri)
+                    except Exception as jwks_err:
+                        logger.error("Failed to create JWKS client - signature verification disabled",
+                                    provider=self.config.provider_name,
+                                    error=str(jwks_err))
+                        self._jwks_client = None
+
             logger.info("OIDC provider initialized", provider=self.config.provider_name)
             
         except Exception as e:
@@ -328,16 +343,30 @@ class OIDCProvider:
                     provider=self.config.provider_name,
                     error="No ID token received"
                 )
-            
-            # Decode ID token (simplified - should verify signature with JWKS)
+
+            # SECURITY FIX: Properly verify ID token signature using JWKS
+            # Previously used verify_signature=False which allowed token forgery
             try:
-                payload = jwt.decode(id_token, options={"verify_signature": False})
+                payload = await self._verify_id_token(id_token)
             except jwt.InvalidTokenError as e:
+                logger.error("ID token verification failed",
+                           provider=self.config.provider_name,
+                           error=str(e))
                 return SSOResponse(
                     success=False,
                     user_attributes={},
                     provider=self.config.provider_name,
                     error=f"Invalid ID token: {str(e)}"
+                )
+            except Exception as e:
+                logger.error("Unexpected error during ID token verification",
+                           provider=self.config.provider_name,
+                           error=str(e))
+                return SSOResponse(
+                    success=False,
+                    user_attributes={},
+                    provider=self.config.provider_name,
+                    error=f"Token verification error: {str(e)}"
                 )
             
             # Extract user attributes
@@ -363,6 +392,89 @@ class OIDCProvider:
                 error=f"Code exchange error: {str(e)}"
             )
     
+    async def _verify_id_token(self, id_token: str) -> Dict[str, Any]:
+        """
+        Verify OIDC ID token signature and claims using JWKS.
+
+        SECURITY: This method properly verifies the JWT signature using the
+        identity provider's JWKS public keys. It also validates standard
+        OIDC claims including issuer, audience, and expiration.
+
+        Args:
+            id_token: The JWT ID token to verify
+
+        Returns:
+            Dict containing the verified token payload
+
+        Raises:
+            jwt.InvalidTokenError: If token verification fails
+            ValueError: If JWKS client is not initialized
+        """
+        # Ensure JWKS client is available
+        if not self._jwks_client:
+            # Attempt to reinitialize
+            if self.discovery_document and 'jwks_uri' in self.discovery_document:
+                try:
+                    from jwt import PyJWKClient
+                    self._jwks_client = PyJWKClient(
+                        self.discovery_document['jwks_uri'],
+                        cache_keys=True
+                    )
+                except Exception as e:
+                    logger.error("Failed to initialize JWKS client", error=str(e))
+                    raise ValueError(
+                        "JWKS client not available - cannot verify token signature. "
+                        "This is a CRITICAL security requirement for OIDC authentication."
+                    )
+            else:
+                raise ValueError(
+                    "OIDC provider not properly initialized - missing JWKS configuration"
+                )
+
+        # Get the signing key from JWKS based on token header's 'kid'
+        try:
+            signing_key = self._jwks_client.get_signing_key_from_jwt(id_token)
+        except Exception as e:
+            logger.error("Failed to get signing key from JWKS",
+                        provider=self.config.provider_name,
+                        error=str(e))
+            raise jwt.InvalidTokenError(f"Unable to find signing key: {str(e)}")
+
+        # Determine expected issuer from discovery document
+        expected_issuer = None
+        if self.discovery_document:
+            expected_issuer = self.discovery_document.get('issuer')
+
+        # Verify and decode the token with full validation
+        # CRITICAL: verify_signature MUST be True (default) for security
+        decode_options = {
+            "verify_signature": True,  # CRITICAL: Must verify signature
+            "verify_exp": True,        # Verify expiration
+            "verify_iat": True,        # Verify issued-at
+            "verify_aud": True,        # Verify audience
+            "require": ["exp", "iat", "sub", "aud"]  # Required claims
+        }
+
+        # Build verification parameters
+        verify_params = {
+            "key": signing_key.key,
+            "algorithms": ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
+            "options": decode_options,
+            "audience": self.config.client_id,  # Audience must match our client_id
+        }
+
+        # Add issuer verification if available
+        if expected_issuer:
+            verify_params["issuer"] = expected_issuer
+
+        payload = jwt.decode(id_token, **verify_params)
+
+        logger.info("ID token verified successfully",
+                   provider=self.config.provider_name,
+                   subject=payload.get('sub', 'unknown'))
+
+        return payload
+
     def _map_claim(self, claim: str) -> Optional[str]:
         """Map OIDC claim to user attribute"""
         default_mapping = {
@@ -374,11 +486,11 @@ class OIDCProvider:
             'groups': 'groups',
             'roles': 'roles'
         }
-        
+
         # Use custom mapping if available
         if self.config.attribute_mapping:
             return self.config.attribute_mapping.get(claim)
-        
+
         return default_mapping.get(claim)
 
 
