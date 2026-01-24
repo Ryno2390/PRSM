@@ -11,20 +11,20 @@ This document provides an index of all information security policies for PRSM, s
 
 | Policy ID | Policy Name | Version | Effective Date | Owner | Status |
 |-----------|-------------|---------|----------------|-------|--------|
-| **PRSM-ISP-001** | [Information Security Policy](INFORMATION_SECURITY_POLICY.md) | 1.0.0 | 2025-07-01 | CTO | Active |
-| **PRSM-DPP-002** | [Data Protection and Privacy Policy](DATA_PROTECTION_POLICY.md) | 1.0.0 | 2025-07-01 | DPO | Active |
-| **PRSM-IRP-003** | [Incident Response Policy](INCIDENT_RESPONSE_POLICY.md) | 1.0.0 | 2025-07-01 | Head of Security | Active |
-| **PRSM-ACP-004** | [Access Control Policy](ACCESS_CONTROL_POLICY.md) | 1.0.0 | 2025-07-01 | Head of Security | Active |
+| **PRSM-ISP-001** | [Information Security Policy](INFORMATION_SECURITY_POLICY.md) | 1.0.0 | 2026-02-01 | CTO | Active |
+| **PRSM-DPP-002** | [Data Protection and Privacy Policy](DATA_PROTECTION_POLICY.md) | 1.0.0 | 2026-02-01 | DPO | Active |
+| **PRSM-IRP-003** | [Incident Response Policy](INCIDENT_RESPONSE_POLICY.md) | 1.0.0 | 2026-02-01 | Head of Security | Active |
+| **PRSM-ACP-004** | [Access Control Policy](ACCESS_CONTROL_POLICY.md) | 1.0.0 | 2026-02-01 | Head of Security | Active |
 
 ### Supporting Procedures (In Development)
 
 | Procedure ID | Procedure Name | Target Date | Owner | Priority |
 |--------------|----------------|-------------|-------|----------|
-| **PRSM-BCP-005** | Business Continuity Procedure | 2025-08-01 | COO | High |
-| **PRSM-CHG-006** | Change Management Procedure | 2025-08-01 | Head of Engineering | High |
-| **PRSM-VUL-007** | Vulnerability Management Procedure | 2025-08-15 | Head of Security | High |
-| **PRSM-BCK-008** | Backup and Recovery Procedure | 2025-08-15 | Head of Infrastructure | Medium |
-| **PRSM-VEN-009** | Vendor Management Procedure | 2025-09-01 | Procurement | Medium |
+| **PRSM-BCP-005** | Business Continuity Procedure | 2026-03-01 | COO | High |
+| **PRSM-CHG-006** | Change Management Procedure | 2026-03-01 | Head of Engineering | High |
+| **PRSM-VUL-007** | Vulnerability Management Procedure | 2026-03-15 | Head of Security | High |
+| **PRSM-BCK-008** | Backup and Recovery Procedure | 2026-03-15 | Head of Infrastructure | Medium |
+| **PRSM-VEN-009** | Vendor Management Procedure | 2026-04-01 | Procurement | Medium |
 
 ## Policy Coverage Matrix
 

@@ -36,7 +36,7 @@ AI Concierge MVP
 The concierge has comprehensive access to:
 
 ### Tier 1: Essential Investor Materials
-- Investment Readiness Report (99/100 external validation)
+- Investment Readiness Report
 - Business Case and Revenue Strategy
 - Game-Theoretic Investor Thesis
 - Funding Milestones and Strategy

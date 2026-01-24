@@ -8,8 +8,8 @@
 | **Document Title** | Information Security Policy |
 | **Document ID** | PRSM-ISP-001 |
 | **Version** | 1.0.0 |
-| **Effective Date** | July 1, 2025 |
-| **Review Date** | January 1, 2026 |
+| **Effective Date** | February 1, 2026 |
+| **Review Date** | August 1, 2026 |
 | **Owner** | Chief Technology Officer |
 | **Approved By** | Chief Executive Officer |
 | **Classification** | Internal Use |
@@ -570,8 +570,8 @@ All assets must be classified according to information classification levels and
 
 **Policy Owner:** Chief Technology Officer  
 **Approved By:** Chief Executive Officer  
-**Effective Date:** July 1, 2025  
-**Next Review Date:** January 1, 2026  
+**Effective Date:** February 1, 2026  
+**Next Review Date:** August 1, 2026  
 
 ---
 

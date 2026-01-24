@@ -8,8 +8,8 @@
 | **Document Title** | Access Control Policy |
 | **Document ID** | PRSM-ACP-004 |
 | **Version** | 1.0.0 |
-| **Effective Date** | July 1, 2025 |
-| **Review Date** | January 1, 2026 |
+| **Effective Date** | February 1, 2026 |
+| **Review Date** | August 1, 2026 |
 | **Owner** | Head of Security |
 | **Approved By** | Chief Technology Officer |
 | **Classification** | Internal Use |
@@ -679,8 +679,8 @@ This policy applies to:
 
 **Policy Owner:** Head of Security  
 **Approved By:** Chief Technology Officer  
-**Effective Date:** July 1, 2025  
-**Next Review Date:** January 1, 2026  
+**Effective Date:** February 1, 2026  
+**Next Review Date:** August 1, 2026  
 
 ---
 

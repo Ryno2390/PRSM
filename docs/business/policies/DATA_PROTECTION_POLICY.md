@@ -8,8 +8,8 @@
 | **Document Title** | Data Protection and Privacy Policy |
 | **Document ID** | PRSM-DPP-002 |
 | **Version** | 1.0.0 |
-| **Effective Date** | July 1, 2025 |
-| **Review Date** | January 1, 2026 |
+| **Effective Date** | February 1, 2026 |
+| **Review Date** | August 1, 2026 |
 | **Owner** | Data Protection Officer |
 | **Approved By** | Chief Executive Officer |
 | **Classification** | Internal Use |
@@ -612,8 +612,8 @@ Any operation performed on personal data including:
 
 **Policy Owner:** Data Protection Officer  
 **Approved By:** Chief Executive Officer  
-**Effective Date:** July 1, 2025  
-**Next Review Date:** January 1, 2026  
+**Effective Date:** February 1, 2026  
+**Next Review Date:** August 1, 2026  
 
 ---
 

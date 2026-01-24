@@ -8,8 +8,8 @@
 | **Document Title** | Incident Response Policy |
 | **Document ID** | PRSM-IRP-003 |
 | **Version** | 1.0.0 |
-| **Effective Date** | July 1, 2025 |
-| **Review Date** | January 1, 2026 |
+| **Effective Date** | February 1, 2026 |
+| **Review Date** | August 1, 2026 |
 | **Owner** | Head of Security |
 | **Approved By** | Chief Technology Officer |
 | **Classification** | Internal Use |
@@ -583,8 +583,8 @@ A security incident is any event that:
 
 **Policy Owner:** Head of Security  
 **Approved By:** Chief Technology Officer  
-**Effective Date:** July 1, 2025  
-**Next Review Date:** January 1, 2026  
+**Effective Date:** February 1, 2026  
+**Next Review Date:** August 1, 2026  
 
 ---
 
