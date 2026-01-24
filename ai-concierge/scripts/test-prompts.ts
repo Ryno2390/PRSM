@@ -53,7 +53,7 @@ const TEST_QUESTIONS: TestCase[] = [
     id: 'funding_status',
     category: 'funding',
     question: "What's PRSM's current funding status and needs?",
-    expectedKeywords: ['99/100', 'external validation', '$2-4M', 'seed round', '$10-15M', 'Series A'],
+    expectedKeywords: ['advanced prototype', 'Series A', '$18M', 'production deployment'],
     expectedSources: ['INVESTMENT_READINESS_REPORT.md']
   },
   {

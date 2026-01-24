@@ -180,6 +180,7 @@ results/
 
 # Logs
 logs/
+logs_archive/
 *.log
 
 # Database

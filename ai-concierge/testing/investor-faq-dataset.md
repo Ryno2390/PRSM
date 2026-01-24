@@ -9,10 +9,10 @@ This dataset contains realistic investor questions for testing the AI Concierge'
 
 ### Q1: What's PRSM's current funding status and needs?
 **Expected Coverage:**
-- External validation score: 99/100 from independent due diligence
-- Recommended seed round: $2-4M (current stage)
-- Series A projection: $10-15M in 18-24 months
-- Funding use: team scaling, platform capabilities, market traction
+- Development stage: Advanced prototype seeking Series A
+- Series A target: $18M for production deployment
+- Funding use: team scaling, independent audits, production infrastructure
+- Planned validations: Security audit, SOC2 certification
 - Source: INVESTMENT_READINESS_REPORT.md
 
 ### Q2: What's the business model and revenue strategy?
@@ -112,8 +112,8 @@ This dataset contains realistic investor questions for testing the AI Concierge'
 - Phase 1: 100% RLT component success (11/11 working)
 - Phase 2: Complete integration testing with real APIs
 - Phase 3: Security hardening and scalability optimization
-- External validation: 88 → 96 → 99/100 progression
-- Comprehensive evidence pipeline with automated validation
+- Internal testing: Comprehensive validation completed
+- Independent audit: Planned post-funding
 - Source: PHASE_1_TASK_1_EVIDENCE_REPORT.md, evidence/
 
 ---
@@ -144,11 +144,11 @@ This dataset contains realistic investor questions for testing the AI Concierge'
 
 ### Q14: What validation exists for PRSM's claims?
 **Expected Coverage:**
-- Independent technical due diligence: 99/100 score
-- Three-round validation process with progressive improvement
-- "Unreserved recommendation for investment"
+- Internal technical validation: Core architecture tested
+- AI-assisted code review: Architecture analysis completed
+- Independent security audit: Planned post-funding
 - Real performance metrics: 7,200+ ops/sec, 100% RLT success
-- Comprehensive automated evidence pipeline
+- Comprehensive automated testing pipeline
 - Source: INVESTMENT_READINESS_REPORT.md, TRANSPARENT_VALIDATION_EVIDENCE.md
 
 ### Q15: How does PRSM demonstrate product-market fit?

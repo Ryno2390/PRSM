@@ -377,8 +377,8 @@ How can I assist with your PRSM evaluation today?`,
               <div className={`mt-2 text-xs text-center transition-colors duration-300 ${
                 isDark ? 'text-prsm-text-secondary' : 'text-prsm-light-text-secondary'
               }`}>
-                Powered by PRSM's AI coordination technology • 
-                <span className="ml-1 font-medium">99/100 External Validation Score</span>
+                Powered by PRSM's AI coordination technology •
+                <span className="ml-1 font-medium">Advanced Prototype</span>
               </div>
             </div>
           </div>
