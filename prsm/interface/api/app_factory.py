@@ -115,7 +115,7 @@ def create_app(
         "FastAPI application created",
         title=title,
         version=version,
-        environment=settings.environment.value
+        environment=settings.environment.value if settings else "unknown"
     )
 
     return app
@@ -148,7 +148,7 @@ API calls are rate-limited based on your tier:
 - Pro: 300 req/min
 - Enterprise: 1000 req/min
 """
-    if settings.is_development:
+    if settings and hasattr(settings, 'is_development') and settings.is_development:
         base_description += "\n\n**Development Mode Active**"
 
     return base_description
@@ -158,7 +158,7 @@ def _get_servers() -> List[Dict[str, str]]:
     """Get server list based on environment."""
     servers = []
 
-    if settings.is_production:
+    if settings and hasattr(settings, 'is_production') and settings.is_production:
         servers.extend([
             {"url": "https://api.prsm.org", "description": "Production server"},
             {"url": "https://staging-api.prsm.org", "description": "Staging server"},
@@ -206,7 +206,7 @@ def _configure_exception_handlers(app: FastAPI) -> None:
         )
 
         # Don't expose internal errors in production
-        if settings.is_production:
+        if settings and hasattr(settings, 'is_production') and settings.is_production:
             return JSONResponse(
                 status_code=500,
                 content={"detail": "Internal server error"}

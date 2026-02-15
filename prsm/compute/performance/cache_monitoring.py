@@ -16,9 +16,14 @@ import redis.asyncio as aioredis
 import logging
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.utils import PlotlyJSONEncoder
+try:
+    import plotly.graph_objects as go
+    import plotly.express as px
+    from plotly.utils import PlotlyJSONEncoder
+    HAS_PLOTLY = True
+except ImportError:
+    go = px = PlotlyJSONEncoder = None
+    HAS_PLOTLY = False
 
 logger = logging.getLogger(__name__)
 

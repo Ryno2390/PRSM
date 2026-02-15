@@ -437,3 +437,5 @@ if __name__ == "__main__":
     finally:
         # Clean up
         os.unlink(temp_file_path)
+# Compatibility alias
+CryptoSharding = BasicCryptoSharding

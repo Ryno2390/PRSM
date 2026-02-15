@@ -29,7 +29,7 @@ try:
     from integration_demo_pgvector import RealEmbeddingService, FTNSTokenService, PRSMProductionDemo
 except ImportError as e:
     import pytest
-    pytest.skip(f"Import error: {e}. Make sure you're running from the PRSM root directory")
+    pytest.skip(f"Import error: {e}. Make sure you're running from the PRSM root directory", allow_module_level=True)
 
 
 class IntegrationTestSuite:

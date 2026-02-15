@@ -8,7 +8,9 @@ import asyncio
 import json
 import time
 from typing import Dict, Any
+import pytest
 
+pytest.importorskip("rich")
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel

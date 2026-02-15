@@ -17,7 +17,10 @@ from typing import Dict, List, Any, Optional, Union, Set, Tuple
 import uuid
 from pathlib import Path
 import hashlib
-import semver
+try:
+    import semver
+except ImportError:
+    semver = None
 
 from prsm.compute.plugins import require_optional, has_optional_dependency
 
