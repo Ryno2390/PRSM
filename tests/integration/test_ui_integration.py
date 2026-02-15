@@ -17,6 +17,8 @@ import os
 from unittest.mock import Mock, patch, AsyncMock
 from pathlib import Path
 import logging
+
+pytest.importorskip("selenium")
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait

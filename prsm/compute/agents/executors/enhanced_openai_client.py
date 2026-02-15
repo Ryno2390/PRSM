@@ -17,7 +17,15 @@ from dataclasses import dataclass, field
 
 import aiohttp
 import structlog
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+try:
+    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+except ImportError:
+    # Provide basic fallback decorators if tenacity is not available
+    def retry(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+    stop_after_attempt = wait_exponential = retry_if_exception_type = lambda *args, **kwargs: None
 
 from .api_clients import BaseModelClient, ModelExecutionRequest, ModelExecutionResponse, ModelProvider
 from prsm.core.config.model_config_manager import get_model_config_manager

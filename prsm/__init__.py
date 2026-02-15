@@ -41,3 +41,8 @@ __all__ = [
     "__email__",
     "__description__"
 ]
+
+# Compatibility shim: Allow prsm.nwtn imports (legacy code uses this path)
+import sys
+import prsm.compute.nwtn
+sys.modules['prsm.nwtn'] = sys.modules['prsm.compute.nwtn']

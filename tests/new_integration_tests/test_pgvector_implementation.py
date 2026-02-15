@@ -37,7 +37,7 @@ try:
     )
 except ImportError as e:
     import pytest
-    pytest.skip(f"Import error: {e}. Make sure you're running from the PRSM root directory")
+    pytest.skip(f"Import error: {e}. Make sure you're running from the PRSM root directory", allow_module_level=True)
 
 
 class PgVectorTestSuite:

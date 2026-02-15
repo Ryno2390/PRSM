@@ -52,7 +52,7 @@ try:
     from prsm.data.vector_store import VectorStoreCoordinator, MigrationPhase
 except ImportError as e:
     import pytest
-    pytest.skip(f"Import error: {e}. Make sure you're running from the PRSM root directory")
+    pytest.skip(f"Import error: {e}. Make sure you're running from the PRSM root directory", allow_module_level=True)
 
 
 class MockVectorStore(PRSMVectorStore):

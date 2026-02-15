@@ -23,7 +23,10 @@ Key Features:
 """
 
 import os
-import git
+try:
+    import git
+except ImportError:
+    git = None
 import json
 import uuid
 import hashlib
