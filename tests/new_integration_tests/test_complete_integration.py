@@ -114,8 +114,8 @@ async def test_core_components():
     # Test 3: Vector Storage (Mock)
     print("\n🗂️  Testing Vector Storage...")
     try:
-        from prsm.vector_store.base import VectorStoreConfig, VectorStoreType
-        from prsm.vector_store.implementations.pgvector_store import PgVectorStore
+        from prsm.data.vector_store import VectorStoreConfig, VectorStoreType
+        from prsm.data.vector_store import PgVectorStore
         
         # This would normally connect to real database
         # For investor demo, we validate the configuration works

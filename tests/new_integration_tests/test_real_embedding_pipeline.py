@@ -28,7 +28,7 @@ from prsm.embeddings import (
     get_embedding_api,
     create_optimized_cache
 )
-from prsm.vector_store.implementations.pgvector_store import PgVectorStore
+from prsm.data.vector_store import PgVectorStore
 
 # Configure logging
 logging.basicConfig(
@@ -178,7 +178,7 @@ async def test_full_pipeline():
     print("=" * 50)
     
     # Initialize vector store
-    from prsm.vector_store.base import VectorStoreConfig, VectorStoreType
+    from prsm.data.vector_store import VectorStoreConfig, VectorStoreType
     config = VectorStoreConfig(
         store_type=VectorStoreType.PGVECTOR,
         host="localhost",
