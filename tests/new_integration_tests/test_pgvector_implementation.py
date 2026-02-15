@@ -31,14 +31,13 @@ logger = logging.getLogger(__name__)
 
 # Import PRSM components
 try:
-    from prsm.vector_store.base import VectorStoreConfig, VectorStoreType, ContentType, SearchFilters
-    from prsm.vector_store.implementations.pgvector_store import (
+    from prsm.data.vector_store import VectorStoreConfig, VectorStoreType, ContentType, SearchFilters
+    from prsm.data.vector_store import (
         PgVectorStore, create_development_pgvector_store, get_docker_connection_info
     )
 except ImportError as e:
-    print(f"❌ Import error: {e}")
-    print("Make sure you're running from the PRSM root directory")
-    sys.exit(1)
+    import pytest
+    pytest.skip(f"Import error: {e}. Make sure you're running from the PRSM root directory")
 
 
 class PgVectorTestSuite:

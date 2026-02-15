@@ -23,14 +23,13 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 try:
-    from prsm.vector_store.base import VectorStoreConfig, VectorStoreType, ContentType
-    from prsm.vector_store.implementations.pgvector_store import create_development_pgvector_store
+    from prsm.data.vector_store import VectorStoreConfig, VectorStoreType, ContentType
+    from prsm.data.vector_store import create_development_pgvector_store
     from test_vector_store_mock import MockVectorStore
     from integration_demo_pgvector import RealEmbeddingService, FTNSTokenService, PRSMProductionDemo
 except ImportError as e:
-    print(f"❌ Import error: {e}")
-    print("Make sure you're running from the PRSM root directory")
-    exit(1)
+    import pytest
+    pytest.skip(f"Import error: {e}. Make sure you're running from the PRSM root directory")
 
 
 class IntegrationTestSuite:

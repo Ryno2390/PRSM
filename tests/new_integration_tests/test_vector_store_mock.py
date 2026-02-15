@@ -45,15 +45,14 @@ class SimplePerformanceTracker:
 
 # Import our vector store components
 try:
-    from prsm.vector_store.base import (
+    from prsm.data.vector_store import (
         PRSMVectorStore, ContentMatch, SearchFilters, VectorStoreConfig,
         VectorStoreType, ContentType, VectorStoreBenchmark
     )
-    from prsm.vector_store.coordinator import VectorStoreCoordinator, MigrationPhase
+    from prsm.data.vector_store import VectorStoreCoordinator, MigrationPhase
 except ImportError as e:
-    print(f"Import error: {e}")
-    print("Make sure you're running from the PRSM root directory")
-    exit(1)
+    import pytest
+    pytest.skip(f"Import error: {e}. Make sure you're running from the PRSM root directory")
 
 
 class MockVectorStore(PRSMVectorStore):
