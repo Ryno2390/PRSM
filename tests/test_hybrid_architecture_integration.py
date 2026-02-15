@@ -25,9 +25,9 @@ from typing import Dict, Any, List
 import json
 import time
 
-from prsm.agents.routers.model_router import ModelRouter, RoutingStrategy, ModelSource
-from prsm.evaluation.chemistry_benchmark import ChemistryReasoningBenchmark
-from prsm.nwtn.hybrid_integration import HybridNWTNManager
+from prsm.compute.agents.routers.model_router import ModelRouter, RoutingStrategy, ModelSource
+from prsm.compute.evaluation.chemistry_benchmark import ChemistryReasoningBenchmark
+from prsm.compute.nwtn.hybrid_integration import HybridNWTNManager
 from prsm.core.models import AgentTask, AgentResponse
 
 

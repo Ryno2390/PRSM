@@ -40,7 +40,7 @@ async def test_core_components():
     # Test 1: Content Processing
     print("\n📝 Testing Content Processing Pipeline...")
     try:
-        from prsm.content_processing.text_processor import (
+        from prsm.data.content_processing.text_processor import (
             ContentTextProcessor, ProcessingConfig, ContentType
         )
         
@@ -79,7 +79,7 @@ async def test_core_components():
     # Test 2: Embedding Pipeline
     print("\n🧠 Testing Embedding Pipeline...")
     try:
-        from prsm.embeddings import (
+        from prsm.data.embeddings import (
             EmbeddingCache, create_optimized_cache,
             RealEmbeddingAPI, get_embedding_api
         )
@@ -144,7 +144,7 @@ async def test_core_components():
     # Test 4: IPFS Integration
     print("\n🌐 Testing IPFS Integration...")
     try:
-        from prsm.ipfs import (
+        from prsm.data.ipfs import (
             IPFSClient, IPFSConfig,
             ContentAddressingSystem, create_addressing_system,
             ContentVerificationSystem, create_verification_system,
@@ -160,7 +160,7 @@ async def test_core_components():
         content_storage = {}
         
         async def mock_add_content(content, filename=None, metadata=None):
-            from prsm.ipfs.ipfs_client import IPFSContent
+            from prsm.data.ipfs.ipfs_client import IPFSContent
             import hashlib
             
             content_bytes = content.encode('utf-8') if isinstance(content, str) else content

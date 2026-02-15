@@ -43,9 +43,9 @@ async def test_web3_integration():
         # Test 1: Import Web3 modules
         print("\n🔧 Testing Web3 module imports...")
         try:
-            from prsm.web3.wallet_connector import Web3WalletConnector
-            from prsm.web3.contract_interface import FTNSContractInterface
-            from prsm.web3.web3_service import Web3ServiceManager
+            from prsm.interface.web3.wallet_connector import Web3WalletConnector
+            from prsm.interface.web3.contract_interface import FTNSContractInterface
+            from prsm.interface.web3.web3_service import Web3ServiceManager
             print("✅ All Web3 modules imported successfully")
         except ImportError as e:
             print(f"❌ Import error: {e}")
@@ -103,7 +103,7 @@ async def test_web3_integration():
         # Test 5: API endpoint simulation
         print("\n🌐 Testing API endpoint availability...")
         try:
-            from prsm.web3.frontend_integration import router
+            from prsm.interface.web3.frontend_integration import router
             print("✅ Web3 API router imported successfully")
             
             # Check endpoint paths

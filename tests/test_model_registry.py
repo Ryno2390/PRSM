@@ -19,9 +19,9 @@ async def test_model_registry():
     
     try:
         # Import the model registry and dependencies
-        from prsm.federation.model_registry import ModelRegistry, model_registry
+        from prsm.compute.federation.model_registry import ModelRegistry, model_registry
         from prsm.core.models import TeacherModel, ModelType, PeerNode
-        from prsm.data_layer.enhanced_ipfs import prsm_ipfs_client
+        from prsm.data.data_layer.enhanced_ipfs import prsm_ipfs_client
         
         print("✅ Model registry imports successful")
         

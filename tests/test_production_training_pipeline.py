@@ -12,12 +12,12 @@ from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from prsm.distillation.production_training_pipeline import (
+from prsm.compute.distillation.production_training_pipeline import (
     ProductionTrainingPipeline, TeacherModelConnector, DistillationDataset,
     ProductionPyTorchTrainer, ProductionTensorFlowTrainer, ProductionTransformersTrainer,
     EnhancedProductionTrainingPipeline, TrainingConfig, get_production_training_pipeline
 )
-from prsm.distillation.models import (
+from prsm.compute.distillation.models import (
     DistillationRequest, ModelSize, OptimizationTarget, TrainingStrategy
 )
 

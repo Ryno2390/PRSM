@@ -20,7 +20,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 try:
     from prsm.core.models import PeerNode
     from prsm.core.config import PRSMConfig
-    from prsm.tokenomics.ftns_service import FTNSService
+    from prsm.economy.tokenomics.ftns_service import FTNSService
 except ImportError as e:
     # If imports fail, we'll skip tests that require them
     pass

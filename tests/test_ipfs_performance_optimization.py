@@ -27,7 +27,7 @@ async def test_ipfs_performance_optimization():
         from prsm.core.ipfs_client import (
             IPFSClient, IPFSNode, IPFSResult, IPFSConnectionType
         )
-        from prsm.data_layer.enhanced_ipfs import (
+        from prsm.data.data_layer.enhanced_ipfs import (
             PRSMIPFSClient, get_ipfs_client
         )
         

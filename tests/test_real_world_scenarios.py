@@ -23,12 +23,12 @@ import structlog
 
 # Import actual PRSM components (not mocks)
 try:
-    from prsm.agents.routers.enhanced_model_router import EnhancedModelRouter
-    from prsm.agents.orchestrators.enhanced_orchestrator import EnhancedOrchestrator
-    from prsm.agents.compilers.enhanced_compiler import EnhancedCompiler
+    from prsm.compute.agents.routers.enhanced_model_router import EnhancedModelRouter
+    from prsm.compute.agents.orchestrators.enhanced_orchestrator import EnhancedOrchestrator
+    from prsm.compute.agents.compilers.enhanced_compiler import EnhancedCompiler
     from prsm.rlt.dense_reward_trainer import DenseRewardTrainer
     from prsm.rlt.quality_monitor import QualityMonitor
-    from prsm.teachers.seal import SEALService
+    from prsm.compute.teachers.seal import SEALService
     from prsm.performance.performance_monitor import PerformanceMonitor
 except ImportError as e:
     print(f"Note: Some PRSM components not available for testing: {e}")

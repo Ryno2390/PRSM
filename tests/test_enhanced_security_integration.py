@@ -18,22 +18,22 @@ from uuid import uuid4
 
 import pytest
 
-from prsm.integrations.security.security_orchestrator import (
+from prsm.core.integrations.security.security_orchestrator import (
     SecurityOrchestrator, SecurityAssessment
 )
-from prsm.integrations.security.threat_detector import (
+from prsm.core.integrations.security.threat_detector import (
     ThreatDetector, ThreatResult, ThreatLevel
 )
-from prsm.integrations.security.enhanced_sandbox import (
+from prsm.core.integrations.security.enhanced_sandbox import (
     EnhancedSandboxManager, EnhancedSandboxResult
 )
-from prsm.integrations.security.audit_logger import (
+from prsm.core.integrations.security.audit_logger import (
     AuditLogger, SecurityEvent, EventLevel
 )
-from prsm.integrations.models.integration_models import (
+from prsm.core.integrations.models.integration_models import (
     SecurityRisk, ImportStatus, ImportRequest, ImportResult, IntegrationSource, IntegrationPlatform
 )
-from prsm.integrations.core.integration_manager import integration_manager
+from prsm.core.integrations.core.integration_manager import integration_manager
 
 
 # === Test Fixtures ===

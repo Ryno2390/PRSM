@@ -18,14 +18,14 @@ import structlog
 # Add PRSM to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from prsm.governance.token_distribution import (
+from prsm.economy.governance.token_distribution import (
     get_governance_distributor, 
     GovernanceParticipantTier, 
     ContributionType
 )
-from prsm.governance.voting import get_token_weighted_voting
-from prsm.governance.quadratic_voting import quadratic_voting
-from prsm.auth.auth_manager import auth_manager
+from prsm.economy.governance.voting import get_token_weighted_voting
+from prsm.economy.governance.quadratic_voting import quadratic_voting
+from prsm.core.auth.auth_manager import auth_manager
 
 # Set up logging
 structlog.configure(

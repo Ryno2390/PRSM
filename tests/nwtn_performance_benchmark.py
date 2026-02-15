@@ -39,11 +39,11 @@ import sys
 import tracemalloc
 
 # Import systems under test
-from prsm.nwtn.meta_reasoning_engine import MetaReasoningEngine
-from prsm.nwtn.content_royalty_engine import ContentRoyaltyEngine, QueryComplexity
-from prsm.nwtn.content_ingestion_engine import NWTNContentIngestionEngine
-from prsm.nwtn.voicebox import NWTNVoicebox
-from prsm.provenance.enhanced_provenance_system import EnhancedProvenanceSystem, ContentType
+from prsm.compute.nwtn.meta_reasoning_engine import MetaReasoningEngine
+from prsm.compute.nwtn.content_royalty_engine import ContentRoyaltyEngine, QueryComplexity
+from prsm.compute.nwtn.content_ingestion_engine import NWTNContentIngestionEngine
+from prsm.compute.nwtn.voicebox import NWTNVoicebox
+from prsm.data.provenance.enhanced_provenance_system import EnhancedProvenanceSystem, ContentType
 
 
 @dataclass

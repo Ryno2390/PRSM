@@ -8,7 +8,7 @@ import asyncio
 import time
 from datetime import datetime, timezone
 
-from prsm.tokenomics.advanced_ftns import get_advanced_ftns
+from prsm.economy.tokenomics.advanced_ftns import get_advanced_ftns
 from prsm.core.models import ImpactMetrics, DividendDistribution
 
 
@@ -44,7 +44,7 @@ async def test_dividend_distribution():
     advanced_ftns = get_advanced_ftns()
     
     # Give test users some initial FTNS balance
-    from prsm.tokenomics.ftns_service import ftns_service
+    from prsm.economy.tokenomics.ftns_service import ftns_service
     token_holders = ["user1", "user2", "user3", "user4"]
     
     for user in token_holders:

@@ -22,8 +22,8 @@ try:
         PRSMSession, UserInput, AgentResponse, FTNSTransaction, 
         User, TaskStatus, AgentType, SafetyLevel
     )
-    from prsm.tokenomics.database_ftns_service import DatabaseFTNSService
-    from prsm.auth.database_auth_service import DatabaseAuthService
+    from prsm.economy.tokenomics.database_ftns_service import DatabaseFTNSService
+    from prsm.core.auth.database_auth_service import DatabaseAuthService
 except ImportError:
     # Create mocks if imports fail
     Session = Mock

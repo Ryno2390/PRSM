@@ -18,7 +18,7 @@ from typing import Dict, List, Any
 from uuid import uuid4
 import structlog
 
-from prsm.safety.circuit_breaker import (
+from prsm.core.safety.circuit_breaker import (
     CircuitBreakerNetwork, 
     SafetyVote as CircuitSafetyVote,
     ThreatLevel,
@@ -26,7 +26,7 @@ from prsm.safety.circuit_breaker import (
     SafetyAssessment
 )
 
-from prsm.safety.monitor import (
+from prsm.core.safety.monitor import (
     SafetyMonitor,
     AlignmentDriftLevel,
     RiskCategory,
@@ -35,7 +35,7 @@ from prsm.safety.monitor import (
     RiskAssessment
 )
 
-from prsm.safety.governance import (
+from prsm.core.safety.governance import (
     SafetyGovernance,
     SafetyProposal,
     ProposalType,
@@ -520,7 +520,7 @@ class SafetyInfrastructureTestSuite:
             proposal_id = await governance.submit_safety_proposal(proposal)
             
             # Manually set proposal as approved (simulate successful voting)
-            from prsm.safety.governance import ProposalStatus
+            from prsm.core.safety.governance import ProposalStatus
             governance.proposals[proposal_id].status = ProposalStatus.APPROVED
             
             # Implement proposal
@@ -702,7 +702,7 @@ class SafetyInfrastructureTestSuite:
                 vote_results.append(result)
             
             # Step 5: Implement if approved
-            from prsm.safety.governance import ProposalStatus
+            from prsm.core.safety.governance import ProposalStatus
             governance.proposals[proposal_id].status = ProposalStatus.APPROVED
             implementation_result = await governance.implement_approved_measures(proposal_id)
             

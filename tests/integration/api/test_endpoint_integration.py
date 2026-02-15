@@ -17,13 +17,13 @@ from datetime import datetime, timezone, timedelta
 try:
     from fastapi.testclient import TestClient
     from httpx import AsyncClient
-    from prsm.api.main import app
+    from prsm.interface.api.main import app
     from prsm.core.models import UserInput, PRSMResponse, AgentType
-    from prsm.auth.models import User, UserSession
-    from prsm.tokenomics.models import FTNSTransaction, FTNSBalance
-    from prsm.nwtn.orchestrator import NWTNOrchestrator
-    from prsm.auth.auth_manager import AuthManager
-    from prsm.tokenomics.ftns_service import FTNSService
+    from prsm.core.auth.models import User, UserSession
+    from prsm.economy.tokenomics.models import FTNSTransaction, FTNSBalance
+    from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
+    from prsm.core.auth.auth_manager import AuthManager
+    from prsm.economy.tokenomics.ftns_service import FTNSService
 except ImportError:
     # Create mocks if imports fail
     TestClient = Mock

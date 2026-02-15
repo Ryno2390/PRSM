@@ -43,7 +43,7 @@ except ImportError:
 
 if AIOFILES_AVAILABLE:
     try:
-        from prsm.teachers.seal import SEALService
+        from prsm.compute.teachers.seal import SEALService
         RLT_TEACHER_AVAILABLE = True
         print("✅ RLT Teacher components available")
     except ImportError as e:
@@ -56,7 +56,7 @@ else:
 SAFETY_AVAILABLE = False
 SAFETY_IMPORT_ERROR = None
 try:
-    from prsm.safety.advanced_safety_quality import AdvancedSafetyQualityFramework
+    from prsm.core.safety.advanced_safety_quality import AdvancedSafetyQualityFramework
     SAFETY_AVAILABLE = True
     print("✅ Advanced Safety components available")
 except ImportError as e:
@@ -67,7 +67,7 @@ except ImportError as e:
 FEDERATION_AVAILABLE = False
 FEDERATION_IMPORT_ERROR = None
 try:
-    from prsm.federation.distributed_rlt_network import DistributedRLTNetwork
+    from prsm.compute.federation.distributed_rlt_network import DistributedRLTNetwork
     FEDERATION_AVAILABLE = True
     print("✅ Federation components available")
 except ImportError as e:

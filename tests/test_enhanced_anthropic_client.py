@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from prsm.agents.executors.enhanced_anthropic_client import (
+from prsm.compute.agents.executors.enhanced_anthropic_client import (
     EnhancedAnthropicClient,
     ClaudeModel,
     ClaudeRequest,

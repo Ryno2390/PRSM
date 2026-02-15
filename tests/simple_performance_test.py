@@ -94,7 +94,7 @@ async def test_p2p_network_integration():
     print("=" * 50)
     
     try:
-        from prsm.federation.p2p_network import P2PModelNetwork
+        from prsm.compute.federation.p2p_network import P2PModelNetwork
         from prsm.core.models import PeerNode, ArchitectTask
         from uuid import uuid4
         

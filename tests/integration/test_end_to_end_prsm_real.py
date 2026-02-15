@@ -30,16 +30,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 try:
     from prsm.core.models import UserInput, AgentType, PRSMResponse
     from prsm.core.config import get_settings
-    from prsm.nwtn.orchestrator import NWTNOrchestrator
-    from prsm.agents.routers.model_router import ModelRouter
-    from prsm.agents.executors.model_executor import ModelExecutor
-    from prsm.agents.compilers.hierarchical_compiler import HierarchicalCompiler
-    from prsm.federation.model_registry import ModelRegistry
-    from prsm.agents.base import BaseAgent, PerformanceTracker, AgentRegistry
+    from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
+    from prsm.compute.agents.routers.model_router import ModelRouter
+    from prsm.compute.agents.executors.model_executor import ModelExecutor
+    from prsm.compute.agents.compilers.hierarchical_compiler import HierarchicalCompiler
+    from prsm.compute.federation.model_registry import ModelRegistry
+    from prsm.compute.agents.base import BaseAgent, PerformanceTracker, AgentRegistry
     
     # Try to import RLT teacher components
     try:
-        from prsm.teachers.seal import SEALService
+        from prsm.compute.teachers.seal import SEALService
         RLT_AVAILABLE = True
     except ImportError:
         print("⚠️  RLT components not available - will test without RLT integration")
@@ -47,8 +47,8 @@ try:
     
     # Try to import safety components
     try:
-        from prsm.safety.monitor import SafetyMonitor
-        from prsm.safety.circuit_breaker import CircuitBreaker
+        from prsm.core.safety.monitor import SafetyMonitor
+        from prsm.core.safety.circuit_breaker import CircuitBreaker
         SAFETY_AVAILABLE = True
     except ImportError:
         print("⚠️  Safety components not available - will test without safety monitoring")

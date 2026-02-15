@@ -109,7 +109,7 @@ class TestCoreImports:
     def test_agent_framework_imports(self):
         """Test that agent framework components can be imported"""
         try:
-            from prsm.agents.base import BaseAgent
+            from prsm.compute.agents.base import BaseAgent
             assert BaseAgent is not None
         except ImportError as e:
             pytest.fail(f"Failed to import agent framework: {e}")
@@ -117,7 +117,7 @@ class TestCoreImports:
     def test_tokenomics_imports(self):
         """Test that tokenomics components can be imported"""
         try:
-            from prsm.tokenomics.ftns_service import FTNSService
+            from prsm.economy.tokenomics.ftns_service import FTNSService
             assert FTNSService is not None
         except ImportError as e:
             pytest.fail(f"Failed to import tokenomics: {e}")
@@ -125,7 +125,7 @@ class TestCoreImports:
     def test_federation_imports(self):
         """Test that federation components can be imported"""
         try:
-            from prsm.federation.consensus import ConsensusEngine
+            from prsm.compute.federation.consensus import ConsensusEngine
             assert ConsensusEngine is not None
         except ImportError as e:
             pytest.fail(f"Failed to import federation: {e}")

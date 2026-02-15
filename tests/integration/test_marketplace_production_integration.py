@@ -25,14 +25,14 @@ from typing import Dict, Any, List
 import json
 
 # Production marketplace imports
-from prsm.marketplace.real_marketplace_service import RealMarketplaceService
-from prsm.marketplace.models import (
+from prsm.economy.marketplace.real_marketplace_service import RealMarketplaceService
+from prsm.economy.marketplace.models import (
     CreateModelListingRequest, ModelCategory, ModelProvider, PricingTier
 )
 
 # Core PRSM integration
 from prsm.core.config import get_settings
-from prsm.tokenomics.database_ftns_service import DatabaseFTNSService
+from prsm.economy.tokenomics.database_ftns_service import DatabaseFTNSService
 
 
 class TestMarketplaceProductionIntegration:

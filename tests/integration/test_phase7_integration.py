@@ -15,13 +15,13 @@ import json
 from pathlib import Path
 
 # Test the major Phase 7 components
-from prsm.ai_orchestration.orchestrator import AIOrchestrator
-from prsm.analytics.dashboard_manager import DashboardManager
-from prsm.enterprise.global_infrastructure import GlobalInfrastructure
-from prsm.integrations.enterprise.integration_manager import IntegrationManager
-from prsm.marketplace.ecosystem.marketplace_core import MarketplaceCore
-from prsm.nwtn.unified_pipeline_controller import UnifiedPipelineController
-from prsm.plugins.plugin_manager import PluginManager
+from prsm.compute.ai_orchestration.orchestrator import AIOrchestrator
+from prsm.data.analytics.dashboard_manager import DashboardManager
+from prsm.core.enterprise.global_infrastructure import GlobalInfrastructure
+from prsm.core.integrations.enterprise.integration_manager import IntegrationManager
+from prsm.economy.marketplace.ecosystem.marketplace_core import MarketplaceCore
+from prsm.compute.nwtn.unified_pipeline_controller import UnifiedPipelineController
+from prsm.compute.plugins.plugin_manager import PluginManager
 
 
 class TestPhase7Integration:

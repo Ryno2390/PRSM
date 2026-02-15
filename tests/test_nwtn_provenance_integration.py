@@ -33,22 +33,22 @@ from typing import Dict, List, Any, Optional
 from unittest.mock import Mock, patch, AsyncMock
 
 # Import the systems under test
-from prsm.nwtn.meta_reasoning_engine import MetaReasoningEngine
-from prsm.nwtn.knowledge_corpus_interface import NWTNKnowledgeCorpusInterface
-from prsm.nwtn.voicebox import NWTNVoicebox, VoiceboxResponse, SourceLink
-from prsm.nwtn.content_royalty_engine import (
+from prsm.compute.nwtn.meta_reasoning_engine import MetaReasoningEngine
+from prsm.compute.nwtn.knowledge_corpus_interface import NWTNKnowledgeCorpusInterface
+from prsm.compute.nwtn.voicebox import NWTNVoicebox, VoiceboxResponse, SourceLink
+from prsm.compute.nwtn.content_royalty_engine import (
     ContentRoyaltyEngine, QueryComplexity, UserTier, ContentImportance, 
     RoyaltyCalculation, RoyaltyDistributionResult
 )
-from prsm.nwtn.content_ingestion_engine import (
+from prsm.compute.nwtn.content_ingestion_engine import (
     NWTNContentIngestionEngine, ContentIngestionResult, DuplicateMatch,
     IngestionStatus, ContentQuality
 )
-from prsm.provenance.enhanced_provenance_system import (
+from prsm.data.provenance.enhanced_provenance_system import (
     EnhancedProvenanceSystem, ContentType, LicenseType, ContentFingerprint, 
     AttributionChain, UsageEvent
 )
-from prsm.tokenomics.ftns_service import FTNSService
+from prsm.economy.tokenomics.ftns_service import FTNSService
 
 
 class TestProvenanceTracking:
@@ -643,7 +643,7 @@ class TestIntegrationScenarios:
                     mock_rate_limit.return_value = {'allowed': True, 'reason': 'Within limits'}
                     
                     # Mock poor quality assessment
-                    from prsm.nwtn.content_ingestion_engine import ContentQualityAssessment, ContentQuality
+                    from prsm.compute.nwtn.content_ingestion_engine import ContentQualityAssessment, ContentQuality
                     poor_assessment = ContentQualityAssessment(
                         quality_level=ContentQuality.POOR,
                         quality_score=0.3,

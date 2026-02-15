@@ -13,7 +13,7 @@ from typing import List
 sys.path.insert(0, str(Path(__file__).parent))
 
 from prsm.core.models import PeerNode
-from prsm.federation.fault_injection import (
+from prsm.compute.federation.fault_injection import (
     FaultInjector, FaultScenario, FaultType, FaultSeverity, get_fault_injector
 )
 

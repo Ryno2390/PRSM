@@ -33,12 +33,12 @@ import click
 # Add PRSM to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from prsm.agents.executors.hybrid_router import (
+from prsm.compute.agents.executors.hybrid_router import (
     HybridModelRouter, 
     RoutingStrategy,
     SensitivityLevel
 )
-from prsm.agents.executors.api_clients import (
+from prsm.compute.agents.executors.api_clients import (
     ModelExecutionRequest, 
     ModelProvider
 )

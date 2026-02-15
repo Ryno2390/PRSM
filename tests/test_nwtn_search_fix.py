@@ -7,7 +7,7 @@ import asyncio
 import sys
 sys.path.append('/Users/ryneschultz/Documents/GitHub/PRSM')
 
-from prsm.nwtn.external_storage_config import ExternalStorageConfig, ExternalKnowledgeBase
+from prsm.compute.nwtn.external_storage_config import ExternalStorageConfig, ExternalKnowledgeBase
 
 async def test_search_method():
     """Test the search method reference issue"""

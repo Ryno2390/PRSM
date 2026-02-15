@@ -30,13 +30,13 @@ import aiohttp
 from fastapi.testclient import TestClient
 
 # Import integration layer components
-from prsm.integrations.core.integration_manager import IntegrationManager
-from prsm.integrations.core.base_connector import BaseConnector, ConnectorStatus
-from prsm.integrations.connectors.github_connector import GitHubConnector
-from prsm.integrations.connectors.huggingface_connector import HuggingFaceConnector
-from prsm.integrations.connectors.ollama_connector import OllamaConnector
-from prsm.integrations.security.sandbox_manager import SandboxManager
-from prsm.integrations.models.integration_models import (
+from prsm.core.integrations.core.integration_manager import IntegrationManager
+from prsm.core.integrations.core.base_connector import BaseConnector, ConnectorStatus
+from prsm.core.integrations.connectors.github_connector import GitHubConnector
+from prsm.core.integrations.connectors.huggingface_connector import HuggingFaceConnector
+from prsm.core.integrations.connectors.ollama_connector import OllamaConnector
+from prsm.core.integrations.security.sandbox_manager import SandboxManager
+from prsm.core.integrations.models.integration_models import (
     IntegrationPlatform, ConnectorConfig, IntegrationSource,
     ImportRequest, ImportStatus, SecurityRisk, LicenseType
 )
@@ -296,7 +296,7 @@ class TestOllamaConnector:
         connector = OllamaConnector(mock_ollama_config)
         
         # Mock model data
-        from prsm.integrations.connectors.ollama_connector import OllamaModelInfo
+        from prsm.core.integrations.connectors.ollama_connector import OllamaModelInfo
         connector.available_models = [
             OllamaModelInfo(
                 name="llama2:7b",
@@ -332,7 +332,7 @@ class TestOllamaConnector:
             mock_api.return_value = mock_response
             
             # Add model to available models
-            from prsm.integrations.connectors.ollama_connector import OllamaModelInfo
+            from prsm.core.integrations.connectors.ollama_connector import OllamaModelInfo
             connector.available_models = [
                 OllamaModelInfo(name="llama2:7b", tag="7b", size=3825819519)
             ]
@@ -726,7 +726,7 @@ class TestIntegrationAPI:
     def test_client(self):
         """Create test client for API endpoints"""
         from fastapi import FastAPI
-        from prsm.integrations.api.integration_api import integration_router
+        from prsm.core.integrations.api.integration_api import integration_router
         
         app = FastAPI()
         app.include_router(integration_router)

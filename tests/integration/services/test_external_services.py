@@ -21,9 +21,9 @@ try:
     from prsm.integration.langchain_integration import LangChainIntegration
     from prsm.integration.mcp_integration import MCPIntegration
     from prsm.integration.security_scanner import SecurityScanner
-    from prsm.federation.p2p_network import P2PNetwork
-    from prsm.monitoring.external_metrics import ExternalMetricsCollector
-    from prsm.marketplace.external_model_registry import ExternalModelRegistry
+    from prsm.compute.federation.p2p_network import P2PNetwork
+    from prsm.core.monitoring.external_metrics import ExternalMetricsCollector
+    from prsm.economy.marketplace.external_model_registry import ExternalModelRegistry
 except ImportError:
     # Create mocks if imports fail
     httpx = Mock()

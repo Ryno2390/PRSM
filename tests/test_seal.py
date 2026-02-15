@@ -16,7 +16,7 @@ from pathlib import Path
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
 
-from prsm.teachers.seal import (
+from prsm.compute.teachers.seal import (
     SEALConfig,
     SEALNeuralNetwork,
     SEALReinforcementLearner, 

@@ -29,11 +29,11 @@ import structlog
 # Add PRSM to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from prsm.agents.executors.enhanced_openai_client import (
+from prsm.compute.agents.executors.enhanced_openai_client import (
     EnhancedOpenAIClient, 
     create_enhanced_openai_client
 )
-from prsm.agents.executors.api_clients import (
+from prsm.compute.agents.executors.api_clients import (
     ModelExecutionRequest, 
     ModelProvider
 )

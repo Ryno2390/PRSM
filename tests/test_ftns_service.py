@@ -17,7 +17,7 @@ async def test_ftns_service():
     
     try:
         # Import the FTNS service
-        from prsm.tokenomics.ftns_service import FTNSService, ftns_service
+        from prsm.economy.tokenomics.ftns_service import FTNSService, ftns_service
         from prsm.core.models import PRSMSession, FTNSBalance
         
         print("✅ FTNS service imports successful")

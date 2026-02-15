@@ -34,11 +34,11 @@ import click
 # Add PRSM to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from prsm.benchmarking.real_benchmark_suite import (
+from prsm.compute.benchmarking.real_benchmark_suite import (
     RealBenchmarkSuite,
     BenchmarkReport
 )
-from prsm.agents.executors.hybrid_router import RoutingStrategy
+from prsm.compute.agents.executors.hybrid_router import RoutingStrategy
 
 
 async def test_benchmark_task_creation(suite: RealBenchmarkSuite):

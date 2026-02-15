@@ -229,7 +229,7 @@ class RLTSystemIntegrationTest:
                 print("      📄 File exists, attempting import...")
                 # Try importing - will likely fail due to syntax error
                 try:
-                    from prsm.nwtn.rlt_enhanced_orchestrator import RLTEnhancedOrchestrator
+                    from prsm.compute.nwtn.rlt_enhanced_orchestrator import RLTEnhancedOrchestrator
                     orch = RLTEnhancedOrchestrator()
                     self.rlt_components["rlt_enhanced_orchestrator"]["status"] = "working"
                     print("   ✅ rlt_enhanced_orchestrator: WORKING")
@@ -252,7 +252,7 @@ class RLTSystemIntegrationTest:
         # Test RLT Performance Monitor (has circular import)  
         try:
             print("   🔧 Testing RLT Performance Monitor (with known circular import)...")
-            from prsm.monitoring.rlt_performance_monitor import RLTPerformanceMonitor
+            from prsm.core.monitoring.rlt_performance_monitor import RLTPerformanceMonitor
             monitor = RLTPerformanceMonitor()
             self.rlt_components["rlt_performance_monitor"]["status"] = "working"
             print("   ✅ rlt_performance_monitor: WORKING")
@@ -282,7 +282,7 @@ class RLTSystemIntegrationTest:
                 if "missing 1 required positional argument: 'rlt_teacher'" in str(e):
                     try:
                         # Create mock teacher for testing
-                        from prsm.teachers.rlt.dense_reward_trainer import RLTDenseRewardTrainer
+                        from prsm.compute.teachers.rlt.dense_reward_trainer import RLTDenseRewardTrainer
                         mock_teacher = RLTDenseRewardTrainer()
                         validator = RLTClaimsValidator(rlt_teacher=mock_teacher)
                         self.rlt_components["rlt_claims_validator"]["status"] = "working_with_fix"
@@ -318,8 +318,8 @@ class RLTSystemIntegrationTest:
     async def _test_compiler_router_integration(self):
         """Test integration between RLT Enhanced Compiler and Router"""
         try:
-            from prsm.agents.compilers.rlt_enhanced_compiler import RLTEnhancedCompiler
-            from prsm.agents.routers.rlt_enhanced_router import RLTEnhancedRouter
+            from prsm.compute.agents.compilers.rlt_enhanced_compiler import RLTEnhancedCompiler
+            from prsm.compute.agents.routers.rlt_enhanced_router import RLTEnhancedRouter
             
             # Create components
             compiler = RLTEnhancedCompiler(agent_id=str(uuid4()))
@@ -357,8 +357,8 @@ class RLTSystemIntegrationTest:
     async def _test_teacher_student_workflow(self):
         """Test end-to-end teacher-student interaction workflow"""
         try:
-            from prsm.teachers.rlt.dense_reward_trainer import RLTDenseRewardTrainer
-            from prsm.teachers.rlt.quality_monitor import RLTQualityMonitor
+            from prsm.compute.teachers.rlt.dense_reward_trainer import RLTDenseRewardTrainer
+            from prsm.compute.teachers.rlt.quality_monitor import RLTQualityMonitor
             
             # Create components
             trainer = RLTDenseRewardTrainer()
@@ -396,8 +396,8 @@ class RLTSystemIntegrationTest:
         print("   🔍 Testing RLT quality assessment pipeline...")
         
         try:
-            from prsm.teachers.rlt.quality_monitor import QualityMetrics
-            from prsm.agents.compilers.rlt_enhanced_compiler import RLTQualityAssessment
+            from prsm.compute.teachers.rlt.quality_monitor import QualityMetrics
+            from prsm.compute.agents.compilers.rlt_enhanced_compiler import RLTQualityAssessment
             
             # Create quality metrics
             metrics = QualityMetrics(
@@ -544,8 +544,8 @@ class RLTSystemIntegrationTest:
             
             # Test if we can replace standard agents with RLT-enhanced versions
             try:
-                from prsm.agents.compilers.rlt_enhanced_compiler import RLTEnhancedCompiler
-                from prsm.agents.routers.rlt_enhanced_router import RLTEnhancedRouter
+                from prsm.compute.agents.compilers.rlt_enhanced_compiler import RLTEnhancedCompiler
+                from prsm.compute.agents.routers.rlt_enhanced_router import RLTEnhancedRouter
                 
                 # Replace with RLT-enhanced versions
                 rlt_compiler = RLTEnhancedCompiler(agent_id=str(uuid4()))

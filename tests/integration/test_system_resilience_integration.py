@@ -34,12 +34,12 @@ from unittest.mock import patch, MagicMock
 # Core PRSM imports
 from prsm.core.models import UserInput, PRSMResponse
 from prsm.core.config import get_settings
-from prsm.nwtn.orchestrator import NWTNOrchestrator
+from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
 
 # Service imports
-from prsm.marketplace.real_marketplace_service import RealMarketplaceService
-from prsm.tokenomics.database_ftns_service import DatabaseFTNSService
-from prsm.api.main import app
+from prsm.economy.marketplace.real_marketplace_service import RealMarketplaceService
+from prsm.economy.tokenomics.database_ftns_service import DatabaseFTNSService
+from prsm.interface.api.main import app
 
 # Testing utilities
 from fastapi.testclient import TestClient

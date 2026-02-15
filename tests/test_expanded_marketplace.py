@@ -22,7 +22,7 @@ from uuid import uuid4, UUID
 from datetime import datetime, timezone
 from typing import Dict, Any
 
-from prsm.marketplace.expanded_models import (
+from prsm.economy.marketplace.expanded_models import (
     ResourceType, PricingModel, QualityGrade,
     DatasetListing, DatasetCategory, DataFormat, DatasetLicense,
     AgentWorkflowListing, AgentType, AgentCapability,
@@ -33,7 +33,7 @@ from prsm.marketplace.expanded_models import (
     SafetyToolListing, SafetyToolType, ComplianceStandard,
     UnifiedSearchFilters
 )
-from prsm.marketplace.real_marketplace_service import RealMarketplaceService
+from prsm.economy.marketplace.real_marketplace_service import RealMarketplaceService
 
 
 class TestExpandedMarketplace:

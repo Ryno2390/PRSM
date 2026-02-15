@@ -36,9 +36,9 @@ try:
     import cProfile
     import pstats
     from prsm.core.models import UserInput, PRSMSession, AgentType
-    from prsm.nwtn.orchestrator import NWTNOrchestrator
-    from prsm.tokenomics.ftns_service import FTNSService
-    from prsm.agents.base import BaseAgent
+    from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
+    from prsm.economy.tokenomics.ftns_service import FTNSService
+    from prsm.compute.agents.base import BaseAgent
     from prsm.core.database import DatabaseManager
 except ImportError:
     # Create mocks if imports fail
@@ -712,7 +712,7 @@ class TestMemoryPerformanceBenchmarks:
                         {
                             "step_id": str(uuid.uuid4()),
                             "agent_type": "executor",
-                            "input_data": f"Query step {j}" for j in range(10)
+                            "input_data": [f"Query step {j}" for j in range(10)]
                         }
                         for _ in range(5)  # 5 reasoning steps per session
                     ],

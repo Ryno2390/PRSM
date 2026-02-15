@@ -17,8 +17,8 @@ import time
 try:
     import httpx
     from fastapi import status
-    from prsm.api.main import create_app
-    from prsm.auth.jwt_handler import create_access_token
+    from prsm.interface.api.main import create_app
+    from prsm.core.auth.jwt_handler import create_access_token
     from prsm.core.models import PRSMSession, FTNSTransaction
 except ImportError:
     # Create mocks if imports fail

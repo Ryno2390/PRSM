@@ -17,7 +17,7 @@ from pathlib import Path
 # Add PRSM to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from prsm.ipfs import (
+from prsm.data.ipfs import (
     IPFSClient,
     IPFSConfig,
     create_ipfs_client,
@@ -131,7 +131,7 @@ async def test_content_addressing():
     
     # Mock the IPFS add_content method for testing
     async def mock_add_content(content, filename=None, metadata=None):
-        from prsm.ipfs.ipfs_client import IPFSContent
+        from prsm.data.ipfs.ipfs_client import IPFSContent
         import hashlib
         
         # Create deterministic CID based on content
@@ -303,7 +303,7 @@ async def test_integrated_workflow():
     content_storage = {}
     
     async def mock_add_content(content, filename=None, metadata=None):
-        from prsm.ipfs.ipfs_client import IPFSContent
+        from prsm.data.ipfs.ipfs_client import IPFSContent
         import hashlib
         
         content_bytes = content.encode('utf-8') if isinstance(content, str) else content

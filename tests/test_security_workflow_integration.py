@@ -19,14 +19,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 # Import all the security components we need to test
-from prsm.integrations.security import (
+from prsm.core.integrations.security import (
     security_orchestrator, audit_logger, threat_detector,
     enhanced_sandbox_manager, SecurityAssessment
 )
-from prsm.integrations.models.integration_models import (
+from prsm.core.integrations.models.integration_models import (
     IntegrationPlatform, SecurityRisk, ImportStatus
 )
-from prsm.integrations.core.integration_manager import integration_manager
+from prsm.core.integrations.core.integration_manager import integration_manager
 
 
 class TestCompleteSecurityWorkflow:

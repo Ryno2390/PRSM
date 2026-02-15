@@ -20,8 +20,8 @@ try:
     from httpx import AsyncClient
     import pytest_asyncio
     # Don't import create_app directly due to initialization issues
-    # from prsm.api.main import create_app
-    # from prsm.auth.jwt_handler import create_access_token, verify_token
+    # from prsm.interface.api.main import create_app
+    # from prsm.core.auth.jwt_handler import create_access_token, verify_token
     # from prsm.core.config import get_config
     create_app = None
     create_access_token = None

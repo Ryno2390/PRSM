@@ -19,7 +19,7 @@ async def test_enhanced_ipfs_client():
     
     try:
         # Import the enhanced IPFS client
-        from prsm.data_layer.enhanced_ipfs import PRSMIPFSClient, prsm_ipfs_client
+        from prsm.data.data_layer.enhanced_ipfs import PRSMIPFSClient, prsm_ipfs_client
         from prsm.core.models import ProvenanceRecord, ModelShard
         
         print("✅ Enhanced IPFS client imports successful")

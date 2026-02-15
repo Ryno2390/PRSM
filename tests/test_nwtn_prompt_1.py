@@ -21,8 +21,8 @@ import json
 from datetime import datetime
 sys.path.insert(0, '.')
 
-from prsm.nwtn.complete_system import NWTNCompleteSystem
-from prsm.nwtn.breakthrough_modes import BreakthroughMode
+from prsm.compute.nwtn.complete_system import NWTNCompleteSystem
+from prsm.compute.nwtn.breakthrough_modes import BreakthroughMode
 from prsm.core.models import UserInput
 
 async def test_prompt_1_both_modes():

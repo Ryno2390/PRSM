@@ -32,7 +32,7 @@ from fastapi.testclient import TestClient
 from fastapi import status
 
 # PRSM API imports
-from prsm.api.main import app
+from prsm.interface.api.main import app
 from prsm.core.config import get_settings
 
 

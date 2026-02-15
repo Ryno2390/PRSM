@@ -20,8 +20,8 @@ from pathlib import Path
 # Add PRSM to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from prsm.content_processing.text_processor import ContentType
-from prsm.embeddings import (
+from prsm.data.content_processing.text_processor import ContentType
+from prsm.data.embeddings import (
     EmbeddingPipeline, 
     EmbeddingPipelineConfig, 
     create_pipeline,
@@ -148,7 +148,7 @@ async def test_content_processing():
     demonstrating the potential for AI-assisted scientific discovery.
     """
     
-    from prsm.content_processing.text_processor import ContentTextProcessor, ProcessingConfig
+    from prsm.data.content_processing.text_processor import ContentTextProcessor, ProcessingConfig
     
     config = ProcessingConfig(
         content_type=ContentType.RESEARCH_PAPER,

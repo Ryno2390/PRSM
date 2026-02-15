@@ -242,7 +242,7 @@ def test_api_basic():
     test_section("FastAPI Application")
     
     try:
-        from prsm.api.main import app
+        from prsm.interface.api.main import app
         success("FastAPI app import successful")
         
         # Test that app is a FastAPI instance
@@ -270,7 +270,7 @@ def test_orchestrator_basic():
     test_section("NWTN Orchestrator")
     
     try:
-        from prsm.nwtn.orchestrator import NWTNOrchestrator, nwtn_orchestrator
+        from prsm.compute.nwtn.orchestrator import NWTNOrchestrator, nwtn_orchestrator
         success("NWTN orchestrator import successful")
         
         # Test orchestrator instantiation
@@ -295,7 +295,7 @@ def test_architect_basic():
     test_section("Hierarchical Architect")
     
     try:
-        from prsm.agents.architects.hierarchical_architect import HierarchicalArchitect, create_architect
+        from prsm.compute.agents.architects.hierarchical_architect import HierarchicalArchitect, create_architect
         success("Hierarchical architect import successful")
         
         # Test architect creation

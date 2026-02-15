@@ -459,7 +459,7 @@ class TestRunner:
         """Test FTNS tokenomics operations"""
         try:
             async with env.test_context("ftns_operations") as ctx:
-                from prsm.tokenomics.ftns_service import ftns_service
+                from prsm.economy.tokenomics.ftns_service import ftns_service
                 
                 test_user = f"test_ftns_{ctx['test_id']}"
                 
@@ -481,7 +481,7 @@ class TestRunner:
         try:
             async with env.test_context("agent_framework") as ctx:
                 # Import and test basic agent operations
-                from prsm.agents.base_agent import BaseAgent
+                from prsm.compute.agents.base_agent import BaseAgent
                 from prsm.core.models import UserInput
                 
                 # Create test agent
@@ -507,7 +507,7 @@ class TestRunner:
         try:
             async with env.test_context("api_endpoints") as ctx:
                 # Test FastAPI application creation
-                from prsm.api.main import FastAPI
+                from prsm.interface.api.main import FastAPI
                 
                 # Check if FastAPI app can be imported and basic routes exist
                 return {
@@ -560,7 +560,7 @@ class TestRunner:
     async def _benchmark_ftns_performance(self, env: PersistentTestEnvironment) -> Dict[str, Any]:
         """Benchmark FTNS performance"""
         try:
-            from prsm.tokenomics.ftns_service import ftns_service
+            from prsm.economy.tokenomics.ftns_service import ftns_service
             
             test_user = f"perf_test_{int(time.time())}"
             
@@ -622,7 +622,7 @@ class TestRunner:
             # Simulate concurrent user operations
             async def simulate_user(user_id: str):
                 try:
-                    from prsm.tokenomics.ftns_service import ftns_service
+                    from prsm.economy.tokenomics.ftns_service import ftns_service
                     await ftns_service.add_tokens(user_id, 10.0)
                     await ftns_service.get_user_balance(user_id)
                     return True
@@ -672,7 +672,7 @@ class TestRunner:
         """Test authentication security"""
         try:
             # Basic auth system test
-            from prsm.auth.auth_manager import auth_manager
+            from prsm.core.auth.auth_manager import auth_manager
             
             return {
                 "secure": True,

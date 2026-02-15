@@ -15,13 +15,13 @@ from rich.panel import Panel
 from rich.text import Text
 
 # PRSM imports
-from prsm.agents.routers import (
+from prsm.compute.agents.routers import (
     ModelRouter, RoutingStrategy, ModelSource, 
     MarketplaceRequest, create_enhanced_router
 )
 from prsm.core.config import get_settings
 from prsm.core.models import ArchitectTask, ModelType
-from prsm.federation.model_registry import ModelRegistry
+from prsm.compute.federation.model_registry import ModelRegistry
 
 console = Console()
 settings = get_settings()

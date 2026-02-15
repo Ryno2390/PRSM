@@ -12,7 +12,7 @@ PRSM_ROOT = Path(__file__).parent
 sys.path.insert(0, str(PRSM_ROOT))
 
 # Import directly from the module file to avoid __init__.py issues
-from prsm.cryptography.post_quantum import (
+from prsm.core.cryptography.post_quantum import (
     PostQuantumCrypto, SecurityLevel, generate_pq_keypair, 
     sign_with_pq, verify_pq_signature, PostQuantumKeyPair, PostQuantumSignature
 )

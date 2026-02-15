@@ -39,12 +39,12 @@ import sys
 import structlog
 
 # Import PRSM systems
-from prsm.nwtn.meta_reasoning_engine import MetaReasoningEngine
-from prsm.nwtn.voicebox import NWTNVoicebox, VoiceboxResponse
-from prsm.nwtn.content_royalty_engine import ContentRoyaltyEngine, QueryComplexity
-from prsm.nwtn.content_ingestion_engine import NWTNContentIngestionEngine, IngestionStatus
-from prsm.provenance.enhanced_provenance_system import EnhancedProvenanceSystem, ContentType
-from prsm.tokenomics.ftns_service import FTNSService
+from prsm.compute.nwtn.meta_reasoning_engine import MetaReasoningEngine
+from prsm.compute.nwtn.voicebox import NWTNVoicebox, VoiceboxResponse
+from prsm.compute.nwtn.content_royalty_engine import ContentRoyaltyEngine, QueryComplexity
+from prsm.compute.nwtn.content_ingestion_engine import NWTNContentIngestionEngine, IngestionStatus
+from prsm.data.provenance.enhanced_provenance_system import EnhancedProvenanceSystem, ContentType
+from prsm.economy.tokenomics.ftns_service import FTNSService
 
 # Set precision for financial calculations
 getcontext().prec = 18
@@ -674,7 +674,7 @@ class Large150KPaperProvenanceTest:
             logger.info(f"🔮 Processing query through NWTN voicebox with {len(relevant_papers)} relevant papers")
             
             # Import and initialize NWTN voicebox
-            from prsm.nwtn.voicebox import NWTNVoicebox, get_voicebox_service, LLMProvider
+            from prsm.compute.nwtn.voicebox import NWTNVoicebox, get_voicebox_service, LLMProvider
             
             voicebox = await get_voicebox_service()
             await voicebox.initialize()
@@ -937,7 +937,7 @@ class Large150KPaperProvenanceTest:
             )
             
             # Configure Claude API for prompt user
-            from prsm.nwtn.voicebox import LLMProvider
+            from prsm.compute.nwtn.voicebox import LLMProvider
             await self.voicebox.configure_api_key(
                 user_id=self.prompt_user.user_id,
                 provider=LLMProvider.CLAUDE,

@@ -30,9 +30,9 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Import PRSM collaboration components
-from prsm.collaboration.security.crypto_sharding import BasicCryptoSharding
-from prsm.collaboration.jupyter.jupyter_collaboration import JupyterCollaboration, JupyterCollaborationAPI
-from prsm.collaboration.tech_transfer.ip_evaluation_workflow import (
+from prsm.compute.collaboration.security.crypto_sharding import BasicCryptoSharding
+from prsm.compute.collaboration.jupyter.jupyter_collaboration import JupyterCollaboration, JupyterCollaborationAPI
+from prsm.compute.collaboration.tech_transfer.ip_evaluation_workflow import (
     TechTransferWorkflow, UNCTechTransfer, EvaluationStatus, StakeholderRole
 )
 
@@ -492,7 +492,7 @@ print(f"Correction applied: {corrected}")
         # Step 12: Test collaborative editing workflow
         print("🤝 Step 12: Testing collaborative editing workflow...")
         
-        from prsm.collaboration.jupyter.jupyter_collaboration import CollaborativeEdit
+        from prsm.compute.collaboration.jupyter.jupyter_collaboration import CollaborativeEdit
         
         # Simulate collaborative edit from industry partner
         edit = CollaborativeEdit(

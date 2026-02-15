@@ -21,16 +21,16 @@ from datetime import datetime, timezone
 from typing import Dict, List, Any
 
 # Import RLT components
-from prsm.teachers.rlt import (
+from prsm.compute.teachers.rlt import (
     RLTDenseRewardTrainer,
     StudentCompressionEvaluator,
     RLTFormatter,
     RLTQualityMonitor
 )
-from prsm.teachers.rlt.dense_reward_trainer import RLTTrainingConfig
-from prsm.teachers.rlt.student_comprehension_evaluator import EvaluationConfig
-from prsm.teachers.rlt.explanation_formatter import RLTFormatConfig
-from prsm.teachers.rlt.quality_monitor import MonitoringConfig
+from prsm.compute.teachers.rlt.dense_reward_trainer import RLTTrainingConfig
+from prsm.compute.teachers.rlt.student_comprehension_evaluator import EvaluationConfig
+from prsm.compute.teachers.rlt.explanation_formatter import RLTFormatConfig
+from prsm.compute.teachers.rlt.quality_monitor import MonitoringConfig
 
 
 class RLTTestDataset:
@@ -568,7 +568,7 @@ class RLTValidationSuite:
             # Test dataset creation
             results["tests_run"] += 1
             try:
-                from prsm.teachers.rlt.dense_reward_trainer import RLTTrainingDataset
+                from prsm.compute.teachers.rlt.dense_reward_trainer import RLTTrainingDataset
                 
                 # Mock tokenizer for testing
                 class MockTokenizer:

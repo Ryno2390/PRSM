@@ -18,8 +18,8 @@ import gc
 try:
     from prsm.core.caching import CacheManager
     from prsm.core.performance import get_performance_monitor, get_profiler
-    from prsm.nwtn.meta_reasoning_engine import NWTNEngine
-    from prsm.tokenomics.ftns_service import FTNSService
+    from prsm.compute.nwtn.meta_reasoning_engine import NWTNEngine
+    from prsm.economy.tokenomics.ftns_service import FTNSService
     from prsm.core.database.optimized_queries import create_optimized_engine
     from prsm.core.async_patterns import gather_with_limit, async_map
 except ImportError:
