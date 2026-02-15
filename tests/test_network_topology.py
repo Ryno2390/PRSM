@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from prsm.core.models import PeerNode
-from prsm.federation.network_topology import (
+from prsm.compute.federation.network_topology import (
     TopologyOptimizer, TopologyType, NetworkMetrics, get_network_topology
 )
 

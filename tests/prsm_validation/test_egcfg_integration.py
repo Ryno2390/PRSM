@@ -15,7 +15,7 @@ import json
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
-from prsm.agents.executors.execution_guided_code_runner import (
+from prsm.compute.agents.executors.execution_guided_code_runner import (
     EGCFGAgent,
     ExecutionGuidedCodeRunner,
     GenerationConfig,

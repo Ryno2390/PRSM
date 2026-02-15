@@ -8,9 +8,9 @@ import asyncio
 import time
 from datetime import datetime, timezone
 
-from prsm.tokenomics.advanced_ftns import get_advanced_ftns
-from prsm.tokenomics.marketplace import get_marketplace
-from prsm.tokenomics.ftns_service import ftns_service
+from prsm.economy.tokenomics.advanced_ftns import get_advanced_ftns
+from prsm.economy.tokenomics.marketplace import get_marketplace
+from prsm.economy.tokenomics.ftns_service import ftns_service
 from prsm.core.models import PricingModel
 
 

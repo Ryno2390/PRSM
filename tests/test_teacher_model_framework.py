@@ -21,13 +21,13 @@ from typing import Dict, List, Any
 
 # Import PRSM components
 from prsm.core.models import TeacherModel, Curriculum, LearningSession, ModelType
-from prsm.teachers import (
+from prsm.compute.teachers import (
     DistilledTeacher, TeachingStrategy, StudentCapabilities, TeachingOutcome,
     RLVREngine, VerifiableReward, TeacherWeights,
     CurriculumGenerator, LearningGap, DifficultyProgression
 )
-from prsm.agents.routers.model_router import ModelRouter
-from prsm.tokenomics.ftns_service import FTNSService
+from prsm.compute.agents.routers.model_router import ModelRouter
+from prsm.economy.tokenomics.ftns_service import FTNSService
 
 # Test configuration
 TEST_DOMAINS = ["mathematics", "science", "programming", "reasoning", "language"]

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 # Set precision for financial calculations matching production
 getcontext().prec = 18
 
-from prsm.tokenomics.ftns_service import (
+from prsm.economy.tokenomics.ftns_service import (
     FTNSService,
     BASE_NWTN_FEE,
     CONTEXT_UNIT_COST,

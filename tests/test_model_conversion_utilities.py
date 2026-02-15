@@ -14,7 +14,7 @@ import asyncio
 import os
 
 # Import the conversion utilities
-from prsm.distillation.model_conversion_utilities import (
+from prsm.compute.distillation.model_conversion_utilities import (
     ModelConversionEngine,
     ConversionConfig,
     PyTorchToONNXConverter,

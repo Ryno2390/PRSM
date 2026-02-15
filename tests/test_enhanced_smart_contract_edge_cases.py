@@ -40,9 +40,9 @@ except ImportError:
 
 # Import PRSM components with fallbacks
 try:
-    from prsm.tokenomics.ftns_service import ftns_service
-    from prsm.tokenomics.advanced_ftns import get_advanced_ftns
-    from prsm.tokenomics.marketplace import get_marketplace
+    from prsm.economy.tokenomics.ftns_service import ftns_service
+    from prsm.economy.tokenomics.advanced_ftns import get_advanced_ftns
+    from prsm.economy.tokenomics.marketplace import get_marketplace
     from prsm.core.models import PricingModel
     PRSM_AVAILABLE = True
 except ImportError as e:

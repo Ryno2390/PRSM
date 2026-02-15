@@ -23,10 +23,10 @@ from uuid import uuid4
 # Add the project root to Python path
 sys.path.insert(0, '/Users/ryneschultz/GitHub/PRSM')
 
-from prsm.governance.voting import TokenWeightedVoting, ProposalCategory, VotingPeriod, GovernanceRole
-from prsm.governance.proposals import ProposalManager, ProposalStatus, ProposalPriority, ReviewDecision
+from prsm.economy.governance.voting import TokenWeightedVoting, ProposalCategory, VotingPeriod, GovernanceRole
+from prsm.economy.governance.proposals import ProposalManager, ProposalStatus, ProposalPriority, ReviewDecision
 from prsm.core.models import GovernanceProposal, Vote
-from prsm.tokenomics.ftns_service import ftns_service
+from prsm.economy.tokenomics.ftns_service import ftns_service
 
 
 class GovernanceIntegrationTester:

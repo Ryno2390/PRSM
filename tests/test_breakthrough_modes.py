@@ -15,7 +15,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
-from prsm.nwtn.breakthrough_modes import (
+from prsm.compute.nwtn.breakthrough_modes import (
     BreakthroughMode, breakthrough_mode_manager, 
     get_breakthrough_mode_config, suggest_breakthrough_mode
 )
@@ -151,8 +151,8 @@ async def test_enhanced_orchestrator_integration():
     
     try:
         # Import enhanced orchestrator components
-        from prsm.nwtn.enhanced_orchestrator import EnhancedNWTNOrchestrator
-        from prsm.nwtn.breakthrough_modes import BreakthroughMode
+        from prsm.compute.nwtn.enhanced_orchestrator import EnhancedNWTNOrchestrator
+        from prsm.compute.nwtn.breakthrough_modes import BreakthroughMode
         from prsm.core.models import UserInput
         
         print("✅ Successfully imported enhanced orchestrator components")
@@ -205,10 +205,10 @@ async def test_system_1_system_2_integration():
     
     try:
         # Import components
-        from prsm.nwtn.candidate_answer_generator import CandidateAnswerGenerator  
-        from prsm.nwtn.candidate_evaluator import CandidateEvaluator
-        from prsm.nwtn.meta_reasoning_engine import MetaReasoningEngine
-        from prsm.nwtn.breakthrough_modes import BreakthroughMode, breakthrough_mode_manager
+        from prsm.compute.nwtn.candidate_answer_generator import CandidateAnswerGenerator  
+        from prsm.compute.nwtn.candidate_evaluator import CandidateEvaluator
+        from prsm.compute.nwtn.meta_reasoning_engine import MetaReasoningEngine
+        from prsm.compute.nwtn.breakthrough_modes import BreakthroughMode, breakthrough_mode_manager
         
         print("✅ Successfully imported System 1/System 2 components")
         
@@ -249,9 +249,9 @@ async def test_cross_domain_analogical_engine():
     
     try:
         # Import cross-domain components
-        from prsm.nwtn.multi_level_analogical_engine import CrossDomainAnalogicalEngine
-        from prsm.nwtn.analogical_breakthrough_engine import AnalogicalBreakthroughEngine
-        from prsm.nwtn.cross_domain_ontology_bridge import ConceptualBridgeDetector
+        from prsm.compute.nwtn.multi_level_analogical_engine import CrossDomainAnalogicalEngine
+        from prsm.compute.nwtn.analogical_breakthrough_engine import AnalogicalBreakthroughEngine
+        from prsm.compute.nwtn.cross_domain_ontology_bridge import ConceptualBridgeDetector
         
         print("✅ Successfully imported cross-domain components")
         

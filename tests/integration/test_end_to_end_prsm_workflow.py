@@ -29,21 +29,21 @@ import time
 # Core PRSM imports
 from prsm.core.models import UserInput, PRSMResponse, AgentType
 from prsm.core.config import get_settings
-from prsm.nwtn.orchestrator import NWTNOrchestrator
+from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
 
 # Agent pipeline imports
-from prsm.agents.base import BaseAgent
-from prsm.agents.routers.model_router import ModelRouter
-from prsm.agents.executors.model_executor import ModelExecutor
-from prsm.agents.compilers.hierarchical_compiler import HierarchicalCompiler
+from prsm.compute.agents.base import BaseAgent
+from prsm.compute.agents.routers.model_router import ModelRouter
+from prsm.compute.agents.executors.model_executor import ModelExecutor
+from prsm.compute.agents.compilers.hierarchical_compiler import HierarchicalCompiler
 
 # Marketplace and tokenomics
-from prsm.marketplace.real_marketplace_service import RealMarketplaceService
-from prsm.tokenomics.database_ftns_service import DatabaseFTNSService
-from prsm.tokenomics.ftns_budget_manager import FTNSBudgetManager
+from prsm.economy.marketplace.real_marketplace_service import RealMarketplaceService
+from prsm.economy.tokenomics.database_ftns_service import DatabaseFTNSService
+from prsm.economy.tokenomics.ftns_budget_manager import FTNSBudgetManager
 
 # Safety and monitoring
-from prsm.safety.advanced_safety_quality import AdvancedSafetyQualityFramework
+from prsm.core.safety.advanced_safety_quality import AdvancedSafetyQualityFramework
 
 
 class TestEndToEndPRSMWorkflow:

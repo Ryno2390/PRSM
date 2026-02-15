@@ -21,10 +21,10 @@ import sys
 # Add PRSM to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from prsm.nwtn.unified_pipeline_controller import UnifiedPipelineController
-from prsm.nwtn.external_storage_config import ExternalKnowledgeBase
-from prsm.analytics.analytics_engine import AnalyticsEngine
-from prsm.marketplace.ecosystem.marketplace_core import MarketplaceCore
+from prsm.compute.nwtn.unified_pipeline_controller import UnifiedPipelineController
+from prsm.compute.nwtn.external_storage_config import ExternalKnowledgeBase
+from prsm.data.analytics.analytics_engine import AnalyticsEngine
+from prsm.economy.marketplace.ecosystem.marketplace_core import MarketplaceCore
 
 class TestRealDataIntegration:
     """Test integration with real data scenarios"""

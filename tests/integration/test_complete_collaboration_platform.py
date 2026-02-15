@@ -37,13 +37,13 @@ import os
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 # Import all collaboration components
-from prsm.collaboration.security.post_quantum_crypto_sharding import PostQuantumCryptoSharding, CryptoMode
-from prsm.collaboration.jupyter.jupyter_collaboration import JupyterCollaboration, JupyterCollaborationAPI
-from prsm.collaboration.latex.latex_collaboration import LaTeXCollaboration, DocumentType
-from prsm.collaboration.grants.grant_collaboration import GrantCollaboration, FundingAgency
-from prsm.collaboration.development.git_p2p_bridge import GitP2PBridge, RepositoryType, AccessLevel
-from prsm.collaboration.references.reference_management import ReferenceManager, LibraryType, ReferenceType
-from prsm.collaboration.tech_transfer.ip_evaluation_workflow import UNCTechTransfer, EvaluationStatus
+from prsm.compute.collaboration.security.post_quantum_crypto_sharding import PostQuantumCryptoSharding, CryptoMode
+from prsm.compute.collaboration.jupyter.jupyter_collaboration import JupyterCollaboration, JupyterCollaborationAPI
+from prsm.compute.collaboration.latex.latex_collaboration import LaTeXCollaboration, DocumentType
+from prsm.compute.collaboration.grants.grant_collaboration import GrantCollaboration, FundingAgency
+from prsm.compute.collaboration.development.git_p2p_bridge import GitP2PBridge, RepositoryType, AccessLevel
+from prsm.compute.collaboration.references.reference_management import ReferenceManager, LibraryType, ReferenceType
+from prsm.compute.collaboration.tech_transfer.ip_evaluation_workflow import UNCTechTransfer, EvaluationStatus
 
 async def test_complete_collaboration_platform():
     """

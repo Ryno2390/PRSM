@@ -29,11 +29,11 @@ import statistics
 
 try:
     from prsm.core.models import UserInput, PRSMResponse, AgentType, TaskStatus
-    from prsm.nwtn.orchestrator import NWTNOrchestrator
-    from prsm.tokenomics.ftns_service import FTNSService
-    from prsm.api.main import app
+    from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
+    from prsm.economy.tokenomics.ftns_service import FTNSService
+    from prsm.interface.api.main import app
     from prsm.core.database import DatabaseManager
-    from prsm.auth.auth_manager import AuthManager
+    from prsm.core.auth.auth_manager import AuthManager
     from fastapi.testclient import TestClient
     from httpx import AsyncClient
 except ImportError:

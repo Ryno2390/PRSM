@@ -36,7 +36,7 @@ import structlog
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from prsm.tokenomics.enhanced_ftns_service import (
+from prsm.economy.tokenomics.enhanced_ftns_service import (
     EnhancedFTNSService, MicrosecondCostCalculation, UsageTrackingEntry,
     get_enhanced_ftns_service
 )

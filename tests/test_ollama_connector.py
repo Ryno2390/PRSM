@@ -27,9 +27,9 @@ import pytest
 import aiohttp
 from aioresponses import aioresponses
 
-from prsm.integrations.connectors.ollama_connector import OllamaConnector, OllamaModelInfo
-from prsm.integrations.core.base_connector import ConnectorStatus
-from prsm.integrations.models.integration_models import (
+from prsm.core.integrations.connectors.ollama_connector import OllamaConnector, OllamaModelInfo
+from prsm.core.integrations.core.base_connector import ConnectorStatus
+from prsm.core.integrations.models.integration_models import (
     IntegrationPlatform, ConnectorConfig, IntegrationSource
 )
 

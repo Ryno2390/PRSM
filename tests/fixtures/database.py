@@ -21,7 +21,7 @@ try:
     import pytest_asyncio
     from prsm.core.database import get_db_session, Base
     from prsm.core.models import *
-    from prsm.tokenomics.models import FTNSTransaction
+    from prsm.economy.tokenomics.models import FTNSTransaction
 except ImportError:
     # If imports fail, we'll create mock fixtures
     Base = None

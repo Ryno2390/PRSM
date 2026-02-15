@@ -7,9 +7,9 @@ Shows core agent functionality working
 import asyncio
 from uuid import uuid4
 
-from prsm.agents.base import BaseAgent, AgentType
-from prsm.agents.executors.model_executor import ModelExecutor
-from prsm.agents.compilers.hierarchical_compiler import HierarchicalCompiler
+from prsm.compute.agents.base import BaseAgent, AgentType
+from prsm.compute.agents.executors.model_executor import ModelExecutor
+from prsm.compute.agents.compilers.hierarchical_compiler import HierarchicalCompiler
 
 
 class SimpleTestAgent(BaseAgent):

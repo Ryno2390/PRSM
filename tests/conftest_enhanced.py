@@ -53,13 +53,13 @@ except ImportError as e:
     PRSMConfig = Mock
 
 try:
-    from prsm.tokenomics.ftns_service import FTNSService
+    from prsm.economy.tokenomics.ftns_service import FTNSService
 except ImportError as e:
     print(f"Warning: Could not import FTNS service: {e}")
     FTNSService = Mock
 
 try:
-    from prsm.nwtn.meta_reasoning_engine import NWTNEngine
+    from prsm.compute.nwtn.meta_reasoning_engine import NWTNEngine
 except ImportError as e:
     print(f"Warning: Could not import NWTN engine: {e}")
     NWTNEngine = Mock

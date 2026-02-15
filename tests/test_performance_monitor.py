@@ -8,7 +8,7 @@ import asyncio
 import time
 from datetime import datetime, timezone, timedelta
 
-from prsm.improvement.performance_monitor import get_performance_monitor, PerformanceMonitor
+from prsm.compute.improvement.performance_monitor import get_performance_monitor, PerformanceMonitor
 from prsm.core.models import MetricType, ImprovementType
 
 

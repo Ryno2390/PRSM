@@ -18,9 +18,9 @@ from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, patch
 
 # Import the FastAPI app and budget components
-from prsm.api.main import app
-from prsm.api.budget_api import get_budget_manager
-from prsm.tokenomics.ftns_budget_manager import FTNSBudgetManager, SpendingCategory
+from prsm.interface.api.main import app
+from prsm.interface.api.budget_api import get_budget_manager
+from prsm.economy.tokenomics.ftns_budget_manager import FTNSBudgetManager, SpendingCategory
 
 
 class TestBudgetAPI:
@@ -55,7 +55,7 @@ class TestBudgetAPI:
             mock_manager.return_value = mock_budget_manager
             
             # Mock prediction response
-            from prsm.tokenomics.ftns_budget_manager import BudgetPrediction
+            from prsm.economy.tokenomics.ftns_budget_manager import BudgetPrediction
             mock_prediction = BudgetPrediction(
                 query_complexity=0.7,
                 estimated_total_cost=Decimal('85.5'),
@@ -101,7 +101,7 @@ class TestBudgetAPI:
             mock_manager.return_value = mock_budget_manager
             
             # Mock budget creation
-            from prsm.tokenomics.ftns_budget_manager import FTNSBudget, BudgetStatus
+            from prsm.economy.tokenomics.ftns_budget_manager import FTNSBudget, BudgetStatus
             from uuid import uuid4
             
             mock_budget = AsyncMock()
@@ -265,7 +265,7 @@ class TestBudgetAPI:
             mock_manager.return_value = mock_budget_manager
             
             # Mock expansion request
-            from prsm.tokenomics.ftns_budget_manager import BudgetExpandRequest
+            from prsm.economy.tokenomics.ftns_budget_manager import BudgetExpandRequest
             from uuid import uuid4
             
             budget_id = uuid4()

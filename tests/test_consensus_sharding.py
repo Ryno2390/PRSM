@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from prsm.core.models import PeerNode
-from prsm.federation.consensus_sharding import (
+from prsm.compute.federation.consensus_sharding import (
     ConsensusShardingManager, ConsensusShard, ShardState, ShardingStrategy,
     CrossShardOperation
 )

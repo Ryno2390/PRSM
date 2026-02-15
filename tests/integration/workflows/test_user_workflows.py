@@ -19,13 +19,13 @@ try:
     from fastapi.testclient import TestClient
     from httpx import AsyncClient
     from prsm.core.models import PRSMSession, UserInput, FTNSTransaction
-    from prsm.auth.models import User, UserSession
-    from prsm.marketplace.models import MarketplaceListing
+    from prsm.core.auth.models import User, UserSession
+    from prsm.economy.marketplace.models import MarketplaceListing
     from prsm.core.database import get_session
-    from prsm.auth.auth_manager import AuthManager
-    from prsm.tokenomics.ftns_service import FTNSService
-    from prsm.nwtn.orchestrator import NWTNOrchestrator
-    from prsm.marketplace.real_marketplace_service import MarketplaceService
+    from prsm.core.auth.auth_manager import AuthManager
+    from prsm.economy.tokenomics.ftns_service import FTNSService
+    from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
+    from prsm.economy.marketplace.real_marketplace_service import MarketplaceService
 except ImportError:
     # Create mocks if imports fail
     TestClient = Mock

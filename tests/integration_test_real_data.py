@@ -35,12 +35,12 @@ import pytest
 import structlog
 
 # Import the systems under test
-from prsm.nwtn.meta_reasoning_engine import MetaReasoningEngine
-from prsm.nwtn.voicebox import NWTNVoicebox, VoiceboxResponse
-from prsm.nwtn.content_royalty_engine import ContentRoyaltyEngine, QueryComplexity
-from prsm.nwtn.content_ingestion_engine import NWTNContentIngestionEngine, IngestionStatus
-from prsm.provenance.enhanced_provenance_system import EnhancedProvenanceSystem, ContentType
-from prsm.tokenomics.ftns_service import FTNSService
+from prsm.compute.nwtn.meta_reasoning_engine import MetaReasoningEngine
+from prsm.compute.nwtn.voicebox import NWTNVoicebox, VoiceboxResponse
+from prsm.compute.nwtn.content_royalty_engine import ContentRoyaltyEngine, QueryComplexity
+from prsm.compute.nwtn.content_ingestion_engine import NWTNContentIngestionEngine, IngestionStatus
+from prsm.data.provenance.enhanced_provenance_system import EnhancedProvenanceSystem, ContentType
+from prsm.economy.tokenomics.ftns_service import FTNSService
 
 logger = structlog.get_logger(__name__)
 

@@ -11,13 +11,13 @@ from datetime import datetime, timezone
 from typing import Dict, List, Any
 from uuid import uuid4
 
-from prsm.federation.consensus import (
+from prsm.compute.federation.consensus import (
     DistributedConsensus, ConsensusType, ConsensusResult,
     BYZANTINE_FAULT_TOLERANCE, STRONG_CONSENSUS_THRESHOLD, 
     WEAK_CONSENSUS_THRESHOLD, SAFETY_CONSENSUS_THRESHOLD
 )
 from prsm.core.models import PeerNode, SafetyLevel
-from prsm.safety.circuit_breaker import ThreatLevel
+from prsm.core.safety.circuit_breaker import ThreatLevel
 
 
 # === Test Configuration ===

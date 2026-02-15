@@ -26,14 +26,14 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from prsm.integrations.config.credential_manager import (
+from prsm.core.integrations.config.credential_manager import (
     CredentialManager, CredentialData, CredentialType, StoredCredential
 )
-from prsm.integrations.config.integration_config import (
+from prsm.core.integrations.config.integration_config import (
     ConfigurationManager, UserIntegrationConfig, IntegrationPreferences,
     PlatformConfig, SecurityConfig, RateLimitConfig, SecurityLevel
 )
-from prsm.integrations.models.integration_models import IntegrationPlatform
+from prsm.core.integrations.models.integration_models import IntegrationPlatform
 
 
 # === Test Fixtures ===

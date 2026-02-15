@@ -64,7 +64,7 @@ class PRSMFullyFixedTester:
         
         # Step 1: Test import
         try:
-            from prsm.teachers.seal import SEALService
+            from prsm.compute.teachers.seal import SEALService
             print("  ✅ Import successful")
             import_success = True
         except Exception as e:
@@ -173,7 +173,7 @@ class PRSMFullyFixedTester:
         
         # Import test
         try:
-            from prsm.safety.advanced_safety_quality import AdvancedSafetyQualityFramework
+            from prsm.core.safety.advanced_safety_quality import AdvancedSafetyQualityFramework
             print("  ✅ Import successful")
             import_success = True
         except Exception as e:
@@ -248,7 +248,7 @@ class PRSMFullyFixedTester:
         
         # Import test
         try:
-            from prsm.federation.distributed_rlt_network import DistributedRLTNetwork
+            from prsm.compute.federation.distributed_rlt_network import DistributedRLTNetwork
             print("  ✅ Import successful")
             import_success = True
         except Exception as e:
@@ -265,7 +265,7 @@ class PRSMFullyFixedTester:
         # Instantiation test
         try:
             # Need to create required parameters for Federation Network
-            from prsm.teachers.seal import SEALService
+            from prsm.compute.teachers.seal import SEALService
             from uuid import uuid4
             
             # Create mock teacher model for the RLT teacher

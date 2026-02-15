@@ -13,7 +13,7 @@ PRSM_ROOT = Path(__file__).parent
 sys.path.insert(0, str(PRSM_ROOT))
 
 from prsm.performance.benchmark_collector import get_global_collector, reset_global_collector
-from prsm.federation.p2p_network import P2PModelNetwork
+from prsm.compute.federation.p2p_network import P2PModelNetwork
 from prsm.core.models import ArchitectTask, PeerNode
 from uuid import uuid4
 
@@ -118,7 +118,7 @@ async def test_multi_region_network_performance():
     print("-" * 50)
     
     try:
-        from prsm.federation.multi_region_p2p_network import MultiRegionP2PNetwork, RegionCode
+        from prsm.compute.federation.multi_region_p2p_network import MultiRegionP2PNetwork, RegionCode
         
         # Create multi-region network
         network = MultiRegionP2PNetwork()

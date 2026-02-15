@@ -23,7 +23,7 @@ def test_rlt_formatter():
     
     # Import locally to avoid dependency issues
     try:
-        from prsm.teachers.rlt.explanation_formatter import RLTFormatter, RLTFormatConfig
+        from prsm.compute.teachers.rlt.explanation_formatter import RLTFormatter, RLTFormatConfig
     except ImportError as e:
         print(f"❌ Import failed: {e}")
         return False
@@ -83,7 +83,7 @@ def test_student_comprehension():
     print("\n📊 Testing Student Comprehension Evaluator...")
     
     try:
-        from prsm.teachers.rlt.student_comprehension_evaluator import StudentCompressionEvaluator, EvaluationConfig
+        from prsm.compute.teachers.rlt.student_comprehension_evaluator import StudentCompressionEvaluator, EvaluationConfig
     except ImportError as e:
         print(f"❌ Import failed: {e}")
         return False
@@ -146,7 +146,7 @@ def test_quality_monitor():
     print("\n📈 Testing Quality Monitor...")
     
     try:
-        from prsm.teachers.rlt.quality_monitor import RLTQualityMonitor, MonitoringConfig, QualityMetrics
+        from prsm.compute.teachers.rlt.quality_monitor import RLTQualityMonitor, MonitoringConfig, QualityMetrics
     except ImportError as e:
         print(f"❌ Import failed: {e}")
         return False
@@ -214,7 +214,7 @@ def test_dense_reward_trainer():
     print("\n💰 Testing Dense Reward Trainer...")
     
     try:
-        from prsm.teachers.rlt.dense_reward_trainer import RLTDenseRewardTrainer, RLTTrainingConfig
+        from prsm.compute.teachers.rlt.dense_reward_trainer import RLTDenseRewardTrainer, RLTTrainingConfig
     except ImportError as e:
         print(f"❌ Import failed: {e}")
         return False
@@ -291,10 +291,10 @@ def test_integration_readiness():
     
     try:
         # Import all components
-        from prsm.teachers.rlt.explanation_formatter import RLTFormatter
-        from prsm.teachers.rlt.student_comprehension_evaluator import StudentCompressionEvaluator
-        from prsm.teachers.rlt.quality_monitor import RLTQualityMonitor
-        from prsm.teachers.rlt.dense_reward_trainer import RLTDenseRewardTrainer
+        from prsm.compute.teachers.rlt.explanation_formatter import RLTFormatter
+        from prsm.compute.teachers.rlt.student_comprehension_evaluator import StudentCompressionEvaluator
+        from prsm.compute.teachers.rlt.quality_monitor import RLTQualityMonitor
+        from prsm.compute.teachers.rlt.dense_reward_trainer import RLTDenseRewardTrainer
         
         # Initialize components
         formatter = RLTFormatter()
@@ -325,7 +325,7 @@ def test_integration_readiness():
         rewards = trainer.compute_total_reward(mock_explanation, "I understand", solution, question)
         
         # 6. Quality monitoring
-        from prsm.teachers.rlt.quality_monitor import QualityMetrics
+        from prsm.compute.teachers.rlt.quality_monitor import QualityMetrics
         quality_metrics = QualityMetrics(
             explanation_coherence=coherence,
             student_comprehension=0.8,  # Mock score
@@ -366,7 +366,7 @@ def run_performance_benchmark():
     print("=" * 30)
     
     # Test formatter performance
-    from prsm.teachers.rlt.explanation_formatter import RLTFormatter
+    from prsm.compute.teachers.rlt.explanation_formatter import RLTFormatter
     
     formatter = RLTFormatter()
     test_pairs = [

@@ -25,7 +25,7 @@ import pytest
 import pytest_asyncio
 pytest_plugins = ('pytest_asyncio',)
 
-from prsm.tokenomics.models import (
+from prsm.economy.tokenomics.models import (
     ContributorTier, ContributionType, ProofStatus
 )
 
@@ -97,8 +97,8 @@ import importlib.util
 from pathlib import Path
 
 # Import the original ContributorManager and create a test version
-from prsm.tokenomics.contributor_manager import ContributionProofRequest
-import prsm.tokenomics.contributor_manager as orig_manager
+from prsm.economy.tokenomics.contributor_manager import ContributionProofRequest
+import prsm.economy.tokenomics.contributor_manager as orig_manager
 
 # Monkey-patch the models in the contributor manager module for testing
 orig_manager.FTNSContributorStatus = FTNSContributorStatus
@@ -106,7 +106,7 @@ orig_manager.FTNSContributionProof = FTNSContributionProof
 orig_manager.FTNSContributionMetrics = FTNSContributionMetrics
 
 # Now import the ContributorManager
-from prsm.tokenomics.contributor_manager import ContributorManager
+from prsm.economy.tokenomics.contributor_manager import ContributorManager
 
 
 # Test fixtures and setup

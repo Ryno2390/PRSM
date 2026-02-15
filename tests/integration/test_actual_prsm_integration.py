@@ -30,7 +30,7 @@ except ImportError as e:
 
 try:
     # Import budget management components
-    from prsm.tokenomics.ftns_budget_manager import FTNSBudgetManager, SpendingCategory
+    from prsm.economy.tokenomics.ftns_budget_manager import FTNSBudgetManager, SpendingCategory
     BUDGET_AVAILABLE = True
 except ImportError as e:
     print(f"⚠️ Budget management not available: {e}")
@@ -38,8 +38,8 @@ except ImportError as e:
 
 try:
     # Import marketplace components  
-    from prsm.marketplace.expanded_models import ResourceType, DatasetListing, AgentWorkflowListing
-    from prsm.marketplace.real_marketplace_service import RealMarketplaceService
+    from prsm.economy.marketplace.expanded_models import ResourceType, DatasetListing, AgentWorkflowListing
+    from prsm.economy.marketplace.real_marketplace_service import RealMarketplaceService
     MARKETPLACE_AVAILABLE = True
 except ImportError as e:
     print(f"⚠️ Marketplace components not available: {e}")
@@ -47,7 +47,7 @@ except ImportError as e:
 
 try:
     # Import enhanced orchestrator
-    from prsm.nwtn.enhanced_orchestrator import EnhancedNWTNOrchestrator
+    from prsm.compute.nwtn.enhanced_orchestrator import EnhancedNWTNOrchestrator
     ORCHESTRATOR_AVAILABLE = True
 except ImportError as e:
     print(f"⚠️ Enhanced orchestrator not available: {e}")

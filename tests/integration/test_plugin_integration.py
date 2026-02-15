@@ -14,9 +14,9 @@ import tempfile
 import json
 from pathlib import Path
 
-from prsm.plugins.plugin_manager import PluginManager
-from prsm.marketplace.ecosystem.plugin_registry import PluginRegistry
-from prsm.marketplace.ecosystem.marketplace_core import MarketplaceCore
+from prsm.compute.plugins.plugin_manager import PluginManager
+from prsm.economy.marketplace.ecosystem.plugin_registry import PluginRegistry
+from prsm.economy.marketplace.ecosystem.marketplace_core import MarketplaceCore
 
 
 class MockPlugin:

@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from prsm.federation import (
+from prsm.compute.federation import (
     get_production_p2p_network,
     get_production_consensus, 
     get_production_model_registry
@@ -183,7 +183,7 @@ class TestProductionConsensus:
     @pytest.mark.asyncio
     async def test_cryptographic_message_verification(self, consensus_node):
         """Test message signing and verification"""
-        from prsm.federation.production_consensus import ConsensusMessage, ConsensusMessageType
+        from prsm.compute.federation.production_consensus import ConsensusMessage, ConsensusMessageType
         
         # Create test message
         message = ConsensusMessage(
@@ -220,7 +220,7 @@ class TestProductionConsensus:
             print("✅ Primary proposal test passed")
         else:
             # Test as backup node
-            from prsm.federation.production_consensus import ConsensusMessage, ConsensusMessageType
+            from prsm.compute.federation.production_consensus import ConsensusMessage, ConsensusMessageType
             
             pre_prepare_msg = ConsensusMessage(
                 ConsensusMessageType.PRE_PREPARE,
@@ -399,7 +399,7 @@ class TestProductionModelRegistry:
         # Test message creation and signing
         test_payload = {"action": "test", "data": "test_data"}
         
-        from prsm.federation.distributed_model_registry import GossipMessage
+        from prsm.compute.federation.distributed_model_registry import GossipMessage
         message = GossipMessage("test_message", test_payload, model_registry.node_id)
         
         assert message.id is not None, "Message should have ID"

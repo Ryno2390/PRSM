@@ -35,9 +35,9 @@ from prsm.core.circuit_breaker import (
     AGENT_CIRCUIT_CONFIG, FTNS_CIRCUIT_CONFIG, IPFS_CIRCUIT_CONFIG,
     DATABASE_CIRCUIT_CONFIG, EXTERNAL_API_CIRCUIT_CONFIG
 )
-from prsm.nwtn.orchestrator import get_nwtn_orchestrator
-from prsm.tokenomics.enhanced_ftns_service import get_enhanced_ftns_service
-from prsm.data_layer.enhanced_ipfs import get_ipfs_client
+from prsm.compute.nwtn.orchestrator import get_nwtn_orchestrator
+from prsm.economy.tokenomics.enhanced_ftns_service import get_enhanced_ftns_service
+from prsm.data.data_layer.enhanced_ipfs import get_ipfs_client
 
 logger = structlog.get_logger(__name__)
 

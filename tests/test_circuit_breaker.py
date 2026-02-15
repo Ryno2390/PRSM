@@ -16,7 +16,7 @@ from typing import Dict, List, Any
 from uuid import uuid4
 import structlog
 
-from prsm.safety.circuit_breaker import (
+from prsm.core.safety.circuit_breaker import (
     CircuitBreakerNetwork, 
     SafetyVote, 
     ThreatLevel,

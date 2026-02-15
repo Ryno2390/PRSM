@@ -11,15 +11,15 @@ from uuid import uuid4, UUID
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from prsm.auth.auth_manager import (
+from prsm.core.auth.auth_manager import (
     AuthManager, AuthenticationError, AuthorizationError,
     get_current_user, require_auth, require_permission, require_role
 )
-from prsm.auth.models import (
+from prsm.core.auth.models import (
     User, UserRole, Permission, LoginRequest, RegisterRequest, 
     TokenResponse, ROLE_PERMISSIONS
 )
-from prsm.auth.jwt_handler import TokenData
+from prsm.core.auth.jwt_handler import TokenData
 
 
 class TestAuthManager:
@@ -587,7 +587,7 @@ class TestPasswordValidationRequests:
 
     def test_password_change_validation(self):
         """Test password change request validation"""
-        from prsm.auth.models import PasswordChange
+        from prsm.core.auth.models import PasswordChange
         
         # Valid password change
         valid_change = PasswordChange(

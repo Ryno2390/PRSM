@@ -50,6 +50,7 @@ class TestRLTQualityAssessment:
                     "logical_coherence": self.logical_coherence,
                     "concept_coverage": self.concept_coverage,
                     "student_comprehension_prediction": self.student_comprehension_prediction,
+                }
         # Mock the RLTQualityAssessment class
         class MockRLTQualityAssessment:
             def __init__(self, explanation_id, teacher_id, **kwargs):

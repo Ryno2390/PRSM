@@ -45,45 +45,45 @@ from prsm.core.models import (
 from prsm.core.config import get_settings
 
 # NWTN Orchestrator
-from prsm.nwtn.orchestrator import NWTNOrchestrator
-from prsm.nwtn.context_manager import ContextManager
+from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
+from prsm.compute.nwtn.context_manager import ContextManager
 
 # Enhanced Agent Framework
-from prsm.agents.prompters.prompt_optimizer import PromptOptimizer
-from prsm.agents.routers.model_router import ModelRouter
-from prsm.agents.compilers.hierarchical_compiler import HierarchicalCompiler
+from prsm.compute.agents.prompters.prompt_optimizer import PromptOptimizer
+from prsm.compute.agents.routers.model_router import ModelRouter
+from prsm.compute.agents.compilers.hierarchical_compiler import HierarchicalCompiler
 
 # Teacher Model Framework
-from prsm.teachers.teacher_model import DistilledTeacher
-from prsm.teachers.rlvr_engine import RLVREngine
-from prsm.teachers.curriculum import CurriculumGenerator
+from prsm.compute.teachers.teacher_model import DistilledTeacher
+from prsm.compute.teachers.rlvr_engine import RLVREngine
+from prsm.compute.teachers.curriculum import CurriculumGenerator
 
 # Safety Infrastructure
-from prsm.safety.circuit_breaker import CircuitBreakerNetwork
-from prsm.safety.monitor import SafetyMonitor
-from prsm.safety.governance import SafetyGovernance
+from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork
+from prsm.core.safety.monitor import SafetyMonitor
+from prsm.core.safety.governance import SafetyGovernance
 
 # P2P Federation & Consensus
-from prsm.federation.p2p_network import P2PModelNetwork
-from prsm.federation.consensus import DistributedConsensus
+from prsm.compute.federation.p2p_network import P2PModelNetwork
+from prsm.compute.federation.consensus import DistributedConsensus
 
 # Advanced Tokenomics
-from prsm.tokenomics.ftns_service import FTNSService
-from prsm.tokenomics.advanced_ftns import AdvancedFTNSEconomy
-from prsm.tokenomics.marketplace import ModelMarketplace
+from prsm.economy.tokenomics.ftns_service import FTNSService
+from prsm.economy.tokenomics.advanced_ftns import AdvancedFTNSEconomy
+from prsm.economy.tokenomics.marketplace import ModelMarketplace
 
 # Governance System
-from prsm.governance.voting import TokenWeightedVoting
-from prsm.governance.proposals import ProposalManager
+from prsm.economy.governance.voting import TokenWeightedVoting
+from prsm.economy.governance.proposals import ProposalManager
 
 # Recursive Self-Improvement
-from prsm.improvement.performance_monitor import PerformanceMonitor
-from prsm.improvement.proposal_engine import ImprovementProposalEngine
-from prsm.improvement.evolution import EvolutionOrchestrator
+from prsm.compute.improvement.performance_monitor import PerformanceMonitor
+from prsm.compute.improvement.proposal_engine import ImprovementProposalEngine
+from prsm.compute.improvement.evolution import EvolutionOrchestrator
 
 # Data Layer
-from prsm.data_layer.enhanced_ipfs import PRSMIPFSClient
-from prsm.federation.model_registry import ModelRegistry
+from prsm.data.data_layer.enhanced_ipfs import PRSMIPFSClient
+from prsm.compute.federation.model_registry import ModelRegistry
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)

@@ -8,9 +8,9 @@ import asyncio
 import time
 from datetime import datetime, timezone
 
-from prsm.improvement.performance_monitor import get_performance_monitor
-from prsm.improvement.proposal_engine import get_proposal_engine
-from prsm.improvement.evolution import get_evolution_orchestrator
+from prsm.compute.improvement.performance_monitor import get_performance_monitor
+from prsm.compute.improvement.proposal_engine import get_proposal_engine
+from prsm.compute.improvement.evolution import get_evolution_orchestrator
 from prsm.core.models import ImprovementType, ProposalStatus
 
 

@@ -35,7 +35,7 @@ except ImportError as e:
 
 # Test additional components
 try:
-    from prsm.teachers.seal import SEALService
+    from prsm.compute.teachers.seal import SEALService
     RLT_TEACHER_AVAILABLE = True
     print("✅ RLT Teacher components available")
 except ImportError:
@@ -43,7 +43,7 @@ except ImportError:
     print("⚠️  RLT Teacher components not available")
 
 try:
-    from prsm.safety.advanced_safety_quality import AdvancedSafetyQualityFramework
+    from prsm.core.safety.advanced_safety_quality import AdvancedSafetyQualityFramework
     SAFETY_AVAILABLE = True
     print("✅ Advanced Safety components available")
 except ImportError:
@@ -51,7 +51,7 @@ except ImportError:
     print("⚠️  Advanced Safety components not available")
 
 try:
-    from prsm.federation.distributed_rlt_network import DistributedRLTNetwork
+    from prsm.compute.federation.distributed_rlt_network import DistributedRLTNetwork
     FEDERATION_AVAILABLE = True
     print("✅ Federation components available")
 except ImportError:

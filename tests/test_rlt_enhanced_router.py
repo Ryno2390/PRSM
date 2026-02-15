@@ -19,9 +19,9 @@ def test_rlt_teacher_candidate():
     
     try:
         # Mock the necessary imports and classes
-        from prsm.agents.routers.rlt_enhanced_router import RLTTeacherCandidate, RLTRoutingStrategy
+        from prsm.compute.agents.routers.rlt_enhanced_router import RLTTeacherCandidate, RLTRoutingStrategy
         from prsm.core.models import ModelType
-        from prsm.agents.routers.model_router import ModelSource
+        from prsm.compute.agents.routers.model_router import ModelSource
         
         # Create test candidate
         candidate = RLTTeacherCandidate(

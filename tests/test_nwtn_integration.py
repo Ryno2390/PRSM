@@ -24,11 +24,11 @@ logger = structlog.get_logger(__name__)
 
 # PRSM imports
 from prsm.core.models import UserInput, PRSMSession, ClarifiedPrompt
-from prsm.nwtn.orchestrator import NWTNOrchestrator
-from prsm.nwtn.context_manager import ContextManager
-from prsm.tokenomics.ftns_service import FTNSService
-from prsm.data_layer.enhanced_ipfs import PRSMIPFSClient
-from prsm.federation.model_registry import ModelRegistry
+from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
+from prsm.compute.nwtn.context_manager import ContextManager
+from prsm.economy.tokenomics.ftns_service import FTNSService
+from prsm.data.data_layer.enhanced_ipfs import PRSMIPFSClient
+from prsm.compute.federation.model_registry import ModelRegistry
 
 
 class NWTNIntegrationTester:

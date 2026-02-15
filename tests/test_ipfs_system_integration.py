@@ -22,13 +22,13 @@ async def test_ipfs_system_integration():
     try:
         # Import system components
         from prsm.core.ipfs_client import get_ipfs_client, init_ipfs
-        from prsm.data_layer.enhanced_ipfs import get_ipfs_client as get_enhanced_client
+        from prsm.data.data_layer.enhanced_ipfs import get_ipfs_client as get_enhanced_client
         from prsm.core.config import get_settings
         from prsm.core.models import (
             TeacherModel, ModelType, ProvenanceRecord, 
             ModelShard, FTNSTransaction
         )
-        from prsm.tokenomics.ftns_service import ftns_service
+        from prsm.economy.tokenomics.ftns_service import ftns_service
         
         print("✅ System integration imports successful")
         
@@ -106,7 +106,7 @@ async def test_ipfs_system_integration():
         
         try:
             # Test API endpoint imports
-            from prsm.api.main import app
+            from prsm.interface.api.main import app
             from fastapi.testclient import TestClient
             
             # Note: We can't easily test full API without starting server
@@ -134,7 +134,7 @@ async def test_ipfs_system_integration():
         print(f"\n🤖 Testing IPFS model registry integration...")
         
         try:
-            from prsm.federation.model_registry import ModelRegistry
+            from prsm.compute.federation.model_registry import ModelRegistry
             
             model_registry = ModelRegistry()
             
@@ -274,7 +274,7 @@ async def test_ipfs_system_integration():
         print(f"\n🌐 Testing IPFS P2P integration...")
         
         try:
-            from prsm.federation.p2p_network import P2PNetwork
+            from prsm.compute.federation.p2p_network import P2PNetwork
             
             # Test P2P network integration with IPFS
             p2p_network = P2PNetwork()
@@ -303,8 +303,8 @@ async def test_ipfs_system_integration():
         print(f"\n🛡️ Testing IPFS safety integration...")
         
         try:
-            from prsm.safety.monitor import SafetyMonitor
-            from prsm.safety.circuit_breaker import CircuitBreaker
+            from prsm.core.safety.monitor import SafetyMonitor
+            from prsm.core.safety.circuit_breaker import CircuitBreaker
             
             # Test safety monitoring for IPFS operations
             safety_monitor = SafetyMonitor()

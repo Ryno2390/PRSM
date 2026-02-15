@@ -8,7 +8,7 @@ import asyncio
 import time
 from datetime import datetime, timezone
 
-from prsm.tokenomics.marketplace import get_marketplace
+from prsm.economy.tokenomics.marketplace import get_marketplace
 from prsm.core.models import PricingModel, MarketplaceListing, MarketplaceTransaction
 
 
@@ -19,7 +19,7 @@ async def test_model_listing():
     marketplace = get_marketplace()
     
     # Give test users initial FTNS balance for fees
-    from prsm.tokenomics.ftns_service import ftns_service
+    from prsm.economy.tokenomics.ftns_service import ftns_service
     
     # Give users multiple model rewards for sufficient balance
     for i in range(10):  # Give 10 model rewards = 1000 FTNS each

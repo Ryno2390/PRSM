@@ -13,8 +13,8 @@ from pathlib import Path
 # Add PRSM to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from prsm.chronos import ChronosEngine, MultiSigWalletManager, ExchangeRouter
-from prsm.chronos.models import AssetType, SwapRequest, SwapType
+from prsm.compute.chronos import ChronosEngine, MultiSigWalletManager, ExchangeRouter
+from prsm.compute.chronos.models import AssetType, SwapRequest, SwapType
 from prsm.core.ipfs_client import IPFSClient
 from datetime import datetime, timedelta
 

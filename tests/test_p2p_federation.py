@@ -21,8 +21,8 @@ from prsm.core.models import (
     ArchitectTask, PeerNode, ModelShard, ModelType, TaskStatus,
     SafetyLevel
 )
-from prsm.safety.circuit_breaker import ThreatLevel
-from prsm.federation.p2p_network import P2PModelNetwork, get_p2p_network
+from prsm.core.safety.circuit_breaker import ThreatLevel
+from prsm.compute.federation.p2p_network import P2PModelNetwork, get_p2p_network
 
 
 class TestP2PFederation:

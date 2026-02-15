@@ -13,9 +13,9 @@ import json
 from datetime import datetime
 sys.path.insert(0, '.')
 
-from prsm.nwtn.meta_reasoning_engine import MetaReasoningEngine, ThinkingMode
-from prsm.nwtn.external_storage_config import get_external_knowledge_base
-from prsm.nwtn.breakthrough_modes import BreakthroughMode
+from prsm.compute.nwtn.meta_reasoning_engine import MetaReasoningEngine, ThinkingMode
+from prsm.compute.nwtn.external_storage_config import get_external_knowledge_base
+from prsm.compute.nwtn.breakthrough_modes import BreakthroughMode
 
 async def test_fixed_nwtn_pipeline():
     """Test the fully fixed NWTN pipeline end-to-end"""

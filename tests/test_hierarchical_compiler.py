@@ -17,7 +17,7 @@ from rich.text import Text
 
 # PRSM imports
 try:
-    from prsm.agents.compilers import (
+    from prsm.compute.agents.compilers import (
         HierarchicalCompiler, CompilationLevel, SynthesisStrategy,
         IntermediateResult, MidResult, FinalResponse, ReasoningTrace
     )

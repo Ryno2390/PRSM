@@ -11,12 +11,12 @@ from datetime import datetime, timezone
 from typing import Dict, List, Any
 from uuid import uuid4
 
-from prsm.federation.p2p_network import P2PModelNetwork
-from prsm.federation.consensus import DistributedConsensus, ConsensusType
-from prsm.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-from prsm.safety.monitor import SafetyMonitor
+from prsm.compute.federation.p2p_network import P2PModelNetwork
+from prsm.compute.federation.consensus import DistributedConsensus, ConsensusType
+from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
+from prsm.core.safety.monitor import SafetyMonitor
 from prsm.core.models import PeerNode, ArchitectTask, ModelShard, SafetyLevel
-from prsm.tokenomics.ftns_service import ftns_service
+from prsm.economy.tokenomics.ftns_service import ftns_service
 
 
 # === Integration Test Suite ===

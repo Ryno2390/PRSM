@@ -33,9 +33,9 @@ import gc
 try:
     import aiohttp
     from prsm.core.models import UserInput, PRSMSession, AgentType
-    from prsm.nwtn.orchestrator import NWTNOrchestrator
-    from prsm.tokenomics.ftns_service import FTNSService
-    from prsm.api.main import app
+    from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
+    from prsm.economy.tokenomics.ftns_service import FTNSService
+    from prsm.interface.api.main import app
     from prsm.core.database import DatabaseManager
     from fastapi.testclient import TestClient
     from httpx import AsyncClient

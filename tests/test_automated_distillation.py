@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 from unittest.mock import Mock, AsyncMock
 
 # Import PRSM distillation components
-from prsm.distillation.orchestrator import DistillationOrchestrator
-from prsm.distillation.models import (
+from prsm.compute.distillation.orchestrator import DistillationOrchestrator
+from prsm.compute.distillation.models import (
     DistillationRequest, DistillationStatus, ModelSize, 
     OptimizationTarget, TrainingStrategy
 )

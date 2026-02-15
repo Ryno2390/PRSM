@@ -15,7 +15,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 # PRSM imports
-from prsm.agents.prompters import (
+from prsm.compute.agents.prompters import (
     PromptOptimizer, DomainType, PromptType, OptimizationStrategy
 )
 from prsm.core.config import get_settings

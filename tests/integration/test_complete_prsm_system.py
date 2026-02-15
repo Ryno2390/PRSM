@@ -286,7 +286,7 @@ class CompletePRSMSystemTester:
         results = []
         
         try:
-            from prsm.nwtn.orchestrator import NWTNOrchestrator
+            from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
             
             # Test basic orchestrator
             orchestrator = NWTNOrchestrator()
@@ -332,7 +332,7 @@ class CompletePRSMSystemTester:
         results = []
         
         try:
-            from prsm.tokenomics.database_ftns_service import DatabaseFTNSService
+            from prsm.economy.tokenomics.database_ftns_service import DatabaseFTNSService
             
             # Test FTNS service
             ftns_service = DatabaseFTNSService()
@@ -379,7 +379,7 @@ class CompletePRSMSystemTester:
         results = []
         
         try:
-            from prsm.api.main import app
+            from prsm.interface.api.main import app
             
             # Test FastAPI app exists and is configured
             app_available = app is not None
@@ -426,7 +426,7 @@ class CompletePRSMSystemTester:
         
         # RLT Teacher
         try:
-            from prsm.teachers.seal import SEALService
+            from prsm.compute.teachers.seal import SEALService
             from uuid import uuid4
             
             class MockTeacherModel:
@@ -467,7 +467,7 @@ class CompletePRSMSystemTester:
         
         # Safety Framework
         try:
-            from prsm.safety.advanced_safety_quality import AdvancedSafetyQualityFramework
+            from prsm.core.safety.advanced_safety_quality import AdvancedSafetyQualityFramework
             
             safety = AdvancedSafetyQualityFramework()
             
@@ -502,8 +502,8 @@ class CompletePRSMSystemTester:
         
         # Federation Network
         try:
-            from prsm.federation.distributed_rlt_network import DistributedRLTNetwork
-            from prsm.teachers.seal import SEALService
+            from prsm.compute.federation.distributed_rlt_network import DistributedRLTNetwork
+            from prsm.compute.teachers.seal import SEALService
             from uuid import uuid4
             
             class MockTeacherModel:

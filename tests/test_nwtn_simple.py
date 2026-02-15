@@ -6,7 +6,7 @@ Shows working NWTN orchestrator with all integrated services
 
 import asyncio
 from prsm.core.models import UserInput
-from prsm.nwtn.orchestrator import NWTNOrchestrator
+from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
 
 async def demonstrate_nwtn():
     """Demonstrate basic NWTN functionality"""

@@ -39,9 +39,9 @@ from prsm.nlp.advanced_nlp import AdvancedNLPProcessor
 from prsm.nlp.query_processor import QueryProcessor
 
 # Phase 3: Deep Reasoning & Multi-Modal Intelligence  
-from prsm.nwtn.deep_reasoning_engine import DeepReasoningEngine
-from prsm.nwtn.meta_reasoning_orchestrator import MetaReasoningOrchestrator
-from prsm.nwtn.multimodal_processor import MultiModalProcessor
+from prsm.compute.nwtn.deep_reasoning_engine import DeepReasoningEngine
+from prsm.compute.nwtn.meta_reasoning_orchestrator import MetaReasoningOrchestrator
+from prsm.compute.nwtn.multimodal_processor import MultiModalProcessor
 
 # Phase 4: Dynamic Learning & Continuous Improvement
 from prsm.learning.adaptive_learning import AdaptiveLearningSystem
@@ -53,15 +53,15 @@ from prsm.response.response_generator import ResponseGenerator
 
 # Phase 6: Performance Optimization & Quality Assurance
 from prsm.optimization.performance_optimizer import PerformanceOptimizer
-from prsm.quality.quality_assessor import QualityAssessor
+from prsm.compute.quality.quality_assessor import QualityAssessor
 
 # Phase 7: Enterprise Scalability & Advanced Analytics
-from prsm.analytics.analytics_engine import AnalyticsEngine
-from prsm.enterprise.ai_orchestrator import AIOrchestrator
-from prsm.marketplace.ecosystem.marketplace_core import MarketplaceCore
+from prsm.data.analytics.analytics_engine import AnalyticsEngine
+from prsm.core.enterprise.ai_orchestrator import AIOrchestrator
+from prsm.economy.marketplace.ecosystem.marketplace_core import MarketplaceCore
 
 # Unified Pipeline Controller
-from prsm.nwtn.unified_pipeline_controller import UnifiedPipelineController
+from prsm.compute.nwtn.unified_pipeline_controller import UnifiedPipelineController
 
 class TestFullSpectrumIntegration:
     """Test the complete NWTN (Neural Web for Transformation Networking) integration"""

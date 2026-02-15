@@ -18,11 +18,11 @@ from datetime import datetime, timezone, timedelta
 from uuid import uuid4, UUID
 
 from prsm.core.models import UserInput, PRSMSession
-from prsm.tokenomics.ftns_budget_manager import (
+from prsm.economy.tokenomics.ftns_budget_manager import (
     FTNSBudgetManager, FTNSBudget, BudgetExpandRequest, BudgetPrediction,
     SpendingCategory, BudgetStatus, BudgetAlert, BudgetAllocation
 )
-from prsm.tokenomics.ftns_service import FTNSService
+from prsm.economy.tokenomics.ftns_service import FTNSService
 
 
 class TestFTNSBudgetManager:

@@ -14,8 +14,8 @@ from datetime import datetime, timezone
 from typing import Dict, Any
 
 # Import the real marketplace services
-from prsm.marketplace.real_marketplace_service import RealMarketplaceService
-from prsm.marketplace.models import (
+from prsm.economy.marketplace.real_marketplace_service import RealMarketplaceService
+from prsm.economy.marketplace.models import (
     CreateModelListingRequest, ModelCategory, ModelProvider, PricingTier
 )
 
