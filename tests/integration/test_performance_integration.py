@@ -78,16 +78,17 @@ class PerformanceMonitor:
         }
 
 
+@pytest.fixture
+def performance_monitor():
+    """Initialize performance monitor for performance tests"""
+    monitor = PerformanceMonitor()
+    monitor.start_monitoring()
+    yield monitor
+
+
 class TestFileOperationPerformance:
     """Performance tests for file operations"""
-    
-    @pytest.fixture
-    def performance_monitor(self):
-        """Initialize performance monitor"""
-        monitor = PerformanceMonitor()
-        monitor.start_monitoring()
-        yield monitor
-    
+
     @pytest.mark.asyncio
     async def test_file_sharding_performance(self, sample_files, performance_benchmarks, performance_monitor):
         """Test file sharding performance across different file sizes"""

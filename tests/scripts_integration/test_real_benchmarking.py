@@ -41,7 +41,7 @@ from prsm.compute.benchmarking.real_benchmark_suite import (
 from prsm.compute.agents.executors.hybrid_router import RoutingStrategy
 
 
-async def test_benchmark_task_creation(suite: RealBenchmarkSuite):
+async def run_benchmark_task_creation(suite: RealBenchmarkSuite):
     """Test benchmark task creation and diversity"""
     click.echo("🎨 Testing Benchmark Task Creation")
     click.echo("-" * 45)
@@ -75,7 +75,7 @@ async def test_benchmark_task_creation(suite: RealBenchmarkSuite):
     return len(tasks), categories
 
 
-async def test_quality_evaluation(suite: RealBenchmarkSuite):
+async def run_quality_evaluation(suite: RealBenchmarkSuite):
     """Test the quality evaluation system"""
     click.echo(f"\n📊 Testing Quality Evaluation System")
     click.echo("-" * 45)
@@ -141,7 +141,7 @@ async def test_quality_evaluation(suite: RealBenchmarkSuite):
     return evaluation_results
 
 
-async def test_routing_strategies(suite: RealBenchmarkSuite):
+async def run_routing_strategies(suite: RealBenchmarkSuite):
     """Test different routing strategies"""
     click.echo(f"\n🔀 Testing Routing Strategies")
     click.echo("-" * 40)
@@ -213,7 +213,7 @@ async def test_routing_strategies(suite: RealBenchmarkSuite):
     return strategy_results
 
 
-async def test_local_vs_cloud_comparison(suite: RealBenchmarkSuite):
+async def run_local_vs_cloud_comparison(suite: RealBenchmarkSuite):
     """Test local vs cloud model performance"""
     click.echo(f"\n⚙️ Testing Local vs Cloud Comparison")
     click.echo("-" * 45)
@@ -279,7 +279,7 @@ async def test_local_vs_cloud_comparison(suite: RealBenchmarkSuite):
     return comparison_results
 
 
-async def test_comprehensive_benchmark_run(suite: RealBenchmarkSuite):
+async def run_comprehensive_benchmark_run(suite: RealBenchmarkSuite):
     """Test the full comprehensive benchmark"""
     click.echo(f"\n🚀 Testing Comprehensive Benchmark Run")
     click.echo("-" * 50)
@@ -349,23 +349,23 @@ async def test_real_benchmarking_pipeline(openrouter_api_key: str = None):
     
     try:
         # Test 1: Benchmark task creation
-        task_count, categories = await test_benchmark_task_creation(suite)
+        task_count, categories = await run_benchmark_task_creation(suite)
         test_results["task_creation"] = {"count": task_count, "categories": list(categories)}
         
         # Test 2: Quality evaluation system
-        eval_results = await test_quality_evaluation(suite)
+        eval_results = await run_quality_evaluation(suite)
         test_results["quality_evaluation"] = eval_results
         
         # Test 3: Routing strategies (if router available)
-        strategy_results = await test_routing_strategies(suite)
+        strategy_results = await run_routing_strategies(suite)
         test_results["routing_strategies"] = strategy_results
         
         # Test 4: Local vs cloud comparison
-        comparison_results = await test_local_vs_cloud_comparison(suite)
+        comparison_results = await run_local_vs_cloud_comparison(suite)
         test_results["local_vs_cloud"] = comparison_results
         
         # Test 5: Comprehensive benchmark run
-        benchmark_report = await test_comprehensive_benchmark_run(suite)
+        benchmark_report = await run_comprehensive_benchmark_run(suite)
         test_results["comprehensive_benchmark"] = benchmark_report is not None
         
         # Generate final assessment

@@ -31,7 +31,7 @@ from prsm.compute.agents.executors.api_clients import (
 )
 
 
-async def test_real_openai_integration(api_key: str):
+async def run_real_openai_integration(api_key: str):
     """Test the integration with real OpenAI API"""
     
     click.echo("🚀 Testing PRSM OpenAI Integration with Real API")
@@ -274,7 +274,7 @@ def main(api_key_file: str, api_key: str):
         sys.exit(1)
     
     async def run_test():
-        results = await test_real_openai_integration(api_key)
+        results = await run_real_openai_integration(api_key)
         generate_integration_report(results)
         
         # Save results

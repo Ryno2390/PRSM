@@ -39,7 +39,7 @@ from prsm.compute.agents.executors.api_clients import (
 )
 
 
-async def test_model_discovery(client: OllamaClient):
+async def run_model_discovery(client: OllamaClient):
     """Test local model discovery and availability"""
     click.echo("🔍 Testing Local Model Discovery")
     click.echo("-" * 45)
@@ -69,7 +69,7 @@ async def test_model_discovery(client: OllamaClient):
     return available_models
 
 
-async def test_basic_functionality(client: OllamaClient, model_name: str):
+async def run_basic_functionality(client: OllamaClient, model_name: str):
     """Test basic local model functionality"""
     click.echo(f"📝 Testing Basic Functionality: {model_name}")
     click.echo("-" * 50)
@@ -149,7 +149,7 @@ async def test_basic_functionality(client: OllamaClient, model_name: str):
     return results
 
 
-async def test_privacy_scenarios(client: OllamaClient, model_name: str):
+async def run_privacy_scenarios(client: OllamaClient, model_name: str):
     """Test privacy-sensitive scenarios that should stay local"""
     click.echo(f"\n🔒 Testing Privacy-Sensitive Scenarios")
     click.echo("-" * 45)
@@ -210,7 +210,7 @@ async def test_privacy_scenarios(client: OllamaClient, model_name: str):
     return privacy_results
 
 
-async def test_performance_comparison(client: OllamaClient, model_name: str):
+async def run_performance_comparison(client: OllamaClient, model_name: str):
     """Compare local vs cloud performance characteristics"""
     click.echo(f"\n⚡ Performance Analysis: Local vs Cloud")
     click.echo("-" * 45)
@@ -299,7 +299,7 @@ async def test_comprehensive_local_integration():
     
     try:
         # Test 1: Model discovery
-        available_models = await test_model_discovery(client)
+        available_models = await run_model_discovery(client)
         
         if not available_models:
             click.echo("⚠️ No models available for testing")
@@ -310,13 +310,13 @@ async def test_comprehensive_local_integration():
         click.echo(f"Using model: {test_model} for testing\n")
         
         # Test 2: Basic functionality
-        basic_results = await test_basic_functionality(client, test_model)
+        basic_results = await run_basic_functionality(client, test_model)
         
         # Test 3: Privacy scenarios
-        privacy_results = await test_privacy_scenarios(client, test_model)
+        privacy_results = await run_privacy_scenarios(client, test_model)
         
         # Test 4: Performance comparison
-        performance_results = await test_performance_comparison(client, test_model)
+        performance_results = await run_performance_comparison(client, test_model)
         
         # Generate comprehensive report
         await generate_local_integration_report(

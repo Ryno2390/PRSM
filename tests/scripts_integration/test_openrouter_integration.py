@@ -37,7 +37,7 @@ from prsm.compute.agents.executors.api_clients import (
 )
 
 
-async def test_model_availability(client: OpenRouterClient):
+async def run_model_availability(client: OpenRouterClient):
     """Test which models are available"""
     click.echo("🔍 Testing Model Availability")
     click.echo("-" * 40)
@@ -55,7 +55,7 @@ async def test_model_availability(client: OpenRouterClient):
         click.echo()
 
 
-async def test_free_models(client: OpenRouterClient):
+async def run_free_models(client: OpenRouterClient):
     """Test free models first to avoid costs"""
     click.echo("🆓 Testing Free Models")
     click.echo("-" * 30)
@@ -107,7 +107,7 @@ async def test_free_models(client: OpenRouterClient):
     return results
 
 
-async def test_premium_models(client: OpenRouterClient, budget_limit: float = 0.05):
+async def run_premium_models(client: OpenRouterClient, budget_limit: float = 0.05):
     """Test premium models with budget control"""
     click.echo(f"\n💎 Testing Premium Models (Budget: ${budget_limit:.2f})")
     click.echo("-" * 50)
@@ -180,7 +180,7 @@ async def test_premium_models(client: OpenRouterClient, budget_limit: float = 0.
     return results, total_spent
 
 
-async def test_system_prompts(client: OpenRouterClient):
+async def run_system_prompts(client: OpenRouterClient):
     """Test system prompt functionality across models"""
     click.echo(f"\n🎯 Testing System Prompt Support")
     click.echo("-" * 40)
@@ -210,7 +210,7 @@ async def test_system_prompts(client: OpenRouterClient):
         return False
 
 
-async def test_comprehensive_integration(api_key: str):
+async def run_comprehensive_integration(api_key: str):
     """Run comprehensive OpenRouter integration test"""
     click.echo("🚀 PRSM OpenRouter Multi-Model Integration Test")
     click.echo("=" * 55)
@@ -222,16 +222,16 @@ async def test_comprehensive_integration(api_key: str):
     
     try:
         # Test 1: Model availability
-        await test_model_availability(client)
+        await run_model_availability(client)
         
         # Test 2: Free models (no cost)
-        free_results = await test_free_models(client)
+        free_results = await run_free_models(client)
         
         # Test 3: Premium models (with budget)
-        premium_results, total_cost = await test_premium_models(client, budget_limit=0.10)
+        premium_results, total_cost = await run_premium_models(client, budget_limit=0.10)
         
         # Test 4: System prompts
-        system_prompt_works = await test_system_prompts(client)
+        system_prompt_works = await run_system_prompts(client)
         
         # Generate comprehensive report
         await generate_integration_report(
@@ -347,7 +347,7 @@ def main(api_key_file: str, api_key: str, budget: float):
         sys.exit(1)
     
     try:
-        asyncio.run(test_comprehensive_integration(api_key))
+        asyncio.run(run_comprehensive_integration(api_key))
         click.echo("\n🎉 OpenRouter integration testing completed successfully!")
     except Exception as e:
         click.echo(f"❌ Test failed: {e}")
