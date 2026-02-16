@@ -249,8 +249,8 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     username: str = Field(..., min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_]+$")
     full_name: Optional[str] = Field(None, max_length=255)
-    password: str = Field(..., min_length=8, max_length=100)
-    confirm_password: str = Field(..., min_length=8, max_length=100)
+    password: str = Field(..., min_length=1, max_length=100)  # Min 1 to allow auth manager to validate strength
+    confirm_password: str = Field(..., min_length=1, max_length=100)  # Min 1 to allow auth manager to validate strength
     
     def passwords_match(self) -> bool:
         """Check if passwords match"""
