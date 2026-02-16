@@ -1331,6 +1331,96 @@ class PluginRegistry:
             },
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+    
+    async def validate_plugin(self, manifest: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate a plugin from its manifest
+        
+        Args:
+            manifest: Plugin manifest dictionary
+            
+        Returns:
+            Validation result dictionary
+        """
+        try:
+            # Create a PluginManifest from the dict
+            plugin_manifest = PluginManifest(
+                name=manifest.get("name", ""),
+                version=manifest.get("version", ""),
+                plugin_id=manifest.get("plugin_id", manifest.get("name", "")),
+                description=manifest.get("description", ""),
+                author=manifest.get("author", ""),
+                entry_point=manifest.get("entry_point", ""),
+                plugin_type=PluginType.CUSTOM_TOOL if "type" not in manifest else PluginType(manifest["type"]),
+                capabilities=[PluginCapability(c) if isinstance(c, str) else c 
+                            for c in manifest.get("capabilities", [])],
+                dependencies=manifest.get("dependencies", []),
+                python_version=manifest.get("python_version", ">=3.8")
+            )
+            
+            # Validate the manifest
+            is_valid, errors = plugin_manifest.validate()
+            
+            return {
+                "valid": is_valid,
+                "errors": errors if errors else [],
+                "plugin_id": plugin_manifest.plugin_id,
+                "name": plugin_manifest.name,
+                "version": plugin_manifest.version
+            }
+        except Exception as e:
+            logger.error(f"Error validating plugin manifest: {e}")
+            return {
+                "valid": False,
+                "errors": [str(e)],
+                "plugin_id": None
+            }
+    
+    async def _scan_plugin_security(self, manifest: Dict[str, Any], 
+                                    code_path: Optional[Path] = None) -> Dict[str, Any]:
+        """Scan plugin for security vulnerabilities
+        
+        Args:
+            manifest: Plugin manifest dictionary
+            code_path: Optional path to plugin code
+            
+        Returns:
+            Security scan results
+        """
+        results = {
+            "passed": True,
+            "vulnerabilities": [],
+            "warnings": [],
+            "risk_level": "low"
+        }
+        
+        try:
+            # Check for dangerous capabilities
+            dangerous_caps = ["file_system_access", "network_access", "system_administration"]
+            capabilities = manifest.get("capabilities", [])
+            
+            for cap in capabilities:
+                cap_str = cap if isinstance(cap, str) else cap.value
+                if cap_str in dangerous_caps:
+                    results["warnings"].append(f"Plugin requests dangerous capability: {cap_str}")
+                    results["risk_level"] = "medium"
+            
+            # If code_path is provided, scan the actual code
+            if code_path and code_path.exists():
+                scan_results = await self.validator._perform_security_checks(code_path, manifest)
+                if scan_results.get("dangerous_patterns"):
+                    results["vulnerabilities"].extend(scan_results["dangerous_patterns"])
+                    results["passed"] = False
+                    results["risk_level"] = "high"
+            
+            return results
+        except Exception as e:
+            logger.error(f"Error scanning plugin security: {e}")
+            return {
+                "passed": False,
+                "vulnerabilities": [str(e)],
+                "warnings": [],
+                "risk_level": "unknown"
+            }
 
 
 # Export main classes

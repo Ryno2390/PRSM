@@ -574,6 +574,27 @@ class MarketplaceCore:
         
         logger.info("Marketplace Core initialized")
     
+    async def initialize(self):
+        """Initialize the marketplace system
+        
+        Performs any async initialization required for the marketplace.
+        """
+        try:
+            # Load any persisted integrations
+            if self.storage_path.exists():
+                # Could load from database/files here
+                pass
+            
+            # Initialize search engine
+            for integration in self.integrations.values():
+                self.search_engine.index_integration(integration)
+            
+            logger.info("Marketplace Core async initialization complete")
+            return True
+        except Exception as e:
+            logger.error(f"Error initializing marketplace: {e}")
+            return False
+    
     def register_integration(self, integration: Integration) -> bool:
         """Register a new integration"""
         
