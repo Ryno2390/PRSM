@@ -82,6 +82,24 @@ class RealMarketplaceService:
     
     def __init__(self):
         """Initialize marketplace service"""
+        from decimal import Decimal
+        
+        # Platform configuration
+        self.platform_fee_percentage = Decimal('0.025')  # 2.5% platform fee
+        self.db_service = None  # Will be set when database is available
+        
+        # Quality and pricing configuration
+        self.quality_boost_multipliers = {
+            'verified': Decimal('1.2'),
+            'popular': Decimal('1.1'),
+            'premium': Decimal('1.5')
+        }
+        self.pricing_models = {
+            'token_based': 'per_1k_tokens',
+            'request_based': 'per_request',
+            'subscription': 'monthly'
+        }
+        
         self.provider_configs = {
             MarketplaceProvider.HUGGING_FACE: {
                 'base_url': 'https://api-inference.huggingface.co',
@@ -369,6 +387,33 @@ This response showcases the model's reasoning and generation capabilities within
             'capabilities': capability_counts,
             'last_cache_update': self.last_cache_update.isoformat(),
             'supported_providers': len(self.provider_configs)
+        }
+    
+    async def get_marketplace_stats(self) -> Dict[str, Any]:
+        """Get marketplace statistics
+        
+        Returns:
+            Dictionary containing marketplace statistics
+        """
+        cache_stats = self.get_cache_statistics()
+        
+        return {
+            'platform': {
+                'fee_percentage': str(self.platform_fee_percentage),
+                'supported_providers': len(self.provider_configs),
+                'quality_tiers': len(self.quality_boost_multipliers),
+                'pricing_models': len(self.pricing_models)
+            },
+            'models': {
+                'total': cache_stats['total_models'],
+                'available': cache_stats['available_models'],
+                'by_provider': cache_stats['providers'],
+                'by_capability': cache_stats['capabilities']
+            },
+            'cache': {
+                'last_update': cache_stats['last_cache_update'],
+                'availability_percentage': cache_stats['availability_percentage']
+            }
         }
 
 
