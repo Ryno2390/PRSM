@@ -9,14 +9,15 @@ import json
 import time
 from typing import Dict, Any
 from uuid import uuid4
+import pytest
 
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
-from rich.text import Text
-
-# PRSM imports
 try:
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.text import Text
+
+    # PRSM imports
     from prsm.compute.agents.compilers import (
         HierarchicalCompiler, CompilationLevel, SynthesisStrategy,
         IntermediateResult, MidResult, FinalResponse, ReasoningTrace
@@ -27,11 +28,8 @@ try:
     console = Console()
     settings = get_settings()
     
-except ImportError as e:
-    console = Console()
-    console.print(f"Import error: {e}")
-    console.print("Some advanced features may not be available yet.")
-    settings = None
+except (ImportError, ModuleNotFoundError) as e:
+    pytest.skip("Module 'rich' not yet implemented", allow_module_level=True)
 
 
 class HierarchicalCompilerTestSuite:
