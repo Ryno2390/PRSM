@@ -451,13 +451,13 @@ class TestArchitectTaskEnhanced:
     
     def test_task_cost_estimation(self):
         """Test task cost estimation"""
-        # Cost should scale with complexity
+        # Cost should scale linearly with complexity at 5.00 per unit
         complexities_and_costs = [
             (1, Decimal("5.00")),
             (2, Decimal("10.00")),
-            (3, Decimal("20.00")),
-            (4, Decimal("40.00")),
-            (5, Decimal("80.00"))
+            (3, Decimal("15.00")),
+            (4, Decimal("20.00")),
+            (5, Decimal("25.00"))
         ]
         
         for complexity, expected_cost in complexities_and_costs:
@@ -471,7 +471,7 @@ class TestArchitectTaskEnhanced:
             
             assert task.estimated_cost == expected_cost
             
-            # Cost per complexity unit
+            # Cost per complexity unit should be constant at 5.00
             cost_per_unit = task.estimated_cost / complexity
             assert cost_per_unit == Decimal("5.00")
 

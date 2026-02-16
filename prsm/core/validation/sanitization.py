@@ -8,7 +8,7 @@ Comprehensive input sanitization to prevent security vulnerabilities.
 import re
 import html
 import urllib.parse
-from typing import str, Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List
 import logging
 
 from .exceptions import InputSanitizationError, SecurityValidationError

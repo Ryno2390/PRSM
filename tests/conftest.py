@@ -755,9 +755,50 @@ def mock_audit_logger():
 @pytest.fixture
 def performance_runner():
     """Performance test runner fixture"""
+    class PerformanceMetrics:
+        def __init__(self, execution_time_ms, error_rate, throughput_ops_per_sec=None):
+            self.execution_time_ms = execution_time_ms
+            self.error_rate = error_rate
+            self.throughput_ops_per_sec = throughput_ops_per_sec or 0
+    
     class PerformanceRunner:
         def __init__(self):
             self.results = []
+        
+        def run_performance_test(self, func, iterations=1, warmup_iterations=0):
+            """Run performance test with multiple iterations"""
+            import time
+            
+            # Warmup runs
+            for _ in range(warmup_iterations):
+                try:
+                    func()
+                except Exception:
+                    pass
+            
+            # Actual test runs
+            execution_times = []
+            errors = 0
+            
+            for _ in range(iterations):
+                start = time.time()
+                try:
+                    func()
+                except Exception:
+                    errors += 1
+                elapsed = (time.time() - start) * 1000  # Convert to ms
+                execution_times.append(elapsed)
+            
+            # Calculate metrics
+            avg_time_ms = sum(execution_times) / len(execution_times) if execution_times else 0
+            error_rate = errors / iterations if iterations > 0 else 0
+            throughput = iterations / (sum(execution_times) / 1000) if sum(execution_times) > 0 else 0
+            
+            return PerformanceMetrics(
+                execution_time_ms=avg_time_ms,
+                error_rate=error_rate,
+                throughput_ops_per_sec=throughput
+            )
         
         def measure(self, func, *args, **kwargs):
             """Measure execution time of a function"""
