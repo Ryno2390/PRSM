@@ -679,18 +679,28 @@ class TestSecurityIntegration:
     
     @pytest.mark.asyncio
     async def test_auth_flow_timing_attack_protection(self, auth_manager):
-        """Test that auth flow protects against timing attacks"""
+        """Test that auth flow protects against timing attacks
+        
+        Note: This test needs real timing, so we restore asyncio.sleep
+        """
         import time
+        import asyncio
+        from prsm.core.integrations.security.audit_logger import audit_logger
+        
+        # Import the unmocked asyncio.tasks module which has the original sleep
+        from asyncio.tasks import sleep as real_sleep
         
         # Test non-existent user (should take similar time as wrong password)
         start_time = time.time()
         
         with patch.object(auth_manager, '_get_user_by_login', new_callable=AsyncMock, return_value=None):
-            with patch('prsm.core.auth.auth_manager.audit_logger.log_auth_event'):
-                try:
-                    await auth_manager.authenticate_user(LoginRequest(username="nonexistent", password="password"))
-                except AuthenticationError:
-                    pass
+            with patch.object(audit_logger, 'log_auth_event', new_callable=AsyncMock):
+                # Replace the mocked asyncio.sleep with the real one
+                with patch('asyncio.sleep', real_sleep):
+                    try:
+                        await auth_manager.authenticate_user(LoginRequest(username="nonexistent", password="password"))
+                    except AuthenticationError:
+                        pass
         
         non_existent_time = time.time() - start_time
         

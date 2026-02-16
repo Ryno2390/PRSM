@@ -189,6 +189,27 @@ class AuditLogger:
         
         self.log_event(event)
     
+    async def log_auth_event(self, event_type: str, details: Dict[str, Any],
+                            client_info: Optional[Dict[str, Any]] = None) -> None:
+        """Log authentication-related events
+        
+        Args:
+            event_type: Type of auth event (e.g., 'login_success', 'login_failed')
+            details: Event details
+            client_info: Optional client information
+        """
+        user_id = details.get("user_id", "unknown")
+        
+        # Determine severity based on event type
+        severity = "warning" if "failed" in event_type else "info"
+        
+        # Combine details and client_info
+        event_details = {**details}
+        if client_info:
+            event_details["client_info"] = client_info
+        
+        await self.log_security_event(event_type, user_id, event_details, severity)
+    
     async def log_security_event(self, event_type: str, user_id: str,
                                 details: Dict[str, Any], security_level: str = "info") -> None:
         """Log a security event with details"""
