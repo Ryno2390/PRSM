@@ -595,13 +595,42 @@ class MarketplaceCore:
             logger.error(f"Error initializing marketplace: {e}")
             return False
     
-    def register_integration(self, integration: Integration) -> bool:
-        """Register a new integration"""
+    async def register_integration(self, integration: Union[Integration, Dict[str, Any]]) -> Optional[str]:
+        """Register a new integration
+        
+        Args:
+            integration: Integration object or dictionary
+            
+        Returns:
+            Integration ID if successful, None otherwise
+        """
         
         try:
+            # Convert dict to Integration object if needed
+            if isinstance(integration, dict):
+                integration_id = integration.get("integration_id", str(uuid.uuid4()))
+                version_str = integration.get("version", "1.0.0")
+                
+                # Convert capabilities dict to list if needed
+                capabilities = integration.get("capabilities", {})
+                if isinstance(capabilities, dict):
+                    capabilities = list(capabilities.keys())
+                
+                integration = Integration(
+                    integration_id=integration_id,
+                    name=integration.get("name", ""),
+                    integration_type=IntegrationType(integration.get("type", "plugin")),
+                    description=integration.get("description", ""),
+                    developer_id=integration.get("developer_id", ""),
+                    latest_version=version_str,
+                    capabilities=capabilities,
+                    category=integration.get("category", "Plugins"),
+                    subcategory=integration.get("subcategory", "Utilities")
+                )
+            
             # Validate integration
             if not self._validate_integration(integration):
-                return False
+                return None
             
             # Store integration
             self.integrations[integration.integration_id] = integration
@@ -624,11 +653,12 @@ class MarketplaceCore:
             # Emit event
             asyncio.create_task(self._emit_event("integration_registered", integration.to_dict()))
             
-            return True
+            return integration.integration_id
             
         except Exception as e:
-            logger.error(f"Failed to register integration {integration.name}: {e}")
-            return False
+            integration_name = integration.name if hasattr(integration, 'name') else str(integration)
+            logger.error(f"Failed to register integration {integration_name}: {e}")
+            return None
     
     def update_integration(self, integration_id: str, updates: Dict[str, Any]) -> bool:
         """Update an existing integration"""
