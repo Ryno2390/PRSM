@@ -13,12 +13,432 @@ import logging
 import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from decimal import Decimal
+from collections import defaultdict
 
 # Add PRSM to path for all tests
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+
+# ============================================================================
+# MOCK EXTERNAL SERVICES - AUTO-USE FIXTURES
+# ============================================================================
+
+class FakeRedisPipeline:
+    """Fake Redis pipeline for testing"""
+    
+    def __init__(self, redis):
+        self.redis = redis
+        self.commands = []
+    
+    def zadd(self, key, mapping):
+        """Add to sorted set"""
+        self.commands.append(('zadd', key, mapping))
+        return self
+    
+    def zremrangebyscore(self, key, min_score, max_score):
+        """Remove range by score"""
+        self.commands.append(('zremrangebyscore', key, min_score, max_score))
+        return self
+    
+    def zcard(self, key):
+        """Get sorted set cardinality"""
+        self.commands.append(('zcard', key))
+        return self
+    
+    def expire(self, key, seconds):
+        """Set key expiration"""
+        self.commands.append(('expire', key, seconds))
+        return self
+    
+    def set(self, key, value, ex=None):
+        """Set value"""
+        self.commands.append(('set', key, value, ex))
+        return self
+    
+    def get(self, key):
+        """Get value"""
+        self.commands.append(('get', key))
+        return self
+    
+    async def execute(self):
+        """Execute all pipeline commands"""
+        results = []
+        for cmd in self.commands:
+            if cmd[0] == 'zadd':
+                results.append(len(cmd[2]))
+            elif cmd[0] == 'zremrangebyscore':
+                results.append(0)
+            elif cmd[0] == 'zcard':
+                results.append(0)
+            elif cmd[0] == 'expire':
+                results.append(True)
+            elif cmd[0] == 'set':
+                results.append(True)
+            elif cmd[0] == 'get':
+                results.append(None)
+            else:
+                results.append(True)
+        self.commands = []
+        return results
+
+
+class FakeRedis:
+    """In-memory fake Redis client for testing"""
+    
+    def __init__(self):
+        self._data = {}
+        self._expirations = {}
+        self._sorted_sets = defaultdict(dict)
+        
+    async def get(self, key):
+        """Get value from fake Redis"""
+        return self._data.get(key)
+    
+    async def set(self, key, value, ex=None, nx=False, xx=False):
+        """Set value in fake Redis"""
+        self._data[key] = value
+        if ex:
+            self._expirations[key] = ex
+        return True
+    
+    async def delete(self, *keys):
+        """Delete keys from fake Redis"""
+        count = 0
+        for key in keys:
+            if key in self._data:
+                del self._data[key]
+                count += 1
+        return count
+    
+    async def exists(self, key):
+        """Check if key exists"""
+        return 1 if key in self._data else 0
+    
+    async def keys(self, pattern="*"):
+        """Get keys matching pattern"""
+        return list(self._data.keys())
+    
+    async def zadd(self, key, mapping):
+        """Add to sorted set"""
+        if key not in self._sorted_sets:
+            self._sorted_sets[key] = {}
+        self._sorted_sets[key].update(mapping)
+        return len(mapping)
+    
+    async def zremrangebyscore(self, key, min_score, max_score):
+        """Remove range by score from sorted set"""
+        if key not in self._sorted_sets:
+            return 0
+        removed = 0
+        to_remove = []
+        for member, score in self._sorted_sets[key].items():
+            if min_score <= score <= max_score:
+                to_remove.append(member)
+                removed += 1
+        for member in to_remove:
+            del self._sorted_sets[key][member]
+        return removed
+    
+    async def zcard(self, key):
+        """Get sorted set cardinality"""
+        return len(self._sorted_sets.get(key, {}))
+    
+    async def expire(self, key, seconds):
+        """Set key expiration"""
+        self._expirations[key] = seconds
+        return True
+    
+    async def incr(self, key):
+        """Increment key"""
+        current = int(self._data.get(key, 0))
+        self._data[key] = str(current + 1)
+        return current + 1
+    
+    async def decr(self, key):
+        """Decrement key"""
+        current = int(self._data.get(key, 0))
+        self._data[key] = str(current - 1)
+        return current - 1
+    
+    async def lpush(self, key, *values):
+        """Push to list (left)"""
+        if key not in self._data:
+            self._data[key] = []
+        for value in values:
+            self._data[key].insert(0, value)
+        return len(self._data[key])
+    
+    async def rpush(self, key, *values):
+        """Push to list (right)"""
+        if key not in self._data:
+            self._data[key] = []
+        self._data[key].extend(values)
+        return len(self._data[key])
+    
+    async def lrange(self, key, start, stop):
+        """Get list range"""
+        if key not in self._data:
+            return []
+        return self._data[key][start:stop+1] if stop >= 0 else self._data[key][start:]
+    
+    def pipeline(self):
+        """Create a pipeline"""
+        return FakeRedisPipeline(self)
+    
+    async def close(self):
+        """Close connection (no-op for fake)"""
+        pass
+    
+    async def ping(self):
+        """Ping server"""
+        return True
+    
+    def __await__(self):
+        """Make FakeRedis awaitable"""
+        async def _impl():
+            return self
+        return _impl().__await__()
+
+
+class FakeAsyncPGConnection:
+    """Fake asyncpg connection for testing"""
+    
+    def __init__(self):
+        self._data = defaultdict(list)
+        self._closed = False
+        
+    async def execute(self, query, *args):
+        """Execute query"""
+        return "SUCCESS"
+    
+    async def fetch(self, query, *args):
+        """Fetch rows"""
+        return []
+    
+    async def fetchrow(self, query, *args):
+        """Fetch single row"""
+        return None
+    
+    async def fetchval(self, query, *args):
+        """Fetch single value"""
+        return None
+    
+    async def close(self):
+        """Close connection"""
+        self._closed = True
+    
+    def transaction(self):
+        """Create transaction context manager"""
+        return FakeAsyncPGTransaction(self)
+
+
+class FakeAsyncPGTransaction:
+    """Fake asyncpg transaction"""
+    
+    def __init__(self, connection):
+        self.connection = connection
+    
+    async def __aenter__(self):
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def mock_redis():
+    """Auto-use fixture to mock Redis connections"""
+    fake_redis_instance = FakeRedis()
+    
+    # Mock redis.asyncio.Redis
+    with patch('redis.asyncio.Redis') as mock_async_redis, \
+         patch('redis.asyncio.from_url') as mock_async_from_url, \
+         patch('redis.Redis') as mock_sync_redis, \
+         patch('redis.from_url') as mock_sync_from_url:
+        
+        # Return fake Redis for all connection methods
+        mock_async_redis.return_value = fake_redis_instance
+        mock_async_from_url.return_value = fake_redis_instance
+        mock_sync_redis.return_value = fake_redis_instance
+        mock_sync_from_url.return_value = fake_redis_instance
+        
+        yield fake_redis_instance
+
+
+@pytest.fixture(autouse=True)
+def mock_asyncpg():
+    """Auto-use fixture to mock asyncpg connections"""
+    fake_conn = FakeAsyncPGConnection()
+    
+    async def fake_connect(*args, **kwargs):
+        return fake_conn
+    
+    with patch('asyncpg.connect', side_effect=fake_connect), \
+         patch('asyncpg.create_pool') as mock_pool:
+        
+        # Mock pool
+        mock_pool_instance = AsyncMock()
+        mock_pool_instance.acquire.return_value.__aenter__.return_value = fake_conn
+        mock_pool_instance.close = AsyncMock()
+        mock_pool.return_value = mock_pool_instance
+        
+        yield fake_conn
+
+
+@pytest.fixture(autouse=True)
+def mock_sqlalchemy_engines():
+    """Auto-use fixture to mock SQLAlchemy async engines"""
+    mock_engine = AsyncMock()
+    mock_connection = AsyncMock()
+    mock_session = AsyncMock()
+    
+    mock_engine.connect.return_value.__aenter__.return_value = mock_connection
+    mock_engine.begin.return_value.__aenter__.return_value = mock_connection
+    mock_engine.dispose = AsyncMock()
+    
+    with patch('sqlalchemy.ext.asyncio.create_async_engine', return_value=mock_engine), \
+         patch('sqlalchemy.ext.asyncio.AsyncSession', return_value=mock_session):
+        yield mock_engine
+
+
+@pytest.fixture(autouse=True)
+def mock_http_requests():
+    """Auto-use fixture to mock HTTP requests (aiohttp, httpx, requests)"""
+    
+    # Mock aiohttp ClientSession
+    mock_response = AsyncMock()
+    mock_response.status = 200
+    mock_response.json = AsyncMock(return_value={"status": "ok"})
+    mock_response.text = AsyncMock(return_value="OK")
+    mock_response.read = AsyncMock(return_value=b"OK")
+    
+    mock_session = AsyncMock()
+    mock_session.get.return_value.__aenter__.return_value = mock_response
+    mock_session.post.return_value.__aenter__.return_value = mock_response
+    mock_session.put.return_value.__aenter__.return_value = mock_response
+    mock_session.delete.return_value.__aenter__.return_value = mock_response
+    mock_session.close = AsyncMock()
+    
+    # Mock httpx AsyncClient
+    mock_httpx_response = MagicMock()
+    mock_httpx_response.status_code = 200
+    mock_httpx_response.json.return_value = {"status": "ok"}
+    mock_httpx_response.text = "OK"
+    mock_httpx_response.content = b"OK"
+    
+    mock_httpx_client = AsyncMock()
+    mock_httpx_client.get = AsyncMock(return_value=mock_httpx_response)
+    mock_httpx_client.post = AsyncMock(return_value=mock_httpx_response)
+    mock_httpx_client.put = AsyncMock(return_value=mock_httpx_response)
+    mock_httpx_client.delete = AsyncMock(return_value=mock_httpx_response)
+    mock_httpx_client.aclose = AsyncMock()
+    
+    # Mock requests (synchronous)
+    mock_sync_response = MagicMock()
+    mock_sync_response.status_code = 200
+    mock_sync_response.json.return_value = {"status": "ok"}
+    mock_sync_response.text = "OK"
+    mock_sync_response.content = b"OK"
+    
+    with patch('aiohttp.ClientSession', return_value=mock_session), \
+         patch('httpx.AsyncClient', return_value=mock_httpx_client), \
+         patch('httpx.Client') as mock_httpx_sync, \
+         patch('requests.get', return_value=mock_sync_response), \
+         patch('requests.post', return_value=mock_sync_response), \
+         patch('requests.put', return_value=mock_sync_response), \
+         patch('requests.delete', return_value=mock_sync_response):
+        
+        mock_httpx_sync.return_value.get.return_value = mock_httpx_response
+        mock_httpx_sync.return_value.post.return_value = mock_httpx_response
+        
+        yield {
+            'aiohttp': mock_session,
+            'httpx': mock_httpx_client,
+            'requests': mock_sync_response
+        }
+
+
+@pytest.fixture(scope="session", autouse=True)
+def mock_external_connections_early():
+    """Very early fixture to mock external connections before test collection"""
+    # Mock subprocess calls that might try to connect
+    with patch('subprocess.run') as mock_run, \
+         patch('subprocess.Popen') as mock_popen, \
+         patch('socket.socket') as mock_socket:
+        
+        mock_run.return_value = Mock(returncode=0, stdout=b'', stderr=b'')
+        mock_popen.return_value = Mock(returncode=0, communicate=lambda: (b'', b''))
+        mock_socket.return_value = Mock()
+        
+        yield
+
+
+@pytest.fixture(autouse=True)
+def mock_time_sleep():
+    """Auto-use fixture to mock time.sleep in tests to prevent actual delays"""
+    
+    # Mock time.sleep to be instant
+    def fake_sleep(seconds):
+        """Fake sleep that doesn't actually sleep"""
+        pass
+    
+    with patch('time.sleep', side_effect=fake_sleep):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def mock_asyncio_sleep():
+    """Auto-use fixture to mock asyncio.sleep to prevent actual delays"""
+    
+    async def fake_async_sleep(seconds):
+        """Fake async sleep that doesn't actually sleep"""
+        await asyncio.sleep(0)  # Yield control but don't actually wait
+    
+    with patch('asyncio.sleep', side_effect=fake_async_sleep):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def mock_openai_clients():
+    """Auto-use fixture to mock OpenAI and LLM clients"""
+    
+    # Mock OpenAI response
+    mock_completion = MagicMock()
+    mock_completion.choices = [MagicMock()]
+    mock_completion.choices[0].message.content = "Mocked LLM response"
+    mock_completion.choices[0].text = "Mocked LLM response"
+    mock_completion.usage = MagicMock()
+    mock_completion.usage.total_tokens = 100
+    
+    mock_openai_client = AsyncMock()
+    mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_completion)
+    mock_openai_client.completions.create = AsyncMock(return_value=mock_completion)
+    
+    # Mock Anthropic Claude
+    mock_anthropic_response = MagicMock()
+    mock_anthropic_response.content = [MagicMock()]
+    mock_anthropic_response.content[0].text = "Mocked Claude response"
+    
+    mock_anthropic_client = AsyncMock()
+    mock_anthropic_client.messages.create = AsyncMock(return_value=mock_anthropic_response)
+    
+    with patch('openai.AsyncOpenAI', return_value=mock_openai_client), \
+         patch('openai.OpenAI') as mock_sync_openai, \
+         patch('anthropic.AsyncAnthropic', return_value=mock_anthropic_client), \
+         patch('anthropic.Anthropic') as mock_sync_anthropic:
+        
+        # Mock sync versions too
+        mock_sync_openai.return_value.chat.completions.create.return_value = mock_completion
+        mock_sync_anthropic.return_value.messages.create.return_value = mock_anthropic_response
+        
+        yield {
+            'openai': mock_openai_client,
+            'anthropic': mock_anthropic_client,
+            'completion': mock_completion
+        }
 
 
 @pytest.fixture(scope="session")
@@ -83,11 +503,21 @@ def setup_test_environment():
     os.environ["PRSM_ENVIRONMENT"] = "test"
     os.environ["PRSM_LOG_LEVEL"] = "DEBUG"
     os.environ["PRSM_DATABASE_URL"] = "sqlite:///:memory:"
+    os.environ["SKIP_REDIS_TESTS"] = "true"
+    os.environ["SKIP_POSTGRES_TESTS"] = "true"
+    os.environ["SKIP_INTEGRATION_TESTS"] = "true"
     
     yield
     
     # Cleanup environment
-    test_env_vars = ["PRSM_ENVIRONMENT", "PRSM_LOG_LEVEL", "PRSM_DATABASE_URL"]
+    test_env_vars = [
+        "PRSM_ENVIRONMENT", 
+        "PRSM_LOG_LEVEL", 
+        "PRSM_DATABASE_URL",
+        "SKIP_REDIS_TESTS",
+        "SKIP_POSTGRES_TESTS",
+        "SKIP_INTEGRATION_TESTS"
+    ]
     for var in test_env_vars:
         os.environ.pop(var, None)
 
