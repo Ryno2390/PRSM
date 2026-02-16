@@ -23,6 +23,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
+
 # ============================================================================
 # MOCK EXTERNAL SERVICES - AUTO-USE FIXTURES
 # ============================================================================
@@ -737,6 +738,27 @@ def mock_jwt_handler_init():
     # This prevents the JWT handler from trying to connect to real database/redis
     # Individual tests can still call initialize() if needed
     yield  # Just provide a placeholder - JWT handler already handles None settings gracefully
+
+
+@pytest.fixture(scope="session")
+def test_app():
+    """Create test FastAPI application — skips if FastAPI not importable"""
+    try:
+        from prsm.interface.api.main import create_app
+        return create_app()
+    except Exception:
+        pytest.skip("FastAPI app not available for testing")
+
+
+@pytest_asyncio.fixture
+async def async_test_client(test_app):
+    """Create async test client for API testing"""
+    try:
+        from httpx import AsyncClient
+    except ImportError:
+        pytest.skip("httpx not available")
+    async with AsyncClient(app=test_app, base_url="http://test") as client:
+        yield client
 
 
 @pytest.fixture(autouse=True)

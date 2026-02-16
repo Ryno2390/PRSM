@@ -32,7 +32,7 @@ from prsm.compute.agents.executors.api_clients import (
 )
 
 
-async def test_with_rate_limiting(api_key: str):
+async def run_with_rate_limiting(api_key: str):
     """Test with proper rate limiting for free tier"""
     
     click.echo("🚀 PRSM OpenAI Integration - Free Tier Test")
@@ -256,7 +256,7 @@ def main(api_key_file: str, api_key: str):
         sys.exit(1)
     
     try:
-        asyncio.run(test_with_rate_limiting(api_key))
+        asyncio.run(run_with_rate_limiting(api_key))
         click.echo("\n🎉 Free tier testing completed successfully!")
     except Exception as e:
         click.echo(f"❌ Test failed: {e}")

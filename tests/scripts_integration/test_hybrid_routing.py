@@ -44,7 +44,7 @@ from prsm.compute.agents.executors.api_clients import (
 )
 
 
-async def test_privacy_routing(router: HybridModelRouter):
+async def run_privacy_routing(router: HybridModelRouter):
     """Test privacy-sensitive content routing"""
     click.echo("🔒 Testing Privacy-Sensitive Routing")
     click.echo("-" * 45)
@@ -122,7 +122,7 @@ async def test_privacy_routing(router: HybridModelRouter):
     return privacy_results
 
 
-async def test_capability_routing(router: HybridModelRouter):
+async def run_capability_routing(router: HybridModelRouter):
     """Test capability-aware routing"""
     click.echo(f"\n🧠 Testing Capability-Aware Routing")
     click.echo("-" * 45)
@@ -192,7 +192,7 @@ async def test_capability_routing(router: HybridModelRouter):
     return capability_results
 
 
-async def test_cost_optimization(router: HybridModelRouter):
+async def run_cost_optimization(router: HybridModelRouter):
     """Test cost-optimized routing"""
     click.echo(f"\n💰 Testing Cost-Optimized Routing")
     click.echo("-" * 40)
@@ -243,7 +243,7 @@ async def test_cost_optimization(router: HybridModelRouter):
     return cost_results, total_estimated_cost
 
 
-async def test_hybrid_intelligent_routing(router: HybridModelRouter):
+async def run_hybrid_intelligent_routing(router: HybridModelRouter):
     """Test the hybrid intelligent routing strategy"""
     click.echo(f"\n🧠 Testing Hybrid Intelligent Routing")
     click.echo("-" * 45)
@@ -324,7 +324,7 @@ async def test_hybrid_intelligent_routing(router: HybridModelRouter):
     return hybrid_results
 
 
-async def test_end_to_end_execution(router: HybridModelRouter):
+async def run_end_to_end_execution(router: HybridModelRouter):
     """Test actual execution through the routing system"""
     click.echo(f"\n🚀 Testing End-to-End Execution")
     click.echo("-" * 40)
@@ -404,19 +404,19 @@ async def test_comprehensive_hybrid_routing(openrouter_api_key: str = None):
     
     try:
         # Test 1: Privacy routing
-        privacy_results = await test_privacy_routing(router)
+        privacy_results = await run_privacy_routing(router)
         
         # Test 2: Capability routing
-        capability_results = await test_capability_routing(router)
+        capability_results = await run_capability_routing(router)
         
         # Test 3: Cost optimization
-        cost_results, total_cost = await test_cost_optimization(router)
+        cost_results, total_cost = await run_cost_optimization(router)
         
         # Test 4: Hybrid intelligent
-        hybrid_results = await test_hybrid_intelligent_routing(router)
+        hybrid_results = await run_hybrid_intelligent_routing(router)
         
         # Test 5: End-to-end execution
-        execution_results = await test_end_to_end_execution(router)
+        execution_results = await run_end_to_end_execution(router)
         
         # Generate comprehensive report
         await generate_hybrid_routing_report(
