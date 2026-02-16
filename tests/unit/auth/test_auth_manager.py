@@ -103,7 +103,7 @@ class TestAuthManager:
     @pytest.mark.asyncio
     async def test_register_user_success(self, auth_manager, valid_register_request):
         """Test successful user registration"""
-        with patch.object(auth_manager, '_user_exists', return_value=False):
+        with patch.object(auth_manager, '_user_exists', new_callable=AsyncMock, return_value=False):
             with patch('prsm.auth.auth_manager.jwt_handler.hash_password', return_value="hashed"):
                 with patch('prsm.auth.auth_manager.audit_logger.log_auth_event') as mock_audit:
                     
@@ -141,7 +141,7 @@ class TestAuthManager:
     @pytest.mark.asyncio
     async def test_register_user_already_exists(self, auth_manager, valid_register_request):
         """Test registration when user already exists"""
-        with patch.object(auth_manager, '_user_exists', return_value=True):
+        with patch.object(auth_manager, '_user_exists', new_callable=AsyncMock, return_value=True):
             with patch('prsm.auth.auth_manager.audit_logger.log_auth_event') as mock_audit:
                 
                 with pytest.raises(HTTPException) as exc_info:
@@ -161,7 +161,7 @@ class TestAuthManager:
             confirm_password="weak"
         )
         
-        with patch.object(auth_manager, '_user_exists', return_value=False):
+        with patch.object(auth_manager, '_user_exists', new_callable=AsyncMock, return_value=False):
             with patch('prsm.auth.auth_manager.audit_logger.log_auth_event') as mock_audit:
                 
                 with pytest.raises(HTTPException) as exc_info:
@@ -176,8 +176,8 @@ class TestAuthManager:
     @pytest.mark.asyncio
     async def test_authenticate_user_success(self, auth_manager, valid_login_request, mock_user):
         """Test successful user authentication"""
-        with patch.object(auth_manager, '_get_user_by_login', return_value=mock_user):
-            with patch.object(auth_manager, '_is_account_locked', return_value=False):
+        with patch.object(auth_manager, '_get_user_by_login', new_callable=AsyncMock, return_value=mock_user):
+            with patch.object(auth_manager, '_is_account_locked', new_callable=AsyncMock, return_value=False):
                 with patch('prsm.auth.auth_manager.jwt_handler.verify_password', return_value=True):
                     with patch('prsm.auth.auth_manager.jwt_handler.create_access_token') as mock_access:
                         with patch('prsm.auth.auth_manager.jwt_handler.create_refresh_token') as mock_refresh:
@@ -208,7 +208,7 @@ class TestAuthManager:
     @pytest.mark.asyncio
     async def test_authenticate_user_not_found(self, auth_manager, valid_login_request):
         """Test authentication with non-existent user"""
-        with patch.object(auth_manager, '_get_user_by_login', return_value=None):
+        with patch.object(auth_manager, '_get_user_by_login', new_callable=AsyncMock, return_value=None):
             with patch('prsm.auth.auth_manager.audit_logger.log_auth_event') as mock_audit:
                 
                 with pytest.raises(AuthenticationError):
@@ -223,8 +223,8 @@ class TestAuthManager:
     @pytest.mark.asyncio
     async def test_authenticate_user_account_locked(self, auth_manager, valid_login_request, mock_user):
         """Test authentication with locked account"""
-        with patch.object(auth_manager, '_get_user_by_login', return_value=mock_user):
-            with patch.object(auth_manager, '_is_account_locked', return_value=True):
+        with patch.object(auth_manager, '_get_user_by_login', new_callable=AsyncMock, return_value=mock_user):
+            with patch.object(auth_manager, '_is_account_locked', new_callable=AsyncMock, return_value=True):
                 with patch('prsm.auth.auth_manager.audit_logger.log_auth_event') as mock_audit:
                     
                     with pytest.raises(AuthenticationError) as exc_info:
@@ -238,8 +238,8 @@ class TestAuthManager:
         """Test authentication with inactive account"""
         mock_user.is_active = False
         
-        with patch.object(auth_manager, '_get_user_by_login', return_value=mock_user):
-            with patch.object(auth_manager, '_is_account_locked', return_value=False):
+        with patch.object(auth_manager, '_get_user_by_login', new_callable=AsyncMock, return_value=mock_user):
+            with patch.object(auth_manager, '_is_account_locked', new_callable=AsyncMock, return_value=False):
                 with patch('prsm.auth.auth_manager.audit_logger.log_auth_event') as mock_audit:
                     
                     with pytest.raises(AuthenticationError) as exc_info:
@@ -251,10 +251,10 @@ class TestAuthManager:
     @pytest.mark.asyncio
     async def test_authenticate_user_wrong_password(self, auth_manager, valid_login_request, mock_user):
         """Test authentication with wrong password"""
-        with patch.object(auth_manager, '_get_user_by_login', return_value=mock_user):
-            with patch.object(auth_manager, '_is_account_locked', return_value=False):
+        with patch.object(auth_manager, '_get_user_by_login', new_callable=AsyncMock, return_value=mock_user):
+            with patch.object(auth_manager, '_is_account_locked', new_callable=AsyncMock, return_value=False):
                 with patch('prsm.auth.auth_manager.jwt_handler.verify_password', return_value=False):
-                    with patch.object(auth_manager, '_record_failed_login') as mock_record:
+                    with patch.object(auth_manager, '_record_failed_login', new_callable=AsyncMock) as mock_record:
                         with patch('prsm.auth.auth_manager.audit_logger.log_auth_event') as mock_audit:
                             
                             with pytest.raises(AuthenticationError):
@@ -280,7 +280,7 @@ class TestAuthManager:
         )
         
         with patch('prsm.auth.auth_manager.jwt_handler.verify_token', return_value=token_data):
-            with patch.object(auth_manager, '_get_user_by_id', return_value=mock_user):
+            with patch.object(auth_manager, '_get_user_by_id', new_callable=AsyncMock, return_value=mock_user):
                 
                 user = await auth_manager.get_current_user("valid_token")
                 
@@ -679,7 +679,7 @@ class TestSecurityIntegration:
         # Test non-existent user (should take similar time as wrong password)
         start_time = time.time()
         
-        with patch.object(auth_manager, '_get_user_by_login', return_value=None):
+        with patch.object(auth_manager, '_get_user_by_login', new_callable=AsyncMock, return_value=None):
             with patch('prsm.auth.auth_manager.audit_logger.log_auth_event'):
                 try:
                     await auth_manager.authenticate_user(LoginRequest(username="nonexistent", password="password"))
@@ -697,7 +697,7 @@ class TestSecurityIntegration:
         with patch('prsm.auth.auth_manager.audit_logger.log_auth_event') as mock_audit:
             
             # Test failed login logging
-            with patch.object(auth_manager, '_get_user_by_login', return_value=None):
+            with patch.object(auth_manager, '_get_user_by_login', new_callable=AsyncMock, return_value=None):
                 try:
                     await auth_manager.authenticate_user(LoginRequest(username="test", password="wrong"))
                 except AuthenticationError:
