@@ -7,6 +7,7 @@ essential testing fixtures.
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
 import sys
 import logging
@@ -288,20 +289,130 @@ def mock_asyncpg():
         yield fake_conn
 
 
-@pytest.fixture(autouse=True)
-def mock_sqlalchemy_engines():
-    """Auto-use fixture to mock SQLAlchemy async engines"""
-    mock_engine = AsyncMock()
-    mock_connection = AsyncMock()
-    mock_session = AsyncMock()
-    
-    mock_engine.connect.return_value.__aenter__.return_value = mock_connection
-    mock_engine.begin.return_value.__aenter__.return_value = mock_connection
-    mock_engine.dispose = AsyncMock()
-    
-    with patch('sqlalchemy.ext.asyncio.create_async_engine', return_value=mock_engine), \
-         patch('sqlalchemy.ext.asyncio.AsyncSession', return_value=mock_session):
+@pytest.fixture(scope="session")
+def test_database_url():
+    """Test database URL - in-memory SQLite"""
+    return "sqlite+aiosqlite:///:memory:"
+
+
+@pytest.fixture(scope="session")
+def test_sync_database_url():
+    """Test database URL for sync operations - in-memory SQLite"""
+    return "sqlite:///:memory:"
+
+
+@pytest_asyncio.fixture(scope="session")
+async def test_async_engine(test_database_url):
+    """Create async test database engine"""
+    try:
+        from sqlalchemy import JSON
+        from sqlalchemy.ext.asyncio import create_async_engine
+        from sqlalchemy.dialects.postgresql import JSONB
+        from prsm.core.database import Base
+        
+        # Replace JSONB columns with JSON for SQLite compatibility
+        for table in Base.metadata.tables.values():
+            for column in table.columns:
+                if isinstance(column.type, JSONB):
+                    column.type = JSON()
+        
+        engine = create_async_engine(
+            test_database_url,
+            echo=False,
+            connect_args={"check_same_thread": False}
+        )
+        
+        # Create all tables
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        
+        yield engine
+        
+        # Cleanup
+        await engine.dispose()
+    except ImportError:
+        # If imports fail, provide a mock
+        mock_engine = AsyncMock()
         yield mock_engine
+
+
+@pytest.fixture(scope="session")
+def test_sync_engine(test_sync_database_url):
+    """Create sync test database engine"""
+    try:
+        from sqlalchemy import create_engine, JSON
+        from sqlalchemy.pool import StaticPool
+        from sqlalchemy.dialects.postgresql import JSONB
+        from prsm.core.database import Base
+        
+        # Replace JSONB columns with JSON for SQLite compatibility
+        for table in Base.metadata.tables.values():
+            for column in table.columns:
+                if isinstance(column.type, JSONB):
+                    column.type = JSON()
+        
+        engine = create_engine(
+            test_sync_database_url,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+            echo=False
+        )
+        
+        # Create all tables
+        Base.metadata.create_all(engine)
+        
+        yield engine
+        
+        # Cleanup
+        engine.dispose()
+    except ImportError:
+        # If imports fail, provide a mock
+        mock_engine = Mock()
+        yield mock_engine
+
+
+@pytest_asyncio.fixture
+async def test_async_session(test_async_engine):
+    """Provide async database session with automatic rollback"""
+    try:
+        from sqlalchemy.ext.asyncio import AsyncSession
+        
+        async with AsyncSession(test_async_engine, expire_on_commit=False) as session:
+            async with session.begin():
+                yield session
+                # Transaction will auto-rollback when exiting context
+    except ImportError:
+        # If imports fail, provide a mock
+        mock_session = AsyncMock()
+        yield mock_session
+
+
+@pytest.fixture
+def test_session(test_sync_engine):
+    """Provide sync database session with automatic rollback"""
+    try:
+        from sqlalchemy.orm import Session
+        
+        with Session(test_sync_engine) as session:
+            with session.begin():
+                yield session
+                # Transaction will auto-rollback when exiting context
+    except ImportError:
+        # If imports fail, provide a mock
+        mock_session = Mock()
+        yield mock_session
+
+
+@pytest_asyncio.fixture
+async def async_db_session(test_async_session):
+    """Alias for test_async_session for compatibility"""
+    return test_async_session
+
+
+@pytest.fixture
+def db_session(test_session):
+    """Alias for test_session for compatibility"""
+    return test_session
 
 
 @pytest.fixture(autouse=True)
@@ -392,9 +503,14 @@ def mock_time_sleep():
 def mock_asyncio_sleep():
     """Auto-use fixture to mock asyncio.sleep to prevent actual delays"""
     
+    # Import the original sleep function before patching
+    import asyncio
+    _original_sleep = asyncio.sleep
+    
     async def fake_async_sleep(seconds):
         """Fake async sleep that doesn't actually sleep"""
-        await asyncio.sleep(0)  # Yield control but don't actually wait
+        # Yield control to event loop but don't actually wait
+        await _original_sleep(0)
     
     with patch('asyncio.sleep', side_effect=fake_async_sleep):
         yield
@@ -540,6 +656,110 @@ def mock_ftns_service():
         "amount": Decimal("10.0")
     }
     return mock_service
+
+
+# Database test factory
+class DatabaseTestFactory:
+    """Factory for creating test database objects"""
+    
+    @staticmethod
+    def create_prsm_session(session_id=None, user_id="test_user", status="pending", **kwargs):
+        """Create test PRSM session"""
+        try:
+            from prsm.core.database import PRSMSessionModel
+            import uuid
+            from datetime import datetime, timezone
+            
+            return PRSMSessionModel(
+                session_id=session_id or uuid.uuid4(),
+                user_id=user_id,
+                status=status,
+                created_at=datetime.now(timezone.utc),
+                **kwargs
+            )
+        except ImportError:
+            return Mock(session_id=session_id, user_id=user_id, status=status, **kwargs)
+    
+    @staticmethod
+    def create_ftns_transaction(transaction_id=None, from_user=None, to_user=None, user_id=None, amount=10.0, transaction_type="reward", **kwargs):
+        """Create test FTNS transaction"""
+        try:
+            from prsm.core.database import FTNSTransactionModel
+            import uuid
+            from datetime import datetime, timezone
+            
+            # Handle user_id alias for to_user
+            if user_id and not to_user:
+                to_user = user_id
+            elif not to_user:
+                to_user = "test_user"
+            
+            # Remove user_id from kwargs if present to avoid conflict
+            kwargs.pop('user_id', None)
+            
+            return FTNSTransactionModel(
+                transaction_id=transaction_id or uuid.uuid4(),
+                from_user=from_user,
+                to_user=to_user,
+                amount=amount,
+                transaction_type=transaction_type,
+                description=kwargs.get('description', 'Test transaction'),
+                created_at=datetime.now(timezone.utc),
+                **{k: v for k, v in kwargs.items() if k != 'description'}
+            )
+        except ImportError:
+            return Mock(transaction_id=transaction_id, to_user=to_user or user_id, amount=amount, **kwargs)
+    
+    @staticmethod
+    def create_user_input(input_id=None, user_id="test_user", content="Test query", **kwargs):
+        """Create test user input"""
+        return Mock(input_id=input_id, user_id=user_id, content=content, **kwargs)
+
+
+@pytest.fixture
+def db_factory():
+    """Database test factory fixture"""
+    return DatabaseTestFactory()
+
+
+@pytest.fixture
+def performance_runner():
+    """Performance test runner fixture"""
+    class PerformanceRunner:
+        def __init__(self):
+            self.results = []
+        
+        def measure(self, func, *args, **kwargs):
+            """Measure execution time of a function"""
+            import time
+            start = time.time()
+            result = func(*args, **kwargs)
+            elapsed = time.time() - start
+            self.results.append(elapsed)
+            return result, elapsed
+        
+        async def measure_async(self, func, *args, **kwargs):
+            """Measure execution time of an async function"""
+            import time
+            start = time.time()
+            result = await func(*args, **kwargs)
+            elapsed = time.time() - start
+            self.results.append(elapsed)
+            return result, elapsed
+        
+        def get_stats(self):
+            """Get performance statistics"""
+            if not self.results:
+                return {"avg": 0, "min": 0, "max": 0, "total": 0}
+            return {
+                "avg": sum(self.results) / len(self.results),
+                "min": min(self.results),
+                "max": max(self.results),
+                "total": sum(self.results),
+                "count": len(self.results)
+            }
+    
+    return PerformanceRunner()
 
 
 # Test helpers
