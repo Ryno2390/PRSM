@@ -163,7 +163,7 @@ class NWTNRequestSchema(QueryValidationSchema):
                 )
         return v
     
-    @root_validator
+    @root_validator(skip_on_failure=True)
     def validate_processing_requirements(cls, values):
         """Validate processing requirement combinations"""
         thinking_mode = values.get('thinking_mode')

@@ -62,6 +62,7 @@ All models follow the PRSMBaseModel pattern with:
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from enum import Enum
 from typing import List, Optional, Dict, Any, Union, Tuple
 from uuid import UUID, uuid4
@@ -191,12 +192,20 @@ class PRSMBaseModel(BaseModel):
     model_config = {
         "from_attributes": True,
         "use_enum_values": True,
-        "validate_by_name": True,
+        "populate_by_name": True,
         "json_encoders": {
             datetime: lambda v: v.isoformat(),
             UUID: lambda v: str(v)
         }
     }
+    
+    def dict(self, **kwargs):
+        """Backwards compatibility for Pydantic v1 dict() method"""
+        return self.model_dump(**kwargs)
+    
+    def json(self, **kwargs):
+        """Backwards compatibility for Pydantic v1 json() method"""
+        return self.model_dump_json(**kwargs)
 
 
 class TimestampMixin(PRSMBaseModel):
@@ -229,14 +238,40 @@ class PRSMSession(TimestampMixin):
     Each session represents a complete user interaction from
     initial query through final response delivery.
     """
-    session_id: UUID = Field(default_factory=uuid4)
+    session_id: str = Field(default_factory=lambda: str(uuid4()))
     user_id: str
     nwtn_context_allocation: int = Field(default=0, description="FTNS tokens allocated for context")
     context_used: int = Field(default=0, description="Context tokens consumed")
     reasoning_trace: List["ReasoningStep"] = Field(default_factory=list)
     safety_flags: List["SafetyFlag"] = Field(default_factory=list)
-    status: TaskStatus = TaskStatus.PENDING
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    status: str = "pending"
+    query_count: int = Field(default=0, description="Number of queries in this session")
+    total_cost: Decimal = Field(default=Decimal("0.0"), description="Total FTNS cost for this session")
+    metadata: Optional[Dict[str, Any]] = None
+    
+    @field_validator('session_id', mode='before')
+    @classmethod
+    def validate_session_id(cls, v):
+        """Validate session_id is a valid UUID format"""
+        if isinstance(v, UUID):
+            return str(v)
+        if isinstance(v, str):
+            try:
+                # Try to parse as UUID to validate format
+                UUID(v)
+                return v
+            except ValueError:
+                raise ValueError(f"Invalid UUID format: {v}")
+        return str(v)
+    
+    @field_validator('status', mode='before')
+    @classmethod
+    def validate_status(cls, v):
+        """Validate status field accepts only valid string values"""
+        valid_statuses = ["pending", "in_progress", "completed", "failed", "cancelled"]
+        if v not in valid_statuses:
+            raise ValueError(f"Invalid status: {v}. Must be one of {valid_statuses}")
+        return v
 
 
 class ReasoningStep(PRSMBaseModel):
@@ -267,13 +302,32 @@ class ReasoningStep(PRSMBaseModel):
 
 class SafetyFlag(PRSMBaseModel):
     """Safety violation or concern"""
-    flag_id: UUID = Field(default_factory=uuid4)
-    level: SafetyLevel
-    category: str
+    flag_id: Union[UUID, str] = Field(default_factory=uuid4)
+    session_id: Optional[Union[UUID, str]] = None
+    level: Optional[SafetyLevel] = None
+    severity: Optional[str] = None  # Alias for level
+    category: Optional[str] = None
+    flag_type: Optional[str] = None  # Alias for category
     description: str
-    triggered_by: str
+    triggered_by: Optional[str] = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     resolved: bool = False
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    
+    def __init__(self, **data):
+        # Handle level/severity aliases
+        if 'severity' in data and 'level' not in data:
+            data['level'] = data['severity']
+        elif 'level' in data and 'severity' not in data:
+            data['severity'] = str(data['level'])
+        
+        # Handle category/flag_type aliases
+        if 'flag_type' in data and 'category' not in data:
+            data['category'] = data['flag_type']
+        elif 'category' in data and 'flag_type' not in data:
+            data['flag_type'] = data['category']
+        
+        super().__init__(**data)
 
 
 # === Task Hierarchy Models ===
@@ -282,18 +336,36 @@ class ArchitectTask(TimestampMixin):
     """
     Enhanced from Co-Lab's SubTask for hierarchical decomposition
     """
-    task_id: UUID = Field(default_factory=uuid4)
-    session_id: UUID
-    parent_task_id: Optional[UUID] = None
+    task_id: str = Field(default_factory=lambda: str(uuid4()))
+    session_id: Optional[UUID] = None
+    user_id: Optional[str] = None
+    parent_task_id: Optional[str] = None
     level: int = Field(default=0, description="Decomposition hierarchy level")
-    instruction: str
+    instruction: Optional[str] = None
+    description: Optional[str] = None
+    complexity: Optional[int] = None  # Integer complexity 1-5
     complexity_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    estimated_cost: Optional[Decimal] = None
     dependencies: List[UUID] = Field(default_factory=list)
-    status: TaskStatus = TaskStatus.PENDING
+    status: Union[TaskStatus, str] = TaskStatus.PENDING
     assigned_agent: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
     execution_time: Optional[float] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    
+    def __init__(self, **data):
+        # Ensure task_id and parent_task_id are strings
+        if 'task_id' in data and isinstance(data['task_id'], UUID):
+            data['task_id'] = str(data['task_id'])
+        if 'parent_task_id' in data and isinstance(data['parent_task_id'], UUID):
+            data['parent_task_id'] = str(data['parent_task_id'])
+        
+        # Handle description/instruction aliases
+        if 'description' in data and 'instruction' not in data:
+            data['instruction'] = data['description']
+        elif 'instruction' in data and 'description' not in data:
+            data['description'] = data['instruction']
+        super().__init__(**data)
 
 
 class TaskHierarchy(PRSMBaseModel):
@@ -391,10 +463,16 @@ class LearningSession(TimestampMixin):
 
 class CircuitBreakerEvent(TimestampMixin):
     """Circuit breaker activation event"""
-    event_id: UUID = Field(default_factory=uuid4)
-    triggered_by: str
-    safety_level: SafetyLevel
-    reason: str
+    event_id: Union[UUID, str] = Field(default_factory=uuid4)
+    component: Optional[str] = None
+    event_type: Optional[str] = None
+    triggered_by: Optional[str] = None
+    safety_level: Optional[SafetyLevel] = None
+    reason: Optional[str] = None
+    threshold_value: Optional[int] = None
+    current_value: Optional[int] = None
+    action_taken: Optional[str] = None
+    recovery_time_seconds: Optional[int] = None
     affected_components: List[str] = Field(default_factory=list)
     resolution_action: Optional[str] = None
     resolved_at: Optional[datetime] = None
@@ -402,27 +480,55 @@ class CircuitBreakerEvent(TimestampMixin):
 
 class GovernanceProposal(TimestampMixin):
     """Governance proposal for system changes"""
-    proposal_id: UUID = Field(default_factory=uuid4)
+    proposal_id: Union[UUID, str] = Field(default_factory=uuid4)
     proposer_id: str
     title: str
     description: str
-    proposal_type: str  # "safety", "economic", "technical", "governance"
-    voting_starts: datetime
-    voting_ends: datetime
+    proposal_type: str  # "safety", "economic", "technical", "governance", "parameter_change"
+    voting_starts: Optional[datetime] = None
+    voting_ends: Optional[datetime] = None
+    voting_end_date: Optional[datetime] = None  # Alias for voting_ends
     votes_for: int = 0
     votes_against: int = 0
-    total_voting_power: float = 0.0
+    total_voting_power: Decimal = Decimal("0.0")
+    required_quorum: Optional[Decimal] = None
     status: str = "active"  # "active", "approved", "rejected", "executed"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    
+    def __init__(self, **data):
+        # Handle voting_ends/voting_end_date aliases
+        if 'voting_end_date' in data and 'voting_ends' not in data:
+            data['voting_ends'] = data['voting_end_date']
+        elif 'voting_ends' in data and 'voting_end_date' not in data:
+            data['voting_end_date'] = data['voting_ends']
+        super().__init__(**data)
 
 
 class Vote(TimestampMixin):
     """Individual vote on a governance proposal"""
-    vote_id: UUID = Field(default_factory=uuid4)
-    proposal_id: UUID
+    vote_id: Union[UUID, str] = Field(default_factory=uuid4)
+    proposal_id: Union[UUID, str]
     voter_id: str
-    vote: bool  # True for yes, False for no
-    voting_power: float
+    vote: Optional[bool] = None  # True for yes, False for no
+    vote_choice: Optional[bool] = None  # Alias for vote
+    voting_power: Decimal
     rationale: Optional[str] = None
+    reason: Optional[str] = None  # Alias for rationale
+    
+    def __init__(self, **data):
+        # Handle vote/vote_choice aliases
+        if 'vote_choice' in data and 'vote' not in data:
+            data['vote'] = data['vote_choice']
+        elif 'vote' in data and 'vote_choice' not in data:
+            data['vote_choice'] = data['vote']
+        
+        # Handle rationale/reason aliases
+        if 'reason' in data and 'rationale' not in data:
+            data['rationale'] = data['reason']
+        elif 'rationale' in data and 'reason' not in data:
+            data['reason'] = data['rationale']
+        
+        super().__init__(**data)
 
 
 # === FTNS Token Models ===
@@ -431,23 +537,53 @@ class FTNSTransaction(TimestampMixin):
     """
     Enhanced from Co-Lab's transaction model for FTNS tokens
     """
-    transaction_id: UUID = Field(default_factory=uuid4)
+    transaction_id: Union[UUID, str] = Field(default_factory=uuid4)
     from_user: Optional[str] = None  # None for system minting
-    to_user: str
-    amount: float
-    transaction_type: str  # "reward", "charge", "transfer", "dividend"
-    description: str
+    to_user: Optional[str] = None
+    user_id: Optional[str] = None  # Alias for to_user for backwards compatibility
+    amount: Decimal
+    transaction_type: str  # "reward", "charge", "transfer", "dividend", "fee", "refund"
+    description: Optional[str] = None
+    status: str = Field(default="pending")  # "pending", "processing", "confirmed", "failed", "cancelled"
+    fee: Optional[Decimal] = None
     context_units: Optional[int] = None  # For context-based charges
     ipfs_cid: Optional[str] = None  # For provenance-based rewards
     block_hash: Optional[str] = None  # For distributed ledger integration
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    
+    def __init__(self, **data):
+        # Handle user_id/to_user aliases
+        if 'user_id' in data and 'to_user' not in data:
+            data['to_user'] = data['user_id']
+        elif 'to_user' in data and 'user_id' not in data:
+            data['user_id'] = data['to_user']
+        super().__init__(**data)
 
 
 class FTNSBalance(TimestampMixin):
     """User FTNS token balance"""
     user_id: str
-    balance: float = Field(default=0.0, ge=0.0)
-    locked_balance: float = Field(default=0.0, ge=0.0)  # For governance voting
+    balance: Decimal = Field(default=Decimal("0.0"), ge=0.0)
+    total_balance: Optional[Decimal] = None  # Alias for balance
+    locked_balance: Decimal = Field(default=Decimal("0.0"), ge=0.0)  # For governance voting
+    reserved_balance: Optional[Decimal] = None  # Alias for locked_balance
+    pending_balance: Decimal = Field(default=Decimal("0.0"), ge=0.0)  # Pending transactions
     last_dividend: Optional[datetime] = None
+    
+    def __init__(self, **data):
+        # Handle balance/total_balance aliases
+        if 'total_balance' in data and 'balance' not in data:
+            data['balance'] = data['total_balance']
+        elif 'balance' in data and 'total_balance' not in data:
+            data['total_balance'] = data['balance']
+        
+        # Handle locked_balance/reserved_balance aliases
+        if 'reserved_balance' in data and 'locked_balance' not in data:
+            data['locked_balance'] = data['reserved_balance']
+        elif 'locked_balance' in data and 'reserved_balance' not in data:
+            data['reserved_balance'] = data['locked_balance']
+        
+        super().__init__(**data)
 
 
 class ContextUsage(TimestampMixin):
@@ -516,11 +652,40 @@ class UserInput(PRSMBaseModel):
     """
     Enhanced from Co-Lab's UserInput for NWTN queries
     """
+    input_id: Union[UUID, str] = Field(default_factory=uuid4)
     user_id: str
-    prompt: str
+    prompt: Optional[str] = None
+    content: Optional[str] = None  # Alias for prompt for backwards compatibility
     context_allocation: Optional[int] = None  # FTNS tokens to spend
     preferences: Dict[str, Any] = Field(default_factory=dict)
     session_id: Optional[UUID] = None
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    
+    @field_validator('content', mode='before')
+    @classmethod
+    def validate_content(cls, v):
+        """Validate content is not empty"""
+        if v == "":
+            raise ValueError("Content cannot be empty string")
+        return v
+    
+    @field_validator('prompt', mode='before')
+    @classmethod
+    def validate_prompt(cls, v):
+        """Validate prompt is not empty"""
+        if v == "":
+            raise ValueError("Prompt cannot be empty string")
+        return v
+    
+    def __init__(self, **data):
+        # If content is provided but not prompt, use content as prompt
+        if 'content' in data and 'prompt' not in data:
+            data['prompt'] = data['content']
+        # If prompt is provided but not content, set content to prompt
+        elif 'prompt' in data and 'content' not in data:
+            data['content'] = data['prompt']
+        super().__init__(**data)
 
 
 class ClarifiedPrompt(PRSMBaseModel):
