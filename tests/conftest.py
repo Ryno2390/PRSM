@@ -365,13 +365,12 @@ def mock_http_requests():
 def mock_external_connections_early():
     """Very early fixture to mock external connections before test collection"""
     # Mock subprocess calls that might try to connect
+    # NOTE: We don't mock socket.socket as it breaks asyncio event loop initialization
     with patch('subprocess.run') as mock_run, \
-         patch('subprocess.Popen') as mock_popen, \
-         patch('socket.socket') as mock_socket:
+         patch('subprocess.Popen') as mock_popen:
         
         mock_run.return_value = Mock(returncode=0, stdout=b'', stderr=b'')
         mock_popen.return_value = Mock(returncode=0, communicate=lambda: (b'', b''))
-        mock_socket.return_value = Mock()
         
         yield
 
@@ -439,15 +438,6 @@ def mock_openai_clients():
             'anthropic': mock_anthropic_client,
             'completion': mock_completion
         }
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    yield loop
-    loop.close()
 
 
 @pytest.fixture(scope="session")
