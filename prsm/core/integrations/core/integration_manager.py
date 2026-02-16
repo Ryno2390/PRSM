@@ -88,7 +88,7 @@ class IntegrationManager:
             platform = config.platform
             user_id = config.user_id
             
-            print(f"📝 Registering {platform.value} connector for user {user_id}")
+            print(f"📝 Registering {platform} connector for user {user_id}")
             
             # Create connector instance
             connector = connector_class(config)
@@ -96,23 +96,23 @@ class IntegrationManager:
             # Initialize connector
             init_success = await connector.initialize()
             if not init_success:
-                print(f"❌ Failed to initialize {platform.value} connector")
+                print(f"❌ Failed to initialize {platform} connector")
                 return False
             
             # Store connector and config
             self.connectors[platform] = connector
-            self.connector_configs[f"{user_id}:{platform.value}"] = config
+            self.connector_configs[f"{user_id}:{platform}"] = config
             
             # Update stats
             self.stats.platforms_connected += 1
             if platform not in self.stats.active_connectors:
                 self.stats.active_connectors.append(platform)
             
-            print(f"✅ Successfully registered {platform.value} connector")
+            print(f"✅ Successfully registered {platform} connector")
             return True
             
         except Exception as e:
-            print(f"❌ Error registering {config.platform.value} connector: {e}")
+            print(f"❌ Error registering {config.platform} connector: {e}")
             return False
     
     async def get_connector(self, platform: IntegrationPlatform) -> Optional[BaseConnector]:
@@ -130,10 +130,10 @@ class IntegrationManager:
         if connector and connector.is_healthy():
             return connector
         elif connector:
-            print(f"⚠️ {platform.value} connector is unhealthy: {connector.status.value}")
+            print(f"⚠️ {platform} connector is unhealthy: {connector.status.value}")
             return None
         else:
-            print(f"❌ No connector available for {platform.value}")
+            print(f"❌ No connector available for {platform}")
             return None
     
     async def health_check_all_connectors(self) -> Dict[IntegrationPlatform, ConnectorHealth]:
@@ -152,10 +152,10 @@ class IntegrationManager:
                 health_results[platform] = health
                 
                 if health.status == "unhealthy":
-                    print(f"⚠️ {platform.value} connector is unhealthy: {health.issues}")
+                    print(f"⚠️ {platform} connector is unhealthy: {health.issues}")
                 
             except Exception as e:
-                print(f"❌ Health check failed for {platform.value}: {e}")
+                print(f"❌ Health check failed for {platform}: {e}")
                 health_results[platform] = ConnectorHealth(
                     platform=platform,
                     status="offline",
@@ -189,13 +189,13 @@ class IntegrationManager:
             # Get appropriate connector
             connector = await self.get_connector(request.source.platform)
             if not connector:
-                raise ValueError(f"No healthy connector available for {request.source.platform.value}")
+                raise ValueError(f"No healthy connector available for {request.source.platform}")
             
             # Add to active imports
             self.active_imports[request.request_id] = request
             
             print(f"📋 Submitted import request: {request.request_id}")
-            print(f"   - Source: {request.source.display_name} ({request.source.platform.value})")
+            print(f"   - Source: {request.source.display_name} ({request.source.platform})")
             print(f"   - Type: {request.import_type}")
             print(f"   - User: {request.user_id}")
             
@@ -447,7 +447,7 @@ class IntegrationManager:
         try:
             return await connector.search_content(query, content_type, limit, filters)
         except Exception as e:
-            print(f"⚠️ Search failed for {connector.platform.value}: {e}")
+            print(f"⚠️ Search failed for {connector.platform}: {e}")
             return []
     
     async def _perform_security_scanning(self, request: ImportRequest, result: ImportResult) -> ImportResult:
@@ -463,7 +463,7 @@ class IntegrationManager:
                 content_path=result.local_path,
                 metadata=result.metadata,
                 user_id=request.user_id,
-                platform=request.source.platform.value,
+                platform=request.source.platform,
                 content_id=request.source.external_id,
                 enable_sandbox=True
             )

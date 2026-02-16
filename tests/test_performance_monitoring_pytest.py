@@ -8,6 +8,7 @@ Converted from test_performance_monitor.py to follow pytest conventions.
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
 import time
 from datetime import datetime, timezone, timedelta
@@ -187,14 +188,15 @@ class MockPerformanceMonitor:
             return "declining"
 
 
+@pytest.fixture
+def performance_monitor():
+    """Fixture providing performance monitor instance"""
+    return MockPerformanceMonitor()
+
+
 class TestPerformanceMetricsTracking:
     """Test suite for performance metrics tracking functionality"""
-    
-    @pytest.fixture
-    def performance_monitor(self):
-        """Fixture providing performance monitor instance"""
-        return MockPerformanceMonitor()
-    
+
     @pytest.fixture
     def sample_metrics_data(self):
         """Fixture providing sample metrics data"""
@@ -256,11 +258,11 @@ class TestPerformanceMetricsTracking:
 class TestImprovementOpportunities:
     """Test suite for improvement opportunity identification"""
     
-    @pytest.fixture
-    def monitor_with_data(self):
+    @pytest_asyncio.fixture
+    async def monitor_with_data(self):
         """Fixture providing monitor with historical data"""
         monitor = MockPerformanceMonitor()
-        
+
         # Add historical metrics showing declining performance
         historical_data = [
             {"model_id": "test_model_2", "metrics": {"accuracy": 0.90, "latency": 100}},
@@ -268,10 +270,10 @@ class TestImprovementOpportunities:
             {"model_id": "test_model_2", "metrics": {"accuracy": 0.84, "latency": 125}},
             {"model_id": "test_model_3", "metrics": {"accuracy": 0.95, "latency": 200}},
         ]
-        
+
         for data in historical_data:
-            asyncio.create_task(monitor.track_model_metrics(data["model_id"], data["metrics"]))
-        
+            await monitor.track_model_metrics(data["model_id"], data["metrics"])
+
         return monitor
     
     @pytest.mark.asyncio

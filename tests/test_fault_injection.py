@@ -54,41 +54,41 @@ async def test_fault_injection():
         print("-" * 50)
         
         # Test 1: Node Crash
-        crash_result = await test_node_crash(fault_injector, peer_nodes)
+        crash_result = await run_node_crash(fault_injector, peer_nodes)
         test_results.append(("Node Crash", crash_result))
         
         # Test 2: Node Slowdown
-        slow_result = await test_node_slowdown(fault_injector, peer_nodes)
+        slow_result = await run_node_slowdown(fault_injector, peer_nodes)
         test_results.append(("Node Slowdown", slow_result))
         
         # Test 3: Byzantine Behavior
-        byzantine_result = await test_byzantine_behavior(fault_injector, peer_nodes)
+        byzantine_result = await run_byzantine_behavior(fault_injector, peer_nodes)
         test_results.append(("Byzantine Behavior", byzantine_result))
         
         # Test 4: Network Partition
-        partition_result = await test_network_partition(fault_injector, peer_nodes)
+        partition_result = await run_network_partition(fault_injector, peer_nodes)
         test_results.append(("Network Partition", partition_result))
         
         # Test 5: Message Loss
-        message_loss_result = await test_message_loss(fault_injector, peer_nodes)
+        message_loss_result = await run_message_loss(fault_injector, peer_nodes)
         test_results.append(("Message Loss", message_loss_result))
         
         # Test comprehensive fault scenarios
         print(f"\n🚀 Testing Comprehensive Fault Scenarios")
         print("-" * 50)
-        comprehensive_result = await test_comprehensive_scenarios(fault_injector, peer_nodes)
+        comprehensive_result = await run_comprehensive_scenarios(fault_injector, peer_nodes)
         test_results.append(("Comprehensive Scenarios", comprehensive_result))
         
         # Test consensus under faults
         print(f"\n🎯 Testing Consensus Under Faults")
         print("-" * 50)
-        consensus_result = await test_consensus_under_faults(fault_injector, peer_nodes)
+        consensus_result = await run_consensus_under_faults(fault_injector, peer_nodes)
         test_results.append(("Consensus Under Faults", consensus_result))
         
         # Test fault recovery
         print(f"\n🔄 Testing Fault Recovery")
         print("-" * 50)
-        recovery_result = await test_fault_recovery(fault_injector, peer_nodes)
+        recovery_result = await run_fault_recovery(fault_injector, peer_nodes)
         test_results.append(("Fault Recovery", recovery_result))
         
         # Summary results
@@ -135,7 +135,7 @@ async def test_fault_injection():
         return []
 
 
-async def test_node_crash(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
+async def run_node_crash(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
     """Test node crash fault injection"""
     try:
         print("💥 Testing node crash fault injection")
@@ -176,7 +176,7 @@ async def test_node_crash(fault_injector: FaultInjector, peer_nodes: List[PeerNo
         return False
 
 
-async def test_node_slowdown(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
+async def run_node_slowdown(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
     """Test node slowdown fault injection"""
     try:
         print("🐌 Testing node slowdown fault injection")
@@ -218,7 +218,7 @@ async def test_node_slowdown(fault_injector: FaultInjector, peer_nodes: List[Pee
         return False
 
 
-async def test_byzantine_behavior(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
+async def run_byzantine_behavior(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
     """Test byzantine behavior fault injection"""
     try:
         print("🎭 Testing byzantine behavior fault injection")
@@ -262,7 +262,7 @@ async def test_byzantine_behavior(fault_injector: FaultInjector, peer_nodes: Lis
         return False
 
 
-async def test_network_partition(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
+async def run_network_partition(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
     """Test network partition fault injection"""
     try:
         print("🌐 Testing network partition fault injection")
@@ -309,7 +309,7 @@ async def test_network_partition(fault_injector: FaultInjector, peer_nodes: List
         return False
 
 
-async def test_message_loss(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
+async def run_message_loss(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
     """Test message loss fault injection"""
     try:
         print("📦 Testing message loss fault injection")
@@ -350,7 +350,7 @@ async def test_message_loss(fault_injector: FaultInjector, peer_nodes: List[Peer
         return False
 
 
-async def test_comprehensive_scenarios(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
+async def run_comprehensive_scenarios(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
     """Test comprehensive fault scenarios"""
     try:
         print("🚀 Testing comprehensive fault scenarios")
@@ -387,7 +387,7 @@ async def test_comprehensive_scenarios(fault_injector: FaultInjector, peer_nodes
         return False
 
 
-async def test_consensus_under_faults(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
+async def run_consensus_under_faults(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
     """Test consensus simulation under fault conditions"""
     try:
         print("🎯 Testing consensus under fault conditions")
@@ -455,7 +455,7 @@ async def test_consensus_under_faults(fault_injector: FaultInjector, peer_nodes:
         return False
 
 
-async def test_fault_recovery(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
+async def run_fault_recovery(fault_injector: FaultInjector, peer_nodes: List[PeerNode]) -> bool:
     """Test fault recovery mechanisms"""
     try:
         print("🔄 Testing fault recovery mechanisms")

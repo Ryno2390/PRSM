@@ -13,7 +13,7 @@ from typing import Dict, List, Any
 # Add the current directory to Python path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-def test_section(name: str):
+def run_section(name: str):
     """Decorator to mark test sections"""
     print(f"\n{'='*60}")
     print(f"🧪 TESTING: {name}")
@@ -35,7 +35,7 @@ def warning(message: str):
 
 def test_project_structure():
     """Test that all expected directories and files exist"""
-    test_section("Project Structure")
+    run_section("Project Structure")
     
     expected_dirs = [
         "prsm",
@@ -107,7 +107,7 @@ def test_project_structure():
 
 def test_basic_imports():
     """Test that basic package imports work"""
-    test_section("Basic Package Imports")
+    run_section("Basic Package Imports")
     
     import_tests = [
         ("prsm", "Main package"),
@@ -137,7 +137,7 @@ def test_basic_imports():
 
 def test_configuration_system():
     """Test configuration system"""
-    test_section("Configuration System")
+    run_section("Configuration System")
     
     try:
         from prsm.core.config import get_settings, PRSMSettings
@@ -167,7 +167,7 @@ def test_configuration_system():
 
 def test_data_models():
     """Test data models validation"""
-    test_section("Data Models")
+    run_section("Data Models")
     
     try:
         from prsm.core.models import (
@@ -217,7 +217,7 @@ def test_data_models():
 
 def test_cli_basic():
     """Test CLI interface basics"""
-    test_section("CLI Interface")
+    run_section("CLI Interface")
     
     try:
         # Test CLI module import
@@ -239,7 +239,7 @@ def test_cli_basic():
 
 def test_api_basic():
     """Test FastAPI application basics"""
-    test_section("FastAPI Application")
+    run_section("FastAPI Application")
     
     try:
         from prsm.interface.api.main import app
@@ -267,7 +267,7 @@ def test_api_basic():
 
 def test_orchestrator_basic():
     """Test NWTN orchestrator basics"""
-    test_section("NWTN Orchestrator")
+    run_section("NWTN Orchestrator")
     
     try:
         from prsm.compute.nwtn.orchestrator import NWTNOrchestrator, nwtn_orchestrator
@@ -292,7 +292,7 @@ def test_orchestrator_basic():
 
 def test_architect_basic():
     """Test hierarchical architect basics"""
-    test_section("Hierarchical Architect")
+    run_section("Hierarchical Architect")
     
     try:
         from prsm.compute.agents.architects.hierarchical_architect import HierarchicalArchitect, create_architect

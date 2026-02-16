@@ -370,7 +370,7 @@ class CredentialManager:
                 # Add metadata (no sensitive data)
                 cred_info = {
                     'credential_id': credential.credential_id,
-                    'platform': credential.platform.value,
+                    'platform': credential.platform,
                     'credential_type': credential.credential_type,
                     'created_at': credential.created_at.isoformat(),
                     'updated_at': credential.updated_at.isoformat(),
@@ -591,7 +591,7 @@ class CredentialManager:
             users = set()
             
             for credential in self.active_credentials.values():
-                platforms[credential.platform.value] = platforms.get(credential.platform.value, 0) + 1
+                platforms[credential.platform] = platforms.get(credential.platform, 0) + 1
                 credential_types[credential.credential_type] = credential_types.get(credential.credential_type, 0) + 1
                 users.add(credential.user_id)
             

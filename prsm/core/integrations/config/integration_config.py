@@ -34,7 +34,7 @@ class SecurityLevel(str, Enum):
 
 class RateLimitConfig(BaseModel):
     """Rate limiting configuration"""
-    requests_per_minute: int = Field(default=60, ge=1, le=1000)
+    requests_per_minute: int = Field(default=60, ge=1, le=10000)
     burst_limit: int = Field(default=10, ge=1, le=100)
     backoff_factor: float = Field(default=1.5, ge=1.0, le=5.0)
     max_retry_attempts: int = Field(default=3, ge=0, le=10)

@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from prsm.core.integration_manager import integration_manager
+from prsm.core.integrations.core.integration_manager import integration_manager
 from ..connectors.github_connector import GitHubConnector
 from ..connectors.huggingface_connector import HuggingFaceConnector
 from ..connectors.ollama_connector import OllamaConnector
@@ -121,7 +121,7 @@ async def register_connector(
         if not await validate_platform_support(config_request.platform):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Platform {config_request.platform.value} not supported"
+                detail=f"Platform {config_request.platform} not supported"
             )
         
         # Create connector config
@@ -143,7 +143,7 @@ async def register_connector(
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"No connector implementation for {config_request.platform.value}"
+                detail=f"No connector implementation for {config_request.platform}"
             )
         
         # Register connector
@@ -153,8 +153,8 @@ async def register_connector(
             return JSONResponse(
                 status_code=status.HTTP_201_CREATED,
                 content={
-                    "message": f"{config_request.platform.value} connector registered successfully",
-                    "platform": config_request.platform.value,
+                    "message": f"{config_request.platform} connector registered successfully",
+                    "platform": config_request.platform,
                     "user_id": user_id
                 }
             )

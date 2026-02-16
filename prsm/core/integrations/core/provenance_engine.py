@@ -160,7 +160,7 @@ class ProvenanceEngine:
             ProvenanceMetadata with complete attribution chain
         """
         try:
-            content_id = f"{import_request.source.platform.value}:{import_request.source.external_id}"
+            content_id = f"{import_request.source.platform}:{import_request.source.external_id}"
             
             # Extract creator information
             original_creator = self._extract_creator_info(metadata)
@@ -481,7 +481,7 @@ class ProvenanceEngine:
             chain.append({
                 "role": "original_creator",
                 "identifier": creator,
-                "platform": import_request.source.platform.value,
+                "platform": import_request.source.platform,
                 "content_id": import_request.source.external_id,
                 "timestamp": metadata.get("created_at", datetime.now(timezone.utc).isoformat())
             })

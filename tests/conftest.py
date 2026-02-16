@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from decimal import Decimal
+from datetime import datetime
 from collections import defaultdict
 
 # Add PRSM to path for all tests
@@ -853,6 +854,102 @@ def performance_runner():
             }
     
     return PerformanceRunner()
+
+
+@pytest.fixture
+def memory_profiler():
+    """Memory profiling fixture"""
+    class MemoryProfiler:
+        def __init__(self):
+            self.snapshots = []
+
+        def take_snapshot(self, label: str = ""):
+            """Take memory snapshot"""
+            import tracemalloc
+            if not tracemalloc.is_tracing():
+                tracemalloc.start()
+            snapshot = tracemalloc.take_snapshot()
+            top_stats = snapshot.statistics('lineno')
+            self.snapshots.append({
+                "label": label,
+                "timestamp": datetime.now(),
+                "total_memory": sum(stat.size for stat in top_stats),
+                "top_allocations": [
+                    {"size": stat.size, "count": stat.count, "traceback": stat.traceback.format()}
+                    for stat in top_stats[:10]
+                ]
+            })
+
+        def compare_snapshots(self, label1: str, label2: str):
+            """Compare two memory snapshots"""
+            snap1 = next((s for s in self.snapshots if s["label"] == label1), None)
+            snap2 = next((s for s in self.snapshots if s["label"] == label2), None)
+            if not snap1 or not snap2:
+                return {"error": "Snapshots not found"}
+            return {
+                "memory_diff": snap2["total_memory"] - snap1["total_memory"],
+                "time_diff": (snap2["timestamp"] - snap1["timestamp"]).total_seconds(),
+                "allocations_diff": len(snap2["top_allocations"]) - len(snap1["top_allocations"])
+            }
+
+    return MemoryProfiler()
+
+
+@pytest.fixture
+def load_test_runner():
+    """Load test runner fixture"""
+    import time as _time
+    import statistics as _stats
+
+    class LoadTestResults:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+    class LoadTestRunner:
+        async def run_load_test(self, test_function, concurrent_users=10,
+                                duration_seconds=60, ramp_up_seconds=10):
+            start_time = _time.time()
+            end_time = start_time + duration_seconds
+            response_times = []
+            successful_requests = 0
+            failed_requests = 0
+            semaphore = asyncio.Semaphore(concurrent_users)
+
+            async def worker():
+                nonlocal successful_requests, failed_requests
+                while _time.time() < end_time:
+                    async with semaphore:
+                        req_start = _time.time()
+                        try:
+                            await test_function()
+                            successful_requests += 1
+                        except Exception:
+                            failed_requests += 1
+                        response_times.append((_time.time() - req_start) * 1000)
+
+            tasks = []
+            ramp_interval = ramp_up_seconds / max(concurrent_users, 1)
+            for i in range(concurrent_users):
+                if i > 0:
+                    await asyncio.sleep(ramp_interval)
+                tasks.append(asyncio.create_task(worker()))
+            await asyncio.sleep(max(0, end_time - _time.time()))
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+            total = successful_requests + failed_requests
+            avg_rt = _stats.mean(response_times) if response_times else 0
+            return LoadTestResults(
+                total_requests=total,
+                successful_requests=successful_requests,
+                failed_requests=failed_requests,
+                average_response_time=avg_rt,
+                error_rate=failed_requests / total if total > 0 else 0,
+            )
+
+    return LoadTestRunner()
 
 
 # Test helpers
