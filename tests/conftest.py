@@ -613,6 +613,11 @@ def setup_test_environment():
     os.environ["SKIP_POSTGRES_TESTS"] = "true"
     os.environ["SKIP_INTEGRATION_TESTS"] = "true"
     
+    # JWT/Auth configuration for tests
+    os.environ["PRSM_JWT_SECRET"] = "test-secret-key-for-testing-only-minimum-32-chars-required-here"
+    os.environ["PRSM_JWT_ALGORITHM"] = "HS256"
+    os.environ["PRSM_SECRET_KEY"] = "test-secret-key-for-testing-only-minimum-32-chars-required-here"
+    
     yield
     
     # Cleanup environment
@@ -622,7 +627,10 @@ def setup_test_environment():
         "PRSM_DATABASE_URL",
         "SKIP_REDIS_TESTS",
         "SKIP_POSTGRES_TESTS",
-        "SKIP_INTEGRATION_TESTS"
+        "SKIP_INTEGRATION_TESTS",
+        "PRSM_JWT_SECRET",
+        "PRSM_JWT_ALGORITHM",
+        "PRSM_SECRET_KEY"
     ]
     for var in test_env_vars:
         os.environ.pop(var, None)
@@ -720,6 +728,28 @@ class DatabaseTestFactory:
 def db_factory():
     """Database test factory fixture"""
     return DatabaseTestFactory()
+
+
+@pytest.fixture(autouse=True)
+def mock_jwt_handler_init():
+    """Auto-use fixture to prevent JWT handler from initializing during test collection"""
+    # Mock the JWT handler's initialize method to prevent async setup during tests
+    # This prevents the JWT handler from trying to connect to real database/redis
+    # Individual tests can still call initialize() if needed
+    yield  # Just provide a placeholder - JWT handler already handles None settings gracefully
+
+
+@pytest.fixture(autouse=True)
+def mock_audit_logger():
+    """Auto-use fixture to mock audit logger for all tests"""
+    # Mock audit logger methods to prevent actual logging during tests
+    mock_logger = AsyncMock()
+    mock_logger.log_security_event = AsyncMock()
+    mock_logger.log_auth_event = AsyncMock()  # Alias for compatibility
+    mock_logger.log = AsyncMock()
+    
+    with patch('prsm.core.auth.auth_manager.audit_logger', mock_logger):
+        yield mock_logger
 
 
 @pytest.fixture
