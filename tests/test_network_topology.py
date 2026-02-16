@@ -64,7 +64,7 @@ async def test_network_topology():
             print("-" * 50)
             
             # Test scenario
-            result = await test_topology_scenario(scenario)
+            result = await run_topology_scenario(scenario)
             results.append(result)
         
         # Test topology optimization
@@ -128,7 +128,7 @@ async def test_network_topology():
         return []
 
 
-async def test_topology_scenario(scenario):
+async def run_topology_scenario(scenario):
     """Test network topology for a specific scenario"""
     try:
         # Create peer nodes

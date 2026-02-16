@@ -69,7 +69,7 @@ async def test_consensus_sharding():
             print("-" * 50)
             
             # Test scenario
-            result = await test_sharding_scenario(scenario)
+            result = await run_sharding_scenario(scenario)
             results.append(result)
         
         # Test cross-shard coordination
@@ -137,7 +137,7 @@ async def test_consensus_sharding():
         return []
 
 
-async def test_sharding_scenario(scenario):
+async def run_sharding_scenario(scenario):
     """Test consensus sharding for a specific scenario"""
     try:
         # Create peer nodes

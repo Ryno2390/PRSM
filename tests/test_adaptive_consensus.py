@@ -77,7 +77,7 @@ async def test_adaptive_consensus():
             print("-" * 50)
             
             # Test scenario
-            result = await test_adaptive_scenario(scenario)
+            result = await run_adaptive_scenario(scenario)
             results.append(result)
         
         # Test dynamic adaptation
@@ -136,7 +136,7 @@ async def test_adaptive_consensus():
         return []
 
 
-async def test_adaptive_scenario(scenario):
+async def run_adaptive_scenario(scenario):
     """Test adaptive consensus for a specific scenario"""
     try:
         # Create peer nodes

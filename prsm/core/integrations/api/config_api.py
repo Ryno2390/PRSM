@@ -136,7 +136,7 @@ async def store_credential(
             content={
                 "message": "Credential stored successfully",
                 "credential_id": credential_id,
-                "platform": request.platform.value
+                "platform": request.platform
             }
         )
         

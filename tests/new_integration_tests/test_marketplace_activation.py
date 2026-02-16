@@ -45,7 +45,7 @@ def sample_ai_model_request():
         name="PRSM Test Model",
         description="A test language model for PRSM marketplace integration testing",
         model_id="prsm-test-model-001",
-        provider=ModelProvider.PRSM,
+        provider=ModelProvider.PRSM_NATIVE,
         category=ModelCategory.LANGUAGE_MODEL,
         provider_name="PRSM Test Provider",
         model_version="1.0.0",

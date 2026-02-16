@@ -735,7 +735,7 @@ class TestIntegrationAPI:
     
     def test_health_endpoint(self, test_client):
         """Test health endpoint"""
-        with patch('prsm.integrations.core.integration_manager.integration_manager') as mock_manager:
+        with patch('prsm.core.integrations.core.integration_manager.integration_manager') as mock_manager:
             mock_manager.get_system_health = AsyncMock(return_value={
                 "overall_status": "healthy",
                 "health_percentage": 95.0,
@@ -754,7 +754,7 @@ class TestIntegrationAPI:
     
     def test_search_endpoint(self, test_client):
         """Test content search endpoint"""
-        with patch('prsm.integrations.core.integration_manager.integration_manager') as mock_manager:
+        with patch('prsm.core.integrations.core.integration_manager.integration_manager') as mock_manager:
             mock_source = IntegrationSource(
                 platform=IntegrationPlatform.GITHUB,
                 external_id="test/repo",

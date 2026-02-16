@@ -61,28 +61,33 @@ class BaseConnector(ABC):
             config: ConnectorConfig with authentication and settings
         """
         self.config = config
-        self.platform = config.platform
+        # Ensure platform is always an IntegrationPlatform enum (pydantic v2 may store as string)
+        from ..models.integration_models import IntegrationPlatform
+        platform = config.platform
+        if isinstance(platform, str) and not isinstance(platform, IntegrationPlatform):
+            platform = IntegrationPlatform(platform)
+        self.platform = platform
         self.user_id = config.user_id
-        
+
         # Operational state
         self.status = ConnectorStatus.INITIALIZING
         self.last_health_check = None
         self.error_count = 0
         self.rate_limit_remaining = None
         self.rate_limit_reset = None
-        
+
         # Performance metrics
         self.total_requests = 0
         self.successful_requests = 0
         self.failed_requests = 0
         self.average_response_time = 0.0
-        
+
         # Configuration from settings
         self.max_retries = int(getattr(settings, "PRSM_CONNECTOR_MAX_RETRIES", 3))
         self.timeout_seconds = int(getattr(settings, "PRSM_CONNECTOR_TIMEOUT", 30))
         self.rate_limit_buffer = float(getattr(settings, "PRSM_RATE_LIMIT_BUFFER", 0.1))
-        
-        print(f"🔌 Initializing {self.platform.value} connector for user {self.user_id}")
+
+        print(f"🔌 Initializing {self.platform} connector for user {self.user_id}")
     
     # === Abstract Methods (Platform-Specific Implementation Required) ===
     
@@ -163,30 +168,30 @@ class BaseConnector(ABC):
             True if initialization successful
         """
         try:
-            print(f"🔄 Initializing {self.platform.value} connector...")
+            print(f"🔄 Initializing {self.platform} connector...")
             
             # Authenticate with platform
             auth_success = await self.authenticate()
             if not auth_success:
                 self.status = ConnectorStatus.AUTH_FAILED
-                print(f"❌ Authentication failed for {self.platform.value}")
+                print(f"❌ Authentication failed for {self.platform}")
                 return False
             
             # Perform initial health check
             health_result = await self.health_check()
             if health_result.status == "healthy":
                 self.status = ConnectorStatus.HEALTHY
-                print(f"✅ {self.platform.value} connector initialized successfully")
+                print(f"✅ {self.platform} connector initialized successfully")
                 return True
             else:
                 self.status = ConnectorStatus.DEGRADED
-                print(f"⚠️ {self.platform.value} connector initialized with issues: {health_result.issues}")
+                print(f"⚠️ {self.platform} connector initialized with issues: {health_result.issues}")
                 return True  # Still functional but degraded
                 
         except Exception as e:
             self.status = ConnectorStatus.OFFLINE
             self.error_count += 1
-            print(f"❌ Failed to initialize {self.platform.value} connector: {e}")
+            print(f"❌ Failed to initialize {self.platform} connector: {e}")
             return False
     
     async def import_content(self, request: ImportRequest) -> ImportResult:
@@ -206,7 +211,7 @@ class BaseConnector(ABC):
         )
         
         try:
-            print(f"📥 Starting import of {request.source.external_id} from {self.platform.value}")
+            print(f"📥 Starting import of {request.source.external_id} from {self.platform}")
             
             # Update request status
             request.status = ImportStatus.SCANNING
@@ -234,7 +239,7 @@ class BaseConnector(ABC):
             
             # Step 3: Download content
             request.status = ImportStatus.IMPORTING
-            print(f"⬇️ Downloading content from {self.platform.value}")
+            print(f"⬇️ Downloading content from {self.platform}")
             
             # For now, we'll simulate the download
             # In actual implementation, this would download to a staging area
@@ -243,7 +248,7 @@ class BaseConnector(ABC):
             if not download_success:
                 result.status = ImportStatus.FAILED
                 result.error_details = {"reason": "Download failed"}
-                print(f"❌ Failed to download content from {self.platform.value}")
+                print(f"❌ Failed to download content from {self.platform}")
                 return result
             
             # Step 4: Create provenance record
@@ -253,10 +258,10 @@ class BaseConnector(ABC):
             
             # Step 5: Complete import
             result.status = ImportStatus.COMPLETED
-            result.imported_content_id = f"{self.platform.value}:{request.source.external_id}"
+            result.imported_content_id = f"{self.platform}:{request.source.external_id}"
             result.success_message = f"Successfully imported {request.source.display_name}"
             
-            print(f"✅ Successfully imported {request.source.external_id} from {self.platform.value}")
+            print(f"✅ Successfully imported {request.source.external_id} from {self.platform}")
             
         except Exception as e:
             result.status = ImportStatus.FAILED
@@ -326,12 +331,12 @@ class BaseConnector(ABC):
             )
             
             self.last_health_check = health
-            print(f"🔍 Health check for {self.platform.value}: {status}")
+            print(f"🔍 Health check for {self.platform}: {status}")
             
             return health
             
         except Exception as e:
-            print(f"❌ Health check failed for {self.platform.value}: {e}")
+            print(f"❌ Health check failed for {self.platform}: {e}")
             return ConnectorHealth(
                 platform=self.platform,
                 status="unhealthy",
@@ -377,12 +382,12 @@ class BaseConnector(ABC):
         print(f"📝 Creating provenance record for {request.source.external_id}")
         
         provenance = ProvenanceMetadata(
-            content_id=f"{self.platform.value}:{request.source.external_id}",
+            content_id=f"{self.platform}:{request.source.external_id}",
             original_creator=metadata.get("creator"),
             platform_source=self.platform,
             external_id=request.source.external_id,
             attribution_chain=[{
-                "platform": self.platform.value,
+                "platform": self.platform,
                 "creator": metadata.get("creator", "unknown"),
                 "content_id": request.source.external_id,
                 "imported_by": request.user_id,
@@ -399,7 +404,7 @@ class BaseConnector(ABC):
     def get_metrics(self) -> Dict[str, Any]:
         """Get connector performance metrics"""
         return {
-            "platform": self.platform.value,
+            "platform": self.platform,
             "status": self.status.value,
             "total_requests": self.total_requests,
             "successful_requests": self.successful_requests,
@@ -415,7 +420,7 @@ class BaseConnector(ABC):
         return self.status in [ConnectorStatus.HEALTHY, ConnectorStatus.DEGRADED]
     
     def __str__(self) -> str:
-        return f"{self.platform.value.title()}Connector(status={self.status.value}, user={self.user_id})"
+        return f"{self.platform.title()}Connector(status={self.status.value}, user={self.user_id})"
     
     def __repr__(self) -> str:
         return self.__str__()

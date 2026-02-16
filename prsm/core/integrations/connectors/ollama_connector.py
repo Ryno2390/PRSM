@@ -465,7 +465,7 @@ class OllamaConnector(BaseConnector):
                 
                 health_data = {
                     "status": "healthy",
-                    "platform": self.platform.value,
+                    "platform": self.platform,
                     "response_time": round(response_time, 2),
                     "ollama_version": self.ollama_version,
                     "base_url": self.base_url,
@@ -486,7 +486,7 @@ class OllamaConnector(BaseConnector):
                 self.status = ConnectorStatus.DISCONNECTED
                 return {
                     "status": "unhealthy",
-                    "platform": self.platform.value,
+                    "platform": self.platform,
                     "error": "Failed to connect to Ollama API",
                     "base_url": self.base_url,
                     "last_check": datetime.now(timezone.utc).isoformat()
@@ -498,7 +498,7 @@ class OllamaConnector(BaseConnector):
             
             return {
                 "status": "error",
-                "platform": self.platform.value,
+                "platform": self.platform,
                 "error": str(e),
                 "error_count": self.error_count,
                 "base_url": self.base_url,
