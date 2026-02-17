@@ -473,6 +473,18 @@ class PRSMConfig(BaseConfigSchema):
         return True
 
     @property
+    def p2p_enabled(self):
+        return False
+
+    @property
+    def governance_enabled(self):
+        return True
+
+    @property
+    def rsi_enabled(self):
+        return False
+
+    @property
     def ftns_initial_grant(self):
         return 100
 
