@@ -11,7 +11,22 @@ from fastapi import FastAPI
 from prsm.core.config import get_settings
 
 logger = structlog.get_logger(__name__)
-settings = get_settings()
+
+
+def _get_settings():
+    """Get settings, ensuring config is loaded."""
+    s = get_settings()
+    if s is None:
+        from prsm.core.config import load_config
+        try:
+            s = load_config()
+        except Exception:
+            pass
+    return s
+
+
+# Module-level reference (may be None at import time, refreshed at startup)
+settings = _get_settings()
 
 
 async def startup_sequence(app: FastAPI) -> None:
@@ -31,7 +46,9 @@ async def startup_sequence(app: FastAPI) -> None:
     Args:
         app: FastAPI application instance
     """
-    logger.info("Starting PRSM API server", environment=settings.environment)
+    global settings
+    settings = _get_settings()
+    logger.info("Starting PRSM API server", environment=getattr(settings, 'environment', 'unknown'))
 
     # Step 1: Validate configuration
     await _validate_configuration()
@@ -62,6 +79,9 @@ async def startup_sequence(app: FastAPI) -> None:
 
 async def _validate_configuration() -> None:
     """Validate required configuration."""
+    if settings is None:
+        logger.warning("No configuration loaded - using defaults")
+        return
     missing_config = settings.validate_required_config()
 
     if missing_config:
