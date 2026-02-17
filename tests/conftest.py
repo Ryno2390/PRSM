@@ -23,6 +23,15 @@ from collections import defaultdict
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Capture real httpx classes before autouse fixtures can mock them.
+# async_test_client needs the real AsyncClient for ASGI transport testing.
+try:
+    from httpx import AsyncClient as _real_httpx_AsyncClient
+    from httpx import ASGITransport as _real_httpx_ASGITransport
+except ImportError:
+    _real_httpx_AsyncClient = None
+    _real_httpx_ASGITransport = None
+
 
 
 # ============================================================================
@@ -753,12 +762,18 @@ def test_app():
 
 @pytest_asyncio.fixture
 async def async_test_client(test_app):
-    """Create async test client for API testing"""
-    try:
-        from httpx import AsyncClient
-    except ImportError:
+    """Create async test client for API testing.
+
+    Uses _real_httpx_AsyncClient / _real_httpx_ASGITransport captured at
+    module-load time so the autouse mock_http_requests fixture doesn't
+    intercept the test client.
+    """
+    if _real_httpx_AsyncClient is None:
         pytest.skip("httpx not available")
-    async with AsyncClient(app=test_app, base_url="http://test") as client:
+    async with _real_httpx_AsyncClient(
+        transport=_real_httpx_ASGITransport(app=test_app),
+        base_url="http://test",
+    ) as client:
         yield client
 
 
