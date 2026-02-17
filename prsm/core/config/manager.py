@@ -433,8 +433,15 @@ def get_config_manager() -> ConfigManager:
 
 
 def get_config() -> Optional[PRSMConfig]:
-    """Get current configuration"""
-    return get_config_manager().get_config()
+    """Get current configuration, auto-initializing with defaults if needed."""
+    manager = get_config_manager()
+    config = manager.get_config()
+    if config is None:
+        try:
+            config = manager.load_config()
+        except Exception as e:
+            logger.warning(f"Auto-initialization of config failed: {e}")
+    return config
 
 
 def get_component_config(component: str) -> Optional[BaseConfigSchema]:
