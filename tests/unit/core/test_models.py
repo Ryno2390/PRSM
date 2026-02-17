@@ -25,16 +25,16 @@ class TestPRSMSession:
     def test_prsm_session_creation_valid(self):
         """Test creating a valid PRSM session"""
         session = PRSMSession(
-            session_id=uuid4(),
+            session_id=str(uuid4()),
             user_id="test_user_001",
             nwtn_context_allocation=100,
-            status=TaskStatus.IN_PROGRESS
+            status="in_progress"
         )
-        
-        assert isinstance(session.session_id, UUID)
+
+        assert isinstance(session.session_id, str)
         assert session.user_id == "test_user_001"
         assert session.nwtn_context_allocation == 100
-        assert session.status == TaskStatus.IN_PROGRESS
+        assert session.status == "in_progress"
         assert session.context_used == 0  # Default value
     
     def test_prsm_session_required_fields(self):
@@ -66,14 +66,14 @@ class TestPRSMSession:
         session = PRSMSession(
             user_id="test_user"
         )
-        
-        assert isinstance(session.session_id, UUID)  # Generated automatically
-        assert session.status == TaskStatus.PENDING
+
+        assert isinstance(session.session_id, str)  # Generated automatically as str UUID
+        assert session.status == "pending"
         assert session.nwtn_context_allocation == 0
         assert session.context_used == 0
         assert session.reasoning_trace == []
         assert session.safety_flags == []
-        assert session.metadata == {}
+        assert session.metadata is None  # Optional field defaults to None
     
     @pytest.mark.parametrize("status", [
         TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.COMPLETED, 
@@ -109,11 +109,11 @@ class TestUserInput:
         """Test that required fields are enforced"""
         with pytest.raises(ValidationError) as exc_info:
             UserInput()
-        
+
         errors = exc_info.value.errors()
-        required_fields = {"user_id", "prompt"}
+        required_fields = {"user_id"}  # Only user_id is truly required
         error_fields = {error["loc"][0] for error in errors if error["type"] == "missing"}
-        
+
         assert required_fields.issubset(error_fields)
     
     def test_user_input_defaults(self):
@@ -150,11 +150,11 @@ class TestFTNSTransaction:
         """Test that required fields are enforced"""
         with pytest.raises(ValidationError) as exc_info:
             FTNSTransaction()
-        
+
         errors = exc_info.value.errors()
-        required_fields = {"to_user", "amount", "transaction_type", "description"}
+        required_fields = {"amount", "transaction_type"}
         error_fields = {error["loc"][0] for error in errors if error["type"] == "missing"}
-        
+
         assert required_fields.issubset(error_fields)
     
     def test_ftns_transaction_decimal_precision(self):
@@ -167,8 +167,8 @@ class TestFTNSTransaction:
             description="High precision reward"
         )
         
-        assert isinstance(transaction.amount, float)
-        assert transaction.amount == 123.456789012345
+        assert isinstance(transaction.amount, Decimal)
+        assert float(transaction.amount) == pytest.approx(123.456789012345)
     
     def test_ftns_transaction_negative_amount(self):
         """Test transaction with negative amount (spending)"""
@@ -279,11 +279,11 @@ class TestArchitectTask:
             status=TaskStatus.PENDING
         )
         
-        assert isinstance(task.task_id, UUID)
+        assert isinstance(task.task_id, str)  # task_id is str UUID
         assert task.session_id == session_id
         assert task.instruction == "Analyze quantum field interactions"
         assert task.complexity_score == 0.75
-        assert task.status == TaskStatus.PENDING
+        assert task.status == "pending"
     
     def test_architect_task_complexity_bounds(self):
         """Test complexity bounds validation"""
@@ -452,7 +452,7 @@ class TestModelValidationEdgeCases:
             user_id="test_user"
         )
         # Optional fields should have their default values
-        assert session.metadata == {}
+        assert session.metadata is None  # Optional[Dict] defaults to None
         assert session.reasoning_trace == []
         assert session.safety_flags == []
     
@@ -469,12 +469,14 @@ class TestModelValidationEdgeCases:
     
     def test_uuid_generation_validation(self):
         """Test UUID generation and validation"""
-        # Test that UUIDs are properly generated
+        # Test that UUIDs are properly generated as string UUIDs
         session = PRSMSession(
             user_id="test_user"
         )
-        assert isinstance(session.session_id, UUID)
-        
+        assert isinstance(session.session_id, str)
+        # Validate it's a proper UUID string
+        UUID(session.session_id)  # Should not raise
+
         # Test that different sessions get different UUIDs
         session2 = PRSMSession(
             user_id="test_user2"

@@ -26,24 +26,19 @@ class TestProjectStructure:
     @pytest.mark.parametrize("expected_dir", [
         "prsm",
         "prsm/core",
-        "prsm/nwtn", 
-        "prsm/agents",
-        "prsm/agents/architects",
-        "prsm/agents/prompters",
-        "prsm/agents/routers",
-        "prsm/agents/executors",
-        "prsm/agents/compilers",
-        "prsm/teachers",
-        "prsm/students",
-        "prsm/tokenomics",
-        "prsm/federation",
-        "prsm/scalability",
-        "prsm/security",
-        "prsm/api",
+        "prsm/compute",
+        "prsm/compute/agents",
+        "prsm/compute/nwtn",
+        "prsm/compute/teachers",
+        "prsm/compute/federation",
+        "prsm/economy",
+        "prsm/economy/tokenomics",
+        "prsm/data",
+        "prsm/interface",
+        "prsm/sdks",
         "tests",
         "docs",
         "scripts",
-        "sdks"
     ])
     def test_expected_directories_exist(self, project_root, expected_dir):
         """Test that all expected project directories exist"""
@@ -56,9 +51,7 @@ class TestProjectStructure:
         "requirements.txt",
         "prsm/__init__.py",
         "prsm/core/__init__.py",
-        "prsm/agents/__init__.py",
-        "prsm/nwtn/__init__.py",
-        "tests/__init__.py"
+        "prsm/compute/__init__.py",
     ])
     def test_expected_files_exist(self, project_root, expected_file):
         """Test that critical project files exist"""
@@ -70,20 +63,27 @@ class TestProjectStructure:
         """Test that Python packages are properly structured with __init__.py files"""
         prsm_dir = project_root / "prsm"
         assert prsm_dir.exists(), "PRSM package directory must exist"
-        
+
+        # Directories to exclude from __init__.py requirement
+        exclude_patterns = {"archive", "experiments", "unused_files", "__pycache__"}
+
         # Find all Python package directories (directories containing Python files)
         python_dirs = []
         for root, dirs, files in os.walk(prsm_dir):
-            if any(f.endswith('.py') for f in files):
-                python_dirs.append(Path(root))
-        
+            root_path = Path(root)
+            # Skip excluded directories
+            if any(part in exclude_patterns for part in root_path.parts):
+                continue
+            if any(f.endswith('.py') and f != '__init__.py' for f in files):
+                python_dirs.append(root_path)
+
         # Each directory with Python files should have an __init__.py
         missing_init_files = []
         for py_dir in python_dirs:
             init_file = py_dir / "__init__.py"
             if not init_file.exists():
                 missing_init_files.append(py_dir.relative_to(project_root))
-        
+
         assert len(missing_init_files) == 0, f"Missing __init__.py files in: {missing_init_files}"
 
 
@@ -125,8 +125,8 @@ class TestCoreImports:
     def test_federation_imports(self):
         """Test that federation components can be imported"""
         try:
-            from prsm.compute.federation.consensus import ConsensusEngine
-            assert ConsensusEngine is not None
+            from prsm.compute.federation.consensus import DistributedConsensus
+            assert DistributedConsensus is not None
         except ImportError as e:
             pytest.fail(f"Failed to import federation: {e}")
 

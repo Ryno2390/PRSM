@@ -36,8 +36,11 @@ class MockPricingModel:
 
 class MockMarketplaceListing:
     """Mock marketplace listing for testing"""
+    _listing_counter = 0
+
     def __init__(self, model_id, pricing_model, owner_id, listing_details):
-        self.listing_id = f"listing_{model_id}_{int(time.time())}"
+        MockMarketplaceListing._listing_counter += 1
+        self.listing_id = f"listing_{model_id}_{MockMarketplaceListing._listing_counter}"
         self.model_id = model_id
         self.pricing_model = pricing_model
         self.owner_id = owner_id
@@ -51,8 +54,11 @@ class MockMarketplaceListing:
 
 class MockMarketplaceTransaction:
     """Mock marketplace transaction for testing"""
+    _tx_counter = 0
+
     def __init__(self, listing, buyer_id, transaction_details):
-        self.transaction_id = f"tx_{int(time.time())}"
+        MockMarketplaceTransaction._tx_counter += 1
+        self.transaction_id = f"tx_{int(time.time())}_{MockMarketplaceTransaction._tx_counter}"
         self.listing = listing
         self.buyer_id = buyer_id
         self.seller_id = listing.owner_id
@@ -131,12 +137,17 @@ class MockMarketplace:
         if buyer_balance < transaction.total_cost:
             raise ValueError("Insufficient balance")
         
-        # Process payment
+        # Process payment: buyer pays full cost, seller receives cost minus platform fee
         platform_fee = transaction.total_cost * self.platform_fee_rate
         seller_amount = transaction.total_cost - platform_fee
-        
-        # Transfer funds
-        success = await self.ftns_service.transfer(buyer_id, listing.owner_id, seller_amount)
+
+        # Deduct full cost from buyer
+        buyer_current = await self.ftns_service.get_balance(buyer_id)
+        self.ftns_service.balances[buyer_id] = buyer_current - transaction.total_cost
+        # Credit seller with their share
+        seller_current = await self.ftns_service.get_balance(listing.owner_id)
+        self.ftns_service.balances[listing.owner_id] = seller_current + seller_amount
+        success = True
         if success:
             transaction.complete_transaction()
             self.transactions[transaction.transaction_id] = transaction
@@ -280,7 +291,7 @@ class TestMarketplaceTransactions:
     @pytest.mark.asyncio
     async def test_transaction_processing(self, setup_marketplace_with_users):
         """Test processing marketplace transactions"""
-        marketplace, ftns_service = await setup_marketplace_with_users
+        marketplace, ftns_service = setup_marketplace_with_users
         
         # Create a listing
         pricing = MockPricingModel(base_price=5.0, pricing_type="usage")
@@ -333,7 +344,7 @@ class TestMarketplaceTransactions:
     @pytest.mark.asyncio
     async def test_insufficient_balance_transaction(self, setup_marketplace_with_users):
         """Test transaction failure with insufficient balance"""
-        marketplace, ftns_service = await setup_marketplace_with_users
+        marketplace, ftns_service = setup_marketplace_with_users
         
         # Create expensive listing
         pricing = MockPricingModel(base_price=50000.0)  # Very expensive
@@ -359,7 +370,7 @@ class TestMarketplaceTransactions:
     @pytest.mark.asyncio
     async def test_nonexistent_listing_transaction(self, setup_marketplace_with_users):
         """Test transaction failure with nonexistent listing"""
-        marketplace, ftns_service = await setup_marketplace_with_users
+        marketplace, ftns_service = setup_marketplace_with_users
         
         transaction_details = {"type": "rental", "duration": 1.0}
         
@@ -373,7 +384,7 @@ class TestMarketplaceTransactions:
     @pytest.mark.asyncio
     async def test_user_transaction_history(self, setup_marketplace_with_users):
         """Test retrieving user transaction history"""
-        marketplace, ftns_service = await setup_marketplace_with_users
+        marketplace, ftns_service = setup_marketplace_with_users
         
         # Create multiple transactions for a user
         pricing = MockPricingModel(base_price=10.0)
