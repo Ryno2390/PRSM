@@ -21,6 +21,7 @@ setup(
         "cryptography>=41.0.0",
         "pyjwt>=2.8.0",
         "bcrypt>=4.1.0",
+        "passlib>=1.7.4",
         "prometheus-client>=0.19.0",
         "numpy>=1.24.0",
     ],
