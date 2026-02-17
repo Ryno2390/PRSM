@@ -144,7 +144,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Default command - start PRSM in production mode
-CMD ["python", "-m", "prsm.main", "--production", "--port", "8000"]
+CMD ["uvicorn", "prsm.interface.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 # ===================================
 # Stage 3: Development Environment
@@ -173,7 +173,7 @@ ENV PRSM_ENV=development \
     PRSM_RELOAD=true
 
 # Development command with auto-reload
-CMD ["python", "-m", "prsm.main", "--development", "--port", "8000", "--reload"]
+CMD ["uvicorn", "prsm.interface.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
 # ===================================
 # Labels and Metadata

@@ -342,12 +342,22 @@ class SEALTrainer:
         self.config = config or SEALConfig()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Initialize tokenizer and model
-        self.tokenizer = AutoTokenizer.from_pretrained(self.config.base_model_name)
+        # Initialize tokenizer and model — try online first, fall back to cache
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(self.config.base_model_name)
+        except Exception:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.config.base_model_name, local_files_only=True
+            )
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-        
-        self.base_model = AutoModelForCausalLM.from_pretrained(self.config.base_model_name).float().to(self.device)
+
+        try:
+            self.base_model = AutoModelForCausalLM.from_pretrained(self.config.base_model_name).float().to(self.device)
+        except Exception:
+            self.base_model = AutoModelForCausalLM.from_pretrained(
+                self.config.base_model_name, local_files_only=True
+            ).float().to(self.device)
 
         # Auto-detect model hidden size and update config to match
         model_hidden_size = self.base_model.config.hidden_size

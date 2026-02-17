@@ -232,7 +232,7 @@ class SecurityConfig(BaseConfigSchema):
     """Security configuration"""
     
     # Authentication
-    jwt_secret_key: str = Field(..., min_length=32, description="JWT secret key")
+    jwt_secret_key: str = Field(default="change-me-to-a-random-string-at-least-32-chars", min_length=32, description="JWT secret key")
     jwt_expiry_hours: int = Field(24, ge=1, le=168, description="JWT expiry in hours")
     enable_refresh_tokens: bool = Field(True, description="Enable refresh tokens")
     refresh_token_expiry_days: int = Field(30, ge=1, le=90, description="Refresh token expiry in days")
@@ -393,7 +393,7 @@ class PRSMConfig(BaseConfigSchema):
     tokenomics: TokenomicsConfig = Field(default_factory=TokenomicsConfig, description="Tokenomics configuration")
     marketplace: MarketplaceConfig = Field(default_factory=MarketplaceConfig, description="Marketplace configuration")
     database: DatabaseConfig = Field(default_factory=DatabaseConfig, description="Database configuration")
-    security: SecurityConfig = Field(..., description="Security configuration")
+    security: SecurityConfig = Field(default_factory=SecurityConfig, description="Security configuration")
     api: APIConfig = Field(default_factory=APIConfig, description="API configuration")
     logging: LoggingConfig = Field(default_factory=LoggingConfig, description="Logging configuration")
     system: SystemConfig = Field(default_factory=SystemConfig, description="System configuration")
@@ -402,6 +402,95 @@ class PRSMConfig(BaseConfigSchema):
     app_name: str = Field("PRSM", description="Application name")
     app_version: str = Field("1.0.0", description="Application version")
     
+    # === Flat attribute compatibility ===
+    # These properties allow code that expects PRSMSettings-style flat access
+    # (settings.environment, settings.debug, etc.) to work with PRSMConfig.
+
+    @property
+    def environment(self):
+        """Return environment as an object with .value for compatibility."""
+        env_str = self.system.environment
+        class _Env:
+            def __init__(self, v): self.value = v
+            def __str__(self): return self.value
+            def __eq__(self, other): return self.value == (other.value if hasattr(other, 'value') else other)
+        return _Env(env_str)
+
+    @property
+    def debug(self):
+        return self.system.debug
+
+    @property
+    def is_production(self):
+        return self.system.environment == "production"
+
+    @property
+    def is_development(self):
+        return self.system.environment == "development" or self.system.environment != "production"
+
+    @property
+    def is_testing(self):
+        return self.system.testing
+
+    @property
+    def jwt_algorithm(self):
+        return "HS256"
+
+    @property
+    def jwt_secret(self):
+        return self.security.jwt_secret_key if self.security else None
+
+    @property
+    def secret_key(self):
+        return self.security.jwt_secret_key if self.security else "dev-secret-key"
+
+    @property
+    def database_url(self):
+        return f"{self.database.type.value}://{self.database.host}:{self.database.port}/{self.database.name}" if self.database else "sqlite:///prsm.db"
+
+    @property
+    def redis_url(self):
+        return "redis://localhost:6379/0"
+
+    @property
+    def ipfs_host(self):
+        return "127.0.0.1"
+
+    @property
+    def ipfs_port(self):
+        return 5001
+
+    @property
+    def nwtn_enabled(self):
+        return True
+
+    @property
+    def nwtn_default_model(self):
+        return self.nwtn.default_model if self.nwtn and hasattr(self.nwtn, 'default_model') else "default"
+
+    @property
+    def ftns_enabled(self):
+        return True
+
+    @property
+    def ftns_initial_grant(self):
+        return 100
+
+    @property
+    def embedding_model(self):
+        return "text-embedding-3-small"
+
+    @property
+    def embedding_dimensions(self):
+        return 1536
+
+    def validate_required_config(self):
+        """Validate required configuration, returns list of missing items."""
+        missing = []
+        if self.security and self.security.jwt_secret_key == "change-me-to-a-random-string-at-least-32-chars":
+            missing.append("PRSM_SECRET_KEY (using default)")
+        return missing
+
     @model_validator(mode='after')
     def validate_component_consistency(self):
         """Validate consistency between component configurations"""

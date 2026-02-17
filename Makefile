@@ -83,10 +83,10 @@ clean:
 
 # Development Server
 run:
-	uvicorn prsm.api.main:app --reload --host 0.0.0.0 --port 8000
+	uvicorn prsm.interface.api.main:app --reload --host 0.0.0.0 --port 8000
 
 run-worker:
-	python -m prsm.workers.main
+	@echo "Worker mode coming in a future release. Use 'make run' to start the API server."
 
 # Database
 db-upgrade:
@@ -149,7 +149,7 @@ ipfs-init:
 
 # Monitoring
 metrics:
-	python -m prsm.monitoring.metrics_server
+	@echo "Metrics are available at /metrics when the API server is running (make run)."
 
 # Development Setup
 setup-dev: install-dev
@@ -162,7 +162,7 @@ ci-test: lint test-cov
 
 # Network setup for P2P
 setup-p2p:
-	python -m prsm.federation.setup_network
+	@echo "P2P networking coming in a future release. The system currently operates in single-node mode."
 
 # Kubernetes autoscaling
 k8s-deploy:

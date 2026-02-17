@@ -121,9 +121,6 @@ Changelog = "https://github.com/prsm-org/prsm/blob/main/CHANGELOG.md"
 
 [project.scripts]
 prsm = "prsm.cli:main"
-prsm-dev = "prsm.dev_cli:main"
-prsm-node = "prsm.node:main"
-prsm-teacher = "prsm.teachers.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

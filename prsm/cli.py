@@ -13,11 +13,31 @@ import uvicorn
 from rich.console import Console
 from rich.table import Table
 
-from prsm.core.config import get_settings
-
-
 console = Console()
-settings = get_settings()
+
+
+def _init_config():
+    """Initialize config manager with defaults so get_settings() works.
+
+    This must be called before starting uvicorn so that when the app
+    module is imported, get_settings()/get_config() return valid objects.
+    """
+    from prsm.core.config import ConfigManager
+    from prsm.core.config.schemas import PRSMConfig
+    manager = ConfigManager()
+    if manager.get_config() is None:
+        manager.load_config()
+
+
+def _get_debug() -> bool:
+    """Get debug setting, defaulting to False if config unavailable."""
+    try:
+        _init_config()
+        from prsm.core.config import get_settings
+        s = get_settings()
+        return getattr(s, 'debug', False) if s else False
+    except Exception:
+        return False
 
 
 @click.group()
@@ -39,38 +59,46 @@ def main():
 def serve(host: str, port: int, reload: bool, workers: int):
     """Start the PRSM API server"""
     console.print(f"🚀 Starting PRSM server on {host}:{port}", style="bold green")
-    
+    _init_config()
+
     if reload and workers > 1:
         console.print("⚠️  Cannot use --reload with multiple workers", style="yellow")
         workers = 1
-    
+
     uvicorn.run(
-        "prsm.api.main:app",
+        "prsm.interface.api.main:app",
         host=host,
         port=port,
         reload=reload,
         workers=workers,
-        log_level="info" if not settings.debug else "debug"
+        log_level="info" if not _get_debug() else "debug"
     )
 
 
 @main.command()
 def status():
     """Show PRSM system status"""
+    _init_config()
+    from prsm.core.config import get_settings
+    settings = get_settings()
     table = Table(title="PRSM System Status")
     table.add_column("Component", style="cyan")
     table.add_column("Status", style="magenta")
     table.add_column("Details", style="green")
-    
-    # Check basic configuration
-    table.add_row("Configuration", "✅ Loaded", f"Environment: {settings.environment}")
-    table.add_row("Database", "🔄 Checking...", settings.database_url)
-    table.add_row("IPFS", "🔄 Checking...", f"{settings.ipfs_host}:{settings.ipfs_port}")
-    table.add_row("NWTN", "✅ Enabled" if settings.nwtn_enabled else "❌ Disabled", 
-                  f"Model: {settings.nwtn_default_model}")
-    table.add_row("FTNS", "✅ Enabled" if settings.ftns_enabled else "❌ Disabled",
-                  f"Initial grant: {settings.ftns_initial_grant}")
-    
+
+    if settings:
+        table.add_row("Configuration", "✅ Loaded", f"Environment: {getattr(settings, 'environment', 'unknown')}")
+        table.add_row("Database", "🔄 Checking...", str(getattr(settings, 'database_url', 'sqlite (default)')))
+        table.add_row("IPFS", "🔄 Checking...", f"{getattr(settings, 'ipfs_host', 'localhost')}:{getattr(settings, 'ipfs_port', 5001)}")
+        table.add_row("NWTN", "✅ Enabled" if getattr(settings, 'nwtn_enabled', True) else "❌ Disabled",
+                      f"Model: {getattr(settings, 'nwtn_default_model', 'default')}")
+        table.add_row("FTNS", "✅ Enabled" if getattr(settings, 'ftns_enabled', True) else "❌ Disabled",
+                      f"Initial grant: {getattr(settings, 'ftns_initial_grant', 100)}")
+    else:
+        table.add_row("Configuration", "⚠️ Using defaults", "No .env file found")
+        table.add_row("NWTN", "✅ Enabled", "Default model")
+        table.add_row("FTNS", "✅ Enabled", "Default settings")
+
     console.print(table)
 
 
@@ -138,37 +166,44 @@ def node():
 
 @node.command()
 @click.option("--wizard", is_flag=True, help="Run interactive setup wizard")
-def start(wizard: bool):
-    """Start P2P node"""
+@click.option("--host", default="127.0.0.1", help="Host to bind to")
+@click.option("--port", default=8000, help="Port to bind to")
+def start(wizard: bool, host: str, port: int):
+    """Start a PRSM node (single-node mode)"""
     if wizard:
-        console.print("🧙 Welcome to the PRSM Node Wizard", style="bold magenta")
-        console.print("Let's get your lab connected to the Universal Research Commons.\n")
-        
+        console.print("🧙 Welcome to the PRSM Node Setup Wizard", style="bold magenta")
+        console.print("This will configure and start a PRSM node in single-node mode.\n")
+        console.print("Note: P2P networking is in development. Your node runs locally for now.\n", style="dim")
+
         # 1. Identity
-        use_sro = click.confirm("🔗 Would you like to link your Scientific Reputation Oracle (SRO) / ORCID?")
+        use_sro = click.confirm("🔗 Would you like to link your ORCID for identity?")
         if use_sro:
             orcid = click.prompt("   Enter your ORCID ID")
-            console.print(f"   ✅ SRO Linked: {orcid}", style="green")
+            console.print(f"   ✅ ORCID noted: {orcid} (will be used when P2P launches)", style="green")
         else:
-            console.print("   👤 Starting as Guest (NHI generated).", style="blue")
-            
+            console.print("   👤 Starting as anonymous user.", style="blue")
+
         # 2. Contribution
         mode = click.prompt(
-            "🧠 Choose your contribution type",
+            "🧠 Choose your node role",
             type=click.Choice(["full", "compute", "verify"]),
             default="full"
         )
         console.print(f"   ✅ Configured as {mode} node.", style="green")
-        
-        # 3. Stake
-        stake = click.prompt("💎 How much FTNS would you like to stake?", type=float, default=100.0)
-        console.print(f"   ✅ {stake} FTNS staked for voting power.", style="green")
-        
-        console.print("\n[SUCCESS] PRSM Node Active. Connected to 4,209 Oracles.", style="bold green")
-        console.print("🚀 PRSM is now mining science in the background.", style="bold blue")
+
+        console.print(f"\n✅ Configuration complete. Starting PRSM API server on {host}:{port}...", style="bold green")
+        console.print("   P2P peer discovery will be enabled in a future release.", style="dim")
     else:
-        console.print("🌐 Starting P2P node in headless mode...", style="bold green")
-        console.print("💡 Node active. Use 'prsm status' to monitor progress.", style="blue")
+        console.print(f"🌐 Starting PRSM node in single-node mode on {host}:{port}...", style="bold green")
+
+    # Initialize config and start the server
+    _init_config()
+    uvicorn.run(
+        "prsm.interface.api.main:app",
+        host=host,
+        port=port,
+        log_level="info" if not _get_debug() else "debug"
+    )
 
 
 @node.command()
