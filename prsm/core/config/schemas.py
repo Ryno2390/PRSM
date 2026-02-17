@@ -384,6 +384,19 @@ class SystemConfig(BaseConfigSchema):
         return v
 
 
+class P2PConfig(BaseConfigSchema):
+    """P2P networking configuration"""
+
+    enabled: bool = Field(True, description="Enable P2P networking")
+    listen_host: str = Field("0.0.0.0", description="P2P listen host")
+    listen_port: int = Field(9001, ge=1024, le=65535, description="P2P listen port")
+    bootstrap_nodes: List[str] = Field([], description="Bootstrap node addresses (host:port)")
+    max_peers: int = Field(50, ge=1, le=500, description="Maximum peer connections")
+    gossip_fanout: int = Field(3, ge=1, le=10, description="Gossip fanout (peers per message)")
+    gossip_ttl: int = Field(5, ge=1, le=20, description="Gossip message TTL (hops)")
+    heartbeat_interval: float = Field(30.0, ge=5.0, le=300.0, description="Heartbeat interval in seconds")
+
+
 # Main configuration schema
 class PRSMConfig(BaseConfigSchema):
     """Main PRSM configuration schema"""
@@ -397,7 +410,8 @@ class PRSMConfig(BaseConfigSchema):
     api: APIConfig = Field(default_factory=APIConfig, description="API configuration")
     logging: LoggingConfig = Field(default_factory=LoggingConfig, description="Logging configuration")
     system: SystemConfig = Field(default_factory=SystemConfig, description="System configuration")
-    
+    p2p: P2PConfig = Field(default_factory=P2PConfig, description="P2P networking configuration")
+
     # Global settings
     app_name: str = Field("PRSM", description="Application name")
     app_version: str = Field("1.0.0", description="Application version")
@@ -474,7 +488,7 @@ class PRSMConfig(BaseConfigSchema):
 
     @property
     def p2p_enabled(self):
-        return False
+        return self.p2p.enabled if self.p2p else False
 
     @property
     def governance_enabled(self):

@@ -24,6 +24,9 @@ setup(
         "passlib>=1.7.4",
         "prometheus-client>=0.19.0",
         "numpy>=1.24.0",
+        # P2P Networking
+        "websockets>=12.0",
+        "aiosqlite>=0.19.0",
     ],
     python_requires=">=3.11",
     description="PRSM - Protocol for Recursive Scientific Modeling",
