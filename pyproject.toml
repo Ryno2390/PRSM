@@ -68,6 +68,7 @@ dependencies = [
     "cryptography>=41.0.0",
     "pyjwt>=2.8.0",
     "bcrypt>=4.1.0",
+    "passlib>=1.7.4",
     
     # P2P Networking (optional for basic functionality)
     # "libp2p>=0.2.0",
