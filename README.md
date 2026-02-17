@@ -1,100 +1,133 @@
 # PRSM: Protocol for Recursive Scientific Modeling
 
-**A decentralized AGI framework for verified scientific discovery.**
+PRSM is a peer-to-peer collaboration framework for neuro-symbolic AI research. It combines three pillars — a compute network for AI orchestration, decentralized storage for scientific artifacts, and a token economy (FTNS) that incentivizes contributions. The goal is to make scientific AI development open, reproducible, and collectively owned.
+
+**Current version: 0.1.0 (Alpha)**
 
 ---
 
-## ⚡ Zero-Friction Deployment (Join the Network in 2 Minutes)
+## Quick Start
 
-PRSM is designed for radical ease of entry. Connect your lab to the Universal Research Commons with just two steps:
-
-### Step 1: One-Command Installation
-Copy and paste this into your terminal. This installs the **lightweight bootstrap** (seconds to complete):
 ```bash
-curl -sSL https://prsm.network/install.sh | bash
+# Clone and set up
+git clone https://github.com/Ryno2390/PRSM.git
+cd PRSM
+python3 -m venv .venv && source .venv/bin/activate
+
+# Install
+pip install -e .
+
+# Configure (optional — works with defaults)
+cp .env.example .env   # edit if needed
+
+# Start the API server
+prsm serve
+
+# Verify it's running
+curl http://localhost:8000/health
 ```
 
-### Step 2: The Terminal Wizard
-Activate your node and link your credentials:
+The server starts on `localhost:8000` by default. See `prsm --help` for all CLI options.
+
+---
+
+## Architecture Overview
+
+PRSM is organized around three pillars:
+
+### 1. Compute Network (NWTN)
+The Neural Web for Transformation Networking orchestrates multi-agent AI pipelines. It includes state-space models for efficient inference, Monte Carlo tree search for hypothesis exploration, and a 5-agent pipeline (Architect, Primer, Solver, Verifier, Scribe).
+
+**Key modules:** `prsm/compute/nwtn/`, `prsm/compute/agents/`, `prsm/compute/teachers/`
+
+### 2. Decentralized Storage
+IPFS-based content-addressed storage for models, datasets, and research artifacts. Includes sharding, retrieval, and integrity verification.
+
+**Key modules:** `prsm/storage/`, `prsm/core/ipfs_model.py`
+
+### 3. Token Economy (FTNS)
+The Federated Token for Networked Science handles resource accounting, staking, and incentive distribution. Includes a microsecond-precision accounting ledger.
+
+**Key modules:** `prsm/tokenomics/`, `prsm/economics/`
+
+---
+
+## Current Status
+
+| Component | Status | Notes |
+|---|---|---|
+| FastAPI server + health endpoint | **Working** | `prsm serve` starts the API |
+| CLI (`prsm` command) | **Working** | `serve`, `status`, `init`, `query` commands |
+| NWTN 5-agent pipeline | **Working** | Orchestration with mocked LLM backends |
+| FTNS accounting ledger | **Working** | Microsecond-precision transactions |
+| Deterministic SSM inference | **Working** | Reproducible results across instances |
+| MCTS search reasoning | **Working** | Hypothesis tree exploration |
+| Teacher model framework | **Working** | Create and train specialized models |
+| Test suite | **Working** | 793/793 tests passing |
+| P2P networking | **In Development** | Currently single-node mode |
+| Blockchain consensus | **In Development** | Local validation only |
+| IPFS storage integration | **In Development** | Works with local IPFS daemon |
+| Production deployment (K8s) | **Planned** | Configs exist, not production-tested |
+
+---
+
+## For Developers
+
+### Running Tests
+
 ```bash
-prsm node start --wizard
+# Install dev dependencies
+pip install -e ".[dev,test]"
+
+# Run the full test suite
+pytest
+
+# Run with coverage
+pytest --cov=prsm --cov-report=term-missing
+
+# Run specific test categories
+pytest -m unit
+pytest -m integration
 ```
 
----
+### Project Structure
 
-## 🏗️ Revolutionary Project Architecture
+```
+prsm/
+  cli.py                    # CLI entry point
+  core/                     # Config, database, validation, errors
+  interface/api/            # FastAPI application and endpoints
+  compute/
+    nwtn/                   # Neural orchestration engine
+    agents/                 # Multi-agent pipeline
+    teachers/               # Teacher model framework
+  tokenomics/               # FTNS token economy
+  economics/                # Economic modeling
+  storage/                  # Decentralized storage
+  safety/                   # Safety and governance
+  federation/               # P2P networking (in development)
+tests/                      # Test suite (793 tests)
+docs/                       # Documentation
+config/                     # Configuration templates
+scripts/                    # Utility scripts
+```
 
-PRSM leverages three converged technologies to decentralize artificial intelligence:
+### Contributing
 
-### 1. 🧠 Linear-Scaling Brain (SSM Core)
-*   **Tech:** State Space Models (SSM) inspired by Mamba/S4.
-*   **Advantage:** Replaces memory-heavy Transformers with $O(N)$ complexity. This enables complex scientific reasoning on edge nodes (laptops/mobiles) with a constant memory footprint.
-*   **Module:** `prsm/compute/nwtn/architectures/ssm_core.py`
-
-### 2. 🔗 Ledger of Truth (Deterministic Consensus)
-*   **Tech:** Deterministic PRNG + Quantized SHA-256 Hashing + Byzantine Fault Tolerance (BFT).
-*   **Advantage:** Ensures that every node reaches the *exact same* conclusion for a given seed. This creates a **Proof-of-Inference**, allowing the blockchain to reach consensus on task rewards without trust.
-*   **Module:** `prsm/core/utils/deterministic.py`
-
-### 3. 🔍 Exploratory Discovery (Search-Augmented Reasoning)
-*   **Tech:** Monte Carlo Tree Search (MCTS) + Value Functions.
-*   **Advantage:** Moves AI from "Predictive" (probabilistic guessing) to "Exploratory" (searching for proofs). NWTN explores a tree of hypotheses and prunes weak logical paths.
-*   **Module:** `prsm/compute/nwtn/engines/search_reasoning_engine.py`
-
----
-
-## 🎓 Scientific Meritocracy
-
-PRSM moves beyond simple "token voting." We use a dual-bridge identity system:
-
-- **SRO (Scientific Reputation Oracle):** Link your ORCID and h-index to gain high-trust validation weight.
-- **NHI (Non-Human Identity):** Autonomous agents build their own on-chain reputation based on verified breakthroughs.
-- **High-Trust Shards:** Critical research is validated by verified human experts, while heavy-lifting compute remains decentralized.
+1. Fork the repository
+2. Create a feature branch
+3. Run the test suite: `pytest`
+4. Submit a pull request
 
 ---
 
-## ✅ Verified Features & Tests
+## For Investors
 
-The following core components have been tested and verified:
-
-### 🚀 P2P Networking
-*   **Status:** ✅ Verified. Nodes discover peers and share specialized "Teacher" capabilities.
-*   **Test:** `tests/test_p2p_network.py`
-
-### 💎 Blockchain Oracle
-*   **Status:** ✅ Verified. Aggregates economic data and syncs with the FTNS ledger.
-*   **Test:** `tests/test_blockchain_oracle.py`
-
-### 📦 Decentralized Storage
-*   **Status:** ✅ Verified. IPFS-based sharding and retrieval verified with mocked node.
-*   **Test:** `tests/test_ipfs_integration.py`
-
-### 🔢 Deterministic SSM
-*   **Status:** ✅ Verified. Confirmed that local generators and quantization enable identical inference hashes across instances.
-*   **Test:** `tests/test_deterministic_ssm.py`
-
-### 🌲 MCTS Reasoning
-*   **Status:** ✅ Verified. The engine successfully searches through a hypothesis space to find high-value scientific insights.
-*   **Test:** `tests/test_search_reasoning.py`
+See the `docs/business/` directory for:
+- Business model and tokenomics documentation
+- Technical architecture deep-dives
+- Development roadmap and milestones
 
 ---
 
-## 🚀 Usage
-
-1.  **Clone & Setup:**
-    ```bash
-    git clone https://github.com/Ryno2390/PRSM.git
-    python3 -m venv venv && source venv/bin/activate
-    pip install -r requirements.txt
-    pip install torch pyyaml structlog pydantic aiohttp aiofiles web3 eth-account hexbytes
-    ```
-
-2.  **Run Core Tests:**
-    ```bash
-    PYTHONPATH=. python3 tests/test_ssm_system.py
-    PYTHONPATH=. python3 tests/verify_consensus_logic.py
-    ```
-
----
-
-**© 2026 PRSM Project - Decentralizing the Future of Science.**
+**License:** MIT | **Python:** >=3.11 | **Repo:** [github.com/Ryno2390/PRSM](https://github.com/Ryno2390/PRSM)

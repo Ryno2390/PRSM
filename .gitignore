@@ -164,10 +164,14 @@ multi-cloud-reports/
 security-validation-results/
 reports/
 
-# Performance and monitoring data  
+# Performance and monitoring data
 quick_*_summary.json
 performance-optimization-report-*.json
 *baseline*.json
+real_world_scenario_results_*.json
+comprehensive_*_report.json
+performance_benchmark_report.json
+data/chroma_db/
 
 # Test artifacts and temporary data
 test_environments/*/data/
