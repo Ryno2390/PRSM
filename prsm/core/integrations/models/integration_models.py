@@ -53,6 +53,7 @@ class ImportStatus(str, Enum):
 
 class SecurityRisk(str, Enum):
     """Security risk levels for imported content"""
+    UNKNOWN = "unknown"
     NONE = "none"
     LOW = "low"
     MEDIUM = "medium"

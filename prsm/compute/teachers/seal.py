@@ -347,8 +347,13 @@ class SEALTrainer:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         
-        self.base_model = AutoModelForCausalLM.from_pretrained(self.config.base_model_name).to(self.device)
-        
+        self.base_model = AutoModelForCausalLM.from_pretrained(self.config.base_model_name).float().to(self.device)
+
+        # Auto-detect model hidden size and update config to match
+        model_hidden_size = self.base_model.config.hidden_size
+        if self.config.input_dim != model_hidden_size:
+            self.config.input_dim = model_hidden_size
+
         # Initialize SEAL components
         self.seal_network = SEALNeuralNetwork(self.config).to(self.device)
         self.rl_learner = SEALReinforcementLearner(self.config)
@@ -429,9 +434,21 @@ class SEALTrainer:
             inputs.append(tokenized["input_ids"])
             targets.append(tokenized["input_ids"])
         
-        # Stack tensors
-        input_ids = torch.cat(inputs, dim=0).to(self.device)
-        target_ids = torch.cat(targets, dim=0).to(self.device)
+        # Pad all sequences to the same length before stacking
+        max_len = max(t.shape[-1] for t in inputs)
+        pad_id = self.tokenizer.pad_token_id or 0
+        padded_inputs = []
+        padded_targets = []
+        for inp, tgt in zip(inputs, targets):
+            pad_size = max_len - inp.shape[-1]
+            if pad_size > 0:
+                inp = torch.nn.functional.pad(inp, (0, pad_size), value=pad_id)
+                tgt = torch.nn.functional.pad(tgt, (0, pad_size), value=-100)  # -100 = ignore in loss
+            padded_inputs.append(inp)
+            padded_targets.append(tgt)
+
+        input_ids = torch.cat(padded_inputs, dim=0).to(self.device)
+        target_ids = torch.cat(padded_targets, dim=0).to(self.device)
         
         # Forward pass through language model
         outputs = self.base_model(input_ids, labels=target_ids)
@@ -518,8 +535,8 @@ class SEALTrainer:
                     pad_token_id=self.tokenizer.eos_token_id
                 )
                 
-                # Get hidden states
-                hidden_outputs = self.base_model(outputs, output_hidden_states=True)
+                # Get hidden states (pass as input_ids keyword argument)
+                hidden_outputs = self.base_model(input_ids=outputs, output_hidden_states=True)
                 hidden = hidden_outputs.hidden_states[-1].mean(dim=1)
                 
                 # Evaluate with SEAL network
