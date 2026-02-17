@@ -39,6 +39,9 @@ class ConnectorStatus(str, Enum):
     OFFLINE = "offline"
     RATE_LIMITED = "rate_limited"
     AUTH_FAILED = "auth_failed"
+    CONNECTED = "connected"
+    DISCONNECTED = "disconnected"
+    ERROR = "error"
 
 
 class BaseConnector(ABC):

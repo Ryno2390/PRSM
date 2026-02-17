@@ -318,7 +318,7 @@ class OllamaConnector(BaseConnector):
                 license_type = "permissive"
                 compliant = True
                 issues = []
-            elif any(term in license_text for term in ["gpl", "copyleft"]):
+            elif any(term in license_text for term in ["gpl", "general public license", "copyleft"]):
                 license_type = "copyleft"
                 compliant = False
                 issues = ["GPL/Copyleft license may have usage restrictions"]
@@ -459,10 +459,13 @@ class OllamaConnector(BaseConnector):
             response_time = (time.time() - start_time) * 1000
             
             if version_response:
+                # Update version from response
+                self.ollama_version = version_response.get("version", self.ollama_version)
+
                 # Get model count
                 await self._refresh_available_models()
                 await self._refresh_running_models()
-                
+
                 health_data = {
                     "status": "healthy",
                     "platform": self.platform,
