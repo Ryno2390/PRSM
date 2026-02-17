@@ -398,9 +398,17 @@ async def test_comprehensive_hybrid_routing(openrouter_api_key: str = None):
     click.echo("=" * 55)
     click.echo("Testing intelligent model routing system\n")
     
-    # Initialize router
+    # Initialize router with mocked local model availability
     router = HybridModelRouter(openrouter_api_key=openrouter_api_key)
     await router.initialize()
+
+    # Mock the Ollama client's list_available_models to provide local models for testing
+    from unittest.mock import AsyncMock
+    if router.ollama_client:
+        router.ollama_client.list_available_models = AsyncMock(return_value=[
+            {"name": "llama3:latest", "size": "4.7GB", "family": "llama"},
+            {"name": "mistral:latest", "size": "4.1GB", "family": "mistral"},
+        ])
     
     try:
         # Test 1: Privacy routing

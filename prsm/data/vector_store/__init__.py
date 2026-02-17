@@ -17,7 +17,7 @@ Key Features:
 - Performance monitoring and optimization
 """
 
-from .base import PRSMVectorStore, ContentMatch, VectorStoreConfig
+from .base import PRSMVectorStore, ContentMatch, VectorStoreConfig, VectorStoreType
 from .coordinator import VectorStoreCoordinator
 from .implementations import (
     PgVectorStore,
@@ -29,12 +29,13 @@ from .migration import VectorStoreMigrator
 
 __all__ = [
     "PRSMVectorStore",
-    "ContentMatch", 
+    "ContentMatch",
     "VectorStoreConfig",
+    "VectorStoreType",
     "VectorStoreCoordinator",
     "PgVectorStore",
     "MilvusVectorStore",
-    "QdrantVectorStore", 
+    "QdrantVectorStore",
     "ProvenanceVectorIntegration",
     "VectorStoreMigrator"
 ]

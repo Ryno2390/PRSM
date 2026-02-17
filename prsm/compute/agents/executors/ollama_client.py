@@ -120,7 +120,27 @@ class OllamaClient(BaseModelClient):
             "Content-Type": "application/json",
             "User-Agent": "PRSM/1.0 (Local Ollama Client)"
         }
-    
+
+    def _get_provider(self) -> ModelProvider:
+        """Get the provider type for this client"""
+        return ModelProvider.LOCAL
+
+    async def _execute_api_request(self, request: ModelExecutionRequest) -> Dict[str, Any]:
+        """Execute Ollama API request (not used directly - execute() is overridden)"""
+        raise NotImplementedError("OllamaClient uses custom execute() method")
+
+    def _parse_success_response(self, data: Dict[str, Any], request: ModelExecutionRequest) -> Dict[str, Any]:
+        """Parse Ollama success response (not used directly - execute() is overridden)"""
+        return {
+            "content": data.get("message", {}).get("content", ""),
+            "token_usage": {},
+            "metadata": {}
+        }
+
+    def _parse_error_response(self, error_data: Dict[str, Any], status_code: int) -> str:
+        """Parse Ollama error response"""
+        return f"Ollama error {status_code}: {str(error_data)}"
+
     async def _setup_client(self) -> None:
         """Ollama-specific setup and model discovery"""
         try:
