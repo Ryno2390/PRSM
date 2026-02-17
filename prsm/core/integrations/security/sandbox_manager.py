@@ -25,6 +25,7 @@ Sandbox Types:
 
 import asyncio
 import os
+import re
 import tempfile
 import shutil
 import subprocess
@@ -61,12 +62,22 @@ class SandboxStatus(str, Enum):
     ERROR = "error"
 
 
-class SandboxResult(str, Enum):
-    """Sandbox operation results"""
+class SandboxResultStatus(str, Enum):
+    """Sandbox operation result statuses"""
     APPROVED = "approved"
     REJECTED = "rejected"
     QUARANTINED = "quarantined"
     ERROR = "error"
+
+
+@dataclass
+class SandboxResult:
+    """Result from sandbox execution"""
+    success: bool = True
+    output: str = ""
+    error_output: str = ""
+    exit_code: int = 0
+    status: str = "completed"
 
 
 # ===== MCP Tool Execution Sandbox Classes =====
@@ -594,7 +605,89 @@ class SandboxManager:
             pass
     
     # === Public Sandbox Operations ===
-    
+
+    async def execute_safely(self, content_path: str, metadata: Dict[str, Any]) -> SandboxResult:
+        """
+        Execute content safely in the sandbox environment
+
+        Args:
+            content_path: Path to content to execute
+            metadata: Execution metadata
+
+        Returns:
+            SandboxResult with execution details
+        """
+        try:
+            import subprocess as sp
+            import os
+
+            if not os.path.exists(content_path):
+                return SandboxResult(
+                    success=False,
+                    output="",
+                    error_output=f"Content path not found: {content_path}",
+                    exit_code=-1,
+                    status="error"
+                )
+
+            # Determine execution command based on file type
+            if content_path.endswith('.py'):
+                import sys
+                cmd = [sys.executable, content_path]
+            else:
+                # For non-Python files, just validate they can be read
+                return SandboxResult(
+                    success=True,
+                    output="Content validated (non-executable)",
+                    error_output="",
+                    exit_code=0,
+                    status="completed"
+                )
+
+            # Execute with timeout and resource limits
+            timeout = min(metadata.get("timeout", 30), self.scan_timeout)
+
+            try:
+                result = sp.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    cwd=self.sandbox_dir,
+                    env={
+                        "PATH": os.environ.get("PATH", ""),
+                        "HOME": self.sandbox_dir,
+                        "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+                    }
+                )
+
+                return SandboxResult(
+                    success=result.returncode == 0,
+                    output=result.stdout[:10000],
+                    error_output=result.stderr[:10000],
+                    exit_code=result.returncode,
+                    status="completed"
+                )
+
+            except sp.TimeoutExpired:
+                return SandboxResult(
+                    success=False,
+                    output="",
+                    error_output=f"Execution timed out after {timeout} seconds",
+                    exit_code=-1,
+                    status="timeout"
+                )
+
+        except Exception as e:
+            logger.error("Sandbox execution failed", error=str(e))
+            return SandboxResult(
+                success=False,
+                output="",
+                error_output=f"Sandbox execution error: {str(e)}",
+                exit_code=-2,
+                status="error"
+            )
+
     async def scan_content(self, content_path: str, metadata: Dict[str, Any],
                          scan_options: Optional[Dict[str, Any]] = None) -> SecurityScanResult:
         """
@@ -925,11 +1018,18 @@ class SandboxManager:
                     "hardcoded_secrets": ["password.*=.*['\"]", "api_key.*=.*['\"]", "secret.*=.*['\"]"]
                 }
                 
+                content_lower = content.lower()
                 for vuln_type, patterns in vuln_patterns.items():
                     for pattern in patterns:
-                        if pattern.lower() in content.lower():
-                            vulnerabilities.append(f"Potential {vuln_type.replace('_', ' ')}: {pattern}")
-                            break
+                        try:
+                            if re.search(pattern, content_lower, re.IGNORECASE):
+                                vulnerabilities.append(f"Potential {vuln_type.replace('_', ' ')}: {pattern}")
+                                break
+                        except re.error:
+                            # Fall back to literal substring match for non-regex patterns
+                            if pattern.lower() in content_lower:
+                                vulnerabilities.append(f"Potential {vuln_type.replace('_', ' ')}: {pattern}")
+                                break
                             
         except Exception:
             # Ignore file reading errors

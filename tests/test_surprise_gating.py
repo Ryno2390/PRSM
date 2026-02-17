@@ -36,7 +36,8 @@ async def test_orchestrator_gating():
     """Verify that the orchestrator trace excludes low-surprise steps"""
     # High threshold to force gating
     orchestrator = NeuroSymbolicOrchestrator(node_id="gated_node")
-    orchestrator.gater.surprise_threshold = 0.5 
+    orchestrator._lazy_init()  # Ensure gater is initialized
+    orchestrator.gater.surprise_threshold = 0.5
     
     # query and s1_proposal are very similar in our mock
     # query: "Battery"

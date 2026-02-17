@@ -186,29 +186,33 @@ class PostQuantumCrypto:
             security_level = self.default_security_level
         
         if self.mock_mode:
+            import os
+            unique_id = os.urandom(16).hex()
             return PostQuantumKeyPair(
-                public_key=b"mock_pub_" + security_level.value.encode(),
-                private_key=b"mock_priv_" + security_level.value.encode(),
+                public_key=b"mock_pub_" + security_level.value.encode() + b"_" + unique_id.encode(),
+                private_key=b"mock_priv_" + security_level.value.encode() + b"_" + unique_id.encode(),
                 security_level=security_level
             )
 
         ml_dsa = self._ml_dsa_implementations[security_level]
         # ... rest of keygen logic
     
-    def sign_message(self, 
-                    message: Union[str, bytes], 
+    def sign_message(self,
+                    message: Union[str, bytes],
                     keypair: PostQuantumKeyPair,
                     signature_type: SignatureType = SignatureType.POST_QUANTUM) -> PostQuantumSignature:
         """Sign a message using post-quantum cryptography"""
         if isinstance(message, str):
             message = message.encode('utf-8')
-        
+
         # Create message hash for verification
         message_hash = hashlib.sha256(message).hexdigest()
-        
+
         if self.mock_mode:
+            # Include public key hash in signature so verification is key-specific
+            key_hash = hashlib.sha256(keypair.public_key).hexdigest()[:16]
             return PostQuantumSignature(
-                signature=b"mock_sig_" + message_hash.encode(),
+                signature=b"mock_sig_" + key_hash.encode() + b"_" + message_hash.encode(),
                 signature_type=signature_type,
                 security_level=keypair.security_level,
                 signer_key_id=keypair.key_id,
@@ -232,7 +236,9 @@ class PostQuantumCrypto:
             return False
         
         if self.mock_mode:
-            return signature.signature == b"mock_sig_" + message_hash.encode()
+            # Verify signature includes correct public key hash
+            key_hash = hashlib.sha256(public_key).hexdigest()[:16]
+            return signature.signature == b"mock_sig_" + key_hash.encode() + b"_" + message_hash.encode()
 
         ml_dsa = self._ml_dsa_implementations[signature.security_level]
         # ... rest of verify logic

@@ -71,6 +71,7 @@ class TrainingConfig:
     max_grad_norm: float = 1.0
     use_fp16: bool = True
     dataloader_num_workers: int = 4
+    gradient_accumulation_steps: int = 1
 
 
 class TeacherModelConnector:
@@ -264,7 +265,7 @@ class DistillationDataset(Dataset):
                 "Write a Python function to {}",
                 "Debug this code: {}",
                 "Explain this algorithm: {}",
-                "Convert to {} programming language: {}",
+                "Convert this to a different programming language: {}",
                 "Optimize this code: {}"
             ],
             "reasoning": [
@@ -780,7 +781,7 @@ class ProductionTrainingPipeline:
                 job.final_metrics = training_result.get("evaluation_results", {})
                 
                 # Charge FTNS for successful training
-                await ftns_service.charge_context_access(
+                await get_ftns_service().charge_context_access(
                     request.user_id, 
                     request.budget_ftns
                 )
@@ -1598,7 +1599,7 @@ class EnhancedProductionTrainingPipeline(ProductionTrainingPipeline):
                 job.final_metrics = training_result.get("evaluation_results", {})
                 
                 # Charge FTNS for successful training
-                await ftns_service.charge_context_access(
+                await get_ftns_service().charge_context_access(
                     request.user_id, 
                     request.budget_ftns
                 )

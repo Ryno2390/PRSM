@@ -12,7 +12,7 @@ async def test_discovery_pipeline_impact():
     """Verify that the pipeline correctly identifies and assesses breakthroughs"""
     orchestrator = NeuroSymbolicOrchestrator(node_id="discovery_node")
     ks = UnifiedKnowledgeSystem() # Uninitialized but for mock it's okay
-    pipeline = DiscoveryPipeline(orchestrator, ks)
+    pipeline = DiscoveryPipeline(orchestrator, ks, treasury=Decimal("1000000.0"))
     
     # Simulate a high-reward result (Level 5)
     high_reward_result = {"reward": 0.98}

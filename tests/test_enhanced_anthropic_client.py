@@ -264,14 +264,14 @@ class TestClaudeIntegration:
     async def test_budget_exceeded_error(self):
         """Test budget exceeded error handling"""
         client = EnhancedAnthropicClient(api_key="test", budget_limit=10.0)
-        client.usage_stats.total_cost = 9.5
-        
-        # Mock expensive request
+        client.usage_stats.total_cost = 9.99
+
+        # Mock expensive request - large enough to push estimated cost over budget
         request = ClaudeRequest(
-            messages=[{"role": "user", "content": "x" * 10000}],  # Large request
+            messages=[{"role": "user", "content": "x" * 100000}],  # Very large request
             model=ClaudeModel.CLAUDE_3_OPUS
         )
-        
+
         with patch.object(client, '_initialized', True):
             with patch.object(client, 'session', AsyncMock()):
                 with pytest.raises(RuntimeError, match="exceed budget limit"):

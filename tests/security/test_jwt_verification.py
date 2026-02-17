@@ -44,64 +44,76 @@ class TestJWTRevocationVerification:
         """Verify that revoked tokens are properly rejected."""
         from prsm.core.auth.jwt_handler import JWTHandler
 
-        handler = JWTHandler(
-            secret_key=jwt_secret,
-            redis_client=mock_redis,
-            db_service=mock_db_service
-        )
+        handler = JWTHandler()
+        handler.secret_key = jwt_secret
+        handler.redis_client = mock_redis
+        handler.db_service = mock_db_service
+        handler._initialized = True
 
-        # Create a valid token
+        # Create a valid token using the handler's algorithm and secret
         user_id = str(uuid4())
-        token = handler.create_access_token(
-            subject=user_id,
+        user_data = {
+            "user_id": user_id,
+            "username": "test_user",
+            "email": "test@example.com",
+            "role": "researcher",
+            "permissions": ["query"]
+        }
+        token, _ = await handler.create_access_token(
+            user_data=user_data,
             expires_delta=timedelta(hours=1)
         )
-
-        # Calculate token hash
-        token_hash = hashlib.sha256(token.encode()).hexdigest()
 
         # Mark token as revoked in Redis cache
         mock_redis.get = AsyncMock(return_value=b"1")  # Revoked
 
-        # Verify token - should fail
+        # Verify token - should fail (returns None for revoked tokens)
         result = await handler.verify_token(token)
-        assert result is None or result.get("revoked", False), "Revoked token should be rejected"
+        assert result is None, "Revoked token should be rejected"
 
     @pytest.mark.asyncio
     async def test_revocation_check_falls_through_to_database(self, mock_redis, mock_db_service, jwt_secret):
         """Verify revocation check queries database when Redis misses."""
         from prsm.core.auth.jwt_handler import JWTHandler
 
-        handler = JWTHandler(
-            secret_key=jwt_secret,
-            redis_client=mock_redis,
-            db_service=mock_db_service
-        )
+        handler = JWTHandler()
+        handler.secret_key = jwt_secret
+        handler.redis_client = mock_redis
+        handler.db_service = mock_db_service
+        handler._initialized = True
 
         # Redis returns None (cache miss)
         mock_redis.get = AsyncMock(return_value=None)
 
-        # Database should be queried
+        # Database should be queried - set up mock session context manager
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=MagicMock(
             scalar=MagicMock(return_value=1)  # Token found in revocation table
         ))
+        mock_session.commit = AsyncMock()
         mock_db_service.get_session = MagicMock(return_value=AsyncMock(
             __aenter__=AsyncMock(return_value=mock_session),
             __aexit__=AsyncMock()
         ))
 
         user_id = str(uuid4())
-        token = handler.create_access_token(
-            subject=user_id,
+        user_data = {
+            "user_id": user_id,
+            "username": "test_user",
+            "email": "test@example.com",
+            "role": "researcher",
+            "permissions": ["query"]
+        }
+        token, _ = await handler.create_access_token(
+            user_data=user_data,
             expires_delta=timedelta(hours=1)
         )
 
         result = await handler.verify_token(token)
 
         # Should have checked database after Redis miss
-        # Token should be rejected as revoked
-        assert result is None or result.get("revoked", False)
+        # Token should be rejected as revoked (returns None)
+        assert result is None
 
 
 class TestAlgorithmConfusionPrevention:
@@ -266,7 +278,13 @@ class TestRequiredClaimsValidation:
             jwt.decode(token, jwt_secret, algorithms=["HS256"])
 
     def test_future_iat_is_suspicious(self, jwt_secret):
-        """Verify tokens with future iat (issued at) are flagged."""
+        """Verify tokens with future iat (issued at) are flagged.
+
+        PyJWT raises ImmatureSignatureError when verify_iat is enabled and
+        the iat claim is in the future. We verify that:
+        1. With iat verification enabled, future iat tokens are rejected.
+        2. Even without iat verification, we can detect the suspicious timestamp.
+        """
         payload = {
             "sub": str(uuid4()),
             "exp": datetime.now(timezone.utc) + timedelta(hours=2),
@@ -276,16 +294,21 @@ class TestRequiredClaimsValidation:
 
         token = jwt.encode(payload, jwt_secret, algorithm="HS256")
 
-        # PyJWT allows future iat by default, but we should check
-        decoded = jwt.decode(token, jwt_secret, algorithms=["HS256"])
+        # PyJWT with verify_iat=True rejects future iat tokens
+        with pytest.raises(jwt.exceptions.ImmatureSignatureError):
+            jwt.decode(token, jwt_secret, algorithms=["HS256"],
+                       options={"verify_iat": True})
+
+        # Even without strict iat verification, we can detect the anomaly
+        decoded = jwt.decode(token, jwt_secret, algorithms=["HS256"],
+                             options={"verify_iat": False})
 
         iat = datetime.fromtimestamp(decoded["iat"], tz=timezone.utc)
         now = datetime.now(timezone.utc)
 
         # Token issued in the future is suspicious
         is_future_iat = iat > now + timedelta(seconds=30)  # Allow 30s clock skew
-        if is_future_iat:
-            pytest.skip("Future iat should trigger additional verification")
+        assert is_future_iat, "Future iat should be detected as suspicious"
 
 
 class TestTokenRevocationFlow:

@@ -85,6 +85,9 @@ def sample_github_repo():
         "owner": {"login": "microsoft"},
         "html_url": "https://github.com/microsoft/vscode",
         "clone_url": "https://github.com/microsoft/vscode.git",
+        "git_url": "git://github.com/microsoft/vscode.git",
+        "ssh_url": "git@github.com:microsoft/vscode.git",
+        "private": False,
         "size": 50000,
         "stargazers_count": 140000,
         "forks_count": 25000,
@@ -222,16 +225,24 @@ class TestGitHubConnector:
     async def test_get_repository_metadata(self, mock_github_config, sample_github_repo):
         """Test getting detailed repository metadata"""
         connector = GitHubConnector(mock_github_config)
-        
+
         with patch.object(connector, '_make_api_request', new_callable=AsyncMock) as mock_api:
             mock_api.return_value = sample_github_repo
-            
-            # Mock additional API calls
-            with patch.object(connector, '_get_repository_languages', new_callable=AsyncMock) as mock_langs:
+
+            # Mock additional API calls used in asyncio.gather within _get_repository_metadata
+            with patch.object(connector, '_get_repository_languages', new_callable=AsyncMock) as mock_langs, \
+                 patch.object(connector, '_get_repository_contributors', new_callable=AsyncMock) as mock_contribs, \
+                 patch.object(connector, '_get_repository_readme', new_callable=AsyncMock) as mock_readme, \
+                 patch.object(connector, '_get_repository_releases', new_callable=AsyncMock) as mock_releases, \
+                 patch.object(connector, '_get_repository_commits', new_callable=AsyncMock) as mock_commits:
                 mock_langs.return_value = {"TypeScript": 70, "JavaScript": 30}
-                
+                mock_contribs.return_value = []
+                mock_readme.return_value = None
+                mock_releases.return_value = []
+                mock_commits.return_value = []
+
                 metadata = await connector.get_content_metadata("microsoft/vscode")
-                
+
                 assert metadata["type"] == "repository"
                 assert metadata["full_name"] == "microsoft/vscode"
                 assert metadata["creator"] == "microsoft"
@@ -342,7 +353,7 @@ class TestOllamaConnector:
             assert metadata["type"] == "local_model"
             assert metadata["name"] == "llama2:7b"
             assert metadata["platform"] == "ollama"
-            assert metadata["size_gb"] == 3.57
+            assert metadata["size_gb"] == round(3825819519 / (1024**3), 2)  # 3.56
     
     @pytest.mark.asyncio
     async def test_license_validation_local_model(self, mock_ollama_config):
@@ -735,7 +746,7 @@ class TestIntegrationAPI:
     
     def test_health_endpoint(self, test_client):
         """Test health endpoint"""
-        with patch('prsm.core.integrations.core.integration_manager.integration_manager') as mock_manager:
+        with patch('prsm.core.integrations.api.integration_api.integration_manager') as mock_manager:
             mock_manager.get_system_health = AsyncMock(return_value={
                 "overall_status": "healthy",
                 "health_percentage": 95.0,
@@ -744,9 +755,9 @@ class TestIntegrationAPI:
                 "last_health_check": None,
                 "sandbox_status": {"status": "idle"}
             })
-            
+
             response = test_client.get("/integrations/health")
-            
+
             assert response.status_code == 200
             data = response.json()
             assert data["overall_status"] == "healthy"
@@ -754,7 +765,7 @@ class TestIntegrationAPI:
     
     def test_search_endpoint(self, test_client):
         """Test content search endpoint"""
-        with patch('prsm.core.integrations.core.integration_manager.integration_manager') as mock_manager:
+        with patch('prsm.core.integrations.api.integration_api.integration_manager') as mock_manager:
             mock_source = IntegrationSource(
                 platform=IntegrationPlatform.GITHUB,
                 external_id="test/repo",
@@ -762,17 +773,17 @@ class TestIntegrationAPI:
                 owner_id="test",
                 url="https://github.com/test/repo"
             )
-            
+
             mock_manager.search_content = AsyncMock(return_value=[mock_source])
-            
+
             search_data = {
                 "query": "test",
                 "content_type": "repository",
                 "limit": 10
             }
-            
+
             response = test_client.post("/integrations/search", json=search_data)
-            
+
             assert response.status_code == 200
             data = response.json()
             assert len(data) == 1
