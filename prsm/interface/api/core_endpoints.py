@@ -49,19 +49,20 @@ def _register_root_endpoint(app: FastAPI) -> None:
     @app.get("/")
     async def root() -> Dict[str, Any]:
         """Root endpoint with system information"""
+        _settings = settings or get_settings()
         return {
             "name": "PRSM API",
             "version": "0.1.0",
             "description": "Protocol for Recursive Scientific Modeling",
-            "environment": settings.environment.value,
+            "environment": _settings.environment.value if _settings else "unknown",
             "status": "operational",
             "features": {
-                "nwtn_enabled": settings.nwtn_enabled,
-                "ftns_enabled": settings.ftns_enabled,
-                "p2p_enabled": settings.p2p_enabled,
-                "governance_enabled": settings.governance_enabled,
-                "rsi_enabled": settings.rsi_enabled,
-            }
+                "nwtn_enabled": getattr(_settings, "nwtn_enabled", True),
+                "ftns_enabled": getattr(_settings, "ftns_enabled", True),
+                "p2p_enabled": getattr(_settings, "p2p_enabled", False),
+                "governance_enabled": getattr(_settings, "governance_enabled", True),
+                "rsi_enabled": getattr(_settings, "rsi_enabled", False),
+            } if _settings else {}
         }
 
 
