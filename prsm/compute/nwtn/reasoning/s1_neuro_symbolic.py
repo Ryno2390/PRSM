@@ -176,7 +176,7 @@ class NeuroSymbolicOrchestrator:
         
         # Local imports for heavy crypt/utils
         import hashlib
-        from prsm.core.utils.deterministic import generate_verification_hash
+        from prsm.core.utils.deterministic import get_local_generator, generate_verification_hash
         
         # SECURITY GATE 1: PII Sanitization
         safe_query = self.security_audit.sanitize_pii(query)
@@ -330,9 +330,12 @@ class NeuroSymbolicOrchestrator:
         """
         Allows a validator node to verify if a worker node actually did the work.
         Crucial for solving the Oracle Problem.
-        
+
         Supports Sharded Verification: verify only a subset of the logic chain.
         """
+        # Ensure lazy initialization for PQC and other dependencies
+        self._lazy_init()
+
         # Local imports for heavy components
         import hashlib
         from prsm.core.utils.deterministic import get_local_generator, generate_verification_hash

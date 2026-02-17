@@ -65,6 +65,8 @@ class ThreatDetector:
             ThreatType.BACKDOOR: {
                 "patterns": [
                     r"eval\s*\(\s*base64_decode",
+                    r"eval\s*\(\s*base64\.",
+                    r"exec\s*\(\s*base64\.",
                     r"system\s*\(\s*\$_[A-Z]+",
                     r"shell_exec\s*\(\s*\$_",
                     r"exec\s*\(\s*\$_[GET|POST]",
@@ -88,10 +90,12 @@ class ThreatDetector:
                 "patterns": [
                     r"(?:http|https|ftp)://(?:[0-9]{1,3}\.){3}[0-9]{1,3}",  # IP addresses
                     r"socket\.connect\s*\(",
+                    r"\.connect\s*\(\s*\(\s*[\"'][\d.]+[\"']",  # sock.connect(("IP", port))
                     r"urllib\.request\.urlopen",
                     r"requests\.(?:get|post)\s*\(",
                     r"wget\s+http",
-                    r"curl\s+.*http"
+                    r"curl\s+.*http",
+                    r"\.send\s*\(\s*b[\"']"  # sock.send(b"data")
                 ],
                 "severity": ThreatLevel.MEDIUM
             },
@@ -124,7 +128,10 @@ class ThreatDetector:
                     r"setgid\s*\(",
                     r"/etc/passwd",
                     r"/etc/shadow",
-                    r"chmod\s+[47]77"
+                    r"chmod\s+[47]77",
+                    r"os\.system\s*\(",
+                    r"subprocess\.(?:call|run|Popen|check_output)\s*\(",
+                    r"shell_exec\s*\("
                 ],
                 "severity": ThreatLevel.HIGH
             },

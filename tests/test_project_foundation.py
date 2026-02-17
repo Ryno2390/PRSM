@@ -65,7 +65,9 @@ class TestProjectStructure:
         assert prsm_dir.exists(), "PRSM package directory must exist"
 
         # Directories to exclude from __init__.py requirement
-        exclude_patterns = {"archive", "experiments", "unused_files", "__pycache__"}
+        # prsm/core/database is excluded because prsm/core/database.py exists as a sibling
+        # module, making the directory a helper/data directory rather than a Python package
+        exclude_patterns = {"archive", "experiments", "unused_files", "__pycache__", "database"}
 
         # Find all Python package directories (directories containing Python files)
         python_dirs = []

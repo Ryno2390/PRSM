@@ -133,6 +133,7 @@ class DistillationRequest(PRSMBaseModel):
     
     # Training configuration
     training_strategy: TrainingStrategy = TrainingStrategy.PROGRESSIVE
+    backend: Optional[str] = Field(default=None, description="Training backend (pytorch, tensorflow, transformers)")
     augmentation_techniques: List[str] = Field(default_factory=list)
     custom_training_data: Optional[str] = Field(default=None, description="IPFS CID for custom training data")
     
@@ -400,48 +401,56 @@ class SafetyAssessment(TimestampMixin):
 class DistillationJob(TimestampMixin):
     """
     Complete distillation job tracking
-    
+
     Central record for the entire distillation process from request to deployment.
     """
     job_id: UUID = Field(default_factory=uuid4)
-    request_id: UUID
+    request_id: Optional[UUID] = Field(default_factory=uuid4)
     user_id: str
-    
-    # Job status
-    status: DistillationStatus = DistillationStatus.QUEUED
+
+    # Job status (accepts both DistillationStatus enum and string values)
+    status: Union[DistillationStatus, str] = DistillationStatus.QUEUED
     progress_percentage: int = Field(default=0, ge=0, le=100)
+    progress: float = Field(default=0.0, ge=0.0, le=1.0, description="Training progress as fraction 0.0-1.0")
     current_stage: str = Field(default="queued")
     estimated_completion: Optional[datetime] = None
-    
+
+    # Training pipeline fields
+    teacher_model: Optional[str] = Field(default=None, description="Teacher model identifier")
+    domain: Optional[str] = Field(default=None, description="Training domain")
+    backend: Optional[str] = Field(default=None, description="Training backend (pytorch, tensorflow, transformers)")
+    model_path: Optional[str] = Field(default=None, description="Path to saved model artifacts")
+    final_metrics: Dict[str, Any] = Field(default_factory=dict, description="Final evaluation metrics")
+
     # Process tracking
     teacher_analysis_id: Optional[UUID] = None
     architecture_id: Optional[UUID] = None
     training_config_id: Optional[UUID] = None
-    
+
     # Results
     final_model_id: Optional[str] = None
     quality_metrics_id: Optional[UUID] = None
     safety_assessment_id: Optional[UUID] = None
-    
+
     # Resource usage
     compute_time_hours: float = Field(default=0.0, ge=0.0)
     ftns_spent: int = Field(default=0, ge=0)
     storage_used_gb: float = Field(default=0.0, ge=0.0)
-    
+
     # Error handling
     error_message: Optional[str] = None
     error_details: Dict[str, Any] = Field(default_factory=dict)
     retry_count: int = Field(default=0, ge=0)
-    
+
     # Deployment info
     marketplace_listing_id: Optional[str] = None
     deployment_endpoints: List[str] = Field(default_factory=list)
     model_version: str = Field(default="1.0.0")
-    
+
     # Notifications and communication
     notification_preferences: Dict[str, bool] = Field(default_factory=dict)
     progress_updates: List[Dict[str, Any]] = Field(default_factory=list)
-    
+
     # Metadata
     tags: List[str] = Field(default_factory=list)
     notes: Optional[str] = None

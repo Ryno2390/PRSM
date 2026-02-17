@@ -150,14 +150,32 @@ class SafeExecutionEnvironment:
                 parsed = ast.parse(code_line)
                 syntax_valid = True
             except SyntaxError as e:
-                return ExecutionTrace(
-                    line_number=0,
-                    code_line=code_line,
-                    status=ExecutionStatus.SYNTAX_ERROR,
-                    error_message=str(e),
-                    execution_time=time.time() - start_time
-                )
-            
+                # Allow incomplete block starters (def, class, if, for, while, etc.)
+                # and indented lines that are part of a block
+                stripped = code_line.strip()
+                is_block_starter = False
+                if stripped.endswith(':') and any(
+                    stripped.startswith(kw) for kw in
+                    ['def ', 'class ', 'if ', 'elif ', 'else:', 'for ', 'while ', 'try:', 'except', 'finally:', 'with ']
+                ):
+                    # Verify it's actually a valid block starter by parsing with a body
+                    try:
+                        ast.parse(stripped + "\n    pass")
+                        is_block_starter = True
+                    except SyntaxError:
+                        pass
+                is_indented_line = code_line.startswith((' ', '\t')) and stripped
+                is_comment = stripped.startswith('#')
+
+                if not (is_block_starter or is_indented_line or is_comment):
+                    return ExecutionTrace(
+                        line_number=0,
+                        code_line=code_line,
+                        status=ExecutionStatus.SYNTAX_ERROR,
+                        error_message=str(e),
+                        execution_time=time.time() - start_time
+                    )
+
             # Execute with timeout
             result = self._execute_with_timeout(code_line, self.timeout)
             
@@ -220,14 +238,24 @@ class SafeExecutionEnvironment:
                 parsed = ast.parse(code_line)
                 syntax_valid = True
             except SyntaxError as e:
-                return ExecutionTrace(
-                    line_number=0,
-                    code_line=code_line,
-                    status=ExecutionStatus.SYNTAX_ERROR,
-                    error_message=str(e),
-                    execution_time=time.time() - start_time
+                # Allow incomplete block starters and indented lines
+                stripped = code_line.strip()
+                is_block_starter = stripped.endswith(':') and any(
+                    stripped.startswith(kw) for kw in
+                    ['def ', 'class ', 'if ', 'elif ', 'else:', 'for ', 'while ', 'try:', 'except', 'finally:', 'with ']
                 )
-            
+                is_indented_line = code_line.startswith((' ', '\t')) and stripped
+                is_comment = stripped.startswith('#')
+
+                if not (is_block_starter or is_indented_line or is_comment):
+                    return ExecutionTrace(
+                        line_number=0,
+                        code_line=code_line,
+                        status=ExecutionStatus.SYNTAX_ERROR,
+                        error_message=str(e),
+                        execution_time=time.time() - start_time
+                    )
+
             # Execute with async-compatible timeout
             if self.enable_async_timeout:
                 result = await self._execute_with_async_timeout(code_line, self.timeout)
@@ -289,10 +317,13 @@ class SafeExecutionEnvironment:
             try:
                 # Use exec for statements, eval for expressions with restricted globals
                 restricted_globals = self._get_restricted_globals()
-                
-                if any(code_line.strip().startswith(stmt) for stmt in 
+                stripped = code_line.strip()
+
+                if any(stripped.startswith(stmt) for stmt in
                        ['def ', 'class ', 'if ', 'for ', 'while ', 'try:', 'with ']):
-                    exec(code_line, restricted_globals, self.local_namespace)  # nosec B102 - controlled execution context
+                    # Block starters need a body to execute; append 'pass'
+                    exec_code = code_line + "\n    pass" if stripped.endswith(':') else code_line
+                    exec(exec_code, restricted_globals, self.local_namespace)  # nosec B102 - controlled execution context
                     return None
                 else:
                     # Try as expression first, fallback to statement
@@ -346,10 +377,13 @@ class SafeExecutionEnvironment:
             try:
                 # Use exec for statements, eval for expressions with restricted globals
                 restricted_globals = self._get_restricted_globals()
-                
-                if any(code_line.strip().startswith(stmt) for stmt in 
+                stripped = code_line.strip()
+
+                if any(stripped.startswith(stmt) for stmt in
                        ['def ', 'class ', 'if ', 'for ', 'while ', 'try:', 'with ']):
-                    exec(code_line, restricted_globals, self.local_namespace)  # nosec B102 - controlled execution context
+                    # Block starters need a body to execute; append 'pass'
+                    exec_code = code_line + "\n    pass" if stripped.endswith(':') else code_line
+                    exec(exec_code, restricted_globals, self.local_namespace)  # nosec B102 - controlled execution context
                     return None
                 else:
                     # Try as expression first, fallback to statement
@@ -360,7 +394,7 @@ class SafeExecutionEnvironment:
                         return None
             except Exception as e:
                 raise e
-        
+
         # Enhanced cross-platform timeout implementation
         return self._execute_with_robust_timeout(target, timeout)
     
@@ -386,8 +420,9 @@ class SafeExecutionEnvironment:
             # Try signal-based timeout first, fallback to threading
             try:
                 return self._execute_with_signal_timeout(target_func, timeout)
-            except (OSError, AttributeError):
+            except (OSError, AttributeError, ValueError):
                 # Fallback to thread-based timeout if signals not available
+                # ValueError occurs when not in main thread
                 return self._execute_with_thread_timeout(target_func, timeout)
     
     def _execute_with_thread_timeout(self, target_func, timeout: float) -> Any:
@@ -564,9 +599,17 @@ class SafeExecutionEnvironment:
                         if node.func.id in ['exec', 'eval', 'compile', '__import__', 'open', 'file']:
                             return False
         except SyntaxError:
-            # If we can't parse it, it's probably not safe
-            return False
-        
+            # Allow incomplete lines that are parts of multi-line constructs
+            stripped = code.strip()
+            is_block_starter = stripped.endswith(':') and any(
+                stripped.startswith(kw) for kw in
+                ['def ', 'class ', 'if ', 'elif ', 'else:', 'for ', 'while ', 'try:', 'except', 'finally:', 'with ']
+            )
+            is_indented = code.startswith((' ', '\t')) and stripped
+            is_comment = stripped.startswith('#')
+            if not (is_block_starter or is_indented or is_comment):
+                return False
+
         return True
     
     def _get_restricted_globals(self) -> Dict[str, Any]:
@@ -938,7 +981,11 @@ class ExecutionGuidedCodeRunner:
     def get_execution_statistics(self) -> Dict[str, Any]:
         """Get comprehensive execution statistics"""
         if not self.generation_history:
-            return {"message": "No generation history available"}
+            return {
+                "message": "No generation history available",
+                "methodology": "EG-CFG (Execution-Guided Classifier-Free Guidance)",
+                "research_paper": "arXiv:2506.10948v1"
+            }
         
         total_candidates = len(self.generation_history)
         successful_candidates = len([c for c in self.generation_history if c.total_score > 0])

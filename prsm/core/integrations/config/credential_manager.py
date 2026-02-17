@@ -496,8 +496,8 @@ class CredentialManager:
             Validation result with status and metadata
         """
         try:
-            # Get credential metadata
-            credentials = self.list_credentials(user_id, platform)
+            # Get credential metadata (include expired to properly report status)
+            credentials = self.list_credentials(user_id, platform, include_expired=True)
             
             if credential_id:
                 credentials = [c for c in credentials if c['credential_id'] == credential_id]

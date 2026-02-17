@@ -654,25 +654,25 @@ class TestPerformance:
     
     def test_large_number_of_credentials(self, credential_manager):
         """Test handling large numbers of credentials"""
-        # Store many credentials
+        # Store many credentials using different users
+        # (store_credential replaces existing creds for same user+platform)
         credential_ids = []
         for i in range(100):
             credential_data = CredentialData(api_key=f"key_{i}")
             credential_id = credential_manager.store_credential(
-                user_id="perf_test_user",
+                user_id=f"perf_test_user_{i}",
                 platform=IntegrationPlatform.GITHUB,
                 credential_data=credential_data,
                 metadata={"index": i}
             )
             credential_ids.append(credential_id)
-        
-        # Test listing performance
-        credentials = credential_manager.list_credentials("perf_test_user")
-        assert len(credentials) == 100
-        
+
+        # Verify all credentials are stored
+        assert len(credential_manager.active_credentials) == 100
+
         # Test retrieval performance
         retrieved = credential_manager.get_credential(
-            "perf_test_user", IntegrationPlatform.GITHUB
+            "perf_test_user_0", IntegrationPlatform.GITHUB
         )
         assert retrieved is not None
     

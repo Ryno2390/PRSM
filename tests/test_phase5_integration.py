@@ -314,7 +314,7 @@ class IntegratedFTNSSystem:
         if stress_type == "price_crash":
             # Simulate price crash
             crash_magnitude = 0.4 + (intensity * 0.4)  # 40% to 80% crash
-            new_price = self.system_metrics["price"] * (1 - crash_magnitude)
+            new_price = self.system_metrics["price"] * Decimal(str(1 - crash_magnitude))
             self.price_oracle.set_current_price(float(new_price))
             
             # Trigger emergency detection
@@ -459,7 +459,7 @@ class IntegratedFTNSSystem:
         
         # Price tends to increase with higher velocity and transaction activity
         price_change = (velocity_factor + transaction_factor - 1) * 0.01  # 1% max change per cycle
-        new_price = self.system_metrics["price"] * (1 + price_change)
+        new_price = self.system_metrics["price"] * Decimal(str(1 + price_change))
         
         self.system_metrics["price"] = max(Decimal('0.1'), new_price)  # Minimum $0.10
         self.system_metrics["market_cap"] = self.system_metrics["price"] * self.system_metrics["total_supply"]

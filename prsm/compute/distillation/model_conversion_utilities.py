@@ -121,7 +121,7 @@ class PyTorchToONNXConverter(BaseConverter):
         try:
             # Load PyTorch model
             if self.config.input_path.endswith('.pth') or self.config.input_path.endswith('.pt'):
-                model = torch.load(self.config.input_path, map_location=self.config.device, weights_only=True)
+                model = torch.load(self.config.input_path, map_location=self.config.device, weights_only=False)
             elif TRANSFORMERS_AVAILABLE and Path(self.config.input_path).is_dir():
                 # Hugging Face model
                 model = AutoModel.from_pretrained(self.config.input_path)
@@ -316,7 +316,7 @@ class PyTorchToTorchScriptConverter(BaseConverter):
         try:
             # Load PyTorch model
             if self.config.input_path.endswith('.pth') or self.config.input_path.endswith('.pt'):
-                model = torch.load(self.config.input_path, map_location=self.config.device, weights_only=True)
+                model = torch.load(self.config.input_path, map_location=self.config.device, weights_only=False)
             elif TRANSFORMERS_AVAILABLE and Path(self.config.input_path).is_dir():
                 # Hugging Face model
                 model = AutoModel.from_pretrained(self.config.input_path)
@@ -618,26 +618,8 @@ class ModelConversionEngine:
     async def convert_model(self, config: ConversionConfig) -> ConversionResult:
         """Convert model between formats"""
         logger.info(f"Converting {config.input_format} → {config.output_format}: {config.input_path}")
-        
-        # Validate input file
-        if not Path(config.input_path).exists():
-            return ConversionResult(
-                success=False,
-                input_format=config.input_format,
-                output_format=config.output_format,
-                input_path=config.input_path,
-                output_path=config.output_path,
-                model_size_mb=0.0,
-                conversion_time=0.0,
-                validation_passed=False,
-                error_message=f"Input file not found: {config.input_path}"
-            )
-        
-        # Create output directory if needed
-        output_dir = Path(config.output_path).parent
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Select appropriate converter
+
+        # Select appropriate converter first (check for unsupported conversion before file check)
         converter = self._get_converter(config)
         if not converter:
             return ConversionResult(
@@ -651,7 +633,25 @@ class ModelConversionEngine:
                 validation_passed=False,
                 error_message=f"Unsupported conversion: {config.input_format} → {config.output_format}"
             )
-        
+
+        # Validate input file
+        if not Path(config.input_path).exists():
+            return ConversionResult(
+                success=False,
+                input_format=config.input_format,
+                output_format=config.output_format,
+                input_path=config.input_path,
+                output_path=config.output_path,
+                model_size_mb=0.0,
+                conversion_time=0.0,
+                validation_passed=False,
+                error_message=f"Input file not found: {config.input_path}"
+            )
+
+        # Create output directory if needed
+        output_dir = Path(config.output_path).parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+
         # Perform conversion
         result = await converter.convert()
         

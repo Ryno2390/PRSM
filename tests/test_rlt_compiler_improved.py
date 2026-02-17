@@ -320,15 +320,21 @@ class TestRLTCompilationMetrics:
             teacher_id="test",
             explanation_quality=0.9,
             logical_coherence=0.9,
-            concept_coverage=0.9
+            concept_coverage=0.9,
+            student_comprehension_prediction=0.9,
+            dense_reward_score=0.9,
+            teaching_effectiveness=0.9
         )
-        
+
         low_quality = MockRLTQualityAssessment(
             explanation_id="low",
             teacher_id="test",
             explanation_quality=0.3,
             logical_coherence=0.3,
-            concept_coverage=0.3
+            concept_coverage=0.3,
+            student_comprehension_prediction=0.3,
+            dense_reward_score=0.3,
+            teaching_effectiveness=0.3
         )
         
         # Record compilations

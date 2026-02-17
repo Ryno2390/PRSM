@@ -190,12 +190,15 @@ class ImportResult(TimestampMixin):
     status: ImportStatus
     imported_content_id: Optional[str] = None
     ipfs_cid: Optional[str] = None
+    local_path: Optional[str] = Field(default=None, description="Local file path to imported content")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Content metadata from source platform")
     security_scan: Optional[SecurityScanResult] = None
+    security_scan_results: Optional[Dict[str, Any]] = Field(default=None, description="Enhanced security scan results")
     provenance: Optional[ProvenanceMetadata] = None
     import_duration: float = Field(default=0.0, description="Total import time in seconds")
     content_size_bytes: Optional[int] = None
     success_message: Optional[str] = None
-    error_details: Optional[Dict[str, Any]] = None
+    error_details: Optional[Any] = None
     ftns_rewards_distributed: float = Field(default=0.0)
     integration_metadata: Dict[str, Any] = Field(default_factory=dict)
 
