@@ -62,9 +62,11 @@ async def test_embedding_cache():
     """Test embedding cache functionality"""
     print("\n💾 Testing Embedding Cache")
     print("=" * 50)
-    
+
+    import tempfile
+    cache_dir = tempfile.mkdtemp(prefix="prsm_test_embedding_cache_")
     cache = await create_optimized_cache(
-        cache_dir="test_embedding_cache",
+        cache_dir=cache_dir,
         max_size_mb=100
     )
     

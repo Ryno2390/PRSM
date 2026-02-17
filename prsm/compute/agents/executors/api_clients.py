@@ -29,10 +29,12 @@ logger = structlog.get_logger(__name__)
 
 
 class ModelProvider(Enum):
-    """Supported AI model providers - NWTN uses Claude API only"""
+    """Supported AI model providers"""
+    OPENAI = "openai"
     ANTHROPIC = "anthropic"
     HUGGINGFACE = "huggingface"
     COHERE = "cohere"
+    OLLAMA = "ollama"
     LOCAL = "local"
     PRSM_DISTILLED = "prsm_distilled"
 

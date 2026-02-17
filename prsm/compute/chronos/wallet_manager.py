@@ -111,7 +111,67 @@ class MultiSigWalletManager:
             total_signers=5,
             created_at=datetime.utcnow()
         )
-        
+
+        # USDC stablecoin wallet (3-of-5)
+        wallets[AssetType.USDC] = WalletAddress(
+            asset_type=AssetType.USDC,
+            address="usdc_multisig_3of5_chronos_reserve",
+            is_multi_sig=True,
+            required_signatures=3,
+            total_signers=5,
+            created_at=datetime.utcnow()
+        )
+
+        # USDT stablecoin wallet (3-of-5)
+        wallets[AssetType.USDT] = WalletAddress(
+            asset_type=AssetType.USDT,
+            address="usdt_multisig_3of5_chronos_reserve",
+            is_multi_sig=True,
+            required_signatures=3,
+            total_signers=5,
+            created_at=datetime.utcnow()
+        )
+
+        # ETH wallet (3-of-5)
+        wallets[AssetType.ETH] = WalletAddress(
+            asset_type=AssetType.ETH,
+            address="0xchronos_multisig_3of5_eth_reserve",
+            is_multi_sig=True,
+            required_signatures=3,
+            total_signers=5,
+            created_at=datetime.utcnow()
+        )
+
+        # ADA wallet (3-of-5)
+        wallets[AssetType.ADA] = WalletAddress(
+            asset_type=AssetType.ADA,
+            address="addr_chronos_multisig_3of5_ada_reserve",
+            is_multi_sig=True,
+            required_signatures=3,
+            total_signers=5,
+            created_at=datetime.utcnow()
+        )
+
+        # SOL wallet (3-of-5)
+        wallets[AssetType.SOL] = WalletAddress(
+            asset_type=AssetType.SOL,
+            address="sol_chronos_multisig_3of5_reserve",
+            is_multi_sig=True,
+            required_signatures=3,
+            total_signers=5,
+            created_at=datetime.utcnow()
+        )
+
+        # DOT wallet (3-of-5)
+        wallets[AssetType.DOT] = WalletAddress(
+            asset_type=AssetType.DOT,
+            address="dot_chronos_multisig_3of5_reserve",
+            is_multi_sig=True,
+            required_signatures=3,
+            total_signers=5,
+            created_at=datetime.utcnow()
+        )
+
         return wallets
     
     def _initialize_mock_balances(self) -> Dict[AssetType, WalletBalance]:
@@ -147,7 +207,67 @@ class MultiSigWalletManager:
             total_balance=Decimal("5000000"),      # $5M total
             last_updated=datetime.utcnow()
         )
-        
+
+        # USDC reserves - $2M for stablecoin liquidity
+        balances[AssetType.USDC] = WalletBalance(
+            asset_type=AssetType.USDC,
+            address=self.wallets[AssetType.USDC].address,
+            available_balance=Decimal("1900000"),
+            reserved_balance=Decimal("100000"),
+            total_balance=Decimal("2000000"),
+            last_updated=datetime.utcnow()
+        )
+
+        # USDT reserves - $1M for stablecoin liquidity
+        balances[AssetType.USDT] = WalletBalance(
+            asset_type=AssetType.USDT,
+            address=self.wallets[AssetType.USDT].address,
+            available_balance=Decimal("950000"),
+            reserved_balance=Decimal("50000"),
+            total_balance=Decimal("1000000"),
+            last_updated=datetime.utcnow()
+        )
+
+        # ETH reserves - 500 ETH for liquidity
+        balances[AssetType.ETH] = WalletBalance(
+            asset_type=AssetType.ETH,
+            address=self.wallets[AssetType.ETH].address,
+            available_balance=Decimal("475"),
+            reserved_balance=Decimal("25"),
+            total_balance=Decimal("500"),
+            last_updated=datetime.utcnow()
+        )
+
+        # ADA reserves - 500K ADA for liquidity
+        balances[AssetType.ADA] = WalletBalance(
+            asset_type=AssetType.ADA,
+            address=self.wallets[AssetType.ADA].address,
+            available_balance=Decimal("475000"),
+            reserved_balance=Decimal("25000"),
+            total_balance=Decimal("500000"),
+            last_updated=datetime.utcnow()
+        )
+
+        # SOL reserves - 5000 SOL for liquidity
+        balances[AssetType.SOL] = WalletBalance(
+            asset_type=AssetType.SOL,
+            address=self.wallets[AssetType.SOL].address,
+            available_balance=Decimal("4750"),
+            reserved_balance=Decimal("250"),
+            total_balance=Decimal("5000"),
+            last_updated=datetime.utcnow()
+        )
+
+        # DOT reserves - 50K DOT for liquidity
+        balances[AssetType.DOT] = WalletBalance(
+            asset_type=AssetType.DOT,
+            address=self.wallets[AssetType.DOT].address,
+            available_balance=Decimal("47500"),
+            reserved_balance=Decimal("2500"),
+            total_balance=Decimal("50000"),
+            last_updated=datetime.utcnow()
+        )
+
         return balances
     
     async def get_balance(self, asset_type: AssetType) -> WalletBalance:
