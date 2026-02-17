@@ -124,7 +124,10 @@ class PaymentTransaction(Base):
     additional_data = Column(JSONB, default=dict)
     failure_reason = Column(Text, nullable=True)
     refund_transaction_id = Column(UUID(as_uuid=True), nullable=True)
-    
+
+    # Foreign keys
+    payment_method_id = Column(UUID(as_uuid=True), ForeignKey('user_payment_methods.method_id'), nullable=True)
+
     # Relationships
     payment_methods = relationship("UserPaymentMethod", back_populates="transactions")
 
