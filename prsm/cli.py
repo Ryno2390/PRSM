@@ -164,54 +164,248 @@ def node():
     pass
 
 
+def _run_node_wizard() -> "NodeConfig":
+    """Interactive wizard that configures a real PRSM node."""
+    from prsm.node.config import NodeConfig, NodeRole
+    from prsm.node.compute_provider import detect_resources
+
+    config = NodeConfig()
+
+    console.print("=" * 60, style="bold magenta")
+    console.print("  PRSM Node Setup Wizard", style="bold magenta")
+    console.print("=" * 60, style="bold magenta")
+    console.print()
+
+    # 1. Display name
+    name = click.prompt("  Node display name", default="prsm-node")
+    config.display_name = name
+
+    # 2. Role selection
+    console.print()
+    console.print("  Node roles:", style="bold")
+    console.print("    full    - Compute + storage + routing (recommended)")
+    console.print("    compute - Compute jobs only")
+    console.print("    storage - Storage contribution only")
+    role_str = click.prompt(
+        "  Choose your node role",
+        type=click.Choice(["full", "compute", "storage"]),
+        default="full",
+    )
+    config.roles = [NodeRole(role_str)]
+
+    # 3. Resource detection
+    console.print()
+    console.print("  Detecting system resources...", style="dim")
+    resources = detect_resources()
+    console.print(f"    CPUs: {resources.cpu_count}", style="green")
+    console.print(f"    RAM:  {resources.memory_total_gb:.1f} GB", style="green")
+    if resources.gpu_available:
+        console.print(f"    GPU:  {resources.gpu_name} ({resources.gpu_memory_gb:.1f} GB)", style="green")
+    else:
+        console.print("    GPU:  not detected", style="dim")
+
+    if NodeRole(role_str) in (NodeRole.FULL, NodeRole.COMPUTE):
+        cpu_pct = click.prompt("  CPU allocation for compute jobs (%)", default=50, type=int)
+        config.cpu_allocation_pct = max(10, min(90, cpu_pct))
+        mem_pct = click.prompt("  Memory allocation for compute jobs (%)", default=50, type=int)
+        config.memory_allocation_pct = max(10, min(90, mem_pct))
+
+    # 4. IPFS detection
+    if NodeRole(role_str) in (NodeRole.FULL, NodeRole.STORAGE):
+        console.print()
+        console.print("  Checking for IPFS daemon...", style="dim")
+        ipfs_ok = False
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["ipfs", "id"], capture_output=True, timeout=5
+            )
+            ipfs_ok = result.returncode == 0
+        except Exception:
+            pass
+
+        if ipfs_ok:
+            console.print("    IPFS daemon detected!", style="green")
+            gb = click.prompt("  Storage to pledge (GB)", default=10.0, type=float)
+            config.storage_gb = gb
+        else:
+            console.print("    IPFS not detected. Storage features will be disabled.", style="yellow")
+            console.print("    Install: https://docs.ipfs.tech/install/", style="dim")
+
+    # 5. Network configuration
+    console.print()
+    p2p_port = click.prompt("  P2P port", default=9001, type=int)
+    config.p2p_port = p2p_port
+    api_port = click.prompt("  API port", default=8000, type=int)
+    config.api_port = api_port
+
+    bootstrap = click.prompt(
+        "  Bootstrap node (host:port, or empty for none)",
+        default="",
+    )
+    if bootstrap.strip():
+        config.bootstrap_nodes = [b.strip() for b in bootstrap.split(",")]
+
+    # Save config
+    config.save()
+    console.print()
+    console.print("  Configuration saved to ~/.prsm/node_config.json", style="green")
+    return config
+
+
 @node.command()
 @click.option("--wizard", is_flag=True, help="Run interactive setup wizard")
-@click.option("--host", default="127.0.0.1", help="Host to bind to")
-@click.option("--port", default=8000, help="Port to bind to")
-def start(wizard: bool, host: str, port: int):
-    """Start a PRSM node (single-node mode)"""
+@click.option("--p2p-port", default=None, type=int, help="P2P listen port (default: 9001)")
+@click.option("--api-port", default=None, type=int, help="API listen port (default: 8000)")
+@click.option("--bootstrap", default=None, help="Bootstrap node address (host:port)")
+def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str):
+    """Start a PRSM network node with real P2P connectivity."""
+    from prsm.node.config import NodeConfig
+
     if wizard:
-        console.print("🧙 Welcome to the PRSM Node Setup Wizard", style="bold magenta")
-        console.print("This will configure and start a PRSM node in single-node mode.\n")
-        console.print("Note: P2P networking is in development. Your node runs locally for now.\n", style="dim")
-
-        # 1. Identity
-        use_sro = click.confirm("🔗 Would you like to link your ORCID for identity?")
-        if use_sro:
-            orcid = click.prompt("   Enter your ORCID ID")
-            console.print(f"   ✅ ORCID noted: {orcid} (will be used when P2P launches)", style="green")
-        else:
-            console.print("   👤 Starting as anonymous user.", style="blue")
-
-        # 2. Contribution
-        mode = click.prompt(
-            "🧠 Choose your node role",
-            type=click.Choice(["full", "compute", "verify"]),
-            default="full"
-        )
-        console.print(f"   ✅ Configured as {mode} node.", style="green")
-
-        console.print(f"\n✅ Configuration complete. Starting PRSM API server on {host}:{port}...", style="bold green")
-        console.print("   P2P peer discovery will be enabled in a future release.", style="dim")
+        config = _run_node_wizard()
     else:
-        console.print(f"🌐 Starting PRSM node in single-node mode on {host}:{port}...", style="bold green")
+        # Load existing config or use defaults
+        config = NodeConfig.load()
 
-    # Initialize config and start the server
-    _init_config()
-    uvicorn.run(
-        "prsm.interface.api.main:app",
-        host=host,
-        port=port,
-        log_level="info" if not _get_debug() else "debug"
-    )
+    # CLI overrides
+    if p2p_port is not None:
+        config.p2p_port = p2p_port
+    if api_port is not None:
+        config.api_port = api_port
+    if bootstrap:
+        config.bootstrap_nodes = [b.strip() for b in bootstrap.split(",")]
+
+    # Start the node
+    console.print()
+    console.print("=" * 60, style="bold green")
+    console.print("  Starting PRSM Node", style="bold green")
+    console.print("=" * 60, style="bold green")
+
+    async def _run():
+        from prsm.node.node import PRSMNode
+
+        prsm_node = PRSMNode(config)
+        await prsm_node.initialize()
+
+        # Print status dashboard
+        status = await prsm_node.get_status()
+        console.print()
+        table = Table(title="PRSM Node Status")
+        table.add_column("Property", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Node ID", status["node_id"])
+        table.add_row("Display Name", status["display_name"])
+        table.add_row("Roles", ", ".join(status["roles"]))
+        table.add_row("P2P Address", status["p2p_address"])
+        table.add_row("API Address", status["api_address"])
+        table.add_row("FTNS Balance", f"{status['ftns_balance']:.2f}")
+        if status.get("compute"):
+            res = status["compute"]["resources"]
+            table.add_row("CPU", f"{res['cpu_count']} cores")
+            table.add_row("RAM", f"{res['memory_total_gb']} GB")
+            table.add_row("GPU", res.get("gpu_name", "none") if res.get("gpu_available") else "none")
+        if status.get("storage"):
+            st = status["storage"]
+            table.add_row("IPFS", "connected" if st["ipfs_available"] else "not available")
+            table.add_row("Storage Pledged", f"{st['pledged_gb']} GB")
+        console.print(table)
+        console.print()
+        console.print("Node is running. Press Ctrl+C to stop.", style="bold")
+        console.print()
+
+        await prsm_node.start()
+
+        # Keep running until interrupted
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await prsm_node.stop()
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        console.print("\nNode stopped.", style="bold")
 
 
 @node.command()
 def peers():
     """List connected peers"""
-    console.print("🌐 Connected peers:", style="bold blue")
-    console.print("🚧 P2P networking coming in v0.3.0", style="yellow")
-    console.print("💡 Currently operates in single-node mode", style="blue")
+    from prsm.node.config import NodeConfig
+    from prsm.node.identity import load_node_identity
+    from pathlib import Path
+
+    config = NodeConfig.load()
+    identity = load_node_identity(config.identity_path)
+
+    if not identity:
+        console.print("No node identity found. Run 'prsm node start --wizard' first.", style="yellow")
+        return
+
+    console.print(f"Node ID: {identity.node_id}", style="bold cyan")
+    console.print(f"P2P address: ws://{config.listen_host}:{config.p2p_port}", style="cyan")
+    console.print()
+
+    # Try connecting to the running node's API to get live peer data
+    try:
+        import httpx
+        resp = httpx.get(f"http://127.0.0.1:{config.api_port}/peers", timeout=3)
+        if resp.status_code == 200:
+            data = resp.json()
+            connected = data.get("connected", [])
+            if connected:
+                table = Table(title="Connected Peers")
+                table.add_column("Peer ID", style="cyan")
+                table.add_column("Address", style="green")
+                table.add_column("Name", style="magenta")
+                table.add_column("Direction", style="blue")
+                for p in connected:
+                    table.add_row(
+                        p["peer_id"][:16] + "...",
+                        p["address"],
+                        p.get("display_name", ""),
+                        "outbound" if p.get("outbound") else "inbound",
+                    )
+                console.print(table)
+            else:
+                console.print("No peers connected.", style="dim")
+
+            console.print(f"\nKnown peers: {data.get('known_count', 0)}")
+            return
+    except Exception:
+        pass
+
+    console.print("Node is not running. Start it with 'prsm node start'.", style="yellow")
+
+
+@node.command()
+def info():
+    """Show node identity and configuration"""
+    from prsm.node.config import NodeConfig
+    from prsm.node.identity import load_node_identity
+
+    config = NodeConfig.load()
+    identity = load_node_identity(config.identity_path)
+
+    if not identity:
+        console.print("No node identity found. Run 'prsm node start --wizard' first.", style="yellow")
+        return
+
+    table = Table(title="PRSM Node Info")
+    table.add_column("Property", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("Node ID", identity.node_id)
+    table.add_row("Display Name", config.display_name)
+    table.add_row("Public Key", identity.public_key_b64[:32] + "...")
+    table.add_row("Roles", ", ".join(r.value for r in config.roles))
+    table.add_row("P2P Port", str(config.p2p_port))
+    table.add_row("API Port", str(config.api_port))
+    table.add_row("Data Dir", config.data_dir)
+    table.add_row("Bootstrap Nodes", ", ".join(config.bootstrap_nodes) if config.bootstrap_nodes else "none")
+    console.print(table)
 
 
 @main.group()
