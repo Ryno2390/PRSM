@@ -33,6 +33,7 @@ dependencies = [
     "uvicorn[standard]>=0.24.0",
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
+    "email-validator>=2.0.0",
     
     # Async & Concurrency
     "asyncio-mqtt>=0.16.0",

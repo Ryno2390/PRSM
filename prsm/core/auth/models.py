@@ -114,7 +114,8 @@ ROLE_PERMISSIONS = {
 class User(Base):
     """User model for authentication and authorization"""
     __tablename__ = "users"
-    
+    __table_args__ = {"extend_existing": True}
+
     id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     email = Column(String(255), unique=True, nullable=False, index=True)
     username = Column(String(50), unique=True, nullable=False, index=True)
@@ -171,7 +172,8 @@ class User(Base):
 class AuthToken(Base):
     """Authentication token model for JWT management"""
     __tablename__ = "auth_tokens"
-    
+    __table_args__ = {"extend_existing": True}
+
     id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id = Column(PGUUID(as_uuid=True), nullable=False, index=True)
     token_hash = Column(String(255), nullable=False, unique=True, index=True)

@@ -9,6 +9,7 @@ setup(
         "uvicorn[standard]>=0.24.0",
         "pydantic>=2.0.0",
         "pydantic-settings>=2.0.0",
+        "email-validator>=2.0.0",
         "sqlalchemy>=2.0.0",
         "redis>=5.0.0",
         "aiohttp>=3.9.0",
