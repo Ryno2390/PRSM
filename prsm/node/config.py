@@ -34,7 +34,7 @@ class NodeConfig:
     listen_host: str = "0.0.0.0"
     p2p_port: int = 9001
     api_port: int = 8000
-    bootstrap_nodes: List[str] = field(default_factory=list)
+    bootstrap_nodes: List[str] = field(default_factory=lambda: ["100.83.80.91:9001"])
     max_peers: int = 50
 
     # Resources

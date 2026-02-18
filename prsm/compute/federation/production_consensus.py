@@ -21,11 +21,11 @@ try:
     import nacl.utils
     from nacl.signing import SigningKey, VerifyKey
     from nacl.hash import sha256
-    from merkletools import MerkleTools
+    from prsm.core.merkle import MerkleTools
     import nacl.encoding
 except ImportError as e:
     print(f"⚠️ Cryptography dependencies not installed: {e}")
-    print("Install with: pip install pynacl merkletools")
+    print("Install with: pip install pynacl")
 
 from prsm.core.config import settings
 from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel

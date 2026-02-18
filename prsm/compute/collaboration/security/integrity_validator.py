@@ -28,12 +28,13 @@ import struct
 from math import ceil, log2
 
 from .key_management import (
-    DistributedKeyManager, 
-    CryptographicKey, 
-    KeyType, 
+    DistributedKeyManager,
+    CryptographicKey,
+    KeyType,
     PostQuantumCrypto,
     PostQuantumAlgorithm
 )
+from prsm.core.merkle import MerkleTree
 
 logger = logging.getLogger(__name__)
 
@@ -109,146 +110,6 @@ class ValidationResult:
     def __post_init__(self):
         if self.validated_at == 0.0:
             self.validated_at = time.time()
-
-
-class MerkleTree:
-    """
-    Post-quantum secure Merkle tree for efficient integrity verification
-    
-    Provides efficient batch verification and tamper localization
-    for large distributed files.
-    """
-    
-    def __init__(self, hash_algorithm: str = 'sha256'):
-        self.hash_algorithm = hash_algorithm
-        self.leaf_nodes: List[str] = []
-        self.tree_levels: List[List[str]] = []
-        self.is_built = False
-    
-    def _hash_data(self, data: Union[str, bytes]) -> str:
-        """Hash data using specified algorithm"""
-        if isinstance(data, str):
-            data = data.encode('utf-8')
-        
-        if self.hash_algorithm == 'sha256':
-            return hashlib.sha256(data).hexdigest()
-        elif self.hash_algorithm == 'sha3_256':
-            return hashlib.sha3_256(data).hexdigest()
-        else:
-            raise ValueError(f"Unsupported hash algorithm: {self.hash_algorithm}")
-    
-    def add_leaf(self, data: Union[str, bytes]) -> int:
-        """Add a leaf node and return its index"""
-        leaf_hash = self._hash_data(data)
-        self.leaf_nodes.append(leaf_hash)
-        self.is_built = False
-        return len(self.leaf_nodes) - 1
-    
-    def build_tree(self):
-        """Build the complete Merkle tree"""
-        if not self.leaf_nodes:
-            raise ValueError("No leaf nodes to build tree")
-        
-        self.tree_levels = []
-        current_level = self.leaf_nodes.copy()
-        
-        # Build tree bottom-up
-        while len(current_level) > 1:
-            self.tree_levels.append(current_level)
-            next_level = []
-            
-            # Process pairs of nodes
-            for i in range(0, len(current_level), 2):
-                left = current_level[i]
-                
-                if i + 1 < len(current_level):
-                    right = current_level[i + 1]
-                else:
-                    right = left  # Duplicate last node for odd counts
-                
-                # Combine hashes
-                combined = left + right
-                parent_hash = self._hash_data(combined)
-                next_level.append(parent_hash)
-            
-            current_level = next_level
-        
-        # Add root level
-        self.tree_levels.append(current_level)
-        self.is_built = True
-        
-        logger.debug(f"Built Merkle tree with {len(self.leaf_nodes)} leaves")
-    
-    def get_root(self) -> str:
-        """Get the Merkle root hash"""
-        if not self.is_built:
-            self.build_tree()
-        
-        if not self.tree_levels:
-            raise ValueError("Tree is empty")
-        
-        return self.tree_levels[-1][0]
-    
-    def get_proof(self, leaf_index: int) -> List[str]:
-        """Get Merkle proof for a specific leaf"""
-        if not self.is_built:
-            self.build_tree()
-        
-        if leaf_index >= len(self.leaf_nodes):
-            raise ValueError(f"Leaf index {leaf_index} out of range")
-        
-        proof = []
-        current_index = leaf_index
-        
-        # Traverse up the tree collecting sibling hashes
-        for level in self.tree_levels[:-1]:  # Exclude root level
-            # Find sibling index
-            if current_index % 2 == 0:  # Left node
-                sibling_index = current_index + 1
-            else:  # Right node
-                sibling_index = current_index - 1
-            
-            # Add sibling hash if it exists
-            if sibling_index < len(level):
-                proof.append(level[sibling_index])
-            else:
-                proof.append(level[current_index])  # Duplicate for odd counts
-            
-            # Move to parent index
-            current_index = current_index // 2
-        
-        return proof
-    
-    def verify_proof(self, leaf_hash: str, leaf_index: int, 
-                    proof: List[str], root_hash: str) -> bool:
-        """Verify a Merkle proof"""
-        current_hash = leaf_hash
-        current_index = leaf_index
-        
-        # Reconstruct path to root
-        for sibling_hash in proof:
-            if current_index % 2 == 0:  # Left node
-                combined = current_hash + sibling_hash
-            else:  # Right node
-                combined = sibling_hash + current_hash
-            
-            current_hash = self._hash_data(combined)
-            current_index = current_index // 2
-        
-        return current_hash == root_hash
-    
-    def detect_tampering(self, expected_leaves: List[str]) -> List[int]:
-        """Detect which leaves have been tampered with"""
-        if len(expected_leaves) != len(self.leaf_nodes):
-            raise ValueError("Leaf count mismatch")
-        
-        tampered_indices = []
-        
-        for i, (expected, actual) in enumerate(zip(expected_leaves, self.leaf_nodes)):
-            if expected != actual:
-                tampered_indices.append(i)
-        
-        return tampered_indices
 
 
 class PostQuantumSigner:

@@ -30,8 +30,8 @@ import struct
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.kdf.pbkdf2 = PBKDF2HMAC
-from cryptography.hazmat.backends = default_backend
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.backends import default_backend
 
 # For production, these would be replaced with actual post-quantum libraries
 # like liboqs-python or pqcrypto

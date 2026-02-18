@@ -40,13 +40,13 @@ try:
     from nacl.hash import sha256
     from nacl.public import PrivateKey, PublicKey, Box
     import nacl.encoding
-    from merkletools import MerkleTools
+    from prsm.core.merkle import MerkleTools
     import websockets
     import aiohttp
     CRYPTO_AVAILABLE = True
 except ImportError as e:
     print(f"⚠️ P2P networking dependencies not installed: {e}")
-    print("Install with: pip install pynacl merkletools websockets aiohttp")
+    print("Install with: pip install pynacl websockets aiohttp")
     CRYPTO_AVAILABLE = False
 
 from prsm.core.config import settings
