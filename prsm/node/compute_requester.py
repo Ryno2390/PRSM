@@ -76,6 +76,7 @@ class ComputeRequester:
 
         self.submitted_jobs: Dict[str, SubmittedJob] = {}
         self._running = False
+        self.ledger_sync = None  # Set by node.py after construction
 
     async def start(self) -> None:
         """Register gossip handlers."""
@@ -191,13 +192,20 @@ class ComputeRequester:
         # Record payment
         try:
             if provider_id != self.identity.node_id:
-                await self.ledger.transfer(
+                tx = await self.ledger.transfer(
                     from_wallet=self.identity.node_id,
                     to_wallet=provider_id,
                     amount=job.ftns_budget,
                     tx_type=TransactionType.COMPUTE_PAYMENT,
                     description=f"Payment for job {job_id[:8]}",
                 )
+
+                # Broadcast payment via ledger sync
+                if self.ledger_sync:
+                    try:
+                        await self.ledger_sync.broadcast_transaction(tx)
+                    except Exception:
+                        pass
 
                 # Confirm payment on network
                 await self.gossip.publish(GOSSIP_PAYMENT_CONFIRM, {

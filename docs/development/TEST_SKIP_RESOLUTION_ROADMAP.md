@@ -15,286 +15,344 @@
 
 # Part I: Collaboration Infrastructure Completion
 
-> **Status as of 2026-02-18:** P2P node networking is fully functional.
-> File sharing and the token economy are scaffolded — local implementations
-> exist but are not wired into network-wide operations.
+> **Status as of 2026-02-18:** P2P node networking and cross-node file
+> discovery are fully functional. The token economy is scaffolded — local
+> implementations exist but are not wired into network-wide operations.
+> A new agentic interoperability layer (CI-4) is planned to make AI agents
+> first-class participants on the network.
 
 ## Infrastructure Audit Summary
 
 | Area | Status | What Works | What's Missing |
 |------|--------|-----------|----------------|
 | **P2P Node Networking** | FUNCTIONAL | WebSocket handshake, signed messages, gossip propagation, peer discovery, bootstrap via `wss://bootstrap.prsm-network.com` | — |
-| **File Storage & Sharing** | SCAFFOLDED | IPFS client uploads/downloads to local daemon, storage provider pins content, content uploader records provenance locally | Cross-node file discovery, request/serve protocol, access event tracking |
-| **FTNS Token Economy** | SCAFFOLDED | Local SQLite ledger, welcome grant, balance tracking, credit/debit/transfer | Network-wide ledger sync, provenance royalty triggers, compute/storage earning distribution |
+| **File Storage & Sharing** | FUNCTIONAL | IPFS upload/download, storage provider pins, content uploader with provenance, content index with keyword search, cross-node content advertisement via gossip, direct-message request/serve (inline ≤1MB or gateway URL), access event tracking with royalty credits | — |
+| **FTNS Token Economy** | FUNCTIONAL | Local SQLite ledger, welcome grant, balance tracking, credit/debit/transfer, content royalty credits, network-wide transaction gossip, nonce-based double-spend prevention, balance reconciliation, earning event broadcasting | — |
+| **Agentic Interoperability** | PLANNED | Nodes can host multiple services; OpenClaw demonstrates multi-agent coordination externally | Agent identity delegation, agent discovery, agent-to-agent messaging, delegated payments, collaboration protocols |
 
 ---
 
-## CI-1: Cross-Node File Discovery & Retrieval
+## CI-1: Cross-Node File Discovery & Retrieval — COMPLETE
+
+**Status: DONE** (implemented 2026-02-18)
 
 **Goal:** A file pinned on node A can be discovered and retrieved by node B
 through the P2P network.
 
-**Current state:**
-- `prsm/core/ipfs_client.py` — Real IPFS client with upload, download, chunked
-  streaming, retry, and gateway fallback. Works with a local IPFS daemon.
-- `prsm/node/storage_provider.py` — Pins content to local IPFS, tracks pinned
-  CIDs, earns FTNS locally for storage contribution.
-- `prsm/node/content_uploader.py` — Uploads files to IPFS and records
-  provenance locally. Has a `record_access()` method that is never called.
+**What was built:**
 
-**What's missing:**
-
-### Step 1: Content Advertisement via Gossip
-
-**File:** `prsm/node/storage_provider.py`
-
-When a node pins new content, it should gossip a `content_available` message
-containing the CID, content metadata (size, type, description), and the
-announcing node's ID. Other nodes receive this via gossip and update a local
-content directory.
-
-```
-Message type: "content_available"
-Payload: { cid, metadata, provider_node_id, timestamp }
-```
-
-Register a gossip handler in `prsm/node/node.py` during `initialize()` that
-processes incoming `content_available` messages and stores them in a local
-content index.
-
-### Step 2: Content Index (Local DHT-like Directory)
-
-**New file:** `prsm/node/content_index.py`
-
-A lightweight in-memory (with optional SQLite persistence) index that maps
-CIDs to known providers:
-
-```python
-class ContentIndex:
-    async def register(self, cid: str, provider_id: str, metadata: dict)
-    async def lookup(self, cid: str) -> List[ContentProvider]
-    async def search(self, query: str) -> List[ContentEntry]
-    async def remove(self, cid: str, provider_id: str)
-```
-
-Populated by gossip `content_available` messages. Queried when a node wants
-to find content.
-
-### Step 3: Content Request/Serve Protocol
-
-**Files:** `prsm/node/transport.py`, `prsm/node/node.py`
-
-Add two new message types to the P2P transport:
-
-- `content_request` — Node A asks Node B for a specific CID
-  ```
-  Payload: { cid, requester_node_id }
-  ```
-- `content_response` — Node B replies with the content data or a redirect
-  to an IPFS gateway URL
-  ```
-  Payload: { cid, data_b64 | gateway_url, provider_node_id }
-  ```
-
-For large files, the response should include an IPFS gateway URL rather than
-streaming the full content over the WebSocket. For small files (<1 MB), direct
-transfer via the WebSocket is acceptable.
-
-Register handlers in `node.py` that:
-1. On `content_request`: check local IPFS, respond with data or gateway URL
-2. On `content_response`: deliver content to the requesting application layer
-
-### Step 4: Access Event Gossip
-
-**Files:** `prsm/node/content_uploader.py`, `prsm/node/node.py`
-
-When content is accessed (downloaded/used), gossip a `content_accessed` message:
-
-```
-Message type: "content_accessed"
-Payload: { cid, accessor_node_id, timestamp }
-```
-
-This triggers provenance royalty credits on the creator's node (see CI-2 below).
-Wire `content_uploader.record_access()` to be called when a `content_response`
-is served, and have it gossip the access event.
-
-**Effort:** High | **Estimated scope:** ~500 lines across 4-5 files
+- **Content advertisement via gossip** — `GOSSIP_CONTENT_ADVERTISE` messages
+  broadcast CID, filename, size, content hash, creator, and provider on every
+  upload and pin operation (`content_uploader.py`, `storage_provider.py`).
+- **Content index** — `prsm/node/content_index.py` with `ContentRecord`
+  dataclass, keyword search (AND semantics over filenames/metadata), LRU
+  eviction at 10k entries, provider set tracking.
+- **Request/serve protocol** — Direct P2P messages (`content_request` /
+  `content_response`) via `MSG_DIRECT`. Small files (≤1MB) served inline
+  as base64; large files served via IPFS gateway URL.
+- **Access event tracking** — `GOSSIP_CONTENT_ACCESS` messages trigger
+  `record_access()` royalty credits (0.01 FTNS) on both the serving node
+  and the original creator's node.
+- **API endpoints** — `GET /content/search?q=...`, `GET /content/{cid}`,
+  `GET /content/index/stats`.
+- **Wiring** — `node.py` creates `ContentIndex`, passes transport to uploader,
+  calls `start()` on all content subsystems, exposes index stats in status.
 
 ---
 
-## CI-2: Provenance Royalty Distribution
+## CI-2: Provenance Royalty Distribution — COMPLETE
+
+**Status: DONE** (implemented 2026-02-18)
 
 **Goal:** When content is accessed anywhere on the network, the original
-creator receives FTNS royalty credits.
+creator receives FTNS royalty credits. Derivative works distribute royalties
+up the provenance chain.
 
-**Current state:**
-- `prsm/economy/tokenomics/strategic_provenance.py` — Defines provenance
-  nodes, royalty rates, and multi-level provenance graphs. Data structures
-  only; no distribution logic.
-- `prsm/node/content_uploader.py` — Has `record_access()` (line 166) that
-  increments access count and credits the local ledger. **Dead code** — never
-  called by anything.
-- `prsm/node/local_ledger.py` — Fully functional SQLite ledger with
-  credit/debit/transfer. Per-node isolation.
+**What was built:**
 
-**What's missing:**
+- **Configurable royalty rates** — Creators set a rate at upload time (clamped
+  to 0.001–0.1 FTNS per access, default 0.01). The rate is included in
+  `GOSSIP_CONTENT_ADVERTISE` and `GOSSIP_CONTENT_ACCESS` payloads, stored in
+  `ContentRecord` and `UploadedContent`, and exposed via the upload API.
+- **Multi-level provenance** — Uploads can declare `parent_cids` (source
+  material). On access, royalties are split: 70% derivative creator, 25%
+  source creators (split evenly among parents), 5% network fee. If parent
+  creators are on the same node, they're credited locally; if remote, they
+  receive credits when the `GOSSIP_CONTENT_ACCESS` message arrives.
+- **Source creator notification** — `_on_content_access()` now handles both
+  cases: (1) we are the direct creator, (2) we are a source creator whose
+  content was used as a parent in a derivative work.
+- **API updates** — `POST /content/upload` accepts optional `royalty_rate`
+  and `parent_cids` fields. All content responses include these fields.
 
-### Step 1: Wire Access Events to Royalty Credits
-
-**File:** `prsm/node/node.py`
-
-Register a gossip handler for `content_accessed` messages (from CI-1 Step 4).
-When received:
-1. Look up the content's provenance record (creator node ID, royalty rate)
-2. Credit the creator's balance in the local ledger
-3. Record the transaction with type `ROYALTY`
-
-```python
-async def _handle_content_accessed(self, msg, peer):
-    cid = msg.payload["cid"]
-    provenance = self.content_index.get_provenance(cid)
-    if provenance and provenance.creator_id == self.identity.node_id:
-        royalty = provenance.royalty_rate  # e.g., 0.01 FTNS per access
-        self.ledger.credit(royalty, f"royalty:{cid}:{msg.payload['accessor_node_id']}")
-```
-
-### Step 2: Provenance Registration at Upload Time
-
-**File:** `prsm/node/content_uploader.py`
-
-When content is uploaded, store a provenance record that includes:
-- Creator node ID
-- CID
-- Royalty rate (configurable, default 0.01 FTNS per access)
-- Timestamp
-- Content type / description
-
-Include provenance data in the `content_available` gossip message so all
-nodes know who created what and what the royalty rate is.
-
-### Step 3: Multi-Level Provenance (Derivative Works)
-
-**File:** `prsm/economy/tokenomics/strategic_provenance.py`
-
-When content is derived from other content (e.g., a model fine-tuned on a
-dataset), record the provenance chain. On access, distribute royalties
-up the chain:
-
-- Creator of derivative: 70% of royalty
-- Creator of source material: 25% of royalty
-- Network fee: 5%
-
-This leverages the existing `ProvenanceGraph` data structures in
-`strategic_provenance.py` — they just need to be connected to the gossip
-layer.
-
-**Effort:** Medium | **Estimated scope:** ~300 lines across 3-4 files
+**Files modified:** `content_uploader.py`, `content_index.py`, `node.py`, `api.py`
 
 ---
 
-## CI-3: Network-Wide FTNS Ledger Synchronization
+## CI-3: Network-Wide FTNS Ledger Synchronization — COMPLETE
+
+**Status: DONE** (implemented 2026-02-18)
 
 **Goal:** Node balances stay consistent across the network so that transfers
 and payments between nodes are valid.
 
-**Current state:**
-- `prsm/node/local_ledger.py` — SQLite-backed, per-node ledger. Tracks
-  transactions locally. No network awareness.
-- `prsm/economy/tokenomics/ftns_service.py` — In-memory token tracking
-  with award/deduct/burn mechanics. Standalone, not integrated into nodes.
+**What was built:**
 
-**What's missing:**
+- **Transaction gossip** — `GOSSIP_FTNS_TRANSACTION` messages broadcast
+  every transaction (credits, debits, transfers, royalties) with a signed
+  canonical payload. Signature verification ensures only the originating node
+  could have authorized the transaction.
+- **Nonce-based double-spend prevention** — `seen_nonces` table in SQLite
+  tracks processed transaction nonces. Replayed or duplicate transactions
+  are rejected. `signed_transfer()` in `LedgerSync` checks balance, signs,
+  gossips, and debits atomically.
+- **Balance reconciliation** — Every 5 minutes, nodes exchange `balance_request`
+  / `balance_response` direct messages with their balance and recent transaction
+  IDs. Discrepancies (missing transactions) are logged for investigation.
+  Eventually-consistent model sufficient for current network scale.
+- **Earning event broadcasting** — Storage rewards (`storage_provider.py`),
+  compute earnings (`compute_provider.py`), compute payments
+  (`compute_requester.py`), and content royalties (`content_uploader.py`)
+  all broadcast their transactions via `ledger_sync.broadcast_transaction()`.
+- **Incoming transaction processing** — When a gossipped transaction names
+  this node as recipient, it's verified (signature + nonce) and credited
+  to the local ledger with a `[remote]` prefix in the description.
+- **API endpoints** — `GET /ledger/sync/stats` (broadcast/received/rejected
+  counts, reconciliation stats), `POST /ledger/transfer` (signed cross-node
+  transfer via the API).
+- **New file:** `prsm/node/ledger_sync.py` — `LedgerSync` class (~250 lines).
 
-### Step 1: Transaction Gossip
+**Files modified:** `gossip.py`, `local_ledger.py`, `node.py`, `api.py`,
+`content_uploader.py`, `storage_provider.py`, `compute_provider.py`,
+`compute_requester.py`
 
-**File:** `prsm/node/local_ledger.py`, `prsm/node/node.py`
+---
 
-When a node records a transaction (credit, debit, transfer, royalty), gossip
-it to the network:
+## CI-4: Agentic Interoperability Layer
+
+**Goal:** Make AI agents first-class participants on the PRSM network —
+able to discover each other, communicate, collaborate, and transact on
+behalf of their human principals.
+
+**Rationale:** Power users and developers on PRSM will be AI-native
+individuals running teams of AI agents (as demonstrated by the OpenClaw
+multi-agent setup). The existing P2P infrastructure handles node-to-node
+communication well, but an agent is a logical entity *above* the node
+layer — one node may host many agents, and one human may control agents
+across multiple nodes. PRSM needs a protocol layer that lets agents
+interact as peers regardless of which node or orchestration framework
+they run on.
+
+### Step 1: Agent Identity & Delegation
+
+**Files:** `prsm/node/identity.py`, new `prsm/node/agent_identity.py`
+
+Extend the identity system so that a human's Ed25519 keypair can issue
+**delegation certificates** to agent keypairs. An agent identity contains:
+
+```python
+@dataclass
+class AgentIdentity:
+    agent_id: str              # Unique agent identifier
+    agent_name: str            # Human-readable name (e.g. "prsm-coder")
+    agent_type: str            # "coding", "research", "devops", etc.
+    principal_id: str          # Node ID of the human who controls this agent
+    public_key_b64: str        # Agent's own Ed25519 public key
+    delegation_cert: str       # Signature from principal proving delegation
+    capabilities: List[str]    # Declared capabilities (e.g. ["code_review", "testing"])
+    max_spend_ftns: float      # Spending cap per epoch (delegated budget)
+    created_at: float
+```
+
+The delegation certificate is signed by the principal's private key, binding
+the agent's public key to the principal's identity. This lets any node verify
+that an agent is authorized to act on behalf of its human without contacting
+the principal.
+
+**Scope:** ~150 lines (new dataclass + delegation signing/verification)
+
+### Step 2: Agent Registry & Discovery
+
+**Files:** `prsm/node/gossip.py`, new `prsm/node/agent_registry.py`
+
+New gossip subtypes:
+```python
+GOSSIP_AGENT_ADVERTISE = "agent_advertise"
+GOSSIP_AGENT_DEREGISTER = "agent_deregister"
+```
+
+`AgentRegistry` — network-wide directory of known agents, similar to
+`ContentIndex` but for agent capabilities:
+
+```python
+class AgentRegistry:
+    def register_local(agent: AgentIdentity)      # Register an agent on this node
+    def lookup(agent_id: str) -> AgentRecord       # Find an agent by ID
+    def search(capability: str) -> List[AgentRecord]  # Find agents by capability
+    def get_agents_for_principal(principal_id: str) -> List[AgentRecord]
+```
+
+When an agent comes online, it gossips `GOSSIP_AGENT_ADVERTISE` with its
+identity, capabilities, node location, and availability status. Other nodes
+add it to their local registry. Agents can also query the registry to find
+peers with specific capabilities ("find me an agent that can do code review").
+
+**Scope:** ~200 lines (registry + gossip handlers + search)
+
+### Step 3: Agent-to-Agent Messaging
+
+**Files:** `prsm/node/transport.py`, `prsm/node/content_uploader.py`
+
+Extend the existing `MSG_DIRECT` transport with agent-level addressing.
+Currently, messages are addressed to node IDs. Add an optional `agent_id`
+field to the message payload so that a message can be routed to a specific
+agent on a target node:
 
 ```
-Message type: "ftns_transaction"
-Payload: {
-    tx_id, tx_type, amount, from_node, to_node,
-    reason, timestamp, signature
+Direct message envelope:
+{
+    msg_type: "direct",
+    sender_id: <node_id>,
+    payload: {
+        subtype: "agent_message",
+        from_agent: <agent_id>,
+        to_agent: <agent_id>,
+        conversation_id: <uuid>,       # Thread/session identifier
+        content_type: "text" | "task" | "result" | "query",
+        content: { ... },
+        delegation_cert: <signature>   # Proves sender is authorized
+    }
 }
 ```
 
-All nodes maintain a transaction log. Signature verification ensures only
-the debited node can authorize outgoing transfers.
+The receiving node looks up the target agent in its local registry and
+dispatches the message. Content types include:
 
-### Step 2: Balance Reconciliation
+- **text** — Free-form communication between agents
+- **task** — Structured task delegation (description, constraints, budget)
+- **result** — Task completion with deliverables
+- **query** — Capability/availability inquiry
 
-**File:** `prsm/node/local_ledger.py`
+**Scope:** ~120 lines (message routing + dispatch + content type handlers)
 
-Periodically (or on demand), nodes can request a balance proof from peers:
+### Step 4: Delegated Payments & Budget Control
 
+**Files:** `prsm/node/local_ledger.py`, `prsm/node/agent_identity.py`
+
+Allow agents to spend FTNS from their principal's wallet up to a delegated
+budget cap. This requires:
+
+1. **Allowance records** in the ledger — principal grants agent X a budget
+   of Y FTNS per epoch (configurable period, default 24h).
+2. **Spend tracking** — each agent payment debits from both the principal's
+   balance and the agent's remaining allowance.
+3. **Budget refresh** — allowances reset at epoch boundaries.
+4. **Revocation** — principal can revoke an agent's spending authority
+   instantly via a signed revocation message.
+
+```python
+# In local_ledger.py
+async def grant_agent_allowance(principal_id, agent_id, amount, epoch_hours=24)
+async def agent_debit(agent_id, amount, tx_type, description) -> bool
+async def get_agent_allowance(agent_id) -> AgentAllowance
+async def revoke_agent_allowance(principal_id, agent_id)
 ```
-Message type: "balance_request" / "balance_response"
+
+Agent-to-agent payments follow this flow:
+1. Agent A requests service from Agent B
+2. Agent A's node verifies A has sufficient allowance
+3. Payment is debited from A's principal's wallet → credited to B's principal's wallet
+4. Transaction is gossiped with both agent IDs and principal IDs for auditability
+
+**Scope:** ~200 lines (allowance model + ledger extensions + payment flow)
+
+### Step 5: Collaboration Protocols
+
+**Files:** new `prsm/node/agent_collaboration.py`
+
+Structured protocols for multi-agent collaboration over the P2P network:
+
+**Task Delegation Protocol:**
+```
+1. Requester agent gossips a task_offer (or sends directly to a known agent)
+2. Candidate agents respond with bids (capability match, estimated cost, ETA)
+3. Requester selects a bid, sends task_assign with FTNS escrow
+4. Worker agent executes, sends task_result
+5. Requester verifies result, releases escrow (or disputes)
 ```
 
-If a node's computed balance (from its transaction log) differs from the
-network consensus, flag it for investigation. This is an eventually-consistent
-model — not full Byzantine consensus, but sufficient for the current scale.
+**Peer Review Protocol:**
+```
+1. Agent submits work product for review
+2. Review request is gossiped to agents with relevant capabilities
+3. Reviewer agents claim review slots (paid per review)
+4. Reviews are collected and aggregated
+5. Consensus determines acceptance/revision
+```
 
-### Step 3: Double-Spend Prevention
+**Knowledge Exchange Protocol:**
+```
+1. Agent queries the network for information on a topic
+2. Agents with relevant knowledge respond with summaries + content CIDs
+3. Requester pays per response (micro-payment via delegated budget)
+4. Provenance is tracked — original knowledge creators earn royalties
+```
 
-**File:** `prsm/node/local_ledger.py`
+These protocols build on the existing gossip/direct-message infrastructure
+and the content index. They are essentially structured conversation patterns
+with built-in payment and verification.
 
-Before processing an outgoing transfer:
-1. Check local balance is sufficient
-2. Create a signed transaction with a unique nonce
-3. Gossip the transaction
-4. Debit locally only after gossip confirmation
+**Scope:** ~300 lines (protocol state machines + message handlers)
 
-The nonce prevents replay attacks. At small network scale (<100 nodes),
-gossip propagation is fast enough that double-spend windows are negligible.
+### Step 6: Agent Observability & Human Oversight
 
-### Step 4: Earning Mechanisms Beyond Welcome Grant
+**Files:** `prsm/node/api.py`, `prsm/node/node.py`
 
-**Files:** `prsm/node/storage_provider.py`, `prsm/node/compute_provider.py`
+API endpoints for humans to monitor and control their agents:
 
-Currently, storage providers earn FTNS locally via `_reward_loop()` but
-don't sync with the network. Wire the following earning events into the
-transaction gossip:
+- `GET /agents` — List all agents on this node (local + remote known)
+- `GET /agents/{agent_id}` — Agent status, activity log, spending
+- `GET /agents/{agent_id}/conversations` — Recent agent-to-agent threads
+- `POST /agents/{agent_id}/allowance` — Set/update spending allowance
+- `DELETE /agents/{agent_id}/allowance` — Revoke spending authority
+- `POST /agents/{agent_id}/pause` — Temporarily suspend an agent
+- `GET /agents/spending` — Aggregate spend dashboard across all agents
 
-| Activity | Reward | Trigger |
-|----------|--------|---------|
-| Storage contribution | 0.1 FTNS/GB/day | Periodic proof-of-storage |
-| Compute job completion | Variable per job | Job result verification |
-| Content creation royalty | 0.01 FTNS/access | `content_accessed` gossip |
-| Governance participation | 0.5 FTNS/vote | Governance vote recorded |
+All agent actions are logged with the principal's node ID, creating a full
+audit trail. Humans can review what their agents did, how much they spent,
+and who they collaborated with.
 
-**Effort:** High | **Estimated scope:** ~600 lines across 4-5 files
+**Scope:** ~150 lines (API endpoints + status aggregation)
+
+**Total CI-4 effort:** High | **Estimated scope:** ~1,100 lines across 6-8 files
 
 ---
 
 ## CI Execution Order
 
 ```
-CI-1 (File Discovery & Retrieval)
- ├── Step 1: Content advertisement gossip
- ├── Step 2: Content index
- ├── Step 3: Request/serve protocol
- └── Step 4: Access event gossip ──────────┐
-                                           │
-CI-2 (Provenance Royalties)                │
- ├── Step 1: Wire access events ◄──────────┘
- ├── Step 2: Provenance at upload
- └── Step 3: Multi-level provenance
-                                           │
-CI-3 (FTNS Ledger Sync)                   │
- ├── Step 1: Transaction gossip ◄──────────┘
- ├── Step 2: Balance reconciliation
- ├── Step 3: Double-spend prevention
- └── Step 4: Earning mechanisms
+CI-1 (File Discovery & Retrieval) ✅ COMPLETE
+ └── Content advertisement, index, request/serve, access events
+
+CI-2 (Provenance Royalties) ✅ COMPLETE
+ └── Configurable rates, multi-level provenance, source creator splits
+
+CI-3 (FTNS Ledger Sync) ✅ COMPLETE
+ └── Transaction gossip, nonce-based double-spend, balance reconciliation, earning broadcasts
+
+CI-4 (Agentic Interoperability)
+ ├── Step 1: Agent identity & delegation
+ ├── Step 2: Agent registry & discovery
+ ├── Step 3: Agent-to-agent messaging
+ ├── Step 4: Delegated payments
+ ├── Step 5: Collaboration protocols
+ └── Step 6: Observability & human oversight
 ```
 
-**CI-1 should be built first** — it's the foundation that CI-2 and CI-3
-depend on (access events trigger royalties, which trigger transactions).
+**CI-4 is the next priority.** All dependencies are now in place —
+ledger sync, content discovery, and provenance royalties are operational.
 
-**Total estimated scope:** ~1,400 lines of new code across ~12 files.
+**Total remaining scope:** ~1,100 lines of new code across ~6-8 files.
 Most changes extend existing modules rather than creating new ones.
 
 ---
@@ -650,27 +708,30 @@ implementing the feature or removing obsolete test files.
 | Local FTNS ledger | DONE | SQLite-backed, per-node balance tracking with transaction history |
 | IPFS client | DONE | Real client with upload/download/pin, requires external IPFS daemon |
 | Neuro-symbolic reasoning (S1) | DONE | System 1 fast-path reasoning via `prsm/compute/nwtn/reasoning/` |
+| Cross-node file discovery | DONE | Content index, gossip advertisement, direct-message request/serve, access tracking with royalties |
+| Provenance royalties | DONE | Configurable rates (0.001–0.1 FTNS), multi-level provenance with parent CIDs, 70/25/5 derivative/source/network split |
+| Network FTNS sync | DONE | Transaction gossip with signatures, nonce-based double-spend prevention, balance reconciliation, earning event broadcasting |
 
 ## What's Scaffolded (Needs Network Wiring)
 
 | Component | Blocking Issue | Roadmap Section |
 |-----------|---------------|-----------------|
-| Cross-node file sharing | No content directory or request/serve protocol | CI-1 |
-| Provenance royalties | Access events never triggered; `record_access()` is dead code | CI-2 |
-| Network FTNS distribution | Ledgers are per-node; no gossip sync or consensus | CI-3 |
+| Agentic interoperability | No agent identity, discovery, messaging, or delegated payments | CI-4 |
 | Marketplace CRUD | Service exists but missing listing creation/search methods | Phase 4 |
 | NWTN orchestrator | Reasoning modules exist but top-level orchestrator missing | Phase 3 |
 
 ## Recommended Overall Priority
 
 ```
-Priority 1 (Foundation):     CI-1 File Discovery + Phase 1-2 Test Fixes
-Priority 2 (Economy):        CI-2 Provenance Royalties + CI-3 Ledger Sync
-Priority 3 (Features):       Phase 3 NWTN Orchestrator + Phase 4 Marketplace
+Priority 1 (Agents):         CI-4 Agentic Interoperability
+Priority 2 (Features):       Phase 3 NWTN Orchestrator + Phase 4 Marketplace
+Priority 3 (Test Fixes):     Phase 1-2 Quick Wins + Export Fixes
 Priority 4 (Polish):         Phase 5-6 Performance + Remaining Test Skips
 ```
 
-CI-1 through CI-3 represent approximately **1,400 lines of new code** across
-12 files. Most changes extend existing modules. Once complete, PRSM's core
-collaboration architecture — nodes joining, sharing files, earning tokens via
-provenance royalties — will be fully operational end-to-end.
+CI-4 represents approximately **1,100 lines of new code** across 6-8 files.
+All infrastructure dependencies (file discovery, provenance royalties, ledger
+sync) are now complete. Once CI-4 is built, PRSM will support a full
+multi-agent economy — AI agents discovering each other, collaborating on
+tasks, sharing content, and transacting FTNS on behalf of their human
+principals, all over a decentralized P2P network.
