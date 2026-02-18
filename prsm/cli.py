@@ -260,7 +260,8 @@ def _run_node_wizard() -> "NodeConfig":
 @click.option("--p2p-port", default=None, type=int, help="P2P listen port (default: 9001)")
 @click.option("--api-port", default=None, type=int, help="API listen port (default: 8000)")
 @click.option("--bootstrap", default=None, help="Bootstrap node address (host:port)")
-def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str):
+@click.option("--no-dashboard", is_flag=True, help="Disable live dashboard (static output)")
+def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str, no_dashboard: bool):
     """Start a PRSM network node with real P2P connectivity."""
     from prsm.node.config import NodeConfig
 
@@ -289,39 +290,42 @@ def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str):
 
         prsm_node = PRSMNode(config)
         await prsm_node.initialize()
-
-        # Print status dashboard
-        status = await prsm_node.get_status()
-        console.print()
-        table = Table(title="PRSM Node Status")
-        table.add_column("Property", style="cyan")
-        table.add_column("Value", style="green")
-        table.add_row("Node ID", status["node_id"])
-        table.add_row("Display Name", status["display_name"])
-        table.add_row("Roles", ", ".join(status["roles"]))
-        table.add_row("P2P Address", status["p2p_address"])
-        table.add_row("API Address", status["api_address"])
-        table.add_row("FTNS Balance", f"{status['ftns_balance']:.2f}")
-        if status.get("compute"):
-            res = status["compute"]["resources"]
-            table.add_row("CPU", f"{res['cpu_count']} cores")
-            table.add_row("RAM", f"{res['memory_total_gb']} GB")
-            table.add_row("GPU", res.get("gpu_name", "none") if res.get("gpu_available") else "none")
-        if status.get("storage"):
-            st = status["storage"]
-            table.add_row("IPFS", "connected" if st["ipfs_available"] else "not available")
-            table.add_row("Storage Pledged", f"{st['pledged_gb']} GB")
-        console.print(table)
-        console.print()
-        console.print("Node is running. Press Ctrl+C to stop.", style="bold")
-        console.print()
-
         await prsm_node.start()
 
-        # Keep running until interrupted
         try:
-            while True:
-                await asyncio.sleep(1)
+            if no_dashboard:
+                # Static table + sleep loop (original behavior)
+                status = await prsm_node.get_status()
+                console.print()
+                table = Table(title="PRSM Node Status")
+                table.add_column("Property", style="cyan")
+                table.add_column("Value", style="green")
+                table.add_row("Node ID", status["node_id"])
+                table.add_row("Display Name", status["display_name"])
+                table.add_row("Roles", ", ".join(status["roles"]))
+                table.add_row("P2P Address", status["p2p_address"])
+                table.add_row("API Address", status["api_address"])
+                table.add_row("FTNS Balance", f"{status['ftns_balance']:.2f}")
+                if status.get("compute"):
+                    res = status["compute"]["resources"]
+                    table.add_row("CPU", f"{res['cpu_count']} cores")
+                    table.add_row("RAM", f"{res['memory_total_gb']} GB")
+                    table.add_row("GPU", res.get("gpu_name", "none") if res.get("gpu_available") else "none")
+                if status.get("storage"):
+                    st = status["storage"]
+                    table.add_row("IPFS", "connected" if st["ipfs_available"] else "not available")
+                    table.add_row("Storage Pledged", f"{st['pledged_gb']} GB")
+                console.print(table)
+                console.print()
+                console.print("Node is running. Press Ctrl+C to stop.", style="bold")
+                console.print()
+                while True:
+                    await asyncio.sleep(1)
+            else:
+                # Live dashboard
+                from prsm.node.dashboard import NodeDashboard
+                dashboard = NodeDashboard(prsm_node)
+                await dashboard.run()
         except asyncio.CancelledError:
             pass
         finally:

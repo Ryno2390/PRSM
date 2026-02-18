@@ -755,3 +755,52 @@ collaborating on tasks, sharing content, and transacting FTNS on behalf of
 their human principals, all over a decentralized P2P network. The remaining
 work focuses on feature completions (NWTN reasoning engine, marketplace) and
 resolving skipped tests.
+
+---
+
+# Part IV: UI/UX Landscape
+
+PRSM has multiple interface layers at different stages of maturity.
+
+## Terminal Dashboard (Ships with `prsm node start`)
+
+A Rich-based live TUI that refreshes every 2 seconds, showing real-time node
+metrics in a multi-panel layout: peers, content & economy, compute & storage,
+agents & collaboration, and a recent activity log. No additional dependencies
+required (Rich is already a core dependency).
+
+- **Module:** `prsm/node/dashboard.py`
+- **Entry point:** `prsm node start` (default); use `--no-dashboard` for
+  static output
+- **Data source:** `PRSMNode.get_status()` + captured `prsm.node.*` log lines
+
+## Web UI Mockup (`PRSM_ui_mockup/`)
+
+HTML/CSS/JS mockup with a P2P dashboard showing node status, peer connections,
+security indicators, and shard visualization. Serves as a design reference for
+the future full-featured web platform. Not connected to a live backend.
+
+## AI Concierge (`ai-concierge/`)
+
+Next.js application with an LLM router supporting Claude and Gemini models.
+Intended as a future conversational web interface for interacting with the PRSM
+network through natural language.
+
+## Platform API (`prsm/interface/api/`)
+
+40+ FastAPI endpoints with WebSocket support. Covers queries, governance,
+sessions, marketplace, FTNS, provenance, and teacher models. This is the
+backend that all web UIs will connect to.
+
+## Node Management API (`prsm/node/api.py`)
+
+Per-node REST API providing status, peers, content, agents, ledger, and compute
+endpoints. Used by the terminal dashboard (indirectly via `get_status()`) and
+available for external monitoring tools.
+
+## Future Work
+
+- Connect the web UI mockup designs to live node APIs
+- Build a full-featured web dashboard with real-time WebSocket updates
+- Integrate the AI Concierge with the PRSM query pipeline
+- Add multi-node fleet monitoring to the terminal dashboard
