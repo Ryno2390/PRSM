@@ -137,6 +137,7 @@ class ComputeProvider:
         self.active_jobs: Dict[str, ComputeJob] = {}
         self.completed_jobs: Dict[str, ComputeJob] = {}
         self._running = False
+        self.ledger_sync = None  # Set by node.py after construction
 
     @property
     def available_capacity(self) -> Dict[str, Any]:
@@ -237,12 +238,19 @@ class ComputeProvider:
             job.result_signature = self.identity.sign(result_bytes)
 
             # Record earnings
-            await self.ledger.credit(
+            tx = await self.ledger.credit(
                 wallet_id=self.identity.node_id,
                 amount=job.ftns_budget,
                 tx_type=TransactionType.COMPUTE_EARNING,
                 description=f"Compute job {job.job_id[:8]} ({job.job_type.value})",
             )
+
+            # Broadcast earning via ledger sync
+            if self.ledger_sync:
+                try:
+                    await self.ledger_sync.broadcast_transaction(tx)
+                except Exception:
+                    pass
 
             # Publish result
             await self.gossip.publish(GOSSIP_JOB_RESULT, {

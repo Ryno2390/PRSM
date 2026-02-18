@@ -27,6 +27,8 @@ from prsm.node.compute_provider import ComputeProvider
 from prsm.node.compute_requester import ComputeRequester
 from prsm.node.storage_provider import StorageProvider
 from prsm.node.content_uploader import ContentUploader
+from prsm.node.content_index import ContentIndex
+from prsm.node.ledger_sync import LedgerSync
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +63,8 @@ class PRSMNode:
         self.compute_requester: Optional[ComputeRequester] = None
         self.storage_provider: Optional[StorageProvider] = None
         self.content_uploader: Optional[ContentUploader] = None
+        self.content_index: Optional[ContentIndex] = None
+        self.ledger_sync: Optional[LedgerSync] = None
 
         self._started = False
         self._start_time: Optional[float] = None
@@ -141,12 +145,33 @@ class PRSMNode:
                 pledged_gb=self.config.storage_gb,
             )
 
+        # ── Content Index ─────────────────────────────────────────
+        self.content_index = ContentIndex(gossip=self.gossip)
+
         self.content_uploader = ContentUploader(
             identity=self.identity,
             gossip=self.gossip,
             ledger=self.ledger,
             ipfs_api_url=self.config.ipfs_api_url,
+            transport=self.transport,
+            content_index=self.content_index,
         )
+
+        # ── Ledger Sync ──────────────────────────────────────────
+        self.ledger_sync = LedgerSync(
+            identity=self.identity,
+            gossip=self.gossip,
+            ledger=self.ledger,
+            transport=self.transport,
+        )
+
+        # Wire ledger_sync into subsystems for transaction broadcasting
+        self.content_uploader.ledger_sync = self.ledger_sync
+        if self.compute_provider:
+            self.compute_provider.ledger_sync = self.ledger_sync
+        self.compute_requester.ledger_sync = self.ledger_sync
+        if self.storage_provider:
+            self.storage_provider.ledger_sync = self.ledger_sync
 
         logger.info("Node initialized — all subsystems ready")
 
@@ -165,6 +190,14 @@ class PRSMNode:
 
         if self.storage_provider:
             await self.storage_provider.start()
+            self.storage_provider.register_content_handler(self.transport)
+
+        if self.content_index:
+            self.content_index.start()
+        if self.content_uploader:
+            self.content_uploader.start()
+        if self.ledger_sync:
+            self.ledger_sync.start()
 
         # Start management API in background
         self._api_task = asyncio.create_task(self._run_api())
@@ -188,6 +221,8 @@ class PRSMNode:
             self._api_task.cancel()
             self._api_task = None
 
+        if self.ledger_sync:
+            await self.ledger_sync.stop()
         if self.content_uploader:
             await self.content_uploader.close()
         if self.storage_provider:
@@ -233,6 +268,8 @@ class PRSMNode:
             "compute_requester": self.compute_requester.get_stats() if self.compute_requester else None,
             "storage": self.storage_provider.get_stats() if self.storage_provider else None,
             "content": self.content_uploader.get_stats() if self.content_uploader else None,
+            "content_index": self.content_index.get_stats() if self.content_index else None,
+            "ledger_sync": self.ledger_sync.get_stats() if self.ledger_sync else None,
         }
         return status
 

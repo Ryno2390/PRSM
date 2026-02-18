@@ -26,6 +26,9 @@ GOSSIP_STORAGE_REQUEST = "storage_request"
 GOSSIP_STORAGE_CONFIRM = "storage_confirm"
 GOSSIP_PROOF_OF_STORAGE = "proof_of_storage"
 GOSSIP_PROVENANCE_REGISTER = "provenance_register"
+GOSSIP_CONTENT_ADVERTISE = "content_advertise"
+GOSSIP_CONTENT_ACCESS = "content_access"
+GOSSIP_FTNS_TRANSACTION = "ftns_transaction"
 
 # Callback type for gossip subscribers
 GossipCallback = Callable[[str, Dict[str, Any], str], Coroutine[Any, Any, None]]

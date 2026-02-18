@@ -78,6 +78,12 @@ class LocalLedger:
             CREATE INDEX IF NOT EXISTS idx_tx_to ON transactions(to_wallet);
             CREATE INDEX IF NOT EXISTS idx_tx_from ON transactions(from_wallet);
             CREATE INDEX IF NOT EXISTS idx_tx_time ON transactions(timestamp);
+
+            CREATE TABLE IF NOT EXISTS seen_nonces (
+                nonce       TEXT PRIMARY KEY,
+                origin      TEXT NOT NULL,
+                seen_at     REAL NOT NULL
+            );
         """)
 
     async def close(self) -> None:
@@ -237,6 +243,41 @@ class LocalLedger:
             (wallet_id, wallet_id),
         )
         return (await cursor.fetchone())[0]
+
+    # ── Nonce tracking (double-spend prevention) ────────────────
+
+    async def has_seen_nonce(self, nonce: str) -> bool:
+        """Check if a transaction nonce has already been processed."""
+        cursor = await self._db.execute(
+            "SELECT 1 FROM seen_nonces WHERE nonce = ?", (nonce,)
+        )
+        return await cursor.fetchone() is not None
+
+    async def record_nonce(self, nonce: str, origin: str) -> None:
+        """Record a transaction nonce to prevent replay."""
+        await self._db.execute(
+            "INSERT OR IGNORE INTO seen_nonces (nonce, origin, seen_at) VALUES (?, ?, ?)",
+            (nonce, origin, time.time()),
+        )
+        await self._db.commit()
+
+    async def get_recent_tx_ids(self, wallet_id: str, limit: int = 50) -> List[str]:
+        """Get recent transaction IDs for reconciliation."""
+        cursor = await self._db.execute(
+            """SELECT tx_id FROM transactions
+               WHERE to_wallet = ? OR from_wallet = ?
+               ORDER BY timestamp DESC LIMIT ?""",
+            (wallet_id, wallet_id, limit),
+        )
+        rows = await cursor.fetchall()
+        return [r[0] for r in rows]
+
+    async def has_transaction(self, tx_id: str) -> bool:
+        """Check if a transaction already exists in the ledger."""
+        cursor = await self._db.execute(
+            "SELECT 1 FROM transactions WHERE tx_id = ?", (tx_id,)
+        )
+        return await cursor.fetchone() is not None
 
     # ── Internal ─────────────────────────────────────────────────
 

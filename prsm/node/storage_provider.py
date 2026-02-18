@@ -14,11 +14,13 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 from prsm.node.gossip import (
+    GOSSIP_CONTENT_ADVERTISE,
     GOSSIP_PROOF_OF_STORAGE,
     GOSSIP_STORAGE_CONFIRM,
     GOSSIP_STORAGE_REQUEST,
     GossipProtocol,
 )
+from prsm.node.transport import MSG_DIRECT, P2PMessage, PeerConnection, WebSocketTransport
 from prsm.node.identity import NodeIdentity
 from prsm.node.local_ledger import LocalLedger, TransactionType
 
@@ -67,6 +69,7 @@ class StorageProvider:
         self._running = False
         self._tasks: List[asyncio.Task] = []
         self._ipfs_session = None
+        self.ledger_sync = None  # Set by node.py after construction
 
     @property
     def used_bytes(self) -> int:
@@ -221,7 +224,57 @@ class StorageProvider:
                 "provider_id": self.identity.node_id,
                 "size_bytes": self.pinned_content[cid].size_bytes,
             })
+
+            # Advertise that we can now serve this content
+            await self.gossip.publish(GOSSIP_CONTENT_ADVERTISE, {
+                "cid": cid,
+                "filename": "",
+                "size_bytes": self.pinned_content[cid].size_bytes,
+                "content_hash": "",
+                "creator_id": requester_id,
+                "provider_id": self.identity.node_id,
+                "created_at": self.pinned_content[cid].pinned_at,
+                "metadata": {},
+            })
+
             logger.info(f"Pinned content {cid[:12]}... for {requester_id[:8]}")
+
+    # ── Content serving ────────────────────────────────────────────
+
+    def register_content_handler(self, transport: WebSocketTransport) -> None:
+        """Register to handle direct content_request messages for pinned CIDs."""
+        self._transport = transport
+        transport.on_message(MSG_DIRECT, self._on_direct_content_request)
+        logger.info("Storage provider registered for content serving")
+
+    async def _on_direct_content_request(self, msg: P2PMessage, peer: PeerConnection) -> None:
+        """Serve pinned content via IPFS gateway URL."""
+        subtype = msg.payload.get("subtype", "")
+        if subtype != "content_request":
+            return
+
+        cid = msg.payload.get("cid", "")
+        request_id = msg.payload.get("request_id", "")
+
+        if cid not in self.pinned_content:
+            return  # Let the content uploader handle unknown CIDs
+
+        gateway_url = f"http://127.0.0.1:8080/ipfs/{cid}"
+        response = P2PMessage(
+            msg_type=MSG_DIRECT,
+            sender_id=self.identity.node_id,
+            payload={
+                "subtype": "content_response",
+                "request_id": request_id,
+                "cid": cid,
+                "found": True,
+                "transfer_mode": "gateway",
+                "gateway_url": gateway_url,
+                "filename": "",
+                "size_bytes": self.pinned_content[cid].size_bytes,
+            },
+        )
+        await self._transport.send_to_peer(peer.peer_id, response)
 
     # ── Reward loop ──────────────────────────────────────────────
 
@@ -249,12 +302,19 @@ class StorageProvider:
                 # Calculate reward: FTNS per GB stored
                 reward = round(self.used_gb * STORAGE_REWARD_RATE, 6)
                 if reward > 0:
-                    await self.ledger.credit(
+                    tx = await self.ledger.credit(
                         wallet_id=self.identity.node_id,
                         amount=reward,
                         tx_type=TransactionType.STORAGE_REWARD,
                         description=f"Storage reward: {self.used_gb:.4f}GB, {verified_count} CIDs verified",
                     )
+
+                    # Broadcast earning via ledger sync
+                    if self.ledger_sync:
+                        try:
+                            await self.ledger_sync.broadcast_transaction(tx)
+                        except Exception:
+                            pass
 
                     # Announce proof to network
                     await self.gossip.publish(GOSSIP_PROOF_OF_STORAGE, {

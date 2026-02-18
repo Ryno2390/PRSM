@@ -6,9 +6,9 @@ FastAPI endpoints for monitoring and controlling a running PRSM node.
 This is the node-local API (not the main PRSM platform API).
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class JobSubmission(BaseModel):
@@ -23,6 +23,14 @@ class ContentUploadRequest(BaseModel):
     text: str
     filename: str = "document.txt"
     replicas: int = 3
+    royalty_rate: Optional[float] = Field(
+        default=None,
+        description="FTNS earned per access (0.001–0.1, default 0.01)",
+    )
+    parent_cids: List[str] = Field(
+        default_factory=list,
+        description="CIDs of source material this content derives from",
+    )
 
 
 def create_api_app(node: Any) -> FastAPI:
@@ -159,6 +167,8 @@ def create_api_app(node: Any) -> FastAPI:
             text=req.text,
             filename=req.filename,
             replicas=req.replicas,
+            royalty_rate=req.royalty_rate,
+            parent_cids=req.parent_cids if req.parent_cids else None,
         )
 
         if not result:
@@ -170,6 +180,65 @@ def create_api_app(node: Any) -> FastAPI:
             "size_bytes": result.size_bytes,
             "content_hash": result.content_hash,
             "creator_id": result.creator_id,
+            "royalty_rate": result.royalty_rate,
+            "parent_cids": result.parent_cids,
+        }
+
+    @app.get("/content/search")
+    async def search_content(q: str = "", limit: int = 20) -> Dict[str, Any]:
+        """Search the network content index by keyword."""
+        if not node.content_index:
+            raise HTTPException(status_code=503, detail="Content index not initialized")
+
+        results = node.content_index.search(q, limit=min(limit, 100))
+        return {
+            "query": q,
+            "results": [
+                {
+                    "cid": r.cid,
+                    "filename": r.filename,
+                    "size_bytes": r.size_bytes,
+                    "content_hash": r.content_hash,
+                    "creator_id": r.creator_id,
+                    "providers": list(r.providers),
+                    "created_at": r.created_at,
+                    "metadata": r.metadata,
+                    "royalty_rate": r.royalty_rate,
+                    "parent_cids": r.parent_cids,
+                }
+                for r in results
+            ],
+            "count": len(results),
+        }
+
+    @app.get("/content/index/stats")
+    async def content_index_stats() -> Dict[str, Any]:
+        """Get content index statistics."""
+        if not node.content_index:
+            raise HTTPException(status_code=503, detail="Content index not initialized")
+        return node.content_index.get_stats()
+
+    @app.get("/content/{cid}")
+    async def get_content_record(cid: str) -> Dict[str, Any]:
+        """Look up a specific content record by CID."""
+        if not node.content_index:
+            raise HTTPException(status_code=503, detail="Content index not initialized")
+
+        record = node.content_index.lookup(cid)
+        if not record:
+            raise HTTPException(status_code=404, detail="Content not found in index")
+
+        return {
+            "cid": record.cid,
+            "filename": record.filename,
+            "size_bytes": record.size_bytes,
+            "content_hash": record.content_hash,
+            "creator_id": record.creator_id,
+            "providers": list(record.providers),
+            "created_at": record.created_at,
+            "metadata": record.metadata,
+            "royalty_rate": record.royalty_rate,
+            "parent_cids": record.parent_cids,
         }
 
     @app.get("/transactions")
@@ -195,6 +264,38 @@ def create_api_app(node: Any) -> FastAPI:
                 for tx in history
             ],
             "count": len(history),
+        }
+
+    @app.get("/ledger/sync/stats")
+    async def ledger_sync_stats() -> Dict[str, Any]:
+        """Get ledger sync statistics."""
+        if not node.ledger_sync:
+            raise HTTPException(status_code=503, detail="Ledger sync not initialized")
+        return node.ledger_sync.get_stats()
+
+    @app.post("/ledger/transfer")
+    async def transfer_ftns(to_wallet: str, amount: float) -> Dict[str, Any]:
+        """Transfer FTNS to another node (signed, gossip-broadcast)."""
+        if not node.ledger_sync:
+            raise HTTPException(status_code=503, detail="Ledger sync not initialized")
+
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="Amount must be positive")
+
+        tx = await node.ledger_sync.signed_transfer(
+            to_wallet=to_wallet,
+            amount=amount,
+            description=f"API transfer to {to_wallet[:12]}...",
+        )
+        if not tx:
+            raise HTTPException(status_code=400, detail="Insufficient balance")
+
+        return {
+            "tx_id": tx.tx_id,
+            "from": tx.from_wallet,
+            "to": tx.to_wallet,
+            "amount": tx.amount,
+            "timestamp": tx.timestamp,
         }
 
     @app.get("/health")
