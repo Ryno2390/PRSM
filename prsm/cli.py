@@ -279,13 +279,44 @@ def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str, no_dashboa
     if bootstrap:
         config.bootstrap_nodes = [b.strip() for b in bootstrap.split(",")]
 
-    # Start the node
-    console.print()
-    console.print("=" * 60, style="bold green")
-    console.print("  Starting PRSM Node", style="bold green")
-    console.print("=" * 60, style="bold green")
+    # When using the live dashboard, suppress startup noise so the
+    # terminal is clean.  The dashboard captures prsm.node.* activity
+    # via its own log handler.
+    if not no_dashboard:
+        import logging as _logging
+        import warnings as _warnings
+
+        # Suppress Python logging below ERROR during startup
+        _logging.root.setLevel(_logging.ERROR)
+        # Suppress structlog info messages (MCP tool registrations)
+        _logging.getLogger("prsm.compute").setLevel(_logging.ERROR)
+        _logging.getLogger("prsm.core").setLevel(_logging.ERROR)
+        # Suppress Python warnings (optional dependency notices)
+        _warnings.filterwarnings("ignore")
+
+        # Suppress structlog output (uses its own rendering pipeline)
+        try:
+            import structlog
+            structlog.configure(
+                wrapper_class=structlog.make_filtering_bound_logger(_logging.ERROR),
+            )
+        except ImportError:
+            pass
+
+        # Suppress uvicorn's CancelledError traceback on shutdown
+        _logging.getLogger("uvicorn.error").setLevel(_logging.CRITICAL)
+
+        console.print()
+        console.print("  Starting PRSM Node...", style="bold green")
+
+    else:
+        console.print()
+        console.print("=" * 60, style="bold green")
+        console.print("  Starting PRSM Node", style="bold green")
+        console.print("=" * 60, style="bold green")
 
     async def _run():
+        import logging as _logging
         from prsm.node.node import PRSMNode
 
         prsm_node = PRSMNode(config)
@@ -322,7 +353,13 @@ def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str, no_dashboa
                 while True:
                     await asyncio.sleep(1)
             else:
-                # Live dashboard
+                # Restore logging for prsm.node.* so the dashboard
+                # activity log captures events during operation.
+                _logging.getLogger("prsm.node").setLevel(_logging.INFO)
+
+                # Clear startup messages before showing dashboard
+                console.clear()
+
                 from prsm.node.dashboard import NodeDashboard
                 dashboard = NodeDashboard(prsm_node)
                 await dashboard.run()
