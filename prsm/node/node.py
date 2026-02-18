@@ -29,6 +29,8 @@ from prsm.node.storage_provider import StorageProvider
 from prsm.node.content_uploader import ContentUploader
 from prsm.node.content_index import ContentIndex
 from prsm.node.ledger_sync import LedgerSync
+from prsm.node.agent_registry import AgentRegistry
+from prsm.node.agent_collaboration import AgentCollaboration
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,8 @@ class PRSMNode:
         self.content_uploader: Optional[ContentUploader] = None
         self.content_index: Optional[ContentIndex] = None
         self.ledger_sync: Optional[LedgerSync] = None
+        self.agent_registry: Optional[AgentRegistry] = None
+        self.agent_collaboration: Optional[AgentCollaboration] = None
 
         self._started = False
         self._start_time: Optional[float] = None
@@ -165,6 +169,17 @@ class PRSMNode:
             transport=self.transport,
         )
 
+        # ── Agent Registry & Collaboration ────────────────────────
+        self.agent_registry = AgentRegistry(
+            gossip=self.gossip,
+            transport=self.transport,
+            node_id=self.identity.node_id,
+        )
+        self.agent_collaboration = AgentCollaboration(
+            gossip=self.gossip,
+            node_id=self.identity.node_id,
+        )
+
         # Wire ledger_sync into subsystems for transaction broadcasting
         self.content_uploader.ledger_sync = self.ledger_sync
         if self.compute_provider:
@@ -198,6 +213,10 @@ class PRSMNode:
             self.content_uploader.start()
         if self.ledger_sync:
             self.ledger_sync.start()
+        if self.agent_registry:
+            self.agent_registry.start()
+        if self.agent_collaboration:
+            self.agent_collaboration.start()
 
         # Start management API in background
         self._api_task = asyncio.create_task(self._run_api())
@@ -270,6 +289,8 @@ class PRSMNode:
             "content": self.content_uploader.get_stats() if self.content_uploader else None,
             "content_index": self.content_index.get_stats() if self.content_index else None,
             "ledger_sync": self.ledger_sync.get_stats() if self.ledger_sync else None,
+            "agents": self.agent_registry.get_stats() if self.agent_registry else None,
+            "collaboration": self.agent_collaboration.get_stats() if self.agent_collaboration else None,
         }
         return status
 
