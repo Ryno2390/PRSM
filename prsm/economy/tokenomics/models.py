@@ -1382,3 +1382,7 @@ class FTNSEmergencyConfig(Base):
         Index('idx_emergency_config_effective', 'effective_date'),
         Index('idx_emergency_config_name', 'config_name'),
     )
+
+
+# Re-export Pydantic FTNSBalance from core models for convenience
+from prsm.core.models import FTNSBalance  # noqa: E402, F401

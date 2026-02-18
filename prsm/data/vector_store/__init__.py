@@ -17,12 +17,19 @@ Key Features:
 - Performance monitoring and optimization
 """
 
-from .base import PRSMVectorStore, ContentMatch, VectorStoreConfig, VectorStoreType
-from .coordinator import VectorStoreCoordinator
+from .base import (
+    PRSMVectorStore, ContentMatch, VectorStoreConfig, VectorStoreType,
+    ContentType, SearchFilters, VectorStoreBenchmark
+)
+from .coordinator import VectorStoreCoordinator, MigrationPhase
 from .implementations import (
     PgVectorStore,
-    MilvusVectorStore, 
+    MilvusVectorStore,
     QdrantVectorStore
+)
+from .implementations.pgvector_store import (
+    create_development_pgvector_store,
+    get_docker_connection_info
 )
 from .provenance import ProvenanceVectorIntegration
 from .migration import VectorStoreMigrator
@@ -32,10 +39,16 @@ __all__ = [
     "ContentMatch",
     "VectorStoreConfig",
     "VectorStoreType",
+    "ContentType",
+    "SearchFilters",
+    "VectorStoreBenchmark",
     "VectorStoreCoordinator",
+    "MigrationPhase",
     "PgVectorStore",
     "MilvusVectorStore",
     "QdrantVectorStore",
+    "create_development_pgvector_store",
+    "get_docker_connection_info",
     "ProvenanceVectorIntegration",
     "VectorStoreMigrator"
 ]

@@ -182,7 +182,8 @@ class TestSlidingWindowAccuracy:
         for i in range(4):  # Test tier allows 5 per minute
             allowed, info = await limiter.check_rate_limit(identifier, tier="test")
             assert allowed, f"Request {i+1} should be allowed"
-            assert info["limits"]["minute"]["remaining"] == 4 - i - 1
+            # remaining = limit - requests_before_this_one - 1 (for current)
+            assert info["limits"]["minute"]["remaining"] == 4 - i
 
     @pytest.mark.asyncio
     async def test_blocks_requests_over_limit(self, limiter, clean_keys):

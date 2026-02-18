@@ -283,3 +283,18 @@ class RoleAssignment(BaseModel):
     user_id: UUID
     role: UserRole
     custom_permissions: Optional[List[Permission]] = None
+
+
+class UserSession(BaseModel):
+    """Active user session model"""
+    session_id: UUID = Field(default_factory=uuid4)
+    user_id: UUID
+    token_hash: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    expires_at: datetime
+    is_active: bool = True
+    client_ip: Optional[str] = None
+    user_agent: Optional[str] = None
+
+    class Config:
+        from_attributes = True

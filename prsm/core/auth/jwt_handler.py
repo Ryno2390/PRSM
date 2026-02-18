@@ -741,3 +741,9 @@ class JWTHandler:
 
 # Global JWT handler instance
 jwt_handler = JWTHandler()
+
+
+async def create_access_token(user_data: Dict[str, Any],
+                              expires_delta: Optional[timedelta] = None) -> Tuple[str, "TokenData"]:
+    """Module-level convenience function delegating to the global jwt_handler."""
+    return await jwt_handler.create_access_token(user_data, expires_delta)
