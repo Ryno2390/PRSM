@@ -85,8 +85,9 @@ def _register_health_endpoint(app: FastAPI) -> None:
         from prsm.core.ipfs_client import get_ipfs_client
         from prsm.core.vector_db import get_vector_db_manager
 
-        # Connection-refused style errors indicate the service simply
-        # isn't running — treat as "not configured" rather than broken.
+        # Errors that indicate a service simply isn't present rather than
+        # a genuine runtime failure.  Covers connection-refused, missing
+        # config attributes, missing packages, etc.
         _NOT_CONFIGURED_MARKERS = (
             "Connection refused", "connection refused",
             "Connect call failed", "connect call failed",
@@ -97,6 +98,8 @@ def _register_health_endpoint(app: FastAPI) -> None:
             "not installed",
             "not available",
             "No module named",
+            "has no attribute",          # AttributeError from missing config
+            "object has no attribute",   # e.g. 'PRSMConfig' object has no attribute
         )
 
         def _is_not_configured(error: str) -> bool:
@@ -115,16 +118,32 @@ def _register_health_endpoint(app: FastAPI) -> None:
         health_status["components"]["api"] = {"status": "healthy"}
 
         # --- Optional components ------------------------------------------
+        # Each check distinguishes three states:
+        #   1. healthy  — service reachable and working
+        #   2. not_configured — service not running / not set up
+        #   3. unhealthy — service configured but broken
+        #
+        # "not_configured" is detected from *both* exception messages AND
+        # return-value signals (e.g. last_health_check is None, 0/0 nodes).
 
         # Database
         try:
             db_healthy = await db_manager.health_check()
-            health_status["components"]["database"] = {
-                "status": "healthy" if db_healthy else "unhealthy",
-                "last_check": db_manager.last_health_check.isoformat() if db_manager.last_health_check else None,
-                "connection_pool": "active" if db_healthy else "failed"
-            }
-            if not db_healthy:
+            if db_healthy:
+                health_status["components"]["database"] = {
+                    "status": "healthy",
+                    "last_check": db_manager.last_health_check.isoformat() if db_manager.last_health_check else None,
+                    "connection_pool": "active"
+                }
+            elif not getattr(db_manager, 'last_health_check', None):
+                # Never successfully connected → not configured
+                health_status["components"]["database"] = {"status": "not_configured"}
+            else:
+                health_status["components"]["database"] = {
+                    "status": "unhealthy",
+                    "last_check": db_manager.last_health_check.isoformat(),
+                    "connection_pool": "failed"
+                }
                 has_configured_failure = True
         except Exception as e:
             err = str(e)
@@ -137,12 +156,20 @@ def _register_health_endpoint(app: FastAPI) -> None:
         # Redis
         try:
             redis_healthy = await redis_manager.health_check()
-            health_status["components"]["redis"] = {
-                "status": "healthy" if redis_healthy else "unhealthy",
-                "connected": redis_manager.client.connected,
-                "last_check": redis_manager.client.last_health_check.isoformat() if redis_manager.client.last_health_check else None
-            }
-            if not redis_healthy:
+            if redis_healthy:
+                health_status["components"]["redis"] = {
+                    "status": "healthy",
+                    "connected": True,
+                    "last_check": redis_manager.client.last_health_check.isoformat() if redis_manager.client.last_health_check else None
+                }
+            elif not getattr(redis_manager.client, 'last_health_check', None):
+                health_status["components"]["redis"] = {"status": "not_configured"}
+            else:
+                health_status["components"]["redis"] = {
+                    "status": "unhealthy",
+                    "connected": redis_manager.client.connected,
+                    "last_check": redis_manager.client.last_health_check.isoformat()
+                }
                 has_configured_failure = True
         except Exception as e:
             err = str(e)
@@ -156,14 +183,24 @@ def _register_health_endpoint(app: FastAPI) -> None:
         try:
             ipfs_client = get_ipfs_client()
             ipfs_healthy_nodes = await ipfs_client.health_check()
-            overall_ipfs_health = ipfs_healthy_nodes > 0
-            health_status["components"]["ipfs"] = {
-                "status": "healthy" if overall_ipfs_health else "unhealthy",
-                "connected": ipfs_client.connected,
-                "healthy_nodes": f"{ipfs_healthy_nodes}/{len(ipfs_client.nodes)}",
-                "primary_node": ipfs_client.primary_node.url if ipfs_client.primary_node else None
-            }
-            if not overall_ipfs_health:
+            total_nodes = len(ipfs_client.nodes)
+            if ipfs_healthy_nodes > 0:
+                health_status["components"]["ipfs"] = {
+                    "status": "healthy",
+                    "connected": ipfs_client.connected,
+                    "healthy_nodes": f"{ipfs_healthy_nodes}/{total_nodes}",
+                    "primary_node": ipfs_client.primary_node.url if ipfs_client.primary_node else None
+                }
+            elif total_nodes == 0 or not getattr(ipfs_client, 'connected', False):
+                # No nodes configured or never connected
+                health_status["components"]["ipfs"] = {"status": "not_configured"}
+            else:
+                health_status["components"]["ipfs"] = {
+                    "status": "unhealthy",
+                    "connected": ipfs_client.connected,
+                    "healthy_nodes": f"0/{total_nodes}",
+                    "primary_node": ipfs_client.primary_node.url if ipfs_client.primary_node else None
+                }
                 has_configured_failure = True
         except Exception as e:
             err = str(e)
@@ -179,14 +216,23 @@ def _register_health_endpoint(app: FastAPI) -> None:
             vector_health = await vector_db_manager.health_check()
             healthy_providers = sum(1 for status in vector_health.values() if status)
             total_providers = len(vector_health)
-            overall_vector_health = healthy_providers > 0
-            health_status["components"]["vector_db"] = {
-                "status": "healthy" if overall_vector_health else "unhealthy",
-                "providers": vector_health,
-                "healthy_providers": f"{healthy_providers}/{total_providers}",
-                "primary_provider": vector_db_manager.primary_provider.value if vector_db_manager.primary_provider else None
-            }
-            if not overall_vector_health:
+            if healthy_providers > 0:
+                health_status["components"]["vector_db"] = {
+                    "status": "healthy",
+                    "providers": vector_health,
+                    "healthy_providers": f"{healthy_providers}/{total_providers}",
+                    "primary_provider": vector_db_manager.primary_provider.value if vector_db_manager.primary_provider else None
+                }
+            elif total_providers == 0:
+                # No providers configured at all
+                health_status["components"]["vector_db"] = {"status": "not_configured"}
+            else:
+                health_status["components"]["vector_db"] = {
+                    "status": "unhealthy",
+                    "providers": vector_health,
+                    "healthy_providers": f"0/{total_providers}",
+                    "primary_provider": vector_db_manager.primary_provider.value if vector_db_manager.primary_provider else None
+                }
                 has_configured_failure = True
         except Exception as e:
             err = str(e)
