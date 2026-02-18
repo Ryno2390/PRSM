@@ -22,8 +22,12 @@ import pytest
 from decimal import Decimal
 from uuid import uuid4
 from typing import List, Dict, Any
-import asyncpg
 from contextlib import asynccontextmanager
+
+try:
+    import asyncpg
+except ImportError:
+    pytest.skip("asyncpg not installed", allow_module_level=True)
 
 
 # Skip if no database URL configured
