@@ -241,10 +241,12 @@ def _run_node_wizard() -> "NodeConfig":
 
     bootstrap = click.prompt(
         "  Bootstrap node (host:port, or empty for none)",
-        default="",
+        default="100.83.80.91:9001",
     )
     if bootstrap.strip():
         config.bootstrap_nodes = [b.strip() for b in bootstrap.split(",")]
+    else:
+        config.bootstrap_nodes = []
 
     # Save config
     config.save()

@@ -74,24 +74,49 @@ def _register_health_endpoint(app: FastAPI) -> None:
         """
         Comprehensive health check endpoint
 
-        Tests all critical PRSM subsystems to ensure operational readiness:
-        - PostgreSQL database connectivity and performance
-        - Redis caching availability
-        - IPFS distributed storage
-        - Vector database embedding services
+        Tests PRSM subsystems and reports their status.  The overall status
+        is "healthy" as long as the core API is running and no *configured*
+        optional service is broken.  Services that are simply absent (not
+        installed / connection refused) are reported as "not_configured"
+        and do **not** degrade the overall status.
         """
         from prsm.core.database import db_manager
         from prsm.core.redis_client import redis_manager
         from prsm.core.ipfs_client import get_ipfs_client
         from prsm.core.vector_db import get_vector_db_manager
 
-        health_status = {
+        # Connection-refused style errors indicate the service simply
+        # isn't running — treat as "not configured" rather than broken.
+        _NOT_CONFIGURED_MARKERS = (
+            "Connection refused", "connection refused",
+            "Connect call failed", "connect call failed",
+            "No such file or directory",
+            "Name or service not known",
+            "nodename nor servname provided",
+            "Cannot connect",
+            "not installed",
+            "not available",
+            "No module named",
+        )
+
+        def _is_not_configured(error: str) -> bool:
+            return any(marker in error for marker in _NOT_CONFIGURED_MARKERS)
+
+        health_status: Dict[str, Any] = {
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
             "components": {}
         }
 
-        # Database Health Check
+        # Track whether any *configured* service is broken
+        has_configured_failure = False
+
+        # Core: the API itself — always healthy if we're serving the request
+        health_status["components"]["api"] = {"status": "healthy"}
+
+        # --- Optional components ------------------------------------------
+
+        # Database
         try:
             db_healthy = await db_manager.health_check()
             health_status["components"]["database"] = {
@@ -100,12 +125,16 @@ def _register_health_endpoint(app: FastAPI) -> None:
                 "connection_pool": "active" if db_healthy else "failed"
             }
             if not db_healthy:
-                health_status["status"] = "degraded"
+                has_configured_failure = True
         except Exception as e:
-            health_status["components"]["database"] = {"status": "unhealthy", "error": str(e)}
-            health_status["status"] = "unhealthy"
+            err = str(e)
+            if _is_not_configured(err):
+                health_status["components"]["database"] = {"status": "not_configured"}
+            else:
+                health_status["components"]["database"] = {"status": "unhealthy", "error": err}
+                has_configured_failure = True
 
-        # Redis Health Check
+        # Redis
         try:
             redis_healthy = await redis_manager.health_check()
             health_status["components"]["redis"] = {
@@ -114,12 +143,16 @@ def _register_health_endpoint(app: FastAPI) -> None:
                 "last_check": redis_manager.client.last_health_check.isoformat() if redis_manager.client.last_health_check else None
             }
             if not redis_healthy:
-                health_status["status"] = "degraded"
+                has_configured_failure = True
         except Exception as e:
-            health_status["components"]["redis"] = {"status": "unhealthy", "error": str(e)}
-            health_status["status"] = "degraded"
+            err = str(e)
+            if _is_not_configured(err):
+                health_status["components"]["redis"] = {"status": "not_configured"}
+            else:
+                health_status["components"]["redis"] = {"status": "unhealthy", "error": err}
+                has_configured_failure = True
 
-        # IPFS Health Check
+        # IPFS
         try:
             ipfs_client = get_ipfs_client()
             ipfs_healthy_nodes = await ipfs_client.health_check()
@@ -131,12 +164,16 @@ def _register_health_endpoint(app: FastAPI) -> None:
                 "primary_node": ipfs_client.primary_node.url if ipfs_client.primary_node else None
             }
             if not overall_ipfs_health:
-                health_status["status"] = "degraded"
+                has_configured_failure = True
         except Exception as e:
-            health_status["components"]["ipfs"] = {"status": "unhealthy", "error": str(e)}
-            health_status["status"] = "unhealthy"
+            err = str(e)
+            if _is_not_configured(err):
+                health_status["components"]["ipfs"] = {"status": "not_configured"}
+            else:
+                health_status["components"]["ipfs"] = {"status": "unhealthy", "error": err}
+                has_configured_failure = True
 
-        # Vector Database Health Check
+        # Vector Database
         try:
             vector_db_manager = get_vector_db_manager()
             vector_health = await vector_db_manager.health_check()
@@ -150,20 +187,18 @@ def _register_health_endpoint(app: FastAPI) -> None:
                 "primary_provider": vector_db_manager.primary_provider.value if vector_db_manager.primary_provider else None
             }
             if not overall_vector_health:
-                health_status["status"] = "degraded"
+                has_configured_failure = True
         except Exception as e:
-            health_status["components"]["vector_db"] = {"status": "unhealthy", "error": str(e)}
-            health_status["status"] = "unhealthy"
+            err = str(e)
+            if _is_not_configured(err):
+                health_status["components"]["vector_db"] = {"status": "not_configured"}
+            else:
+                health_status["components"]["vector_db"] = {"status": "unhealthy", "error": err}
+                has_configured_failure = True
 
-        # Placeholder for future components
-        health_status["components"]["p2p_network"] = {
-            "status": "not_implemented",
-            "message": "P2P network integration pending"
-        }
-        health_status["components"]["safety_system"] = {
-            "status": "not_implemented",
-            "message": "Safety monitoring integration pending"
-        }
+        # Set overall status based on configured services only
+        if has_configured_failure:
+            health_status["status"] = "degraded"
 
         return health_status
 

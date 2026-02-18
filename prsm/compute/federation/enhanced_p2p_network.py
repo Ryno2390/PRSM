@@ -22,10 +22,10 @@ try:
     import nacl.utils
     from nacl.public import PrivateKey, PublicKey, Box
     from nacl.signing import SigningKey, VerifyKey
-    from merkletools import MerkleTools
+    from prsm.core.merkle import MerkleTools
 except ImportError as e:
     print(f"⚠️ P2P dependencies not installed: {e}")
-    print("Install with: pip install kademlia websockets pynacl merkletools")
+    print("Install with: pip install kademlia websockets pynacl")
 
 from prsm.core.config import settings
 from prsm.core.models import (

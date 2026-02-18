@@ -41,10 +41,10 @@ try:
     from nacl.signing import SigningKey, VerifyKey
     from nacl.hash import sha256
     from nacl.encoding import HexEncoder
-    from merkletools import MerkleTools
+    from prsm.core.merkle import MerkleTools
     CRYPTO_AVAILABLE = True
 except ImportError:
-    print("⚠️ Cryptography dependencies not available. Install: pip install pynacl merkletools")
+    print("⚠️ Cryptography dependencies not available. Install: pip install pynacl")
     CRYPTO_AVAILABLE = False
 
 from prsm.core.config import settings
