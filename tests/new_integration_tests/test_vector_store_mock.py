@@ -54,6 +54,9 @@ except ImportError as e:
     import pytest
     pytest.skip(f"Import error: {e}. Make sure you're running from the PRSM root directory", allow_module_level=True)
 
+import pytest
+import pytest_asyncio
+
 
 class MockVectorStore(PRSMVectorStore):
     """
@@ -273,6 +276,75 @@ class MockVectorStore(PRSMVectorStore):
             "total_accesses": total_accesses,
             "table_size_mb": len(str(self.content_store)) / (1024 * 1024)  # Approximate
         }
+
+
+@pytest_asyncio.fixture
+async def store():
+    """Create a MockVectorStore instance for pytest tests."""
+    config = VectorStoreConfig(
+        store_type=VectorStoreType.PGVECTOR,
+        host="mock",
+        port=5432,
+        database="mock_db",
+        collection_name="test_vectors",
+        vector_dimension=384
+    )
+    s = MockVectorStore(config)
+    await s.connect()
+    yield s
+    await s.disconnect()
+
+
+@pytest_asyncio.fixture
+async def test_contents(store):
+    """Pre-populate the store with test content and return the content list."""
+    contents = [
+        {
+            "cid": "QmTest1_AIEthics_Paper",
+            "embedding": np.random.random(384).astype(np.float32),
+            "metadata": {
+                "title": "AI Ethics in Modern Systems",
+                "author": "Dr. Sarah Wilson",
+                "content_type": ContentType.RESEARCH_PAPER.value,
+                "creator_id": "sarah_wilson_001",
+                "royalty_rate": 0.08,
+                "quality_score": 0.94,
+                "citation_count": 67,
+                "license": "Creative Commons",
+                "keywords": ["AI", "ethics", "governance"],
+            },
+        },
+        {
+            "cid": "QmTest2_ClimateData_Dataset",
+            "embedding": np.random.random(384).astype(np.float32),
+            "metadata": {
+                "title": "Arctic Temperature Dataset 2010-2024",
+                "author": "Arctic Research Consortium",
+                "content_type": ContentType.DATASET.value,
+                "creator_id": "arctic_research_consortium",
+                "royalty_rate": 0.06,
+                "quality_score": 0.97,
+                "citation_count": 134,
+                "license": "Open Data",
+            },
+        },
+        {
+            "cid": "QmTest3_MLAlgorithm_Code",
+            "embedding": np.random.random(384).astype(np.float32),
+            "metadata": {
+                "title": "Efficient Attention Mechanism",
+                "author": "Alex Chen",
+                "content_type": ContentType.CODE.value,
+                "creator_id": "alex_chen_dev",
+                "royalty_rate": 0.05,
+                "quality_score": 0.89,
+                "license": "MIT",
+            },
+        },
+    ]
+    for c in contents:
+        await store.store_content_with_embeddings(c["cid"], c["embedding"], c["metadata"])
+    return contents
 
 
 async def test_vector_store_interface():

@@ -76,21 +76,50 @@ class FakeRedisPipeline:
         return self
     
     async def execute(self):
-        """Execute all pipeline commands"""
+        """Execute all pipeline commands against the underlying FakeRedis"""
         results = []
+        r = self.redis
         for cmd in self.commands:
             if cmd[0] == 'zadd':
-                results.append(len(cmd[2]))
+                key, mapping = cmd[1], cmd[2]
+                if key not in r._sorted_sets:
+                    r._sorted_sets[key] = {}
+                r._sorted_sets[key].update(mapping)
+                results.append(len(mapping))
             elif cmd[0] == 'zremrangebyscore':
-                results.append(0)
+                key, min_s, max_s = cmd[1], cmd[2], cmd[3]
+                removed = 0
+                if key in r._sorted_sets:
+                    try:
+                        min_val = float('-inf') if min_s == '-inf' else float(min_s)
+                    except (ValueError, TypeError):
+                        min_val = float('-inf')
+                    try:
+                        max_val = float('inf') if max_s == '+inf' else float(max_s)
+                    except (ValueError, TypeError):
+                        max_val = float('inf')
+                    to_remove = [m for m, s in r._sorted_sets[key].items()
+                                 if min_val <= s <= max_val]
+                    for m in to_remove:
+                        del r._sorted_sets[key][m]
+                        removed += 1
+                results.append(removed)
             elif cmd[0] == 'zcard':
-                results.append(0)
+                key = cmd[1]
+                results.append(len(r._sorted_sets.get(key, {})))
             elif cmd[0] == 'expire':
+                key, seconds = cmd[1], cmd[2]
+                r._expirations[key] = seconds
                 results.append(True)
             elif cmd[0] == 'set':
+                key, value = cmd[1], cmd[2]
+                r._data[key] = value
+                if len(cmd) > 3 and cmd[3]:
+                    r._expirations[key] = cmd[3]
                 results.append(True)
             elif cmd[0] == 'get':
-                results.append(None)
+                key = cmd[1]
+                results.append(r._data.get(key))
             else:
                 results.append(True)
         self.commands = []
@@ -123,6 +152,10 @@ class FakeRedis:
             if key in self._data:
                 del self._data[key]
                 count += 1
+            if key in self._sorted_sets:
+                del self._sorted_sets[key]
+                count += 1
+            self._expirations.pop(key, None)
         return count
     
     async def exists(self, key):
@@ -200,14 +233,56 @@ class FakeRedis:
         """Create a pipeline"""
         return FakeRedisPipeline(self)
     
+    async def scan_iter(self, match="*", count=100):
+        """Async iterator over keys matching pattern"""
+        import fnmatch
+        all_keys = list(self._data.keys()) + list(self._sorted_sets.keys())
+        for key in all_keys:
+            if fnmatch.fnmatch(key, match):
+                yield key
+
+    async def zrange(self, key, start, stop, withscores=False):
+        """Get range from sorted set"""
+        if key not in self._sorted_sets:
+            return []
+        items = sorted(self._sorted_sets[key].items(), key=lambda x: x[1])
+        if stop == -1:
+            sliced = items[start:]
+        else:
+            sliced = items[start:stop + 1]
+        if withscores:
+            return sliced
+        return [member for member, score in sliced]
+
+    async def zrem(self, key, *members):
+        """Remove members from sorted set"""
+        if key not in self._sorted_sets:
+            return 0
+        removed = 0
+        for member in members:
+            if member in self._sorted_sets[key]:
+                del self._sorted_sets[key][member]
+                removed += 1
+        return removed
+
+    async def setex(self, key, seconds, value):
+        """Set key with expiration"""
+        self._data[key] = value
+        self._expirations[key] = seconds
+        return True
+
     async def close(self):
         """Close connection (no-op for fake)"""
         pass
-    
+
+    async def aclose(self):
+        """Async close connection (no-op for fake)"""
+        pass
+
     async def ping(self):
         """Ping server"""
         return True
-    
+
     def __await__(self):
         """Make FakeRedis awaitable"""
         async def _impl():
@@ -260,9 +335,10 @@ class FakeAsyncPGTransaction:
         pass
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(scope="session", autouse=True)
 def mock_redis():
-    """Auto-use fixture to mock Redis connections"""
+    """Auto-use fixture to mock Redis connections (session-scoped so module-scoped
+    fixtures in test files also get the FakeRedis via patched from_url)."""
     fake_redis_instance = FakeRedis()
     
     # Mock redis.asyncio.Redis
@@ -620,7 +696,6 @@ def setup_test_environment():
     os.environ["PRSM_ENVIRONMENT"] = "test"
     os.environ["PRSM_LOG_LEVEL"] = "DEBUG"
     os.environ["PRSM_DATABASE_URL"] = "sqlite:///:memory:"
-    os.environ["SKIP_REDIS_TESTS"] = "true"
     os.environ["SKIP_POSTGRES_TESTS"] = "true"
     os.environ["SKIP_INTEGRATION_TESTS"] = "true"
     
@@ -633,10 +708,9 @@ def setup_test_environment():
     
     # Cleanup environment
     test_env_vars = [
-        "PRSM_ENVIRONMENT", 
-        "PRSM_LOG_LEVEL", 
+        "PRSM_ENVIRONMENT",
+        "PRSM_LOG_LEVEL",
         "PRSM_DATABASE_URL",
-        "SKIP_REDIS_TESTS",
         "SKIP_POSTGRES_TESTS",
         "SKIP_INTEGRATION_TESTS",
         "PRSM_JWT_SECRET",

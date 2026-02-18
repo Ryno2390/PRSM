@@ -7,7 +7,15 @@ import asyncio
 import tempfile
 import os
 import shutil
+import sys
 from pathlib import Path
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Any
+
+# Ensure fixtures directory is importable
+_fixtures_dir = Path(__file__).parent.parent / "fixtures"
+if str(_fixtures_dir.parent) not in sys.path:
+    sys.path.insert(0, str(_fixtures_dir.parent))
 
 
 @pytest.fixture(scope="session")
@@ -348,3 +356,149 @@ def simulate_network_delay(latency_ms=50):
 async def async_simulate_network_delay(latency_ms=50):
     """Async version of network delay simulation."""
     await asyncio.sleep(latency_ms / 1000.0)
+
+
+class APITestDataFactory:
+    """Factory for creating API test data"""
+
+    @staticmethod
+    def create_nwtn_query_request(query: str = "Test reasoning query", mode: str = "adaptive",
+                                  max_depth: int = 3, **kwargs) -> Dict[str, Any]:
+        return {"query": query, "mode": mode, "max_depth": max_depth,
+                "timestamp": datetime.now(timezone.utc).isoformat(), **kwargs}
+
+    @staticmethod
+    def create_ftns_transfer_request(recipient: str = "test_recipient", amount: float = 10.0,
+                                     description: str = "Test transfer", **kwargs) -> Dict[str, Any]:
+        return {"recipient": recipient, "amount": amount, "description": description,
+                "timestamp": datetime.now(timezone.utc).isoformat(), **kwargs}
+
+    @staticmethod
+    def create_marketplace_item_request(title: str = "Test Item", description: str = "Test marketplace item",
+                                        price: float = 50.0, category: str = "tools", **kwargs) -> Dict[str, Any]:
+        return {"title": title, "description": description, "price": price, "category": category,
+                "created_at": datetime.now(timezone.utc).isoformat(), **kwargs}
+
+    @staticmethod
+    def create_user_registration_request(username: str = "testuser", email: str = "test@example.com",
+                                          password: str = "testpassword123", **kwargs) -> Dict[str, Any]:
+        return {"username": username, "email": email, "password": password, **kwargs}
+
+
+@pytest.fixture
+def api_data_factory():
+    """API test data factory fixture"""
+    return APITestDataFactory()
+
+
+@pytest.fixture
+def user_headers():
+    """Regular user authorization headers for API testing"""
+    import jwt as pyjwt
+    payload = {
+        "sub": "test_regular_user",
+        "username": "user",
+        "email": "user@test.com",
+        "role": "user",
+        "permissions": ["read", "write"],
+        "token_type": "access",
+        "exp": (datetime.now(timezone.utc) + timedelta(hours=1)).timestamp(),
+        "iat": datetime.now(timezone.utc).timestamp(),
+        "jti": "test_jti_user"
+    }
+    token = pyjwt.encode(payload, "test-secret-key-for-testing-only-minimum-32-chars-required-here", algorithm="HS256")
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def expired_token_headers():
+    """Expired token headers for testing authentication failures"""
+    import jwt as pyjwt
+    payload = {
+        "sub": "test_regular_user",
+        "username": "user",
+        "email": "user@test.com",
+        "role": "user",
+        "permissions": ["read", "write"],
+        "token_type": "access",
+        "exp": (datetime.now(timezone.utc) - timedelta(hours=1)).timestamp(),
+        "iat": (datetime.now(timezone.utc) - timedelta(hours=2)).timestamp(),
+        "jti": "test_jti_expired"
+    }
+    token = pyjwt.encode(payload, "test-secret-key-for-testing-only-minimum-32-chars-required-here", algorithm="HS256")
+    return {"Authorization": f"Bearer {token}"}
+
+
+class _APIPerformanceMonitor:
+    def __init__(self):
+        self.requests = []
+
+    def record_request(self, start_time, end_time, response_size):
+        self.requests.append({"start": start_time, "end": end_time, "size": response_size})
+
+    def get_stats(self):
+        if not self.requests:
+            return {"avg_time": 0, "total_requests": 0}
+        times = [r["end"] - r["start"] for r in self.requests]
+        return {"avg_time": sum(times) / len(times), "total_requests": len(self.requests)}
+
+
+@pytest.fixture
+def api_performance_monitor():
+    """API performance monitoring fixture"""
+    return _APIPerformanceMonitor()
+
+
+class _SecurityTestHelper:
+    sql_injection_payloads = [
+        "'; DROP TABLE users; --",
+        "1' OR '1'='1",
+        "admin'--",
+    ]
+    xss_payloads = [
+        "<script>alert('xss')</script>",
+        "<img src=x onerror=alert(1)>",
+    ]
+
+    def get_sql_injection_payloads(self):
+        return self.sql_injection_payloads
+
+    def get_xss_payloads(self):
+        return self.xss_payloads
+
+    def get_malformed_json_payloads(self):
+        return ["{invalid}", "{'bad': }", "{\"unterminated\": "]
+
+
+@pytest.fixture
+def security_test_helper():
+    """Security testing helper fixture"""
+    return _SecurityTestHelper()
+
+
+class _RateLimitTester:
+    async def send_requests(self, client, url, headers, count=10):
+        results = []
+        for _ in range(count):
+            resp = await client.get(url, headers=headers)
+            results.append(resp.status_code)
+        return results
+
+
+@pytest.fixture
+def rate_limit_tester():
+    """Rate limit testing fixture"""
+    return _RateLimitTester()
+
+
+@pytest.fixture
+def api_response_schemas():
+    """Expected API response schemas for validation"""
+    return {
+        "nwtn_response": {
+            "required_fields": ["response", "session_id", "timestamp"],
+        },
+        "error_response": {
+            "required_fields": ["detail"],
+        },
+    }
