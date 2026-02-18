@@ -65,12 +65,14 @@ class NodeDashboard:
 
     async def run(self) -> None:
         """Run the live dashboard until cancelled."""
-        with Live(self._build_display({}), refresh_per_second=1, screen=False) as live:
+        # Poll once before rendering so the first frame has real data
+        initial_status = await self.node.get_status()
+        with Live(self._build_display(initial_status), refresh_per_second=1, screen=False) as live:
             try:
                 while True:
+                    await asyncio.sleep(self.REFRESH_INTERVAL)
                     status = await self.node.get_status()
                     live.update(self._build_display(status))
-                    await asyncio.sleep(self.REFRESH_INTERVAL)
             except asyncio.CancelledError:
                 pass
             finally:

@@ -45,7 +45,10 @@ try:
     EVAL_DEPS_AVAILABLE = True
 except ImportError:
     EVAL_DEPS_AVAILABLE = False
-    print("Warning: Install sentence-transformers, rouge-score, matplotlib for full evaluation capabilities")
+    import logging as _logging
+    _logging.getLogger(__name__).info(
+        "Optional: install sentence-transformers, rouge-score, matplotlib for full evaluation capabilities"
+    )
 
 # PRSM imports
 from ..agents.executors.unified_router import UnifiedModelRouter, RoutingStrategy
