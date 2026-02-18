@@ -263,8 +263,18 @@ class WebSocketTransport:
     # ── Client (outgoing connections) ────────────────────────────
 
     async def connect_to_peer(self, address: str) -> Optional[PeerConnection]:
-        """Initiate an outgoing connection to a peer at address (host:port)."""
-        uri = f"ws://{address}"
+        """Initiate an outgoing connection to a peer at address (host:port).
+
+        Addresses that already start with ``ws://`` or ``wss://`` are used
+        as-is.  Plain ``host:port`` addresses default to ``ws://``, except
+        when the port is 443 which implies TLS (``wss://``).
+        """
+        if address.startswith(("ws://", "wss://")):
+            uri = address
+        elif address.endswith(":443"):
+            uri = f"wss://{address}"
+        else:
+            uri = f"ws://{address}"
         try:
             websocket = await websockets.client.connect(uri, open_timeout=10)
 
