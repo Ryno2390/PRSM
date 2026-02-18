@@ -84,6 +84,17 @@ class LocalLedger:
                 origin      TEXT NOT NULL,
                 seen_at     REAL NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS agent_allowances (
+                agent_id        TEXT PRIMARY KEY,
+                principal_id    TEXT NOT NULL,
+                allowance       REAL NOT NULL CHECK(allowance >= 0),
+                spent           REAL NOT NULL DEFAULT 0 CHECK(spent >= 0),
+                epoch_hours     REAL NOT NULL DEFAULT 24,
+                epoch_start     REAL NOT NULL,
+                created_at      REAL NOT NULL,
+                revoked         INTEGER NOT NULL DEFAULT 0
+            );
         """)
 
     async def close(self) -> None:
@@ -278,6 +289,120 @@ class LocalLedger:
             "SELECT 1 FROM transactions WHERE tx_id = ?", (tx_id,)
         )
         return await cursor.fetchone() is not None
+
+    # ── Agent allowances (delegated payments) ───────────────────
+
+    async def grant_agent_allowance(
+        self,
+        principal_id: str,
+        agent_id: str,
+        amount: float,
+        epoch_hours: float = 24.0,
+    ) -> None:
+        """Grant an agent a spending allowance from the principal's wallet.
+
+        The allowance resets at each epoch boundary (epoch_hours interval).
+        """
+        now = time.time()
+        await self._db.execute(
+            """INSERT INTO agent_allowances
+               (agent_id, principal_id, allowance, spent, epoch_hours, epoch_start, created_at, revoked)
+               VALUES (?, ?, ?, 0, ?, ?, ?, 0)
+               ON CONFLICT(agent_id) DO UPDATE SET
+                   allowance = excluded.allowance,
+                   spent = 0,
+                   epoch_hours = excluded.epoch_hours,
+                   epoch_start = excluded.epoch_start,
+                   revoked = 0""",
+            (agent_id, principal_id, amount, epoch_hours, now, now),
+        )
+        await self._db.commit()
+
+    async def get_agent_allowance(self, agent_id: str) -> Optional[dict]:
+        """Get an agent's current allowance state. Returns None if not found."""
+        cursor = await self._db.execute(
+            "SELECT principal_id, allowance, spent, epoch_hours, epoch_start, revoked "
+            "FROM agent_allowances WHERE agent_id = ?",
+            (agent_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+
+        principal_id, allowance, spent, epoch_hours, epoch_start, revoked = row
+
+        # Check if epoch has rolled over — if so, reset spent
+        now = time.time()
+        epoch_seconds = epoch_hours * 3600
+        if now - epoch_start >= epoch_seconds:
+            spent = 0.0
+            epoch_start = now
+            await self._db.execute(
+                "UPDATE agent_allowances SET spent = 0, epoch_start = ? WHERE agent_id = ?",
+                (now, agent_id),
+            )
+            await self._db.commit()
+
+        return {
+            "agent_id": agent_id,
+            "principal_id": principal_id,
+            "allowance": allowance,
+            "spent": spent,
+            "remaining": max(0.0, allowance - spent),
+            "epoch_hours": epoch_hours,
+            "epoch_start": epoch_start,
+            "revoked": bool(revoked),
+        }
+
+    async def agent_debit(
+        self,
+        agent_id: str,
+        amount: float,
+        tx_type: TransactionType,
+        description: str = "",
+    ) -> Optional[Transaction]:
+        """Debit from the principal's wallet on behalf of an agent.
+
+        Checks the agent's remaining allowance and the principal's balance.
+        Returns the transaction, or None if rejected.
+        """
+        allowance = await self.get_agent_allowance(agent_id)
+        if not allowance or allowance["revoked"]:
+            return None
+
+        if amount > allowance["remaining"]:
+            return None  # Exceeds allowance
+
+        principal_id = allowance["principal_id"]
+        balance = await self.get_balance(principal_id)
+        if balance < amount:
+            return None  # Insufficient principal balance
+
+        # Debit from principal
+        tx = await self.debit(
+            wallet_id=principal_id,
+            amount=amount,
+            tx_type=tx_type,
+            description=f"[agent:{agent_id[:12]}] {description}",
+        )
+
+        # Update spent
+        await self._db.execute(
+            "UPDATE agent_allowances SET spent = spent + ? WHERE agent_id = ?",
+            (amount, agent_id),
+        )
+        await self._db.commit()
+        return tx
+
+    async def revoke_agent_allowance(self, principal_id: str, agent_id: str) -> bool:
+        """Revoke an agent's spending authority. Returns True if found."""
+        cursor = await self._db.execute(
+            "UPDATE agent_allowances SET revoked = 1 "
+            "WHERE agent_id = ? AND principal_id = ?",
+            (agent_id, principal_id),
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
 
     # ── Internal ─────────────────────────────────────────────────
 

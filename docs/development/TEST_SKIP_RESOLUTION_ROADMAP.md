@@ -28,7 +28,7 @@
 | **P2P Node Networking** | FUNCTIONAL | WebSocket handshake, signed messages, gossip propagation, peer discovery, bootstrap via `wss://bootstrap.prsm-network.com` | — |
 | **File Storage & Sharing** | FUNCTIONAL | IPFS upload/download, storage provider pins, content uploader with provenance, content index with keyword search, cross-node content advertisement via gossip, direct-message request/serve (inline ≤1MB or gateway URL), access event tracking with royalty credits | — |
 | **FTNS Token Economy** | FUNCTIONAL | Local SQLite ledger, welcome grant, balance tracking, credit/debit/transfer, content royalty credits, network-wide transaction gossip, nonce-based double-spend prevention, balance reconciliation, earning event broadcasting | — |
-| **Agentic Interoperability** | PLANNED | Nodes can host multiple services; OpenClaw demonstrates multi-agent coordination externally | Agent identity delegation, agent discovery, agent-to-agent messaging, delegated payments, collaboration protocols |
+| **Agentic Interoperability** | FUNCTIONAL | Agent identity with Ed25519 delegation certs, gossip-based registry with capability search, agent-to-agent messaging, delegated payments with epoch budgets, task/review/knowledge collaboration protocols, observability API | — |
 
 ---
 
@@ -128,7 +128,9 @@ and payments between nodes are valid.
 
 ---
 
-## CI-4: Agentic Interoperability Layer
+## CI-4: Agentic Interoperability Layer — COMPLETE
+
+**Status: DONE** (implemented 2026-02-18)
 
 **Goal:** Make AI agents first-class participants on the PRSM network —
 able to discover each other, communicate, collaborate, and transact on
@@ -324,7 +326,33 @@ and who they collaborated with.
 
 **Scope:** ~150 lines (API endpoints + status aggregation)
 
-**Total CI-4 effort:** High | **Estimated scope:** ~1,100 lines across 6-8 files
+**What was built:**
+
+- **Agent identity & delegation** (`agent_identity.py`) — `AgentIdentity`
+  dataclass with Ed25519 keypair, `create_agent_identity()` generates agent
+  keys and signs delegation certificate with principal's key,
+  `verify_delegation()` validates certificates cryptographically.
+- **Agent registry & discovery** (`agent_registry.py`) — `AgentRegistry`
+  with gossip-based advertisements (`GOSSIP_AGENT_ADVERTISE/DEREGISTER`),
+  capability-based search, principal lookup, delegation verification on
+  incoming advertisements, LRU eviction at 5k agents.
+- **Agent-to-agent messaging** — `send_agent_message()` routes via P2P
+  direct messages with `agent_message` subtype, dispatches to local agent
+  handlers, records conversation threads for observability.
+- **Delegated payments** — `agent_allowances` table in SQLite with
+  `grant_agent_allowance()`, `agent_debit()`, `revoke_agent_allowance()`,
+  epoch-based budget refresh. Agents spend from principal's wallet within
+  their allowance cap.
+- **Collaboration protocols** (`agent_collaboration.py`) — Task delegation
+  (offer/bid/assign/complete), peer review (submit/review/consensus),
+  knowledge exchange (query/respond) — all gossip-based with state machines.
+- **Observability API** — `GET /agents`, `/agents/search`, `/agents/{id}`,
+  `/agents/{id}/conversations`, `/agents/spending`,
+  `POST /agents/{id}/allowance`, `DELETE /agents/{id}/allowance`,
+  `POST /agents/{id}/pause`, `POST /agents/{id}/resume`.
+
+**Files created:** `agent_identity.py`, `agent_registry.py`, `agent_collaboration.py`
+**Files modified:** `gossip.py`, `local_ledger.py`, `node.py`, `api.py`
 
 ---
 
@@ -340,20 +368,13 @@ CI-2 (Provenance Royalties) ✅ COMPLETE
 CI-3 (FTNS Ledger Sync) ✅ COMPLETE
  └── Transaction gossip, nonce-based double-spend, balance reconciliation, earning broadcasts
 
-CI-4 (Agentic Interoperability)
- ├── Step 1: Agent identity & delegation
- ├── Step 2: Agent registry & discovery
- ├── Step 3: Agent-to-agent messaging
- ├── Step 4: Delegated payments
- ├── Step 5: Collaboration protocols
- └── Step 6: Observability & human oversight
+CI-4 (Agentic Interoperability) ✅ COMPLETE
+ └── Agent identity, registry, messaging, delegated payments, collaboration, observability
 ```
 
-**CI-4 is the next priority.** All dependencies are now in place —
-ledger sync, content discovery, and provenance royalties are operational.
-
-**Total remaining scope:** ~1,100 lines of new code across ~6-8 files.
-Most changes extend existing modules rather than creating new ones.
+**All collaboration infrastructure is complete (CI-1 through CI-4).**
+The next priorities are feature completions (NWTN, Marketplace) and
+test skip resolution.
 
 ---
 
@@ -711,27 +732,26 @@ implementing the feature or removing obsolete test files.
 | Cross-node file discovery | DONE | Content index, gossip advertisement, direct-message request/serve, access tracking with royalties |
 | Provenance royalties | DONE | Configurable rates (0.001–0.1 FTNS), multi-level provenance with parent CIDs, 70/25/5 derivative/source/network split |
 | Network FTNS sync | DONE | Transaction gossip with signatures, nonce-based double-spend prevention, balance reconciliation, earning event broadcasting |
+| Agentic interoperability | DONE | Agent identity with delegation certs, registry with gossip discovery, messaging, delegated payments, collaboration protocols |
 
 ## What's Scaffolded (Needs Network Wiring)
 
 | Component | Blocking Issue | Roadmap Section |
 |-----------|---------------|-----------------|
-| Agentic interoperability | No agent identity, discovery, messaging, or delegated payments | CI-4 |
 | Marketplace CRUD | Service exists but missing listing creation/search methods | Phase 4 |
 | NWTN orchestrator | Reasoning modules exist but top-level orchestrator missing | Phase 3 |
 
 ## Recommended Overall Priority
 
 ```
-Priority 1 (Agents):         CI-4 Agentic Interoperability
-Priority 2 (Features):       Phase 3 NWTN Orchestrator + Phase 4 Marketplace
-Priority 3 (Test Fixes):     Phase 1-2 Quick Wins + Export Fixes
-Priority 4 (Polish):         Phase 5-6 Performance + Remaining Test Skips
+Priority 1 (Features):       Phase 3 NWTN Orchestrator + Phase 4 Marketplace
+Priority 2 (Test Fixes):     Phase 1-2 Quick Wins + Export Fixes
+Priority 3 (Polish):         Phase 5-6 Performance + Remaining Test Skips
 ```
 
-CI-4 represents approximately **1,100 lines of new code** across 6-8 files.
-All infrastructure dependencies (file discovery, provenance royalties, ledger
-sync) are now complete. Once CI-4 is built, PRSM will support a full
-multi-agent economy — AI agents discovering each other, collaborating on
-tasks, sharing content, and transacting FTNS on behalf of their human
-principals, all over a decentralized P2P network.
+All collaboration infrastructure (CI-1 through CI-4) is complete. PRSM now
+supports a full multi-agent economy — AI agents discovering each other,
+collaborating on tasks, sharing content, and transacting FTNS on behalf of
+their human principals, all over a decentralized P2P network. The remaining
+work focuses on feature completions (NWTN reasoning engine, marketplace) and
+resolving skipped tests.

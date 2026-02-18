@@ -29,6 +29,8 @@ GOSSIP_PROVENANCE_REGISTER = "provenance_register"
 GOSSIP_CONTENT_ADVERTISE = "content_advertise"
 GOSSIP_CONTENT_ACCESS = "content_access"
 GOSSIP_FTNS_TRANSACTION = "ftns_transaction"
+GOSSIP_AGENT_ADVERTISE = "agent_advertise"
+GOSSIP_AGENT_DEREGISTER = "agent_deregister"
 
 # Callback type for gossip subscribers
 GossipCallback = Callable[[str, Dict[str, Any], str], Coroutine[Any, Any, None]]

@@ -266,6 +266,145 @@ def create_api_app(node: Any) -> FastAPI:
             "count": len(history),
         }
 
+    # ── Agent endpoints ─────────────────────────────────────────
+
+    @app.get("/agents")
+    async def list_agents(local_only: bool = False) -> Dict[str, Any]:
+        """List known agents (local and/or remote)."""
+        if not node.agent_registry:
+            raise HTTPException(status_code=503, detail="Agent registry not initialized")
+
+        if local_only:
+            agents = node.agent_registry.get_local_agents()
+        else:
+            agents = node.agent_registry.get_all_agents()
+
+        return {
+            "agents": [a.to_dict() for a in agents],
+            "count": len(agents),
+        }
+
+    @app.get("/agents/search")
+    async def search_agents(capability: str, limit: int = 20) -> Dict[str, Any]:
+        """Search agents by capability."""
+        if not node.agent_registry:
+            raise HTTPException(status_code=503, detail="Agent registry not initialized")
+
+        results = node.agent_registry.search(capability, limit=min(limit, 100))
+        return {
+            "capability": capability,
+            "agents": [a.to_dict() for a in results],
+            "count": len(results),
+        }
+
+    @app.get("/agents/spending")
+    async def agent_spending() -> Dict[str, Any]:
+        """Aggregate spending dashboard across all local agents."""
+        if not node.agent_registry or not node.ledger:
+            raise HTTPException(status_code=503, detail="Not initialized")
+
+        agents = node.agent_registry.get_local_agents()
+        spending = []
+        for agent in agents:
+            allowance = await node.ledger.get_agent_allowance(agent.agent_id)
+            spending.append({
+                "agent_id": agent.agent_id,
+                "agent_name": agent.agent_name,
+                "allowance": allowance,
+            })
+        return {"agents": spending, "count": len(spending)}
+
+    @app.get("/agents/{agent_id}")
+    async def get_agent(agent_id: str) -> Dict[str, Any]:
+        """Get agent details, spending, and status."""
+        if not node.agent_registry:
+            raise HTTPException(status_code=503, detail="Agent registry not initialized")
+
+        record = node.agent_registry.lookup(agent_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        result = record.to_dict()
+        if node.ledger:
+            result["allowance"] = await node.ledger.get_agent_allowance(agent_id)
+        return result
+
+    @app.get("/agents/{agent_id}/conversations")
+    async def get_agent_conversations(agent_id: str, limit: int = 10) -> Dict[str, Any]:
+        """Get recent conversation threads involving an agent."""
+        if not node.agent_registry:
+            raise HTTPException(status_code=503, detail="Agent registry not initialized")
+
+        conv_ids = node.agent_registry.get_agent_conversations(agent_id, limit=limit)
+        conversations = []
+        for conv_id in conv_ids:
+            messages = node.agent_registry.get_conversation(conv_id)
+            conversations.append({
+                "conversation_id": conv_id,
+                "message_count": len(messages),
+                "messages": messages[-5:],  # Last 5 messages per conversation
+            })
+        return {"conversations": conversations, "count": len(conversations)}
+
+    @app.post("/agents/{agent_id}/allowance")
+    async def set_agent_allowance(agent_id: str, amount: float, epoch_hours: float = 24.0) -> Dict[str, Any]:
+        """Set or update an agent's spending allowance."""
+        if not node.ledger or not node.identity:
+            raise HTTPException(status_code=503, detail="Not initialized")
+
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="Amount must be positive")
+
+        await node.ledger.grant_agent_allowance(
+            principal_id=node.identity.node_id,
+            agent_id=agent_id,
+            amount=amount,
+            epoch_hours=epoch_hours,
+        )
+        return await node.ledger.get_agent_allowance(agent_id)
+
+    @app.delete("/agents/{agent_id}/allowance")
+    async def revoke_agent_allowance(agent_id: str) -> Dict[str, Any]:
+        """Revoke an agent's spending authority."""
+        if not node.ledger or not node.identity:
+            raise HTTPException(status_code=503, detail="Not initialized")
+
+        revoked = await node.ledger.revoke_agent_allowance(
+            principal_id=node.identity.node_id,
+            agent_id=agent_id,
+        )
+        if not revoked:
+            raise HTTPException(status_code=404, detail="Agent allowance not found")
+        return {"agent_id": agent_id, "revoked": True}
+
+    @app.post("/agents/{agent_id}/pause")
+    async def pause_agent(agent_id: str) -> Dict[str, Any]:
+        """Temporarily suspend an agent."""
+        if not node.agent_registry:
+            raise HTTPException(status_code=503, detail="Agent registry not initialized")
+
+        record = node.agent_registry.lookup(agent_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        node.agent_registry.set_agent_status(agent_id, "paused")
+        return {"agent_id": agent_id, "status": "paused"}
+
+    @app.post("/agents/{agent_id}/resume")
+    async def resume_agent(agent_id: str) -> Dict[str, Any]:
+        """Resume a paused agent."""
+        if not node.agent_registry:
+            raise HTTPException(status_code=503, detail="Agent registry not initialized")
+
+        record = node.agent_registry.lookup(agent_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        node.agent_registry.set_agent_status(agent_id, "online")
+        return {"agent_id": agent_id, "status": "online"}
+
+    # ── Ledger endpoints ─────────────────────────────────────────
+
     @app.get("/ledger/sync/stats")
     async def ledger_sync_stats() -> Dict[str, Any]:
         """Get ledger sync statistics."""
