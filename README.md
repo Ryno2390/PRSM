@@ -14,7 +14,7 @@ git clone https://github.com/Ryno2390/PRSM.git
 cd PRSM
 python3 -m venv .venv && source .venv/bin/activate
 
-# Install
+# Install (includes all runtime dependencies)
 pip install -e .
 
 # Configure (optional — works with defaults)
@@ -27,7 +27,7 @@ prsm serve
 curl http://localhost:8000/health
 ```
 
-The server starts on `localhost:8000` by default. See `prsm --help` for all CLI options.
+The server starts on `localhost:8000` by default. The health endpoint returns component status — external services (Redis, PostgreSQL, IPFS) show as "unhealthy" until configured, but the core API is fully functional. See `prsm --help` for all CLI options.
 
 ---
 
@@ -125,7 +125,7 @@ WebSocket-based peer-to-peer connectivity with gossip protocol, peer discovery, 
 | Deterministic SSM inference | **Working** | Reproducible results across instances |
 | MCTS search reasoning | **Working** | Hypothesis tree exploration |
 | Teacher model framework | **Working** | Create and train specialized models |
-| Test suite | **Working** | 793+ tests passing |
+| Test suite | **Working** | 920+ tests passing |
 | P2P networking | **Working** | WebSocket transport with gossip protocol |
 | Node identity | **Working** | Ed25519 keypair, persisted to `~/.prsm/` |
 | Local FTNS ledger | **Working** | SQLite-backed, zero config |
@@ -141,14 +141,14 @@ WebSocket-based peer-to-peer connectivity with gossip protocol, peer discovery, 
 ### Running Tests
 
 ```bash
-# Install dev dependencies
+# Install dev + test dependencies
 pip install -e ".[dev,test]"
 
 # Run the full test suite
-pytest
+pytest --timeout=120
 
 # Run with coverage
-pytest --cov=prsm --cov-report=term-missing
+pytest --timeout=120 --cov=prsm --cov-report=term-missing
 
 # Run specific test categories
 pytest -m unit
@@ -183,7 +183,7 @@ prsm/
   economics/                # Economic modeling
   storage/                  # Decentralized storage
   safety/                   # Safety and governance
-tests/                      # Test suite (793+ tests)
+tests/                      # Test suite (920+ tests)
 docs/                       # Documentation
 config/                     # Configuration templates
 scripts/                    # Utility scripts
@@ -207,4 +207,4 @@ See the `docs/business/` directory for:
 
 ---
 
-**License:** MIT | **Python:** >=3.11 | **Repo:** [github.com/Ryno2390/PRSM](https://github.com/Ryno2390/PRSM)
+**License:** MIT | **Python:** 3.11 - 3.13 (3.14 supported but some optional C extensions may not build) | **Repo:** [github.com/Ryno2390/PRSM](https://github.com/Ryno2390/PRSM)

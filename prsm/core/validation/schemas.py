@@ -50,7 +50,7 @@ class BaseValidationSchema(BaseModel):
         # Use enum values
         use_enum_values = True
         # Allow population by field name or alias
-        allow_population_by_field_name = True
+        validate_by_name = True
         # Forbid extra fields by default
         extra = "forbid"
     

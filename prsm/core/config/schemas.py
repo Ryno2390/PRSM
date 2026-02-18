@@ -36,7 +36,7 @@ class BaseConfigSchema(BaseModel):
     class Config:
         validate_assignment = True
         use_enum_values = True
-        allow_population_by_field_name = True
+        validate_by_name = True
         extra = "forbid"
 
 

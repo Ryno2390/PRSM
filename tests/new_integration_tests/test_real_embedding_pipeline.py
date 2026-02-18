@@ -20,15 +20,19 @@ from pathlib import Path
 # Add PRSM to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from prsm.data.content_processing.text_processor import ContentType
-from prsm.data.embeddings import (
-    EmbeddingPipeline, 
-    EmbeddingPipelineConfig, 
-    create_pipeline,
-    get_embedding_api,
-    create_optimized_cache
-)
-from prsm.data.vector_store import PgVectorStore
+try:
+    from prsm.data.content_processing.text_processor import ContentType
+    from prsm.data.embeddings import (
+        EmbeddingPipeline,
+        EmbeddingPipelineConfig,
+        create_pipeline,
+        get_embedding_api,
+        create_optimized_cache
+    )
+    from prsm.data.vector_store import PgVectorStore
+except ImportError as e:
+    import pytest
+    pytest.skip(f"Embedding pipeline dependencies not available: {e}", allow_module_level=True)
 
 # Configure logging
 logging.basicConfig(

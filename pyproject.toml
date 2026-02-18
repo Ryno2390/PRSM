@@ -45,6 +45,8 @@ dependencies = [
     "alembic>=1.13.0",
     "redis>=5.0.0",
     "psycopg2-binary>=2.9.0",
+    "asyncpg>=0.29.0",
+    "greenlet>=3.0.0",
     
     # IPFS & Distributed Storage
     "ipfshttpclient>=0.8.0a2",
@@ -69,6 +71,10 @@ dependencies = [
     "pyjwt>=2.8.0",
     "bcrypt>=4.1.0",
     "passlib>=1.7.4",
+    "pynacl>=1.5.0",
+
+    # Security & Sanitization
+    "bleach>=6.0.0",
     
     # P2P Networking
     "websockets>=12.0",
@@ -105,6 +111,8 @@ test = [
     "pytest-asyncio>=0.21.0",
     "pytest-mock>=3.12.0",
     "pytest-cov>=4.1.0",
+    "pytest-timeout>=2.2.0",
+    "pytest-subtests>=0.11.0",
     "factory-boy>=3.3.0",
     "faker>=20.1.0",
 ]
