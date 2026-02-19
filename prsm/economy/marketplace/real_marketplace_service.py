@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
 """
+DEPRECATED: This module is deprecated.
+
+Use prsm.economy.marketplace.expanded_models for marketplace data models.
+Use prsm.node.compute_provider for external model integration.
+
+This module is kept for backward compatibility only.
+
+---
 Real Marketplace Service
 
 Provides integration with external AI model marketplaces and federated

@@ -1,4 +1,13 @@
 """
+DEPRECATED: This module is deprecated.
+
+Use prsm.economy.marketplace.expanded_models for marketplace data models.
+Use prsm.economy.tokenomics.ftns_service for token transactions.
+
+This module had experimental production features - some are now in other modules.
+---
+Production FTNS Marketplace with Real Value Transfer
+===================================================
 Production FTNS Marketplace with Real Value Transfer
 ===================================================
 
