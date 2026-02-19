@@ -16,42 +16,28 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Custom CSS for dark theme
 st.markdown("""
     <style>
         .stApp {
             background-color: #0a0a0f;
             color: #e0e0e0;
         }
-        .metric-card {
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            border-radius: 12px;
-            padding: 20px;
-            margin: 10px 0;
-            border: 1px solid #2a2a4e;
+        .stSidebar {
+            background-color: #12121a;
         }
-        .metric-value {
-            font-size: 28px;
-            font-weight: bold;
-            color: #00ff88;
-        }
-        .metric-label {
-            font-size: 12px;
-            color: #888;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .stMetric {
-            background: #1a1a2e;
+        div[data-testid="stMetric"] {
+            background-color: #1a1a2e;
             padding: 15px;
             border-radius: 8px;
         }
         .stTabs [data-baseweb="tab-list"] {
-            gap: 10px;
+            gap: 8px;
         }
         .stTabs [data-baseweb="tab"] {
-            padding: 10px 20px;
             background-color: #1a1a2e;
             border-radius: 8px 8px 0 0;
+            padding: 8px 16px;
         }
         .stTabs [aria-selected="true"] {
             background-color: #00ff88;
@@ -67,18 +53,21 @@ st.markdown("""
 
 
 class PRSMClient:
-    """Client for interacting with PRSM node API."""
+    """Client for interacting with PRSM API."""
     
     def __init__(self, base_url: str = API_BASE_URL):
         self.base_url = base_url
-        self.timeout = 5
+        self.timeout = 3
     
     def _get(self, endpoint: str) -> dict | None:
         try:
             resp = requests.get(f"{self.base_url}{endpoint}", timeout=self.timeout)
             return resp.json()
-        except Exception:
+        except:
             return None
+    
+    def health_check(self) -> bool:
+        return self._get("/health") is not None
     
     def get_status(self) -> dict | None:
         return self._get("/status")
@@ -88,46 +77,27 @@ class PRSMClient:
     
     def get_balance(self) -> dict | None:
         return self._get("/balance")
-    
-    def get_transactions(self, limit: int = 20) -> dict | None:
-        return self._get(f"/transactions?limit={limit}")
-    
-    def get_storage_stats(self) -> dict | None:
-        return self._get("/storage/stats")
-    
-    def get_compute_stats(self) -> dict | None:
-        return self._get("/compute/stats")
-    
-    def get_agents(self) -> dict | None:
-        return self._get("/agents")
-    
-    def get_content_search(self, query: str, limit: int = 10) -> dict | None:
-        return self._get(f"/content/search?q={query}&limit={limit}")
-    
-    def health_check(self) -> bool:
-        return self._get("/health") is not None
 
 
-def render_mockup_viewer():
-    """Render the full UI mockup in an iframe."""
-    st.subheader("🎨 PRSM UI Mockup")
+def render_mockup():
+    """Render the full UI mockup."""
+    st.header("🎨 PRSM UI Mockup Preview")
     
-    if not (MOCKUP_DIR / "index.html").exists():
-        st.error(f"Mockup file not found at {MOCKUP_DIR}")
+    html_path = MOCKUP_DIR / "index.html"
+    if not html_path.exists():
+        st.error(f"Mockup file not found at {html_path}")
         return
     
-    # Read and display the mockup HTML
-    html_path = MOCKUP_DIR / "index.html"
     try:
         with open(html_path, 'r', encoding='utf-8') as f:
             html_content = f.read()
         
-        st.markdown(f"📄 Loading mockup from `{html_path.name}` ({len(html_content)//1024}KB)...")
+        st.success(f"Loaded mockup ({len(html_content)//1024}KB)")
         
-        # Render in an iframe
+        # Render the HTML in an iframe
         st.components.v1.html(
-            html_content, 
-            height=2000, 
+            html_content,
+            height=2500,
             scrolling=True
         )
     except Exception as e:
@@ -135,210 +105,111 @@ def render_mockup_viewer():
 
 
 def render_live_dashboard():
-    """Render the live dashboard with real node data."""
+    """Render the live dashboard with real data."""
     client = PRSMClient(API_BASE_URL)
     
-    status = client.get_status()
-    
-    if not status:
-        st.warning("⚠️ Could not connect to PRSM node. Showing mockup instead.")
-        render_mockup_viewer()
+    # Check connection
+    if not client.health_check():
+        st.error("❌ Cannot connect to PRSM API. Make sure the API server is running.")
+        st.info("Try running: python -m prsm.cli serve")
         return
     
-    # Header
+    # Header metrics
+    status = client.get_status()
+    if not status:
+        st.warning("Could not get node status")
+        return
+    
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        is_online = status.get('started', False)
-        st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">Node Status</div>
-                <div class="metric-value" style="color: {'#00ff88' if is_online else '#ff4444'}">
-                    {'● Online' if is_online else '○ Offline'}
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-    
+        st.metric("Status", "🟢 Online" if status.get('started') else "🔴 Offline")
     with col2:
         node_id = status.get('node_id', 'N/A')
-        st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">Node ID</div>
-                <div class="metric-value" style="font-size: 14px; word-break: break-all;">
-                    {node_id[:20]}...
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-    
+        st.metric("Node ID", node_id[:12] + "...")
     with col3:
-        uptime = status.get('uptime_seconds', 0)
-        hours = int(uptime // 3600)
-        minutes = int((uptime % 3600) // 60)
-        st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">Uptime</div>
-                <div class="metric-value" style="font-size: 20px;">
-                    {hours}h {minutes}m
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-    
+        uptime = int(status.get('uptime_seconds', 0))
+        hours = uptime // 3600
+        minutes = (uptime % 3600) // 60
+        st.metric("Uptime", f"{hours}h {minutes}m")
     with col4:
-        ledger_type = status.get('ledger_type', 'legacy')
-        st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">Ledger</div>
-                <div class="metric-value" style="font-size: 18px; color: #00bfff;">
-                    {ledger_type.upper()}
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
+        ledger = status.get('ledger_type', 'legacy').upper()
+        st.metric("Ledger", ledger)
     
     # Tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "🌐 Network", 
-        "💰 Wallet", 
-        "💻 Compute", 
-        "💾 Storage",
-        "🔍 Content"
-    ])
+    tab1, tab2, tab3, tab4 = st.tabs(["🌐 Network", "💰 Wallet", "💻 Compute", "💾 Storage"])
     
     with tab1:
-        st.subheader("🌐 Network Peers")
         peers = client.get_peers()
-        
         if peers:
-            col1, col2 = st.columns(2)
-            with col1:
+            col_a, col_b = st.columns(2)
+            with col_a:
                 st.metric("Connected", peers.get('connected_count', 0))
-            with col2:
+            with col_b:
                 st.metric("Known", peers.get('known_count', 0))
             
             if peers.get('connected'):
-                with st.expander("🔗 Connected Peers", expanded=True):
-                    for peer in peers['connected']:
-                        st.write(f"• **{peer.get('display_name', 'Unknown')}** - {peer.get('address', 'N/A')[:40]}")
+                with st.expander("Connected Peers"):
+                    for p in peers['connected']:
+                        st.write(f"• {p.get('display_name', 'Unknown')}")
         else:
-            st.info("No peer data available.")
+            st.info("No peer data")
     
     with tab2:
-        st.subheader("💰 FTNS Token Balance")
         balance = client.get_balance()
-        
         if balance:
-            st.metric("Balance", f"{balance.get('balance', 0):.4f} FTNS")
+            st.metric("FTNS Balance", f"{balance.get('balance', 0):.4f}")
             
-            # Transaction history
-            st.subheader("📜 Transaction History")
-            txs = client.get_transactions(limit=10)
-            
-            if txs and txs.get('transactions'):
-                for tx in txs['transactions']:
-                    with st.expander(f"{tx['type']}: {tx['amount']:.4f} FTNS"):
-                        st.write(f"**From:** {tx.get('from', 'N/A')[:20]}...")
-                        st.write(f"**To:** {tx.get('to', 'N/A')[:20]}...")
-                        ts = tx.get('timestamp', 0)
-                        st.write(f"**Time:** {datetime.fromtimestamp(ts).strftime('%H:%M:%S')}")
-            else:
-                st.info("No transactions yet.")
-            
-            # DAG Stats
             dag_stats = status.get('dag_stats')
             if dag_stats:
-                st.subheader("🔗 DAG Ledger Stats")
-                col_d1, col_d2, col_d3, col_d4 = st.columns(4)
+                st.subheader("🔗 DAG Stats")
+                col_d1, col_d2, col_d3 = st.columns(3)
                 with col_d1:
                     st.metric("Total Txs", dag_stats.get('total_transactions', 0))
                 with col_d2:
                     st.metric("Tips", dag_stats.get('tips', 0))
                 with col_d3:
-                    st.metric("Confirmed", dag_stats.get('confirmed', 0))
-                with col_d4:
-                    confirm_level = dag_stats.get('avg_confirmation_level', 0)
-                    st.metric("Avg Confirm", f"{confirm_level:.1%}")
+                    conf = dag_stats.get('avg_confirmation_level', 0)
+                    st.metric("Confirmation", f"{conf:.1%}")
         else:
-            st.info("No balance data.")
+            st.info("No balance data")
     
     with tab3:
-        st.subheader("💻 Compute Network")
-        compute_stats = status.get('compute')
-        compute_requester_stats = status.get('compute_requester')
-        
-        if compute_stats:
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Jobs Completed", compute_stats.get('jobs_completed', 0))
-            with col2:
-                st.metric("Jobs In Queue", compute_stats.get('jobs_queued', 0))
-            with col3:
-                st.metric("Active Workers", compute_stats.get('active_workers', 0))
+        compute = status.get('compute')
+        if compute:
+            col_c1, col_c2 = st.columns(2)
+            with col_c1:
+                st.metric("Jobs Done", compute.get('jobs_completed', 0))
+            with col_c2:
+                st.metric("In Queue", compute.get('jobs_queued', 0))
         else:
-            st.info("Compute provider not initialized.")
+            st.info("Compute not initialized")
     
     with tab4:
-        st.subheader("💾 Storage Network")
-        storage_stats = status.get('storage')
-        
-        if storage_stats:
-            pledged = storage_stats.get('pledged_gb', 0)
-            used = storage_stats.get('used_gb', 0)
+        storage = status.get('storage')
+        if storage:
+            pledged = storage.get('pledged_gb', 0)
+            used = storage.get('used_gb', 0)
             
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Pledged", f"{pledged:.2f} GB")
-            with col2:
-                st.metric("Used", f"{used:.2f} GB")
-            with col3:
-                st.metric("Pinned", storage_stats.get('pinned_count', 0))
+            col_s1, col_s2, col_s3 = st.columns(3)
+            with col_s1:
+                st.metric("Pledged", f"{pledged:.1f} GB")
+            with col_s2:
+                st.metric("Used", f"{used:.1f} GB")
+            with col_s3:
+                st.metric("Pinned", storage.get('pinned_count', 0))
             
             if pledged > 0:
-                st.progress(min(used / pledged, 1.0), "Storage Usage")
+                st.progress(used/pledged, "Storage Usage")
         else:
-            st.info("Storage provider not initialized.")
-        
-        content_stats = status.get('content_index')
-        if content_stats:
-            st.subheader("📄 Content Index")
-            st.metric("Indexed Content", content_stats.get('total_cids', 0))
-    
-    with tab5:
-        st.subheader("🔍 Content Search")
-        query = st.text_input("Search for content", placeholder="Enter keywords...")
-        
-        if query:
-            results = client.get_content_search(query, limit=10)
-            
-            if results and results.get('results'):
-                st.write(f"Found **{results.get('count', 0)}** results")
-                
-                for result in results['results']:
-                    with st.expander(f"📄 {result.get('filename', 'Unknown')}"):
-                        st.write(f"**CID:** {result.get('cid', 'N/A')[:30]}...")
-                        st.write(f"**Size:** {result.get('size_bytes', 0) / 1024:.1f} KB")
-            else:
-                st.info("No content found.")
-    
-    # Agents section
-    with st.expander("🤖 Agent Registry"):
-        agents = client.get_agents()
-        
-        if agents and agents.get('agents'):
-            st.write(f"**{agents.get('count', 0)}** registered agents")
-            
-            for agent in agents['agents']:
-                with st.container():
-                    st.write(f"• **{agent.get('agent_name', 'Unknown')}** - {agent.get('status', 'N/A')}")
-        else:
-            st.info("No agents registered.")
+            st.info("Storage not initialized")
     
     # Footer
     st.divider()
-    col_f1, col_f2 = st.columns([3, 1])
-    with col_f1:
-        st.caption(f"Last updated: {datetime.now().strftime('%H:%M:%S')}")
-    with col_f2:
-        if st.button("🔄 Refresh", use_container_width=True):
-            st.rerun()
+    st.caption(f"Last updated: {datetime.now().strftime('%H:%M:%S')}")
+    
+    if st.button("🔄 Refresh"):
+        st.rerun()
     
     # Auto-refresh
     time.sleep(30)
@@ -346,43 +217,38 @@ def render_live_dashboard():
 
 
 def main():
-    """Main dashboard application."""
+    """Main app."""
     st.title("🧠 PRSM Dashboard")
     st.caption("Protocol for Recursive Scientific Modeling")
     
-    # Sidebar with mode selection
+    # Sidebar
     with st.sidebar:
         st.header("⚙️ Dashboard Mode")
         
         mode = st.radio(
-            "Select Mode:",
-            ["🟢 Live Node", "🎨 Mockup Preview"],
-            help="Live Node requires a running PRSM node. Mockup shows the UI design."
+            "Select:",
+            ["🟢 Live Dashboard", "🎨 Mockup Preview"],
+            label_visibility="collapsed"
         )
         
         st.divider()
         
         st.header("🔗 Connection")
-        st.write(f"**API URL:** `{API_BASE_URL}`")
-        
-        # Check connection
         client = PRSMClient(API_BASE_URL)
         if client.health_check():
-            st.success("✅ API is responding")
+            st.success("✅ API Connected")
         else:
-            st.warning("⚠️ API not responding")
+            st.warning("⚠️ API Not Running")
         
         st.divider()
         
-        st.header("📋 Quick Links")
-        st.markdown("""
-        - [GitHub](https://github.com/Ryno2390/PRSM)
-        - [Documentation](https://prsm.readthedocs.io)
-        """)
+        st.header("📋 Commands")
+        st.code("python -m prsm.cli dashboard", language="bash")
+        st.code("python -m prsm.cli serve", language="bash")
     
-    # Render based on mode selection
+    # Render
     if mode == "🎨 Mockup Preview":
-        render_mockup_viewer()
+        render_mockup()
     else:
         render_live_dashboard()
 
