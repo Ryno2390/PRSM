@@ -1,10 +1,12 @@
 """
-Marketplace Data Models
-======================
+DEPRECATED: This module is deprecated.
 
-Database models and Pydantic schemas for the PRSM marketplace system.
-Defines model listings, pricing, rentals, and marketplace transactions.
-"""
+Use prsm.economy.marketplace.expanded_models instead, which provides
+comprehensive coverage of all marketplace resource types.
+
+This module is kept for backward compatibility only.
+---
+
 
 import uuid
 from datetime import datetime, timezone

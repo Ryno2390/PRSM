@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
 """
+DEPRECATED: This module is deprecated for general use.
+
+For production token operations, use prsm.economy.tokenomics.ftns_service.
+For database-backed persistence, use prsm.economy.tokenomics.database_ftns_service.
+
+This module provides microsecond-precision cost tracking which may be
+integrated into the main ftns_service in a future version.
+
+---
 Enhanced FTNS Accounting Ledger
 Phase 1 production-ready token accounting system with microsecond-precision cost calculation
 

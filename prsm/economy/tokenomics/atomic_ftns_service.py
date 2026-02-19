@@ -20,6 +20,15 @@ Security Features:
 5. Automatic rollback on failures
 """
 
+# =============================================================================
+# DEPRECATION NOTICE
+# =============================================================================
+# This module provides atomic transaction handling. The core ftns_service
+# now handles atomicity internally. This module is kept for specialized
+# use cases requiring explicit transaction atomicity.
+# =============================================================================
+
+
 import asyncio
 import hashlib
 import structlog
