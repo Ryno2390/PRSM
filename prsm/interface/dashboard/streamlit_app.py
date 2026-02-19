@@ -17,7 +17,7 @@ st.set_page_config(
     page_title="PRSM | Dashboard",
     page_icon="🧠",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"  # Start with sidebar hidden
 )
 
 # --- API Client ---
@@ -51,66 +51,60 @@ def get_image_base64(path):
 
 # --- Main App Logic ---
 def main():
-    # Initialize session state for sidebar visibility
-    if 'sidebar_visible' not in st.session_state:
-        st.session_state.sidebar_visible = True
+    # Initialize session state for connection panel
+    if 'show_status' not in st.session_state:
+        st.session_state.show_status = True
     
-    # Sidebar with connection status
-    with st.sidebar:
-        st.title("🧠 PRSM Dashboard")
-        st.divider()
-        
-        # API Connection Status
-        st.subheader("🔗 Connection Status")
+    # Render connection status as an expander at the top
+    with st.expander("🔗 Connection Status", expanded=st.session_state.show_status):
         client = PRSMClient(API_BASE_URL)
         
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            if client.health_check():
+                st.success("✅ API Connected")
+            else:
+                st.warning("⚠️ API Not Running")
+        
         if client.health_check():
-            st.success("✅ API Connected")
             status = client.get_status()
             if status:
-                st.write(f"**Node:** {status.get('display_name', 'N/A')}")
-                st.write(f"**Ledger:** {status.get('ledger_type', 'legacy').upper()}")
-                balance = status.get('ftns_balance', 0)
-                st.write(f"**Balance:** {balance:.4f} FTNS")
-                
-                # Show additional stats
-                dag_stats = status.get('dag_stats')
-                if dag_stats:
-                    st.write("---")
-                    st.write("**DAG Stats:**")
-                    st.write(f"  Txs: {dag_stats.get('total_transactions', 0)}")
-                    st.write(f"  Tips: {dag_stats.get('tips', 0)}")
+                with col2:
+                    st.metric("Node", status.get('display_name', 'N/A')[:15])
+                with col3:
+                    st.metric("Ledger", status.get('ledger_type', 'legacy').upper())
+                with col4:
+                    balance = status.get('ftns_balance', 0)
+                    st.metric("Balance", f"{balance:.2f} FTNS")
+                with col5:
+                    dag_stats = status.get('dag_stats')
+                    if dag_stats:
+                        st.metric("DAG Txs", dag_stats.get('total_transactions', 0))
         else:
-            st.warning("⚠️ API Not Running")
-            st.caption("Run: python -m prsm.cli serve")
+            with col2:
+                st.caption("Run: python -m prsm.cli serve")
         
-        st.divider()
-        
-        # Quick Actions
-        st.subheader("⚡ Quick Actions")
-        if st.button("🔄 Refresh Status", use_container_width=True):
-            st.rerun()
-        
-        # Toggle sidebar visibility
-        if st.button("👁️ Show/Hide Sidebar", use_container_width=True):
-            st.session_state.sidebar_visible = not st.session_state.sidebar_visible
+        # Toggle button
+        if st.button("🔄 Refresh"):
             st.rerun()
     
-    # Toggle button in main area to show sidebar
-    # Use columns to put a small toggle in the corner
-    col1, col2 = st.columns([1, 20])
-    with col1:
-        if st.button("☰", help="Toggle Sidebar"):
-            st.session_state.sidebar_visible = not st.session_state.sidebar_visible
-            st.rerun()
-    with col2:
-        st.caption("Click ☰ to show/hide connection status")
-
-    # Only render sidebar content if visible
-    if st.session_state.sidebar_visible:
-        # Sidebar content is rendered above in the `with st.sidebar:` context
-        pass
-
+    # Floating toggle button in top-right corner
+    st.markdown("""
+        <style>
+            .stButton > button {
+                position: fixed;
+                top: 10px;
+                right: 20px;
+                z-index: 999;
+                opacity: 0.7;
+            }
+            .stButton > button:hover {
+                opacity: 1;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+    
     # CSS to make the iframe take up the main area
     st.markdown("""
         <style>
