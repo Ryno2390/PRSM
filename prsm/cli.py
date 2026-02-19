@@ -130,9 +130,13 @@ def dashboard(port: int, api_port: int):
     console.print(f"🎨 Launching Dashboard UI on port {port}...", style="dim")
     
     # Find the correct Python executable (use venv if available)
-    venv_python = Path(__file__).parent.parent / ".venv" / "bin" / "python"
-    if venv_python.exists():
-        python_exe = str(venv_python)
+    # Try python3.14 first, then python, then sys.executable
+    venv_base = Path(__file__).parent.parent / ".venv" / "bin"
+    for py_name in ["python3.14", "python"]:
+        venv_python = venv_base / py_name
+        if venv_python.exists():
+            python_exe = str(venv_python)
+            break
     else:
         python_exe = sys.executable
     
