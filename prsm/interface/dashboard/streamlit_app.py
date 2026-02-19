@@ -108,8 +108,44 @@ class PRSMClient:
         return self._get("/health") is not None
 
 
-def render_header(status: dict):
-    """Render the header with node status."""
+def render_mockup_viewer():
+    """Render the full UI mockup in an iframe."""
+    st.subheader("🎨 PRSM UI Mockup")
+    
+    if not (MOCKUP_DIR / "index.html").exists():
+        st.error(f"Mockup file not found at {MOCKUP_DIR}")
+        return
+    
+    # Read and display the mockup HTML
+    html_path = MOCKUP_DIR / "index.html"
+    try:
+        with open(html_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        
+        st.markdown(f"📄 Loading mockup from `{html_path.name}` ({len(html_content)//1024}KB)...")
+        
+        # Render in an iframe
+        st.components.v1.html(
+            html_content, 
+            height=2000, 
+            scrolling=True
+        )
+    except Exception as e:
+        st.error(f"Error loading mockup: {e}")
+
+
+def render_live_dashboard():
+    """Render the live dashboard with real node data."""
+    client = PRSMClient(API_BASE_URL)
+    
+    status = client.get_status()
+    
+    if not status:
+        st.warning("⚠️ Could not connect to PRSM node. Showing mockup instead.")
+        render_mockup_viewer()
+        return
+    
+    # Header
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -157,263 +193,8 @@ def render_header(status: dict):
                 </div>
             </div>
         """, unsafe_allow_html=True)
-
-
-def render_network_tab(client: PRSMClient):
-    """Render the network/peers tab."""
-    st.subheader("🌐 Network Peers")
     
-    peers = client.get_peers()
-    
-    if peers:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Connected", peers.get('connected_count', 0))
-        with col2:
-            st.metric("Known", peers.get('known_count', 0))
-        
-        if peers.get('connected'):
-            with st.expander("🔗 Connected Peers", expanded=True):
-                for peer in peers['connected']:
-                    with st.container():
-                        col_p1, col_p2 = st.columns([3, 2])
-                        with col_p1:
-                            st.write(f"**{peer.get('display_name', 'Unknown')}**")
-                        with col_p2:
-                            st.caption(peer.get('address', 'N/A')[:40])
-        
-        if peers.get('known'):
-            with st.expander("📋 Known Peers"):
-                for peer in peers['known']:
-                    st.text(f"• {peer.get('display_name', 'Unknown')} - {peer.get('address', 'N/A')[:40]}")
-    else:
-        st.info("No peer data available. Connect to the network to see peers.")
-
-
-def render_wallet_tab(client: PRSMClient):
-    """Render the wallet/balance tab."""
-    st.subheader("💰 FTNS Token Balance")
-    
-    balance = client.get_balance()
-    
-    if balance:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Balance", f"{balance.get('balance', 0):.4f} FTNS")
-        with col2:
-            wallet_id = balance.get('wallet_id', 'N/A')
-            st.metric("Wallet", f"{wallet_id[:16]}...")
-        
-        # Transaction history
-        st.subheader("📜 Transaction History")
-        txs = client.get_transactions(limit=10)
-        
-        if txs and txs.get('transactions'):
-            for tx in txs['transactions']:
-                with st.expander(f"{tx['type']}: {tx['amount']:.4f} FTNS"):
-                    col_t1, col_t2 = st.columns(2)
-                    with col_t1:
-                        st.write(f"**From:** {tx.get('from', 'N/A')[:20]}...")
-                        st.write(f"**To:** {tx.get('to', 'N/A')[:20]}...")
-                    with col_t2:
-                        ts = tx.get('timestamp', 0)
-                        st.write(f"**Time:** {datetime.fromtimestamp(ts).strftime('%H:%M:%S')}")
-                        st.write(f"**ID:** {tx.get('tx_id', 'N/A')[:16]}...")
-                    st.write(f"**Description:** {tx.get('description', 'N/A')}")
-        else:
-            st.info("No transactions yet.")
-        
-        # DAG Stats
-        status = client.get_status()
-        dag_stats = status.get('dag_stats') if status else None
-        
-        if dag_stats:
-            st.subheader("🔗 DAG Ledger Stats")
-            col_d1, col_d2, col_d3, col_d4 = st.columns(4)
-            with col_d1:
-                st.metric("Total Txs", dag_stats.get('total_transactions', 0))
-            with col_d2:
-                st.metric("Tips", dag_stats.get('tips', 0))
-            with col_d3:
-                st.metric("Confirmed", dag_stats.get('confirmed', 0))
-            with col_d4:
-                confirm_level = dag_stats.get('avg_confirmation_level', 0)
-                st.metric("Avg Confirm", f"{confirm_level:.1%}")
-    else:
-        st.info("No balance data. Start the PRSM node to see wallet info.")
-
-
-def render_compute_tab(client: PRSMClient):
-    """Render the compute tab."""
-    st.subheader("💻 Compute Network")
-    
-    status = client.get_status()
-    compute_stats = status.get('compute') if status else None
-    compute_requester_stats = status.get('compute_requester') if status else None
-    
-    if compute_stats:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Jobs Completed", compute_stats.get('jobs_completed', 0))
-        with col2:
-            st.metric("Jobs In Queue", compute_stats.get('jobs_queued', 0))
-        with col3:
-            st.metric("Active Workers", compute_stats.get('active_workers', 0))
-    
-    if compute_requester_stats:
-        st.subheader("📤 Your Submitted Jobs")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Jobs Submitted", compute_requester_stats.get('jobs_submitted', 0))
-        with col2:
-            st.metric("Jobs Completed", compute_requester_stats.get('jobs_completed', 0))
-    
-    if not compute_stats and not compute_requester_stats:
-        st.info("Compute provider not initialized. Enable compute role to participate in the network.")
-
-
-def render_storage_tab(client: PRSMClient):
-    """Render the storage tab."""
-    st.subheader("💾 Storage Network")
-    
-    status = client.get_status()
-    storage_stats = status.get('storage') if status else None
-    
-    if storage_stats:
-        col1, col2, col3 = st.columns(3)
-        
-        pledged = storage_stats.get('pledged_gb', 0)
-        used = storage_stats.get('used_gb', 0)
-        
-        with col1:
-            st.metric("Pledged", f"{pledged:.2f} GB")
-        with col2:
-            st.metric("Used", f"{used:.2f} GB")
-        with col3:
-            st.metric("Pinned Content", storage_stats.get('pinned_count', 0))
-        
-        if pledged > 0:
-            usage_pct = min(used / pledged, 1.0)
-            st.progress(usage_pct, "Storage Usage")
-    
-    # Content Index
-    content_stats = status.get('content_index') if status else None
-    
-    if content_stats:
-        st.subheader("📄 Content Index")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Indexed Content", content_stats.get('total_cids', 0))
-        with col2:
-            st.metric("Providers", content_stats.get('provider_count', 0))
-    
-    if not storage_stats and not content_stats:
-        st.info("Storage provider not initialized. Enable storage role to contribute.")
-
-
-def render_agents_tab(client: PRSMClient):
-    """Render the agents tab."""
-    st.subheader("🤖 Agent Management")
-    
-    agents = client.get_agents()
-    
-    if agents and agents.get('agents'):
-        st.write(f"**{agents.get('count', 0)}** registered agents")
-        
-        for agent in agents['agents']:
-            with st.expander(f"🤖 {agent.get('agent_name', 'Unknown')}"):
-                col_a1, col_a2 = st.columns(2)
-                with col_a1:
-                    st.write(f"**Agent ID:** {agent.get('agent_id', 'N/A')[:20]}...")
-                    st.write(f"**Status:** {agent.get('status', 'N/A')}")
-                with col_a2:
-                    st.write(f"**Capabilities:** {', '.join(agent.get('capabilities', []))}")
-                    st.write(f"**Version:** {agent.get('version', 'N/A')}")
-    else:
-        st.info("No agents registered. Agents will appear here when discovered on the network.")
-
-
-def render_content_search(client: PRSMClient):
-    """Render content search functionality."""
-    st.subheader("🔍 Content Search")
-    
-    query = st.text_input("Search for content", placeholder="Enter keywords...")
-    
-    if query:
-        results = client.get_content_search(query, limit=10)
-        
-        if results and results.get('results'):
-            st.write(f"Found **{results.get('count', 0)}** results")
-            
-            for result in results['results']:
-                with st.expander(f"📄 {result.get('filename', 'Unknown')}"):
-                    st.write(f"**CID:** {result.get('cid', 'N/A')[:30]}...")
-                    st.write(f"**Size:** {result.get('size_bytes', 0) / 1024:.1f} KB")
-                    st.write(f"**Creator:** {result.get('creator_id', 'N/A')[:20]}...")
-                    if result.get('royalty_rate'):
-                        st.write(f"**Royalty Rate:** {result.get('royalty_rate'):.4f} FTNS")
-        else:
-            st.info("No content found matching your query.")
-
-
-def render_fallback():
-    """Render fallback UI when node is not running."""
-    st.warning("⚠️ **PRSM Node is Not Running**")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.info("""
-        ### Start Your Node
-        
-        Run the following command in your terminal:
-        
-        ```bash
-        python -m prsm.cli start
-        ```
-        
-        This will start the PRSM node and API server on port 8000.
-        """)
-    
-    with col2:
-        st.info("""
-        ### Configuration
-        
-        The dashboard expects the API at `http://127.0.0.1:8000`
-        
-        To use a different port, update `API_BASE_URL` in the dashboard code.
-        """)
-    
-    # Show mockup as fallback
-    if (MOCKUP_DIR / "index.html").exists():
-        st.subheader("📱 UI Mockup Preview")
-        with st.expander("View Static Mockup"):
-            with open(MOCKUP_DIR / "index.html", 'r') as f:
-                html_content = f.read()
-            st.components.v1.html(html_content, height=500, scrolling=True)
-
-
-def main():
-    """Main dashboard application."""
-    st.title("🧠 PRSM Dashboard")
-    st.caption("Protocol for Recursive Scientific Modeling")
-    
-    client = PRSMClient(API_BASE_URL)
-    
-    # Check if node is running
-    if not client.health_check():
-        render_fallback()
-        return
-    
-    status = client.get_status()
-    
-    if not status:
-        render_fallback()
-        return
-    
-    # Render header
-    render_header(status)
-    
-    # Create tabs for different sections
+    # Tabs
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🌐 Network", 
         "💰 Wallet", 
@@ -423,25 +204,134 @@ def main():
     ])
     
     with tab1:
-        render_network_tab(client)
+        st.subheader("🌐 Network Peers")
+        peers = client.get_peers()
+        
+        if peers:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Connected", peers.get('connected_count', 0))
+            with col2:
+                st.metric("Known", peers.get('known_count', 0))
+            
+            if peers.get('connected'):
+                with st.expander("🔗 Connected Peers", expanded=True):
+                    for peer in peers['connected']:
+                        st.write(f"• **{peer.get('display_name', 'Unknown')}** - {peer.get('address', 'N/A')[:40]}")
+        else:
+            st.info("No peer data available.")
     
     with tab2:
-        render_wallet_tab(client)
+        st.subheader("💰 FTNS Token Balance")
+        balance = client.get_balance()
+        
+        if balance:
+            st.metric("Balance", f"{balance.get('balance', 0):.4f} FTNS")
+            
+            # Transaction history
+            st.subheader("📜 Transaction History")
+            txs = client.get_transactions(limit=10)
+            
+            if txs and txs.get('transactions'):
+                for tx in txs['transactions']:
+                    with st.expander(f"{tx['type']}: {tx['amount']:.4f} FTNS"):
+                        st.write(f"**From:** {tx.get('from', 'N/A')[:20]}...")
+                        st.write(f"**To:** {tx.get('to', 'N/A')[:20]}...")
+                        ts = tx.get('timestamp', 0)
+                        st.write(f"**Time:** {datetime.fromtimestamp(ts).strftime('%H:%M:%S')}")
+            else:
+                st.info("No transactions yet.")
+            
+            # DAG Stats
+            dag_stats = status.get('dag_stats')
+            if dag_stats:
+                st.subheader("🔗 DAG Ledger Stats")
+                col_d1, col_d2, col_d3, col_d4 = st.columns(4)
+                with col_d1:
+                    st.metric("Total Txs", dag_stats.get('total_transactions', 0))
+                with col_d2:
+                    st.metric("Tips", dag_stats.get('tips', 0))
+                with col_d3:
+                    st.metric("Confirmed", dag_stats.get('confirmed', 0))
+                with col_d4:
+                    confirm_level = dag_stats.get('avg_confirmation_level', 0)
+                    st.metric("Avg Confirm", f"{confirm_level:.1%}")
+        else:
+            st.info("No balance data.")
     
     with tab3:
-        render_compute_tab(client)
+        st.subheader("💻 Compute Network")
+        compute_stats = status.get('compute')
+        compute_requester_stats = status.get('compute_requester')
+        
+        if compute_stats:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Jobs Completed", compute_stats.get('jobs_completed', 0))
+            with col2:
+                st.metric("Jobs In Queue", compute_stats.get('jobs_queued', 0))
+            with col3:
+                st.metric("Active Workers", compute_stats.get('active_workers', 0))
+        else:
+            st.info("Compute provider not initialized.")
     
     with tab4:
-        render_storage_tab(client)
+        st.subheader("💾 Storage Network")
+        storage_stats = status.get('storage')
+        
+        if storage_stats:
+            pledged = storage_stats.get('pledged_gb', 0)
+            used = storage_stats.get('used_gb', 0)
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Pledged", f"{pledged:.2f} GB")
+            with col2:
+                st.metric("Used", f"{used:.2f} GB")
+            with col3:
+                st.metric("Pinned", storage_stats.get('pinned_count', 0))
+            
+            if pledged > 0:
+                st.progress(min(used / pledged, 1.0), "Storage Usage")
+        else:
+            st.info("Storage provider not initialized.")
+        
+        content_stats = status.get('content_index')
+        if content_stats:
+            st.subheader("📄 Content Index")
+            st.metric("Indexed Content", content_stats.get('total_cids', 0))
     
     with tab5:
-        render_content_search(client)
+        st.subheader("🔍 Content Search")
+        query = st.text_input("Search for content", placeholder="Enter keywords...")
+        
+        if query:
+            results = client.get_content_search(query, limit=10)
+            
+            if results and results.get('results'):
+                st.write(f"Found **{results.get('count', 0)}** results")
+                
+                for result in results['results']:
+                    with st.expander(f"📄 {result.get('filename', 'Unknown')}"):
+                        st.write(f"**CID:** {result.get('cid', 'N/A')[:30]}...")
+                        st.write(f"**Size:** {result.get('size_bytes', 0) / 1024:.1f} KB")
+            else:
+                st.info("No content found.")
     
-    # Agents section (collapsible)
+    # Agents section
     with st.expander("🤖 Agent Registry"):
-        render_agents_tab(client)
+        agents = client.get_agents()
+        
+        if agents and agents.get('agents'):
+            st.write(f"**{agents.get('count', 0)}** registered agents")
+            
+            for agent in agents['agents']:
+                with st.container():
+                    st.write(f"• **{agent.get('agent_name', 'Unknown')}** - {agent.get('status', 'N/A')}")
+        else:
+            st.info("No agents registered.")
     
-    # Footer with refresh
+    # Footer
     st.divider()
     col_f1, col_f2 = st.columns([3, 1])
     with col_f1:
@@ -450,9 +340,51 @@ def main():
         if st.button("🔄 Refresh", use_container_width=True):
             st.rerun()
     
-    # Auto-refresh every 30 seconds
+    # Auto-refresh
     time.sleep(30)
     st.rerun()
+
+
+def main():
+    """Main dashboard application."""
+    st.title("🧠 PRSM Dashboard")
+    st.caption("Protocol for Recursive Scientific Modeling")
+    
+    # Sidebar with mode selection
+    with st.sidebar:
+        st.header("⚙️ Dashboard Mode")
+        
+        mode = st.radio(
+            "Select Mode:",
+            ["🟢 Live Node", "🎨 Mockup Preview"],
+            help="Live Node requires a running PRSM node. Mockup shows the UI design."
+        )
+        
+        st.divider()
+        
+        st.header("🔗 Connection")
+        st.write(f"**API URL:** `{API_BASE_URL}`")
+        
+        # Check connection
+        client = PRSMClient(API_BASE_URL)
+        if client.health_check():
+            st.success("✅ API is responding")
+        else:
+            st.warning("⚠️ API not responding")
+        
+        st.divider()
+        
+        st.header("📋 Quick Links")
+        st.markdown("""
+        - [GitHub](https://github.com/Ryno2390/PRSM)
+        - [Documentation](https://prsm.readthedocs.io)
+        """)
+    
+    # Render based on mode selection
+    if mode == "🎨 Mockup Preview":
+        render_mockup_viewer()
+    else:
+        render_live_dashboard()
 
 
 if __name__ == "__main__":
