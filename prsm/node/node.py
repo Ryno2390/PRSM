@@ -20,6 +20,7 @@ from prsm.node.identity import (
     save_node_identity,
 )
 from prsm.node.local_ledger import LocalLedger, TransactionType
+from prsm.node.dag_ledger import DAGLedger, DAGLedgerAdapter
 from prsm.node.transport import WebSocketTransport
 from prsm.node.discovery import PeerDiscovery
 from prsm.node.gossip import GossipProtocol
@@ -85,8 +86,11 @@ class PRSMNode:
         else:
             logger.info(f"Loaded node identity: {self.identity.node_id}")
 
-        # ── Local Ledger ─────────────────────────────────────────
-        self.ledger = LocalLedger(str(self.config.ledger_path))
+        # ── Local Ledger (DAG-based or legacy) ─────────────────────
+        if self.config.ledger_type == "dag":
+            self.ledger = DAGLedger(str(self.config.ledger_path))
+        else:
+            self.ledger = LocalLedger(str(self.config.ledger_path))
         await self.ledger.initialize()
         await self.ledger.create_wallet(self.identity.node_id, self.config.display_name)
         await self.ledger.create_wallet("system", "PRSM Network")
@@ -274,6 +278,7 @@ class PRSMNode:
             "node_id": self.identity.node_id if self.identity else None,
             "display_name": self.config.display_name,
             "roles": [r.value for r in self.config.roles],
+            "ledger_type": self.config.ledger_type,
             "started": self._started,
             "uptime_seconds": round(uptime, 1),
             "p2p_address": f"ws://{self.config.listen_host}:{self.config.p2p_port}",
@@ -283,6 +288,7 @@ class PRSMNode:
                 "known": len(self.discovery.known_peers) if self.discovery else 0,
             },
             "ftns_balance": balance,
+            "dag_stats": self.ledger.get_stats() if hasattr(self.ledger, 'get_stats') else None,
             "compute": self.compute_provider.get_stats() if self.compute_provider else None,
             "compute_requester": self.compute_requester.get_stats() if self.compute_requester else None,
             "storage": self.storage_provider.get_stats() if self.storage_provider else None,
