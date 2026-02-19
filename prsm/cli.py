@@ -129,9 +129,16 @@ def dashboard(port: int, api_port: int):
     # 2. Launch Streamlit
     console.print(f"🎨 Launching Dashboard UI on port {port}...", style="dim")
     
+    # Find the correct Python executable (use venv if available)
+    venv_python = Path(__file__).parent.parent / ".venv" / "bin" / "python"
+    if venv_python.exists():
+        python_exe = str(venv_python)
+    else:
+        python_exe = sys.executable
+    
     dashboard_path = Path(__file__).parent / "interface" / "dashboard" / "streamlit_app.py"
     streamlit_cmd = [
-        sys.executable, "-m", "streamlit", "run", 
+        python_exe, "-m", "streamlit", "run", 
         str(dashboard_path),
         "--server.port", str(port),
         "--server.headless", "false"
