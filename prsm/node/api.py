@@ -442,4 +442,34 @@ def create_api_app(node: Any) -> FastAPI:
         """Simple health check."""
         return {"status": "ok", "node_id": node.identity.node_id if node.identity else "unknown"}
 
+
+    # ── Storage endpoints ────────────────────────────────────────
+
+    @app.get("/storage/stats")
+    async def get_storage_stats() -> Dict[str, Any]:
+        """Get storage provider statistics."""
+        if not node.storage_provider:
+            return {
+                "available": False,
+                "pledged_gb": 0,
+                "used_gb": 0,
+                "pinned_count": 0,
+                "message": "Storage provider not initialized"
+            }
+        return node.storage_provider.get_stats()
+
+    # ── Compute endpoints ────────────────────────────────────────
+
+    @app.get("/compute/stats")
+    async def get_compute_stats() -> Dict[str, Any]:
+        """Get compute provider statistics."""
+        if not node.compute_provider:
+            return {
+                "available": False,
+                "jobs_completed": 0,
+                "jobs_queued": 0,
+                "message": "Compute provider not initialized"
+            }
+        return node.compute_provider.get_stats()
+
     return app
