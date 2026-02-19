@@ -30,6 +30,9 @@ class NodeConfig:
     display_name: str = "prsm-node"
     roles: List[NodeRole] = field(default_factory=lambda: [NodeRole.FULL])
 
+    # Ledger type: "dag" for DAG-based (IOTA-style) or "legacy" for linear
+    ledger_type: str = "dag"
+
     # Network
     listen_host: str = "0.0.0.0"
     p2p_port: int = 9001
