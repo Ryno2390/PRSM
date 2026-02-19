@@ -1,0 +1,17 @@
+#!/bin/bash
+# PRSM Dashboard Launcher
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Find Python in venv or use system Python
+if [ -f "$SCRIPT_DIR/.venv/bin/python" ]; then
+    PYTHON="$SCRIPT_DIR/.venv/bin/python"
+elif command -v python3 &> /dev/null; then
+    PYTHON="python3"
+else
+    PYTHON="python"
+fi
+
+# Run the dashboard
+exec $PYTHON -m prsm.cli dashboard "$@"
