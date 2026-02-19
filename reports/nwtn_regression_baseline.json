@@ -1,0 +1,49 @@
+{
+  "nwtn_query_response_structure": {
+    "session_id": "test_session_123",
+    "final_answer": "NWTN processed query: Test query for regression detection",
+    "reasoning_trace": [
+      {
+        "step_id": "step_1",
+        "agent_type": "architect",
+        "execution_time": 0.1,
+        "confidence_score": 0.9
+      },
+      {
+        "step_id": "step_2",
+        "agent_type": "executor",
+        "execution_time": 0.3,
+        "confidence_score": 0.85
+      }
+    ],
+    "confidence_score": 0.87,
+    "context_used": 35,
+    "processing_time": 0.4
+  },
+  "nwtn_query_processing_performance": 4.582994733937085e-06,
+  "nwtn_reasoning_trace_analysis": {
+    "trace_length": 2,
+    "agent_types": [
+      "architect",
+      "executor"
+    ],
+    "total_execution_time": 0.4,
+    "average_confidence": 0.875,
+    "has_required_fields": true
+  },
+  "nwtn_confidence_scoring": {
+    "scores": [
+      0.87,
+      0.87,
+      0.87
+    ],
+    "average_confidence": 0.87,
+    "confidence_range": 0.0,
+    "all_scores_valid": true,
+    "score_distribution": {
+      "high_confidence": 3,
+      "medium_confidence": 0,
+      "low_confidence": 0
+    }
+  }
+}

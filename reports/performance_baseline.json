@@ -1,0 +1,221 @@
+{
+  "nwtn_single_query": {
+    "benchmark_name": "nwtn_single_query",
+    "execution_time": 3.295002068625763e-05,
+    "memory_peak": 616.6875,
+    "memory_average": 616.6875,
+    "cpu_usage": 0.0,
+    "throughput": 28436.687466159794,
+    "latency_p50": 3.143750654999167e-05,
+    "latency_p95": 3.7410049117170274e-05,
+    "latency_p99": 0.00011847383590065874,
+    "error_rate": 0.0,
+    "iterations": 50,
+    "baseline_comparison": -2.0777340578041237,
+    "metadata": {
+      "total_time": 0.0017582919972483069,
+      "warmup_iterations": 5,
+      "valid_iterations": 50,
+      "baseline_execution_time": 3.3649160759523514e-05,
+      "baseline_memory_peak": 629.296875,
+      "baseline_throughput": 27862.914461474407,
+      "performance_change": "stable"
+    },
+    "timestamp": "2026-02-18T18:10:27.567880+00:00"
+  },
+  "nwtn_concurrent_queries": {
+    "benchmark_name": "nwtn_concurrent_queries",
+    "execution_time": 0.002254039550462039,
+    "memory_peak": 616.6875,
+    "memory_average": 616.6875,
+    "cpu_usage": 0.0,
+    "throughput": 442.90576031701903,
+    "latency_p50": 0.0002506459932192229,
+    "latency_p95": 0.038223307696171105,
+    "latency_p99": 0.07172222713707015,
+    "error_rate": 0.0,
+    "iterations": 20,
+    "baseline_comparison": -3.9499914553201716,
+    "metadata": {
+      "total_time": 0.04515633299888577,
+      "warmup_iterations": 2,
+      "valid_iterations": 20,
+      "baseline_execution_time": 0.0023467353981686755,
+      "baseline_memory_peak": 629.296875,
+      "baseline_throughput": 425.3490328801855,
+      "performance_change": "stable"
+    },
+    "timestamp": "2026-02-18T18:10:27.792549+00:00"
+  },
+  "nwtn_memory_load": {
+    "benchmark_name": "nwtn_memory_load",
+    "execution_time": 1.7471529917995212,
+    "memory_peak": 616.6875,
+    "memory_average": 616.6875,
+    "cpu_usage": 0.0,
+    "throughput": 0.5723534728581332,
+    "latency_p50": 1.745069083000999,
+    "latency_p95": 1.745069083000999,
+    "latency_p99": 1.745069083000999,
+    "error_rate": 0.0,
+    "iterations": 5,
+    "baseline_comparison": -7.8351084008123735,
+    "metadata": {
+      "total_time": 8.735860333006713,
+      "warmup_iterations": 1,
+      "valid_iterations": 5,
+      "baseline_execution_time": 1.8956817086029332,
+      "baseline_memory_peak": 629.3125,
+      "baseline_throughput": 0.5275089220913494,
+      "performance_change": "improvement"
+    },
+    "timestamp": "2026-02-18T18:10:38.425225+00:00"
+  },
+  "ftns_balance_calculation": {
+    "benchmark_name": "ftns_balance_calculation",
+    "execution_time": 2.8779700078302993e-06,
+    "memory_peak": 616.71875,
+    "memory_average": 616.698171875,
+    "cpu_usage": 0.0,
+    "throughput": 22690.229377423937,
+    "latency_p50": 2.6670022634789348e-06,
+    "latency_p95": 2.9579969123005867e-06,
+    "latency_p99": 4.908920673187822e-06,
+    "error_rate": 0.0,
+    "iterations": 1000,
+    "baseline_comparison": 0.17121521610034296,
+    "metadata": {
+      "baseline_execution_time": 2.8730509075103327e-06,
+      "baseline_memory_peak": 629.34375,
+      "baseline_throughput": 21568.167541937473,
+      "performance_change": "stable"
+    },
+    "timestamp": "2026-02-18T18:10:38.647033+00:00"
+  },
+  "ftns_transaction_processing": {
+    "benchmark_name": "ftns_transaction_processing",
+    "execution_time": 8.326589607167989e-05,
+    "memory_peak": 616.71875,
+    "memory_average": 616.71875,
+    "cpu_usage": 0.0,
+    "throughput": 11785.284096098518,
+    "latency_p50": 4.0000013541430235e-06,
+    "latency_p95": 4.375004209578037e-06,
+    "latency_p99": 6.5746798645704984e-06,
+    "error_rate": 0.0,
+    "iterations": 500,
+    "baseline_comparison": -6.361013159480769,
+    "metadata": {
+      "baseline_execution_time": 8.892225223826245e-05,
+      "baseline_memory_peak": 629.34375,
+      "baseline_throughput": 11040.431983441118,
+      "performance_change": "improvement"
+    },
+    "timestamp": "2026-02-18T18:10:38.834895+00:00"
+  },
+  "ftns_concurrent_transactions": {
+    "benchmark_name": "ftns_concurrent_transactions",
+    "execution_time": 0.00566543320164783,
+    "memory_peak": 616.75,
+    "memory_average": 616.746875,
+    "cpu_usage": 0.0,
+    "throughput": 176.2704693951485,
+    "latency_p50": 0.0013188955053919926,
+    "latency_p95": 0.06415946104825707,
+    "latency_p99": 0.06415946104825707,
+    "error_rate": 0.0,
+    "iterations": 10,
+    "baseline_comparison": 2.334173350869998,
+    "metadata": {
+      "baseline_execution_time": 0.005536208498233464,
+      "baseline_memory_peak": 629.375,
+      "baseline_throughput": 180.41640212120467,
+      "performance_change": "stable"
+    },
+    "timestamp": "2026-02-18T18:10:39.038418+00:00"
+  },
+  "database_crud_operations": {
+    "benchmark_name": "database_crud_operations",
+    "execution_time": 0.00021543682072660886,
+    "memory_peak": 616.765625,
+    "memory_average": 616.7571875,
+    "cpu_usage": 0.0,
+    "throughput": 4603.362756509999,
+    "latency_p50": 1.5520497981924564e-05,
+    "latency_p95": 1.6491644782945513e-05,
+    "latency_p99": 5.168882082216442e-05,
+    "error_rate": 0.0,
+    "iterations": 200,
+    "baseline_comparison": -4.477350897549857,
+    "metadata": {
+      "baseline_execution_time": 0.00022553480535862037,
+      "baseline_memory_peak": 629.40625,
+      "baseline_throughput": 4398.822884340171,
+      "performance_change": "stable"
+    },
+    "timestamp": "2026-02-18T18:10:39.232452+00:00"
+  },
+  "database_bulk_operations": {
+    "benchmark_name": "database_bulk_operations",
+    "execution_time": 0.004606154102657456,
+    "memory_peak": 616.796875,
+    "memory_average": 616.79375,
+    "cpu_usage": 0.0,
+    "throughput": 216.87093198261587,
+    "latency_p50": 0.0005633330001728609,
+    "latency_p95": 0.05911625450462452,
+    "latency_p99": 0.05911625450462452,
+    "error_rate": 0.0,
+    "iterations": 10,
+    "baseline_comparison": -3.3253173215953016,
+    "metadata": {
+      "baseline_execution_time": 0.00476459190249443,
+      "baseline_memory_peak": 629.4375,
+      "baseline_throughput": 209.67932165916207,
+      "performance_change": "stable"
+    },
+    "timestamp": "2026-02-18T18:10:39.423841+00:00"
+  },
+  "memory_allocation_patterns": {
+    "benchmark_name": "memory_allocation_patterns",
+    "execution_time": 0.20167618750274413,
+    "memory_peak": 617.015625,
+    "memory_average": 617.015625,
+    "cpu_usage": 0.0,
+    "throughput": 4.957782007291328,
+    "latency_p50": 0.19969220850180136,
+    "latency_p95": 0.235793157704029,
+    "latency_p99": 0.235793157704029,
+    "error_rate": 0.0,
+    "iterations": 10,
+    "baseline_comparison": -3.5525363143956135,
+    "metadata": {
+      "baseline_execution_time": 0.2091047081965371,
+      "baseline_memory_peak": 631.4375,
+      "baseline_throughput": 4.781693477038339,
+      "performance_change": "stable"
+    },
+    "timestamp": "2026-02-18T18:10:41.972580+00:00"
+  },
+  "garbage_collection_performance": {
+    "benchmark_name": "garbage_collection_performance",
+    "execution_time": 0.19187535004821257,
+    "memory_peak": 621.796875,
+    "memory_average": 621.209375,
+    "cpu_usage": 0.0,
+    "throughput": 5.210988076630316,
+    "latency_p50": 0.19060162499954458,
+    "latency_p95": 0.2040959163561638,
+    "latency_p99": 0.20644441607859335,
+    "error_rate": 0.0,
+    "iterations": 20,
+    "baseline_comparison": -6.120271332823418,
+    "metadata": {
+      "baseline_execution_time": 0.20438421880025998,
+      "baseline_memory_peak": 635.4375,
+      "baseline_throughput": 4.8921301602693745,
+      "performance_change": "improvement"
+    },
+    "timestamp": "2026-02-18T18:10:46.563403+00:00"
+  }
+}

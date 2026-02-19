@@ -1,0 +1,70 @@
+{
+  "nwtn_query_endpoint_api": {
+    "status_code": 200,
+    "data": {
+      "session_id": "api_test_session_123",
+      "final_answer": "API test response",
+      "reasoning_trace": [
+        {
+          "step_id": "1",
+          "agent_type": "architect",
+          "execution_time": 0.1
+        }
+      ],
+      "confidence_score": 0.85,
+      "context_used": 50,
+      "processing_time": 0.4,
+      "metadata": {
+        "api_version": "v1",
+        "model_version": "nwtn_v2.1"
+      }
+    },
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Response-Time": "400ms"
+    }
+  },
+  "ftns_balance_endpoint_api": {
+    "status_code": 200,
+    "data": {
+      "total_balance": 100.0,
+      "available_balance": 85.5,
+      "reserved_balance": 14.5,
+      "currency": "FTNS",
+      "last_transaction": {
+        "transaction_id": "tx_12345",
+        "timestamp": "2025-01-23T10:30:00Z",
+        "amount": -5.0,
+        "type": "charge"
+      },
+      "balance_history_available": true
+    },
+    "headers": {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache"
+    }
+  },
+  "authentication_endpoint_api": {
+    "status_code": 200,
+    "data": {
+      "access_token": "jwt_token_abc123",
+      "token_type": "bearer",
+      "expires_in": 3600,
+      "refresh_token": "refresh_token_def456",
+      "user_info": {
+        "user_id": "auth_test_user",
+        "username": "testuser",
+        "role": "researcher"
+      },
+      "permissions": [
+        "query",
+        "balance_view",
+        "transaction_create"
+      ]
+    },
+    "headers": {
+      "Content-Type": "application/json",
+      "Set-Cookie": "session_id=abc123; HttpOnly; Secure"
+    }
+  }
+}
