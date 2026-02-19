@@ -460,11 +460,23 @@ class PRSMConfig(BaseConfigSchema):
 
     @property
     def database_url(self):
-        return f"{self.database.type.value}://{self.database.host}:{self.database.port}/{self.database.name}" if self.database else "sqlite:///prsm.db"
+        return f"{self.database.type.value}://{self.database.host}:{self.database.port}/{self.database.database}" if self.database else "sqlite:///prsm.db"
 
     @property
     def redis_url(self):
         return "redis://localhost:6379/0"
+
+    @property
+    def redis_password(self):
+        return None
+
+    @property
+    def pinecone_api_key(self):
+        return None
+
+    @property
+    def ipfs_timeout(self):
+        return 60
 
     @property
     def ipfs_host(self):

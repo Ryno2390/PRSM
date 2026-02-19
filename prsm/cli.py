@@ -103,6 +103,49 @@ def status():
 
 
 @main.command()
+@click.option("--port", default=8501, help="Port for the Streamlit dashboard")
+@click.option("--api-port", default=8000, help="Port for the PRSM API")
+def dashboard(port: int, api_port: int):
+    """Launch the high-fidelity PRSM Dashboard and API"""
+    import subprocess
+    import time
+    import os
+
+    _init_config()
+    
+    console.print("🚀 Starting PRSM Command Center...", style="bold green")
+    
+    # 1. Start the API Server in the background
+    console.print(f"📡 Launching API Server on port {api_port}...", style="dim")
+    api_process = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "prsm.interface.api.main:app", "--port", str(api_port)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+    
+    # Give the API a moment to spin up
+    time.sleep(2)
+    
+    # 2. Launch Streamlit
+    console.print(f"🎨 Launching Dashboard UI on port {port}...", style="dim")
+    
+    dashboard_path = Path(__file__).parent / "interface" / "dashboard" / "streamlit_app.py"
+    streamlit_cmd = [
+        sys.executable, "-m", "streamlit", "run", 
+        str(dashboard_path),
+        "--server.port", str(port),
+        "--server.headless", "false"
+    ]
+    
+    try:
+        subprocess.run(streamlit_cmd)
+    except KeyboardInterrupt:
+        console.print("\n👋 Closing Command Center...", style="bold yellow")
+    finally:
+        api_process.terminate()
+
+
+@main.command()
 @click.argument("query", required=True)
 @click.option("--context", "-c", default=100, help="FTNS context allocation")
 @click.option("--user-id", default="cli-user", help="User ID for the query")
