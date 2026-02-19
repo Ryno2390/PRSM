@@ -17,7 +17,7 @@ st.set_page_config(
     page_title="PRSM | Dashboard",
     page_icon="🧠",
     layout="wide",
-    initial_sidebar_state="expanded"  # Show sidebar for connection status
+    initial_sidebar_state="expanded"
 )
 
 # --- API Client ---
@@ -51,7 +51,11 @@ def get_image_base64(path):
 
 # --- Main App Logic ---
 def main():
-    # Create sidebar with connection status
+    # Initialize session state for sidebar visibility
+    if 'sidebar_visible' not in st.session_state:
+        st.session_state.sidebar_visible = True
+    
+    # Sidebar with connection status
     with st.sidebar:
         st.title("🧠 PRSM Dashboard")
         st.divider()
@@ -68,6 +72,14 @@ def main():
                 st.write(f"**Ledger:** {status.get('ledger_type', 'legacy').upper()}")
                 balance = status.get('ftns_balance', 0)
                 st.write(f"**Balance:** {balance:.4f} FTNS")
+                
+                # Show additional stats
+                dag_stats = status.get('dag_stats')
+                if dag_stats:
+                    st.write("---")
+                    st.write("**DAG Stats:**")
+                    st.write(f"  Txs: {dag_stats.get('total_transactions', 0)}")
+                    st.write(f"  Tips: {dag_stats.get('tips', 0)}")
         else:
             st.warning("⚠️ API Not Running")
             st.caption("Run: python -m prsm.cli serve")
@@ -78,7 +90,27 @@ def main():
         st.subheader("⚡ Quick Actions")
         if st.button("🔄 Refresh Status", use_container_width=True):
             st.rerun()
+        
+        # Toggle sidebar visibility
+        if st.button("👁️ Show/Hide Sidebar", use_container_width=True):
+            st.session_state.sidebar_visible = not st.session_state.sidebar_visible
+            st.rerun()
     
+    # Toggle button in main area to show sidebar
+    # Use columns to put a small toggle in the corner
+    col1, col2 = st.columns([1, 20])
+    with col1:
+        if st.button("☰", help="Toggle Sidebar"):
+            st.session_state.sidebar_visible = not st.session_state.sidebar_visible
+            st.rerun()
+    with col2:
+        st.caption("Click ☰ to show/hide connection status")
+
+    # Only render sidebar content if visible
+    if st.session_state.sidebar_visible:
+        # Sidebar content is rendered above in the `with st.sidebar:` context
+        pass
+
     # CSS to make the iframe take up the main area
     st.markdown("""
         <style>
