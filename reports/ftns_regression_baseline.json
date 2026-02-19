@@ -1,0 +1,35 @@
+{
+  "ftns_balance_calculation": {
+    "total_balance": 100.0,
+    "available_balance": 85.5,
+    "reserved_balance": 14.5,
+    "balance_components_sum": 100.0,
+    "has_transaction_id": true,
+    "has_timestamp": true,
+    "balance_calculation_consistent": true
+  },
+  "ftns_balance_lookup_performance": 5.125009920448065e-06,
+  "ftns_transaction_processing": {
+    "success": true,
+    "amount": 10.0,
+    "transaction_type": "transfer",
+    "fee": 0.1,
+    "fee_percentage": 1.0,
+    "new_balance": 89.9,
+    "has_transaction_id": true,
+    "has_timestamp": true,
+    "fee_calculation_correct": true
+  },
+  "ftns_transaction_creation_performance": 3.55829979525879e-05,
+  "ftns_economic_model_consistency": {
+    "initial_balance": 100.0,
+    "final_balance": 74.75,
+    "total_transactions": 5,
+    "total_amount_sent": 25.0,
+    "total_fees_paid": 0.25,
+    "expected_final_balance": 74.75,
+    "balance_consistency": true,
+    "average_fee_percentage": 1.0,
+    "all_transactions_successful": true
+  }
+}
