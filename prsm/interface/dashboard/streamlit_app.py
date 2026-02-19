@@ -4,6 +4,7 @@ import json
 import time
 from pathlib import Path
 from datetime import datetime
+import webbrowser
 
 PRSM_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 MOCKUP_DIR = PRSM_ROOT / "PRSM_ui_mockup"
@@ -48,6 +49,17 @@ st.markdown("""
             border: 1px solid #2a2a4e;
             border-radius: 8px;
         }
+        .mockup-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: bold;
+            text-align: center;
+            display: inline-block;
+            margin: 10px 0;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -80,28 +92,57 @@ class PRSMClient:
 
 
 def render_mockup():
-    """Render the full UI mockup."""
-    st.header("🎨 PRSM UI Mockup Preview")
+    """Render a link to the mockup instead of embedding it."""
+    st.header("🎨 PRSM UI Mockup")
     
     html_path = MOCKUP_DIR / "index.html"
+    
     if not html_path.exists():
-        st.error(f"Mockup file not found at {html_path}")
+        st.error(f"Mockup file not found!")
         return
     
-    try:
+    # Show file info
+    file_size = html_path.stat().st_size // 1024
+    st.info(f"📄 Mockup file: {file_size}KB")
+    
+    # Show preview images/assets that exist
+    assets_dir = MOCKUP_DIR / "assets"
+    if assets_dir.exists():
+        images = list(assets_dir.glob("*.png")) + list(assets_dir.glob("*.jpg"))
+        if images:
+            st.subheader("🖼️ Preview Assets")
+            for img in images[:4]:  # Show up to 4 images
+                try:
+                    st.image(str(img), use_container_width=True)
+                except:
+                    pass
+    
+    # Show the mockup as a download/link option
+    st.subheader("📥 Open Mockup")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Show the raw HTML in a code block for reference
         with open(html_path, 'r', encoding='utf-8') as f:
-            html_content = f.read()
+            html_preview = f.read()[:2000]  # First 2000 chars
         
-        st.success(f"Loaded mockup ({len(html_content)//1024}KB)")
+        with st.expander("📝 HTML Preview (first 2000 chars)"):
+            st.code(html_preview, language="html")
+    
+    with col2:
+        st.markdown("### 🚀 Open Full Mockup")
+        st.markdown("The mockup is a complex HTML file that doesn't render well in Streamlit.")
         
-        # Render the HTML in an iframe
-        st.components.v1.html(
-            html_content,
-            height=2500,
-            scrolling=True
-        )
-    except Exception as e:
-        st.error(f"Error loading mockup: {e}")
+        st.markdown("""
+        <div style="text-align: center; padding: 20px;">
+            <a href="file://{}" target="_blank">
+                <div class="mockup-button">📱 Open in Browser</div>
+            </a>
+        </div>
+        """.format(html_path.absolute()), unsafe_allow_html=True)
+        
+        st.caption("Click above to open the full mockup in your browser")
 
 
 def render_live_dashboard():
