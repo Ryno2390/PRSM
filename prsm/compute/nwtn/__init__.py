@@ -62,6 +62,59 @@ from .engines.world_model_engine import (
 # Backward compatibility alias
 WorldModelEngine = NeuroSymbolicEngine
 
+# New orchestration and reasoning components
+from .orchestrator import (
+    NWTNOrchestrator,
+    NWTNResponse,
+    ClarifiedPrompt,
+    IntentCategory,
+    get_nwtn_orchestrator,
+    create_nwtn_orchestrator
+)
+
+from .meta_reasoning_engine import (
+    MetaReasoningEngine,
+    ThinkingMode,
+    BreakthroughMode,
+    ReasoningCandidate,
+    MetaReasoningResult,
+    get_meta_reasoning_engine
+)
+
+# Alias for backward compatibility with tests
+from .meta_reasoning_engine import BreakthroughMode as BreakthroughModesClass
+
+class BreakthroughModes:
+    """Breakthrough mode constants for backward compatibility"""
+    CONSERVATIVE = BreakthroughMode.CONSERVATIVE
+    BALANCED = BreakthroughMode.BALANCED
+    REVOLUTIONARY = BreakthroughMode.REVOLUTIONARY
+
+# Import from breakthrough_modes module for backward compatibility
+from .breakthrough_modes import BreakthroughMode as BreakthroughModeExport
+
+from .complete_system import (
+    NWTNCompleteSystem,
+    NWTNCompleteResponse,
+    BreakthroughModes,
+    get_nwtn_complete_system,
+    process_nwtn_query
+)
+
+from .external_storage_config import (
+    ExternalStorageConfig,
+    ExternalKnowledgeBase,
+    StorageConfig,
+    PaperMetadata,
+    get_external_knowledge_base,
+    initialize_external_storage
+)
+
+from .context_manager import (
+    ContextManager,
+    ContextUsage,
+    get_context_manager
+)
 
 # Note: BayesianSearchEngine components are archived as they are not currently used
 
@@ -86,8 +139,43 @@ __all__ = [
     "WorldModelEngine",
     "ScientificConstraint",
     "get_world_model",
-
     
+    # Orchestration layer
+    "NWTNOrchestrator",
+    "NWTNResponse",
+    "ClarifiedPrompt",
+    "IntentCategory",
+    "get_nwtn_orchestrator",
+    "create_nwtn_orchestrator",
+    
+    # Meta-reasoning engine
+    "MetaReasoningEngine",
+    "ThinkingMode",
+    "BreakthroughMode",
+    "ReasoningCandidate",
+    "MetaReasoningResult",
+    "get_meta_reasoning_engine",
+    
+    # Complete system facade
+    "NWTNCompleteSystem",
+    "NWTNCompleteResponse",
+    "BreakthroughModes",
+    "get_nwtn_complete_system",
+    "process_nwtn_query",
+    
+    # External storage
+    "ExternalStorageConfig",
+    "ExternalKnowledgeBase",
+    "StorageConfig",
+    "PaperMetadata",
+    "get_external_knowledge_base",
+    "initialize_external_storage",
+    
+    # Context management
+    "ContextManager",
+    "ContextUsage",
+    "get_context_manager",
+
     # Note: Bayesian search, integration, and convenience functions are archived
     
     # Factory functions (only those still available)
