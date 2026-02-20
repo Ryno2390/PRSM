@@ -57,6 +57,31 @@ from enum import Enum
 
 logger = structlog.get_logger(__name__)
 
+# Module-level constants for external imports
+INITIAL_BALANCE = Decimal('1000.0')  # Welcome grant for new users
+MIN_TRANSACTION_AMOUNT = Decimal('0.01')  # Minimum FTNS per transaction
+MAX_TRANSACTION_AMOUNT = Decimal('1000000.0')  # Maximum single transaction
+DEFAULT_REWARD_MULTIPLIER = Decimal('1.0')
+STAKING_REWARD_RATE = Decimal('0.05')  # 5% annual staking rewards
+
+# Export these constants
+__all__ = [
+    'FTNSService',
+    'FTNSBalance',
+    'FTNSTransaction',
+    'FTNSTransactionType',
+    'LaunchGuardrails',
+    'get_ftns_service',
+    'award_training_tokens',
+    'get_user_ftns_balance',
+    'ftns_service',
+    'INITIAL_BALANCE',
+    'MIN_TRANSACTION_AMOUNT',
+    'MAX_TRANSACTION_AMOUNT',
+    'DEFAULT_REWARD_MULTIPLIER',
+    'STAKING_REWARD_RATE',
+]
+
 
 class FTNSTransactionType(Enum):
     """Types of FTNS token transactions"""
@@ -166,8 +191,8 @@ class FTNSService:
             return True
         return False
     
-    def get_user_balance(self, user_id: str) -> Decimal:
-        """Get current FTNS balance for user"""
+    async def get_user_balance(self, user_id: str) -> "FTNSBalance":
+        """Get current FTNS balance for user (async for test compatibility)"""
         if user_id not in self.user_balances:
             self.user_balances[user_id] = FTNSBalance(
                 user_id=user_id,
@@ -175,7 +200,22 @@ class FTNSService:
                 last_updated=datetime.now(timezone.utc)
             )
         
-        return self.user_balances[user_id].balance
+        return self.user_balances[user_id]
+    
+    def get_user_balance_sync(self, user_id: str) -> "FTNSBalance":
+        """Get current FTNS balance (sync version)"""
+        if user_id not in self.user_balances:
+            self.user_balances[user_id] = FTNSBalance(
+                user_id=user_id,
+                balance=Decimal('0'),
+                last_updated=datetime.now(timezone.utc)
+            )
+        
+        return self.user_balances[user_id]
+    
+    def get_user_balance_decimal(self, user_id: str) -> Decimal:
+        """Get current FTNS balance as Decimal (sync version for internal use)"""
+        return self.get_user_balance_sync(user_id).balance
     
     def award_tokens(self, user_id: str, 
                     transaction_type: FTNSTransactionType,
@@ -200,7 +240,8 @@ class FTNSService:
             award_amount = base_amount * multiplier
             
             # Update user balance
-            current_balance = self.get_user_balance(user_id)
+            balance_obj = self.get_user_balance_sync(user_id)
+            current_balance = balance_obj.balance
             new_balance = current_balance + award_amount
             
             # Update balance record
@@ -259,7 +300,7 @@ class FTNSService:
             "Use FTNSQueries.execute_atomic_deduct() instead."
         )
         try:
-            current_balance = self.get_user_balance(user_id)
+            current_balance = self.get_user_balance_decimal(user_id)
             
             if current_balance < amount:
                 logger.warning("Insufficient FTNS balance",
@@ -290,14 +331,38 @@ class FTNSService:
             self.transactions.append(transaction)
             
             logger.info("FTNS tokens deducted",
-                       user_id=user_id,
-                       amount=float(amount),
-                       new_balance=float(new_balance))
+                        user_id=user_id,
+                        amount=float(amount),
+                        new_balance=float(new_balance))
             
             return True
             
         except Exception as e:
             logger.error(f"Failed to deduct FTNS tokens: {e}", user_id=user_id)
+            return False
+    
+    async def reward_contribution(self, user_id: str, contribution_type: str, amount: float) -> bool:
+        """Async method for rewarding contributions (wrapper for award_tokens)."""
+        try:
+            type_map = {
+                "data": FTNSTransactionType.DATA_CONTRIBUTION,
+                "training": FTNSTransactionType.TRAINING_REWARD,
+                "model": FTNSTransactionType.MODEL_IMPROVEMENT,
+                "collaboration": FTNSTransactionType.COLLABORATIVE_REASONING,
+                "knowledge": FTNSTransactionType.KNOWLEDGE_DISTILLATION,
+                "pipeline": FTNSTransactionType.PIPELINE_EXECUTION,
+            }
+            tx_type = type_map.get(contribution_type, FTNSTransactionType.DATA_CONTRIBUTION)
+            
+            self.award_tokens(
+                user_id=user_id,
+                transaction_type=tx_type,
+                base_amount=Decimal(str(amount)),
+                description=f"Contribution reward: {contribution_type}"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to reward contribution: {e}")
             return False
     
     def get_user_transaction_history(self, user_id: str,
@@ -432,3 +497,7 @@ def award_training_tokens(user_id: str, performance_improvement: float,
 def get_user_ftns_balance(user_id: str) -> Decimal:
     """Get user's current FTNS token balance"""
     return get_ftns_service().get_user_balance(user_id)
+
+
+# Module-level singleton for direct import
+ftns_service = get_ftns_service()

@@ -377,6 +377,53 @@ class TaskHierarchy(PRSMBaseModel):
     total_tasks: int = 0
 
 
+class AgentTask(TimestampMixin):
+    """
+    Task assigned to an AI agent in the PRSM network
+    
+    Represents a unit of work that can be executed by an agent,
+    with support for hierarchical decomposition and result tracking.
+    """
+    task_id: str = Field(default_factory=lambda: str(uuid4()))
+    session_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    agent_type: Optional[AgentType] = None
+    parent_task_id: Optional[str] = None
+    instruction: str
+    context: Dict[str, Any] = Field(default_factory=dict)
+    input_data: Optional[Dict[str, Any]] = None
+    output_data: Optional[Dict[str, Any]] = None
+    status: TaskStatus = TaskStatus.PENDING
+    priority: int = Field(default=0, ge=0, le=10)
+    estimated_tokens: int = Field(default=0, ge=0)
+    actual_tokens: int = Field(default=0, ge=0)
+    ftns_budget: Optional[Decimal] = None
+    ftns_spent: Decimal = Field(default=Decimal("0.0"))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error_message: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    
+    def mark_in_progress(self):
+        """Mark task as in progress"""
+        self.status = TaskStatus.IN_PROGRESS
+        self.started_at = datetime.now(timezone.utc)
+    
+    def mark_completed(self, output_data: Optional[Dict[str, Any]] = None):
+        """Mark task as completed"""
+        self.status = TaskStatus.COMPLETED
+        self.completed_at = datetime.now(timezone.utc)
+        if output_data:
+            self.output_data = output_data
+    
+    def mark_failed(self, error_message: str):
+        """Mark task as failed"""
+        self.status = TaskStatus.FAILED
+        self.completed_at = datetime.now(timezone.utc)
+        self.error_message = error_message
+
+
 # === Agent Models ===
 
 class AgentResponse(TimestampMixin):

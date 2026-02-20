@@ -155,6 +155,24 @@ pytest -m unit
 pytest -m integration
 ```
 
+### PostgreSQL Integration Tests
+
+Some integration tests require PostgreSQL for testing database concurrency features. To run these:
+
+```bash
+# Option 1: Using Docker Compose (recommended)
+docker-compose -f docker-compose.test.yml up -d
+DATABASE_URL=postgresql+asyncpg://prsm:test@localhost:5433/prsm_test pytest tests/integration/
+docker-compose -f docker-compose.test.yml down -v
+
+# Option 2: Using local PostgreSQL
+# Set up a test database:
+createdb prsm_test
+DATABASE_URL=postgresql+asyncpg://your_user:your_password@localhost:5432/prsm_test pytest tests/integration/
+```
+
+The GitHub CI pipeline automatically provisions PostgreSQL 16 for integration tests.
+
 ### Project Structure
 
 ```
