@@ -59,17 +59,31 @@ logger.info(
 @app.post("/ftns/transactions")
 async def create_ftns_transaction(
     transaction_data: Dict[str, Any],
-    current_user: str = None  # Optional auth for legacy compat
-) -> Dict[str, str]:
+    current_user: str = None
+) -> Dict[str, Any]:
     """
-    Create a new FTNS transaction (Legacy endpoint)
-
-    Note: Prefer using /api/v1/payments endpoints for new integrations.
+    Create a new FTNS transaction with atomic guarantees
+    
+    Security features:
+    - Idempotency key prevents duplicate transactions
+    - Atomic balance updates prevent race conditions
+    - Proper error handling for insufficient balance
+    
+    Required fields:
+    - to_user: Recipient user ID
+    - amount: Amount to transfer (positive number)
+    - transaction_type: 'transfer', 'reward', 'charge', etc.
+    - description: Transaction description
+    
+    Optional fields:
+    - idempotency_key: Unique key for duplicate prevention (auto-generated if not provided)
+    - from_user: Sender user ID (defaults to current_user or 'system' for rewards)
     """
     from uuid import uuid4
     from fastapi import HTTPException
     from prsm.core.database import FTNSQueries
-
+    import hashlib
+    
     try:
         required_fields = ["to_user", "amount", "transaction_type", "description"]
         for field in required_fields:
@@ -78,26 +92,85 @@ async def create_ftns_transaction(
                     status_code=400,
                     detail=f"Missing required field: {field}"
                 )
-
-        transaction_data["transaction_id"] = uuid4()
-        transaction_id = await FTNSQueries.create_transaction(transaction_data)
-
-        if transaction_data["transaction_type"] != "charge":
-            await FTNSQueries.update_balance(
-                transaction_data["to_user"],
-                transaction_data["amount"]
+        
+        amount = float(transaction_data["amount"])
+        if amount <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Amount must be positive"
             )
-
+        
+        to_user = transaction_data["to_user"]
+        transaction_type = transaction_data["transaction_type"]
+        description = transaction_data["description"]
+        
+        from_user = transaction_data.get("from_user") or current_user or "system"
+        
+        idempotency_key = transaction_data.get("idempotency_key")
+        if not idempotency_key:
+            key_components = f"{from_user}:{to_user}:{amount}:{transaction_type}:{uuid4().hex}"
+            idempotency_key = f"ftns:{hashlib.sha256(key_components.encode()).hexdigest()[:32]}"
+        
+        if transaction_type == "transfer":
+            result = await FTNSQueries.execute_atomic_transfer(
+                from_user_id=from_user,
+                to_user_id=to_user,
+                amount=amount,
+                idempotency_key=idempotency_key,
+                description=description
+            )
+        elif transaction_type == "reward":
+            result = await FTNSQueries.execute_atomic_deduct(
+                user_id=from_user if from_user != "system" else "system_mint",
+                amount=-amount,
+                idempotency_key=idempotency_key,
+                description=description,
+                transaction_type="reward"
+            )
+            if result["success"]:
+                deduct_result = await FTNSQueries.execute_atomic_deduct(
+                    user_id=to_user,
+                    amount=-amount,
+                    idempotency_key=f"{idempotency_key}:credit",
+                    description=description,
+                    transaction_type="reward_credit"
+                )
+                result = deduct_result
+        else:
+            result = await FTNSQueries.execute_atomic_deduct(
+                user_id=from_user,
+                amount=amount,
+                idempotency_key=idempotency_key,
+                description=description,
+                transaction_type=transaction_type
+            )
+        
+        if not result["success"]:
+            error_msg = result.get("error_message", "Transaction failed")
+            if "Insufficient balance" in error_msg:
+                raise HTTPException(status_code=402, detail=error_msg)
+            elif "Duplicate request" in error_msg or "idempotency" in error_msg.lower():
+                return {
+                    "transaction_id": result.get("transaction_id"),
+                    "status": "completed",
+                    "idempotent_replay": True
+                }
+            else:
+                raise HTTPException(status_code=400, detail=error_msg)
+        
         logger.info("FTNS transaction created",
-                   transaction_id=transaction_id,
-                   transaction_type=transaction_data["transaction_type"],
-                   amount=transaction_data["amount"])
-
+                   transaction_id=result["transaction_id"],
+                   transaction_type=transaction_type,
+                   amount=amount,
+                   idempotency_key=idempotency_key)
+        
         return {
-            "transaction_id": str(transaction_id),
-            "status": "completed"
+            "transaction_id": str(result["transaction_id"]),
+            "status": "completed",
+            "new_balance": result.get("new_balance"),
+            "idempotency_key": idempotency_key
         }
-
+    
     except HTTPException:
         raise
     except Exception as e:

@@ -2,10 +2,46 @@
 """
 FTNS (Fine-Tuning Network Service) Token Management Service
 
-Manages tokenized incentives for AI model training, knowledge distillation,
-and collaborative reasoning within the PRSM ecosystem.
+⚠️ DEPRECATION NOTICE ⚠️
+========================
+This in-memory FTNSService is DEPRECATED and should NOT be used for production.
 
-Core Functions:
+Race Condition Vulnerabilities:
+- Uses in-memory Python dictionaries (no persistence)
+- No transaction isolation between operations
+- No locking mechanism for concurrent access
+- No idempotency protection
+
+Replacement Options:
+1. AtomicFTNSService (prsm.economy.tokenomics.atomic_ftns_service)
+   - SELECT FOR UPDATE row-level locking
+   - Optimistic concurrency control via version column
+   - Idempotency key support
+   
+2. FTNSQueries (prsm.core.database)
+   - execute_atomic_transfer() for transfers
+   - execute_atomic_deduct() for deductions
+   - Uses PostgreSQL stored procedures for atomicity
+
+Migration Guide:
+    # OLD (deprecated, vulnerable to race conditions):
+    from prsm.economy.tokenomics.ftns_service import get_ftns_service
+    service = get_ftns_service()
+    service.deduct_tokens(user_id, amount)
+    
+    # NEW (recommended, atomic with race condition protection):
+    from prsm.core.database import FTNSQueries
+    result = await FTNSQueries.execute_atomic_deduct(
+        user_id=user_id,
+        amount=amount,
+        idempotency_key=f"deduct:{user_id}:{context_id}",
+        description="Token usage"
+    )
+
+This module will be removed in a future version.
+========================
+
+Original Purpose:
 - Token distribution for AI training contributions
 - Reward calculation for model performance improvements
 - Collaborative reasoning incentive management
@@ -147,7 +183,15 @@ class FTNSService:
                     multiplier: Decimal = Decimal('1.0'),
                     description: str = "",
                     metadata: Optional[Dict[str, Any]] = None) -> FTNSTransaction:
-        """Award FTNS tokens to user"""
+        """Award FTNS tokens to user
+        
+        ⚠️ DEPRECATED: This method is NOT thread-safe and has no persistence.
+        Use FTNSQueries.execute_atomic_deduct() with negative amount for rewards.
+        """
+        logger.warning(
+            "DEPRECATED: FTNSService.award_tokens() is deprecated. "
+            "Use FTNSQueries.execute_atomic_deduct() instead."
+        )
         try:
             # Calculate reward amount
             if base_amount is None:
@@ -205,7 +249,15 @@ class FTNSService:
                      amount: Decimal,
                      description: str = "",
                      metadata: Optional[Dict[str, Any]] = None) -> bool:
-        """Deduct FTNS tokens from user balance"""
+        """Deduct FTNS tokens from user balance
+        
+        ⚠️ DEPRECATED: This method has race condition vulnerabilities.
+        Use FTNSQueries.execute_atomic_deduct() for thread-safe operations.
+        """
+        logger.warning(
+            "DEPRECATED: FTNSService.deduct_tokens() is deprecated. "
+            "Use FTNSQueries.execute_atomic_deduct() instead."
+        )
         try:
             current_balance = self.get_user_balance(user_id)
             

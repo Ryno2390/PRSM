@@ -262,34 +262,53 @@ class FTNSTransactionModel(Base):
     🪙 FTNS INTEGRATION:
     Complete transaction history for token economy including
     rewards, charges, transfers, and dividend distributions
+    
+    Security features:
+    - Idempotency key for duplicate detection
+    - Balance snapshots for audit trail
     """
     __tablename__ = "ftns_transactions"
     
     transaction_id = Column(UUID(as_uuid=True), primary_key=True)
-    from_user = Column(String(255), nullable=True, index=True)  # None for system minting
+    from_user = Column(String(255), nullable=True, index=True)
     to_user = Column(String(255), nullable=False, index=True)
     amount = Column(Float, nullable=False)
     transaction_type = Column(String(50), nullable=False, index=True)
     description = Column(Text, nullable=False)
+    status = Column(String(20), default="completed", nullable=False)
+    idempotency_key = Column(String(255), unique=True, nullable=True, index=True)
     context_units = Column(Integer)
     ipfs_cid = Column(String(255))
     block_hash = Column(String(255))
+    balance_before_sender = Column(Float)
+    balance_after_sender = Column(Float)
+    balance_before_receiver = Column(Float)
+    balance_after_receiver = Column(Float)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     __table_args__ = (
         Index('idx_ftns_user_type_created', 'to_user', 'transaction_type', 'created_at'),
         Index('idx_ftns_created', 'created_at'),
         Index('idx_ftns_block_hash', 'block_hash'),
+        Index('idx_ftns_idempotency', 'idempotency_key'),
     )
 
 
 class FTNSBalanceModel(Base):
-    """Database model for FTNS balances"""
+    """Database model for FTNS balances
+    
+    Includes version column for optimistic concurrency control (OCC)
+    to prevent race conditions during balance updates.
+    """
     __tablename__ = "ftns_balances"
     
     user_id = Column(String(255), primary_key=True)
     balance = Column(Float, default=0.0, nullable=False)
     locked_balance = Column(Float, default=0.0, nullable=False)
+    total_earned = Column(Float, default=0.0, nullable=False)
+    total_spent = Column(Float, default=0.0, nullable=False)
+    version = Column(Integer, default=1, nullable=False)
+    last_transaction_id = Column(UUID(as_uuid=True))
     last_dividend = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -615,11 +634,21 @@ class SessionQueries:
 
 
 class FTNSQueries:
-    """Query helpers for FTNS operations"""
+    """Query helpers for FTNS operations with atomic guarantees
+    
+    All balance-affecting operations use:
+    - SELECT FOR UPDATE for row-level locking
+    - Optimistic concurrency control via version column
+    - Idempotency keys to prevent duplicate operations
+    """
     
     @staticmethod
     async def create_transaction(transaction_data: Dict[str, Any]) -> str:
-        """Create a new FTNS transaction"""
+        """Create a new FTNS transaction
+        
+        Note: For atomic balance updates, use execute_atomic_transfer instead.
+        This method is for recording transaction history only.
+        """
         async with get_async_session() as db_session:
             transaction_model = FTNSTransactionModel(**transaction_data)
             db_session.add(transaction_model)
@@ -628,7 +657,7 @@ class FTNSQueries:
     
     @staticmethod
     async def get_user_balance(user_id: str) -> Dict[str, float]:
-        """Get user FTNS balance"""
+        """Get user FTNS balance (read-only, no lock)"""
         async with get_async_session() as db_session:
             from sqlalchemy import select
             
@@ -639,22 +668,81 @@ class FTNSQueries:
             if balance_model:
                 return {
                     "balance": balance_model.balance,
-                    "locked_balance": balance_model.locked_balance
+                    "locked_balance": balance_model.locked_balance,
+                    "available_balance": balance_model.balance - balance_model.locked_balance,
+                    "total_earned": balance_model.total_earned or 0.0,
+                    "total_spent": balance_model.total_spent or 0.0,
+                    "version": balance_model.version
                 }
             else:
-                # Create new balance record
-                balance_model = FTNSBalanceModel(user_id=user_id, balance=0.0, locked_balance=0.0)
-                db_session.add(balance_model)
-                await db_session.flush()
-                return {"balance": 0.0, "locked_balance": 0.0}
+                return {
+                    "balance": 0.0, 
+                    "locked_balance": 0.0,
+                    "available_balance": 0.0,
+                    "total_earned": 0.0,
+                    "total_spent": 0.0,
+                    "version": 1
+                }
+    
+    @staticmethod
+    async def get_user_balance_locked(user_id: str) -> Dict[str, Any]:
+        """Get user FTNS balance with FOR UPDATE lock
+        
+        Use this when you need to prevent concurrent modifications.
+        Must be called within a transaction.
+        """
+        async with get_async_session() as db_session:
+            result = await db_session.execute(
+                text("""
+                    SELECT user_id, balance, locked_balance, total_earned, total_spent, version
+                    FROM ftns_balances
+                    WHERE user_id = :user_id
+                    FOR UPDATE NOWAIT
+                """),
+                {"user_id": user_id}
+            )
+            row = result.fetchone()
+            
+            if row:
+                return {
+                    "user_id": row.user_id,
+                    "balance": float(row.balance),
+                    "locked_balance": float(row.locked_balance),
+                    "available_balance": float(row.balance) - float(row.locked_balance),
+                    "total_earned": float(row.total_earned or 0),
+                    "total_spent": float(row.total_spent or 0),
+                    "version": row.version
+                }
+            else:
+                await db_session.execute(
+                    text("""
+                        INSERT INTO ftns_balances 
+                        (user_id, balance, locked_balance, total_earned, total_spent, version)
+                        VALUES (:user_id, 0, 0, 0, 0, 1)
+                        ON CONFLICT (user_id) DO NOTHING
+                    """),
+                    {"user_id": user_id}
+                )
+                return {
+                    "user_id": user_id,
+                    "balance": 0.0,
+                    "locked_balance": 0.0,
+                    "available_balance": 0.0,
+                    "total_earned": 0.0,
+                    "total_spent": 0.0,
+                    "version": 1
+                }
     
     @staticmethod
     async def update_balance(user_id: str, amount: float) -> bool:
-        """Update user balance (can be positive or negative)"""
+        """Update user balance (DEPRECATED - use execute_atomic_deduct instead)
+        
+        This method does NOT provide race condition protection.
+        Kept for backwards compatibility only.
+        """
         async with get_async_session() as db_session:
             from sqlalchemy import select, update
             
-            # Ensure balance record exists
             await FTNSQueries.get_user_balance(user_id)
             
             stmt = (
@@ -664,6 +752,125 @@ class FTNSQueries:
             )
             result = await db_session.execute(stmt)
             return result.rowcount > 0
+    
+    @staticmethod
+    async def execute_atomic_deduct(
+        user_id: str,
+        amount: float,
+        idempotency_key: str,
+        description: str = "",
+        transaction_type: str = "deduction"
+    ) -> Dict[str, Any]:
+        """Atomically deduct tokens with race condition protection
+        
+        Uses PostgreSQL stored procedure for true atomicity.
+        
+        Args:
+            user_id: User to deduct from
+            amount: Amount to deduct (positive value)
+            idempotency_key: Unique key to prevent duplicate operations
+            description: Transaction description
+            transaction_type: Type of transaction
+            
+        Returns:
+            Dict with success, transaction_id, new_balance, error_message
+        """
+        async with get_async_session() as db_session:
+            result = await db_session.execute(
+                text("""
+                    SELECT success, transaction_id, new_balance, error_message
+                    FROM atomic_deduct_balance(
+                        :user_id, :amount, :idempotency_key, :description, :tx_type
+                    )
+                """),
+                {
+                    "user_id": user_id,
+                    "amount": amount,
+                    "idempotency_key": idempotency_key,
+                    "description": description,
+                    "tx_type": transaction_type
+                }
+            )
+            row = result.fetchone()
+            await db_session.commit()
+            
+            return {
+                "success": row.success,
+                "transaction_id": row.transaction_id,
+                "new_balance": float(row.new_balance) if row.new_balance is not None else None,
+                "error_message": row.error_message
+            }
+    
+    @staticmethod
+    async def execute_atomic_transfer(
+        from_user_id: str,
+        to_user_id: str,
+        amount: float,
+        idempotency_key: str,
+        description: str = ""
+    ) -> Dict[str, Any]:
+        """Atomically transfer tokens between users
+        
+        Uses PostgreSQL stored procedure with:
+        - Consistent lock ordering to prevent deadlocks
+        - Idempotency key to prevent duplicates
+        - Balance validation
+        - Automatic rollback on failure
+        
+        Args:
+            from_user_id: Sender user ID
+            to_user_id: Recipient user ID
+            amount: Amount to transfer
+            idempotency_key: Unique key for this operation
+            description: Transfer description
+            
+        Returns:
+            Dict with success, transaction_id, balances, error_message
+        """
+        async with get_async_session() as db_session:
+            result = await db_session.execute(
+                text("""
+                    SELECT success, transaction_id, sender_new_balance, 
+                           receiver_new_balance, error_message
+                    FROM atomic_transfer(
+                        :from_user, :to_user, :amount, :idempotency_key, :description
+                    )
+                """),
+                {
+                    "from_user": from_user_id,
+                    "to_user": to_user_id,
+                    "amount": amount,
+                    "idempotency_key": idempotency_key,
+                    "description": description
+                }
+            )
+            row = result.fetchone()
+            await db_session.commit()
+            
+            return {
+                "success": row.success,
+                "transaction_id": row.transaction_id,
+                "sender_new_balance": float(row.sender_new_balance) if row.sender_new_balance is not None else None,
+                "receiver_new_balance": float(row.receiver_new_balance) if row.receiver_new_balance is not None else None,
+                "error_message": row.error_message
+            }
+    
+    @staticmethod
+    async def check_idempotency(idempotency_key: str) -> Optional[str]:
+        """Check if idempotency key has been used
+        
+        Returns transaction_id if duplicate, None otherwise
+        """
+        async with get_async_session() as db_session:
+            result = await db_session.execute(
+                text("""
+                    SELECT transaction_id FROM ftns_idempotency_keys
+                    WHERE idempotency_key = :key AND expires_at > NOW()
+                """),
+                {"key": idempotency_key}
+            )
+            row = result.fetchone()
+            return row.transaction_id if row else None
 
 
 class ModelQueries:
