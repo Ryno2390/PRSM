@@ -5,8 +5,7 @@ Use prsm.economy.marketplace.expanded_models instead, which provides
 comprehensive coverage of all marketplace resource types.
 
 This module is kept for backward compatibility only.
----
-
+"""
 
 import uuid
 from datetime import datetime, timezone
@@ -458,3 +457,7 @@ class MarketplaceStatsResponse(BaseModel):
     average_model_rating: Optional[Decimal]
     most_popular_category: Optional[str]
     top_providers: List[Dict[str, Any]]
+    
+    model_config = {
+        "from_attributes": True
+    }
