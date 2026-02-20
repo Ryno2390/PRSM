@@ -137,9 +137,19 @@ class LaunchGuardrails:
         
         return Decimal("Infinity"), Decimal("Infinity")
 
+import warnings
+
 class FTNSService:
     """
     FTNS Token Management Service
+    
+    .. deprecated::
+        This service is DEPRECATED due to race condition vulnerabilities.
+        Use AtomicFTNSService instead for all new code.
+        
+        Migration:
+            from prsm.economy.tokenomics.atomic_ftns_service import get_atomic_ftns_service
+            ftns = await get_atomic_ftns_service()
     
     Handles token distribution, rewards, and usage tracking for the
     PRSM AI training and collaboration ecosystem.
@@ -147,6 +157,12 @@ class FTNSService:
     
     def __init__(self):
         """Initialize FTNS service"""
+        warnings.warn(
+            "FTNSService is deprecated due to race condition vulnerabilities. "
+            "Use AtomicFTNSService from prsm.economy.tokenomics.atomic_ftns_service instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         self.user_balances: Dict[str, FTNSBalance] = {}
         self.transactions: List[FTNSTransaction] = []
         self.total_staked = Decimal('0')
@@ -160,7 +176,7 @@ class FTNSService:
             FTNSTransactionType.PIPELINE_EXECUTION: Decimal('2.0')
         }
         
-        logger.info("FTNSService initialized", reward_rates=len(self.reward_rates))
+        logger.warning("FTNSService initialized (DEPRECATED - use AtomicFTNSService instead)")
 
     def stake_tokens(self, user_id: str, amount: Decimal) -> bool:
         """Stakes tokens while enforcing Launch Guardrails (Capped Mainnet)"""
