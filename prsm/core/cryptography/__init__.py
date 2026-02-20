@@ -21,6 +21,11 @@ from .crypto_models import (
     ZKProof, PrivacyPolicy, SecureMessage, KeyUsage, PrivacyLevel,
     KeyGenerationRequest, EncryptionRequest, DecryptionRequest, ZKProofRequest
 )
+from .dag_signatures import (
+    DAGSignatureManager, KeyPair, SignatureError, InvalidSignatureError,
+    MissingSignatureError, MissingPublicKeyError,
+    create_signing_key_pair, sign_hash, verify_hash_signature
+)
 
 __all__ = [
     "KeyManager",
@@ -54,5 +59,15 @@ __all__ = [
     "KeyGenerationRequest",
     "EncryptionRequest",
     "DecryptionRequest",
-    "ZKProofRequest"
+    "ZKProofRequest",
+    # DAG Transaction Signatures
+    "DAGSignatureManager",
+    "KeyPair",
+    "SignatureError",
+    "InvalidSignatureError",
+    "MissingSignatureError",
+    "MissingPublicKeyError",
+    "create_signing_key_pair",
+    "sign_hash",
+    "verify_hash_signature",
 ]
