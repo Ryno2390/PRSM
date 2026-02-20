@@ -102,6 +102,31 @@ jobs:
           - os: macos-latest
             python-version: '3.12'
     
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: prsm_test
+          POSTGRES_USER: prsm
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -144,6 +169,10 @@ jobs:
           --junit-xml=test-results-unit.xml \
           -v \
           --timeout=300
+      env:
+        DATABASE_URL: postgresql+asyncpg://prsm:test@localhost:5432/prsm_test
+        TEST_DATABASE_URL: postgresql+asyncpg://prsm:test@localhost:5432/prsm_test
+        REDIS_URL: redis://localhost:6379/0
     
     - name: Run Integration Tests
       if: matrix.test-type == 'integration'
@@ -156,6 +185,10 @@ jobs:
           -v \
           --timeout=600 \
           -m "not slow"
+      env:
+        DATABASE_URL: postgresql+asyncpg://prsm:test@localhost:5432/prsm_test
+        TEST_DATABASE_URL: postgresql+asyncpg://prsm:test@localhost:5432/prsm_test
+        REDIS_URL: redis://localhost:6379/0
     
     - name: Upload Test Results
       uses: actions/upload-artifact@v3
