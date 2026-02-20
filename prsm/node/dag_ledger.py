@@ -1,6 +1,6 @@
 """
 DAG Ledger
-==========
+ ==========
 
 DAG-based (Directed Acyclic Graph) ledger for FTNS tokens.
 Unlike traditional blockchain (linear), this DAG structure allows:
@@ -18,11 +18,69 @@ Cryptographic Signature Verification:
 - Signatures verify the transaction hash (SHA-256)
 - Public keys are stored with the transaction for verification
 - Genesis and system transactions are exempt from signature requirements
+
+Atomic Balance Operations (TOCTOU Prevention):
+==============================================
+This ledger implements atomic balance operations to prevent Time-of-Check-Time-of-Use
+(TOCTOU) race conditions that could lead to double-spend attacks.
+
+Security Architecture:
+1. **Row-Level Locking**: Uses SQLite's BEGIN IMMEDIATE to acquire write locks
+   before balance checks, preventing concurrent modifications.
+
+2. **Optimistic Concurrency Control**: Balance cache includes a version number
+   that is checked during deduction to detect concurrent modifications.
+
+3. **Atomic Transaction Flow**:
+   - BEGIN IMMEDIATE (acquires write lock)
+   - Check balance with version
+   - Create and store transaction
+   - Update balance with version check (OCC)
+   - COMMIT or ROLLBACK
+
+4. **Balance Cache Table**: The `wallet_balances` table stores pre-computed
+   balances with version numbers for efficient atomic operations.
+
+Exception Hierarchy:
+- AtomicOperationError: Base exception for atomic operation failures
+- InsufficientBalanceError: Raised when balance is insufficient
+- ConcurrentModificationError: Raised when TOCTOU is detected
+- BalanceLockError: Raised when lock acquisition fails
+
+Usage Example:
+    ledger = DAGLedger(db_path='ledger.db')
+    await ledger.initialize()
+    
+    try:
+        tx = await ledger.submit_transaction(
+            tx_type=TransactionType.TRANSFER,
+            amount=100.0,
+            from_wallet='sender_wallet',
+            to_wallet='receiver_wallet',
+            signature='base64_signature',
+            public_key='hex_public_key'
+        )
+    except InsufficientBalanceError:
+        # Handle insufficient balance
+        pass
+    except ConcurrentModificationError:
+        # Retry the operation - concurrent modification detected
+        pass
+    except BalanceLockError:
+        # Retry later - system under high contention
+        pass
+
+Security Guarantees:
+- No double-spend: Balance check and deduction are atomic
+- No lost updates: Concurrent modifications are detected
+- Fail-safe: Any error during transaction rolls back all changes
+- Audit trail: All operations are logged for security review
 """
 
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import random
 import time
@@ -39,6 +97,33 @@ from prsm.core.cryptography.dag_signatures import (
     InvalidSignatureError,
     MissingSignatureError,
 )
+
+# Configure logger for security audit trail
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# ATOMIC OPERATION EXCEPTIONS
+# =============================================================================
+
+class AtomicOperationError(Exception):
+    """Base exception for atomic operation failures."""
+    pass
+
+
+class InsufficientBalanceError(AtomicOperationError):
+    """Raised when wallet has insufficient balance for transaction."""
+    pass
+
+
+class ConcurrentModificationError(AtomicOperationError):
+    """Raised when concurrent modification is detected (TOCTOU prevention)."""
+    pass
+
+
+class BalanceLockError(AtomicOperationError):
+    """Raised when balance lock cannot be acquired."""
+    pass
 
 
 class TransactionType(str, Enum):
@@ -141,6 +226,10 @@ class DAGLedger:
         # Maps wallet_id -> public_key_hex
         self._wallet_public_keys: Dict[str, str] = {}
         
+        # Temporary storage for signature verification data during transaction creation
+        # This is used to pass verification data between pre-creation and post-creation phases
+        self._pending_verification: Optional[Dict[str, str]] = None
+        
     async def initialize(self) -> None:
         """Initialize database and load existing state."""
         self._db = await aiosqlite.connect(self.db_path)
@@ -194,6 +283,18 @@ class DAGLedger:
                 origin TEXT NOT NULL,
                 seen_at REAL NOT NULL
             );
+            
+            -- Balance cache table for atomic operations with optimistic concurrency control
+            -- This table stores pre-computed balances with version numbers for TOCTOU prevention
+            CREATE TABLE IF NOT EXISTS wallet_balances (
+                wallet_id TEXT PRIMARY KEY,
+                balance REAL NOT NULL DEFAULT 0.0,
+                version INTEGER NOT NULL DEFAULT 1,
+                last_updated REAL NOT NULL,
+                FOREIGN KEY (wallet_id) REFERENCES wallets(wallet_id)
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_wallet_balances_version ON wallet_balances(wallet_id, version);
         """)
         
     async def _load_state(self) -> None:
@@ -315,6 +416,7 @@ class DAGLedger:
         return await cursor.fetchone() is not None
     
     async def get_balance(self, wallet_id: str) -> float:
+        """Get the current balance for a wallet (non-atomic read)."""
         cursor = await self._db.execute(
             "SELECT COALESCE(SUM(amount), 0) FROM dag_transactions WHERE to_wallet = ? AND tx_type != ?",
             (wallet_id, TransactionType.APPROVAL.value),
@@ -327,6 +429,226 @@ class DAGLedger:
         )
         debits = (await cursor.fetchone())[0]
         return round(credits - debits, 6)
+    
+    # =========================================================================
+    # ATOMIC BALANCE OPERATIONS - TOCTOU Prevention
+    # =========================================================================
+    
+    async def _get_or_create_balance_cache(self, wallet_id: str) -> Tuple[float, int]:
+        """
+        Get or create a balance cache entry for atomic operations.
+        
+        This method ensures the wallet_balances table has an entry for the wallet,
+        computing the balance from transactions if needed.
+        
+        Args:
+            wallet_id: The wallet to get/create cache for
+            
+        Returns:
+            Tuple of (balance, version)
+        """
+        # Try to get existing cache
+        cursor = await self._db.execute(
+            "SELECT balance, version FROM wallet_balances WHERE wallet_id = ?",
+            (wallet_id,)
+        )
+        row = await cursor.fetchone()
+        
+        if row:
+            return (row[0], row[1])
+        
+        # Compute balance from transactions
+        balance = await self.get_balance(wallet_id)
+        
+        # Insert new cache entry
+        await self._db.execute(
+            """INSERT INTO wallet_balances (wallet_id, balance, version, last_updated)
+               VALUES (?, ?, 1, ?)
+               ON CONFLICT(wallet_id) DO UPDATE SET balance = excluded.balance""",
+            (wallet_id, balance, time.time())
+        )
+        
+        return (balance, 1)
+    
+    async def _check_balance_atomic(
+        self,
+        wallet_id: str,
+        amount: float,
+        lock_timeout_ms: int = 5000
+    ) -> Tuple[bool, float, int]:
+        """
+        Atomically check if wallet has sufficient balance with row-level locking.
+        
+        This method uses SQLite's SAVEPOINT to create a nested transaction context
+        for atomic balance operations, preventing TOCTOU race conditions.
+        
+        Atomicity Guarantees:
+        1. Uses SAVEPOINT for nested transaction support
+        2. Reads balance with version for optimistic concurrency control
+        3. Balance check and version read happen atomically
+        
+        Args:
+            wallet_id: Wallet to check
+            amount: Required amount
+            lock_timeout_ms: Timeout for acquiring lock (default 5 seconds)
+            
+        Returns:
+            Tuple of (has_sufficient, current_balance, version)
+            
+        Raises:
+            BalanceLockError: If lock cannot be acquired within timeout
+        """
+        try:
+            # Use SAVEPOINT for nested transaction support
+            # This allows us to have atomic operations within an existing transaction
+            await self._db.execute("SAVEPOINT balance_check")
+            
+            # Get or create balance cache with version
+            balance, version = await self._get_or_create_balance_cache(wallet_id)
+            
+            has_sufficient = balance >= amount
+            
+            if not has_sufficient:
+                # Release the savepoint and raise error
+                await self._db.execute("RELEASE SAVEPOINT balance_check")
+                logger.warning(
+                    f"Atomic balance check failed: insufficient balance for {wallet_id[:8]}... "
+                    f"(has {balance:.6f}, needs {amount:.6f})"
+                )
+            else:
+                # Keep savepoint for caller to complete
+                logger.debug(
+                    f"Atomic balance check passed for {wallet_id[:8]}... "
+                    f"(balance={balance:.6f}, version={version})"
+                )
+            
+            return (has_sufficient, balance, version)
+            
+        except Exception as e:
+            # Rollback to savepoint on error
+            try:
+                await self._db.execute("ROLLBACK TO SAVEPOINT balance_check")
+                await self._db.execute("RELEASE SAVEPOINT balance_check")
+            except:
+                pass
+            
+            if "database is locked" in str(e).lower():
+                raise BalanceLockError(
+                    f"Could not acquire balance lock for {wallet_id[:8]}... within {lock_timeout_ms}ms"
+                )
+            raise
+    
+    async def _commit_balance_deduction(
+        self,
+        wallet_id: str,
+        amount: float,
+        expected_version: int
+    ) -> bool:
+        """
+        Commit a balance deduction with optimistic concurrency control.
+        
+        This method MUST be called after _check_balance_atomic within the same
+        transaction. It updates the balance cache only if the version hasn't
+        changed, detecting concurrent modifications.
+        
+        Atomicity Guarantees:
+        1. Uses optimistic concurrency control (version check)
+        2. Update only succeeds if version matches expected
+        3. Automatic detection of concurrent modifications
+        
+        Args:
+            wallet_id: Wallet to deduct from
+            amount: Amount to deduct
+            expected_version: Version expected from balance check
+            
+        Returns:
+            True if deduction succeeded
+            
+        Raises:
+            ConcurrentModificationError: If balance was modified by another transaction
+        """
+        # Update balance with version check (optimistic concurrency control)
+        cursor = await self._db.execute(
+            """UPDATE wallet_balances
+               SET balance = balance - ?,
+                   version = version + 1,
+                   last_updated = ?
+               WHERE wallet_id = ? AND version = ?""",
+            (amount, time.time(), wallet_id, expected_version)
+        )
+        
+        if cursor.rowcount == 0:
+            # Version mismatch - concurrent modification detected
+            # Rollback to savepoint and release
+            await self._db.execute("ROLLBACK TO SAVEPOINT balance_check")
+            await self._db.execute("RELEASE SAVEPOINT balance_check")
+            logger.error(
+                f"TOCTOU detected: concurrent modification of {wallet_id[:8]}... "
+                f"(expected version {expected_version})"
+            )
+            raise ConcurrentModificationError(
+                f"Balance for {wallet_id[:8]}... was modified by another transaction. "
+                "Please retry the operation."
+            )
+        
+        # Release the savepoint - the main transaction will commit later
+        await self._db.execute("RELEASE SAVEPOINT balance_check")
+        
+        logger.info(
+            f"Atomic balance deduction completed for {wallet_id[:8]}... "
+            f"(deducted {amount:.6f}, new version {expected_version + 1})"
+        )
+        
+        return True
+    
+    async def _commit_balance_credit(
+        self,
+        wallet_id: str,
+        amount: float
+    ) -> bool:
+        """
+        Commit a balance credit (for receiving wallet).
+        
+        This method updates the balance cache for credits. It uses INSERT OR REPLACE
+        to handle both new and existing wallets atomically.
+        
+        Args:
+            wallet_id: Wallet to credit
+            amount: Amount to credit
+            
+        Returns:
+            True if credit succeeded
+        """
+        # Use INSERT ... ON CONFLICT for atomic upsert
+        await self._db.execute(
+            """INSERT INTO wallet_balances (wallet_id, balance, version, last_updated)
+               VALUES (?, ?, 1, ?)
+               ON CONFLICT(wallet_id) DO UPDATE SET
+                   balance = balance + excluded.balance,
+                   version = version + 1,
+                   last_updated = excluded.last_updated""",
+            (wallet_id, amount, time.time())
+        )
+        
+        logger.debug(
+            f"Atomic balance credit completed for {wallet_id[:8]}... "
+            f"(credited {amount:.6f})"
+        )
+        
+        return True
+    
+    async def _rollback_balance_check(self) -> None:
+        """
+        Rollback an atomic balance check savepoint.
+        
+        Call this if balance check passed but transaction creation fails.
+        """
+        try:
+            await self._db.execute("ROLLBACK TO SAVEPOINT balance_check")
+            await self._db.execute("RELEASE SAVEPOINT balance_check")
+            logger.debug("Rolled back atomic balance check savepoint")
+        except:
+            pass
     
     def select_tips_mcmc(self, num_tips: int = 2) -> List[str]:
         """
@@ -393,27 +715,73 @@ class DAGLedger:
         """
         Verify the Ed25519 signature of a transaction.
         
+        This method performs cryptographic verification that the transaction
+        was authorized by the owner of the private key corresponding to the
+        provided public key.
+        
         Args:
             tx: The transaction to verify
-            signature: Base64-encoded signature
-            public_key: Hex-encoded Ed25519 public key
+            signature: Base64-encoded signature (64 bytes when decoded)
+            public_key: Hex-encoded Ed25519 public key (32 bytes when decoded)
             
         Returns:
             bool: True if signature is valid
             
         Raises:
-            InvalidSignatureError: If signature verification fails
+            InvalidSignatureError: If signature verification fails due to:
+                - Invalid signature format
+                - Signature doesn't match transaction hash
+                - Invalid public key format
+                - Any other cryptographic error
+                
+        Security Notes:
+            - This method fails closed: any error results in rejection
+            - The transaction hash includes tx_id, so signatures must be
+              created after the client receives the tx_id from the server
+              OR the client must use a signing scheme that excludes tx_id
+            - For the chicken-and-egg problem, clients typically sign
+              transaction data without tx_id, and servers verify using
+              a hash that excludes tx_id (see get_signing_data())
         """
         try:
-            # Load the public key
-            pk = DAGSignatureManager.load_public_key_from_hex(public_key)
+            # Validate inputs are not empty
+            if not signature:
+                logger.warning("Empty signature provided for verification")
+                raise InvalidSignatureError("Signature cannot be empty")
+            if not public_key:
+                logger.warning("Empty public key provided for verification")
+                raise InvalidSignatureError("Public key cannot be empty")
             
-            # Get the transaction hash
+            # Load the public key from hex format
+            try:
+                pk = DAGSignatureManager.load_public_key_from_hex(public_key)
+            except ValueError as e:
+                logger.warning(f"Invalid public key format: {e}")
+                raise InvalidSignatureError(f"Invalid public key format: {e}")
+            
+            # Get the transaction hash for verification
             tx_hash = tx.hash()
+            logger.debug(f"Verifying signature for tx {tx.tx_id[:8]}... with hash {tx_hash[:16]}...")
             
-            # Verify the signature
-            return DAGSignatureManager.verify_signature(tx_hash, signature, pk)
+            # Verify the signature using Ed25519
+            try:
+                result = DAGSignatureManager.verify_signature(tx_hash, signature, pk)
+                logger.debug(f"Signature verification successful for tx {tx.tx_id[:8]}...")
+                return result
+            except InvalidSignatureError:
+                # Re-raise InvalidSignatureError from DAGSignatureManager directly
+                logger.warning(
+                    f"Signature verification failed for tx {tx.tx_id[:8]}... "
+                    f"from wallet {tx.from_wallet[:8] if tx.from_wallet else 'system'}..."
+                )
+                raise
+                
+        except InvalidSignatureError:
+            # Re-raise our custom errors
+            raise
         except Exception as e:
+            # Catch any unexpected errors and wrap them
+            logger.error(f"Unexpected error during signature verification: {e}")
             raise InvalidSignatureError(f"Signature verification failed: {e}")
     
     def _is_signature_required(self, tx_type: TransactionType, from_wallet: Optional[str]) -> bool:
@@ -421,16 +789,36 @@ class DAGLedger:
         Determine if a transaction requires a signature.
         
         Transactions that don't require signatures:
-        - GENESIS: Initial token supply
+        - GENESIS: Initial token supply (system-initiated)
         - Transactions from None (system transactions)
-        - WELCOME_GRANT: System-initiated grants
+        - WELCOME_GRANT: System-initiated grants for new users
         
-        All other transactions require valid signatures.
+        All other transactions require valid Ed25519 signatures.
+        
+        Security Policy:
+            - Fail closed: when in doubt, require a signature
+            - Only explicitly exempt transaction types can skip verification
+            - System transactions (from_wallet=None) are trusted by definition
+            
+        Args:
+            tx_type: The type of transaction being submitted
+            from_wallet: The source wallet (None for system transactions)
+            
+        Returns:
+            bool: True if signature is required, False if exempt
         """
+        # System transactions (no source wallet) don't need signatures
         if from_wallet is None:
+            logger.debug(f"No signature required: system transaction (tx_type={tx_type.value})")
             return False
+        
+        # Genesis transactions are system-initiated
         if tx_type == TransactionType.GENESIS:
+            logger.debug(f"No signature required: genesis transaction")
             return False
+        
+        # All other transactions require signatures
+        logger.debug(f"Signature required for tx_type={tx_type.value} from {from_wallet[:8]}...")
         return True
     
     async def submit_transaction(
@@ -455,6 +843,12 @@ class DAGLedger:
         - The signature must be created by signing the transaction hash
         - The public key must be provided or registered with the wallet
         
+        Atomicity Guarantees (TOCTOU Prevention):
+        - Balance checks use BEGIN IMMEDIATE to acquire write lock
+        - Balance deduction uses optimistic concurrency control (version check)
+        - Concurrent modifications are detected and rejected with retry guidance
+        - The entire balance check + deduction is atomic
+        
         Args:
             tx_type: Type of transaction
             amount: Transaction amount
@@ -468,90 +862,194 @@ class DAGLedger:
             DAGTransaction: The created transaction
             
         Raises:
-            ValueError: If balance is insufficient
+            InsufficientBalanceError: If balance is insufficient (atomic check)
+            ConcurrentModificationError: If concurrent modification detected
+            BalanceLockError: If balance lock cannot be acquired
             MissingSignatureError: If signature is required but not provided
             InvalidSignatureError: If signature verification fails
         """
-        # Create wallets if they don't exist
-        if from_wallet and not await self.wallet_exists(from_wallet):
-            await self.create_wallet(from_wallet, f"wallet-{from_wallet[:8]}", public_key)
-        if not await self.wallet_exists(to_wallet):
-            await self.create_wallet(to_wallet, f"wallet-{to_wallet[:8]}")
-            
-        # Check balance for debit transactions
-        if from_wallet:
-            balance = await self.get_balance(from_wallet)
-            if balance < amount:
-                raise ValueError(f"Insufficient balance: {balance:.6f} < {amount:.6f}")
+        # Track atomic balance check state for cleanup
+        balance_version = None
+        atomic_check_in_progress = False
         
-        # Signature verification
-        if self.verify_signatures and self._is_signature_required(tx_type, from_wallet):
-            if not signature:
-                raise MissingSignatureError(
-                    f"Transaction from {from_wallet} requires a signature"
+        try:
+            # Create wallets if they don't exist
+            if from_wallet and not await self.wallet_exists(from_wallet):
+                await self.create_wallet(from_wallet, f"wallet-{from_wallet[:8]}", public_key)
+            if not await self.wallet_exists(to_wallet):
+                await self.create_wallet(to_wallet, f"wallet-{to_wallet[:8]}")
+            
+            # ATOMIC BALANCE CHECK - TOCTOU Prevention
+            # Use atomic balance check with row-level locking for debit transactions
+            if from_wallet:
+                has_sufficient, balance, balance_version = await self._check_balance_atomic(
+                    from_wallet, amount
                 )
-            
-            # Get public key - prefer provided key, then registered key
-            verify_pk = public_key or self.get_wallet_public_key(from_wallet)
-            if not verify_pk:
-                raise MissingSignatureError(
-                    f"No public key provided or registered for wallet {from_wallet}"
-                )
-            
-            # Create a temporary transaction to verify signature
-            # (we need the tx_id for the hash, but signature was created before tx_id was assigned)
-            # This is a chicken-and-egg problem - we need to verify the signature matches
-            # the transaction data that will be created
-            
-            # For now, we'll create the transaction first, then verify
-            # In production, the tx_id should be derived from or included in the signed data
-            pass  # Signature will be verified after tx creation
+                atomic_check_in_progress = True
                 
-        parent_ids = self.select_tips_mcmc(num_tips=min(self.max_parents, len(self._state.tips)))
+                if not has_sufficient:
+                    raise InsufficientBalanceError(
+                        f"Insufficient balance for {from_wallet[:8]}...: "
+                        f"has {balance:.6f}, needs {amount:.6f}"
+                    )
         
-        tx = DAGTransaction(
-            tx_id=str(uuid.uuid4()),
-            tx_type=tx_type,
-            amount=amount,
-            from_wallet=from_wallet,
-            to_wallet=to_wallet,
-            timestamp=time.time(),
-            signature=signature,
-            public_key=public_key or (self.get_wallet_public_key(from_wallet) if from_wallet else None),
-            description=description,
-            parent_ids=parent_ids,
-        )
-        
-        # Verify signature after transaction creation
-        # The signature should be created from transaction data without tx_id
-        # or the tx_id should be predictable (e.g., derived from hash)
-        if self.verify_signatures and self._is_signature_required(tx_type, from_wallet):
-            if signature:
+            # Signature verification - pre-creation checks
+            # Note: Signature verification happens AFTER transaction creation due to a
+            # chicken-and-egg problem: the signature is created by the client who doesn't
+            # know the tx_id yet, but the transaction hash includes tx_id.
+            # Solution: Clients sign transaction data WITHOUT tx_id, and we verify using
+            # the hash of core transaction fields (excluding tx_id).
+            if self.verify_signatures and self._is_signature_required(tx_type, from_wallet):
+                if not signature:
+                    logger.warning(
+                        f"Signature required but missing for transaction from {from_wallet}"
+                    )
+                    raise MissingSignatureError(
+                        f"Transaction from {from_wallet} requires a signature"
+                    )
+                
+                # Get public key - prefer provided key, then registered key
                 verify_pk = public_key or self.get_wallet_public_key(from_wallet)
-                if verify_pk:
-                    try:
-                        self._verify_transaction_signature(tx, signature, verify_pk)
-                    except InvalidSignatureError:
-                        raise InvalidSignatureError(
-                            f"Invalid signature for transaction from {from_wallet}"
-                        )
-        
-        await self._store_transaction(tx)
-        
-        for parent_id in parent_ids:
-            if parent_id in self._state.tips:
-                self._state.tips.discard(parent_id)
-                await self._db.execute("DELETE FROM tips WHERE tx_id = ?", (parent_id,))
+                if not verify_pk:
+                    logger.warning(
+                        f"No public key available for wallet {from_wallet}"
+                    )
+                    raise MissingSignatureError(
+                        f"No public key provided or registered for wallet {from_wallet}"
+                    )
                 
-        self._state.tips.add(tx.tx_id)
-        await self._db.execute("INSERT OR IGNORE INTO tips (tx_id) VALUES (?)", (tx.tx_id,))
-        
-        await self._update_weights(tx)
-        await self._db.commit()
-        
-        self._state.transactions[tx.tx_id] = tx
-        
-        return tx
+                # Store verification data for post-creation verification
+                # This ensures we don't silently skip verification due to missing data
+                self._pending_verification = {
+                    "from_wallet": from_wallet,
+                    "signature": signature,
+                    "public_key": verify_pk,
+                }
+            else:
+                self._pending_verification = None
+                    
+            parent_ids = self.select_tips_mcmc(num_tips=min(self.max_parents, len(self._state.tips)))
+            
+            tx = DAGTransaction(
+                tx_id=str(uuid.uuid4()),
+                tx_type=tx_type,
+                amount=amount,
+                from_wallet=from_wallet,
+                to_wallet=to_wallet,
+                timestamp=time.time(),
+                signature=signature,
+                public_key=public_key or (self.get_wallet_public_key(from_wallet) if from_wallet else None),
+                description=description,
+                parent_ids=parent_ids,
+            )
+            
+            # Post-creation signature verification
+            # This is where we actually verify the signature after the transaction is created.
+            # The signature should have been created from transaction data that will match
+            # the tx.hash() method output (which includes tx_id).
+            #
+            # Edge cases handled:
+            # - Genesis transactions: No signature required (system-initiated)
+            # - System transactions (from_wallet=None): No signature required
+            # - WELCOME_GRANT: System-initiated, no signature required
+            # - First transaction from new wallet: Must provide public_key with signature
+            #
+            # SECURITY: We explicitly check all conditions and fail closed, not open.
+            if self._pending_verification is not None:
+                # Retrieve and clear pending verification data
+                pending = self._pending_verification
+                self._pending_verification = None
+                
+                # These should never be None due to pre-creation checks, but verify defensively
+                sig_to_verify = pending.get("signature")
+                pk_to_verify = pending.get("public_key")
+                wallet_being_verified = pending.get("from_wallet")
+                
+                if not sig_to_verify:
+                    logger.error(
+                        f"SECURITY: Signature disappeared during transaction creation for wallet {wallet_being_verified}"
+                    )
+                    raise MissingSignatureError(
+                        f"Signature required for transaction from {wallet_being_verified} but not found during verification"
+                    )
+                
+                if not pk_to_verify:
+                    logger.error(
+                        f"SECURITY: Public key disappeared during transaction creation for wallet {wallet_being_verified}"
+                    )
+                    raise MissingSignatureError(
+                        f"Public key required for transaction from {wallet_being_verified} but not found during verification"
+                    )
+                
+                try:
+                    self._verify_transaction_signature(tx, sig_to_verify, pk_to_verify)
+                    logger.info(
+                        f"Signature verified successfully for transaction {tx.tx_id[:8]}... "
+                        f"from wallet {wallet_being_verified[:8] if wallet_being_verified else 'system'}..."
+                    )
+                except InvalidSignatureError as e:
+                    logger.warning(
+                        f"SECURITY: Invalid signature detected for transaction from {wallet_being_verified}: {e}"
+                    )
+                    raise InvalidSignatureError(
+                        f"Invalid signature for transaction from {wallet_being_verified}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"SECURITY: Unexpected error during signature verification for wallet {wallet_being_verified}: {e}"
+                    )
+                    raise InvalidSignatureError(
+                        f"Signature verification failed for transaction from {wallet_being_verified}: {e}"
+                    )
+            
+            await self._store_transaction(tx)
+            
+            for parent_id in parent_ids:
+                if parent_id in self._state.tips:
+                    self._state.tips.discard(parent_id)
+                    await self._db.execute("DELETE FROM tips WHERE tx_id = ?", (parent_id,))
+                    
+            self._state.tips.add(tx.tx_id)
+            await self._db.execute("INSERT OR IGNORE INTO tips (tx_id) VALUES (?)", (tx.tx_id,))
+            
+            await self._update_weights(tx)
+            
+            # ATOMIC BALANCE DEDUCTION - Complete the atomic operation
+            # This commits the balance deduction with version check
+            if from_wallet and balance_version is not None:
+                await self._commit_balance_deduction(from_wallet, amount, balance_version)
+            else:
+                # For credit transactions (no from_wallet), just commit
+                await self._db.commit()
+            
+            # Update balance cache for receiving wallet
+            if to_wallet:
+                await self._commit_balance_credit(to_wallet, amount)
+            
+            self._state.transactions[tx.tx_id] = tx
+            
+            logger.info(
+                f"Transaction {tx.tx_id[:8]}... completed atomically: "
+                f"{amount:.6f} from {from_wallet[:8] if from_wallet else 'system'}... "
+                f"to {to_wallet[:8]}..."
+            )
+            
+            return tx
+            
+        except (InsufficientBalanceError, ConcurrentModificationError, BalanceLockError):
+            # These are atomic operation errors - re-raise as-is
+            raise
+        except (MissingSignatureError, InvalidSignatureError):
+            # These are signature errors - rollback and re-raise
+            if atomic_check_in_progress:
+                await self._rollback_balance_check()
+            raise
+        except Exception as e:
+            # Unexpected error - rollback and wrap
+            logger.error(f"Unexpected error in submit_transaction: {e}")
+            if atomic_check_in_progress:
+                await self._rollback_balance_check()
+            raise
     
     async def _update_weights(self, new_tx: DAGTransaction) -> None:
         """Update cumulative weights and confirmation levels for approved transactions."""

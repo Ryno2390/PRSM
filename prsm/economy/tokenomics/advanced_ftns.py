@@ -1,11 +1,17 @@
 """
 PRSM Advanced FTNS Economy
 Enhanced tokenomics features including dynamic pricing, dividend distribution, and research impact tracking
+
+Migration Notice:
+- Migrated from deprecated ftns_service to AtomicFTNSService
+- All balance operations now use atomic transactions with idempotency keys
+- Race condition vulnerabilities have been addressed
 """
 
 import asyncio
 import math
 import statistics
+import structlog
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, getcontext
@@ -20,7 +26,9 @@ from prsm.core.models import (
     ImpactMetrics, DividendDistribution, RoyaltyPayment,
     FTNSTransaction, FTNSBalance
 )
-from .ftns_service import ftns_service
+from .atomic_ftns_service import get_atomic_ftns_service, AtomicFTNSService
+
+logger = structlog.get_logger(__name__)
 
 # === Advanced FTNS Configuration ===
 
@@ -51,6 +59,10 @@ class AdvancedFTNSEconomy:
     """
     Advanced FTNS economy features for sophisticated tokenomics
     Includes dynamic pricing, dividend distribution, and research impact tracking
+    
+    Migration Note:
+        Uses AtomicFTNSService for all FTNS operations to prevent race conditions.
+        All balance operations use atomic transactions with idempotency keys.
     """
     
     def __init__(self):
@@ -71,6 +83,9 @@ class AdvancedFTNSEconomy:
         self.royalty_payments: Dict[UUID, RoyaltyPayment] = {}
         self.content_usage_log: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         
+        # Atomic FTNS service (initialized lazily)
+        self._ftns_service: Optional[AtomicFTNSService] = None
+        
         # Performance statistics
         self.economy_stats = {
             "total_context_purchased": 0,
@@ -87,7 +102,13 @@ class AdvancedFTNSEconomy:
         self._dividend_lock = asyncio.Lock()
         self._royalty_lock = asyncio.Lock()
         
-        print("💰 AdvancedFTNSEconomy initialized")
+        logger.info("AdvancedFTNSEconomy initialized")
+    
+    async def _get_ftns_service(self) -> AtomicFTNSService:
+        """Get or initialize the atomic FTNS service."""
+        if self._ftns_service is None:
+            self._ftns_service = await get_atomic_ftns_service()
+        return self._ftns_service
     
     
     async def calculate_context_pricing(self, demand: float, supply: float) -> float:
@@ -143,12 +164,15 @@ class AdvancedFTNSEconomy:
                 # Update statistics
                 self.economy_stats["price_calculations"] += 1
                 
-                print(f"💱 Context pricing: demand={demand:.2f}, supply={supply:.2f}, price={final_price:.4f} FTNS")
+                logger.info("Context pricing calculated",
+                           demand=demand,
+                           supply=supply,
+                           price=final_price)
                 
                 return final_price
                 
         except Exception as e:
-            print(f"❌ Error calculating context pricing: {str(e)}")
+            logger.error("Error calculating context pricing", error=str(e))
             return BASE_CONTEXT_PRICE
     
     
@@ -170,7 +194,8 @@ class AdvancedFTNSEconomy:
                 # Check if dividends already distributed this quarter
                 if current_quarter in self.dividend_distributions:
                     existing = self.dividend_distributions[current_quarter]
-                    print(f"📊 Dividends already distributed for {current_quarter}")
+                    logger.info("Dividends already distributed for quarter",
+                               quarter=current_quarter)
                     return existing
                 
                 # Calculate total dividend pool
@@ -199,14 +224,14 @@ class AdvancedFTNSEconomy:
                     status="processing"
                 )
                 
-                # Execute distributions
+                # Execute distributions using atomic operations
                 successful_distributions = 0
                 for holder_id, amount in distribution_amounts.items():
                     # Apply bonus multiplier
                     bonus = bonus_multipliers.get(holder_id, 1.0)
                     final_amount = amount * bonus
                     
-                    # Distribute to holder
+                    # Distribute to holder using atomic operation
                     success = await self._distribute_to_holder(holder_id, final_amount, current_quarter)
                     if success:
                         successful_distributions += 1
@@ -224,12 +249,16 @@ class AdvancedFTNSEconomy:
                 self.economy_stats["dividend_distributions"] += 1
                 self.economy_stats["total_dividends_distributed"] += total_pool
                 
-                print(f"💰 Distributed {total_pool:.2f} FTNS dividends to {successful_distributions}/{len(distribution_amounts)} holders")
+                logger.info("Dividends distributed",
+                           quarter=current_quarter,
+                           total_pool=total_pool,
+                           successful=successful_distributions,
+                           total_holders=len(distribution_amounts))
                 
                 return distribution
                 
         except Exception as e:
-            print(f"❌ Error distributing dividends: {str(e)}")
+            logger.error("Error distributing dividends", error=str(e))
             return DividendDistribution(
                 quarter=self._get_current_quarter(),
                 total_pool=0.0,
@@ -272,12 +301,16 @@ class AdvancedFTNSEconomy:
             # Update global statistics
             self.economy_stats["total_research_impact_value"] += impact_score
             
-            print(f"📊 Research impact for {research_cid[:8]}...: {impact_score:.2f} points")
+            logger.info("Research impact tracked",
+                       research_cid=research_cid[:8],
+                       impact_score=impact_score)
             
             return metrics
             
         except Exception as e:
-            print(f"❌ Error tracking research impact: {str(e)}")
+            logger.error("Error tracking research impact",
+                        research_cid=research_cid,
+                        error=str(e))
             return ImpactMetrics(content_id=research_cid)
     
     
@@ -315,12 +348,14 @@ class AdvancedFTNSEconomy:
                 self.economy_stats["royalty_payments"] += royalty_results["payments_processed"]
                 self.economy_stats["total_royalties_paid"] += royalty_results["total_amount_paid"]
                 
-                print(f"💎 Processed {royalty_results['payments_processed']} royalty payments totaling {royalty_results['total_amount_paid']:.2f} FTNS")
+                logger.info("Royalty payments processed",
+                           payments_count=royalty_results["payments_processed"],
+                           total_amount=royalty_results["total_amount_paid"])
                 
                 return royalty_results
                 
         except Exception as e:
-            print(f"❌ Error implementing royalty system: {str(e)}")
+            logger.error("Error implementing royalty system", error=str(e))
             return {
                 "payments_processed": 0,
                 "total_amount_paid": 0.0,
@@ -407,15 +442,16 @@ class AdvancedFTNSEconomy:
     async def _filter_eligible_holders(self, token_holders: List[str]) -> List[str]:
         """Filter token holders eligible for dividends"""
         eligible = []
+        ftns = await self._get_ftns_service()
         
         for holder_id in token_holders:
             # Check minimum holding period (simulated)
             holding_period_days = 45  # Simulated
             
-            # Check minimum balance (simulated)  
-            balance = await ftns_service.get_user_balance(holder_id)
+            # Check minimum balance using atomic service
+            balance = await ftns.get_balance(holder_id)
             
-            if holding_period_days >= MINIMUM_HOLDING_PERIOD_DAYS and balance.balance >= 1.0:
+            if holding_period_days >= MINIMUM_HOLDING_PERIOD_DAYS and balance.balance >= Decimal("1.0"):
                 eligible.append(holder_id)
         
         return eligible
@@ -428,19 +464,21 @@ class AdvancedFTNSEconomy:
         if not eligible_holders:
             return distribution_amounts
         
+        ftns = await self._get_ftns_service()
+        
         # Get balances for proportional distribution
-        total_eligible_balance = 0.0
+        total_eligible_balance = Decimal("0.0")
         holder_balances = {}
         
         for holder_id in eligible_holders:
-            balance = await ftns_service.get_user_balance(holder_id)
+            balance = await ftns.get_balance(holder_id)
             holder_balances[holder_id] = balance.balance
             total_eligible_balance += balance.balance
         
         # Calculate proportional amounts
         for holder_id in eligible_holders:
             if total_eligible_balance > 0:
-                proportion = holder_balances[holder_id] / total_eligible_balance
+                proportion = float(holder_balances[holder_id] / total_eligible_balance)
                 amount = total_pool * proportion
                 distribution_amounts[holder_id] = amount
         
@@ -450,6 +488,7 @@ class AdvancedFTNSEconomy:
     async def _calculate_bonus_multipliers(self, eligible_holders: List[str]) -> Dict[str, float]:
         """Calculate bonus multipliers for holders"""
         bonus_multipliers = {}
+        ftns = await self._get_ftns_service()
         
         for holder_id in eligible_holders:
             # Base multiplier
@@ -461,7 +500,7 @@ class AdvancedFTNSEconomy:
                 multiplier *= DIVIDEND_BONUS_MULTIPLIER
             
             # High balance bonus (simulated)
-            balance = await ftns_service.get_user_balance(holder_id)
+            balance = await ftns.get_balance(holder_id)
             if balance.balance >= 10000:  # 10K FTNS
                 multiplier *= 1.1
             
@@ -471,17 +510,42 @@ class AdvancedFTNSEconomy:
     
     
     async def _distribute_to_holder(self, holder_id: str, amount: float, quarter: str) -> bool:
-        """Distribute dividend to individual holder"""
+        """
+        Distribute dividend to individual holder using atomic operations.
+        
+        Uses idempotency keys to prevent duplicate distributions.
+        """
         try:
-            # Create transaction record
-            transaction_success = await ftns_service.reward_contribution(
-                holder_id, "dividend_distribution", amount
+            ftns = await self._get_ftns_service()
+            
+            # Generate idempotency key for this distribution
+            idempotency_key = f"dividend:{quarter}:{holder_id}"
+            
+            # Use atomic mint for distribution
+            result = await ftns.mint_tokens_atomic(
+                to_user_id=holder_id,
+                amount=Decimal(str(amount)),
+                idempotency_key=idempotency_key,
+                description=f"Dividend distribution for {quarter}",
+                metadata={
+                    "distribution_type": "dividend",
+                    "quarter": quarter
+                }
             )
             
-            return transaction_success
+            if not result.success:
+                logger.warning("Failed to distribute dividend",
+                              holder_id=holder_id,
+                              quarter=quarter,
+                              error=result.error_message)
+            
+            return result.success
             
         except Exception as e:
-            print(f"⚠️ Failed to distribute to {holder_id}: {str(e)}")
+            logger.error("Failed to distribute to holder",
+                        holder_id=holder_id,
+                        quarter=quarter,
+                        error=str(e))
             return False
     
     
@@ -535,7 +599,11 @@ class AdvancedFTNSEconomy:
     
     
     async def _process_royalty_payment(self, usage_record: Dict[str, Any]) -> Dict[str, Any]:
-        """Process individual royalty payment"""
+        """
+        Process individual royalty payment using atomic operations.
+        
+        Uses idempotency keys to prevent duplicate payments.
+        """
         try:
             content_id = usage_record.get("content_id")
             creator_id = usage_record.get("creator_id")
@@ -578,17 +646,36 @@ class AdvancedFTNSEconomy:
                 status="pending"
             )
             
-            # Execute payment
-            payment_success = await ftns_service.reward_contribution(
-                creator_id, f"royalty_{usage_type}", total_amount
+            # Execute payment using atomic mint
+            ftns = await self._get_ftns_service()
+            idempotency_key = f"royalty:{royalty_payment.payment_id}"
+            
+            result = await ftns.mint_tokens_atomic(
+                to_user_id=creator_id,
+                amount=Decimal(str(total_amount)),
+                idempotency_key=idempotency_key,
+                description=f"Royalty payment for {usage_type} - {content_id[:8]}",
+                metadata={
+                    "payment_type": "royalty",
+                    "content_id": content_id,
+                    "usage_type": usage_type,
+                    "impact_multiplier": impact_multiplier,
+                    "quality_score": quality_score
+                }
             )
             
-            if payment_success:
+            if result.success:
                 royalty_payment.status = "paid"
                 royalty_payment.payment_date = datetime.now(timezone.utc)
                 
                 # Store payment record
                 self.royalty_payments[royalty_payment.payment_id] = royalty_payment
+                
+                logger.info("Royalty payment processed",
+                           payment_id=royalty_payment.payment_id,
+                           creator_id=creator_id,
+                           amount=total_amount,
+                           usage_type=usage_type)
                 
                 return {
                     "success": True,
@@ -599,9 +686,14 @@ class AdvancedFTNSEconomy:
                 }
             else:
                 royalty_payment.status = "failed"
-                return {"success": False, "error": "Payment execution failed"}
+                logger.warning("Royalty payment failed",
+                              payment_id=royalty_payment.payment_id,
+                              creator_id=creator_id,
+                              error=result.error_message)
+                return {"success": False, "error": result.error_message or "Payment execution failed"}
                 
         except Exception as e:
+            logger.error("Error processing royalty payment", error=str(e))
             return {"success": False, "error": str(e)}
 
 

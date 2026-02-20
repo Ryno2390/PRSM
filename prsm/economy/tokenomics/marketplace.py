@@ -1,11 +1,17 @@
 """
 PRSM Model Marketplace
 Facilitates model rentals, transactions, and marketplace operations
+
+Migration Notice:
+- Migrated from deprecated ftns_service to AtomicFTNSService
+- All balance operations now use atomic transactions with idempotency keys
+- Race condition vulnerabilities have been addressed
 """
 
 import asyncio
 import math
 import random
+import structlog
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, getcontext
@@ -21,7 +27,9 @@ from prsm.core.models import (
     FTNSTransaction, FTNSBalance
 )
 from prsm.core.safety.monitor import SafetyMonitor
-from .ftns_service import ftns_service
+from .atomic_ftns_service import get_atomic_ftns_service, AtomicFTNSService
+
+logger = structlog.get_logger(__name__)
 
 # === Marketplace Configuration ===
 
@@ -47,6 +55,10 @@ class ModelMarketplace:
     """
     Model marketplace for renting and trading AI models
     Handles listings, transactions, payments, and platform operations
+    
+    Migration Note:
+        Uses AtomicFTNSService for all FTNS operations to prevent race conditions.
+        All balance operations use atomic transactions with idempotency keys.
     """
     
     def __init__(self):
@@ -62,6 +74,9 @@ class ModelMarketplace:
         
         # Safety integration
         self.safety_monitor = SafetyMonitor()
+        
+        # Atomic FTNS service (initialized lazily)
+        self._ftns_service: Optional[AtomicFTNSService] = None
         
         # Performance statistics
         self.marketplace_stats = {
@@ -79,7 +94,13 @@ class ModelMarketplace:
         self._listings_lock = asyncio.Lock()
         self._transactions_lock = asyncio.Lock()
         
-        print("🏪 ModelMarketplace initialized")
+        logger.info("ModelMarketplace initialized")
+    
+    async def _get_ftns_service(self) -> AtomicFTNSService:
+        """Get or initialize the atomic FTNS service."""
+        if self._ftns_service is None:
+            self._ftns_service = await get_atomic_ftns_service()
+        return self._ftns_service
     
     
     async def list_model_for_rent(self, model_id: str, pricing: PricingModel, 
@@ -107,11 +128,24 @@ class ModelMarketplace:
                 if not safety_check:
                     raise ValueError("Model failed safety validation")
                 
-                # Charge listing fee (simplified - charge some context units for listing)
-                listing_fee_context_units = 1  # Charge 1 context unit for listing fee
-                listing_fee_paid = await ftns_service.charge_context_access(owner_id, listing_fee_context_units)
-                if not listing_fee_paid:
-                    raise ValueError("Insufficient FTNS balance for listing fee")
+                # Charge listing fee using atomic FTNS service
+                ftns = await self._get_ftns_service()
+                listing_fee = Decimal(str(LISTING_FEE))
+                idempotency_key = f"listing_fee:{owner_id}:{model_id}:{uuid4().hex[:8]}"
+                
+                fee_result = await ftns.deduct_tokens_atomic(
+                    user_id=owner_id,
+                    amount=listing_fee,
+                    idempotency_key=idempotency_key,
+                    description=f"Marketplace listing fee for model {model_id}",
+                    metadata={"model_id": model_id, "fee_type": "listing"}
+                )
+                
+                if not fee_result.success:
+                    logger.warning("Insufficient balance for listing fee",
+                                  owner_id=owner_id, model_id=model_id,
+                                  error=fee_result.error_message)
+                    raise ValueError(f"Insufficient FTNS balance for listing fee: {fee_result.error_message}")
                 
                 # Create marketplace listing
                 listing = MarketplaceListing(
@@ -136,12 +170,18 @@ class ModelMarketplace:
                 self.marketplace_stats["active_listings"] += 1
                 self.marketplace_stats["platform_fees_collected"] += LISTING_FEE
                 
-                print(f"📋 Listed model {model_id} for rent: {listing.listing_id}")
+                logger.info("Model listed for rent",
+                           model_id=model_id,
+                           listing_id=str(listing.listing_id),
+                           owner_id=owner_id)
                 
                 return listing
                 
         except Exception as e:
-            print(f"❌ Error listing model for rent: {str(e)}")
+            logger.error("Error listing model for rent",
+                        model_id=model_id,
+                        owner_id=owner_id,
+                        error=str(e))
             raise
     
     
@@ -186,12 +226,17 @@ class ModelMarketplace:
                 # Calculate escrow amount
                 escrow_amount = transaction_amount * ESCROW_PERCENTAGE
                 
-                # Check buyer balance
-                buyer_balance = await ftns_service.get_user_balance(buyer_id)
-                total_required = transaction_amount + platform_fee + escrow_amount
+                # Check buyer balance using atomic service
+                ftns = await self._get_ftns_service()
+                buyer_balance = await ftns.get_balance(buyer_id)
+                total_required = Decimal(str(transaction_amount + platform_fee + escrow_amount))
                 
-                if buyer_balance.balance < total_required:
-                    raise ValueError(f"Insufficient balance. Required: {total_required}, Available: {buyer_balance.balance}")
+                if buyer_balance.available_balance < total_required:
+                    logger.warning("Insufficient balance for transaction",
+                                  buyer_id=buyer_id,
+                                  required=float(total_required),
+                                  available=float(buyer_balance.available_balance))
+                    raise ValueError(f"Insufficient balance. Required: {total_required}, Available: {buyer_balance.available_balance}")
                 
                 # Create transaction record
                 transaction = MarketplaceTransaction(
@@ -206,7 +251,7 @@ class ModelMarketplace:
                     status="pending"
                 )
                 
-                # Execute payment
+                # Execute payment using atomic operations
                 payment_success = await self._execute_transaction_payment(transaction)
                 
                 if payment_success:
@@ -234,7 +279,11 @@ class ModelMarketplace:
                         self.marketplace_stats["total_revenue"] / total_transactions
                     )
                     
-                    print(f"💰 Transaction completed: {buyer_id} → {seller_id}, {transaction_amount:.2f} FTNS")
+                    logger.info("Transaction completed",
+                               buyer_id=buyer_id,
+                               seller_id=seller_id,
+                               amount=transaction_amount,
+                               transaction_id=str(transaction.transaction_id))
                     
                 else:
                     transaction.status = "failed"
@@ -243,7 +292,11 @@ class ModelMarketplace:
                 return transaction
                 
         except Exception as e:
-            print(f"❌ Error facilitating transaction: {str(e)}")
+            logger.error("Error facilitating transaction",
+                        buyer_id=buyer_id,
+                        seller_id=seller_id,
+                        listing_id=str(listing_id),
+                        error=str(e))
             raise
     
     
@@ -321,11 +374,13 @@ class ModelMarketplace:
             return True
             
         except Exception as e:
-            print(f"⚠️ Error updating model performance: {str(e)}")
+            logger.error("Error updating model performance",
+                        model_id=model_id,
+                        error=str(e))
             return False
     
     
-    async def rate_transaction(self, transaction_id: UUID, rater_id: str, 
+    async def rate_transaction(self, transaction_id: UUID, rater_id: str,
                              rating: float, review: str = "") -> bool:
         """Rate a completed transaction"""
         try:
@@ -347,12 +402,18 @@ class ModelMarketplace:
             # Update user satisfaction score
             await self._update_user_satisfaction_score()
             
-            print(f"⭐ Transaction {transaction_id} rated: {rating}/5.0")
+            logger.info("Transaction rated",
+                       transaction_id=str(transaction_id),
+                       rating=rating,
+                       rater_id=rater_id,
+                       rated_user=rated_user)
             
             return True
             
         except Exception as e:
-            print(f"⚠️ Error rating transaction: {str(e)}")
+            logger.error("Error rating transaction",
+                        transaction_id=str(transaction_id),
+                        error=str(e))
             return False
     
     
@@ -465,58 +526,91 @@ class ModelMarketplace:
     
     
     async def _execute_transaction_payment(self, transaction: MarketplaceTransaction) -> bool:
-        """Execute the payment for a transaction"""
+        """
+        Execute the payment for a transaction using atomic FTNS operations.
+        
+        This method uses atomic transfers to prevent race conditions during
+        payment processing. All operations use idempotency keys for safety.
+        """
         try:
-            # Simplified context unit charges for marketplace transactions
-            transaction_context_units = max(1, int(transaction.amount))
-            fee_context_units = 1  # Simple fee
-            escrow_context_units = 1  # Simple escrow
+            ftns = await self._get_ftns_service()
             
-            # Charge buyer for transaction amount
-            transaction_success = await ftns_service.charge_context_access(
-                transaction.buyer_id, transaction_context_units
+            # Calculate amounts
+            transaction_amount = Decimal(str(transaction.amount))
+            platform_fee = Decimal(str(transaction.platform_fee))
+            escrow_amount = Decimal(str(transaction.escrow_amount))
+            total_deduction = transaction_amount + platform_fee + escrow_amount
+            seller_amount = Decimal(str(transaction.amount * CREATOR_REVENUE_SHARE))
+            
+            # Generate unique idempotency keys for each operation
+            tx_id_short = str(transaction.transaction_id)[:8]
+            
+            # Step 1: Deduct total amount from buyer atomically
+            buyer_deduct_key = f"marketplace_tx:{transaction.transaction_id}:buyer_deduct"
+            buyer_result = await ftns.deduct_tokens_atomic(
+                user_id=transaction.buyer_id,
+                amount=total_deduction,
+                idempotency_key=buyer_deduct_key,
+                description=f"Marketplace transaction {transaction.transaction_id}",
+                metadata={
+                    "transaction_id": str(transaction.transaction_id),
+                    "transaction_type": transaction.transaction_type,
+                    "listing_id": str(transaction.listing_id)
+                }
             )
             
-            if not transaction_success:
+            if not buyer_result.success:
+                logger.warning("Failed to deduct from buyer",
+                              transaction_id=str(transaction.transaction_id),
+                              buyer_id=transaction.buyer_id,
+                              error=buyer_result.error_message)
                 return False
             
-            # Charge platform fee
-            fee_success = await ftns_service.charge_context_access(
-                transaction.buyer_id, fee_context_units
+            # Step 2: Transfer seller amount atomically
+            seller_transfer_key = f"marketplace_tx:{transaction.transaction_id}:seller_transfer"
+            seller_result = await ftns.mint_tokens_atomic(
+                to_user_id=transaction.seller_id,
+                amount=seller_amount,
+                idempotency_key=seller_transfer_key,
+                description=f"Marketplace sale payment for {transaction.transaction_id}",
+                metadata={
+                    "transaction_id": str(transaction.transaction_id),
+                    "buyer_id": transaction.buyer_id,
+                    "sale_type": "marketplace_sale"
+                }
             )
             
-            if not fee_success:
-                # Refund transaction amount if fee charging fails
-                await ftns_service.reward_contribution(
-                    transaction.buyer_id, "refund", transaction.amount
+            if not seller_result.success:
+                # Attempt to refund buyer
+                refund_key = f"marketplace_tx:{transaction.transaction_id}:refund"
+                await ftns.mint_tokens_atomic(
+                    to_user_id=transaction.buyer_id,
+                    amount=total_deduction,
+                    idempotency_key=refund_key,
+                    description=f"Refund for failed transaction {transaction.transaction_id}"
                 )
+                logger.error("Failed to pay seller, refunding buyer",
+                            transaction_id=str(transaction.transaction_id),
+                            seller_id=transaction.seller_id)
                 return False
-            
-            # Hold escrow amount
-            escrow_success = await ftns_service.charge_context_access(
-                transaction.buyer_id, escrow_context_units
-            )
-            
-            if not escrow_success:
-                # Refund previous charges
-                await ftns_service.reward_contribution(
-                    transaction.buyer_id, "refund", transaction.amount + transaction.platform_fee
-                )
-                return False
-            
-            # Pay seller (minus platform share)
-            seller_amount = transaction.amount * CREATOR_REVENUE_SHARE
-            await ftns_service.reward_contribution(
-                transaction.seller_id, "marketplace_sale", seller_amount
-            )
             
             # Schedule escrow release
             asyncio.create_task(self._schedule_escrow_release(transaction))
             
+            logger.info("Transaction payment completed",
+                       transaction_id=str(transaction.transaction_id),
+                       buyer_id=transaction.buyer_id,
+                       seller_id=transaction.seller_id,
+                       amount=float(transaction_amount),
+                       platform_fee=float(platform_fee),
+                       escrow=float(escrow_amount))
+            
             return True
             
         except Exception as e:
-            print(f"⚠️ Transaction payment failed: {str(e)}")
+            logger.error("Transaction payment failed",
+                        transaction_id=str(transaction.transaction_id),
+                        error=str(e))
             return False
     
     
@@ -526,15 +620,36 @@ class ModelMarketplace:
             # Wait for escrow release delay
             await asyncio.sleep(ESCROW_RELEASE_DELAY_HOURS * 3600)  # Convert hours to seconds
             
-            # Release escrow to seller
-            await ftns_service.reward_contribution(
-                transaction.seller_id, "escrow_release", transaction.escrow_amount
+            # Release escrow to seller using atomic mint
+            ftns = await self._get_ftns_service()
+            escrow_amount = Decimal(str(transaction.escrow_amount))
+            escrow_release_key = f"marketplace_escrow:{transaction.transaction_id}:release"
+            
+            result = await ftns.mint_tokens_atomic(
+                to_user_id=transaction.seller_id,
+                amount=escrow_amount,
+                idempotency_key=escrow_release_key,
+                description=f"Escrow release for transaction {transaction.transaction_id}",
+                metadata={
+                    "transaction_id": str(transaction.transaction_id),
+                    "release_type": "escrow"
+                }
             )
             
-            print(f"🔓 Escrow released for transaction {transaction.transaction_id}")
+            if result.success:
+                logger.info("Escrow released",
+                           transaction_id=str(transaction.transaction_id),
+                           seller_id=transaction.seller_id,
+                           amount=float(escrow_amount))
+            else:
+                logger.error("Failed to release escrow",
+                            transaction_id=str(transaction.transaction_id),
+                            error=result.error_message)
             
         except Exception as e:
-            print(f"⚠️ Error releasing escrow: {str(e)}")
+            logger.error("Error releasing escrow",
+                        transaction_id=str(transaction.transaction_id),
+                        error=str(e))
     
     
     async def _matches_search_criteria(self, listing: MarketplaceListing, 
