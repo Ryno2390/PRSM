@@ -41,7 +41,6 @@ try:
     )
 except (ImportError, ModuleNotFoundError) as e:
     pytest.skip('Module dependencies not yet fully implemented (ftns_service)', allow_module_level=True)
-)
 
 logger = structlog.get_logger(__name__)
 console = Console()

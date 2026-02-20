@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from sqlalchemy.pool import QueuePool, NullPool
 from sqlalchemy import text, event, Engine
-from sqlalchemy.engine.events import PoolEvents
+from sqlalchemy.pool.events import PoolEvents
 import redis.asyncio as aioredis
 from .cache_invalidation import get_invalidation_manager, InvalidationEvent
 

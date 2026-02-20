@@ -52,9 +52,13 @@ from .cache_invalidation import (
 from .cache_monitoring import (
     CacheHealthMonitor,
     initialize_cache_monitoring,
-    get_cache_monitor,
+    get_cache_monitoring_dashboard,
     shutdown_cache_monitoring
 )
+
+def get_cache_monitor():
+    """Alias for backward compatibility"""
+    return get_cache_monitoring_dashboard()
 
 from .database_optimization import (
     AdvancedConnectionPool,
