@@ -12,6 +12,7 @@ from typing import Dict, List, Any, Optional, Set, Union
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from uuid import uuid4
 import json
 
 logger = structlog.get_logger(__name__)
@@ -36,6 +37,7 @@ class ModelProvider(Enum):
     HUGGINGFACE = "huggingface"
     LOCAL = "local"
     MARKETPLACE = "marketplace"
+    PRSM = "prsm"
 
 
 @dataclass
@@ -303,6 +305,35 @@ class ModelRegistry:
                 for provider, models in self.provider_models.items()
             }
         }
+    
+    async def register_teacher_model(self, teacher_model: Any, cid: str) -> bool:
+        """Register a teacher model with IPFS CID (for NWTN compatibility)"""
+        try:
+            model_id = getattr(teacher_model, 'teacher_id', None) or getattr(teacher_model, 'name', str(uuid4()))
+            name = getattr(teacher_model, 'name', 'Unknown')
+            specialization = getattr(teacher_model, 'specialization', 'general')
+            performance_score = getattr(teacher_model, 'performance_score', 0.8)
+            
+            model_details = ModelDetails(
+                model_id=str(model_id),
+                name=name,
+                provider=ModelProvider.LOCAL,
+                capabilities=[ModelCapability.REASONING, ModelCapability.ANALYSIS],
+                performance_score=performance_score,
+                specialization_domains=[specialization, "general"]
+            )
+            model_details.metadata['ipfs_cid'] = cid
+            
+            self.register_model(model_details)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to register teacher model: {e}")
+            return False
+    
+    @property
+    def registered_models(self) -> Dict[str, Any]:
+        """Property for backward compatibility with tests"""
+        return self.models
 
 
 # Global registry instance

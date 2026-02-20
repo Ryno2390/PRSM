@@ -65,6 +65,7 @@ class ModelProvider(str, Enum):
     STABILITY = "stability"
     COMMUNITY = "community"
     CUSTOM = "custom"
+    PRSM = "prsm"
     PRSM_NATIVE = "prsm_native"
 
 
