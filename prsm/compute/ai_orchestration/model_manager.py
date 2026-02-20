@@ -34,6 +34,7 @@ class ModelProvider(Enum):
     OPENROUTER = "openrouter"
     CUSTOM = "custom"
     LOCAL = "local"
+    PRSM = "prsm"
 
 
 class ModelStatus(Enum):

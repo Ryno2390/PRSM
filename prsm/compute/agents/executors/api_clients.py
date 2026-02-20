@@ -37,6 +37,7 @@ class ModelProvider(Enum):
     OLLAMA = "ollama"
     LOCAL = "local"
     PRSM_DISTILLED = "prsm_distilled"
+    PRSM = "prsm"
 
 
 @dataclass

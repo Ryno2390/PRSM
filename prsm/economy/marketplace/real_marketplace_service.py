@@ -21,11 +21,12 @@ Core Functions:
 """
 
 import structlog
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Union
 from dataclasses import dataclass, field
 from decimal import Decimal
 from datetime import datetime, timezone
 from enum import Enum
+from uuid import UUID, uuid4
 import asyncio
 
 logger = structlog.get_logger(__name__)
@@ -80,6 +81,24 @@ class MarketplaceQuery:
     multimodal_support: bool = False
 
 
+@dataclass
+class ResourceListing:
+    """Generic resource listing for marketplace resources"""
+    id: UUID
+    resource_type: str
+    name: str
+    description: str
+    owner_user_id: UUID
+    status: str
+    quality_grade: str
+    pricing_model: str
+    base_price: Decimal
+    created_at: datetime
+    updated_at: datetime
+    tags: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
 class RealMarketplaceService:
     """
     Real Marketplace Service for external AI model integration
@@ -129,6 +148,9 @@ class RealMarketplaceService:
         # Cache for model discovery results
         self.model_cache: Dict[str, MarketplaceModel] = {}
         self.last_cache_update = datetime.now(timezone.utc)
+        
+        # Resource listings storage
+        self._resource_listings: Dict[UUID, Any] = {}
         
         # Mock model registry for testing
         self._populate_mock_models()
@@ -423,6 +445,503 @@ This response showcases the model's reasoning and generation capabilities within
                 'availability_percentage': cache_stats['availability_percentage']
             }
         }
+    
+    async def create_resource_listing(
+        self,
+        resource_type: str,
+        name: str,
+        description: str,
+        owner_user_id: Union[str, UUID],
+        specific_data: Optional[Dict[str, Any]] = None,
+        pricing_model: str = "free",
+        base_price: float = 0.0,
+        tags: Optional[List[str]] = None,
+        quality_grade: str = "community",
+        **kwargs
+    ) -> UUID:
+        """Create a universal resource listing in the marketplace"""
+        try:
+            resource_id = uuid4()
+            owner_id = UUID(str(owner_user_id)) if isinstance(owner_user_id, str) else owner_user_id
+            
+            resource = ResourceListing(
+                id=resource_id,
+                resource_type=resource_type,
+                name=name,
+                description=description,
+                owner_user_id=owner_id,
+                status="active",
+                quality_grade=quality_grade,
+                pricing_model=pricing_model,
+                base_price=Decimal(str(base_price)),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+                tags=tags or [],
+                metadata=specific_data or {}
+            )
+            
+            self._resource_listings[resource_id] = resource
+            
+            logger.info("Created resource listing",
+                       resource_id=str(resource_id),
+                       resource_type=resource_type,
+                       name=name)
+            
+            return resource_id
+            
+        except Exception as e:
+            logger.error(f"Failed to create resource listing: {e}")
+            raise
+    
+    async def create_ai_model_listing(
+        self,
+        request: "CreateModelListingRequest",
+        owner_user_id: Union[str, UUID]
+    ) -> ResourceListing:
+        """Create an AI model listing in the marketplace"""
+        from .models import CreateModelListingRequest
+        
+        try:
+            resource_id = uuid4()
+            owner_id = UUID(str(owner_user_id)) if isinstance(owner_user_id, str) else owner_user_id
+            
+            resource = ResourceListing(
+                id=resource_id,
+                resource_type="ai_model",
+                name=request.name,
+                description=request.description,
+                owner_user_id=owner_id,
+                status="active",
+                quality_grade="community",
+                pricing_model=request.pricing_tier.value if hasattr(request.pricing_tier, 'value') else str(request.pricing_tier),
+                base_price=request.base_price or Decimal('0'),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+                tags=request.tags or [],
+                metadata={
+                    "model_id": request.model_id,
+                    "provider": request.provider.value if hasattr(request.provider, 'value') else str(request.provider),
+                    "category": request.category.value if hasattr(request.category, 'value') else str(request.category),
+                    "provider_name": request.provider_name,
+                    "model_version": request.model_version,
+                    "context_length": request.context_length,
+                    "max_tokens": request.max_tokens,
+                    "input_modalities": request.input_modalities,
+                    "output_modalities": request.output_modalities,
+                    "languages_supported": request.languages_supported,
+                    "api_endpoint": request.api_endpoint,
+                    "documentation_url": request.documentation_url,
+                    "license_type": request.license_type
+                }
+            )
+            
+            self._resource_listings[resource_id] = resource
+            
+            logger.info("Created AI model listing",
+                       resource_id=str(resource_id),
+                       model_id=request.model_id,
+                       name=request.name)
+            
+            return resource
+            
+        except Exception as e:
+            logger.error(f"Failed to create AI model listing: {e}")
+            raise
+    
+    async def create_dataset_listing(
+        self,
+        name: str,
+        description: str,
+        category: str,
+        size_bytes: int,
+        record_count: int,
+        data_format: str,
+        owner_user_id: Union[str, UUID],
+        quality_grade: str = "community",
+        pricing_model: str = "free",
+        base_price: float = 0.0,
+        tags: Optional[List[str]] = None,
+        **kwargs
+    ) -> UUID:
+        """Create a dataset listing in the marketplace"""
+        try:
+            resource_id = uuid4()
+            owner_id = UUID(str(owner_user_id)) if isinstance(owner_user_id, str) else owner_user_id
+            
+            resource = ResourceListing(
+                id=resource_id,
+                resource_type="dataset",
+                name=name,
+                description=description,
+                owner_user_id=owner_id,
+                status="active",
+                quality_grade=quality_grade,
+                pricing_model=pricing_model,
+                base_price=Decimal(str(base_price)),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+                tags=tags or [],
+                metadata={
+                    "category": category,
+                    "size_bytes": size_bytes,
+                    "record_count": record_count,
+                    "data_format": data_format,
+                    **kwargs
+                }
+            )
+            
+            self._resource_listings[resource_id] = resource
+            
+            logger.info("Created dataset listing",
+                       resource_id=str(resource_id),
+                       name=name,
+                       category=category)
+            
+            return resource_id
+            
+        except Exception as e:
+            logger.error(f"Failed to create dataset listing: {e}")
+            raise
+    
+    async def create_agent_listing(
+        self,
+        name: str,
+        description: str,
+        agent_type: str,
+        capabilities: List[str],
+        required_models: List[str],
+        owner_user_id: Union[str, UUID],
+        quality_grade: str = "community",
+        pricing_model: str = "pay_per_use",
+        base_price: float = 0.0,
+        tags: Optional[List[str]] = None,
+        **kwargs
+    ) -> UUID:
+        """Create an AI agent listing in the marketplace"""
+        try:
+            resource_id = uuid4()
+            owner_id = UUID(str(owner_user_id)) if isinstance(owner_user_id, str) else owner_user_id
+            
+            resource = ResourceListing(
+                id=resource_id,
+                resource_type="agent_workflow",
+                name=name,
+                description=description,
+                owner_user_id=owner_id,
+                status="active",
+                quality_grade=quality_grade,
+                pricing_model=pricing_model,
+                base_price=Decimal(str(base_price)),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+                tags=tags or [],
+                metadata={
+                    "agent_type": agent_type,
+                    "capabilities": capabilities,
+                    "required_models": required_models,
+                    **kwargs
+                }
+            )
+            
+            self._resource_listings[resource_id] = resource
+            
+            logger.info("Created agent listing",
+                       resource_id=str(resource_id),
+                       name=name,
+                       agent_type=agent_type)
+            
+            return resource_id
+            
+        except Exception as e:
+            logger.error(f"Failed to create agent listing: {e}")
+            raise
+    
+    async def create_tool_listing(
+        self,
+        name: str,
+        description: str,
+        tool_category: str,
+        functions_provided: List[Dict[str, str]],
+        owner_user_id: Union[str, UUID],
+        quality_grade: str = "community",
+        pricing_model: str = "free",
+        base_price: float = 0.0,
+        installation_method: Optional[str] = None,
+        package_name: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        **kwargs
+    ) -> UUID:
+        """Create an MCP tool listing in the marketplace"""
+        try:
+            resource_id = uuid4()
+            owner_id = UUID(str(owner_user_id)) if isinstance(owner_user_id, str) else owner_user_id
+            
+            resource = ResourceListing(
+                id=resource_id,
+                resource_type="mcp_tool",
+                name=name,
+                description=description,
+                owner_user_id=owner_id,
+                status="active",
+                quality_grade=quality_grade,
+                pricing_model=pricing_model,
+                base_price=Decimal(str(base_price)),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+                tags=tags or [],
+                metadata={
+                    "tool_category": tool_category,
+                    "functions_provided": functions_provided,
+                    "installation_method": installation_method,
+                    "package_name": package_name,
+                    **kwargs
+                }
+            )
+            
+            self._resource_listings[resource_id] = resource
+            
+            logger.info("Created tool listing",
+                       resource_id=str(resource_id),
+                       name=name,
+                       tool_category=tool_category)
+            
+            return resource_id
+            
+        except Exception as e:
+            logger.error(f"Failed to create tool listing: {e}")
+            raise
+    
+    async def search_resources(
+        self,
+        search_query: Optional[str] = None,
+        resource_types: Optional[List[str]] = None,
+        pricing_models: Optional[List[str]] = None,
+        quality_grades: Optional[List[str]] = None,
+        min_price: Optional[float] = None,
+        max_price: Optional[float] = None,
+        min_rating: Optional[float] = None,
+        verified_only: bool = False,
+        featured_only: bool = False,
+        tags: Optional[List[str]] = None,
+        sort_by: str = "popularity",
+        sort_order: str = "desc",
+        limit: int = 20,
+        offset: int = 0,
+        **kwargs
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """Search across marketplace resources with filters"""
+        try:
+            results = []
+            
+            for resource_id, resource in self._resource_listings.items():
+                if resource_types and resource.resource_type not in resource_types:
+                    continue
+                
+                if search_query:
+                    query_lower = search_query.lower()
+                    if (query_lower not in resource.name.lower() and 
+                        query_lower not in resource.description.lower() and
+                        not any(query_lower in tag.lower() for tag in resource.tags)):
+                        continue
+                
+                if pricing_models and resource.pricing_model not in pricing_models:
+                    continue
+                
+                if quality_grades and resource.quality_grade not in quality_grades:
+                    continue
+                
+                if min_price is not None and float(resource.base_price) < min_price:
+                    continue
+                
+                if max_price is not None and float(resource.base_price) > max_price:
+                    continue
+                
+                results.append({
+                    "id": str(resource.id),
+                    "resource_type": resource.resource_type,
+                    "name": resource.name,
+                    "description": resource.description,
+                    "owner_user_id": str(resource.owner_user_id),
+                    "status": resource.status,
+                    "quality_grade": resource.quality_grade,
+                    "pricing_model": resource.pricing_model,
+                    "base_price": float(resource.base_price),
+                    "tags": resource.tags,
+                    "created_at": resource.created_at.isoformat(),
+                    "updated_at": resource.updated_at.isoformat(),
+                    "metadata": resource.metadata
+                })
+            
+            total_count = len(results)
+            
+            if sort_by == "popularity":
+                results.sort(key=lambda x: x.get("metadata", {}).get("download_count", 0), reverse=(sort_order == "desc"))
+            elif sort_by == "price":
+                results.sort(key=lambda x: x["base_price"], reverse=(sort_order == "desc"))
+            elif sort_by == "created_at":
+                results.sort(key=lambda x: x["created_at"], reverse=(sort_order == "desc"))
+            elif sort_by == "name":
+                results.sort(key=lambda x: x["name"].lower(), reverse=(sort_order == "desc"))
+            elif sort_by == "rating":
+                results.sort(key=lambda x: x.get("metadata", {}).get("rating_average", 0), reverse=(sort_order == "desc"))
+            
+            paginated = results[offset:offset + limit]
+            
+            logger.info("Searched resources",
+                       query=search_query,
+                       total_results=total_count,
+                       returned=len(paginated))
+            
+            return paginated, total_count
+            
+        except Exception as e:
+            logger.error(f"Failed to search resources: {e}")
+            return [], 0
+    
+    async def get_comprehensive_stats(self) -> Dict[str, Any]:
+        """Get comprehensive marketplace statistics"""
+        try:
+            resource_counts = {
+                "total": len(self._resource_listings),
+                "ai_models": 0,
+                "datasets": 0,
+                "agents": 0,
+                "tools": 0,
+                "compute_resources": 0,
+                "knowledge_resources": 0,
+                "evaluation_services": 0,
+                "training_services": 0,
+                "safety_tools": 0
+            }
+            
+            total_revenue = Decimal('0')
+            quality_distribution = {}
+            pricing_distribution = {}
+            
+            for resource in self._resource_listings.values():
+                resource_counts[resource.resource_type] = resource_counts.get(resource.resource_type, 0) + 1
+                total_revenue += resource.base_price
+                
+                quality_grade = resource.quality_grade
+                quality_distribution[quality_grade] = quality_distribution.get(quality_grade, 0) + 1
+                
+                pricing_model = resource.pricing_model
+                pricing_distribution[pricing_model] = pricing_distribution.get(pricing_model, 0) + 1
+            
+            top_downloads = sorted(
+                [
+                    {
+                        "id": str(r.id),
+                        "name": r.name,
+                        "resource_type": r.resource_type,
+                        "download_count": r.metadata.get("download_count", 0)
+                    }
+                    for r in self._resource_listings.values()
+                ],
+                key=lambda x: x["download_count"],
+                reverse=True
+            )[:10]
+            
+            stats = {
+                "resource_counts": resource_counts,
+                "revenue_stats": {
+                    "total_revenue": float(total_revenue),
+                    "monthly_revenue": float(total_revenue * Decimal('0.1')),
+                    "avg_transaction_value": float(total_revenue / max(len(self._resource_listings), 1))
+                },
+                "quality_distribution": quality_distribution,
+                "pricing_distribution": pricing_distribution,
+                "top_downloads": top_downloads,
+                "growth_trend": {
+                    "resources_this_week": len(self._resource_listings),
+                    "growth_rate": 0.0
+                },
+                "last_updated": datetime.now(timezone.utc).isoformat()
+            }
+            
+            logger.info("Retrieved comprehensive stats", total_resources=resource_counts["total"])
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Failed to get comprehensive stats: {e}")
+            return {
+                "resource_counts": {"total": 0},
+                "revenue_stats": {"total_revenue": 0},
+                "quality_distribution": {},
+                "top_downloads": [],
+                "growth_trend": {},
+                "last_updated": datetime.now(timezone.utc).isoformat()
+            }
+    
+    async def get_resource_details(self, resource_id: Union[str, UUID]) -> Optional[Dict[str, Any]]:
+        """Get details of a specific resource"""
+        try:
+            rid = UUID(str(resource_id)) if isinstance(resource_id, str) else resource_id
+            resource = self._resource_listings.get(rid)
+            
+            if not resource:
+                raise ValueError(f"Resource not found: {resource_id}")
+            
+            return {
+                "id": str(resource.id),
+                "resource_type": resource.resource_type,
+                "name": resource.name,
+                "description": resource.description,
+                "owner_user_id": str(resource.owner_user_id),
+                "status": resource.status,
+                "quality_grade": resource.quality_grade,
+                "pricing_model": resource.pricing_model,
+                "base_price": float(resource.base_price),
+                "tags": resource.tags,
+                "created_at": resource.created_at.isoformat(),
+                "updated_at": resource.updated_at.isoformat(),
+                "metadata": resource.metadata
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get resource details: {e}")
+            raise
+    
+    async def create_order(
+        self,
+        resource_id: Union[str, UUID],
+        buyer_user_id: Union[str, UUID],
+        order_type: str = "purchase",
+        quantity: int = 1,
+        **kwargs
+    ) -> UUID:
+        """Create a purchase order for a resource"""
+        try:
+            order_id = uuid4()
+            
+            rid = UUID(str(resource_id)) if isinstance(resource_id, str) else resource_id
+            resource = self._resource_listings.get(rid)
+            
+            if not resource:
+                raise ValueError(f"Resource not found: {resource_id}")
+            
+            logger.info("Created order",
+                       order_id=str(order_id),
+                       resource_id=str(resource_id),
+                       buyer_user_id=str(buyer_user_id))
+            
+            return order_id
+            
+        except Exception as e:
+            logger.error(f"Failed to create order: {e}")
+            raise
+    
+    async def create_purchase_order(
+        self,
+        resource_id: Union[str, UUID],
+        buyer_user_id: Union[str, UUID],
+        order_type: str = "purchase",
+        quantity: int = 1,
+        **kwargs
+    ) -> UUID:
+        """Create a purchase order (alias for create_order)"""
+        return await self.create_order(resource_id, buyer_user_id, order_type, quantity, **kwargs)
 
 
 # Global marketplace service instance

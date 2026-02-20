@@ -16,6 +16,7 @@ class ModelProvider(str, Enum):
     HUGGINGFACE = "huggingface"
     LOCAL = "local"
     PRSM_DISTILLED = "prsm_distilled"
+    PRSM = "prsm"
 
 
 class SafetyLevel(str, Enum):
