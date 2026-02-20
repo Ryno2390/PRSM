@@ -6,13 +6,15 @@ Central authentication and authorization management for PRSM
 import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
-from uuid import UUID
+from uuid import UUID, uuid4
 import structlog
 
 from fastapi import HTTPException, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import select, or_
+from sqlalchemy.exc import IntegrityError
 
-from prsm.core.database import get_database_service
+from prsm.core.database import get_database_service, get_async_session
 from prsm.core.auth.models import User, UserRole, Permission, LoginRequest, RegisterRequest, TokenResponse
 from prsm.core.auth.jwt_handler import jwt_handler, TokenData
 from prsm.core.integrations.security.audit_logger import audit_logger
@@ -124,7 +126,7 @@ class AuthManager:
             # Hash password
             hashed_password = jwt_handler.hash_password(request.password)
             
-            # Create user object
+            # Create user object with unique UUID
             user = User(
                 email=request.email,
                 username=request.username,
@@ -135,9 +137,24 @@ class AuthManager:
                 is_verified=False  # Require email verification
             )
             
-            # Save to database (placeholder - would use actual database service)
-            # For now, just create the user object
-            user.id = UUID('12345678-1234-5678-9012-123456789012')  # Placeholder
+            # Save to database with proper persistence
+            try:
+                async with get_async_session() as session:
+                    session.add(user)
+                    await session.flush()  # Flush to get the generated ID
+                    await session.refresh(user)  # Refresh to get all generated fields
+            except IntegrityError as e:
+                # Handle duplicate email or username
+                error_msg = str(e).lower()
+                if "email" in error_msg or "unique" in error_msg:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="User with this email or username already exists"
+                    )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Database error during registration"
+                )
             
             await audit_logger.log_auth_event(
                 "user_registered",
@@ -495,57 +512,63 @@ class AuthManager:
     
     async def _user_exists(self, email: str, username: str) -> bool:
         """Check if user exists by email or username"""
-        # Would check database - for now return False
-        return False
+        try:
+            async with get_async_session() as session:
+                stmt = select(User).where(
+                    or_(User.email == email, User.username == username)
+                )
+                result = await session.execute(stmt)
+                return result.scalar_one_or_none() is not None
+        except Exception as e:
+            logger.error("Error checking user existence", error=str(e))
+            return False
     
     async def _get_user_by_login(self, login: str) -> Optional[User]:
         """Get user by username or email"""
-        # Would query database - for now return mock user for testing
-        if login in ["admin", "admin@prsm.ai"]:
-            user = User(
-                email="admin@prsm.ai",
-                username="admin",
-                full_name="Admin User",
-                hashed_password=jwt_handler.hash_password("admin123"),
-                role=UserRole.ADMIN,
-                is_active=True,
-                is_verified=True,
-                is_superuser=True
-            )
-            user.id = UUID('12345678-1234-5678-9012-123456789012')
-            return user
-        return None
+        try:
+            async with get_async_session() as session:
+                stmt = select(User).where(
+                    or_(User.email == login, User.username == login)
+                )
+                result = await session.execute(stmt)
+                return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error("Error fetching user by login", error=str(e), login=login)
+            return None
     
     async def _get_user_by_id(self, user_id: UUID) -> Optional[User]:
         """Get user by ID"""
-        # Would query database - for now return mock user
-        if str(user_id) == '12345678-1234-5678-9012-123456789012':
-            user = User(
-                email="admin@prsm.ai",
-                username="admin",
-                full_name="Admin User",
-                hashed_password=jwt_handler.hash_password("admin123"),
-                role=UserRole.ADMIN,
-                is_active=True,
-                is_verified=True,
-                is_superuser=True
-            )
-            user.id = user_id
-            return user
-        return None
+        try:
+            async with get_async_session() as session:
+                stmt = select(User).where(User.id == user_id)
+                result = await session.execute(stmt)
+                return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error("Error fetching user by ID", error=str(e), user_id=str(user_id))
+            return None
     
     async def _is_account_locked(self, user: User) -> bool:
         """Check if account is locked due to failed attempts"""
         if user.failed_login_attempts >= self.max_login_attempts:
-            # Check if lockout period has expired
-            # For now, assume not locked (would check last failed attempt time)
-            return False
+            # Account is locked - in production, would also check lockout expiration
+            return True
         return False
     
     async def _record_failed_login(self, user: User):
         """Record failed login attempt"""
         user.failed_login_attempts += 1
-        # Would update database
+        # Update in database
+        try:
+            async with get_async_session() as session:
+                stmt = select(User).where(User.id == user.id)
+                result = await session.execute(stmt)
+                db_user = result.scalar_one_or_none()
+                if db_user:
+                    db_user.failed_login_attempts = user.failed_login_attempts
+                    await session.flush()
+        except Exception as e:
+            logger.error("Failed to update login attempts in database", error=str(e))
+        
         logger.warning("Failed login attempt recorded",
                       user_id=str(user.id),
                       username=user.username,
@@ -554,7 +577,18 @@ class AuthManager:
     async def _reset_failed_login_attempts(self, user: User):
         """Reset failed login attempts counter"""
         user.failed_login_attempts = 0
-        # Would update database
+        # Update in database
+        try:
+            async with get_async_session() as session:
+                stmt = select(User).where(User.id == user.id)
+                result = await session.execute(stmt)
+                db_user = result.scalar_one_or_none()
+                if db_user:
+                    db_user.failed_login_attempts = 0
+                    await session.flush()
+        except Exception as e:
+            logger.error("Failed to reset login attempts in database", error=str(e))
+        
         logger.debug("Failed login attempts reset",
                     user_id=str(user.id),
                     username=user.username)

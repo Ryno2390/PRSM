@@ -109,18 +109,47 @@ class TestAuthManager:
     @pytest.mark.asyncio
     async def test_register_user_success(self, auth_manager, valid_register_request):
         """Test successful user registration"""
+        # Create a mock user that will be returned from database operations
+        created_user = User(
+            email=valid_register_request.email,
+            username=valid_register_request.username,
+            full_name=valid_register_request.full_name,
+            hashed_password="hashed",
+            role=UserRole.USER,
+            is_active=True,
+            is_verified=False
+        )
+        created_user.id = uuid4()  # Simulate database-generated UUID
+        
+        # Mock the database session context manager
+        mock_session = AsyncMock()
+        mock_session.add = Mock()
+        mock_session.flush = AsyncMock()
+        mock_session.refresh = AsyncMock()
+        
+        # Make refresh set the user ID
+        async def mock_refresh_side_effect(user):
+            user.id = created_user.id
+        mock_session.refresh.side_effect = mock_refresh_side_effect
+        
         with patch.object(auth_manager, '_user_exists', new_callable=AsyncMock, return_value=False):
             with patch('prsm.core.auth.auth_manager.jwt_handler.hash_password', return_value="hashed"):
                 with patch('prsm.core.auth.auth_manager.audit_logger.log_auth_event') as mock_audit:
-                    
-                    user = await auth_manager.register_user(valid_register_request)
-                    
-                    assert user.email == valid_register_request.email
-                    assert user.username == valid_register_request.username
-                    assert user.role == UserRole.USER
-                    assert user.is_active == True
-                    assert user.is_verified == False
-                    mock_audit.assert_called()
+                    with patch('prsm.core.auth.auth_manager.get_async_session') as mock_get_session:
+                        # Set up the async context manager
+                        mock_get_session.return_value.__aenter__.return_value = mock_session
+                        mock_get_session.return_value.__aexit__.return_value = None
+                        
+                        user = await auth_manager.register_user(valid_register_request)
+                        
+                        assert user.email == valid_register_request.email
+                        assert user.username == valid_register_request.username
+                        assert user.role == UserRole.USER
+                        assert user.is_active == True
+                        assert user.is_verified == False
+                        assert user.id is not None
+                        assert user.id != UUID('12345678-1234-5678-9012-123456789012')  # Not the hardcoded placeholder
+                        mock_audit.assert_called()
 
     @pytest.mark.asyncio
     async def test_register_user_password_mismatch(self, auth_manager):
@@ -156,6 +185,100 @@ class TestAuthManager:
                 assert exc_info.value.status_code == 400
                 assert "already exists" in exc_info.value.detail
                 mock_audit.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_register_user_unique_ids(self, auth_manager):
+        """Test that each registered user gets a unique UUID"""
+        from uuid import uuid4
+        
+        # Create two registration requests
+        request1 = RegisterRequest(
+            email="user1@prsm.ai",
+            username="user1",
+            full_name="User One",
+            password="SecurePass123!",
+            confirm_password="SecurePass123!"
+        )
+        request2 = RegisterRequest(
+            email="user2@prsm.ai",
+            username="user2",
+            full_name="User Two",
+            password="SecurePass123!",
+            confirm_password="SecurePass123!"
+        )
+        
+        # Track created user IDs
+        created_ids = []
+        
+        async def create_mock_session():
+            mock_session = AsyncMock()
+            mock_session.add = Mock()
+            mock_session.flush = AsyncMock()
+            mock_session.refresh = AsyncMock()
+            
+            async def mock_refresh_side_effect(user):
+                # Assign a unique ID to each user
+                user.id = uuid4()
+                created_ids.append(user.id)
+            mock_session.refresh.side_effect = mock_refresh_side_effect
+            
+            return mock_session
+        
+        with patch.object(auth_manager, '_user_exists', new_callable=AsyncMock, return_value=False):
+            with patch('prsm.core.auth.auth_manager.jwt_handler.hash_password', return_value="hashed"):
+                with patch('prsm.core.auth.auth_manager.audit_logger.log_auth_event'):
+                    with patch('prsm.core.auth.auth_manager.get_async_session') as mock_get_session:
+                        # First registration
+                        mock_session1 = await create_mock_session()
+                        mock_get_session.return_value.__aenter__.return_value = mock_session1
+                        mock_get_session.return_value.__aexit__.return_value = None
+                        user1 = await auth_manager.register_user(request1)
+                        
+                        # Second registration
+                        mock_session2 = await create_mock_session()
+                        mock_get_session.return_value.__aenter__.return_value = mock_session2
+                        user2 = await auth_manager.register_user(request2)
+                        
+                        # Verify unique IDs
+                        assert user1.id != user2.id, "Each user should have a unique UUID"
+                        assert len(created_ids) == 2, "Should have created 2 user IDs"
+                        assert len(set(created_ids)) == 2, "All user IDs should be unique"
+
+    @pytest.mark.asyncio
+    async def test_register_user_database_integrity_error(self, auth_manager):
+        """Test handling of database integrity errors during registration"""
+        from sqlalchemy.exc import IntegrityError
+        
+        request = RegisterRequest(
+            email="test@prsm.ai",
+            username="testuser",
+            full_name="Test User",
+            password="SecurePass123!",
+            confirm_password="SecurePass123!"
+        )
+        
+        # Create an IntegrityError that looks like a duplicate key error
+        mock_session = AsyncMock()
+        mock_session.add = Mock()
+        mock_session.flush = AsyncMock(side_effect=IntegrityError(
+            "duplicate key value violates unique constraint \"users_email_key\"",
+            {},
+            None
+        ))
+        
+        with patch.object(auth_manager, '_user_exists', new_callable=AsyncMock, return_value=False):
+            with patch('prsm.core.auth.auth_manager.jwt_handler.hash_password', return_value="hashed"):
+                with patch('prsm.core.auth.auth_manager.audit_logger.log_auth_event'):
+                    with patch('prsm.core.auth.auth_manager.get_async_session') as mock_get_session:
+                        mock_get_session.return_value.__aenter__.return_value = mock_session
+                        mock_get_session.return_value.__aexit__.return_value = None
+                        
+                        with pytest.raises(HTTPException) as exc_info:
+                            await auth_manager.register_user(request)
+                        
+                        # The error message contains "unique" so it should return 400
+                        assert exc_info.value.status_code == 400
+                        assert "already exists" in exc_info.value.detail
 
     @pytest.mark.asyncio
     async def test_register_user_weak_password(self, auth_manager):
@@ -450,7 +573,16 @@ class TestAuthManager:
         """Test failed login attempt tracking"""
         initial_attempts = mock_user.failed_login_attempts
         
-        await auth_manager._record_failed_login(mock_user)
+        # Mock the database session for updating failed attempts
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock()
+        mock_session.flush = AsyncMock()
+        
+        with patch('prsm.core.auth.auth_manager.get_async_session') as mock_get_session:
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+            mock_get_session.return_value.__aexit__.return_value = None
+            
+            await auth_manager._record_failed_login(mock_user)
         
         assert mock_user.failed_login_attempts == initial_attempts + 1
 
@@ -459,7 +591,16 @@ class TestAuthManager:
         """Test resetting failed login attempts"""
         mock_user.failed_login_attempts = 3
         
-        await auth_manager._reset_failed_login_attempts(mock_user)
+        # Mock the database session for resetting attempts
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock()
+        mock_session.flush = AsyncMock()
+        
+        with patch('prsm.core.auth.auth_manager.get_async_session') as mock_get_session:
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+            mock_get_session.return_value.__aexit__.return_value = None
+            
+            await auth_manager._reset_failed_login_attempts(mock_user)
         
         assert mock_user.failed_login_attempts == 0
 
@@ -474,7 +615,7 @@ class TestAuthManager:
         # Test locked (exceeds max attempts)
         mock_user.failed_login_attempts = 10
         result = await auth_manager._is_account_locked(mock_user)
-        assert result == False  # Current implementation always returns False
+        assert result == True  # Now properly returns True when locked
 
 
 class TestUserModel:
