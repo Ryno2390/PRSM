@@ -122,7 +122,7 @@ def check_memory_usage() -> bool:
     try:
         memory_percent = psutil.virtual_memory().percent / 100.0
         return memory_percent < MEMORY_THRESHOLD
-    except:
+    except Exception:
         return True  # Continue processing if can't check memory
 
 async def safe_file_operation(operation, *args, timeout=PROCESSING_TIMEOUT, **kwargs):
@@ -3029,7 +3029,7 @@ if __name__ == "__main__":
             for file_path in test_files:
                 try:
                     os.unlink(file_path)
-                except:
-                    pass
+                except Exception:
+                    pass  # File cleanup failure is non-critical
     
     asyncio.run(test_universal_ingestion())

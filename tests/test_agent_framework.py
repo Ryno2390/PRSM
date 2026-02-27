@@ -33,6 +33,9 @@ from prsm.compute.agents.routers.model_router import ModelRouter
 from prsm.compute.agents.executors.model_executor import ModelExecutor
 from prsm.compute.agents.compilers.hierarchical_compiler import HierarchicalCompiler
 from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
+from tests.fixtures.nwtn_mocks import (
+    MockContextManager, MockFTNSService, MockIPFSClient, MockModelRegistry
+)
 
 
 class AgentFrameworkTester:
@@ -40,7 +43,13 @@ class AgentFrameworkTester:
     
     def __init__(self):
         self.agents = {}
-        self.orchestrator = NWTNOrchestrator()
+        # Initialize orchestrator with mock services for testing
+        self.orchestrator = NWTNOrchestrator(
+            context_manager=MockContextManager(),
+            ftns_service=MockFTNSService(),
+            ipfs_client=MockIPFSClient(),
+            model_registry=MockModelRegistry()
+        )
         self.test_session_id = uuid4()
     
     async def setup_agent_framework(self):

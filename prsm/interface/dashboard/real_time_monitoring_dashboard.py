@@ -722,8 +722,8 @@ class FlaskDashboard:
         # Try to open browser
         try:
             webbrowser.open(f"http://{host}:{port}")
-        except:
-            pass
+        except Exception:
+            pass  # Browser may not be available in headless environments
         
         logger.info(f"📱 Dashboard available at: http://{host}:{port}")
     

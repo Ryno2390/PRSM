@@ -948,8 +948,8 @@ class MarketplaceRecommendationEngine:
                 )
                 for resource in trending
             ]
-        except:
-            return []
+        except Exception:
+            return []  # Fallback recommendations failed
 
 
 # Factory function

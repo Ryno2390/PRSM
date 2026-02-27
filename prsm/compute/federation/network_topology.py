@@ -130,8 +130,8 @@ class NetworkMetrics:
             # Assortativity
             try:
                 self.assortativity = nx.degree_assortativity_coefficient(graph)
-            except:
-                self.assortativity = 0.0
+            except Exception:
+                self.assortativity = 0.0  # Default if calculation fails
                 
         except Exception as e:
             print(f"❌ Error calculating topology properties: {e}")

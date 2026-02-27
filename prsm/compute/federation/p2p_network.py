@@ -17,7 +17,7 @@ from prsm.core.models import (
     ArchitectTask, PeerNode, ModelShard, TeacherModel, ModelType,
     SafetyFlag, CircuitBreakerEvent, AgentResponse
 )
-from prsm.data.data_layer.enhanced_ipfs import get_ipfs_client
+from prsm.core.ipfs_client import create_ipfs_client
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
 from prsm.core.safety.monitor import SafetyMonitor

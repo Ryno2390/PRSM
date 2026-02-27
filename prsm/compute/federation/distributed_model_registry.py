@@ -28,7 +28,7 @@ from prsm.core.models import (
     TeacherModel, ModelType, PeerNode, ModelShard,
     FTNSTransaction, ProvenanceRecord
 )
-from prsm.data.data_layer.enhanced_ipfs import get_ipfs_client
+from prsm.core.ipfs_client import create_ipfs_client
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from .enhanced_p2p_network import get_production_p2p_network
 
@@ -95,7 +95,8 @@ class GossipMessage:
             msg_time = datetime.fromisoformat(self.timestamp.replace('Z', '+00:00'))
             age = (datetime.now(timezone.utc) - msg_time).total_seconds()
             return age > self.ttl or self.hops > 10
-        except:
+        except (ValueError, AttributeError):
+            # Invalid timestamp format - treat as expired for safety
             return True
 
 

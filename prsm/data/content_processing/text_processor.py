@@ -499,7 +499,8 @@ class ContentTextProcessor:
         if HAS_NLTK:
             try:
                 sentences = sent_tokenize(text)
-            except:
+            except Exception:
+                # NLTK tokenization failed, fall back to simple split
                 sentences = text.split('. ')
         else:
             sentences = text.split('. ')

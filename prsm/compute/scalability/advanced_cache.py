@@ -337,8 +337,8 @@ class AdvancedCache:
             else:
                 # Use pickle to estimate
                 return len(self._secure_pickle_dumps(value))
-        except:
-            return 1024  # Default estimate
+        except Exception:
+            return 1024  # Default estimate if size calculation fails
     
     async def _serialize_value(self, value: Any, level: CacheLevel) -> tuple[Any, int]:
         """Serialize and optionally compress value"""
@@ -381,8 +381,8 @@ class AdvancedCache:
             if isinstance(data, bytes):
                 try:
                     data = zlib.decompress(data)
-                except:
-                    pass  # Not compressed
+                except Exception:
+                    pass  # Not compressed, use as-is
             
             # Deserialize
             if config.serialization_format == "json":

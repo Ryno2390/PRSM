@@ -302,7 +302,7 @@ CIRCUIT_BREAKER_ENABLED=true
             r = redis.Redis(host='localhost', port=6379, db=0)
             r.ping()
             return True
-        except:
+        except Exception:
             return False
     
     def _test_ipfs(self) -> bool:
@@ -310,7 +310,7 @@ CIRCUIT_BREAKER_ENABLED=true
         try:
             response = requests.get("http://localhost:5001/api/v0/version", timeout=5)
             return response.status_code == 200
-        except:
+        except Exception:
             return False
     
     def initialize_database(self) -> bool:
@@ -407,7 +407,7 @@ CIRCUIT_BREAKER_ENABLED=true
                 console.print("✅ Database: OK", style="green")
             else:
                 console.print("❌ Database: FAIL", style="red")
-        except:
+        except Exception:
             health_status["database"] = False
             console.print("❌ Database: FAIL", style="red")
         

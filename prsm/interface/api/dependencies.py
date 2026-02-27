@@ -193,7 +193,7 @@ async def get_optional_user(
     try:
         user_id = await verify_api_key(credentials, db)
         return await get_current_user(user_id, db)
-    except:
+    except Exception:
         return None
 
 

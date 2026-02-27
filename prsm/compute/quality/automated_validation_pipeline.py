@@ -1173,8 +1173,8 @@ class AutomatedValidationPipeline:
             try:
                 result = await model_executor("test input")
                 return 1.0 if isinstance(result, str) else 0.5
-            except:
-                return 0.0
+            except Exception:
+                return 0.0  # API compatibility test failed
         
         elif test_name == "input_format_handling":
             # Test handling of different input formats
@@ -1182,23 +1182,23 @@ class AutomatedValidationPipeline:
                 await model_executor("")  # Empty input
                 await model_executor("a" * 1000)  # Long input
                 return 1.0
-            except:
-                return 0.5
+            except Exception:
+                return 0.5  # Input format handling test partially failed
         
         elif test_name == "output_format_compliance":
             # Test output format consistency
             try:
                 result = await model_executor("test")
                 return 1.0 if result and len(result.strip()) > 0 else 0.0
-            except:
-                return 0.0
+            except Exception:
+                return 0.0  # Output format compliance test failed
         
         elif test_name == "error_handling":
             # Test graceful error handling
             try:
                 await model_executor(None)  # Invalid input
                 return 0.5  # Should have raised exception
-            except:
+            except Exception:
                 return 1.0  # Good: handled error appropriately
         
         elif test_name == "resource_management":

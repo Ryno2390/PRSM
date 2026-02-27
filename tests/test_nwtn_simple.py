@@ -10,6 +10,9 @@ import pytest
 try:
     from prsm.core.models import UserInput
     from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
+    from tests.fixtures.nwtn_mocks import (
+        MockContextManager, MockFTNSService, MockIPFSClient, MockModelRegistry
+    )
 except (ImportError, ModuleNotFoundError) as e:
     pytest.skip("NWTN orchestrator module not yet implemented", allow_module_level=True)
 
@@ -18,8 +21,13 @@ async def demonstrate_nwtn():
     print("🚀 NWTN Integration Demonstration")
     print("=" * 50)
     
-    # Create orchestrator
-    orchestrator = NWTNOrchestrator()
+    # Create orchestrator with mock services for testing
+    orchestrator = NWTNOrchestrator(
+        context_manager=MockContextManager(),
+        ftns_service=MockFTNSService(),
+        ipfs_client=MockIPFSClient(),
+        model_registry=MockModelRegistry()
+    )
     
     # Give user some FTNS for testing
     await orchestrator.ftns_service.reward_contribution("demo_user", "data", 100.0)

@@ -281,8 +281,8 @@ class SOC(PRSMBaseModel):
             # Bonus for consistent evidence (low standard deviation)
             consistency_bonus = max(0.0, (0.3 - std_dev) * 0.1)  # Up to 0.03 bonus
             return consistency_bonus
-        except:
-            return 0.0
+        except Exception:
+            return 0.0  # Return 0 bonus if statistics calculation fails
     
     def _handle_confidence_level_transition(self, old_level: ConfidenceLevel, new_level: ConfidenceLevel, learning_event: Dict[str, Any]):
         """Handle transitions between confidence levels"""
@@ -505,7 +505,7 @@ class SOC(PRSMBaseModel):
                 (1 - posterior) * math.log((1 - posterior) / (1 - prior))
             )
             return max(0.0, kl_divergence)
-        except:
+        except (ValueError, ZeroDivisionError):
             return abs(posterior - prior)  # Fallback to simple difference
     
     def _assess_evidence_strength(self, evidence: float, source: str) -> str:

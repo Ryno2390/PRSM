@@ -41,7 +41,7 @@ from prsm.core.config import get_settings
 from prsm.economy.tokenomics.ftns_service import FTNSService
 from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork
 from ..federation.model_registry import ModelRegistry
-from prsm.data.data_layer.enhanced_ipfs import PRSMIPFSClient
+from prsm.core.ipfs_client import PRSMIPFSOperations
 from prsm.economy.governance.proposals import ProposalManager
 
 from .models import (
@@ -1032,7 +1032,7 @@ class DistillationOrchestrator:
         try:
             request = await self._get_request_for_job(job.job_id)
             return await self._estimate_cost(request)
-        except:
+        except Exception:
             # Fallback estimate based on job characteristics
             base_cost = 500
             

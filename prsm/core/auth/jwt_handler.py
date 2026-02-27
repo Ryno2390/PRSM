@@ -713,8 +713,8 @@ class JWTHandler:
                             try:
                                 cache_key = f"token_revoked:{token_row.token_hash[:16]}"
                                 await self.redis_client.setex(cache_key, 86400, "1")
-                            except:
-                                pass
+                            except Exception:
+                                pass  # Cache update failure is non-critical, database is authoritative
 
                         revoked_count += 1
 

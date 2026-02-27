@@ -816,8 +816,8 @@ class LoadTestSuite:
         for ws in self.websocket_connections:
             try:
                 await ws.close()
-            except:
-                pass
+            except Exception:
+                pass  # Connection may already be closed
         
         self.websocket_connections.clear()
 

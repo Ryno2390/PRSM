@@ -520,7 +520,7 @@ class RealBenchmarkSuite:
                     np.linalg.norm(embeddings[0]) * np.linalg.norm(embeddings[1])
                 )
                 scores["semantic_similarity"] = max(0.0, similarity)
-            except:
+            except Exception:
                 scores["semantic_similarity"] = 0.5  # Neutral score if evaluation fails
         else:
             scores["semantic_similarity"] = 0.5
@@ -530,8 +530,8 @@ class RealBenchmarkSuite:
             try:
                 rouge_scores = self.rouge_scorer.score(task.reference_response, response)
                 scores["rouge_score"] = rouge_scores['rougeL'].fmeasure
-            except:
-                scores["rouge_score"] = 0.5
+            except Exception:
+                scores["rouge_score"] = 0.5  # Neutral score if ROUGE evaluation fails
         else:
             scores["rouge_score"] = 0.5
         

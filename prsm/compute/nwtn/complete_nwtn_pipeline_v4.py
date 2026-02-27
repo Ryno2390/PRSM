@@ -567,7 +567,7 @@ class CompleteNWTNPipeline:
                 try:
                     with open('/tmp/nwtn_progress.json', 'w') as f:
                         json.dump(progress_data, f)
-                except:
+                except (IOError, OSError):
                     pass  # Ignore progress file errors
             
             candidates = await self.system1_generator.generate_5040_candidates(

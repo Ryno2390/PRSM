@@ -779,7 +779,8 @@ class BusinessIntelligenceEngine:
             if isinstance(timestamp_value, str):
                 try:
                     timestamp_value = datetime.fromisoformat(timestamp_value.replace('Z', '+00:00'))
-                except:
+                except (ValueError, AttributeError):
+                    # Invalid timestamp format, skip this record
                     continue
             
             # Apply range filter

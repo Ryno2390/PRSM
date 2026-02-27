@@ -643,8 +643,8 @@ class DistributedConsensus:
             if "timestamp" in log:
                 try:
                     timestamps.append(datetime.fromisoformat(log["timestamp"].replace('Z', '+00:00')))
-                except:
-                    return False
+                except (ValueError, AttributeError):
+                    return False  # Invalid timestamp format
         
         # Timestamps should be in order
         if timestamps != sorted(timestamps):
