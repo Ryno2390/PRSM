@@ -109,6 +109,10 @@ class WebSocketTransport:
 
     Manages both a server (for incoming connections) and client connections
     (outgoing to other peers). Provides message routing and health monitoring.
+    
+    Thread Safety:
+        All peer connection operations are protected by asyncio locks to prevent
+        race conditions when multiple coroutines access shared state concurrently.
     """
 
     def __init__(self, identity: NodeIdentity, host: str = "0.0.0.0", port: int = 9001):
@@ -124,14 +128,33 @@ class WebSocketTransport:
         self._server = None
         self._running = False
         self._tasks: List[asyncio.Task] = []
+        
+        # Thread safety locks for concurrent access to shared state
+        self._peers_lock = asyncio.Lock()  # Protects self.peers dictionary
+        self._nonces_lock = asyncio.Lock()  # Protects _seen_nonces and _nonce_timestamps
 
     @property
     def peer_count(self) -> int:
+        """Return the number of connected peers (thread-safe read)."""
+        # Note: This property is not async, so we can't use the lock here.
+        # For accurate count in async context, use get_peer_count() instead.
         return len(self.peers)
 
     @property
     def peer_addresses(self) -> List[str]:
+        """Return list of peer addresses (thread-safe snapshot)."""
+        # Note: For accurate snapshot in async context, use get_peer_addresses() instead.
         return [p.address for p in self.peers.values()]
+
+    async def get_peer_count(self) -> int:
+        """Async method to get peer count with proper locking."""
+        async with self._peers_lock:
+            return len(self.peers)
+
+    async def get_peer_addresses(self) -> List[str]:
+        """Async method to get peer addresses with proper locking."""
+        async with self._peers_lock:
+            return [p.address for p in self.peers.values()]
 
     # ── Message handler registration ─────────────────────────────
 
@@ -170,13 +193,14 @@ class WebSocketTransport:
             task.cancel()
         self._tasks.clear()
 
-        # Close all peer connections
-        for peer in list(self.peers.values()):
-            try:
-                await peer.websocket.close()
-            except Exception:
-                pass
-        self.peers.clear()
+        # Close all peer connections with proper locking
+        async with self._peers_lock:
+            for peer in list(self.peers.values()):
+                try:
+                    await peer.websocket.close()
+                except Exception:
+                    pass
+            self.peers.clear()
 
         if self._server:
             self._server.close()
@@ -202,9 +226,11 @@ class WebSocketTransport:
                 await websocket.close(1002, "Self-connection rejected")
                 return
 
-            if peer_id in self.peers:
-                await websocket.close(1002, "Already connected")
-                return
+            # Thread-safe check and add for peer connection
+            async with self._peers_lock:
+                if peer_id in self.peers:
+                    await websocket.close(1002, "Already connected")
+                    return
 
             # Verify handshake signature
             pub_key_b64 = msg.payload.get("public_key", "")
@@ -221,7 +247,15 @@ class WebSocketTransport:
                 roles=msg.payload.get("roles", []),
                 outbound=False,
             )
-            self.peers[peer_id] = peer
+            
+            # Thread-safe peer addition
+            async with self._peers_lock:
+                # Double-check after acquiring lock (race condition prevention)
+                if peer_id in self.peers:
+                    await websocket.close(1002, "Already connected")
+                    return
+                self.peers[peer_id] = peer
+                peer_count = len(self.peers)
 
             # Send handshake acknowledgment
             ack = P2PMessage(
@@ -230,7 +264,7 @@ class WebSocketTransport:
                 payload={
                     "public_key": self.identity.public_key_b64,
                     "display_name": self.identity.display_name if hasattr(self.identity, 'display_name') else "",
-                    "peer_count": self.peer_count,
+                    "peer_count": peer_count,
                 },
             )
             ack.sign(self.identity)
@@ -252,13 +286,18 @@ class WebSocketTransport:
         except Exception as e:
             logger.error(f"Error handling incoming connection: {e}")
         finally:
-            if peer and peer.peer_id in self.peers:
-                del self.peers[peer.peer_id]
-                logger.info(f"Peer disconnected: {peer.peer_id[:8]}...")
-                await self._dispatch(
-                    P2PMessage(msg_type="peer_disconnected", sender_id=peer.peer_id, payload={}),
-                    peer,
-                )
+            if peer:
+                # Thread-safe peer removal
+                async with self._peers_lock:
+                    if peer.peer_id in self.peers:
+                        del self.peers[peer.peer_id]
+                        logger.info(f"Peer disconnected: {peer.peer_id[:8]}...")
+                # Dispatch outside lock to prevent deadlock
+                if peer:
+                    await self._dispatch(
+                        P2PMessage(msg_type="peer_disconnected", sender_id=peer.peer_id, payload={}),
+                        peer,
+                    )
 
     # ── Client (outgoing connections) ────────────────────────────
 
@@ -308,11 +347,13 @@ class WebSocketTransport:
                 outbound=True,
             )
 
-            if peer.peer_id in self.peers:
-                await websocket.close()
-                return self.peers[peer.peer_id]
+            # Thread-safe check and add for peer connection
+            async with self._peers_lock:
+                if peer.peer_id in self.peers:
+                    await websocket.close()
+                    return self.peers[peer.peer_id]
+                self.peers[peer.peer_id] = peer
 
-            self.peers[peer.peer_id] = peer
             logger.info(f"Peer connected (outbound): {peer.peer_id[:8]}... at {address}")
 
             # Start reading in background
@@ -332,24 +373,33 @@ class WebSocketTransport:
     # ── Messaging ────────────────────────────────────────────────
 
     async def send_to_peer(self, peer_id: str, msg: P2PMessage) -> bool:
-        """Send a message directly to a specific peer."""
-        peer = self.peers.get(peer_id)
-        if not peer:
-            return False
+        """Send a message directly to a specific peer (thread-safe)."""
+        async with self._peers_lock:
+            peer = self.peers.get(peer_id)
+            if not peer:
+                return False
+            # Get reference to websocket while holding lock
+            websocket = peer.websocket
+        
         try:
             msg.sign(self.identity)
-            await peer.websocket.send(msg.to_json())
+            await websocket.send(msg.to_json())
             return True
         except Exception as e:
             logger.error(f"Failed to send to {peer_id[:8]}: {e}")
             return False
 
     async def broadcast(self, msg: P2PMessage) -> int:
-        """Send a message to ALL connected peers."""
+        """Send a message to ALL connected peers (thread-safe)."""
         msg.sign(self.identity)
         raw = msg.to_json()
+        
+        # Get snapshot of peers under lock
+        async with self._peers_lock:
+            peers_snapshot = list(self.peers.values())
+        
         sent = 0
-        for peer in list(self.peers.values()):
+        for peer in peers_snapshot:
             try:
                 await peer.websocket.send(raw)
                 sent += 1
@@ -358,9 +408,13 @@ class WebSocketTransport:
         return sent
 
     async def gossip(self, msg: P2PMessage, fanout: int = 3) -> int:
-        """Send a message to a random subset of peers (gossip protocol)."""
+        """Send a message to a random subset of peers (gossip protocol, thread-safe)."""
         import random
-        targets = list(self.peers.values())
+        
+        # Get snapshot of peers under lock
+        async with self._peers_lock:
+            targets = list(self.peers.values())
+        
         if len(targets) > fanout:
             targets = random.sample(targets, fanout)
 
@@ -385,11 +439,12 @@ class WebSocketTransport:
                     msg = P2PMessage.from_json(raw)
                     peer.last_seen = time.time()
 
-                    # Dedup by nonce
-                    if msg.nonce in self._seen_nonces:
-                        continue
-                    self._seen_nonces.add(msg.nonce)
-                    self._nonce_timestamps[msg.nonce] = time.time()
+                    # Thread-safe dedup by nonce
+                    async with self._nonces_lock:
+                        if msg.nonce in self._seen_nonces:
+                            continue
+                        self._seen_nonces.add(msg.nonce)
+                        self._nonce_timestamps[msg.nonce] = time.time()
 
                     # Handle pings internally
                     if msg.msg_type == MSG_PING:
@@ -412,20 +467,26 @@ class WebSocketTransport:
         except websockets.exceptions.ConnectionClosed:
             pass
         finally:
-            if peer.peer_id in self.peers:
-                del self.peers[peer.peer_id]
-                logger.info(f"Peer disconnected: {peer.peer_id[:8]}...")
-                await self._dispatch(
-                    P2PMessage(msg_type="peer_disconnected", sender_id=peer.peer_id, payload={}),
-                    peer,
-                )
+            # Thread-safe peer removal
+            async with self._peers_lock:
+                if peer.peer_id in self.peers:
+                    del self.peers[peer.peer_id]
+                    logger.info(f"Peer disconnected: {peer.peer_id[:8]}...")
+            # Dispatch outside lock to prevent deadlock
+            await self._dispatch(
+                P2PMessage(msg_type="peer_disconnected", sender_id=peer.peer_id, payload={}),
+                peer,
+            )
 
     async def _nonce_cleanup_loop(self) -> None:
-        """Periodically clean up old nonces to prevent memory growth."""
+        """Periodically clean up old nonces to prevent memory growth (thread-safe)."""
         while self._running:
             await asyncio.sleep(60)
             cutoff = time.time() - self._nonce_window
-            expired = [n for n, t in self._nonce_timestamps.items() if t < cutoff]
-            for n in expired:
-                self._seen_nonces.discard(n)
-                del self._nonce_timestamps[n]
+            
+            # Thread-safe nonce cleanup
+            async with self._nonces_lock:
+                expired = [n for n, t in self._nonce_timestamps.items() if t < cutoff]
+                for n in expired:
+                    self._seen_nonces.discard(n)
+                    del self._nonce_timestamps[n]
