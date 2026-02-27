@@ -21,7 +21,7 @@ def _get_settings():
         try:
             s = load_config()
         except Exception:
-            pass
+            pass  # Config loading failed, return None (settings are optional at import time)
     return s
 
 

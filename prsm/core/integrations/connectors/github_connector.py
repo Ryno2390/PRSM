@@ -706,4 +706,4 @@ class GitHubConnector(BaseConnector):
             try:
                 asyncio.get_event_loop().run_until_complete(self.session.close())
             except Exception:
-                pass
+                pass  # Session cleanup during garbage collection may fail
