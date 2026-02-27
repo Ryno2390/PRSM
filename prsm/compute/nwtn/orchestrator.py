@@ -18,6 +18,24 @@ This orchestrator implements the complete query processing workflow:
 3. Context allocation and FTNS charging
 4. Multi-stage reasoning execution
 5. Safety validation and response compilation
+
+DEPENDENCY INJECTION:
+This orchestrator requires all dependencies to be injected via the constructor.
+This ensures that production code uses real service implementations and tests
+can inject mock services as needed.
+
+For testing, use the mock services from tests/fixtures/nwtn_mocks.py:
+
+    from tests.fixtures.nwtn_mocks import (
+        MockContextManager, MockFTNSService, MockIPFSClient, MockModelRegistry
+    )
+    
+    orchestrator = NWTNOrchestrator(
+        context_manager=MockContextManager(),
+        ftns_service=MockFTNSService(),
+        ipfs_client=MockIPFSClient(),
+        model_registry=MockModelRegistry()
+    )
 """
 
 import asyncio
@@ -25,7 +43,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional, Union, TYPE_CHECKING
 from uuid import UUID, uuid4
 from enum import Enum
 
@@ -78,149 +96,59 @@ class NWTNResponse:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-class MockContextManager:
-    """Mock context manager for standalone operation"""
-    
-    def __init__(self):
-        self.sessions: Dict[str, Dict[str, Any]] = {}
-        self.usage_history: List[Dict[str, Any]] = []
-    
-    async def get_session_usage(self, session_id: Union[str, UUID]) -> Optional[Dict[str, Any]]:
-        return self.sessions.get(str(session_id))
-    
-    async def optimize_context_allocation(self, historical_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-        if not historical_data:
-            return {"avg_efficiency": 0.7, "over_allocation_rate": 0.1, "under_allocation_rate": 0.1}
-        
-        efficiencies = [d.get("used", 0) / max(d.get("allocated", 1), 1) for d in historical_data]
-        avg_eff = sum(efficiencies) / len(efficiencies)
-        
-        return {
-            "avg_efficiency": avg_eff,
-            "over_allocation_rate": sum(1 for e in efficiencies if e < 0.7) / len(efficiencies),
-            "under_allocation_rate": sum(1 for e in efficiencies if e > 0.9) / len(efficiencies),
-            "optimization_potential": (1 - avg_eff) * 100
-        }
-    
-    def record_usage(self, session_id: str, context_used: int, allocated: int):
-        self.usage_history.append({
-            "session_id": session_id,
-            "used": context_used,
-            "allocated": allocated,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        })
+class NWTNOrchestratorError(Exception):
+    """Base exception for NWTN Orchestrator errors."""
+    pass
 
 
-class MockFTNSService:
-    """Mock FTNS service for standalone operation"""
-    
-    def __init__(self):
-        self.balances: Dict[str, float] = {}
-        self.transactions: List[Dict[str, Any]] = []
-    
-    async def get_user_balance(self, user_id: str):
-        from dataclasses import dataclass
-        @dataclass
-        class Balance:
-            balance: float
-            user_id: str
-        return Balance(balance=self.balances.get(user_id, 0.0), user_id=user_id)
-    
-    def get_user_balance_sync(self, user_id: str) -> float:
-        return self.balances.get(user_id, 0.0)
-    
-    async def reward_contribution(self, user_id: str, contribution_type: str, amount: float) -> bool:
-        self.balances[user_id] = self.balances.get(user_id, 0.0) + amount
-        self.transactions.append({
-            "user_id": user_id,
-            "type": "reward",
-            "amount": amount,
-            "contribution_type": contribution_type
-        })
-        return True
-    
-    def award_tokens(self, user_id: str, amount: float, description: str = "") -> bool:
-        self.balances[user_id] = self.balances.get(user_id, 0.0) + amount
-        self.transactions.append({
-            "user_id": user_id,
-            "type": "award",
-            "amount": amount,
-            "description": description
-        })
-        return True
-    
-    async def charge_user(self, user_id: str, amount: float, description: str = "") -> bool:
-        if self.balances.get(user_id, 0.0) < amount:
-            raise ValueError(f"Insufficient balance for user {user_id}")
-        self.balances[user_id] -= amount
-        self.transactions.append({
-            "user_id": user_id,
-            "type": "charge",
-            "amount": amount,
-            "description": description
-        })
-        return True
-    
-    def deduct_tokens(self, user_id: str, amount: float, description: str = "") -> bool:
-        if self.balances.get(user_id, 0.0) < amount:
-            return False
-        self.balances[user_id] -= amount
-        self.transactions.append({
-            "user_id": user_id,
-            "type": "deduct",
-            "amount": amount,
-            "description": description
-        })
-        return True
+class MissingDependencyError(NWTNOrchestratorError):
+    """Raised when a required dependency is not provided."""
+    pass
 
 
-class MockIPFSClient:
-    """Mock IPFS client for standalone operation"""
-    
-    def __init__(self):
-        self.storage: Dict[str, bytes] = {}
-        self.models: Dict[str, Dict[str, Any]] = {}
-    
-    async def store_model(self, model_data: bytes, metadata: Dict[str, Any]) -> str:
-        import hashlib
-        cid = f"Qm{hashlib.sha256(model_data).hexdigest()[:44]}"
-        self.storage[cid] = model_data
-        self.models[cid] = metadata
-        return cid
-    
-    async def retrieve_model(self, cid: str) -> Optional[bytes]:
-        return self.storage.get(cid)
+class QueryProcessingError(NWTNOrchestratorError):
+    """Raised when query processing fails."""
+    def __init__(self, message: str, session_id: str = None, stage: str = None):
+        super().__init__(message)
+        self.session_id = session_id
+        self.stage = stage
 
 
-class MockModelRegistry:
-    """Mock model registry for standalone operation"""
-    
-    def __init__(self):
-        self.registered_models: Dict[str, TeacherModel] = {}
-        self._initialize_default_models()
-    
-    def _initialize_default_models(self):
-        default_models = [
-            TeacherModel(name="Research Assistant", specialization="research", performance_score=0.92),
-            TeacherModel(name="Data Analyzer", specialization="data_analysis", performance_score=0.88),
-            TeacherModel(name="General Helper", specialization="general", performance_score=0.85),
-            TeacherModel(name="Physics Expert", specialization="theoretical_physics", performance_score=0.90),
-            TeacherModel(name="ML Specialist", specialization="machine_learning", performance_score=0.91),
-        ]
-        for model in default_models:
-            self.registered_models[model.name] = model
-    
-    async def register_teacher_model(self, model: TeacherModel, cid: str) -> bool:
-        model.ipfs_cid = cid
-        self.registered_models[model.name] = model
-        return True
-    
-    async def discover_specialists(self, domain: str) -> List[TeacherModel]:
-        domain_lower = domain.lower()
-        return [
-            m for m in self.registered_models.values()
-            if domain_lower in m.specialization.lower() or m.specialization.lower() == "general"
-        ]
+class IntentClarificationError(QueryProcessingError):
+    """Raised when intent clarification fails."""
+    def __init__(self, message: str, prompt: str = None):
+        super().__init__(message, stage="intent_clarification")
+        self.prompt = prompt
+
+
+class ModelDiscoveryError(QueryProcessingError):
+    """Raised when model discovery fails."""
+    def __init__(self, message: str, category: str = None):
+        super().__init__(message, stage="model_discovery")
+        self.category = category
+
+
+class ContextAllocationError(QueryProcessingError):
+    """Raised when context allocation fails."""
+    def __init__(self, message: str, requested: int = None, available: int = None):
+        super().__init__(message, stage="context_allocation")
+        self.requested = requested
+        self.available = available
+
+
+class ReasoningExecutionError(QueryProcessingError):
+    """Raised when reasoning execution fails."""
+    def __init__(self, message: str, step: int = None, agent_type: str = None):
+        super().__init__(message, stage="reasoning_execution")
+        self.step = step
+        self.agent_type = agent_type
+
+
+class SafetyValidationError(QueryProcessingError):
+    """Raised when safety validation fails."""
+    def __init__(self, message: str, flags: List[str] = None):
+        super().__init__(message, stage="safety_validation")
+        self.flags = flags or []
 
 
 class NWTNOrchestrator:
@@ -233,24 +161,73 @@ class NWTNOrchestrator:
     - Model discovery and specialist selection
     - Multi-stage reasoning execution
     - Safety validation and response compilation
+    
+    DEPENDENCY INJECTION:
+    All dependencies must be provided via the constructor. This ensures
+    that production code uses real service implementations.
+    
+    For testing, use mock services from tests/fixtures/nwtn_mocks.py:
+    
+        from tests.fixtures.nwtn_mocks import (
+            MockContextManager, MockFTNSService, MockIPFSClient, MockModelRegistry
+        )
+        orchestrator = NWTNOrchestrator(
+            context_manager=MockContextManager(),
+            ftns_service=MockFTNSService(),
+            ipfs_client=MockIPFSClient(),
+            model_registry=MockModelRegistry()
+        )
     """
     
     def __init__(
         self,
-        context_manager: Optional[Any] = None,
-        ftns_service: Optional[Any] = None,
-        ipfs_client: Optional[Any] = None,
-        model_registry: Optional[Any] = None
+        context_manager: Any,
+        ftns_service: Any,
+        ipfs_client: Any,
+        model_registry: Any
     ):
-        self.context_manager = context_manager or MockContextManager()
-        self.ftns_service = ftns_service or MockFTNSService()
-        self.ipfs_client = ipfs_client or MockIPFSClient()
-        self.model_registry = model_registry or MockModelRegistry()
+        """
+        Initialize the NWTN Orchestrator with required dependencies.
+        
+        Args:
+            context_manager: Service for managing context allocation and usage tracking
+            ftns_service: FTNS token service for balance management and charging
+            ipfs_client: IPFS client for distributed storage operations
+            model_registry: Registry for discovering and registering AI models
+            
+        Raises:
+            MissingDependencyError: If any required dependency is None
+        """
+        if context_manager is None:
+            raise MissingDependencyError(
+                "context_manager is required. "
+                "For testing, use MockContextManager from tests/fixtures/nwtn_mocks.py"
+            )
+        if ftns_service is None:
+            raise MissingDependencyError(
+                "ftns_service is required. "
+                "For testing, use MockFTNSService from tests/fixtures/nwtn_mocks.py"
+            )
+        if ipfs_client is None:
+            raise MissingDependencyError(
+                "ipfs_client is required. "
+                "For testing, use MockIPFSClient from tests/fixtures/nwtn_mocks.py"
+            )
+        if model_registry is None:
+            raise MissingDependencyError(
+                "model_registry is required. "
+                "For testing, use MockModelRegistry from tests/fixtures/nwtn_mocks.py"
+            )
+        
+        self.context_manager = context_manager
+        self.ftns_service = ftns_service
+        self.ipfs_client = ipfs_client
+        self.model_registry = model_registry
         
         self.sessions: Dict[str, PRSMSession] = {}
         self._initialized = False
         
-        logger.info("NWTNOrchestrator initialized")
+        logger.info("NWTNOrchestrator initialized with injected dependencies")
     
     async def initialize(self) -> bool:
         """Initialize the orchestrator and all dependencies."""
@@ -316,88 +293,190 @@ class NWTNOrchestrator:
             
         Returns:
             NWTNResponse with complete results and reasoning trace
+            
+        Raises:
+            IntentClarificationError: If intent clarification fails
+            ModelDiscoveryError: If model discovery fails
+            ContextAllocationError: If context allocation fails
+            ReasoningExecutionError: If reasoning execution fails
+            SafetyValidationError: If safety validation fails
+            QueryProcessingError: For other processing failures
         """
         start_time = time.time()
+        session = None
+        reasoning_trace = []
         
-        await self.initialize()
+        try:
+            await self.initialize()
+        except Exception as e:
+            logger.error(f"Failed to initialize orchestrator: {e}")
+            raise QueryProcessingError(
+                f"Orchestrator initialization failed: {e}",
+                stage="initialization"
+            )
         
-        session = PRSMSession(
-            session_id=str(uuid4()),
-            user_id=user_input.user_id,
-            nwtn_context_allocation=user_input.context_allocation
-        )
-        self.sessions[session.session_id] = session
+        # Create session
+        try:
+            session = PRSMSession(
+                session_id=str(uuid4()),
+                user_id=user_input.user_id,
+                nwtn_context_allocation=user_input.context_allocation
+            )
+            self.sessions[session.session_id] = session
+        except Exception as e:
+            logger.error(f"Failed to create session: {e}")
+            raise QueryProcessingError(
+                f"Session creation failed: {e}",
+                stage="session_creation"
+            )
         
-        clarified = await self.clarify_intent(user_input.prompt)
+        # Stage 1: Intent Clarification
+        try:
+            clarified = await self.clarify_intent(user_input.prompt)
+        except Exception as e:
+            logger.error(f"Intent clarification failed: {e}", prompt=user_input.prompt[:100])
+            if session:
+                session.status = "failed"
+            raise IntentClarificationError(
+                f"Failed to clarify intent: {e}",
+                prompt=user_input.prompt[:100] if user_input.prompt else None
+            )
         
-        context_needed = min(
-            user_input.context_allocation,
-            clarified.context_required
-        )
+        # Stage 2: Context Allocation
+        try:
+            context_needed = min(
+                user_input.context_allocation,
+                clarified.context_required
+            )
+        except Exception as e:
+            logger.error(f"Context allocation calculation failed: {e}")
+            if session:
+                session.status = "failed"
+            raise ContextAllocationError(
+                f"Failed to calculate context allocation: {e}",
+                requested=user_input.context_allocation,
+                available=clarified.context_required if clarified else None
+            )
         
+        # Verify user balance (non-blocking warning)
         try:
             await self.ftns_service.get_user_balance(user_input.user_id)
         except Exception as e:
             logger.warning(f"Could not verify user balance: {e}")
         
-        reasoning_trace = []
+        # Stage 3: Model Discovery
+        specialists = []
+        models_used = []
+        try:
+            specialists = await self.model_registry.discover_specialists(clarified.intent_category)
+            models_used = [s.name for s in specialists[:2]]
+        except Exception as e:
+            logger.error(f"Model discovery failed: {e}", category=clarified.intent_category)
+            if session:
+                session.status = "failed"
+            raise ModelDiscoveryError(
+                f"Failed to discover models for category '{clarified.intent_category}': {e}",
+                category=clarified.intent_category
+            )
         
-        step1 = ReasoningStep(
-            agent_type=AgentType.ARCHITECT,
-            agent_id="nwtn_architect",
-            input_data={"prompt": user_input.prompt},
-            output_data={
-                "intent_category": clarified.intent_category,
-                "complexity": clarified.complexity_estimate
-            },
-            execution_time=0.1,
-            confidence_score=0.9
-        )
-        reasoning_trace.append(step1)
+        # Stage 4: Reasoning Execution
+        try:
+            # Step 1: Architect - Intent Analysis
+            step1 = ReasoningStep(
+                agent_type=AgentType.ARCHITECT,
+                agent_id="nwtn_architect",
+                input_data={"prompt": user_input.prompt},
+                output_data={
+                    "intent_category": clarified.intent_category,
+                    "complexity": clarified.complexity_estimate
+                },
+                execution_time=0.1,
+                confidence_score=0.9
+            )
+            reasoning_trace.append(step1)
+            
+            # Step 2: Router - Model Selection
+            step2 = ReasoningStep(
+                agent_type=AgentType.ROUTER,
+                agent_id="nwtn_router",
+                input_data={"category": clarified.intent_category},
+                output_data={"selected_models": models_used},
+                execution_time=0.05,
+                confidence_score=0.85
+            )
+            reasoning_trace.append(step2)
+            
+            # Step 3: Executor - Query Processing
+            step3 = ReasoningStep(
+                agent_type=AgentType.EXECUTOR,
+                agent_id="nwtn_executor",
+                input_data={"models": models_used, "prompt": user_input.prompt},
+                output_data={
+                    "analysis": f"Processed query using {len(models_used)} specialist models",
+                    "key_findings": ["Finding 1", "Finding 2", "Finding 3"]
+                },
+                execution_time=0.3 * clarified.complexity_estimate,
+                confidence_score=0.88
+            )
+            reasoning_trace.append(step3)
+            
+            # Step 4: Compiler - Response Synthesis
+            step4 = ReasoningStep(
+                agent_type=AgentType.COMPILER,
+                agent_id="nwtn_compiler",
+                input_data={"reasoning_steps": len(reasoning_trace)},
+                output_data={
+                    "synthesis": "Compiled comprehensive analysis",
+                    "confidence": 0.87
+                },
+                execution_time=0.15,
+                confidence_score=0.87
+            )
+            reasoning_trace.append(step4)
+            
+        except Exception as e:
+            logger.error(f"Reasoning execution failed: {e}", step=len(reasoning_trace) + 1)
+            if session:
+                session.status = "failed"
+            raise ReasoningExecutionError(
+                f"Reasoning execution failed at step {len(reasoning_trace) + 1}: {e}",
+                step=len(reasoning_trace) + 1,
+                agent_type=reasoning_trace[-1].agent_type.value if reasoning_trace else None
+            )
         
-        specialists = await self.model_registry.discover_specialists(clarified.intent_category)
-        models_used = [s.name for s in specialists[:2]]
+        # Stage 5: Safety Validation
+        safety_validated = True
+        try:
+            # Basic safety checks
+            response_text = self._compile_response(
+                prompt=user_input.prompt,
+                reasoning_trace=reasoning_trace,
+                clarified=clarified
+            )
+            
+            # Check for potential safety issues
+            safety_flags = []
+            if len(response_text) > 10000:  # Unusually long response
+                safety_flags.append("response_length_exceeded")
+            
+            # Add more safety checks as needed
+            if safety_flags:
+                logger.warning("Safety validation flags raised", flags=safety_flags)
+                # For now, we log but don't fail - adjust based on policy
+                # safety_validated = False
+                # raise SafetyValidationError("Safety validation failed", flags=safety_flags)
+                
+        except SafetyValidationError:
+            raise
+        except Exception as e:
+            logger.error(f"Safety validation failed: {e}")
+            if session:
+                session.status = "failed"
+            raise SafetyValidationError(f"Safety validation error: {e}")
         
-        step2 = ReasoningStep(
-            agent_type=AgentType.ROUTER,
-            agent_id="nwtn_router",
-            input_data={"category": clarified.intent_category},
-            output_data={"selected_models": models_used},
-            execution_time=0.05,
-            confidence_score=0.85
-        )
-        reasoning_trace.append(step2)
-        
-        step3 = ReasoningStep(
-            agent_type=AgentType.EXECUTOR,
-            agent_id="nwtn_executor",
-            input_data={"models": models_used, "prompt": user_input.prompt},
-            output_data={
-                "analysis": f"Processed query using {len(models_used)} specialist models",
-                "key_findings": ["Finding 1", "Finding 2", "Finding 3"]
-            },
-            execution_time=0.3 * clarified.complexity_estimate,
-            confidence_score=0.88
-        )
-        reasoning_trace.append(step3)
-        
-        step4 = ReasoningStep(
-            agent_type=AgentType.COMPILER,
-            agent_id="nwtn_compiler",
-            input_data={"reasoning_steps": len(reasoning_trace)},
-            output_data={
-                "synthesis": "Compiled comprehensive analysis",
-                "confidence": 0.87
-            },
-            execution_time=0.15,
-            confidence_score=0.87
-        )
-        reasoning_trace.append(step4)
-        
+        # Calculate final metrics
         context_used = int(context_needed * 0.75)
         ftns_charged = context_used * 0.01
-        
-        safety_validated = True
         
         response = self._compile_response(
             prompt=user_input.prompt,
@@ -409,14 +488,20 @@ class NWTNOrchestrator:
         
         processing_time = time.time() - start_time
         
-        self.context_manager.record_usage(session.session_id, context_used, context_needed)
+        # Record usage (non-critical, don't fail if this errors)
+        try:
+            self.context_manager.record_usage(session.session_id, context_used, context_needed)
+        except Exception as e:
+            logger.warning(f"Failed to record context usage: {e}")
         
-        session.context_used = context_used
-        session.status = "completed"
-        session.reasoning_trace = reasoning_trace
+        # Update session status
+        if session:
+            session.context_used = context_used
+            session.status = "completed"
+            session.reasoning_trace = reasoning_trace
         
         return NWTNResponse(
-            session_id=session.session_id,
+            session_id=session.session_id if session else str(uuid4()),
             response=response,
             context_used=context_used,
             ftns_charged=ftns_charged,
@@ -476,12 +561,51 @@ class NWTNOrchestrator:
 
 
 def create_nwtn_orchestrator(
-    context_manager: Optional[Any] = None,
-    ftns_service: Optional[Any] = None,
-    ipfs_client: Optional[Any] = None,
-    model_registry: Optional[Any] = None
+    context_manager: Any,
+    ftns_service: Any,
+    ipfs_client: Any,
+    model_registry: Any
 ) -> NWTNOrchestrator:
-    """Factory function to create an NWTN orchestrator."""
+    """
+    Factory function to create an NWTN orchestrator with all required dependencies.
+    
+    Args:
+        context_manager: Service for managing context allocation and usage tracking
+        ftns_service: FTNS token service for balance management and charging
+        ipfs_client: IPFS client for distributed storage operations
+        model_registry: Registry for discovering and registering AI models
+        
+    Returns:
+        Configured NWTNOrchestrator instance
+        
+    Raises:
+        MissingDependencyError: If any required dependency is None
+        
+    Example:
+        # For production use with real services
+        from prsm.economy.tokenomics.ftns_service import FTNSService
+        from prsm.core.ipfs_client import IPFSClient
+        # ... other imports
+        
+        orchestrator = create_nwtn_orchestrator(
+            context_manager=real_context_manager,
+            ftns_service=real_ftns_service,
+            ipfs_client=real_ipfs_client,
+            model_registry=real_model_registry
+        )
+        
+        # For testing use with mocks
+        from tests.fixtures.nwtn_mocks import (
+            MockContextManager, MockFTNSService, MockIPFSClient, MockModelRegistry
+        )
+        
+        orchestrator = create_nwtn_orchestrator(
+            context_manager=MockContextManager(),
+            ftns_service=MockFTNSService(),
+            ipfs_client=MockIPFSClient(),
+            model_registry=MockModelRegistry()
+        )
+    """
     return NWTNOrchestrator(
         context_manager=context_manager,
         ftns_service=ftns_service,
@@ -493,9 +617,41 @@ def create_nwtn_orchestrator(
 _nwtn_orchestrator_instance: Optional[NWTNOrchestrator] = None
 
 
-def get_nwtn_orchestrator() -> NWTNOrchestrator:
-    """Get or create the singleton NWTN orchestrator instance."""
+def get_nwtn_orchestrator(
+    context_manager: Any = None,
+    ftns_service: Any = None,
+    ipfs_client: Any = None,
+    model_registry: Any = None
+) -> NWTNOrchestrator:
+    """
+    Get or create the singleton NWTN orchestrator instance.
+    
+    On first call, all dependencies must be provided. Subsequent calls
+    will return the existing instance regardless of parameters.
+    
+    Args:
+        context_manager: Service for managing context allocation (required on first call)
+        ftns_service: FTNS token service (required on first call)
+        ipfs_client: IPFS client (required on first call)
+        model_registry: Model registry (required on first call)
+        
+    Returns:
+        The singleton NWTNOrchestrator instance
+        
+    Raises:
+        MissingDependencyError: If called for the first time without all dependencies
+        
+    Note:
+        This singleton pattern is provided for convenience but dependency injection
+        via create_nwtn_orchestrator() or direct instantiation is preferred for
+        better testability and explicit dependency management.
+    """
     global _nwtn_orchestrator_instance
     if _nwtn_orchestrator_instance is None:
-        _nwtn_orchestrator_instance = NWTNOrchestrator()
+        _nwtn_orchestrator_instance = NWTNOrchestrator(
+            context_manager=context_manager,
+            ftns_service=ftns_service,
+            ipfs_client=ipfs_client,
+            model_registry=model_registry
+        )
     return _nwtn_orchestrator_instance

@@ -63,6 +63,181 @@ class IPFSConnectionType(Enum):
     LOCAL_NODE = "local_node"
 
 
+# =============================================================================
+# Custom Exception Hierarchy
+# =============================================================================
+
+class IPFSError(Exception):
+    """
+    Base exception for IPFS operations.
+    
+    All IPFS-related exceptions inherit from this class, allowing for
+    both specific exception handling and general IPFS error catching.
+    
+    Example:
+        try:
+            result = await client.add_content(content)
+        except IPFSError as e:
+            logger.error(f"IPFS operation failed: {e}")
+    """
+    pass
+
+
+class IPFSTimeoutError(IPFSError):
+    """
+    Exception raised when an IPFS operation times out.
+    
+    This exception is raised when operations exceed their configured
+    timeout duration, allowing for specific timeout handling logic.
+    
+    Example:
+        try:
+            content = await client.get_content(cid, timeout=30)
+        except IPFSTimeoutError:
+            logger.warning("Content retrieval timed out, retrying...")
+            content = await client.get_content(cid, timeout=60)
+    """
+    pass
+
+
+class IPFSConnectionError(IPFSError):
+    """
+    Exception raised when connection to IPFS node fails.
+    
+    This exception indicates network-level issues such as:
+    - IPFS daemon not running
+    - Network connectivity problems
+    - Invalid API endpoint configuration
+    
+    Example:
+        try:
+            await client.connect()
+        except IPFSConnectionError as e:
+            logger.error(f"Cannot connect to IPFS node: {e}")
+            # Attempt fallback or notify user
+    """
+    pass
+
+
+# =============================================================================
+# Configuration and Content Dataclasses
+# =============================================================================
+
+@dataclass
+class IPFSConfig:
+    """
+    Configuration for IPFS client connections.
+    
+    This dataclass provides a clean, type-safe way to configure IPFS
+    client behavior with sensible defaults for most use cases.
+    
+    Attributes:
+        api_url: URL of the IPFS API endpoint (default: localhost:5001)
+        gateway_url: URL of the IPFS HTTP gateway (default: localhost:8080)
+        timeout: Default timeout for operations in seconds
+        chunk_size: Size of chunks for large file transfers
+        pin_content: Whether to pin content by default
+        verify_content: Whether to verify content integrity after upload
+        max_file_size: Maximum allowed file size for uploads
+        cluster_peers: List of IPFS cluster peer addresses for distributed storage
+        replication_factor: Number of replicas for cluster storage
+    
+    Example:
+        config = IPFSConfig(
+            api_url="http://ipfs.example.com:5001",
+            timeout=60.0,
+            pin_content=True
+        )
+        client = IPFSClient(config)
+    """
+    api_url: str = "http://localhost:5001"
+    gateway_url: str = "http://localhost:8080"
+    timeout: float = 30.0
+    chunk_size: int = 1024 * 1024  # 1MB chunks for large files
+    pin_content: bool = True
+    verify_content: bool = True
+    
+    # Cluster settings for production
+    cluster_peers: Optional[List[str]] = None
+    replication_factor: int = 3
+    
+    # Content policies
+    max_file_size: int = 100 * 1024 * 1024  # 100MB max
+    allowed_content_types: Optional[List[str]] = None
+
+
+@dataclass
+class IPFSContent:
+    """
+    IPFS content metadata container.
+    
+    This dataclass holds comprehensive metadata about content stored
+    in IPFS, including provenance information for tracking content
+    ownership and licensing.
+    
+    Attributes:
+        cid: Content Identifier (hash) - the unique address in IPFS
+        size: Size of the content in bytes
+        content_type: MIME type of the content
+        filename: Original filename if available
+        metadata: Additional metadata dictionary
+        pinned: Whether the content is pinned locally
+        added_at: Timestamp when content was added
+        creator_id: ID of the content creator
+        creator_signature: Cryptographic signature of creator
+        license: License information for the content
+    
+    Example:
+        content = await client.add_content(data, filename="model.bin")
+        print(f"Content stored at {content.cid}")
+        print(f"Size: {content.size} bytes")
+    """
+    cid: str  # Content Identifier
+    size: int
+    content_type: str
+    filename: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    pinned: bool = False
+    added_at: Optional[float] = None
+    
+    # Provenance tracking
+    creator_id: Optional[str] = None
+    creator_signature: Optional[str] = None
+    license: Optional[str] = None
+
+
+@dataclass
+class IPFSStats:
+    """
+    IPFS node statistics container.
+    
+    This dataclass holds operational statistics about an IPFS node,
+    useful for monitoring node health and network participation.
+    
+    Attributes:
+        peer_id: Unique identifier of the IPFS node
+        version: Version string of the IPFS implementation
+        connected_peers: Number of peers currently connected
+        total_storage: Total storage used by the node in bytes
+        available_storage: Available storage capacity in bytes
+        pinned_objects: Number of objects pinned on this node
+        bandwidth_in: Total incoming bandwidth in bytes
+        bandwidth_out: Total outgoing bandwidth in bytes
+    
+    Example:
+        stats = await client.get_node_info()
+        print(f"Node {stats.peer_id} has {stats.connected_peers} peers")
+    """
+    peer_id: str
+    version: str
+    connected_peers: int
+    total_storage: int
+    available_storage: int
+    pinned_objects: int
+    bandwidth_in: int
+    bandwidth_out: int
+
+
 @dataclass
 class IPFSUploadProgress:
     """Progress tracking for IPFS uploads"""
@@ -1216,6 +1391,296 @@ class PRSMIPFSOperations:
                 success=False,
                 error=f"Research content publishing failed: {str(e)}"
             )
+
+
+# =============================================================================
+# Utility Functions for Common Operations
+# =============================================================================
+
+async def create_ipfs_client(
+    api_url: str = "http://localhost:5001",
+    gateway_url: str = "http://localhost:8080",
+    timeout: float = 30.0
+) -> 'IPFSClient':
+    """
+    Create and connect an IPFS client with specified configuration.
+    
+    This is a convenience function for quickly creating a connected
+    IPFS client with common default settings.
+    
+    Args:
+        api_url: URL of the IPFS API endpoint
+        gateway_url: URL of the IPFS HTTP gateway
+        timeout: Default timeout for operations in seconds
+    
+    Returns:
+        Connected IPFSClient instance
+    
+    Example:
+        client = await create_ipfs_client(
+            api_url="http://ipfs.example.com:5001",
+            timeout=60.0
+        )
+        result = await client.add_content(b"Hello IPFS!")
+    """
+    config = IPFSConfig(api_url=api_url, gateway_url=gateway_url, timeout=timeout)
+    # Note: The actual client creation depends on the IPFSClient class implementation
+    # This returns a configured IPFSClient that needs to be connected
+    from prsm.core.ipfs_client import IPFSClient
+    client = IPFSClient(config)
+    await client.connect()
+    return client
+
+
+async def add_text_to_ipfs(
+    client: 'IPFSClient',
+    text: str,
+    filename: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None
+) -> IPFSContent:
+    """
+    Add text content to IPFS.
+    
+    Convenience function for adding string/text content to IPFS
+    with proper encoding and content type detection.
+    
+    Args:
+        client: Connected IPFSClient instance
+        text: Text content to add
+        filename: Optional filename for the content
+        metadata: Additional metadata to store with content
+    
+    Returns:
+        IPFSContent object with CID and metadata
+    
+    Example:
+        content = await add_text_to_ipfs(
+            client,
+            "Hello, IPFS World!",
+            filename="greeting.txt"
+        )
+        print(f"Text stored at: {content.cid}")
+    """
+    result = await client.add_content(
+        content=text,
+        filename=filename or "text_content.txt"
+    )
+    
+    if not result.success:
+        raise IPFSError(f"Failed to add text content: {result.error}")
+    
+    return IPFSContent(
+        cid=result.cid,
+        size=result.size or len(text.encode('utf-8')),
+        content_type='text/plain',
+        filename=filename,
+        metadata=metadata or {},
+        pinned=True,
+        added_at=time.time()
+    )
+
+
+async def get_text_from_ipfs(client: 'IPFSClient', cid: str) -> str:
+    """
+    Retrieve text content from IPFS.
+    
+    Convenience function for retrieving and decoding text content
+    stored in IPFS.
+    
+    Args:
+        client: Connected IPFSClient instance
+        cid: Content Identifier to retrieve
+    
+    Returns:
+        Decoded text content as string
+    
+    Example:
+        text = await get_text_from_ipfs(client, "QmXxx...")
+        print(f"Retrieved: {text}")
+    """
+    result = await client.get_content(cid)
+    
+    if not result.success:
+        raise IPFSError(f"Failed to get text content: {result.error}")
+    
+    # Handle both bytes and IPFSResult with content
+    if isinstance(result, bytes):
+        return result.decode('utf-8')
+    elif hasattr(result, 'metadata') and result.metadata and 'content' in result.metadata:
+        return result.metadata['content'].decode('utf-8')
+    else:
+        raise IPFSError("No content returned from IPFS")
+
+
+async def add_json_to_ipfs(
+    client: 'IPFSClient',
+    data: Dict[str, Any],
+    filename: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None
+) -> IPFSContent:
+    """
+    Add JSON data to IPFS.
+    
+    Convenience function for adding JSON-serializable data to IPFS
+    with proper content type headers.
+    
+    Args:
+        client: Connected IPFSClient instance
+        data: JSON-serializable dictionary to store
+        filename: Optional filename for the content
+        metadata: Additional metadata to store with content
+    
+    Returns:
+        IPFSContent object with CID and metadata
+    
+    Example:
+        content = await add_json_to_ipfs(
+            client,
+            {"model": "gpt-4", "accuracy": 0.95},
+            filename="model_metrics.json"
+        )
+        print(f"JSON stored at: {content.cid}")
+    """
+    json_content = json.dumps(data, indent=2, ensure_ascii=False)
+    
+    result = await client.add_content(
+        content=json_content,
+        filename=filename or "data.json"
+    )
+    
+    if not result.success:
+        raise IPFSError(f"Failed to add JSON content: {result.error}")
+    
+    return IPFSContent(
+        cid=result.cid,
+        size=result.size or len(json_content.encode('utf-8')),
+        content_type='application/json',
+        filename=filename,
+        metadata=metadata or {},
+        pinned=True,
+        added_at=time.time()
+    )
+
+
+async def get_json_from_ipfs(client: 'IPFSClient', cid: str) -> Dict[str, Any]:
+    """
+    Retrieve JSON data from IPFS.
+    
+    Convenience function for retrieving and parsing JSON content
+    stored in IPFS.
+    
+    Args:
+        client: Connected IPFSClient instance
+        cid: Content Identifier to retrieve
+    
+    Returns:
+        Parsed JSON data as dictionary
+    
+    Example:
+        data = await get_json_from_ipfs(client, "QmXxx...")
+        print(f"Model: {data['model']}")
+    """
+    result = await client.get_content(cid)
+    
+    if not result.success:
+        raise IPFSError(f"Failed to get JSON content: {result.error}")
+    
+    # Handle both bytes and IPFSResult with content
+    if isinstance(result, bytes):
+        content_str = result.decode('utf-8')
+    elif hasattr(result, 'metadata') and result.metadata and 'content' in result.metadata:
+        content_str = result.metadata['content'].decode('utf-8')
+    else:
+        raise IPFSError("No content returned from IPFS")
+    
+    try:
+        return json.loads(content_str)
+    except json.JSONDecodeError as e:
+        raise IPFSError(f"Failed to parse JSON content: {e}")
+
+
+# =============================================================================
+# Additional IPFS Operations
+# =============================================================================
+
+async def list_pinned_content(client: 'IPFSClient') -> List[str]:
+    """
+    List all content pinned on the connected IPFS node.
+    
+    Returns a list of CIDs for all content that is pinned locally,
+    preventing it from being garbage collected.
+    
+    Args:
+        client: Connected IPFSClient instance
+    
+    Returns:
+        List of pinned content CIDs
+    
+    Example:
+        pinned = await list_pinned_content(client)
+        print(f"Pinned items: {len(pinned)}")
+        for cid in pinned[:5]:
+            print(f"  - {cid}")
+    """
+    try:
+        # Use the IPFS API to list pins
+        if hasattr(client, 'session') and client.session:
+            async with client.session.post(
+                f"{client.config.api_url}/api/v0/pin/ls"
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    return list(result.get('Keys', {}).keys())
+                else:
+                    raise IPFSError(f"Failed to list pins: {response.status}")
+        else:
+            # Fallback for different client implementations
+            raise IPFSError("Client does not have active session")
+    except Exception as e:
+        logger.error("Failed to list pinned content", error=str(e))
+        raise IPFSError(f"Pin list retrieval failed: {e}")
+
+
+async def get_content_info(client: 'IPFSClient', cid: str) -> Dict[str, Any]:
+    """
+    Get information about content without downloading it.
+    
+    Retrieves metadata about content stored in IPFS, including
+    size, links, and block information.
+    
+    Args:
+        client: Connected IPFSClient instance
+        cid: Content Identifier to inspect
+    
+    Returns:
+        Dictionary with content information including:
+        - Hash: The CID
+        - NumLinks: Number of links in the object
+        - BlockSize: Size of the block
+        - LinksSize: Size of links
+        - DataSize: Size of data
+        - CumulativeSize: Total size including linked objects
+    
+    Example:
+        info = await get_content_info(client, "QmXxx...")
+        print(f"Content size: {info['DataSize']} bytes")
+    """
+    try:
+        if hasattr(client, 'session') and client.session:
+            async with client.session.post(
+                f"{client.config.api_url}/api/v0/object/stat",
+                params={'arg': cid}
+            ) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    error_text = await response.text()
+                    raise IPFSError(f"Failed to get content info: {response.status} - {error_text}")
+        else:
+            raise IPFSError("Client does not have active session")
+    except Exception as e:
+        logger.error("Failed to get content info", cid=cid, error=str(e))
+        raise IPFSError(f"Content info retrieval failed: {e}")
 
 
 # Global PRSM IPFS operations
