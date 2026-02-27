@@ -270,18 +270,20 @@ def test_orchestrator_basic():
     run_section("NWTN Orchestrator")
     
     try:
-        from prsm.compute.nwtn.orchestrator import NWTNOrchestrator, nwtn_orchestrator
+        from prsm.compute.nwtn.orchestrator import NWTNOrchestrator, create_nwtn_orchestrator
+        from tests.fixtures.nwtn_mocks import (
+            MockContextManager, MockFTNSService, MockIPFSClient, MockModelRegistry
+        )
         success("NWTN orchestrator import successful")
         
-        # Test orchestrator instantiation
-        orchestrator = NWTNOrchestrator()
-        success("NWTN orchestrator created")
-        
-        # Test global instance
-        if nwtn_orchestrator is not None:
-            success("Global NWTN orchestrator available")
-        else:
-            warning("Global NWTN orchestrator is None")
+        # Test orchestrator instantiation with mock services (for testing)
+        orchestrator = create_nwtn_orchestrator(
+            context_manager=MockContextManager(),
+            ftns_service=MockFTNSService(),
+            ipfs_client=MockIPFSClient(),
+            model_registry=MockModelRegistry()
+        )
+        success("NWTN orchestrator created with dependency injection")
         
         return True
         

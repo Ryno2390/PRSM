@@ -221,7 +221,7 @@ class SSMModelInstance(ModelInstance):
         """Initialize the local SSM model architecture with streaming support"""
         from prsm.compute.nwtn.architectures.ssm_core import get_ssm_reasoner
         from prsm.core.utils.deterministic import force_determinism
-        from prsm.data.data_layer.enhanced_ipfs import get_ipfs_client
+        from prsm.core.ipfs_client import create_ipfs_client
         from .weight_streamer import WeightStreamer
         
         # 1. Setup deterministic base

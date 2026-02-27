@@ -529,8 +529,10 @@ class DAGLedger:
             try:
                 await self._db.execute("ROLLBACK TO SAVEPOINT balance_check")
                 await self._db.execute("RELEASE SAVEPOINT balance_check")
-            except:
-                pass
+            except Exception:
+                # Savepoint may not exist if the outer transaction failed
+                # This is acceptable - the outer transaction will handle cleanup
+                logger.debug("Could not release savepoint during balance check rollback")
             
             if "database is locked" in str(e).lower():
                 raise BalanceLockError(
@@ -647,8 +649,10 @@ class DAGLedger:
             await self._db.execute("ROLLBACK TO SAVEPOINT balance_check")
             await self._db.execute("RELEASE SAVEPOINT balance_check")
             logger.debug("Rolled back atomic balance check savepoint")
-        except:
-            pass
+        except Exception:
+            # Savepoint may not exist if the outer transaction failed
+            # This is acceptable - the outer transaction will handle cleanup
+            logger.debug("Could not rollback savepoint - may not exist or already released")
     
     def select_tips_mcmc(self, num_tips: int = 2) -> List[str]:
         """
@@ -1366,5 +1370,6 @@ class DAGLedgerAdapter:
                     "note": "Use async stats for live data"
                 }
             return loop.run_until_complete(self._dag.get_stats())
-        except:
+        except Exception:
+            logger.debug("Could not retrieve DAG stats in sync context")
             return {"dag_mode": True, "error": "stats unavailable"}

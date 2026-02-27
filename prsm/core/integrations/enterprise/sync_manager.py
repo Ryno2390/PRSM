@@ -527,8 +527,8 @@ class ConflictResolver:
                         return record[field]
                     elif isinstance(record[field], str):
                         return datetime.fromisoformat(record[field])
-                except:
-                    continue
+                except (ValueError, TypeError):
+                    continue  # Invalid datetime format, try next field
         
         return None
 

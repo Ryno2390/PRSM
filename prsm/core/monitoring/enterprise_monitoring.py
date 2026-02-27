@@ -565,15 +565,15 @@ class EnterpriseMonitoring:
         """Get current memory usage in MB"""
         try:
             return psutil.Process().memory_info().rss / 1024 / 1024
-        except:
-            return 0.0
+        except Exception:
+            return 0.0  # Memory usage unavailable
     
     def _get_current_cpu_usage(self) -> float:
         """Get current CPU usage percentage"""
         try:
             return psutil.cpu_percent(interval=0.1)
-        except:
-            return 0.0
+        except Exception:
+            return 0.0  # CPU usage unavailable
     
     def _update_system_health(self):
         """Update system health metrics"""

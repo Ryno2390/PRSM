@@ -1277,7 +1277,7 @@ class PRSMIPFSOperations:
                     cid=f"{model_cid}_metadata",  # This is a simplified approach
                     verify_integrity=False
                 )
-            except:
+            except Exception:
                 pass  # Metadata not found, continue with model download
             
             # Download main model file

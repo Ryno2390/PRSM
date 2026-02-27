@@ -358,7 +358,8 @@ class SelectiveParallelismEngine(TimestampMixin):
                 weight=lambda u, v, d: task_durations.get(v, 0)
             )
             return longest_path
-        except:
+        except Exception:
+            # Graph algorithm failed, return empty path
             return []
     
     def _calculate_max_dependency_depth(self) -> int:

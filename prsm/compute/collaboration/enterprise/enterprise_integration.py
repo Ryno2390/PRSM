@@ -924,8 +924,8 @@ class EnterpriseIntegrationSuite:
         for key, date_str in timeline.items():
             try:
                 timeline_dates[key] = datetime.fromisoformat(date_str)
-            except:
-                timeline_dates[key] = datetime.now() + timedelta(days=30)
+            except (ValueError, TypeError):
+                timeline_dates[key] = datetime.now() + timedelta(days=30)  # Default to 30 days from now
         
         project = EnterpriseProject(
             id=str(uuid.uuid4()),

@@ -335,8 +335,8 @@ class ResourceCapabilityDetector:
         try:
             # Would use nvidia-ml-py, pycuda, or similar
             return 8.0  # Placeholder: 8GB GPU memory
-        except:
-            return 0.0
+        except Exception:
+            return 0.0  # GPU detection not available
     
     async def _benchmark_disk_read(self) -> float:
         """Benchmark disk read speed"""

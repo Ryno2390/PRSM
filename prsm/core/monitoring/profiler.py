@@ -168,8 +168,8 @@ class PerformanceProfiler:
             try:
                 current, peak = tracemalloc.get_traced_memory()
                 return current / 1024 / 1024  # Convert to MB
-            except:
-                pass
+            except Exception:
+                pass  # Fall back to process memory
         
         # Fallback to process memory
         process = psutil.Process()
