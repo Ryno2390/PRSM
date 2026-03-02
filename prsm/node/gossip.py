@@ -57,15 +57,20 @@ class GossipProtocol:
         fanout: int = 3,
         default_ttl: int = 5,
         heartbeat_interval: float = 30.0,
+        gossip_log_retention: float = 3600.0,
     ):
         self.transport = transport
         self.fanout = fanout
         self.default_ttl = default_ttl
         self.heartbeat_interval = heartbeat_interval
+        self.gossip_log_retention = gossip_log_retention
 
         self._subscribers: Dict[str, List[GossipCallback]] = {}
         self._running = False
         self._tasks: List[asyncio.Task] = []
+
+        # Ledger for gossip persistence (set post-construction by node.py)
+        self.ledger: Optional[Any] = None
 
         # Register as handler for all gossip messages
         self.transport.on_message(MSG_GOSSIP, self._handle_gossip)
@@ -120,6 +125,19 @@ class GossipProtocol:
             except Exception as e:
                 logger.error(f"Gossip subscriber error ({subtype}): {e}")
 
+        # Persist to gossip log (skip heartbeats — too frequent, low value)
+        if self.ledger and subtype != "heartbeat":
+            try:
+                await self.ledger.log_gossip(
+                    nonce=msg.nonce,
+                    subtype=subtype,
+                    origin=origin,
+                    payload=data,
+                    ttl=msg.ttl,
+                )
+            except Exception:
+                pass  # Fire-and-forget; don't break gossip on log failure
+
         # Re-propagate with decremented TTL
         if msg.ttl > 1:
             fwd = P2PMessage(
@@ -131,8 +149,22 @@ class GossipProtocol:
             )
             await self.transport.gossip(fwd, fanout=self.fanout)
 
+    async def get_catchup_messages(
+        self,
+        since: float,
+        subtypes: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return persisted gossip messages received after *since*.
+
+        Used by newly-connected peers to catch up on missed state changes.
+        """
+        if not self.ledger:
+            return []
+        return await self.ledger.get_recent_gossip(since, subtypes)
+
     async def _heartbeat_loop(self) -> None:
         """Periodic heartbeat to maintain network liveness info."""
+        prune_counter = 0
         while self._running:
             await asyncio.sleep(self.heartbeat_interval)
             try:
@@ -146,3 +178,14 @@ class GossipProtocol:
                 )
             except Exception as e:
                 logger.debug(f"Heartbeat error: {e}")
+
+            # Prune old gossip log entries every ~10 heartbeats
+            prune_counter += 1
+            if prune_counter >= 10 and self.ledger:
+                prune_counter = 0
+                try:
+                    pruned = await self.ledger.prune_gossip_log(self.gossip_log_retention)
+                    if pruned:
+                        logger.debug(f"Pruned {pruned} old gossip log entries")
+                except Exception:
+                    pass
