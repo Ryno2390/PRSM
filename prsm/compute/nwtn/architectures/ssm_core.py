@@ -9,9 +9,14 @@ enabling advanced AI reasoning on resource-constrained edge nodes.
 Inspired by Mamba and S4 architectures.
 """
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+except (ImportError, RuntimeError):
+    torch = None  # type: ignore[assignment]
+    nn = None  # type: ignore[assignment]
+    F = None  # type: ignore[assignment]
 import math
 from typing import Optional, Tuple, Union
 

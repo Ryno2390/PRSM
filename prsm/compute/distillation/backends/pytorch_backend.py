@@ -20,11 +20,19 @@ PRSM's orchestration system to provide:
 - Production deployment capabilities
 """
 
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset
+try:
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+    import torch.nn.functional as F
+    from torch.utils.data import DataLoader, Dataset
+except (ImportError, RuntimeError):
+    torch = None  # type: ignore[assignment]
+    nn = None  # type: ignore[assignment]
+    optim = None  # type: ignore[assignment]
+    F = None  # type: ignore[assignment]
+    DataLoader = None  # type: ignore[assignment]
+    Dataset = None  # type: ignore[assignment]
 from typing import Dict, Any, List, Optional, Tuple, AsyncGenerator
 import asyncio
 import logging

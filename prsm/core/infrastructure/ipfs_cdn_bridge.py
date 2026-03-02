@@ -20,7 +20,11 @@ from typing import Dict, List, Optional, Any, Set
 from uuid import UUID
 from dataclasses import dataclass
 
-import ipfshttpclient
+try:
+    import ipfshttpclient
+except ImportError:
+    ipfshttpclient = None  # type: ignore[assignment]
+
 from .cdn_layer import prsm_cdn, ContentItem, ContentPriority
 
 

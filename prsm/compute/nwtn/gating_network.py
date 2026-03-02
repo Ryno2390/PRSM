@@ -1,7 +1,13 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.distributions import Categorical
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    from torch.distributions import Categorical
+except (ImportError, RuntimeError):
+    torch = None  # type: ignore[assignment]
+    nn = None  # type: ignore[assignment]
+    F = None  # type: ignore[assignment]
+    Categorical = None  # type: ignore[assignment]
 from prometheus_client import Gauge, Histogram
 
 # Metric Definitions

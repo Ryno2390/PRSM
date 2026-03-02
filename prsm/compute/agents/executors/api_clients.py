@@ -382,7 +382,7 @@ class LocalModelClient(BaseModelClient):
             import torch
             self.model = torch.load(self.model_path, map_location='cpu', weights_only=True)
             self.model.eval()
-        except ImportError:
+        except (ImportError, RuntimeError):
             raise RuntimeError("PyTorch not available for local model execution")
     
     async def _load_tensorflow_model(self):
@@ -433,7 +433,7 @@ class LocalModelClient(BaseModelClient):
         """Execute with Transformers model"""
         try:
             import torch
-        except ImportError:
+        except (ImportError, RuntimeError):
             raise RuntimeError("PyTorch not available for transformers execution")
         
         inputs = self.tokenizer(request.prompt, return_tensors="pt", truncation=True, max_length=512)

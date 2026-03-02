@@ -6,10 +6,17 @@ Real knowledge distillation with PyTorch, TensorFlow, and Transformers
 import asyncio
 import logging
 import time
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+try:
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+    from torch.utils.data import Dataset, DataLoader
+except (ImportError, RuntimeError):
+    torch = None  # type: ignore[assignment]
+    nn = None  # type: ignore[assignment]
+    optim = None  # type: ignore[assignment]
+    Dataset = None  # type: ignore[assignment]
+    DataLoader = None  # type: ignore[assignment]
 import numpy as np
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Tuple, Union
@@ -31,7 +38,7 @@ try:
     from datasets import Dataset as HFDataset
     import evaluate
     import wandb
-except ImportError as e:
+except (ImportError, RuntimeError) as e:
     print(f"⚠️ ML dependencies not fully installed: {e}")
     print("Install with: pip install torch transformers tensorflow datasets evaluate wandb")
 

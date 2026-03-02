@@ -11,8 +11,11 @@ Enables seamless model format conversion for:
 - Edge device optimization
 """
 
-import torch
-import torch.jit
+try:
+    import torch
+    import torch.jit
+except (ImportError, RuntimeError):
+    torch = None  # type: ignore[assignment]
 import numpy as np
 import tempfile
 import shutil
@@ -31,7 +34,7 @@ try:
     import onnx
     import onnxruntime as ort
     ONNX_AVAILABLE = True
-except ImportError:
+except (ImportError, RuntimeError):
     ONNX_AVAILABLE = False
 
 try:
@@ -49,7 +52,7 @@ except ImportError:
 try:
     import torch.fx
     FX_AVAILABLE = True
-except ImportError:
+except (ImportError, RuntimeError):
     FX_AVAILABLE = False
 
 logger = structlog.get_logger(__name__)

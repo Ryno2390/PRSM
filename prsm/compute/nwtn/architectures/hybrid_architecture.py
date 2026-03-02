@@ -29,10 +29,19 @@ import statistics
 import structlog
 from pydantic import BaseModel, Field
 
-from prsm.compute.nwtn.architectures.gating_network import HybridMultiCoreModel, CrossCoreGater
-from prsm.compute.nwtn.architectures.ssm_core import get_ssm_reasoner
-from prsm.compute.nwtn.architectures.sanm_core import get_sanm_reasoner
-from prsm.compute.nwtn.architectures.fsmn_core import get_fsmn_reasoner
+try:
+    from prsm.compute.nwtn.architectures.gating_network import HybridMultiCoreModel, CrossCoreGater
+    from prsm.compute.nwtn.architectures.ssm_core import get_ssm_reasoner
+    from prsm.compute.nwtn.architectures.sanm_core import get_sanm_reasoner
+    from prsm.compute.nwtn.architectures.fsmn_core import get_fsmn_reasoner
+    _TORCH_AVAILABLE = True
+except (ImportError, RuntimeError, AttributeError):
+    HybridMultiCoreModel = None  # type: ignore[assignment,misc]
+    CrossCoreGater = None  # type: ignore[assignment,misc]
+    get_ssm_reasoner = None  # type: ignore[assignment]
+    get_sanm_reasoner = None  # type: ignore[assignment]
+    get_fsmn_reasoner = None  # type: ignore[assignment]
+    _TORCH_AVAILABLE = False
 
 from prsm.core.models import PRSMBaseModel, TimestampMixin
 from prsm.core.config import get_settings

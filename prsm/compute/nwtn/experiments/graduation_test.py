@@ -8,7 +8,10 @@ Forces the Cross-Core Gating Network (CCGN) to specialize:
 3. FSMN: Low-latency signal processing (Thermal Vibration Streams)
 """
 
-import torch
+try:
+    import torch
+except (ImportError, RuntimeError):
+    torch = None  # type: ignore[assignment]
 import random
 import logging
 from typing import Dict, List, Any, Tuple

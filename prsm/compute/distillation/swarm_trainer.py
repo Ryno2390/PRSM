@@ -10,7 +10,10 @@ untrusted edge nodes.
 
 import asyncio
 import logging
-import torch
+try:
+    import torch
+except (ImportError, RuntimeError):
+    torch = None  # type: ignore[assignment]
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Set

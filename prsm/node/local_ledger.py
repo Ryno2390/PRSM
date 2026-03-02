@@ -7,11 +7,12 @@ Zero-config — no PostgreSQL required. Each node maintains its own ledger
 which is reconciled via gossip when connected to the network.
 """
 
+import json
 import time
 import uuid
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import aiosqlite
 
@@ -44,7 +45,7 @@ class LocalLedger:
     the transaction log.
     """
 
-    def __init__(self, db_path: str = ":memory:"):
+    def __init__(self, db_path: str = ":memory:") -> None:
         self.db_path = db_path
         self._db: Optional[aiosqlite.Connection] = None
 
@@ -94,6 +95,66 @@ class LocalLedger:
                 epoch_start     REAL NOT NULL,
                 created_at      REAL NOT NULL,
                 revoked         INTEGER NOT NULL DEFAULT 0
+            );
+
+            -- Gossip log for persistence and catch-up
+            CREATE TABLE IF NOT EXISTS gossip_log (
+                nonce       TEXT PRIMARY KEY,
+                subtype     TEXT NOT NULL,
+                origin      TEXT NOT NULL,
+                payload     TEXT NOT NULL,
+                ttl         INTEGER NOT NULL DEFAULT 5,
+                received_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_gossip_log_time ON gossip_log(received_at);
+            CREATE INDEX IF NOT EXISTS idx_gossip_log_subtype ON gossip_log(subtype);
+
+            -- Collaboration persistence tables
+            CREATE TABLE IF NOT EXISTS collab_tasks (
+                task_id                 TEXT PRIMARY KEY,
+                requester_agent_id      TEXT NOT NULL,
+                requester_node_id       TEXT NOT NULL,
+                title                   TEXT NOT NULL DEFAULT '',
+                description             TEXT NOT NULL DEFAULT '',
+                required_capabilities   TEXT NOT NULL DEFAULT '[]',
+                ftns_budget             REAL NOT NULL DEFAULT 0,
+                deadline_seconds        REAL NOT NULL DEFAULT 3600,
+                status                  TEXT NOT NULL DEFAULT 'open',
+                assigned_agent_id       TEXT,
+                bids                    TEXT NOT NULL DEFAULT '[]',
+                result                  TEXT,
+                created_at              REAL NOT NULL,
+                escrow_tx_id            TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS collab_reviews (
+                review_id               TEXT PRIMARY KEY,
+                submitter_agent_id      TEXT NOT NULL,
+                submitter_node_id       TEXT NOT NULL,
+                content_cid             TEXT NOT NULL DEFAULT '',
+                description             TEXT NOT NULL DEFAULT '',
+                required_capabilities   TEXT NOT NULL DEFAULT '[]',
+                ftns_per_review         REAL NOT NULL DEFAULT 0.1,
+                max_reviewers           INTEGER NOT NULL DEFAULT 3,
+                status                  TEXT NOT NULL DEFAULT 'pending',
+                reviews                 TEXT NOT NULL DEFAULT '[]',
+                created_at              REAL NOT NULL,
+                escrow_tx_id            TEXT,
+                paid_reviewers          TEXT NOT NULL DEFAULT '[]'
+            );
+
+            CREATE TABLE IF NOT EXISTS collab_queries (
+                query_id                TEXT PRIMARY KEY,
+                requester_agent_id      TEXT NOT NULL,
+                requester_node_id       TEXT NOT NULL,
+                topic                   TEXT NOT NULL DEFAULT '',
+                question                TEXT NOT NULL DEFAULT '',
+                ftns_per_response       REAL NOT NULL DEFAULT 0.05,
+                max_responses           INTEGER NOT NULL DEFAULT 5,
+                responses               TEXT NOT NULL DEFAULT '[]',
+                created_at              REAL NOT NULL,
+                escrow_tx_id            TEXT,
+                paid_responders         TEXT NOT NULL DEFAULT '[]'
             );
         """)
 
@@ -403,6 +464,232 @@ class LocalLedger:
         )
         await self._db.commit()
         return cursor.rowcount > 0
+
+    # ── Gossip Log ────────────────────────────────────────────────
+
+    async def log_gossip(
+        self,
+        nonce: str,
+        subtype: str,
+        origin: str,
+        payload: Dict[str, Any],
+        ttl: int = 5,
+    ) -> None:
+        """Persist a gossip message for catch-up replay."""
+        await self._db.execute(
+            """INSERT OR IGNORE INTO gossip_log
+               (nonce, subtype, origin, payload, ttl, received_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (nonce, subtype, origin, json.dumps(payload), ttl, time.time()),
+        )
+        await self._db.commit()
+
+    async def get_recent_gossip(
+        self,
+        since: float,
+        subtypes: Optional[List[str]] = None,
+        limit: int = 500,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve gossip messages received after *since* timestamp."""
+        if subtypes:
+            placeholders = ",".join("?" for _ in subtypes)
+            cursor = await self._db.execute(
+                f"""SELECT nonce, subtype, origin, payload, ttl, received_at
+                    FROM gossip_log
+                    WHERE received_at > ? AND subtype IN ({placeholders})
+                    ORDER BY received_at ASC LIMIT ?""",
+                (since, *subtypes, limit),
+            )
+        else:
+            cursor = await self._db.execute(
+                """SELECT nonce, subtype, origin, payload, ttl, received_at
+                   FROM gossip_log
+                   WHERE received_at > ?
+                   ORDER BY received_at ASC LIMIT ?""",
+                (since, limit),
+            )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "nonce": r[0],
+                "subtype": r[1],
+                "origin": r[2],
+                "payload": json.loads(r[3]),
+                "ttl": r[4],
+                "received_at": r[5],
+            }
+            for r in rows
+        ]
+
+    async def prune_gossip_log(self, max_age: float) -> int:
+        """Delete gossip entries older than *max_age* seconds. Returns count deleted."""
+        cutoff = time.time() - max_age
+        cursor = await self._db.execute(
+            "DELETE FROM gossip_log WHERE received_at < ?", (cutoff,)
+        )
+        await self._db.commit()
+        return cursor.rowcount
+
+    # ── Collaboration Persistence ────────────────────────────────
+
+    async def save_task(self, data: Dict[str, Any]) -> None:
+        """Upsert a collaboration task record."""
+        await self._db.execute(
+            """INSERT OR REPLACE INTO collab_tasks
+               (task_id, requester_agent_id, requester_node_id, title, description,
+                required_capabilities, ftns_budget, deadline_seconds, status,
+                assigned_agent_id, bids, result, created_at, escrow_tx_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                data["task_id"],
+                data["requester_agent_id"],
+                data["requester_node_id"],
+                data.get("title", ""),
+                data.get("description", ""),
+                json.dumps(data.get("required_capabilities", [])),
+                data.get("ftns_budget", 0),
+                data.get("deadline_seconds", 3600),
+                data.get("status", "open"),
+                data.get("assigned_agent_id"),
+                json.dumps(data.get("bids", [])),
+                json.dumps(data.get("result")) if data.get("result") else None,
+                data["created_at"],
+                data.get("escrow_tx_id"),
+            ),
+        )
+        await self._db.commit()
+
+    async def save_review(self, data: Dict[str, Any]) -> None:
+        """Upsert a collaboration review record."""
+        await self._db.execute(
+            """INSERT OR REPLACE INTO collab_reviews
+               (review_id, submitter_agent_id, submitter_node_id, content_cid,
+                description, required_capabilities, ftns_per_review, max_reviewers,
+                status, reviews, created_at, escrow_tx_id, paid_reviewers)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                data["review_id"],
+                data["submitter_agent_id"],
+                data["submitter_node_id"],
+                data.get("content_cid", ""),
+                data.get("description", ""),
+                json.dumps(data.get("required_capabilities", [])),
+                data.get("ftns_per_review", 0.1),
+                data.get("max_reviewers", 3),
+                data.get("status", "pending"),
+                json.dumps(data.get("reviews", [])),
+                data["created_at"],
+                data.get("escrow_tx_id"),
+                json.dumps(data.get("paid_reviewers", [])),
+            ),
+        )
+        await self._db.commit()
+
+    async def save_query(self, data: Dict[str, Any]) -> None:
+        """Upsert a collaboration query record."""
+        await self._db.execute(
+            """INSERT OR REPLACE INTO collab_queries
+               (query_id, requester_agent_id, requester_node_id, topic, question,
+                ftns_per_response, max_responses, responses, created_at,
+                escrow_tx_id, paid_responders)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                data["query_id"],
+                data["requester_agent_id"],
+                data["requester_node_id"],
+                data.get("topic", ""),
+                data.get("question", ""),
+                data.get("ftns_per_response", 0.05),
+                data.get("max_responses", 5),
+                json.dumps(data.get("responses", [])),
+                data["created_at"],
+                data.get("escrow_tx_id"),
+                json.dumps(data.get("paid_responders", [])),
+            ),
+        )
+        await self._db.commit()
+
+    async def load_active_tasks(self) -> List[Dict[str, Any]]:
+        """Load non-terminal collaboration tasks."""
+        cursor = await self._db.execute(
+            """SELECT task_id, requester_agent_id, requester_node_id, title,
+                      description, required_capabilities, ftns_budget,
+                      deadline_seconds, status, assigned_agent_id, bids,
+                      result, created_at, escrow_tx_id
+               FROM collab_tasks WHERE status NOT IN ('completed', 'cancelled')"""
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "task_id": r[0], "requester_agent_id": r[1],
+                "requester_node_id": r[2], "title": r[3],
+                "description": r[4],
+                "required_capabilities": json.loads(r[5]),
+                "ftns_budget": r[6], "deadline_seconds": r[7],
+                "status": r[8], "assigned_agent_id": r[9],
+                "bids": json.loads(r[10]),
+                "result": json.loads(r[11]) if r[11] else None,
+                "created_at": r[12], "escrow_tx_id": r[13],
+            }
+            for r in rows
+        ]
+
+    async def load_active_reviews(self) -> List[Dict[str, Any]]:
+        """Load non-terminal collaboration reviews."""
+        cursor = await self._db.execute(
+            """SELECT review_id, submitter_agent_id, submitter_node_id,
+                      content_cid, description, required_capabilities,
+                      ftns_per_review, max_reviewers, status, reviews,
+                      created_at, escrow_tx_id, paid_reviewers
+               FROM collab_reviews WHERE status NOT IN ('accepted', 'rejected')"""
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "review_id": r[0], "submitter_agent_id": r[1],
+                "submitter_node_id": r[2], "content_cid": r[3],
+                "description": r[4],
+                "required_capabilities": json.loads(r[5]),
+                "ftns_per_review": r[6], "max_reviewers": r[7],
+                "status": r[8], "reviews": json.loads(r[9]),
+                "created_at": r[10], "escrow_tx_id": r[11],
+                "paid_reviewers": json.loads(r[12]),
+            }
+            for r in rows
+        ]
+
+    async def load_active_queries(self) -> List[Dict[str, Any]]:
+        """Load active collaboration queries (not yet at max responses)."""
+        cursor = await self._db.execute(
+            """SELECT query_id, requester_agent_id, requester_node_id,
+                      topic, question, ftns_per_response, max_responses,
+                      responses, created_at, escrow_tx_id, paid_responders
+               FROM collab_queries"""
+        )
+        rows = await cursor.fetchall()
+        results = []
+        for r in rows:
+            responses = json.loads(r[7])
+            max_responses = r[6]
+            if len(responses) < max_responses:
+                results.append({
+                    "query_id": r[0], "requester_agent_id": r[1],
+                    "requester_node_id": r[2], "topic": r[3],
+                    "question": r[4], "ftns_per_response": r[5],
+                    "max_responses": max_responses,
+                    "responses": responses,
+                    "created_at": r[8], "escrow_tx_id": r[9],
+                    "paid_responders": json.loads(r[10]),
+                })
+        return results
+
+    async def delete_collab_record(self, table: str, id_column: str, record_id: str) -> None:
+        """Delete a completed/archived collaboration record from SQLite."""
+        allowed = {"collab_tasks": "task_id", "collab_reviews": "review_id", "collab_queries": "query_id"}
+        if table not in allowed or allowed[table] != id_column:
+            return
+        await self._db.execute(f"DELETE FROM {table} WHERE {id_column} = ?", (record_id,))
+        await self._db.commit()
 
     # ── Internal ─────────────────────────────────────────────────
 

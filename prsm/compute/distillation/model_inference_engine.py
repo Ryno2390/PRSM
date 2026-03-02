@@ -13,7 +13,10 @@ Provides real model loading and inference capabilities including:
 """
 
 import asyncio
-import torch
+try:
+    import torch
+except (ImportError, RuntimeError):
+    torch = None  # type: ignore[assignment]
 import numpy as np
 import time
 import logging
