@@ -705,7 +705,7 @@ Based on the code review findings, the following items require attention:
 
 ### Technical Debt Backlog
 
-- [ ] **MEDIUM**: Extract hardcoded values to configuration
+- [x] **MEDIUM**: Extract hardcoded values to configuration *(Sprint 5, Item 1)*
 - [ ] **LOW**: Wire compute provider to NWTN orchestrator for real inference
 - [ ] **LOW**: Extend peer discovery with capability-based search
 - [ ] **LOW**: Add gossip persistence for late-joining nodes
@@ -1361,14 +1361,19 @@ TestProtocolCompletion (4 tests)     — success, failure, unknown protocol, get
 - [x] **Sprint 2** (2026-02-27): Code quality — IPFS consolidation, mock separation, thread safety, NWTN error handling
 - [x] **Sprint 3** (2026-03-01): Exception handling — bare except fixes, silent handler comments, integration tests
 
+### Completed Sprints (continued)
+
+- [x] **Sprint 4** (2026-03-02): Core Collaboration Robustness
+  - [x] Phase 1: FTNS payment integration for collaboration protocols
+  - [x] Phase 2: Network-wide state change broadcasts
+  - [x] Phase 3: Expiry enforcement and bounded memory
+  - [x] Phase 4: Content retrieval API
+  - [x] Phase 5: Collaboration system bridge
+
 ### Current Sprint
 
-- [ ] **Sprint 4** (2026-03-02): Core Collaboration Robustness
-  - [ ] Phase 1: FTNS payment integration for collaboration protocols
-  - [ ] Phase 2: Network-wide state change broadcasts
-  - [ ] Phase 3: Expiry enforcement and bounded memory
-  - [ ] Phase 4: Content retrieval API
-  - [ ] Phase 5: Collaboration system bridge
+- [x] **Sprint 5, Item 1** (2026-03-02): Extract hardcoded values to `NodeConfig` for runtime tuning
+- [x] **Sprint 5, Item 2** (2026-03-02): Bid Selection Strategy
 
 ### Next Sprint Candidates
 
@@ -1376,15 +1381,103 @@ TestProtocolCompletion (4 tests)     — success, failure, unknown protocol, get
 - [ ] **Capability-Based Discovery**: Extend peer discovery with agent capabilities and resource metadata
 - [ ] **Gossip Persistence / Catch-Up**: Allow late-joining nodes to receive recent collaboration offers
 - [ ] **SQLite Persistence for Collaboration State**: Persist active tasks/reviews/queries across node restarts
-- [ ] **Bid Selection Strategy**: Automated bid scoring and assignment based on cost, time, reputation, and capability
 
 ### Technical Debt Backlog
 
-- [ ] **LOW**: Extract hardcoded values to configuration (timeouts, limits, thresholds)
 - [ ] **LOW**: Document deprecation timeline for legacy compatibility shim in `prsm/__init__.py`
 - [ ] **LOW**: Complete type hint coverage across all public APIs
 - [ ] **LOW**: Increase test coverage from 50% to 80% for security components
-- [ ] **LOW**: Add graceful collaboration shutdown (cancel active tasks on node stop)
+
+---
+
+## 22. Sprint 5, Item 2 — Bid Selection Strategy (2026-03-02)
+
+### Motivation
+
+PRSM's agent collaboration system lets agents post tasks and receive bids, but had no automated bid selection — callers had to manually pick a winner and pass the `agent_id` to `assign_task()`. Adding a scoring and selection layer makes the task delegation protocol fully autonomous.
+
+### What Changed
+
+#### `prsm/node/config.py` — 3 new config fields
+
+```python
+bid_strategy: str = "best_score"       # "lowest_cost", "fastest", "best_score"
+bid_window_seconds: float = 30.0
+min_bids: int = 1
+```
+
+Strategy stored as string to avoid circular import (config.py must not import from agent_collaboration.py). Converted to enum in `node.py`. Updated `save()` to persist the new fields; `load()` handles them automatically via `**data`.
+
+#### `prsm/node/agent_registry.py` — 2 reputation fields on `AgentRecord`
+
+```python
+tasks_completed: int = 0
+tasks_failed: int = 0
+```
+
+Preparatory fields for future reputation scoring. Updated `to_dict()` to include them.
+
+#### `prsm/node/agent_collaboration.py` — Core implementation
+
+**`BidStrategy` enum:** `LOWEST_COST`, `FASTEST`, `BEST_SCORE`
+
+**Scoring weight constants:**
+- `DEFAULT_COST_WEIGHT = 0.35`
+- `DEFAULT_TIME_WEIGHT = 0.25`
+- `DEFAULT_CAPABILITY_WEIGHT = 0.25`
+- `DEFAULT_FRESHNESS_WEIGHT = 0.15`
+
+**Extended `__init__`** with `agent_registry`, `bid_strategy`, `bid_window_seconds`, `min_bids` (all with defaults for backward compatibility).
+
+**Bid validation in `submit_bid()`:** Rejects bids that exceed the task budget or target non-OPEN tasks.
+
+**`score_bid(bid, task) -> float`:** Composite 0.0–1.0 score:
+- Cost efficiency (0.35): `1 - (cost / budget)`
+- Time efficiency (0.25): `1 - (seconds / deadline)`
+- Capability match (0.25): fraction of required_capabilities the bidder has (from agent_registry)
+- Freshness (0.15): exponential decay from agent `last_seen`
+- Returns 0.0 for over-budget bids; defaults to 0.5 for missing components
+
+**`select_best_bid(task) -> Optional[dict]`:** Filters over-budget bids, then applies strategy:
+- `LOWEST_COST` → cheapest bid
+- `FASTEST` → shortest estimated time
+- `BEST_SCORE` → highest composite score
+
+**`auto_assign_task(task_id) -> Optional[str]`:** Async pipeline that waits for bids (configurable window with 1s polling), exits early when `min_bids` met past half-window, calls `select_best_bid()` then `assign_task()`.
+
+**Updated `get_stats()`:** Added `total_active_bids` and `bid_strategy` fields.
+
+#### `prsm/node/node.py` — Wiring
+
+- Imports `BidStrategy`, passes `bid_strategy=BidStrategy(self.config.bid_strategy)`, `bid_window_seconds`, `min_bids` to `AgentCollaboration` constructor
+- Wires `agent_registry` post-construction: `self.agent_collaboration.agent_registry = self.agent_registry`
+
+#### `tests/security/test_sprint4_collaboration.py` — 15 new tests
+
+| Test Class | Tests | Coverage |
+|-----------|-------|---------|
+| `TestBidValidation` | 3 | Over-budget rejected, non-OPEN rejected, valid accepted |
+| `TestScoreBid` | 4 | Cost ranking, capability match, over-budget → 0.0, freshness |
+| `TestSelectBestBid` | 5 | LOWEST_COST, FASTEST, BEST_SCORE strategies; empty → None; all over-budget → None |
+| `TestAutoAssignTask` | 3 | Basic assignment, no bids → None, early exit on min_bids |
+
+### What's NOT Changed
+
+- Existing `assign_task()` API unchanged — manual assignment still works
+- All new constructor params have defaults — zero breakage to existing callers
+- `submit_bid()` still gossips for unknown tasks (remote propagation)
+
+### Test Results
+
+```
+38 passed in 10.68s (23 existing + 15 new)
+```
+
+### Verification
+
+- `from prsm.node.agent_collaboration import BidStrategy` — enum imports correctly
+- `from prsm.node.node import PRSMNode` — wiring imports correctly
+- Config round-trip: save with `bid_strategy="fastest"`, load, value preserved
 
 ---
 
@@ -1394,4 +1487,6 @@ TestProtocolCompletion (4 tests)     — success, failure, unknown protocol, get
 *Sprint 2 completed: 2026-02-27*
 *Sprint 3 completed: 2026-03-01*
 *Sprint 4 completed: 2026-03-02*
+*Sprint 5 Item 1 completed: 2026-03-02*
+*Sprint 5 Item 2 completed: 2026-03-02*
 *PRSM Version: 0.1.0*

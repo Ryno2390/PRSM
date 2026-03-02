@@ -31,7 +31,7 @@ from prsm.node.content_uploader import ContentUploader
 from prsm.node.content_index import ContentIndex
 from prsm.node.ledger_sync import LedgerSync
 from prsm.node.agent_registry import AgentRegistry
-from prsm.node.agent_collaboration import AgentCollaboration
+from prsm.node.agent_collaboration import AgentCollaboration, BidStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +196,9 @@ class PRSMNode:
             gossip=self.gossip,
             node_id=self.identity.node_id,
             ledger=self.ledger,
+            bid_strategy=BidStrategy(self.config.bid_strategy),
+            bid_window_seconds=self.config.bid_window_seconds,
+            min_bids=self.config.min_bids,
             task_timeout=self.config.task_timeout,
             review_timeout=self.config.review_timeout,
             query_timeout=self.config.query_timeout,
@@ -203,7 +206,7 @@ class PRSMNode:
             cleanup_interval=self.config.collab_cleanup_interval,
         )
 
-        # Wire ledger_sync into subsystems for transaction broadcasting
+        # Wire ledger_sync and agent_registry into subsystems
         self.content_uploader.ledger_sync = self.ledger_sync
         if self.compute_provider:
             self.compute_provider.ledger_sync = self.ledger_sync
@@ -211,6 +214,7 @@ class PRSMNode:
         if self.storage_provider:
             self.storage_provider.ledger_sync = self.ledger_sync
         self.agent_collaboration.ledger_sync = self.ledger_sync
+        self.agent_collaboration.agent_registry = self.agent_registry
 
         logger.info("Node initialized — all subsystems ready")
 
