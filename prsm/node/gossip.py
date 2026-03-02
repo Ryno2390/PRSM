@@ -32,6 +32,13 @@ GOSSIP_FTNS_TRANSACTION = "ftns_transaction"
 GOSSIP_AGENT_ADVERTISE = "agent_advertise"
 GOSSIP_AGENT_DEREGISTER = "agent_deregister"
 
+# Gossip subtypes for agent collaboration protocols
+GOSSIP_TASK_ASSIGN = "agent_task_assign"
+GOSSIP_TASK_COMPLETE = "agent_task_complete"
+GOSSIP_TASK_CANCEL = "agent_task_cancel"
+GOSSIP_REVIEW_SUBMIT = "agent_review_submit"
+GOSSIP_KNOWLEDGE_RESPONSE = "agent_knowledge_response"
+
 # Callback type for gossip subscribers
 GossipCallback = Callable[[str, Dict[str, Any], str], Coroutine[Any, Any, None]]
 # (subtype, payload, sender_id) -> None

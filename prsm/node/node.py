@@ -182,6 +182,7 @@ class PRSMNode:
         self.agent_collaboration = AgentCollaboration(
             gossip=self.gossip,
             node_id=self.identity.node_id,
+            ledger=self.ledger,
         )
 
         # Wire ledger_sync into subsystems for transaction broadcasting
@@ -191,6 +192,7 @@ class PRSMNode:
         self.compute_requester.ledger_sync = self.ledger_sync
         if self.storage_provider:
             self.storage_provider.ledger_sync = self.ledger_sync
+        self.agent_collaboration.ledger_sync = self.ledger_sync
 
         logger.info("Node initialized — all subsystems ready")
 
@@ -244,6 +246,8 @@ class PRSMNode:
             self._api_task.cancel()
             self._api_task = None
 
+        if self.agent_collaboration:
+            await self.agent_collaboration.stop()
         if self.ledger_sync:
             await self.ledger_sync.stop()
         if self.content_uploader:

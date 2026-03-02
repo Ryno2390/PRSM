@@ -675,32 +675,40 @@ Issues organized by impact and effort to guide remediation planning:
 
 Based on the code review findings, the following items require attention:
 
-### Immediate (This Sprint) - ✅ COMPLETED
+### Sprint 1 — Critical Security Fixes ✅ COMPLETED (2026-02-20)
 
 - [x] **CRITICAL**: Fix signature verification `pass` statement in [`dag_ledger.py:508`](prsm/node/dag_ledger.py:508)
 - [x] **CRITICAL**: Migrate marketplace from deprecated FTNS service to atomic service
 - [x] **CRITICAL**: Implement atomic balance operations in DAG ledger
 
-### Next Sprint
+### Sprint 2 — Code Quality & Thread Safety ✅ COMPLETED (2026-02-27)
 
-- [ ] **HIGH**: Consolidate duplicate IPFS client implementations
-- [ ] **HIGH**: Remove mock services from production code in orchestrator
-- [ ] **HIGH**: Add thread safety to peer connection management
-- [ ] **HIGH**: Add error handling to NWTN query processing
+- [x] **HIGH**: Consolidate duplicate IPFS client implementations
+- [x] **HIGH**: Remove mock services from production code in orchestrator
+- [x] **HIGH**: Add thread safety to peer connection management
+- [x] **HIGH**: Add error handling to NWTN query processing
 
-### Upcoming Sprints
+### Sprint 3 — Exception Handling & Integration Tests ✅ COMPLETED (2026-03-01)
 
-- [ ] **MEDIUM**: Audit and fix silent exception handling (99 instances)
-- [ ] **MEDIUM**: Add missing integration tests:
-  - P2P network partition scenarios
-  - DAG consensus validation
-  - Marketplace concurrency
-  - NWTN end-to-end flows
-- [ ] **MEDIUM**: Extract hardcoded values to configuration
+- [x] **MEDIUM**: Audit and fix silent exception handling (40 bare except patterns, ~50 silent handlers)
+- [x] **MEDIUM**: Add missing integration tests (P2P, DAG consensus, marketplace concurrency, NWTN e2e)
+
+### Sprint 4 — Core Collaboration Robustness (Current)
+
+- [ ] **CRITICAL**: Wire FTNS payments into collaboration protocols (task delegation, peer review, knowledge exchange)
+- [ ] **CRITICAL**: Broadcast all collaboration state changes to the network
+- [ ] **HIGH**: Add expiry enforcement and bounded memory for collaboration state
+- [ ] **MEDIUM**: Add content retrieval API for cross-node content download
+- [ ] **MEDIUM**: Bridge CollaborationManager with P2P AgentCollaboration
+
+*See Section 20 for full Sprint 4 plan with phased implementation details.*
 
 ### Technical Debt Backlog
 
-- [ ] **LOW**: Replace print statements with proper logging
+- [ ] **MEDIUM**: Extract hardcoded values to configuration
+- [ ] **LOW**: Wire compute provider to NWTN orchestrator for real inference
+- [ ] **LOW**: Extend peer discovery with capability-based search
+- [ ] **LOW**: Add gossip persistence for late-joining nodes
 - [ ] **LOW**: Document deprecation timeline for legacy compatibility shim
 - [ ] **LOW**: Complete type hint coverage
 - [ ] **LOW**: Increase test coverage from 50% to 80% for security components
@@ -924,8 +932,428 @@ All Sprint 2 improvements verified functional:
 
 ---
 
+## 20. Sprint 4 — Core Collaboration Robustness (2026-03-02)
+
+### Motivation
+
+With Sprints 1–3 having addressed critical security vulnerabilities, code quality, and exception handling, the codebase's foundational infrastructure is now solid. This sprint focuses on PRSM's **core collaboration features** — the mechanisms that enable researchers to actually work together on the network. A thorough review of the collaboration stack identified 12 concrete gaps that, if left unaddressed, would prevent real-world multi-node collaboration from functioning end-to-end.
+
+### Current State of Core Collaboration Features
+
+| Component | File(s) | Status | Assessment |
+|-----------|---------|--------|------------|
+| WebSocket P2P Transport | `prsm/node/transport.py` | **Production** | Solid — thread-safe with asyncio locks, handshake verification, nonce dedup |
+| Gossip Protocol | `prsm/node/gossip.py` | **Production** | Working — epidemic gossip with fanout, TTL, heartbeat |
+| Peer Discovery | `prsm/node/discovery.py` | **Production** | Working — bootstrap, announce, maintenance, stale pruning |
+| DAG Ledger | `prsm/node/dag_ledger.py` | **Production** | Strong — atomic ops, Ed25519 verification, TOCTOU prevention |
+| Ledger Sync | `prsm/node/ledger_sync.py` | **Production** | Working — signed broadcast, nonce replay prevention, reconciliation |
+| Compute Provider | `prsm/node/compute_provider.py` | **Alpha** | Pipeline works, but inference/embedding returns mock results |
+| Compute Requester | `prsm/node/compute_requester.py` | **Production** | Working — submit, await, verify signature, record payment |
+| Content Uploader | `prsm/node/content_uploader.py` | **Production** | Working — IPFS upload, provenance, multi-level royalties |
+| Content Index | `prsm/node/content_index.py` | **Production** | Working — LRU-evicted gossip-based content tracking |
+| Agent Registry | `prsm/node/agent_registry.py` | **Production** | Working — gossip-based agent discovery, capability search |
+| Agent Collaboration | `prsm/node/agent_collaboration.py` | **Partial** | State machines defined, but missing payment, persistence, broadcast |
+| Session Manager | `prsm/collaboration/session_manager.py` | **Partial** | In-memory sessions, not connected to P2P layer |
+| Collaboration Manager | `prsm/collaboration/__init__.py` | **Partial** | Higher-level abstraction, not connected to agent_collaboration |
+
+### Identified Issues
+
+#### Issue 1: No FTNS Payment Execution in Agent Collaboration (Critical)
+
+**Location:** [`prsm/node/agent_collaboration.py`](prsm/node/agent_collaboration.py)
+
+**Problem:** The `AgentCollaboration` class handles task offers with `ftns_budget`, review requests with `ftns_per_review`, and knowledge queries with `ftns_per_response`, but **never actually deducts or credits FTNS tokens**. The collaboration protocols are state machines without payment execution.
+
+- `post_task()` broadcasts budget but doesn't escrow it
+- `complete_task()` marks status but doesn't pay the assigned agent
+- `submit_review()` records verdicts but doesn't pay reviewers
+- `submit_response()` records answers but doesn't pay responders
+
+**Impact:** Researchers have no economic incentive to participate in collaboration protocols. The token economy, which is PRSM's core differentiator, is disconnected from collaboration.
+
+**Recommended Fix:**
+- Wire `AgentCollaboration` to the local ledger (or `LedgerSync` for cross-node payments)
+- Add escrow: hold FTNS when posting a task/review/query, release to winners, return on cancel
+- Add automatic payment on task completion, review submission, and knowledge response
+
+#### Issue 2: Memory-Only Collaboration State (High)
+
+**Location:** [`prsm/node/agent_collaboration.py:110-112`](prsm/node/agent_collaboration.py:110)
+
+**Problem:** All collaboration state is stored in Python dictionaries:
+```python
+self.tasks: Dict[str, TaskOffer] = {}
+self.reviews: Dict[str, ReviewRequest] = {}
+self.queries: Dict[str, KnowledgeQuery] = {}
+```
+
+If a node restarts, all active collaborations are lost. There's no way to recover in-progress tasks, pending reviews, or open queries.
+
+**Impact:** Any node restart destroys collaboration state, making long-running collaborations unreliable.
+
+**Recommended Fix:**
+- Persist active collaboration records to SQLite (alongside the local ledger)
+- Load state on startup, resume in-progress collaborations
+- Archive completed records for audit trail
+
+#### Issue 3: No Timeout/Expiry Enforcement (High)
+
+**Location:** [`prsm/node/agent_collaboration.py`](prsm/node/agent_collaboration.py)
+
+**Problem:** Tasks have `deadline_seconds` and all records have `created_at`, but nothing enforces these deadlines. There is no background loop that:
+- Cancels expired task offers that received no bids
+- Times out assigned tasks that weren't completed
+- Expires old review requests
+- Closes old knowledge queries
+
+**Impact:** Stale collaboration records accumulate indefinitely. FTNS budgets that should be returned remain in limbo.
+
+**Recommended Fix:**
+- Add a `_cleanup_loop()` that runs every 60 seconds
+- Cancel expired tasks and return escrowed FTNS to requester
+- Close stale reviews and queries
+- Emit gossip notifications for state changes
+
+#### Issue 4: Missing State Change Broadcasts (High)
+
+**Location:** [`prsm/node/agent_collaboration.py:192-208`](prsm/node/agent_collaboration.py:192)
+
+**Problem:** Several critical state changes are local-only — the network is never notified:
+- `assign_task()` — the assigned agent and other bidders aren't told
+- `complete_task()` — the requester on another node isn't notified
+- `submit_review()` — the submitter isn't notified of the verdict
+- `submit_response()` — the requester isn't notified of the answer
+
+Only `post_task()`, `submit_bid()`, `request_review()`, and `post_query()` broadcast via gossip.
+
+**Impact:** In a multi-node scenario, collaboration cannot progress because parties on other nodes never learn about state changes.
+
+**Recommended Fix:**
+- Add gossip subtypes: `agent_task_assign`, `agent_task_complete`, `agent_review_submit`, `agent_knowledge_response`
+- Broadcast on each state change
+- Add corresponding `_on_*` handlers to process incoming state updates
+
+#### Issue 5: No Bid Selection Strategy (Medium)
+
+**Location:** [`prsm/node/agent_collaboration.py:192-199`](prsm/node/agent_collaboration.py:192)
+
+**Problem:** When multiple agents bid on a task, the `assign_task()` method requires the requester to manually pick a winner by agent ID. There's no:
+- Automatic bid scoring based on cost, estimated time, or capability match
+- Reputation-weighted selection
+- Automatic assignment after a bidding window
+
+**Recommended Fix:**
+- Add `select_best_bid()` method with configurable scoring strategy
+- Consider cost, estimated_seconds, agent reputation (from agent_registry), and capability match
+- Optionally add auto-assignment after a configurable bidding window
+
+#### Issue 6: No Content Retrieval API (Medium)
+
+**Location:** [`prsm/node/content_uploader.py`](prsm/node/content_uploader.py)
+
+**Problem:** The `ContentUploader` has `_handle_content_request()` to serve incoming requests, but there's no corresponding `request_content()` method for a node to initiate a download. A node must manually construct P2P messages to fetch content from another node.
+
+**Recommended Fix:**
+- Add `request_content(cid: str) -> Optional[bytes]` method
+- Use the `ContentIndex` to find providers
+- Send direct content_request, await response with timeout
+- Verify content hash on receipt
+
+#### Issue 7: Unbounded Memory Growth (Medium)
+
+**Location:** Multiple files in `prsm/node/`
+
+**Problem:** Several dictionaries grow without bounds:
+- `agent_collaboration.py`: `self.tasks`, `self.reviews`, `self.queries`
+- `compute_provider.py`: `self.completed_jobs`
+- `content_uploader.py`: `self.uploaded_content`
+- `compute_requester.py`: `self.submitted_jobs`
+
+**Recommended Fix:**
+- Add max-size bounds with LRU eviction for completed/archived items
+- Move completed records to persistent storage before eviction
+- Log when eviction occurs for monitoring
+
+#### Issue 8: Dual Collaboration Systems Not Connected (Medium)
+
+**Location:** [`prsm/collaboration/`](prsm/collaboration/) vs [`prsm/node/agent_collaboration.py`](prsm/node/agent_collaboration.py)
+
+**Problem:** There are two independent collaboration systems:
+1. `prsm/collaboration/` — Higher-level `SessionManager` and `CollaborationManager` with proposal/session/result lifecycle
+2. `prsm/node/agent_collaboration.py` — P2P-level protocols for task delegation, peer review, knowledge exchange
+
+These systems don't interact. The `CollaborationManager` manages collaboration lifecycle but has no P2P transport. The `AgentCollaboration` has P2P transport but no session management.
+
+**Recommended Fix:**
+- Bridge the two: `CollaborationManager` should be able to dispatch tasks to `AgentCollaboration` for network execution
+- `AgentCollaboration` completion should update `CollaborationManager` session state
+- Eventually consolidate into a single coherent API
+
+#### Issue 9: Mock Compute Jobs (Low, Alpha-appropriate)
+
+**Location:** [`prsm/node/compute_provider.py:308-338`](prsm/node/compute_provider.py:308)
+
+**Problem:** `_run_inference()` and `_run_embedding()` return mock results:
+```python
+return {
+    "response": f"[PRSM node {self.identity.node_id[:8]} processed inference]",
+    ...
+}
+```
+
+**Note:** This is documented as alpha behavior and is appropriate for the current stage. However, the pipeline should eventually connect to the NWTN orchestrator for real inference.
+
+**Recommended Fix (future):**
+- Wire `_run_inference()` to the NWTN orchestrator
+- Wire `_run_embedding()` to the embedding pipeline
+- Add model discovery via the agent registry
+
+#### Issue 10: Discovery Lacks Capability-Based Search (Low)
+
+**Location:** [`prsm/node/discovery.py`](prsm/node/discovery.py)
+
+**Problem:** `PeerDiscovery` only tracks node-level metadata (node_id, address, roles). It doesn't support finding nodes that have specific agent capabilities, GPU resources, or content.
+
+**Recommended Fix:**
+- Extend `PeerInfo` with `capabilities: List[str]` and `resources: Dict`
+- Add `find_peers_with_capability(capability: str) -> List[PeerInfo]`
+- Populate from agent_registry advertisements
+
+#### Issue 11: No Gossip Message Persistence (Low)
+
+**Location:** [`prsm/node/gossip.py`](prsm/node/gossip.py)
+
+**Problem:** If a node joins the network after a job offer or task was broadcast, it will never see that offer. There's no catch-up mechanism for missed gossip.
+
+**Recommended Fix (future):**
+- Add a gossip log with configurable retention
+- On new peer connect, exchange recent gossip digests
+- Request missing messages by nonce
+
+#### Issue 12: No Graceful Collaboration Shutdown (Low)
+
+**Problem:** When a node shuts down, its active collaborations (tasks it posted, reviews it requested, bids it submitted) are left in limbo. Other participants are not notified.
+
+**Recommended Fix:**
+- On `PRSMNode.stop()`, gossip cancellation messages for all active tasks/reviews/queries
+- Return escrowed FTNS
+- Mark all local collaboration records as cancelled
+
+### Sprint 4 Phased Implementation Plan
+
+#### Phase 1: FTNS Payment Integration (Critical path)
+
+**Goal:** Wire collaboration protocols to the token economy.
+
+**Files to modify:**
+- `prsm/node/agent_collaboration.py` — Add ledger and ledger_sync as constructor parameters; implement escrow, payment, and refund logic
+
+**Changes:**
+1. Add `ledger: LocalLedger` and `ledger_sync: Optional[LedgerSync]` to `__init__()`
+2. In `post_task()`: escrow `ftns_budget` (debit from requester wallet)
+3. In `complete_task()`: release escrow to assigned agent via `ledger_sync.signed_transfer()`
+4. In `assign_task()`: if task is cancelled, return escrow to requester
+5. In `request_review()`: escrow `ftns_per_review * max_reviewers`
+6. In `submit_review()`: pay reviewer from escrow when review is accepted
+7. In `post_query()`: escrow `ftns_per_response * max_responses`
+8. In `submit_response()`: pay responder from escrow
+9. Update `PRSMNode.initialize()` to pass ledger and ledger_sync to AgentCollaboration
+
+**Estimated effort:** 4–6 hours
+
+#### Phase 2: State Change Broadcasts (Critical for multi-node)
+
+**Goal:** Network-wide visibility of all collaboration state changes.
+
+**Files to modify:**
+- `prsm/node/agent_collaboration.py` — Add new gossip subtypes and handlers
+- `prsm/node/gossip.py` — Register new gossip subtypes (constants only)
+
+**Changes:**
+1. Add gossip subtypes: `GOSSIP_TASK_ASSIGN`, `GOSSIP_TASK_COMPLETE`, `GOSSIP_REVIEW_SUBMIT`, `GOSSIP_KNOWLEDGE_RESPONSE`
+2. Make `assign_task()` async, broadcast assignment
+3. Make `complete_task()` async, broadcast completion
+4. Make `submit_review()` async, broadcast review verdict
+5. Make `submit_response()` async, broadcast response
+6. Add `_on_task_assign()`, `_on_task_complete()`, `_on_review_submit()`, `_on_knowledge_response()` handlers
+7. Subscribe in `start()`
+
+**Estimated effort:** 3–4 hours
+
+#### Phase 3: Expiry Enforcement & Bounded Memory (Reliability)
+
+**Goal:** Prevent stale records and unbounded memory growth.
+
+**Files to modify:**
+- `prsm/node/agent_collaboration.py` — Add cleanup loop and eviction
+- `prsm/node/compute_provider.py` — Bound `completed_jobs`
+- `prsm/node/compute_requester.py` — Bound `submitted_jobs`
+
+**Changes:**
+1. Add `_cleanup_loop()` to AgentCollaboration that runs every 60 seconds
+2. Cancel expired tasks (beyond `deadline_seconds`), return escrowed FTNS
+3. Close expired reviews and queries (configurable timeout, default 1 hour)
+4. Add `MAX_COMPLETED_ITEMS = 1000` constant, evict oldest when exceeded
+5. Bound `completed_jobs` in ComputeProvider with same pattern
+6. Bound `submitted_jobs` in ComputeRequester
+
+**Estimated effort:** 2–3 hours
+
+#### Phase 4: Content Retrieval API (Usability)
+
+**Goal:** Allow nodes to request and download content from the network.
+
+**Files to modify:**
+- `prsm/node/content_uploader.py` — Add `request_content()` method
+
+**Changes:**
+1. Add `async def request_content(cid: str, timeout: float = 30.0) -> Optional[bytes]`
+2. Look up providers via `content_index.get_providers(cid)`
+3. Send direct `content_request` message to best provider
+4. Await response with configurable timeout
+5. Verify `content_hash` matches on receipt
+6. Return content bytes or None
+
+**Estimated effort:** 2–3 hours
+
+#### Phase 5: Collaboration System Bridge (Architecture)
+
+**Goal:** Connect the higher-level `CollaborationManager` to P2P protocols.
+
+**Files to modify:**
+- `prsm/collaboration/__init__.py` — Add bridge methods
+- `prsm/node/node.py` — Wire collaboration manager into node lifecycle
+
+**Changes:**
+1. Add `set_agent_collaboration(ac: AgentCollaboration)` to CollaborationManager
+2. When a `CollaborationSession` of type `TASK_DELEGATION` starts, dispatch to `AgentCollaboration.post_task()`
+3. When `AgentCollaboration` completes a task, update the corresponding `CollaborationSession`
+4. Add `create_session_from_task()` and `create_session_from_review()` convenience methods
+
+**Estimated effort:** 3–4 hours
+
+### Priority Matrix
+
+| Phase | Impact | Effort | Priority | Dependency |
+|-------|--------|--------|----------|------------|
+| Phase 1: FTNS Payment | **Critical** | 4–6 hrs | P0 | None |
+| Phase 2: State Broadcasts | **Critical** | 3–4 hrs | P0 | None |
+| Phase 3: Expiry & Bounds | **High** | 2–3 hrs | P1 | Phase 1 (for escrow refund) |
+| Phase 4: Content Retrieval | **Medium** | 2–3 hrs | P2 | None |
+| Phase 5: System Bridge | **Medium** | 3–4 hrs | P2 | Phase 1, Phase 2 |
+
+### Success Criteria
+
+- [x] Tasks, reviews, and queries trigger actual FTNS token transfers
+- [x] All collaboration state changes are broadcast to the network
+- [x] Expired collaborations are automatically cleaned up with FTNS returned
+- [ ] Nodes can request and download content from network peers by CID
+- [ ] `CollaborationManager` dispatches to P2P `AgentCollaboration` for execution
+- [x] No in-memory dictionary grows beyond configurable bounds
+- [x] Integration tests cover multi-node collaboration scenarios end-to-end
+
+### Sprint 4 Completion Summary (2026-03-02)
+
+Phases 1–3 and testing completed. Phases 4–5 deferred to a future sprint.
+
+#### Files Modified
+
+| File | Changes |
+|------|---------|
+| `prsm/node/agent_collaboration.py` | Complete rewrite: FTNS escrow/payment, gossip broadcasts, expiry cleanup, bounded archives |
+| `prsm/node/gossip.py` | Added 5 new gossip subtypes for collaboration state changes |
+| `prsm/node/node.py` | Wired ledger and ledger_sync into AgentCollaboration; added graceful shutdown |
+| `tests/security/test_sprint4_collaboration.py` | 23 tests across 8 test classes |
+
+#### What Changed
+
+**FTNS Payment Integration:**
+- `post_task()` escrows the FTNS budget via `ledger.debit()`
+- `complete_task()` pays the assigned agent via `ledger_sync.signed_transfer()`
+- `cancel_task()` refunds escrowed FTNS via `ledger.credit()`
+- `request_review()` escrows `ftns_per_review * max_reviewers`
+- `submit_review()` pays each reviewer from escrow
+- `post_query()` escrows `ftns_per_response * max_responses`
+- `submit_response()` pays each responder from escrow
+- Unused escrow slots are refunded when reviews/queries close
+
+**State Change Broadcasts:**
+- New gossip subtypes: `agent_task_assign`, `agent_task_complete`, `agent_task_cancel`, `agent_review_submit`, `agent_knowledge_response`
+- All state changes (assignment, completion, cancellation, review verdicts, knowledge responses) broadcast to network
+- Corresponding `_on_*` handlers process incoming state updates from remote nodes
+
+**Expiry Enforcement:**
+- Background `_cleanup_loop()` runs every 60 seconds
+- Cancels tasks past their `deadline_seconds` and refunds escrow
+- Closes reviews and queries past configurable timeouts (1h and 30m)
+- Broadcasts cancellation gossip for expired items
+
+**Bounded Memory:**
+- Completed/cancelled/expired records archived to `OrderedDict` with LRU eviction
+- `MAX_COMPLETED_RECORDS = 500` per category (tasks, reviews, queries)
+- Active dictionaries only hold in-progress records
+
+**Graceful Shutdown:**
+- `stop()` cancels all open/assigned tasks owned by this node
+- Refunds escrowed FTNS before shutting down
+
+#### Test Results
+
+```
+23 passed in 8.26s
+
+TestTaskEscrowAndPayment (4 tests)   — escrow, insufficient balance, payment, refund
+TestReviewEscrowAndPayment (2 tests) — escrow, reviewer payment
+TestQueryEscrowAndPayment (2 tests)  — escrow, responder payment
+TestStateBroadcasts (5 tests)        — assign, complete, cancel, review, response
+TestIncomingStateChanges (3 tests)   — remote assign, complete, review updates
+TestExpiryEnforcement (3 tests)      — expired tasks, reviews, queries with refund
+TestBoundedMemory (2 tests)          — archive bounds, active→archive movement
+TestGracefulShutdown (1 test)        — stop refunds open tasks
+TestStats (1 test)                   — stats accuracy
+```
+
+---
+
+## 21. Updated "What Still Needs to Be Done"
+
+### Completed Sprints
+
+- [x] **Sprint 1** (2026-02-20): Critical security fixes — signature verification, atomic balance ops, marketplace migration
+- [x] **Sprint 2** (2026-02-27): Code quality — IPFS consolidation, mock separation, thread safety, NWTN error handling
+- [x] **Sprint 3** (2026-03-01): Exception handling — bare except fixes, silent handler comments, integration tests
+
+### Current Sprint
+
+- [ ] **Sprint 4** (2026-03-02): Core Collaboration Robustness
+  - [ ] Phase 1: FTNS payment integration for collaboration protocols
+  - [ ] Phase 2: Network-wide state change broadcasts
+  - [ ] Phase 3: Expiry enforcement and bounded memory
+  - [ ] Phase 4: Content retrieval API
+  - [ ] Phase 5: Collaboration system bridge
+
+### Next Sprint Candidates
+
+- [ ] **Compute Provider Integration**: Wire `_run_inference()` to NWTN orchestrator for real inference on network
+- [ ] **Capability-Based Discovery**: Extend peer discovery with agent capabilities and resource metadata
+- [ ] **Gossip Persistence / Catch-Up**: Allow late-joining nodes to receive recent collaboration offers
+- [ ] **SQLite Persistence for Collaboration State**: Persist active tasks/reviews/queries across node restarts
+- [ ] **Bid Selection Strategy**: Automated bid scoring and assignment based on cost, time, reputation, and capability
+
+### Technical Debt Backlog
+
+- [ ] **LOW**: Extract hardcoded values to configuration (timeouts, limits, thresholds)
+- [ ] **LOW**: Document deprecation timeline for legacy compatibility shim in `prsm/__init__.py`
+- [ ] **LOW**: Complete type hint coverage across all public APIs
+- [ ] **LOW**: Increase test coverage from 50% to 80% for security components
+- [ ] **LOW**: Add graceful collaboration shutdown (cancel active tasks on node stop)
+
+---
+
 *Analysis completed: 2026-02-20*
 *Code Review completed: 2026-02-20*
 *Sprint 1 completed: 2026-02-20*
 *Sprint 2 completed: 2026-02-27*
+*Sprint 3 completed: 2026-03-01*
+*Sprint 4 Phases 1-3 completed: 2026-03-02*
 *PRSM Version: 0.1.0*
