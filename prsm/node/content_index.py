@@ -47,8 +47,9 @@ class ContentIndex:
     loop is single-threaded.
     """
 
-    def __init__(self, gossip: GossipProtocol):
+    def __init__(self, gossip: GossipProtocol, max_indexed_cids: int = MAX_INDEXED_CIDS):
         self.gossip = gossip
+        self.max_indexed_cids = max_indexed_cids
         # OrderedDict for LRU eviction — most-recently-touched at the end
         self._records: OrderedDict[str, ContentRecord] = OrderedDict()
         # keyword → set of CIDs that match
@@ -170,7 +171,7 @@ class ContentIndex:
 
     def _evict_if_needed(self) -> None:
         """Remove the oldest entries when the index exceeds the cap."""
-        while len(self._records) > MAX_INDEXED_CIDS:
+        while len(self._records) > self.max_indexed_cids:
             evicted_cid, evicted_record = self._records.popitem(last=False)
             # Clean up keyword index references
             for word in self._tokenize(evicted_record.filename):

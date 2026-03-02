@@ -59,6 +59,32 @@ class NodeConfig:
     # FTNS
     welcome_grant: float = 100.0
 
+    # Discovery tuning
+    target_peers: int = 8
+    announce_interval: float = 60.0
+    maintenance_interval: float = 30.0
+    peer_stale_timeout: float = 600.0          # 10 minutes
+
+    # Transport tuning
+    nonce_window: float = 300.0                # 5 minutes
+    ws_ping_interval: float = 20.0
+    ws_ping_timeout: float = 10.0
+    handshake_timeout: float = 10.0
+    nonce_cleanup_interval: float = 60.0
+
+    # Collaboration tuning
+    task_timeout: float = 3600.0               # 1 hour
+    review_timeout: float = 3600.0             # 1 hour
+    query_timeout: float = 1800.0              # 30 minutes
+    max_completed_records: int = 500
+    collab_cleanup_interval: float = 60.0
+
+    # Content index tuning
+    max_indexed_cids: int = 10000
+
+    # Ledger sync tuning
+    reconciliation_interval: float = 300.0     # 5 minutes
+
     @property
     def identity_path(self) -> Path:
         return Path(self.data_dir) / "identity.json"
@@ -95,6 +121,22 @@ class NodeConfig:
             "data_dir": self.data_dir,
             "ipfs_api_url": self.ipfs_api_url,
             "welcome_grant": self.welcome_grant,
+            "target_peers": self.target_peers,
+            "announce_interval": self.announce_interval,
+            "maintenance_interval": self.maintenance_interval,
+            "peer_stale_timeout": self.peer_stale_timeout,
+            "nonce_window": self.nonce_window,
+            "ws_ping_interval": self.ws_ping_interval,
+            "ws_ping_timeout": self.ws_ping_timeout,
+            "handshake_timeout": self.handshake_timeout,
+            "nonce_cleanup_interval": self.nonce_cleanup_interval,
+            "task_timeout": self.task_timeout,
+            "review_timeout": self.review_timeout,
+            "query_timeout": self.query_timeout,
+            "max_completed_records": self.max_completed_records,
+            "collab_cleanup_interval": self.collab_cleanup_interval,
+            "max_indexed_cids": self.max_indexed_cids,
+            "reconciliation_interval": self.reconciliation_interval,
         }
         self.config_path.write_text(json.dumps(data, indent=2))
 

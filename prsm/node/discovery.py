@@ -56,12 +56,14 @@ class PeerDiscovery:
         target_peers: int = 8,
         announce_interval: float = 60.0,
         maintenance_interval: float = 30.0,
+        peer_stale_timeout: float = 600.0,
     ):
         self.transport = transport
         self.bootstrap_nodes = bootstrap_nodes or []
         self.target_peers = target_peers
         self.announce_interval = announce_interval
         self.maintenance_interval = maintenance_interval
+        self.peer_stale_timeout = peer_stale_timeout
 
         # Known peers (may not be connected)
         self.known_peers: Dict[str, PeerInfo] = {}
@@ -248,8 +250,8 @@ class PeerDiscovery:
             await asyncio.sleep(self.maintenance_interval)
             try:
                 await self.maintain_connections()
-                # Prune stale known peers (not seen in 10 minutes)
-                cutoff = time.time() - 600
+                # Prune stale known peers
+                cutoff = time.time() - self.peer_stale_timeout
                 stale = [nid for nid, p in self.known_peers.items() if p.last_seen < cutoff]
                 for nid in stale:
                     del self.known_peers[nid]
