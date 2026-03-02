@@ -138,11 +138,21 @@ class AgentCollaboration:
         node_id: str,
         ledger=None,
         ledger_sync=None,
+        task_timeout: float = DEFAULT_TASK_TIMEOUT,
+        review_timeout: float = DEFAULT_REVIEW_TIMEOUT,
+        query_timeout: float = DEFAULT_QUERY_TIMEOUT,
+        max_completed_records: int = MAX_COMPLETED_RECORDS,
+        cleanup_interval: float = CLEANUP_INTERVAL_SECONDS,
     ):
         self.gossip = gossip
         self.node_id = node_id
         self.ledger = ledger          # LocalLedger for balance operations
         self.ledger_sync = ledger_sync  # LedgerSync for cross-node payments
+        self.task_timeout = task_timeout
+        self.review_timeout = review_timeout
+        self.query_timeout = query_timeout
+        self.max_completed_records = max_completed_records
+        self.cleanup_interval = cleanup_interval
 
         self.tasks: Dict[str, TaskOffer] = {}
         self.reviews: Dict[str, ReviewRequest] = {}
@@ -859,7 +869,7 @@ class AgentCollaboration:
     async def _cleanup_loop(self) -> None:
         """Periodically clean up expired collaborations and enforce memory bounds."""
         while self._running:
-            await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
+            await asyncio.sleep(self.cleanup_interval)
             try:
                 await self._expire_stale_records()
                 self._enforce_archive_bounds()
@@ -890,7 +900,7 @@ class AgentCollaboration:
         for review in list(self.reviews.values()):
             if review.status == ReviewStatus.PENDING:
                 age = now - review.created_at
-                if age > DEFAULT_REVIEW_TIMEOUT:
+                if age > self.review_timeout:
                     review.status = ReviewStatus.REJECTED
                     if review.submitter_node_id == self.node_id:
                         unused = review.max_reviewers - len(review.paid_reviewers)
@@ -902,7 +912,7 @@ class AgentCollaboration:
         # Expire open queries past timeout
         for query in list(self.queries.values()):
             age = now - query.created_at
-            if age > DEFAULT_QUERY_TIMEOUT and len(query.responses) < query.max_responses:
+            if age > self.query_timeout and len(query.responses) < query.max_responses:
                 if query.requester_node_id == self.node_id:
                     unused = query.max_responses - len(query.paid_responders)
                     if unused > 0:
@@ -932,11 +942,11 @@ class AgentCollaboration:
 
     def _enforce_archive_bounds(self) -> None:
         """Evict oldest records from archives when they exceed bounds."""
-        while len(self._completed_tasks) > MAX_COMPLETED_RECORDS:
+        while len(self._completed_tasks) > self.max_completed_records:
             self._completed_tasks.popitem(last=False)
-        while len(self._completed_reviews) > MAX_COMPLETED_RECORDS:
+        while len(self._completed_reviews) > self.max_completed_records:
             self._completed_reviews.popitem(last=False)
-        while len(self._completed_queries) > MAX_COMPLETED_RECORDS:
+        while len(self._completed_queries) > self.max_completed_records:
             self._completed_queries.popitem(last=False)
 
     # ── Stats ────────────────────────────────────────────────────

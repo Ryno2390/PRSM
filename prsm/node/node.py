@@ -109,6 +109,11 @@ class PRSMNode:
             identity=self.identity,
             host=self.config.listen_host,
             port=self.config.p2p_port,
+            nonce_window=self.config.nonce_window,
+            ws_ping_interval=self.config.ws_ping_interval,
+            ws_ping_timeout=self.config.ws_ping_timeout,
+            handshake_timeout=self.config.handshake_timeout,
+            nonce_cleanup_interval=self.config.nonce_cleanup_interval,
         )
 
         # ── Gossip ───────────────────────────────────────────────
@@ -123,6 +128,10 @@ class PRSMNode:
         self.discovery = PeerDiscovery(
             transport=self.transport,
             bootstrap_nodes=self.config.bootstrap_nodes,
+            target_peers=self.config.target_peers,
+            announce_interval=self.config.announce_interval,
+            maintenance_interval=self.config.maintenance_interval,
+            peer_stale_timeout=self.config.peer_stale_timeout,
         )
 
         # ── Compute ──────────────────────────────────────────────
@@ -154,7 +163,10 @@ class PRSMNode:
             )
 
         # ── Content Index ─────────────────────────────────────────
-        self.content_index = ContentIndex(gossip=self.gossip)
+        self.content_index = ContentIndex(
+            gossip=self.gossip,
+            max_indexed_cids=self.config.max_indexed_cids,
+        )
 
         self.content_uploader = ContentUploader(
             identity=self.identity,
@@ -171,6 +183,7 @@ class PRSMNode:
             gossip=self.gossip,
             ledger=self.ledger,
             transport=self.transport,
+            reconciliation_interval=self.config.reconciliation_interval,
         )
 
         # ── Agent Registry & Collaboration ────────────────────────
@@ -183,6 +196,11 @@ class PRSMNode:
             gossip=self.gossip,
             node_id=self.identity.node_id,
             ledger=self.ledger,
+            task_timeout=self.config.task_timeout,
+            review_timeout=self.config.review_timeout,
+            query_timeout=self.config.query_timeout,
+            max_completed_records=self.config.max_completed_records,
+            cleanup_interval=self.config.collab_cleanup_interval,
         )
 
         # Wire ledger_sync into subsystems for transaction broadcasting

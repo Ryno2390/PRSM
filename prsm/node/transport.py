@@ -115,15 +115,29 @@ class WebSocketTransport:
         race conditions when multiple coroutines access shared state concurrently.
     """
 
-    def __init__(self, identity: NodeIdentity, host: str = "0.0.0.0", port: int = 9001):
+    def __init__(
+        self,
+        identity: NodeIdentity,
+        host: str = "0.0.0.0",
+        port: int = 9001,
+        nonce_window: float = 300.0,
+        ws_ping_interval: float = 20.0,
+        ws_ping_timeout: float = 10.0,
+        handshake_timeout: float = 10.0,
+        nonce_cleanup_interval: float = 60.0,
+    ):
         self.identity = identity
         self.host = host
         self.port = port
+        self.ws_ping_interval = ws_ping_interval
+        self.ws_ping_timeout = ws_ping_timeout
+        self.handshake_timeout = handshake_timeout
+        self.nonce_cleanup_interval = nonce_cleanup_interval
 
         self.peers: Dict[str, PeerConnection] = {}  # peer_id -> connection
         self._handlers: Dict[str, List[MessageHandler]] = {}
         self._seen_nonces: Set[str] = set()
-        self._nonce_window = 300  # seconds to remember nonces
+        self._nonce_window = nonce_window
         self._nonce_timestamps: Dict[str, float] = {}
         self._server = None
         self._running = False
@@ -180,8 +194,8 @@ class WebSocketTransport:
             self._handle_incoming,
             self.host,
             self.port,
-            ping_interval=20,
-            ping_timeout=10,
+            ping_interval=self.ws_ping_interval,
+            ping_timeout=self.ws_ping_timeout,
         )
         self._tasks.append(asyncio.create_task(self._nonce_cleanup_loop()))
         logger.info(f"P2P transport listening on ws://{self.host}:{self.port}")
@@ -214,7 +228,7 @@ class WebSocketTransport:
         peer = None
         try:
             # Wait for handshake
-            raw = await asyncio.wait_for(websocket.recv(), timeout=10.0)
+            raw = await asyncio.wait_for(websocket.recv(), timeout=self.handshake_timeout)
             msg = P2PMessage.from_json(raw)
 
             if msg.msg_type != MSG_HANDSHAKE:
@@ -315,7 +329,7 @@ class WebSocketTransport:
         else:
             uri = f"ws://{address}"
         try:
-            websocket = await websockets.client.connect(uri, open_timeout=10)
+            websocket = await websockets.client.connect(uri, open_timeout=self.handshake_timeout)
 
             # Send handshake
             hs = P2PMessage(
@@ -331,7 +345,7 @@ class WebSocketTransport:
             await websocket.send(hs.to_json())
 
             # Wait for ack
-            raw = await asyncio.wait_for(websocket.recv(), timeout=10.0)
+            raw = await asyncio.wait_for(websocket.recv(), timeout=self.handshake_timeout)
             ack = P2PMessage.from_json(raw)
 
             if ack.msg_type != MSG_HANDSHAKE_ACK:
@@ -481,7 +495,7 @@ class WebSocketTransport:
     async def _nonce_cleanup_loop(self) -> None:
         """Periodically clean up old nonces to prevent memory growth (thread-safe)."""
         while self._running:
-            await asyncio.sleep(60)
+            await asyncio.sleep(self.nonce_cleanup_interval)
             cutoff = time.time() - self._nonce_window
             
             # Thread-safe nonce cleanup
