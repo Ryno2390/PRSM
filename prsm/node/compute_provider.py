@@ -138,6 +138,7 @@ class ComputeProvider:
         self.completed_jobs: Dict[str, ComputeJob] = {}
         self._running = False
         self.ledger_sync = None  # Set by node.py after construction
+        self.orchestrator = None  # NWTN orchestrator, set by node.py after construction
 
     @property
     def available_capacity(self) -> Dict[str, Any]:
@@ -306,21 +307,49 @@ class ComputeProvider:
         }
 
     async def _run_inference(self, job: ComputeJob) -> Dict[str, Any]:
-        """Run an inference job. For alpha, this is a mock that demonstrates the pipeline."""
+        """Run an inference job via NWTN orchestrator if available, else mock."""
         prompt = job.payload.get("prompt", "")
         model = job.payload.get("model", "local")
 
-        # For alpha: return a structured response showing the pipeline works
+        # Use NWTN orchestrator if wired
+        if self.orchestrator is not None:
+            try:
+                from prsm.core.models import UserInput
+                user_input = UserInput(
+                    user_id=job.requester_id,
+                    prompt=prompt,
+                    context_allocation=100,
+                )
+                response = await self.orchestrator.process_query(user_input)
+                return {
+                    "model": model,
+                    "prompt": prompt[:200],
+                    "response": response.response,
+                    "tokens_used": response.context_used,
+                    "ftns_charged": response.ftns_charged,
+                    "models_used": response.models_used,
+                    "confidence": response.confidence_score,
+                    "processing_time": response.processing_time,
+                    "provider_node": self.identity.node_id,
+                    "source": "nwtn_orchestrator",
+                }
+            except Exception as e:
+                logger.warning(f"NWTN inference failed, falling back to mock: {e}")
+
+        # Fallback: mock response (alpha)
         return {
             "model": model,
             "prompt": prompt[:200],
             "response": f"[PRSM node {self.identity.node_id[:8]} processed inference]",
             "tokens_used": len(prompt.split()),
             "provider_node": self.identity.node_id,
+            "source": "mock",
         }
 
     async def _run_embedding(self, job: ComputeJob) -> Dict[str, Any]:
-        """Compute embeddings. For alpha, returns a mock embedding vector."""
+        """Compute embeddings. For alpha, returns a mock embedding vector.
+        # TODO: wire to embedding pipeline when available
+        """
         text = job.payload.get("text", "")
         dimensions = job.payload.get("dimensions", 128)
 

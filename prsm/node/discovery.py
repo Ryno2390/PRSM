@@ -36,6 +36,7 @@ class PeerInfo:
     address: str
     display_name: str = ""
     roles: List[str] = field(default_factory=list)
+    capabilities: List[str] = field(default_factory=list)
     last_seen: float = field(default_factory=time.time)
 
 
@@ -57,6 +58,7 @@ class PeerDiscovery:
         announce_interval: float = 60.0,
         maintenance_interval: float = 30.0,
         peer_stale_timeout: float = 600.0,
+        local_capabilities: Optional[List[str]] = None,
     ):
         self.transport = transport
         self.bootstrap_nodes = bootstrap_nodes or []
@@ -64,6 +66,7 @@ class PeerDiscovery:
         self.announce_interval = announce_interval
         self.maintenance_interval = maintenance_interval
         self.peer_stale_timeout = peer_stale_timeout
+        self._local_capabilities = local_capabilities or []
 
         # Known peers (may not be connected)
         self.known_peers: Dict[str, PeerInfo] = {}
@@ -124,6 +127,7 @@ class PeerDiscovery:
                 "address": f"{self.transport.host}:{self.transport.port}",
                 "display_name": getattr(self.transport.identity, "display_name", ""),
                 "roles": [],
+                "capabilities": self._local_capabilities,
                 "peer_count": self.transport.peer_count,
             },
         )
@@ -154,6 +158,34 @@ class PeerDiscovery:
         """Return list of all known peers (connected or not)."""
         return list(self.known_peers.values())
 
+    def find_peers_by_capability(
+        self,
+        required: List[str],
+        match_all: bool = True,
+    ) -> List[PeerInfo]:
+        """Find peers that offer the required capabilities.
+
+        Args:
+            required: Capability strings to search for.
+            match_all: If True, peer must have *all* required capabilities.
+                       If False, peer must have *any* of them.
+
+        Returns:
+            Matching peers sorted by most-recently-seen first.
+        """
+        required_lower = {c.lower() for c in required}
+        results: List[PeerInfo] = []
+        for peer in self.known_peers.values():
+            peer_caps = {c.lower() for c in peer.capabilities}
+            if match_all:
+                if required_lower <= peer_caps:
+                    results.append(peer)
+            else:
+                if required_lower & peer_caps:
+                    results.append(peer)
+        results.sort(key=lambda p: p.last_seen, reverse=True)
+        return results
+
     # ── Message handlers ─────────────────────────────────────────
 
     async def _handle_gossip(self, msg: P2PMessage, peer: PeerConnection) -> None:
@@ -175,6 +207,7 @@ class PeerDiscovery:
             address=address,
             display_name=msg.payload.get("display_name", ""),
             roles=msg.payload.get("roles", []),
+            capabilities=msg.payload.get("capabilities", []),
             last_seen=time.time(),
         )
         # Re-gossip if TTL > 0
@@ -198,6 +231,7 @@ class PeerDiscovery:
                 "address": info.address,
                 "display_name": info.display_name,
                 "roles": info.roles,
+                "capabilities": info.capabilities,
             })
 
         # Also include directly connected peers
@@ -208,6 +242,7 @@ class PeerDiscovery:
                     "address": pc.address,
                     "display_name": pc.display_name,
                     "roles": pc.roles,
+                    "capabilities": getattr(pc, "capabilities", []),
                 })
 
         resp = P2PMessage(
@@ -231,6 +266,7 @@ class PeerDiscovery:
                     address=p.get("address", ""),
                     display_name=p.get("display_name", ""),
                     roles=p.get("roles", []),
+                    capabilities=p.get("capabilities", []),
                     last_seen=time.time(),
                 )
         logger.debug(f"Received {len(peers_data)} peers from {peer.peer_id[:8]}")
