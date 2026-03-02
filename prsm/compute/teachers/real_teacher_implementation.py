@@ -39,7 +39,7 @@ try:
     import torch.optim as optim
     from torch.utils.data import DataLoader, Dataset
     PYTORCH_AVAILABLE = True
-except ImportError:
+except (ImportError, RuntimeError):
     PYTORCH_AVAILABLE = False
 
 try:
@@ -48,7 +48,7 @@ try:
         TrainingArguments, Trainer, DataCollatorForLanguageModeling
     )
     TRANSFORMERS_AVAILABLE = True
-except ImportError:
+except (ImportError, RuntimeError):
     TRANSFORMERS_AVAILABLE = False
 
 from prsm.core.models import TeacherModel, Curriculum, LearningSession

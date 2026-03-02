@@ -42,7 +42,10 @@ __all__ = [
     "__description__"
 ]
 
-# Compatibility shim: Allow prsm.nwtn imports (legacy code uses this path)
+# ── Legacy compatibility shim ──────────────────────────────────────────
+# DEPRECATED: The `prsm.nwtn` import path is a compatibility shim.
+# Migration: `from prsm.nwtn import ...` → `from prsm.compute.nwtn import ...`
+# Timeline: v0.1.x active (no warning) → v0.2.0 DeprecationWarning → v0.3.0 removed
 import sys
 import prsm.compute.nwtn
 sys.modules['prsm.nwtn'] = sys.modules['prsm.compute.nwtn']

@@ -27,7 +27,7 @@ try:
     import torch.nn.functional as F
     from torch.utils.data import DataLoader
     PYTORCH_AVAILABLE = True
-except ImportError:
+except (ImportError, RuntimeError):
     PYTORCH_AVAILABLE = False
 
 try:

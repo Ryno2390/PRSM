@@ -7,9 +7,14 @@ distributes weights between SSM, SANM, and FSMN cores.
 Optimizes for both inference speed (SSM) and logical precision (SANM).
 """
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+except (ImportError, RuntimeError):
+    torch = None  # type: ignore[assignment]
+    nn = None  # type: ignore[assignment]
+    F = None  # type: ignore[assignment]
 from typing import Dict, List, Optional, Any, Tuple
 
 class CrossCoreGater(nn.Module):

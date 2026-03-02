@@ -36,7 +36,7 @@ try:
     import torch
     import torch.nn as nn
     TRANSFORMERS_AVAILABLE = True
-except ImportError:
+except (ImportError, RuntimeError):
     TRANSFORMERS_AVAILABLE = False
 
 from .base_backend import DistillationBackend, TrainingMetrics, ModelArtifacts, BackendRegistry

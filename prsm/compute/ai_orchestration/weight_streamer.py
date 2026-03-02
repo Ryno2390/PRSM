@@ -9,8 +9,12 @@ inference on memory-constrained devices.
 
 import asyncio
 import logging
-import torch
 from typing import Dict, List, Optional, Any
+
+try:
+    import torch
+except (ImportError, RuntimeError):
+    torch = None  # type: ignore[assignment]
 from collections import OrderedDict
 
 logger = logging.getLogger(__name__)

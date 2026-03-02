@@ -6,9 +6,14 @@ Implements Liquid Neural Networks (LNNs) based on ODE-based time-continuous neur
 Provides extreme efficiency for time-series and sensor data on the edge.
 """
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+except (ImportError, RuntimeError):
+    torch = None  # type: ignore[assignment]
+    nn = None  # type: ignore[assignment]
+    F = None  # type: ignore[assignment]
 import numpy as np
 from typing import Optional, Tuple, Dict, Any
 

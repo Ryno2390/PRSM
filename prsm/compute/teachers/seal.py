@@ -30,7 +30,7 @@ try:
     from torch.utils.data import DataLoader, Dataset, TensorDataset
     from torch.distributions import Categorical
     PYTORCH_AVAILABLE = True
-except ImportError:
+except (ImportError, RuntimeError):
     PYTORCH_AVAILABLE = False
     raise ImportError("PyTorch is required for SEAL implementation")
 

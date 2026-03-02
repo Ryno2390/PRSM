@@ -7,9 +7,14 @@ Provides non-recurrent sequence modeling with memory blocks,
 ideal for low-latency speech and signal processing on edge nodes.
 """
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+except (ImportError, RuntimeError):
+    torch = None  # type: ignore[assignment]
+    nn = None  # type: ignore[assignment]
+    F = None  # type: ignore[assignment]
 from typing import Dict, List, Optional, Any, Tuple
 
 class FSMNBlock(nn.Module):

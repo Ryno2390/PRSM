@@ -122,7 +122,7 @@ class StorageProvider:
         except Exception:
             return False
 
-    async def _get_ipfs_session(self):
+    async def _get_ipfs_session(self) -> Any:
         """Get or create aiohttp session for IPFS API."""
         if self._ipfs_session is None or self._ipfs_session.closed:
             import aiohttp

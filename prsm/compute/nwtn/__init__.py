@@ -39,18 +39,29 @@ Usage:
     result = await process_team_query(team, "How do catalysts work?")
 """
 
-# Core hybrid architecture components
-from .architectures.hybrid_architecture import (
-    HybridNWTNEngine,
-    SOC,
-    SOCType,
-    ConfidenceLevel,
-    ExperimentResult,
-    ExperimentType,
-    create_hybrid_nwtn_engine,
-    create_specialized_agent_team,
-    integrate_with_nwtn_orchestrator
-)
+# Core hybrid architecture components (require torch)
+try:
+    from .architectures.hybrid_architecture import (
+        HybridNWTNEngine,
+        SOC,
+        SOCType,
+        ConfidenceLevel,
+        ExperimentResult,
+        ExperimentType,
+        create_hybrid_nwtn_engine,
+        create_specialized_agent_team,
+        integrate_with_nwtn_orchestrator
+    )
+except (ImportError, RuntimeError, AttributeError):
+    HybridNWTNEngine = None  # type: ignore[assignment,misc]
+    SOC = None  # type: ignore[assignment,misc]
+    SOCType = None  # type: ignore[assignment,misc]
+    ConfidenceLevel = None  # type: ignore[assignment,misc]
+    ExperimentResult = None  # type: ignore[assignment,misc]
+    ExperimentType = None  # type: ignore[assignment,misc]
+    create_hybrid_nwtn_engine = None  # type: ignore[assignment]
+    create_specialized_agent_team = None  # type: ignore[assignment]
+    integrate_with_nwtn_orchestrator = None  # type: ignore[assignment]
 
 # World model engine
 from .engines.world_model_engine import (

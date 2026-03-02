@@ -7,9 +7,14 @@ Optimizes self-attention for sequence-to-sequence modeling
 with a specialized memory block to reduce quadratic complexity impact.
 """
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+except (ImportError, RuntimeError):
+    torch = None  # type: ignore[assignment]
+    nn = None  # type: ignore[assignment]
+    F = None  # type: ignore[assignment]
 from typing import Dict, List, Optional, Any, Tuple
 
 class SANMBlock(nn.Module):

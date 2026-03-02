@@ -98,7 +98,7 @@ class ContentUploader:
         # Pending content retrieval requests: request_id → asyncio.Future[dict]
         self._pending_requests: Dict[str, asyncio.Future] = {}
 
-    async def _get_ipfs_session(self):
+    async def _get_ipfs_session(self) -> Any:
         if self._ipfs_session is None or self._ipfs_session.closed:
             import aiohttp
             self._ipfs_session = aiohttp.ClientSession()
