@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from prsm.node.agent_collaboration import (
     AgentCollaboration,
+    BidStrategy,
     TaskOffer,
     TaskStatus,
     ReviewRequest,
@@ -21,6 +22,7 @@ from prsm.node.agent_collaboration import (
     KnowledgeQuery,
     MAX_COMPLETED_RECORDS,
 )
+from prsm.node.agent_registry import AgentRecord
 from prsm.node.local_ledger import LocalLedger, TransactionType
 
 
@@ -619,3 +621,435 @@ class TestStats:
         assert stats["open_tasks"] == 2
         assert stats["assigned_tasks"] == 0
         assert stats["archived_tasks"] == 0
+        assert stats["total_active_bids"] == 0
+        assert stats["bid_strategy"] == "best_score"
+
+
+# =============================================================================
+# BID SELECTION (Sprint 5)
+# =============================================================================
+
+@pytest.fixture
+def mock_registry():
+    """Create a mock agent registry with some agents."""
+    registry = MagicMock()
+
+    def _lookup(agent_id):
+        agents = {
+            "agent-fast": AgentRecord(
+                agent_id="agent-fast",
+                agent_name="Fast Agent",
+                agent_type="compute",
+                principal_id="p1",
+                principal_public_key="pk1",
+                public_key_b64="pub1",
+                delegation_cert="cert1",
+                capabilities=["nlp", "vision", "code"],
+                last_seen=time.time(),
+            ),
+            "agent-cheap": AgentRecord(
+                agent_id="agent-cheap",
+                agent_name="Cheap Agent",
+                agent_type="compute",
+                principal_id="p2",
+                principal_public_key="pk2",
+                public_key_b64="pub2",
+                delegation_cert="cert2",
+                capabilities=["nlp"],
+                last_seen=time.time(),
+            ),
+            "agent-stale": AgentRecord(
+                agent_id="agent-stale",
+                agent_name="Stale Agent",
+                agent_type="compute",
+                principal_id="p3",
+                principal_public_key="pk3",
+                public_key_b64="pub3",
+                delegation_cert="cert3",
+                capabilities=["nlp", "vision", "code"],
+                last_seen=time.time() - 7200,  # 2 hours old
+            ),
+        }
+        return agents.get(agent_id)
+
+    registry.lookup = MagicMock(side_effect=_lookup)
+    return registry
+
+
+@pytest.fixture
+def collab_with_registry(mock_gossip, ledger, mock_ledger_sync, mock_registry):
+    """AgentCollaboration instance with agent registry wired in."""
+    ac = AgentCollaboration(
+        gossip=mock_gossip,
+        node_id="node-A",
+        ledger=ledger,
+        ledger_sync=mock_ledger_sync,
+        agent_registry=mock_registry,
+    )
+    return ac
+
+
+class TestBidValidation:
+    """Test bid validation in submit_bid()."""
+
+    @pytest.mark.asyncio
+    async def test_reject_over_budget_bid(self, collab):
+        """Bids exceeding the task budget should be rejected."""
+        task = await collab.post_task(
+            requester_agent_id="agent-1",
+            title="Budget Test",
+            description="Testing bid validation",
+            ftns_budget=10.0,
+        )
+
+        result = await collab.submit_bid(
+            task_id=task.task_id,
+            bidder_agent_id="agent-2",
+            estimated_cost=15.0,  # Over budget
+            estimated_seconds=60,
+        )
+
+        assert result is False
+        assert len(task.bids) == 0
+
+    @pytest.mark.asyncio
+    async def test_reject_bid_on_non_open_task(self, collab):
+        """Bids on non-OPEN tasks should be rejected."""
+        task = await collab.post_task(
+            requester_agent_id="agent-1",
+            title="Assigned Task",
+            description="Already assigned",
+            ftns_budget=20.0,
+        )
+
+        # Add a valid bid and assign
+        task.bids.append({
+            "bidder_agent_id": "agent-2",
+            "bidder_node_id": "node-B",
+            "estimated_cost": 10.0,
+            "estimated_seconds": 60,
+        })
+        await collab.assign_task(task.task_id, "agent-2")
+
+        # Now try to bid on the assigned task
+        result = await collab.submit_bid(
+            task_id=task.task_id,
+            bidder_agent_id="agent-3",
+            estimated_cost=8.0,
+            estimated_seconds=30,
+        )
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_accept_valid_bid(self, collab):
+        """Valid bids within budget should be accepted."""
+        task = await collab.post_task(
+            requester_agent_id="agent-1",
+            title="Valid Bid Test",
+            description="Test",
+            ftns_budget=50.0,
+        )
+
+        result = await collab.submit_bid(
+            task_id=task.task_id,
+            bidder_agent_id="agent-2",
+            estimated_cost=25.0,
+            estimated_seconds=120,
+        )
+
+        assert result is True
+        assert len(task.bids) == 1
+
+
+class TestScoreBid:
+    """Test bid scoring logic."""
+
+    @pytest.mark.asyncio
+    async def test_cost_efficiency_ranking(self, collab_with_registry):
+        """Cheaper bids should score higher on cost component."""
+        task = await collab_with_registry.post_task(
+            requester_agent_id="agent-1",
+            title="Score Test",
+            description="Testing scoring",
+            ftns_budget=100.0,
+            deadline_seconds=3600.0,
+        )
+
+        cheap_bid = {
+            "bidder_agent_id": "agent-cheap",
+            "estimated_cost": 20.0,
+            "estimated_seconds": 1800.0,
+        }
+        expensive_bid = {
+            "bidder_agent_id": "agent-cheap",
+            "estimated_cost": 80.0,
+            "estimated_seconds": 1800.0,
+        }
+
+        cheap_score = collab_with_registry.score_bid(cheap_bid, task)
+        expensive_score = collab_with_registry.score_bid(expensive_bid, task)
+
+        assert cheap_score > expensive_score
+
+    @pytest.mark.asyncio
+    async def test_capability_match_scoring(self, collab_with_registry):
+        """Agents with more matching capabilities should score higher."""
+        task = await collab_with_registry.post_task(
+            requester_agent_id="agent-1",
+            title="Cap Test",
+            description="Testing capabilities",
+            ftns_budget=100.0,
+            required_capabilities=["nlp", "vision", "code"],
+        )
+
+        full_match_bid = {
+            "bidder_agent_id": "agent-fast",  # has nlp, vision, code
+            "estimated_cost": 50.0,
+            "estimated_seconds": 1800.0,
+        }
+        partial_match_bid = {
+            "bidder_agent_id": "agent-cheap",  # has only nlp
+            "estimated_cost": 50.0,
+            "estimated_seconds": 1800.0,
+        }
+
+        full_score = collab_with_registry.score_bid(full_match_bid, task)
+        partial_score = collab_with_registry.score_bid(partial_match_bid, task)
+
+        assert full_score > partial_score
+
+    @pytest.mark.asyncio
+    async def test_over_budget_scores_zero(self, collab_with_registry):
+        """Over-budget bids should score exactly 0.0."""
+        task = await collab_with_registry.post_task(
+            requester_agent_id="agent-1",
+            title="Over Budget",
+            description="Test",
+            ftns_budget=10.0,
+        )
+
+        over_bid = {
+            "bidder_agent_id": "agent-fast",
+            "estimated_cost": 15.0,
+            "estimated_seconds": 60,
+        }
+
+        score = collab_with_registry.score_bid(over_bid, task)
+        assert score == 0.0
+
+    @pytest.mark.asyncio
+    async def test_freshness_rewards_recent_agents(self, collab_with_registry):
+        """Recently seen agents should score higher on freshness than stale ones."""
+        task = await collab_with_registry.post_task(
+            requester_agent_id="agent-1",
+            title="Freshness Test",
+            description="Test",
+            ftns_budget=100.0,
+        )
+
+        fresh_bid = {
+            "bidder_agent_id": "agent-fast",  # last_seen = now
+            "estimated_cost": 50.0,
+            "estimated_seconds": 1800.0,
+        }
+        stale_bid = {
+            "bidder_agent_id": "agent-stale",  # last_seen = 2 hours ago
+            "estimated_cost": 50.0,
+            "estimated_seconds": 1800.0,
+        }
+
+        fresh_score = collab_with_registry.score_bid(fresh_bid, task)
+        stale_score = collab_with_registry.score_bid(stale_bid, task)
+
+        assert fresh_score > stale_score
+
+
+class TestSelectBestBid:
+    """Test bid selection strategies."""
+
+    @pytest.mark.asyncio
+    async def test_lowest_cost_strategy(self, mock_gossip, ledger, mock_ledger_sync):
+        """LOWEST_COST strategy should pick the cheapest valid bid."""
+        ac = AgentCollaboration(
+            gossip=mock_gossip,
+            node_id="node-A",
+            ledger=ledger,
+            bid_strategy=BidStrategy.LOWEST_COST,
+        )
+
+        task = await ac.post_task(
+            requester_agent_id="agent-1",
+            title="Cost Test",
+            description="Test",
+            ftns_budget=100.0,
+        )
+
+        task.bids = [
+            {"bidder_agent_id": "a1", "estimated_cost": 50.0, "estimated_seconds": 100},
+            {"bidder_agent_id": "a2", "estimated_cost": 20.0, "estimated_seconds": 200},
+            {"bidder_agent_id": "a3", "estimated_cost": 80.0, "estimated_seconds": 50},
+        ]
+
+        winner = ac.select_best_bid(task)
+        assert winner is not None
+        assert winner["bidder_agent_id"] == "a2"
+
+    @pytest.mark.asyncio
+    async def test_fastest_strategy(self, mock_gossip, ledger, mock_ledger_sync):
+        """FASTEST strategy should pick the bid with shortest estimated time."""
+        ac = AgentCollaboration(
+            gossip=mock_gossip,
+            node_id="node-A",
+            ledger=ledger,
+            bid_strategy=BidStrategy.FASTEST,
+        )
+
+        task = await ac.post_task(
+            requester_agent_id="agent-1",
+            title="Speed Test",
+            description="Test",
+            ftns_budget=100.0,
+        )
+
+        task.bids = [
+            {"bidder_agent_id": "a1", "estimated_cost": 50.0, "estimated_seconds": 100},
+            {"bidder_agent_id": "a2", "estimated_cost": 20.0, "estimated_seconds": 200},
+            {"bidder_agent_id": "a3", "estimated_cost": 80.0, "estimated_seconds": 30},
+        ]
+
+        winner = ac.select_best_bid(task)
+        assert winner is not None
+        assert winner["bidder_agent_id"] == "a3"
+
+    @pytest.mark.asyncio
+    async def test_best_score_strategy(self, collab_with_registry):
+        """BEST_SCORE strategy should pick the highest composite-scored bid."""
+        task = await collab_with_registry.post_task(
+            requester_agent_id="agent-1",
+            title="Score Strategy",
+            description="Test",
+            ftns_budget=100.0,
+            required_capabilities=["nlp", "vision", "code"],
+        )
+
+        task.bids = [
+            {"bidder_agent_id": "agent-fast", "estimated_cost": 40.0, "estimated_seconds": 600},
+            {"bidder_agent_id": "agent-cheap", "estimated_cost": 10.0, "estimated_seconds": 3000},
+        ]
+
+        winner = collab_with_registry.select_best_bid(task)
+        assert winner is not None
+        # agent-fast should win: better capability match + better time, even if costlier
+        assert winner["bidder_agent_id"] == "agent-fast"
+
+    @pytest.mark.asyncio
+    async def test_no_bids_returns_none(self, collab):
+        """Selecting from an empty bid list should return None."""
+        task = await collab.post_task(
+            requester_agent_id="agent-1",
+            title="Empty Bids",
+            description="Test",
+            ftns_budget=50.0,
+        )
+
+        winner = collab.select_best_bid(task)
+        assert winner is None
+
+    @pytest.mark.asyncio
+    async def test_all_over_budget_returns_none(self, collab):
+        """When all bids exceed budget, selection should return None."""
+        task = await collab.post_task(
+            requester_agent_id="agent-1",
+            title="All Over Budget",
+            description="Test",
+            ftns_budget=10.0,
+        )
+
+        task.bids = [
+            {"bidder_agent_id": "a1", "estimated_cost": 15.0, "estimated_seconds": 60},
+            {"bidder_agent_id": "a2", "estimated_cost": 20.0, "estimated_seconds": 30},
+        ]
+
+        winner = collab.select_best_bid(task)
+        assert winner is None
+
+
+class TestAutoAssignTask:
+    """Test the auto_assign_task pipeline."""
+
+    @pytest.mark.asyncio
+    async def test_auto_assign_basic(self, collab):
+        """auto_assign_task should select and assign the best bid."""
+        collab.bid_window_seconds = 2.0
+        collab.min_bids = 1
+
+        task = await collab.post_task(
+            requester_agent_id="agent-1",
+            title="Auto-assign Test",
+            description="Test",
+            ftns_budget=50.0,
+        )
+
+        # Pre-populate a bid (simulating network arrival)
+        task.bids.append({
+            "bidder_agent_id": "agent-2",
+            "bidder_node_id": "node-B",
+            "estimated_cost": 30.0,
+            "estimated_seconds": 120,
+            "timestamp": time.time(),
+        })
+
+        agent_id = await collab.auto_assign_task(task.task_id)
+
+        assert agent_id == "agent-2"
+        assert task.status == TaskStatus.ASSIGNED
+        assert task.assigned_agent_id == "agent-2"
+
+    @pytest.mark.asyncio
+    async def test_auto_assign_no_bids_returns_none(self, collab):
+        """auto_assign_task with no bids should return None."""
+        collab.bid_window_seconds = 2.0
+        collab.min_bids = 1
+
+        task = await collab.post_task(
+            requester_agent_id="agent-1",
+            title="No Bids",
+            description="Test",
+            ftns_budget=50.0,
+        )
+
+        agent_id = await collab.auto_assign_task(task.task_id)
+
+        assert agent_id is None
+        assert task.status == TaskStatus.OPEN  # Still open, not assigned
+
+    @pytest.mark.asyncio
+    async def test_auto_assign_early_exit_on_min_bids(self, collab):
+        """auto_assign_task should exit early once min_bids met past half window."""
+        collab.bid_window_seconds = 10.0
+        collab.min_bids = 1
+
+        task = await collab.post_task(
+            requester_agent_id="agent-1",
+            title="Early Exit",
+            description="Test",
+            ftns_budget=50.0,
+        )
+
+        # Pre-populate enough bids
+        task.bids.append({
+            "bidder_agent_id": "agent-2",
+            "bidder_node_id": "node-B",
+            "estimated_cost": 25.0,
+            "estimated_seconds": 60,
+            "timestamp": time.time(),
+        })
+
+        start = time.time()
+        agent_id = await collab.auto_assign_task(task.task_id)
+        elapsed = time.time() - start
+
+        assert agent_id == "agent-2"
+        # Should exit around half-window (5s) + 1s polling, not wait the full 10s
+        assert elapsed < 8.0

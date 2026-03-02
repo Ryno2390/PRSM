@@ -70,6 +70,21 @@ class ReviewStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class BidStrategy(str, Enum):
+    LOWEST_COST = "lowest_cost"
+    FASTEST = "fastest"
+    BEST_SCORE = "best_score"
+
+
+# Scoring weight constants for BEST_SCORE strategy
+DEFAULT_BID_WINDOW_SECONDS = 30.0
+DEFAULT_MIN_BIDS = 1
+DEFAULT_COST_WEIGHT = 0.35
+DEFAULT_TIME_WEIGHT = 0.25
+DEFAULT_CAPABILITY_WEIGHT = 0.25
+DEFAULT_FRESHNESS_WEIGHT = 0.15
+
+
 @dataclass
 class TaskOffer:
     """A task posted by an agent for other agents to bid on."""
@@ -138,6 +153,10 @@ class AgentCollaboration:
         node_id: str,
         ledger=None,
         ledger_sync=None,
+        agent_registry=None,
+        bid_strategy: BidStrategy = BidStrategy.BEST_SCORE,
+        bid_window_seconds: float = DEFAULT_BID_WINDOW_SECONDS,
+        min_bids: int = DEFAULT_MIN_BIDS,
         task_timeout: float = DEFAULT_TASK_TIMEOUT,
         review_timeout: float = DEFAULT_REVIEW_TIMEOUT,
         query_timeout: float = DEFAULT_QUERY_TIMEOUT,
@@ -148,6 +167,10 @@ class AgentCollaboration:
         self.node_id = node_id
         self.ledger = ledger          # LocalLedger for balance operations
         self.ledger_sync = ledger_sync  # LedgerSync for cross-node payments
+        self.agent_registry = agent_registry  # AgentRegistry for capability lookup
+        self.bid_strategy = bid_strategy
+        self.bid_window_seconds = bid_window_seconds
+        self.min_bids = min_bids
         self.task_timeout = task_timeout
         self.review_timeout = review_timeout
         self.query_timeout = query_timeout
@@ -273,7 +296,20 @@ class AgentCollaboration:
         estimated_seconds: float,
         message: str = "",
     ) -> bool:
-        """Submit a bid on a task offer."""
+        """Submit a bid on a task offer.
+
+        Returns False if the bid exceeds the task budget or the task
+        is no longer open.  Still gossips for unknown tasks (remote
+        propagation).
+        """
+        # Validate against local task state if available
+        task = self.tasks.get(task_id)
+        if task:
+            if task.status != TaskStatus.OPEN:
+                return False
+            if estimated_cost > task.ftns_budget:
+                return False
+
         bid = {
             "task_id": task_id,
             "bidder_agent_id": bidder_agent_id,
@@ -285,7 +321,6 @@ class AgentCollaboration:
         }
 
         # Store locally if we have the task
-        task = self.tasks.get(task_id)
         if task:
             task.bids.append(bid)
 
@@ -363,6 +398,138 @@ class AgentCollaboration:
         self._archive_task(task)
         logger.info(f"Task {task_id[:8]} cancelled, escrow refunded")
         return True
+
+    # ── Bid Selection ────────────────────────────────────────────
+
+    def score_bid(self, bid: Dict[str, Any], task: TaskOffer) -> float:
+        """Score a single bid from 0.0 to 1.0.
+
+        Components (when using BEST_SCORE strategy):
+        - Cost efficiency  (0.35): 1 - (cost / budget). Lower cost → higher.
+        - Time efficiency  (0.25): 1 - (seconds / deadline). Faster → higher.
+        - Capability match (0.25): fraction of required_capabilities the bidder has.
+        - Freshness        (0.15): exponential decay from agent last_seen.
+
+        Returns 0.0 for over-budget bids.
+        """
+        cost = bid.get("estimated_cost", 0.0)
+        seconds = bid.get("estimated_seconds", 0.0)
+        budget = task.ftns_budget
+        deadline = task.deadline_seconds
+
+        # Hard reject over-budget bids
+        if budget > 0 and cost > budget:
+            return 0.0
+
+        # Cost efficiency
+        if budget > 0:
+            cost_score = max(0.0, 1.0 - (cost / budget))
+        else:
+            cost_score = 0.5
+
+        # Time efficiency
+        if deadline > 0:
+            time_score = max(0.0, 1.0 - (seconds / deadline))
+        else:
+            time_score = 0.5
+
+        # Capability match
+        bidder_id = bid.get("bidder_agent_id", "")
+        required = task.required_capabilities
+        if required and self.agent_registry:
+            record = self.agent_registry.lookup(bidder_id)
+            if record:
+                bidder_caps = {c.lower() for c in record.capabilities}
+                matched = sum(1 for cap in required if cap.lower() in bidder_caps)
+                cap_score = matched / len(required)
+            else:
+                cap_score = 0.5  # Unknown agent — neutral score
+        else:
+            cap_score = 0.5  # No requirements or no registry
+
+        # Freshness (exponential decay)
+        freshness_score = 0.5  # Default when registry absent
+        if self.agent_registry:
+            record = self.agent_registry.lookup(bidder_id)
+            if record:
+                age = time.time() - record.last_seen
+                import math
+                freshness_score = math.exp(-age / 3600.0)  # Half-life ~1 hour
+
+        total = (
+            DEFAULT_COST_WEIGHT * cost_score
+            + DEFAULT_TIME_WEIGHT * time_score
+            + DEFAULT_CAPABILITY_WEIGHT * cap_score
+            + DEFAULT_FRESHNESS_WEIGHT * freshness_score
+        )
+        return round(total, 6)
+
+    def select_best_bid(self, task: TaskOffer) -> Optional[Dict[str, Any]]:
+        """Select the winning bid for a task based on the configured strategy.
+
+        Filters out over-budget bids, then applies the strategy:
+        - LOWEST_COST: cheapest bid
+        - FASTEST: shortest estimated time
+        - BEST_SCORE: highest composite score from score_bid()
+
+        Returns the winning bid dict, or None if no valid bids.
+        """
+        budget = task.ftns_budget
+        valid_bids = [
+            b for b in task.bids
+            if budget <= 0 or b.get("estimated_cost", 0.0) <= budget
+        ]
+
+        if not valid_bids:
+            return None
+
+        if self.bid_strategy == BidStrategy.LOWEST_COST:
+            return min(valid_bids, key=lambda b: b.get("estimated_cost", float("inf")))
+        elif self.bid_strategy == BidStrategy.FASTEST:
+            return min(valid_bids, key=lambda b: b.get("estimated_seconds", float("inf")))
+        else:  # BEST_SCORE
+            return max(valid_bids, key=lambda b: self.score_bid(b, task))
+
+    async def auto_assign_task(self, task_id: str) -> Optional[str]:
+        """Wait for bids, select the best one, and assign the task.
+
+        Waits up to ``bid_window_seconds`` for bids to arrive, polling
+        every 1 second.  Exits early once ``min_bids`` bids have been
+        received AND at least half the window has elapsed.
+
+        Returns the assigned agent_id, or None if no suitable bid was found.
+        """
+        task = self.tasks.get(task_id)
+        if not task or task.status != TaskStatus.OPEN:
+            return None
+
+        half_window = self.bid_window_seconds / 2.0
+        elapsed = 0.0
+
+        while elapsed < self.bid_window_seconds:
+            await asyncio.sleep(1.0)
+            elapsed += 1.0
+
+            # Early exit: enough bids and past half the window
+            if len(task.bids) >= self.min_bids and elapsed >= half_window:
+                break
+
+        winner = self.select_best_bid(task)
+        if winner is None:
+            return None
+
+        agent_id = winner.get("bidder_agent_id", "")
+        if not agent_id:
+            return None
+
+        success = await self.assign_task(task_id, agent_id)
+        if success:
+            logger.info(
+                f"Auto-assigned task {task_id[:8]} to {agent_id[:12]} "
+                f"(strategy={self.bid_strategy.value}, bids={len(task.bids)})"
+            )
+            return agent_id
+        return None
 
     # ── Peer Review Protocol ─────────────────────────────────────
 
@@ -956,11 +1123,14 @@ class AgentCollaboration:
         open_tasks = sum(1 for t in self.tasks.values() if t.status == TaskStatus.OPEN)
         assigned_tasks = sum(1 for t in self.tasks.values() if t.status == TaskStatus.ASSIGNED)
         pending_reviews = sum(1 for r in self.reviews.values() if r.status == ReviewStatus.PENDING)
+        total_active_bids = sum(len(t.bids) for t in self.tasks.values() if t.status == TaskStatus.OPEN)
         return {
             "active_tasks": len(self.tasks),
             "open_tasks": open_tasks,
             "assigned_tasks": assigned_tasks,
             "archived_tasks": len(self._completed_tasks),
+            "total_active_bids": total_active_bids,
+            "bid_strategy": self.bid_strategy.value,
             "active_reviews": len(self.reviews),
             "pending_reviews": pending_reviews,
             "archived_reviews": len(self._completed_reviews),

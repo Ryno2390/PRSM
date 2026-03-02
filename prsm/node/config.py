@@ -79,6 +79,11 @@ class NodeConfig:
     max_completed_records: int = 500
     collab_cleanup_interval: float = 60.0
 
+    # Bid selection tuning
+    bid_strategy: str = "best_score"       # "lowest_cost", "fastest", "best_score"
+    bid_window_seconds: float = 30.0
+    min_bids: int = 1
+
     # Content index tuning
     max_indexed_cids: int = 10000
 
@@ -135,6 +140,9 @@ class NodeConfig:
             "query_timeout": self.query_timeout,
             "max_completed_records": self.max_completed_records,
             "collab_cleanup_interval": self.collab_cleanup_interval,
+            "bid_strategy": self.bid_strategy,
+            "bid_window_seconds": self.bid_window_seconds,
+            "min_bids": self.min_bids,
             "max_indexed_cids": self.max_indexed_cids,
             "reconciliation_interval": self.reconciliation_interval,
         }

@@ -50,6 +50,8 @@ class AgentRecord:
     status: str = "online"     # online, paused, offline
     last_seen: float = field(default_factory=time.time)
     created_at: float = field(default_factory=time.time)
+    tasks_completed: int = 0
+    tasks_failed: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -63,6 +65,8 @@ class AgentRecord:
             "status": self.status,
             "last_seen": self.last_seen,
             "created_at": self.created_at,
+            "tasks_completed": self.tasks_completed,
+            "tasks_failed": self.tasks_failed,
         }
 
 
