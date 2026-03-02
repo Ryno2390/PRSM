@@ -21,6 +21,7 @@ Sprint 4 enhancements:
 
 import asyncio
 import collections
+import json
 import logging
 import time
 import uuid
@@ -151,9 +152,9 @@ class AgentCollaboration:
         self,
         gossip: GossipProtocol,
         node_id: str,
-        ledger=None,
-        ledger_sync=None,
-        agent_registry=None,
+        ledger: Optional[Any] = None,
+        ledger_sync: Optional[Any] = None,
+        agent_registry: Optional[Any] = None,
         bid_strategy: BidStrategy = BidStrategy.BEST_SCORE,
         bid_window_seconds: float = DEFAULT_BID_WINDOW_SECONDS,
         min_bids: int = DEFAULT_MIN_BIDS,
@@ -272,6 +273,7 @@ class AgentCollaboration:
             escrow_tx_id=escrow_tx_id,
         )
         self.tasks[task.task_id] = task
+        await self._persist_task(task)
 
         await self.gossip.publish(GOSSIP_TASK_OFFER, {
             "task_id": task.task_id,
@@ -323,6 +325,7 @@ class AgentCollaboration:
         # Store locally if we have the task
         if task:
             task.bids.append(bid)
+            await self._persist_task(task)
 
         await self.gossip.publish(GOSSIP_TASK_BID, bid)
         return True
@@ -334,6 +337,7 @@ class AgentCollaboration:
             return False
         task.assigned_agent_id = agent_id
         task.status = TaskStatus.ASSIGNED
+        await self._persist_task(task)
 
         # Broadcast assignment so all nodes (especially the assigned agent) know
         await self.gossip.publish(GOSSIP_TASK_ASSIGN, {
@@ -353,6 +357,7 @@ class AgentCollaboration:
 
         task.result = result
         task.status = TaskStatus.COMPLETED
+        await self._persist_task(task)
 
         # Pay the assigned agent from escrow
         if (self.ledger and task.ftns_budget > 0
@@ -384,6 +389,7 @@ class AgentCollaboration:
             return False
 
         task.status = TaskStatus.CANCELLED
+        await self._persist_task(task)
 
         # Refund escrow if we own this task
         if task.requester_node_id == self.node_id:
@@ -572,6 +578,7 @@ class AgentCollaboration:
             escrow_tx_id=escrow_tx_id,
         )
         self.reviews[review.review_id] = review
+        await self._persist_review(review)
 
         await self.gossip.publish(GOSSIP_REVIEW_REQUEST, {
             "review_id": review.review_id,
@@ -610,6 +617,7 @@ class AgentCollaboration:
             "comments": comments,
             "timestamp": time.time(),
         })
+        await self._persist_review(review)
 
         # Pay the reviewer from escrow if we own this review
         if (self.ledger and review.submitter_node_id == self.node_id
@@ -688,6 +696,7 @@ class AgentCollaboration:
             escrow_tx_id=escrow_tx_id,
         )
         self.queries[query.query_id] = query
+        await self._persist_query(query)
 
         await self.gossip.publish(GOSSIP_KNOWLEDGE_QUERY, {
             "query_id": query.query_id,
@@ -725,6 +734,7 @@ class AgentCollaboration:
             "content_cids": content_cids or [],
             "timestamp": time.time(),
         })
+        await self._persist_query(query)
 
         # Pay the responder from escrow if we own this query
         if (self.ledger and query.requester_node_id == self.node_id
@@ -1094,18 +1104,31 @@ class AgentCollaboration:
         self.tasks.pop(task.task_id, None)
         self._completed_tasks[task.task_id] = task
         self._completed_tasks.move_to_end(task.task_id)
+        # Remove from SQLite persistence
+        if self.ledger and hasattr(self.ledger, "delete_collab_record"):
+            asyncio.ensure_future(
+                self.ledger.delete_collab_record("collab_tasks", "task_id", task.task_id)
+            )
 
     def _archive_review(self, review: ReviewRequest) -> None:
         """Move a finalized review from active to archive."""
         self.reviews.pop(review.review_id, None)
         self._completed_reviews[review.review_id] = review
         self._completed_reviews.move_to_end(review.review_id)
+        if self.ledger and hasattr(self.ledger, "delete_collab_record"):
+            asyncio.ensure_future(
+                self.ledger.delete_collab_record("collab_reviews", "review_id", review.review_id)
+            )
 
     def _archive_query(self, query: KnowledgeQuery) -> None:
         """Move a completed/expired query from active to archive."""
         self.queries.pop(query.query_id, None)
         self._completed_queries[query.query_id] = query
         self._completed_queries.move_to_end(query.query_id)
+        if self.ledger and hasattr(self.ledger, "delete_collab_record"):
+            asyncio.ensure_future(
+                self.ledger.delete_collab_record("collab_queries", "query_id", query.query_id)
+            )
 
     def _enforce_archive_bounds(self) -> None:
         """Evict oldest records from archives when they exceed bounds."""
@@ -1115,6 +1138,149 @@ class AgentCollaboration:
             self._completed_reviews.popitem(last=False)
         while len(self._completed_queries) > self.max_completed_records:
             self._completed_queries.popitem(last=False)
+
+    # ── Persistence ─────────────────────────────────────────────
+
+    async def _persist_task(self, task: TaskOffer) -> None:
+        """Write-through task state to SQLite."""
+        if not self.ledger or not hasattr(self.ledger, "save_task"):
+            return
+        try:
+            await self.ledger.save_task({
+                "task_id": task.task_id,
+                "requester_agent_id": task.requester_agent_id,
+                "requester_node_id": task.requester_node_id,
+                "title": task.title,
+                "description": task.description,
+                "required_capabilities": task.required_capabilities,
+                "ftns_budget": task.ftns_budget,
+                "deadline_seconds": task.deadline_seconds,
+                "status": task.status.value,
+                "assigned_agent_id": task.assigned_agent_id,
+                "bids": task.bids,
+                "result": task.result,
+                "created_at": task.created_at,
+                "escrow_tx_id": task.escrow_tx_id,
+            })
+        except Exception as e:
+            logger.debug(f"Task persist failed: {e}")
+
+    async def _persist_review(self, review: ReviewRequest) -> None:
+        """Write-through review state to SQLite."""
+        if not self.ledger or not hasattr(self.ledger, "save_review"):
+            return
+        try:
+            await self.ledger.save_review({
+                "review_id": review.review_id,
+                "submitter_agent_id": review.submitter_agent_id,
+                "submitter_node_id": review.submitter_node_id,
+                "content_cid": review.content_cid,
+                "description": review.description,
+                "required_capabilities": review.required_capabilities,
+                "ftns_per_review": review.ftns_per_review,
+                "max_reviewers": review.max_reviewers,
+                "status": review.status.value,
+                "reviews": review.reviews,
+                "created_at": review.created_at,
+                "escrow_tx_id": review.escrow_tx_id,
+                "paid_reviewers": review.paid_reviewers,
+            })
+        except Exception as e:
+            logger.debug(f"Review persist failed: {e}")
+
+    async def _persist_query(self, query: KnowledgeQuery) -> None:
+        """Write-through query state to SQLite."""
+        if not self.ledger or not hasattr(self.ledger, "save_query"):
+            return
+        try:
+            await self.ledger.save_query({
+                "query_id": query.query_id,
+                "requester_agent_id": query.requester_agent_id,
+                "requester_node_id": query.requester_node_id,
+                "topic": query.topic,
+                "question": query.question,
+                "ftns_per_response": query.ftns_per_response,
+                "max_responses": query.max_responses,
+                "responses": query.responses,
+                "created_at": query.created_at,
+                "escrow_tx_id": query.escrow_tx_id,
+                "paid_responders": query.paid_responders,
+            })
+        except Exception as e:
+            logger.debug(f"Query persist failed: {e}")
+
+    async def load_state(self) -> int:
+        """Restore active collaboration records from SQLite on startup.
+
+        Returns the total number of records restored.
+        """
+        if not self.ledger or not hasattr(self.ledger, "load_active_tasks"):
+            return 0
+
+        count = 0
+        try:
+            for row in await self.ledger.load_active_tasks():
+                task = TaskOffer(
+                    task_id=row["task_id"],
+                    requester_agent_id=row["requester_agent_id"],
+                    requester_node_id=row["requester_node_id"],
+                    title=row["title"],
+                    description=row["description"],
+                    required_capabilities=row["required_capabilities"],
+                    ftns_budget=row["ftns_budget"],
+                    deadline_seconds=row["deadline_seconds"],
+                    status=TaskStatus(row["status"]),
+                    assigned_agent_id=row.get("assigned_agent_id"),
+                    bids=row.get("bids", []),
+                    result=row.get("result"),
+                    created_at=row["created_at"],
+                    escrow_tx_id=row.get("escrow_tx_id"),
+                )
+                self.tasks[task.task_id] = task
+                count += 1
+
+            for row in await self.ledger.load_active_reviews():
+                review = ReviewRequest(
+                    review_id=row["review_id"],
+                    submitter_agent_id=row["submitter_agent_id"],
+                    submitter_node_id=row["submitter_node_id"],
+                    content_cid=row["content_cid"],
+                    description=row["description"],
+                    required_capabilities=row["required_capabilities"],
+                    ftns_per_review=row["ftns_per_review"],
+                    max_reviewers=row["max_reviewers"],
+                    status=ReviewStatus(row["status"]),
+                    reviews=row.get("reviews", []),
+                    created_at=row["created_at"],
+                    escrow_tx_id=row.get("escrow_tx_id"),
+                    paid_reviewers=row.get("paid_reviewers", []),
+                )
+                self.reviews[review.review_id] = review
+                count += 1
+
+            for row in await self.ledger.load_active_queries():
+                query = KnowledgeQuery(
+                    query_id=row["query_id"],
+                    requester_agent_id=row["requester_agent_id"],
+                    requester_node_id=row["requester_node_id"],
+                    topic=row["topic"],
+                    question=row["question"],
+                    ftns_per_response=row["ftns_per_response"],
+                    max_responses=row["max_responses"],
+                    responses=row.get("responses", []),
+                    created_at=row["created_at"],
+                    escrow_tx_id=row.get("escrow_tx_id"),
+                    paid_responders=row.get("paid_responders", []),
+                )
+                self.queries[query.query_id] = query
+                count += 1
+
+            if count:
+                logger.info(f"Restored {count} active collaboration records from persistence")
+        except Exception as e:
+            logger.error(f"Failed to load collaboration state: {e}")
+
+        return count
 
     # ── Stats ────────────────────────────────────────────────────
 
