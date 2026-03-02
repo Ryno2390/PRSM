@@ -693,13 +693,13 @@ Based on the code review findings, the following items require attention:
 - [x] **MEDIUM**: Audit and fix silent exception handling (40 bare except patterns, ~50 silent handlers)
 - [x] **MEDIUM**: Add missing integration tests (P2P, DAG consensus, marketplace concurrency, NWTN e2e)
 
-### Sprint 4 — Core Collaboration Robustness (Current)
+### Sprint 4 — Core Collaboration Robustness ✅ COMPLETED (2026-03-02)
 
-- [ ] **CRITICAL**: Wire FTNS payments into collaboration protocols (task delegation, peer review, knowledge exchange)
-- [ ] **CRITICAL**: Broadcast all collaboration state changes to the network
-- [ ] **HIGH**: Add expiry enforcement and bounded memory for collaboration state
-- [ ] **MEDIUM**: Add content retrieval API for cross-node content download
-- [ ] **MEDIUM**: Bridge CollaborationManager with P2P AgentCollaboration
+- [x] **CRITICAL**: Wire FTNS payments into collaboration protocols (task delegation, peer review, knowledge exchange)
+- [x] **CRITICAL**: Broadcast all collaboration state changes to the network
+- [x] **HIGH**: Add expiry enforcement and bounded memory for collaboration state
+- [x] **MEDIUM**: Add content retrieval API for cross-node content download
+- [ ] **MEDIUM**: Bridge CollaborationManager with P2P AgentCollaboration (deferred)
 
 *See Section 20 for full Sprint 4 plan with phased implementation details.*
 
@@ -1247,14 +1247,14 @@ return {
 - [x] Tasks, reviews, and queries trigger actual FTNS token transfers
 - [x] All collaboration state changes are broadcast to the network
 - [x] Expired collaborations are automatically cleaned up with FTNS returned
-- [ ] Nodes can request and download content from network peers by CID
+- [x] Nodes can request and download content from network peers by CID
 - [ ] `CollaborationManager` dispatches to P2P `AgentCollaboration` for execution
 - [x] No in-memory dictionary grows beyond configurable bounds
 - [x] Integration tests cover multi-node collaboration scenarios end-to-end
 
 ### Sprint 4 Completion Summary (2026-03-02)
 
-Phases 1–3 and testing completed. Phases 4–5 deferred to a future sprint.
+Phases 1–4 and testing completed. Phase 5 deferred to a future sprint.
 
 #### Files Modified
 
@@ -1263,7 +1263,9 @@ Phases 1–3 and testing completed. Phases 4–5 deferred to a future sprint.
 | `prsm/node/agent_collaboration.py` | Complete rewrite: FTNS escrow/payment, gossip broadcasts, expiry cleanup, bounded archives |
 | `prsm/node/gossip.py` | Added 5 new gossip subtypes for collaboration state changes |
 | `prsm/node/node.py` | Wired ledger and ledger_sync into AgentCollaboration; added graceful shutdown |
+| `prsm/node/content_uploader.py` | Added `request_content()` with provider discovery, hash verification, inline/gateway modes |
 | `tests/security/test_sprint4_collaboration.py` | 23 tests across 8 test classes |
+| `tests/security/test_sprint4_content_retrieval.py` | 14 tests across 6 test classes |
 
 #### What Changed
 
@@ -1297,10 +1299,20 @@ Phases 1–3 and testing completed. Phases 4–5 deferred to a future sprint.
 - `stop()` cancels all open/assigned tasks owned by this node
 - Refunds escrowed FTNS before shutting down
 
+**Content Retrieval API (Phase 4):**
+- Added `request_content(cid, timeout, verify_hash)` to `ContentUploader`
+- Discovers providers via `ContentIndex.lookup(cid)`
+- Sends direct `content_request` P2P message to providers
+- Supports inline (base64 ≤1MB) and gateway (IPFS URL >1MB) transfer modes
+- Verifies SHA-256 content hash against content index record
+- Falls back to next provider on failure/mismatch
+- Routes incoming `content_response` via `_handle_content_response()` to resolve pending futures
+- Checks local IPFS first before contacting network
+
 #### Test Results
 
 ```
-23 passed in 8.26s
+37 passed in 4.05s (23 collaboration + 14 content retrieval)
 
 TestTaskEscrowAndPayment (4 tests)   — escrow, insufficient balance, payment, refund
 TestReviewEscrowAndPayment (2 tests) — escrow, reviewer payment
@@ -1311,6 +1323,12 @@ TestExpiryEnforcement (3 tests)      — expired tasks, reviews, queries with re
 TestBoundedMemory (2 tests)          — archive bounds, active→archive movement
 TestGracefulShutdown (1 test)        — stop refunds open tasks
 TestStats (1 test)                   — stats accuracy
+
+TestProviderDiscovery (4 tests)      — no transport, no providers, self-skip, local content
+TestInlineTransfer (3 tests)         — decode, hash mismatch rejection, hash skip
+TestGatewayTransfer (1 test)         — gateway URL fetch
+TestErrorHandling (3 tests)          — timeout, not found, fallback to second provider
+TestResponseHandler (3 tests)        — future resolution, unknown ID, already-done future
 ```
 
 ---
@@ -1355,5 +1373,5 @@ TestStats (1 test)                   — stats accuracy
 *Sprint 1 completed: 2026-02-20*
 *Sprint 2 completed: 2026-02-27*
 *Sprint 3 completed: 2026-03-01*
-*Sprint 4 Phases 1-3 completed: 2026-03-02*
+*Sprint 4 Phases 1-4 completed: 2026-03-02*
 *PRSM Version: 0.1.0*

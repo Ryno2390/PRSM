@@ -1,16 +1,25 @@
 """
-Content Uploader
-================
+Content Uploader & Retrieval
+============================
 
-Upload content to IPFS with provenance tracking for royalties.
+Upload content to IPFS with provenance tracking for royalties,
+and retrieve content from the network by CID.
+
 Creates a verifiable provenance chain so the original creator
 earns FTNS when other nodes access or use their content.
+
+Sprint 4 Phase 4: Added request_content() for cross-node downloads
+with provider discovery via ContentIndex, content hash verification,
+and support for both inline (base64) and IPFS gateway transfer modes.
 """
 
+import asyncio
+import base64
 import hashlib
 import json
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -85,6 +94,9 @@ class ContentUploader:
 
         self.uploaded_content: Dict[str, UploadedContent] = {}
         self._ipfs_session = None
+
+        # Pending content retrieval requests: request_id → asyncio.Future[dict]
+        self._pending_requests: Dict[str, asyncio.Future] = {}
 
     async def _get_ipfs_session(self):
         if self._ipfs_session is None or self._ipfs_session.closed:
@@ -348,6 +360,8 @@ class ContentUploader:
         subtype = msg.payload.get("subtype", "")
         if subtype == "content_request":
             await self._handle_content_request(msg, peer)
+        elif subtype == "content_response":
+            self._handle_content_response(msg)
 
     async def _handle_content_request(self, msg: P2PMessage, peer: PeerConnection) -> None:
         """Serve content in response to a direct content_request."""
@@ -413,6 +427,172 @@ class ContentUploader:
             "parent_cids": content_info.parent_cids,
             "timestamp": time.time(),
         })
+
+    # ── Content Retrieval (client side) ─────────────────────────
+
+    async def request_content(
+        self,
+        cid: str,
+        timeout: float = 30.0,
+        verify_hash: bool = True,
+    ) -> Optional[bytes]:
+        """Request content from the network by CID.
+
+        Looks up providers via the content index, sends a direct
+        content_request to the best available provider, and awaits
+        the response.  For inline transfers (≤1MB), the raw bytes
+        are returned directly.  For gateway transfers (>1MB), the
+        content is fetched from the provider's IPFS gateway URL.
+
+        Args:
+            cid: Content identifier to retrieve
+            timeout: Seconds to wait for a response (default 30)
+            verify_hash: If True, verify SHA-256 hash matches the
+                         content_hash from the content index record
+
+        Returns:
+            Content bytes, or None if not found / timed out / failed
+        """
+        if not self.transport:
+            logger.error("Cannot request content: no transport layer")
+            return None
+
+        # Check if we already have it locally
+        if cid in self.uploaded_content:
+            local_bytes = await self._ipfs_cat(cid)
+            if local_bytes is not None:
+                return local_bytes
+
+        # Look up providers from the content index
+        providers: set = set()
+        expected_hash: Optional[str] = None
+        if self.content_index:
+            record = self.content_index.lookup(cid)
+            if record:
+                providers = record.providers.copy()
+                expected_hash = record.content_hash
+                # Remove ourselves — we already checked local
+                providers.discard(self.identity.node_id)
+
+        if not providers:
+            logger.debug(f"No known providers for CID {cid[:12]}...")
+            return None
+
+        # Try each provider until one succeeds
+        for provider_id in providers:
+            result = await self._request_from_provider(cid, provider_id, timeout)
+            if result is None:
+                continue
+
+            content_bytes = result.get("content_bytes")
+            if content_bytes is None:
+                continue
+
+            # Verify content hash if requested and available
+            if verify_hash and expected_hash:
+                actual_hash = hashlib.sha256(content_bytes).hexdigest()
+                if actual_hash != expected_hash:
+                    logger.warning(
+                        f"Content hash mismatch for {cid[:12]}... from {provider_id[:8]}: "
+                        f"expected {expected_hash[:16]}..., got {actual_hash[:16]}..."
+                    )
+                    continue  # Try next provider
+
+            logger.info(
+                f"Retrieved {len(content_bytes)} bytes for CID {cid[:12]}... "
+                f"from provider {provider_id[:8]}"
+            )
+            return content_bytes
+
+        logger.warning(f"Failed to retrieve CID {cid[:12]}... from any provider")
+        return None
+
+    async def _request_from_provider(
+        self,
+        cid: str,
+        provider_id: str,
+        timeout: float,
+    ) -> Optional[Dict[str, Any]]:
+        """Send a content_request to a specific provider and await the response.
+
+        Returns a dict with 'content_bytes' key, or None on failure/timeout.
+        """
+        request_id = uuid.uuid4().hex[:16]
+
+        # Create a future that will be resolved when the response arrives
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future = loop.create_future()
+        self._pending_requests[request_id] = future
+
+        try:
+            # Send the request
+            await self._send_direct(provider_id, {
+                "subtype": "content_request",
+                "request_id": request_id,
+                "cid": cid,
+            })
+
+            # Wait for the response
+            response = await asyncio.wait_for(future, timeout=timeout)
+
+        except asyncio.TimeoutError:
+            logger.debug(f"Content request to {provider_id[:8]} timed out for {cid[:12]}...")
+            return None
+        except Exception as e:
+            logger.debug(f"Content request to {provider_id[:8]} failed: {e}")
+            return None
+        finally:
+            self._pending_requests.pop(request_id, None)
+
+        if not response.get("found", False):
+            return None
+
+        transfer_mode = response.get("transfer_mode", "")
+
+        if transfer_mode == "inline":
+            # Decode base64 content
+            data_b64 = response.get("data_b64", "")
+            if data_b64:
+                try:
+                    content_bytes = base64.b64decode(data_b64)
+                    return {"content_bytes": content_bytes}
+                except Exception as e:
+                    logger.error(f"Failed to decode inline content: {e}")
+                    return None
+
+        elif transfer_mode == "gateway":
+            # Fetch from IPFS gateway URL
+            gateway_url = response.get("gateway_url", "")
+            if gateway_url:
+                content_bytes = await self._fetch_from_gateway(gateway_url)
+                if content_bytes is not None:
+                    return {"content_bytes": content_bytes}
+
+        return None
+
+    def _handle_content_response(self, msg: P2PMessage) -> None:
+        """Resolve a pending content request future with the response payload."""
+        request_id = msg.payload.get("request_id", "")
+        future = self._pending_requests.get(request_id)
+        if future and not future.done():
+            future.set_result(msg.payload)
+
+    async def _fetch_from_gateway(self, gateway_url: str) -> Optional[bytes]:
+        """Fetch content bytes from an IPFS gateway URL."""
+        try:
+            import aiohttp
+            session = await self._get_ipfs_session()
+            async with session.get(
+                gateway_url,
+                timeout=aiohttp.ClientTimeout(total=60),
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.read()
+                else:
+                    logger.debug(f"Gateway returned status {resp.status} for {gateway_url}")
+        except Exception as e:
+            logger.error(f"Gateway fetch failed for {gateway_url}: {e}")
+        return None
 
     async def _on_content_access(self, subtype: str, data: Dict[str, Any], origin: str) -> None:
         """Credit royalty when we are the original creator or a source creator.
