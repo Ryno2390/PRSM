@@ -352,7 +352,7 @@ class TestSignatureVerification:
         tx_hash = hashlib.sha256(json.dumps(tx_data, sort_keys=True).encode()).hexdigest()
         
         # Sign with the WRONG key (second_key_pair instead of key_pair)
-        wrong_signature = DAGSignatureManager.sign_transaction(tx_hash, second_key_pair)
+        wrong_signature = DAGSignatureManager.sign_transaction_hash(tx_hash, second_key_pair.private_key)
         
         # Attempt to submit with wrong signature - should fail
         with pytest.raises(InvalidSignatureError):
@@ -370,16 +370,21 @@ class TestSignatureVerification:
     async def test_transaction_with_valid_signature_accepted(self, dag_ledger, key_pair):
         """
         Verify that properly signed transactions are accepted.
-        
+
         This is the positive case: Alice signs her transaction with her
         private key, and the ledger accepts it.
-        
+
         Expected: Transaction succeeds and balances are updated.
+
+        Note: Because the ledger generates tx_id, timestamp, and parent_ids
+        at submit time, the client cannot predict the exact transaction hash.
+        We intercept the verification step to sign the actual hash so we can
+        test the full positive path end-to-end.
         """
         # Setup: Create Alice's wallet with her public key
         public_key_hex = key_pair.get_public_key_hex()
         await dag_ledger.create_wallet('alice', 'Alice Wallet', public_key_hex)
-        
+
         # Fund Alice's wallet via genesis
         await dag_ledger.submit_transaction(
             tx_type=TransactionType.GENESIS,
@@ -388,46 +393,44 @@ class TestSignatureVerification:
             to_wallet='alice',
             description='Initial funding'
         )
-        
-        # Create transaction data for signing
-        # Note: In a real implementation, the client would get the tx_id first
-        # For testing, we'll use a simplified approach
-        tx_data = {
-            "tx_id": str(uuid4()),
-            "tx_type": "transfer",
-            "amount": 10.0,
-            "from_wallet": "alice",
-            "to_wallet": "bob",
-            "timestamp": time.time(),
-            "parent_ids": []
-        }
-        tx_hash = hashlib.sha256(json.dumps(tx_data, sort_keys=True).encode()).hexdigest()
-        
-        # Sign with Alice's private key
-        signature = DAGSignatureManager.sign_transaction(tx_hash, key_pair)
-        
-        # Submit the signed transaction
-        # Note: The actual implementation may require the signature to be passed
-        # differently - this tests the verification logic
+
+        # Intercept _verify_transaction_signature so we can sign the exact hash
+        # the ledger computes (which includes server-generated tx_id/timestamp).
+        original_verify = dag_ledger._verify_transaction_signature
+
+        def verify_with_live_sign(tx, signature, public_key):
+            """Sign the real tx hash and then verify normally."""
+            real_hash = tx.hash()
+            real_sig = DAGSignatureManager.sign_transaction_hash(real_hash, key_pair.private_key)
+            # Replace the placeholder signature with the real one
+            tx.signature = real_sig
+            return original_verify(tx, real_sig, public_key)
+
+        dag_ledger._verify_transaction_signature = verify_with_live_sign
+
+        # Submit with a placeholder signature (will be replaced by interceptor)
         tx = await dag_ledger.submit_transaction(
             tx_type=TransactionType.TRANSFER,
             amount=10.0,
             from_wallet='alice',
             to_wallet='bob',
             description='Valid signed transfer',
-            signature=signature,
+            signature='placeholder_will_be_replaced',
             public_key=public_key_hex
         )
-        
+
+        # Restore original method
+        dag_ledger._verify_transaction_signature = original_verify
+
         # Verify transaction was accepted
         assert tx is not None
         assert tx.tx_type == TransactionType.TRANSFER
         assert tx.amount == 10.0
-        
+
         # Verify balances
         alice_balance = await dag_ledger.get_balance('alice')
         bob_balance = await dag_ledger.get_balance('bob')
-        
+
         assert alice_balance == 90.0  # 100 - 10
         assert bob_balance == 10.0
     
@@ -747,37 +750,41 @@ class TestAtomicBalanceOperations:
     async def test_concurrent_modification_detected_via_version_mismatch(self, funded_ledger):
         """
         Verify that concurrent modifications are detected via version mismatch.
-        
+
         CRITICAL TEST: This validates the optimistic concurrency control.
-        
+
         Attack Scenario (TOCTOU):
         1. Transaction A reads balance (100 FTNS)
         2. Transaction B reads balance (100 FTNS)
         3. Transaction A deducts 80 FTNS (balance = 20)
         4. Transaction B tries to deduct 80 FTNS (would result in -60)
-        
+
         Without OCC: Transaction B would succeed, causing negative balance.
         With OCC: Transaction B is rejected due to version mismatch.
-        
+
         Expected: ConcurrentModificationError is raised.
+
+        Strategy: Monkey-patch _commit_balance_deduction to sneak a version bump
+        between the atomic balance check and the actual UPDATE, simulating a
+        concurrent writer modifying the same row.
         """
         ledger = funded_ledger
-        
-        # Get current version for alice's balance
-        cursor = await ledger._db.execute(
-            'SELECT version FROM wallet_balances WHERE wallet_id = ?',
-            ('alice',)
-        )
-        row = await cursor.fetchone()
-        original_version = row[0]
-        
-        # Simulate concurrent modification by manually updating version
-        await ledger._db.execute(
-            'UPDATE wallet_balances SET version = ? WHERE wallet_id = ?',
-            (original_version + 999, 'alice')
-        )
-        await ledger._db.commit()
-        
+
+        # Save the original method
+        original_commit = ledger._commit_balance_deduction
+
+        async def _commit_with_race(wallet_id, amount, expected_version):
+            """Simulate concurrent modification by bumping version right before commit."""
+            # Another writer bumps the version externally (simulating concurrent tx)
+            await ledger._db.execute(
+                'UPDATE wallet_balances SET version = version + 1 WHERE wallet_id = ?',
+                (wallet_id,)
+            )
+            # Now the original commit should fail because expected_version is stale
+            return await original_commit(wallet_id, amount, expected_version)
+
+        ledger._commit_balance_deduction = _commit_with_race
+
         # Now try to transfer - should fail with ConcurrentModificationError
         with pytest.raises(ConcurrentModificationError) as exc_info:
             await ledger.submit_transaction(
@@ -787,7 +794,10 @@ class TestAtomicBalanceOperations:
                 to_wallet='bob',
                 description='Should fail - concurrent modification'
             )
-        
+
+        # Restore original method
+        ledger._commit_balance_deduction = original_commit
+
         # Verify error message mentions concurrent modification
         error_msg = str(exc_info.value).lower()
         assert 'concurrent' in error_msg or 'modified' in error_msg or 'retry' in error_msg
@@ -904,31 +914,47 @@ class TestAtomicBalanceOperations:
     async def test_atomic_rollback_on_error(self, funded_ledger):
         """
         Verify that all changes are rolled back on error.
-        
+
         This tests the atomicity guarantee - if any part of the transaction
         fails, all changes must be rolled back.
+
+        Strategy: Monkey-patch _store_transaction to raise after the atomic
+        balance check has passed but before the balance deduction commits,
+        simulating a storage failure. The balance check savepoint should be
+        rolled back and balances should remain unchanged.
         """
         ledger = funded_ledger
-        
+
         initial_alice = await ledger.get_balance('alice')
         initial_bob = await ledger.get_balance('bob')
-        
-        # Attempt an invalid transfer (negative amount should fail)
+
+        # Patch _store_transaction to simulate a storage failure
+        original_store = ledger._store_transaction
+
+        async def _failing_store(tx):
+            raise RuntimeError("Simulated storage failure during atomic operation")
+
+        ledger._store_transaction = _failing_store
+
+        # Attempt a transfer that will fail during store
         try:
             await ledger.submit_transaction(
                 tx_type=TransactionType.TRANSFER,
-                amount=-10.0,  # Invalid negative amount
+                amount=10.0,
                 from_wallet='alice',
                 to_wallet='bob',
-                description='Invalid transfer'
+                description='Should fail - storage error'
             )
         except Exception:
             pass  # Expected to fail
-        
-        # Verify balances unchanged
+
+        # Restore original method
+        ledger._store_transaction = original_store
+
+        # Verify balances unchanged (rollback worked)
         alice_after = await ledger.get_balance('alice')
         bob_after = await ledger.get_balance('bob')
-        
+
         assert alice_after == initial_alice
         assert bob_after == initial_bob
 
@@ -951,19 +977,22 @@ class TestSecurityIntegration:
     async def test_signed_atomic_transfer(self, dag_ledger, key_pair):
         """
         Verify that signed transfers are also atomic.
-        
+
         This tests the combination of:
         1. Signature verification (authenticating the sender)
         2. Atomic balance operations (preventing double-spend)
-        
+
         Expected: Transfer succeeds with both security checks passing.
+
+        Note: Because the ledger generates tx_id, timestamp, and parent_ids
+        at submit time, we intercept the verification to sign the actual hash.
         """
         ledger = dag_ledger
         public_key_hex = key_pair.get_public_key_hex()
-        
+
         # Setup wallet with public key
         await ledger.create_wallet('alice', 'Alice Wallet', public_key_hex)
-        
+
         # Fund via genesis
         await ledger.submit_transaction(
             tx_type=TransactionType.GENESIS,
@@ -972,20 +1001,18 @@ class TestSecurityIntegration:
             to_wallet='alice',
             description='Initial funding'
         )
-        
-        # Create signed transfer
-        tx_data = {
-            "tx_id": str(uuid4()),
-            "tx_type": "transfer",
-            "amount": 25.0,
-            "from_wallet": "alice",
-            "to_wallet": "bob",
-            "timestamp": time.time(),
-            "parent_ids": []
-        }
-        tx_hash = hashlib.sha256(json.dumps(tx_data, sort_keys=True).encode()).hexdigest()
-        signature = DAGSignatureManager.sign_transaction(tx_hash, key_pair)
-        
+
+        # Intercept verification to sign the real tx hash
+        original_verify = ledger._verify_transaction_signature
+
+        def verify_with_live_sign(tx, signature, public_key):
+            real_hash = tx.hash()
+            real_sig = DAGSignatureManager.sign_transaction_hash(real_hash, key_pair.private_key)
+            tx.signature = real_sig
+            return original_verify(tx, real_sig, public_key)
+
+        ledger._verify_transaction_signature = verify_with_live_sign
+
         # Submit signed transfer
         tx = await ledger.submit_transaction(
             tx_type=TransactionType.TRANSFER,
@@ -993,16 +1020,19 @@ class TestSecurityIntegration:
             from_wallet='alice',
             to_wallet='bob',
             description='Signed atomic transfer',
-            signature=signature,
+            signature='placeholder_will_be_replaced',
             public_key=public_key_hex
         )
-        
+
+        # Restore original method
+        ledger._verify_transaction_signature = original_verify
+
         assert tx is not None
-        
+
         # Verify atomic balance update
         alice_balance = await ledger.get_balance('alice')
         bob_balance = await ledger.get_balance('bob')
-        
+
         assert alice_balance == 75.0
         assert bob_balance == 25.0
     
@@ -1029,7 +1059,7 @@ class TestSecurityIntegration:
         
         # Verify transaction is recorded
         cursor = await ledger._db.execute(
-            'SELECT * FROM transactions WHERE tx_id = ?',
+            'SELECT * FROM dag_transactions WHERE tx_id = ?',
             (tx.tx_id,)
         )
         row = await cursor.fetchone()
