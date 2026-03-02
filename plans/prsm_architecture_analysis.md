@@ -699,7 +699,7 @@ Based on the code review findings, the following items require attention:
 - [x] **CRITICAL**: Broadcast all collaboration state changes to the network
 - [x] **HIGH**: Add expiry enforcement and bounded memory for collaboration state
 - [x] **MEDIUM**: Add content retrieval API for cross-node content download
-- [ ] **MEDIUM**: Bridge CollaborationManager with P2P AgentCollaboration (deferred)
+- [x] **MEDIUM**: Bridge CollaborationManager with P2P AgentCollaboration
 
 *See Section 20 for full Sprint 4 plan with phased implementation details.*
 
@@ -1248,13 +1248,13 @@ return {
 - [x] All collaboration state changes are broadcast to the network
 - [x] Expired collaborations are automatically cleaned up with FTNS returned
 - [x] Nodes can request and download content from network peers by CID
-- [ ] `CollaborationManager` dispatches to P2P `AgentCollaboration` for execution
+- [x] `CollaborationManager` dispatches to P2P `AgentCollaboration` for execution
 - [x] No in-memory dictionary grows beyond configurable bounds
 - [x] Integration tests cover multi-node collaboration scenarios end-to-end
 
 ### Sprint 4 Completion Summary (2026-03-02)
 
-Phases 1–4 and testing completed. Phase 5 deferred to a future sprint.
+All 5 phases completed.
 
 #### Files Modified
 
@@ -1264,8 +1264,10 @@ Phases 1–4 and testing completed. Phase 5 deferred to a future sprint.
 | `prsm/node/gossip.py` | Added 5 new gossip subtypes for collaboration state changes |
 | `prsm/node/node.py` | Wired ledger and ledger_sync into AgentCollaboration; added graceful shutdown |
 | `prsm/node/content_uploader.py` | Added `request_content()` with provider discovery, hash verification, inline/gateway modes |
+| `prsm/collaboration/__init__.py` | Added `dispatch_session()`, `on_protocol_complete()`, bidirectional session↔protocol mapping |
 | `tests/security/test_sprint4_collaboration.py` | 23 tests across 8 test classes |
 | `tests/security/test_sprint4_content_retrieval.py` | 14 tests across 6 test classes |
+| `tests/security/test_sprint4_collab_bridge.py` | 12 tests across 4 test classes |
 
 #### What Changed
 
@@ -1299,6 +1301,18 @@ Phases 1–4 and testing completed. Phase 5 deferred to a future sprint.
 - `stop()` cancels all open/assigned tasks owned by this node
 - Refunds escrowed FTNS before shutting down
 
+**Collaboration System Bridge (Phase 5):**
+- `CollaborationManager.set_agent_collaboration(ac)` wires in the P2P layer
+- `dispatch_session(session_id)` maps session type to P2P protocol:
+  - `TASK_DELEGATION` → `AgentCollaboration.post_task()`
+  - `PEER_REVIEW` → `AgentCollaboration.request_review()`
+  - `KNOWLEDGE_EXCHANGE` → `AgentCollaboration.post_query()`
+  - Other types (e.g., `JOINT_REASONING`) start locally without P2P dispatch
+- Bidirectional mapping: `session_id ↔ protocol_id` via `_session_to_protocol` / `_protocol_to_session`
+- `on_protocol_complete(protocol_id, success, outputs)` callback updates the linked session
+- Insufficient balance on dispatch gracefully fails the session with error metadata
+- Mappings are cleaned up after protocol completion
+
 **Content Retrieval API (Phase 4):**
 - Added `request_content(cid, timeout, verify_hash)` to `ContentUploader`
 - Discovers providers via `ContentIndex.lookup(cid)`
@@ -1312,7 +1326,7 @@ Phases 1–4 and testing completed. Phase 5 deferred to a future sprint.
 #### Test Results
 
 ```
-37 passed in 4.05s (23 collaboration + 14 content retrieval)
+49 passed in 3.54s (23 collaboration + 14 content retrieval + 12 bridge)
 
 TestTaskEscrowAndPayment (4 tests)   — escrow, insufficient balance, payment, refund
 TestReviewEscrowAndPayment (2 tests) — escrow, reviewer payment
@@ -1329,6 +1343,12 @@ TestInlineTransfer (3 tests)         — decode, hash mismatch rejection, hash s
 TestGatewayTransfer (1 test)         — gateway URL fetch
 TestErrorHandling (3 tests)          — timeout, not found, fallback to second provider
 TestResponseHandler (3 tests)        — future resolution, unknown ID, already-done future
+
+TestDispatchTask (2 tests)           — task dispatch, insufficient balance
+TestDispatchReview (1 test)          — review dispatch
+TestDispatchQuery (1 test)           — query dispatch
+TestDispatchEdgeCases (4 tests)      — unknown session, no collab, already active, local-only type
+TestProtocolCompletion (4 tests)     — success, failure, unknown protocol, get_result
 ```
 
 ---
@@ -1373,5 +1393,5 @@ TestResponseHandler (3 tests)        — future resolution, unknown ID, already-
 *Sprint 1 completed: 2026-02-20*
 *Sprint 2 completed: 2026-02-27*
 *Sprint 3 completed: 2026-03-01*
-*Sprint 4 Phases 1-4 completed: 2026-03-02*
+*Sprint 4 completed: 2026-03-02*
 *PRSM Version: 0.1.0*
