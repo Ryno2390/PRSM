@@ -29,6 +29,7 @@ import hashlib
 import json
 import os
 import time
+from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -804,7 +805,15 @@ class IPFSClient:
     and automatic failover with comprehensive error handling and monitoring
     """
     
-    def __init__(self):
+    def __init__(self, config: Optional[IPFSConfig] = None):
+        default_api_url = "http://localhost:5001"
+        if getattr(settings, "ipfs_host", None) and getattr(settings, "ipfs_port", None):
+            default_api_url = f"http://{settings.ipfs_host}:{settings.ipfs_port}"
+
+        self.config = config or IPFSConfig(
+            api_url=default_api_url,
+            timeout=float(getattr(settings, "ipfs_timeout", 30.0)),
+        )
         self.nodes: List[IPFSNode] = []
         self.primary_node: Optional[IPFSNode] = None
         self.gateway_nodes: List[IPFSNode] = []
@@ -827,13 +836,17 @@ class IPFSClient:
         4. Establish connection priorities
         """
         try:
+            # Reset any previously initialized nodes to keep initialize idempotent
+            if self.nodes:
+                await self.cleanup()
+
             # 🔗 Configure primary IPFS API node
-            if settings.ipfs_host and settings.ipfs_port:
-                primary_url = f"http://{settings.ipfs_host}:{settings.ipfs_port}"
+            if self.config.api_url:
+                primary_url = self.config.api_url.rstrip('/')
                 primary_node = IPFSNode(
                     url=primary_url,
                     connection_type=IPFSConnectionType.HTTP_API,
-                    timeout=settings.ipfs_timeout
+                    timeout=int(self.config.timeout)
                 )
                 await primary_node.initialize()
                 self.nodes.append(primary_node)
@@ -843,13 +856,17 @@ class IPFSClient:
             
             # 🌐 Configure gateway fallback nodes
             gateway_urls = [
+                self.config.gateway_url.rstrip('/'),
                 "https://ipfs.io",
                 "https://gateway.pinata.cloud",
                 "https://cloudflare-ipfs.com",
-                "https://dweb.link"
+                "https://dweb.link",
             ]
-            
-            for gateway_url in gateway_urls:
+
+            # Keep first-seen order while removing duplicates
+            unique_gateway_urls = list(dict.fromkeys(gateway_urls))
+
+            for gateway_url in unique_gateway_urls:
                 gateway_node = IPFSNode(
                     url=gateway_url,
                     connection_type=IPFSConnectionType.GATEWAY,
@@ -876,6 +893,40 @@ class IPFSClient:
         except Exception as e:
             logger.error("Failed to initialize IPFS client", error=str(e))
             raise
+
+    async def connect(self):
+        """Backward-compatible alias for initialize()."""
+        await self.initialize()
+
+    async def add_content(
+        self,
+        content: Union[bytes, str, Path],
+        filename: Optional[str] = None,
+        pin: bool = True,
+        progress_callback: Optional[Callable[[IPFSUploadProgress], None]] = None,
+    ) -> IPFSResult:
+        """Backward-compatible alias for upload_content()."""
+        return await self.upload_content(
+            content=content,
+            filename=filename,
+            pin=pin,
+            progress_callback=progress_callback,
+        )
+
+    async def get_content(
+        self,
+        cid: str,
+        output_path: Optional[Path] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        verify_integrity: bool = True,
+    ) -> IPFSResult:
+        """Backward-compatible alias for download_content()."""
+        return await self.download_content(
+            cid=cid,
+            output_path=output_path,
+            progress_callback=progress_callback,
+            verify_integrity=verify_integrity,
+        )
     
     async def health_check(self) -> int:
         """
@@ -1423,12 +1474,22 @@ async def create_ipfs_client(
         )
         result = await client.add_content(b"Hello IPFS!")
     """
+    def _validate_http_url(value: str, field: str) -> None:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError(
+                f"Invalid {field} '{value}'. Expected a full http(s) URL, "
+                "for example 'http://localhost:5001'."
+            )
+
+    _validate_http_url(api_url, "api_url")
+    _validate_http_url(gateway_url, "gateway_url")
+    if timeout <= 0:
+        raise ValueError("Invalid timeout value. timeout must be > 0.")
+
     config = IPFSConfig(api_url=api_url, gateway_url=gateway_url, timeout=timeout)
-    # Note: The actual client creation depends on the IPFSClient class implementation
-    # This returns a configured IPFSClient that needs to be connected
-    from prsm.core.ipfs_client import IPFSClient
     client = IPFSClient(config)
-    await client.connect()
+    await client.initialize()
     return client
 
 
@@ -1623,19 +1684,22 @@ async def list_pinned_content(client: 'IPFSClient') -> List[str]:
             print(f"  - {cid}")
     """
     try:
-        # Use the IPFS API to list pins
-        if hasattr(client, 'session') and client.session:
-            async with client.session.post(
-                f"{client.config.api_url}/api/v0/pin/ls"
-            ) as response:
-                if response.status == 200:
-                    result = await response.json()
-                    return list(result.get('Keys', {}).keys())
-                else:
-                    raise IPFSError(f"Failed to list pins: {response.status}")
-        else:
-            # Fallback for different client implementations
-            raise IPFSError("Client does not have active session")
+        if not client.connected:
+            raise IPFSError("IPFS client is not connected")
+
+        api_nodes = [
+            node for node in client.nodes
+            if node.connection_type == IPFSConnectionType.HTTP_API and node.status.healthy and node.session
+        ]
+        if not api_nodes:
+            raise IPFSError("No healthy IPFS API node available for pin listing")
+
+        node = api_nodes[0]
+        async with node.session.post(f"{node.url}/api/v0/pin/ls") as response:
+            if response.status == 200:
+                result = await response.json()
+                return list(result.get('Keys', {}).keys())
+            raise IPFSError(f"Failed to list pins: {response.status}")
     except Exception as e:
         logger.error("Failed to list pinned content", error=str(e))
         raise IPFSError(f"Pin list retrieval failed: {e}")
@@ -1666,18 +1730,25 @@ async def get_content_info(client: 'IPFSClient', cid: str) -> Dict[str, Any]:
         print(f"Content size: {info['DataSize']} bytes")
     """
     try:
-        if hasattr(client, 'session') and client.session:
-            async with client.session.post(
-                f"{client.config.api_url}/api/v0/object/stat",
-                params={'arg': cid}
-            ) as response:
-                if response.status == 200:
-                    return await response.json()
-                else:
-                    error_text = await response.text()
-                    raise IPFSError(f"Failed to get content info: {response.status} - {error_text}")
-        else:
-            raise IPFSError("Client does not have active session")
+        if not client.connected:
+            raise IPFSError("IPFS client is not connected")
+
+        api_nodes = [
+            node for node in client.nodes
+            if node.connection_type == IPFSConnectionType.HTTP_API and node.status.healthy and node.session
+        ]
+        if not api_nodes:
+            raise IPFSError("No healthy IPFS API node available for content info retrieval")
+
+        node = api_nodes[0]
+        async with node.session.post(
+            f"{node.url}/api/v0/object/stat",
+            params={'arg': cid}
+        ) as response:
+            if response.status == 200:
+                return await response.json()
+            error_text = await response.text()
+            raise IPFSError(f"Failed to get content info: {response.status} - {error_text}")
     except Exception as e:
         logger.error("Failed to get content info", cid=cid, error=str(e))
         raise IPFSError(f"Content info retrieval failed: {e}")

@@ -20,6 +20,7 @@ import json
 import statistics
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Dict, List, Optional, Set, Any, Tuple, Union
 from uuid import UUID, uuid4
 
@@ -57,7 +58,6 @@ class ConsensusType:
     WEIGHTED_MAJORITY = "weighted_majority"
     BYZANTINE_FAULT_TOLERANT = "byzantine_fault_tolerant"
     SAFETY_CRITICAL = "safety_critical"
-    ZK_SNARK = "zk_snark"
     ZK_SNARK = "zk_snark"
 
 
@@ -700,31 +700,6 @@ class DistributedConsensus:
             return hashlib.sha256(result_str.encode()).hexdigest()
         except Exception:
             return hashlib.sha256(str(result).encode()).hexdigest()
-
-    async def _zk_snark_verification(self, peer_results: List[Dict[str, Any]], session_id: str) -> ConsensusResult:
-        """Reach consensus via Zero-Knowledge proof verification"""
-        from prsm.core.cryptography.zk_proofs import get_zk_proof_system
-        zk_system = await get_zk_proof_system()
-        
-        # In ZK mode, we only need ONE valid proof to reach consensus
-        for result in peer_results:
-            proof_id = result.get("zk_proof_id")
-            if not proof_id:
-                continue
-                
-            is_valid = await zk_system.verify_proof(proof_id, "consensus_engine")
-            
-            if is_valid:
-                return ConsensusResult(
-                    agreed_value=result.get("result"),
-                    consensus_achieved=True,
-                    consensus_type=ConsensusType.ZK_SNARK,
-                    agreement_ratio=1.0,
-                    participating_peers=[result.get("peer_id", "prover")]
-                )
-                
-        return ConsensusResult(consensus_achieved=False, consensus_type=ConsensusType.ZK_SNARK)
-
 
 # === Global Consensus Instance ===
 

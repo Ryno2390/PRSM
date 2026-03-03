@@ -18,6 +18,7 @@ metrics:
   agents: true
   federation: true
   safety: true
+  collaboration: true
 
 # HTTP client settings
 http_timeout: 10

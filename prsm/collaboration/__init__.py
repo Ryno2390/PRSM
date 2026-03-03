@@ -18,6 +18,7 @@ update the corresponding session state.
 """
 
 import logging
+import collections
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -25,6 +26,15 @@ from typing import Dict, List, Optional, Any
 from uuid import UUID, uuid4
 
 logger = logging.getLogger(__name__)
+
+_DISPATCH_REASON_LABELS = {
+    "session_not_found",
+    "agent_collab_not_wired",
+    "invalid_session_status",
+    "unsupported_collaboration_type",
+    "dispatch_value_error",
+    "dispatch_success",
+}
 
 # Import session management
 from prsm.collaboration.session_manager import (
@@ -158,6 +168,37 @@ class CollaborationManager:
         self._session_to_protocol: Dict[str, str] = {}  # session_id → protocol_id
         self._protocol_to_session: Dict[str, str] = {}  # protocol_id → session_id
 
+        # Additive observability counters (must never alter dispatch behavior)
+        self._telemetry: Dict[str, Any] = {
+            "dispatch_success_total": 0,
+            "dispatch_failure_total": 0,
+            "dispatch_reasons": collections.Counter(),
+        }
+
+    @staticmethod
+    def _bounded_dispatch_reason(reason: str) -> str:
+        return reason if reason in _DISPATCH_REASON_LABELS else "other"
+
+    def _record_dispatch(self, *, success: bool, reason: str) -> None:
+        try:
+            label = self._bounded_dispatch_reason(reason)
+            if success:
+                self._telemetry["dispatch_success_total"] += 1
+            else:
+                self._telemetry["dispatch_failure_total"] += 1
+            self._telemetry["dispatch_reasons"][label] += 1
+        except Exception:
+            # Fail closed for telemetry internals only.
+            pass
+
+    def get_telemetry_snapshot(self) -> Dict[str, Any]:
+        """Return a stable copy of collaboration manager telemetry counters."""
+        return {
+            "dispatch_success_total": int(self._telemetry["dispatch_success_total"]),
+            "dispatch_failure_total": int(self._telemetry["dispatch_failure_total"]),
+            "dispatch_reasons": dict(self._telemetry["dispatch_reasons"]),
+        }
+
     def set_agent_collaboration(self, agent_collab) -> None:
         """Wire in the P2P agent collaboration layer for network dispatch."""
         self._agent_collab = agent_collab
@@ -272,14 +313,17 @@ class CollaborationManager:
         session = self._sessions.get(session_id)
         if not session:
             logger.warning(f"Cannot dispatch: session {session_id} not found")
+            self._record_dispatch(success=False, reason="session_not_found")
             return None
 
         if not self._agent_collab:
             logger.warning("Cannot dispatch: no AgentCollaboration wired in")
+            self._record_dispatch(success=False, reason="agent_collab_not_wired")
             return None
 
         if session.status != CollaborationStatus.PENDING:
             logger.warning(f"Cannot dispatch: session {session_id} is {session.status.value}")
+            self._record_dispatch(success=False, reason="invalid_session_status")
             return None
 
         collab_type = session.collaboration_type
@@ -299,12 +343,14 @@ class CollaborationManager:
                     f"Session {session_id} type {collab_type.value} does not map to a P2P protocol; "
                     f"starting locally"
                 )
+                self._record_dispatch(success=False, reason="unsupported_collaboration_type")
                 session.start()
                 return None
 
         except ValueError as e:
             session.fail(str(e))
             logger.error(f"Dispatch failed for session {session_id}: {e}")
+            self._record_dispatch(success=False, reason="dispatch_value_error")
             return None
 
         # Link session ↔ protocol
@@ -315,6 +361,7 @@ class CollaborationManager:
         logger.info(
             f"Session {session_id[:8]} dispatched as {collab_type.value} → protocol {protocol_id[:8]}"
         )
+        self._record_dispatch(success=True, reason="dispatch_success")
         return protocol_id
 
     async def _dispatch_task(

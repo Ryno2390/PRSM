@@ -9,6 +9,8 @@
 #   Old: from prsm.data.ipfs import IPFSClient, IPFSConfig
 #   New: from prsm.core.ipfs_client import IPFSClient, IPFSConfig
 #
+#   Canonical accessor: from prsm.core.ipfs_client import get_ipfs_client
+#
 #   Old: from prsm.data.ipfs import IPFSContent, IPFSStats
 #   New: from prsm.core.ipfs_client import IPFSContent, IPFSStats
 #
@@ -38,6 +40,7 @@ from prsm.core.ipfs_client import (
     IPFSStats,
     
     # Utility Functions
+    get_ipfs_client,
     create_ipfs_client,
     add_text_to_ipfs,
     get_text_from_ipfs,
@@ -88,6 +91,7 @@ __all__ = [
     'IPFSStats',
     
     # Utility Functions (from core)
+    'get_ipfs_client',
     'create_ipfs_client',
     'add_text_to_ipfs',
     'get_text_from_ipfs',

@@ -6,7 +6,9 @@ Torrent-like model distribution with safety oversight and distributed execution
 import asyncio
 import hashlib
 import json
+import logging
 import random
+import warnings
 from concurrent.futures import Future
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Any, Tuple
@@ -17,12 +19,31 @@ from prsm.core.models import (
     ArchitectTask, PeerNode, ModelShard, TeacherModel, ModelType,
     SafetyFlag, CircuitBreakerEvent, AgentResponse
 )
-from prsm.core.ipfs_client import create_ipfs_client
+from prsm.core.ipfs_client import get_ipfs_client
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
 from prsm.core.safety.monitor import SafetyMonitor
 from .consensus import get_consensus, ConsensusType
 from ..performance.benchmark_collector import time_async_operation, get_global_collector
+
+
+logger = logging.getLogger(__name__)
+
+_CANONICAL_COLLABORATION_REDIRECT = (
+    "Use canonical collaboration dispatch via "
+    "prsm.collaboration.CollaborationManager.dispatch_session() "
+    "with prsm.node.agent_collaboration.AgentCollaboration bridge."
+)
+
+
+def _emit_collaboration_compatibility_fence(entrypoint: str) -> None:
+    """Emit additive compatibility-only fence for collaboration-like federation entrypoints."""
+    message = (
+        f"Compatibility-only collaboration entrypoint used: {entrypoint}. "
+        f"{_CANONICAL_COLLABORATION_REDIRECT}"
+    )
+    logger.warning(message)
+    warnings.warn(message, RuntimeWarning, stacklevel=2)
 
 
 # === P2P Configuration ===
@@ -163,6 +184,9 @@ class P2PModelNetwork:
         Returns:
             List of Future objects representing peer execution results
         """
+        _emit_collaboration_compatibility_fence(
+            "prsm.compute.federation.p2p_network.P2PModelNetwork.coordinate_distributed_execution"
+        )
         async with self._execution_lock:
             # Safety validation
             if ENABLE_SAFETY_MONITORING:

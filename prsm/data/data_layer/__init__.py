@@ -12,7 +12,7 @@ Migration Guide:
   New: from prsm.core.ipfs_client import IPFSClient, PRSMIPFSOperations
 
   Old: from prsm.data.data_layer import get_ipfs_client
-  New: from prsm.core.ipfs_client import create_ipfs_client
+  New: from prsm.core.ipfs_client import get_ipfs_client
 
 The PRSMIPFSClient class provided model-specific storage features.
 These are now available through PRSMIPFSOperations in prsm.core.ipfs_client.
@@ -48,6 +48,7 @@ from prsm.core.ipfs_client import (
     PRSMIPFSOperations,
     
     # Utility Functions
+    get_ipfs_client as get_core_ipfs_client,
     create_ipfs_client,
     add_text_to_ipfs,
     get_text_from_ipfs,
@@ -71,6 +72,7 @@ __all__ = [
     'IPFSStats',
     'IPFSClient',
     'PRSMIPFSOperations',
+    'get_core_ipfs_client',
     'create_ipfs_client',
     'add_text_to_ipfs',
     'get_text_from_ipfs',

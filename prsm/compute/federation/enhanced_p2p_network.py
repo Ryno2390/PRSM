@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import time
+import warnings
 from concurrent.futures import Future
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Any, Tuple, Callable
@@ -24,6 +25,16 @@ try:
     from nacl.signing import SigningKey, VerifyKey
     from prsm.core.merkle import MerkleTools
 except ImportError as e:
+    KademliaServer = None
+    ForgetfulStorage = None
+    websockets = None
+    nacl = None
+    PrivateKey = None
+    PublicKey = None
+    Box = None
+    SigningKey = None
+    VerifyKey = None
+    MerkleTools = None
     print(f"⚠️ P2P dependencies not installed: {e}")
     print("Install with: pip install kademlia websockets pynacl")
 
@@ -32,7 +43,7 @@ from prsm.core.models import (
     ArchitectTask, PeerNode, ModelShard, TeacherModel, ModelType,
     SafetyFlag, CircuitBreakerEvent, AgentResponse
 )
-from prsm.core.ipfs_client import create_ipfs_client
+from prsm.core.ipfs_client import get_ipfs_client
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
 from prsm.core.safety.monitor import SafetyMonitor
@@ -59,6 +70,26 @@ DHT_K_BUCKET_SIZE = int(getattr(settings, "PRSM_DHT_K_BUCKET", 20))
 # Replication settings
 SHARD_REPLICATION_FACTOR = int(getattr(settings, "PRSM_SHARD_REPLICATION", 3))
 AUTO_REBALANCE_INTERVAL = int(getattr(settings, "PRSM_REBALANCE_MINUTES", 30))
+CAPABILITY_RECORD_MAX_AGE_SECONDS = int(getattr(settings, "PRSM_CAPABILITY_MAX_AGE_SECONDS", 24 * 3600))
+
+
+logger = logging.getLogger(__name__)
+
+_CANONICAL_COLLABORATION_REDIRECT = (
+    "Use canonical collaboration dispatch via "
+    "prsm.collaboration.CollaborationManager.dispatch_session() "
+    "with prsm.node.agent_collaboration.AgentCollaboration bridge."
+)
+
+
+def _emit_collaboration_compatibility_fence(entrypoint: str) -> None:
+    """Emit additive compatibility-only fence for collaboration-like federation entrypoints."""
+    message = (
+        f"Compatibility-only collaboration entrypoint used: {entrypoint}. "
+        f"{_CANONICAL_COLLABORATION_REDIRECT}"
+    )
+    logger.warning(message)
+    warnings.warn(message, RuntimeWarning, stacklevel=2)
 
 
 class P2PMessage:
@@ -98,6 +129,10 @@ class SecureP2PConnection:
     """Secure connection manager for P2P communications"""
     
     def __init__(self, node_id: str):
+        if PrivateKey is None or SigningKey is None:
+            raise RuntimeError(
+                "P2P cryptography dependencies unavailable. Install pynacl and related P2P extras."
+            )
         self.node_id = node_id
         self.private_key = PrivateKey.generate()
         self.public_key = self.private_key.public_key
@@ -268,11 +303,170 @@ class DistributedHashTable:
     """Kademlia DHT for peer and content discovery"""
     
     def __init__(self, node_id: str, listen_port: int = P2P_LISTEN_PORT + 1):
+        if ForgetfulStorage is None:
+            raise RuntimeError(
+                "DHT dependencies unavailable. Install kademlia for production DHT support."
+            )
         self.node_id = node_id
         self.listen_port = listen_port
         self.server = None
         self.storage = ForgetfulStorage()
         self.bootstrap_nodes = DHT_BOOTSTRAP_NODES
+        self.local_signing_key: Optional[SigningKey] = None
+        self.local_verify_key_hex: Optional[str] = None
+        self.peer_identity_keys: Dict[str, str] = {}
+        self.peer_identity_status: Dict[str, str] = {}
+        self.peer_identity_updated_at: Dict[str, str] = {}
+        self.peer_key_versions: Dict[str, int] = {}
+        self.revoked_capabilities: Dict[str, Set[str]] = {}
+
+    def set_local_identity(self, node_id: str, signing_key: SigningKey, verify_key_hex: str):
+        """Bind the local DHT announcer identity for capability signatures."""
+        self.node_id = node_id
+        self.local_signing_key = signing_key
+        self.local_verify_key_hex = verify_key_hex
+        self.register_peer_identity(node_id, verify_key_hex)
+
+    def register_peer_identity(self, peer_id: str, verify_key_hex: str):
+        """
+        Register trusted identity binding for peer capability verification.
+
+        Deterministic semantics:
+        - first-time registration succeeds,
+        - same-key re-registration is idempotent,
+        - different-key updates are rejected and must use explicit rotation flow.
+        """
+        existing_key = self.peer_identity_keys.get(peer_id)
+        if existing_key and existing_key != verify_key_hex:
+            return False
+
+        self.peer_identity_keys[peer_id] = verify_key_hex
+        self.peer_identity_status[peer_id] = 'active'
+        self.peer_identity_updated_at[peer_id] = datetime.now(timezone.utc).isoformat()
+        self.peer_key_versions[peer_id] = self.peer_key_versions.get(peer_id, 0) + (0 if existing_key else 1)
+        return True
+
+    def rotate_peer_identity_key(
+        self,
+        peer_id: str,
+        previous_verify_key_hex: str,
+        new_verify_key_hex: str,
+    ) -> bool:
+        """Explicit, safe key rotation path for existing identities."""
+        current_key = self.peer_identity_keys.get(peer_id)
+        if not current_key:
+            return False
+        if self.peer_identity_status.get(peer_id) == 'revoked':
+            return False
+        if current_key != previous_verify_key_hex:
+            return False
+        if new_verify_key_hex == previous_verify_key_hex:
+            return False
+
+        self.peer_identity_keys[peer_id] = new_verify_key_hex
+        self.peer_identity_status[peer_id] = 'active'
+        self.peer_identity_updated_at[peer_id] = datetime.now(timezone.utc).isoformat()
+        self.peer_key_versions[peer_id] = self.peer_key_versions.get(peer_id, 1) + 1
+        return True
+
+    def revoke_peer_identity(self, peer_id: str) -> bool:
+        """Revoke peer identity and fail-closed future routing/trust decisions."""
+        if peer_id not in self.peer_identity_keys:
+            return False
+
+        self.peer_identity_status[peer_id] = 'revoked'
+        self.peer_identity_updated_at[peer_id] = datetime.now(timezone.utc).isoformat()
+        return True
+
+    def revoke_peer_capability(self, peer_id: str, capability: str) -> bool:
+        """Revoke a specific capability for a peer from routing candidacy."""
+        if peer_id not in self.peer_identity_keys:
+            return False
+
+        revoked = self.revoked_capabilities.setdefault(peer_id, set())
+        revoked.add(capability)
+        return True
+
+    def _log_trust_decision(self, peer_id: str, capability: str, accepted: bool, reason: str):
+        decision = 'accept' if accepted else 'reject'
+        logger.info(
+            "capability_trust_decision decision=%s peer_id=%s capability=%s reason=%s",
+            decision,
+            peer_id,
+            capability,
+            reason,
+        )
+
+    def _canonical_capability_payload(self, peer_record: dict) -> bytes:
+        """Canonical payload used for capability signing/verification."""
+        canonical = {
+            'id': peer_record.get('id'),
+            'address': peer_record.get('address'),
+            'capability': peer_record.get('capability'),
+            'timestamp': peer_record.get('timestamp'),
+            'verify_key': peer_record.get('verify_key')
+        }
+        return json.dumps(canonical, sort_keys=True, separators=(',', ':')).encode('utf-8')
+
+    def _is_capability_record_trusted(self, peer_record: dict, expected_capability: str) -> bool:
+        """Verify signed capability record and identity binding, fail-closed."""
+        required_fields = {'id', 'address', 'capability', 'timestamp', 'verify_key', 'signature'}
+        if not required_fields.issubset(set(peer_record.keys())):
+            self._log_trust_decision('unknown', expected_capability, False, 'missing_required_fields')
+            return False
+
+        if peer_record.get('capability') != expected_capability:
+            self._log_trust_decision(str(peer_record.get('id', 'unknown')), expected_capability, False, 'capability_mismatch')
+            return False
+
+        peer_id = peer_record.get('id')
+        verify_key_hex = peer_record.get('verify_key')
+        signature_hex = peer_record.get('signature')
+        if not isinstance(peer_id, str) or not isinstance(verify_key_hex, str) or not isinstance(signature_hex, str):
+            self._log_trust_decision(str(peer_record.get('id', 'unknown')), expected_capability, False, 'invalid_field_types')
+            return False
+
+        # Enforce explicit trusted identity binding (unknown == reject)
+        expected_verify_key = self.peer_identity_keys.get(peer_id)
+        if not expected_verify_key:
+            self._log_trust_decision(peer_id, expected_capability, False, 'unknown_identity')
+            return False
+
+        identity_status = self.peer_identity_status.get(peer_id, 'active')
+        if identity_status != 'active':
+            self._log_trust_decision(peer_id, expected_capability, False, f'identity_status_{identity_status}')
+            return False
+
+        if expected_capability in self.revoked_capabilities.get(peer_id, set()):
+            self._log_trust_decision(peer_id, expected_capability, False, 'capability_revoked')
+            return False
+
+        if expected_verify_key != verify_key_hex:
+            self._log_trust_decision(peer_id, expected_capability, False, 'identity_key_mismatch')
+            return False
+
+        # Verify cryptographic signature
+        try:
+            verify_key = VerifyKey(bytes.fromhex(verify_key_hex))
+            signature = bytes.fromhex(signature_hex)
+            verify_key.verify(self._canonical_capability_payload(peer_record), signature)
+        except Exception:
+            self._log_trust_decision(peer_id, expected_capability, False, 'signature_verification_failed')
+            return False
+
+        # Reject stale capability records
+        try:
+            cutoff_time = datetime.now(timezone.utc).timestamp() - CAPABILITY_RECORD_MAX_AGE_SECONDS
+            announced_at = datetime.fromisoformat(peer_record['timestamp'].replace('Z', '+00:00')).timestamp()
+            is_fresh = announced_at > cutoff_time
+            if not is_fresh:
+                self._log_trust_decision(peer_id, expected_capability, False, 'stale_capability_record')
+                return False
+            self._log_trust_decision(peer_id, expected_capability, True, 'trusted_capability_record')
+            return True
+        except Exception:
+            self._log_trust_decision(peer_id, expected_capability, False, 'invalid_timestamp')
+            return False
         
     async def start(self) -> bool:
         """Start the DHT server"""
@@ -340,7 +534,12 @@ class DistributedHashTable:
             if not peer_data:
                 return []
             
-            return [(peer['id'], peer['address']) for peer in peer_data.get('peers', [])]
+            trusted_peers = []
+            for peer_record in peer_data.get('peers', []):
+                if self._is_capability_record_trusted(peer_record, capability):
+                    trusted_peers.append((peer_record['id'], peer_record['address']))
+
+            return trusted_peers
             
         except Exception as e:
             print(f"❌ Error finding peers by capability: {e}")
@@ -356,8 +555,16 @@ class DistributedHashTable:
             peer_info = {
                 'id': self.node_id,
                 'address': peer_address,
+                'capability': capability,
+                'verify_key': self.local_verify_key_hex,
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
+
+            # Add signature when identity is available (production path)
+            if self.local_signing_key and self.local_verify_key_hex:
+                peer_info['signature'] = self.local_signing_key.sign(
+                    self._canonical_capability_payload(peer_info)
+                ).signature.hex()
             
             # Remove existing entry for this peer
             existing_data['peers'] = [p for p in existing_data['peers'] if p['id'] != self.node_id]
@@ -388,11 +595,20 @@ class ProductionP2PNetwork:
         self.node_id = node_id or str(uuid4())
         self.secure_connection = SecureP2PConnection(self.node_id)
         self.dht = DistributedHashTable(self.node_id)
+        self.dht.set_local_identity(
+            node_id=self.node_id,
+            signing_key=self.secure_connection.signing_key,
+            verify_key_hex=self.secure_connection.verify_key.encode().hex()
+        )
         
         # P2P state
         self.active_peers: Dict[str, PeerNode] = {}
         self.model_shards: Dict[str, List[ModelShard]] = {}
         self.shard_locations: Dict[UUID, Set[str]] = {}
+        self.peer_connection_state: Dict[str, Dict[str, Any]] = {}
+        self._peer_reconcile_generation: Dict[str, int] = {}
+        self.in_flight_tasks: Dict[str, Dict[str, Any]] = {}
+        self.completed_task_results: Dict[str, Dict[str, Any]] = {}
         
         # Network services
         self.websocket_server = None
@@ -521,6 +737,9 @@ class ProductionP2PNetwork:
         """
         Coordinate distributed execution across P2P network (REAL implementation)
         """
+        _emit_collaboration_compatibility_fence(
+            "prsm.compute.federation.enhanced_p2p_network.ProductionP2PNetwork.coordinate_distributed_execution"
+        )
         try:
             # Safety validation
             safety_check = await self.safety_monitor.validate_model_output(
@@ -555,19 +774,25 @@ class ProductionP2PNetwork:
     async def connect_to_peer(self, peer_address: str, peer_id: str) -> bool:
         """Connect to a peer using real networking"""
         try:
+            previous_state = self.peer_connection_state.get(peer_id, {}).get('state')
             success = await self.secure_connection.establish_connection(peer_address, peer_id)
             if success:
                 self.network_stats['connections_established'] += 1
                 
                 # Add to active peers
                 peer_node = PeerNode(
+                    node_id=peer_id,
                     peer_id=peer_id,
-                    address=peer_address,
+                    multiaddr=peer_address,
                     capabilities=["model_execution", "data_storage"],
                     reputation_score=0.5,
                     active=True
                 )
                 self.active_peers[peer_id] = peer_node
+                self._record_peer_transition(peer_id, 'connected')
+
+                if previous_state in {'disconnected', 'partitioned'}:
+                    await self.reconcile_peer_state(peer_id)
                 
                 print(f"✅ Connected to peer {peer_id} at {peer_address}")
             
@@ -587,6 +812,105 @@ class ProductionP2PNetwork:
         except Exception as e:
             print(f"❌ Error discovering peers: {e}")
             return []
+
+    def _record_peer_transition(self, peer_id: str, next_state: str):
+        """Record deterministic peer connection transition state."""
+        generation = self._peer_reconcile_generation.get(peer_id, 0)
+        if next_state == 'connected':
+            generation += 1
+        self._peer_reconcile_generation[peer_id] = generation
+        self.peer_connection_state[peer_id] = {
+            'peer_id': peer_id,
+            'state': next_state,
+            'generation': generation,
+            'updated_at': datetime.now(timezone.utc).isoformat()
+        }
+
+    def _canonical_rpc_operation_id(self, peer_id: str, task: ArchitectTask) -> str:
+        canonical_payload = {
+            'peer_id': peer_id,
+            'task_id': task.task_id,
+            'task_type': task.task_type,
+            'instruction': task.instruction,
+            'context_data': task.context_data,
+            'dependencies': task.dependencies,
+            'expected_output_type': task.expected_output_type,
+        }
+        canonical_json = json.dumps(canonical_payload, sort_keys=True, separators=(',', ':'))
+        return hashlib.sha256(canonical_json.encode('utf-8')).hexdigest()
+
+    def _active_eligible_peer_ids(self) -> Set[str]:
+        """Deterministic connected/trusted peer view for reconciliation."""
+        eligible: Set[str] = set()
+        for peer_id in sorted(self.active_peers.keys()):
+            peer = self.active_peers[peer_id]
+            state = self.peer_connection_state.get(peer_id, {}).get('state')
+            if not peer.active:
+                continue
+            if state != 'connected':
+                continue
+            if self.dht.peer_identity_status.get(peer_id, 'active') != 'active':
+                continue
+            eligible.add(peer_id)
+        return eligible
+
+    async def reconcile_peer_state(self, peer_id: str) -> Dict[str, Any]:
+        """Reconcile shard/task state for a reconnecting peer (fail-closed on unknowns)."""
+        state = self.peer_connection_state.get(peer_id, {}).get('state')
+        if state != 'connected':
+            return {
+                'peer_id': peer_id,
+                'status': 'skipped',
+                'reason': 'peer_not_connected'
+            }
+
+        refreshed_shards = await self._reconcile_shard_locations()
+        task_updates = self._reconcile_in_flight_tasks(peer_id)
+        return {
+            'peer_id': peer_id,
+            'status': 'reconciled',
+            'generation': self.peer_connection_state.get(peer_id, {}).get('generation', 0),
+            'refreshed_shards': refreshed_shards,
+            'task_updates': task_updates,
+        }
+
+    async def _reconcile_shard_locations(self) -> int:
+        """Rebuild shard locations deterministically from canonical shard metadata."""
+        reconciled_count = 0
+        eligible_peers = self._active_eligible_peer_ids()
+
+        for model_cid in sorted(self.model_shards.keys()):
+            for shard in sorted(
+                self.model_shards[model_cid],
+                key=lambda s: (str(s.shard_id), s.shard_index)
+            ):
+                canonical_hosts = sorted(set(shard.hosted_by or []))
+                reconciled_hosts = {peer_id for peer_id in canonical_hosts if peer_id in eligible_peers}
+                self.shard_locations[shard.shard_id] = reconciled_hosts
+                reconciled_count += 1
+
+        return reconciled_count
+
+    def _reconcile_in_flight_tasks(self, peer_id: str) -> int:
+        """
+        Reconcile in-flight tasks for peer deterministically.
+
+        Safety rule (fail-closed): unknown/pending task dispatch states are terminally
+        marked aborted and are not retried automatically to avoid duplicate side-effects.
+        """
+        updates = 0
+        for operation_id in sorted(self.in_flight_tasks.keys()):
+            record = self.in_flight_tasks[operation_id]
+            if record.get('peer_id') != peer_id:
+                continue
+
+            if record.get('state') in {'pending_dispatch', 'dispatching'}:
+                record['state'] = 'aborted'
+                record['finalized_by'] = 'reconcile_fail_closed'
+                record['updated_at'] = datetime.now(timezone.utc).isoformat()
+                updates += 1
+
+        return updates
     
     # === Private Implementation Methods ===
     
@@ -595,8 +919,11 @@ class ProductionP2PNetwork:
         self.message_handlers = {
             'shard_store': self._handle_shard_store,
             'shard_retrieve': self._handle_shard_retrieve,
+            'shard_retrieve_request': self._handle_shard_retrieve,
             'task_execute': self._handle_task_execute,
+            'task_execute_request': self._handle_task_execute,
             'peer_discovery': self._handle_peer_discovery,
+            'peer_discovery_request': self._handle_peer_discovery,
             'heartbeat': self._handle_heartbeat
         }
     
@@ -648,7 +975,22 @@ class ProductionP2PNetwork:
         try:
             handler = self.message_handlers.get(message.type)
             if handler:
-                await handler(message, peer_id)
+                response = await handler(message, peer_id)
+                if isinstance(response, dict) and message.type in {
+                    'shard_retrieve', 'shard_retrieve_request',
+                    'task_execute', 'task_execute_request',
+                    'peer_discovery', 'peer_discovery_request'
+                }:
+                    request_id = message.payload.get('request_id') if isinstance(message.payload, dict) else None
+                    response_payload = dict(response)
+                    if request_id is not None:
+                        response_payload['request_id'] = request_id
+                    response_message = P2PMessage(
+                        msg_type=f"{message.type.replace('_request', '')}_response",
+                        payload=response_payload,
+                        sender_id=self.node_id
+                    )
+                    await self.secure_connection.send_message(peer_id, response_message)
             else:
                 print(f"⚠️ Unknown message type: {message.type}")
                 
@@ -724,12 +1066,19 @@ class ProductionP2PNetwork:
             # Filter and rank peers (simplified for now)
             qualified_peers = []
             for peer_id, peer_address in execution_peers:
+                # Defense-in-depth: fail closed if trust state changed during selection
+                peer_identity_status = self.dht.peer_identity_status.get(peer_id)
+                if peer_identity_status != 'active':
+                    continue
+                if "model_execution" in self.dht.revoked_capabilities.get(peer_id, set()):
+                    continue
+
                 if peer_id in self.active_peers:
                     peer = self.active_peers[peer_id]
                     if peer.active and peer.reputation_score >= 0.3:
                         qualified_peers.append((peer_id, peer_address))
                 else:
-                    # Unknown peer, include with caution
+                    # Identity already trust-vetted by DHT capability gate
                     qualified_peers.append((peer_id, peer_address))
             
             # Limit concurrent executions
@@ -743,10 +1092,25 @@ class ProductionP2PNetwork:
     async def _execute_task_on_peer_rpc(self, peer_id: str, peer_address: str, task: ArchitectTask) -> dict:
         """Execute task on peer via RPC (REAL implementation)"""
         try:
+            operation_id = self._canonical_rpc_operation_id(peer_id, task)
+            existing_result = self.completed_task_results.get(operation_id)
+            if existing_result is not None:
+                return dict(existing_result)
+
+            self.in_flight_tasks[operation_id] = {
+                'peer_id': peer_id,
+                'task_id': task.task_id,
+                'state': 'pending_dispatch',
+                'updated_at': datetime.now(timezone.utc).isoformat()
+            }
+
             # Ensure connection exists
             if peer_id not in self.secure_connection.active_connections:
                 connected = await self.connect_to_peer(peer_address, peer_id)
                 if not connected:
+                    self.in_flight_tasks[operation_id]['state'] = 'aborted'
+                    self.in_flight_tasks[operation_id]['finalized_by'] = 'connect_failed'
+                    self.in_flight_tasks[operation_id]['updated_at'] = datetime.now(timezone.utc).isoformat()
                     raise Exception(f"Could not connect to peer {peer_id}")
             
             # Create execution message
@@ -764,31 +1128,51 @@ class ProductionP2PNetwork:
             )
             
             # Send execution request
+            self.in_flight_tasks[operation_id]['state'] = 'dispatching'
+            self.in_flight_tasks[operation_id]['updated_at'] = datetime.now(timezone.utc).isoformat()
             success = await self.secure_connection.send_message(peer_id, message)
             if not success:
+                self.in_flight_tasks[operation_id]['state'] = 'aborted'
+                self.in_flight_tasks[operation_id]['finalized_by'] = 'dispatch_failed'
+                self.in_flight_tasks[operation_id]['updated_at'] = datetime.now(timezone.utc).isoformat()
                 raise Exception(f"Failed to send execution request to peer {peer_id}")
             
             # Wait for response (simplified - in production would use proper request/response matching)
             # For now, return a placeholder result
-            return {
+            response = {
                 "peer_id": peer_id,
                 "task_id": task.task_id,
                 "result": f"RPC execution result from peer {peer_id}",
                 "execution_time": 2.5,  # Would be actual execution time
                 "timestamp": datetime.now(timezone.utc),
-                "success": True
+                "success": True,
+                "operation_id": operation_id
             }
+            self.in_flight_tasks[operation_id]['state'] = 'committed'
+            self.in_flight_tasks[operation_id]['finalized_by'] = 'dispatch_acknowledged'
+            self.in_flight_tasks[operation_id]['updated_at'] = datetime.now(timezone.utc).isoformat()
+            self.completed_task_results[operation_id] = dict(response)
+            return response
             
         except Exception as e:
             print(f"❌ RPC execution failed on peer {peer_id}: {e}")
-            return {
+            fallback_operation_id = locals().get('operation_id')
+            if fallback_operation_id and fallback_operation_id in self.in_flight_tasks:
+                self.in_flight_tasks[fallback_operation_id]['state'] = 'aborted'
+                self.in_flight_tasks[fallback_operation_id]['updated_at'] = datetime.now(timezone.utc).isoformat()
+
+            response = {
                 "peer_id": peer_id,
                 "task_id": task.task_id,
                 "error": str(e),
                 "execution_time": 0,
                 "timestamp": datetime.now(timezone.utc),
-                "success": False
+                "success": False,
+                "operation_id": fallback_operation_id
             }
+            if fallback_operation_id:
+                self.completed_task_results[fallback_operation_id] = dict(response)
+            return response
     
     async def _store_shard_metadata_in_dht(self, model_cid: str, shards: List[ModelShard]):
         """Store shard metadata in DHT for discovery"""
@@ -824,12 +1208,25 @@ class ProductionP2PNetwork:
             await self.secure_connection._handle_connection_error(peer_id)
             
             if peer_id in self.active_peers:
-                del self.active_peers[peer_id]
+                self.active_peers[peer_id].active = False
+            self._record_peer_transition(peer_id, 'disconnected')
+
+            await self._reconcile_shard_locations()
+            self._reconcile_in_flight_tasks(peer_id)
             
             print(f"🔌 Disconnected from peer {peer_id}")
             
         except Exception as e:
             print(f"❌ Error disconnecting from peer {peer_id}: {e}")
+
+    async def mark_peer_partitioned(self, peer_id: str):
+        """Mark a peer as partitioned and reconcile state in fail-closed mode."""
+        if peer_id in self.active_peers:
+            self.active_peers[peer_id].active = False
+        await self.secure_connection._handle_connection_error(peer_id)
+        self._record_peer_transition(peer_id, 'partitioned')
+        await self._reconcile_shard_locations()
+        self._reconcile_in_flight_tasks(peer_id)
     
     # === Message Handlers ===
     
@@ -866,17 +1263,169 @@ class ProductionP2PNetwork:
     
     async def _handle_shard_retrieve(self, message: P2PMessage, peer_id: str):
         """Handle shard retrieval request"""
-        # Implementation would retrieve and send shard data
-        pass
+        try:
+            payload = message.payload if isinstance(message.payload, dict) else {}
+            shard_id = payload.get('shard_id')
+
+            if not shard_id:
+                return {
+                    'status': 'error',
+                    'handler': 'shard_retrieve',
+                    'error_code': 'INVALID_REQUEST',
+                    'error': 'Missing required field: shard_id',
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+
+            shard_key = f"shard:{shard_id}"
+            shard_record = await self.dht.retrieve(shard_key)
+            if not shard_record:
+                return {
+                    'status': 'error',
+                    'handler': 'shard_retrieve',
+                    'error_code': 'SHARD_NOT_FOUND',
+                    'error': f'Shard not found: {shard_id}',
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+
+            shard_data_hex = shard_record.get('data')
+            shard_metadata = shard_record.get('metadata', {})
+            if not isinstance(shard_data_hex, str):
+                return {
+                    'status': 'error',
+                    'handler': 'shard_retrieve',
+                    'error_code': 'INVALID_SHARD_RECORD',
+                    'error': f'Invalid shard record for shard_id={shard_id}',
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+
+            try:
+                shard_data = bytes.fromhex(shard_data_hex)
+            except Exception:
+                return {
+                    'status': 'error',
+                    'handler': 'shard_retrieve',
+                    'error_code': 'INVALID_SHARD_ENCODING',
+                    'error': f'Corrupt shard encoding for shard_id={shard_id}',
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+
+            expected_hash = shard_metadata.get('verification_hash')
+            computed_hash = hashlib.sha256(shard_data).hexdigest()
+            if expected_hash and expected_hash != computed_hash:
+                return {
+                    'status': 'error',
+                    'handler': 'shard_retrieve',
+                    'error_code': 'INTEGRITY_CHECK_FAILED',
+                    'error': f'Shard integrity verification failed for shard_id={shard_id}',
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+
+            return {
+                'status': 'success',
+                'handler': 'shard_retrieve',
+                'peer_id': peer_id,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'data': {
+                    'shard_id': shard_id,
+                    'shard_data': shard_data_hex,
+                    'metadata': shard_metadata
+                }
+            }
+        except Exception as e:
+            return {
+                'status': 'error',
+                'handler': 'shard_retrieve',
+                'error_code': 'INTERNAL_ERROR',
+                'error': str(e),
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
     
     async def _handle_task_execute(self, message: P2PMessage, peer_id: str):
         """Handle task execution request"""
-        # Implementation would execute task and return result
-        pass
+        try:
+            payload = message.payload if isinstance(message.payload, dict) else {}
+            missing = [field for field in ('task_id', 'task_type', 'instruction') if not payload.get(field)]
+            if missing:
+                return {
+                    'status': 'error',
+                    'handler': 'task_execute',
+                    'error_code': 'INVALID_REQUEST',
+                    'error': f"Missing required field(s): {', '.join(missing)}",
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+
+            deterministic_input = json.dumps(
+                {
+                    'task_id': payload['task_id'],
+                    'task_type': payload['task_type'],
+                    'instruction': payload['instruction'],
+                    'context_data': payload.get('context_data', {}),
+                    'dependencies': payload.get('dependencies', []),
+                    'expected_output_type': payload.get('expected_output_type')
+                },
+                sort_keys=True,
+                separators=(',', ':')
+            )
+            execution_digest = hashlib.sha256(deterministic_input.encode('utf-8')).hexdigest()
+
+            return {
+                'status': 'success',
+                'handler': 'task_execute',
+                'peer_id': peer_id,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'data': {
+                    'task_id': payload['task_id'],
+                    'execution_digest': execution_digest,
+                    'result': {
+                        'accepted': True,
+                        'deterministic_result_token': execution_digest[:24],
+                        'simulated': True
+                    }
+                }
+            }
+        except Exception as e:
+            return {
+                'status': 'error',
+                'handler': 'task_execute',
+                'error_code': 'INTERNAL_ERROR',
+                'error': str(e),
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
     
     async def _handle_peer_discovery(self, message: P2PMessage, peer_id: str):
         """Handle peer discovery message"""
-        pass
+        try:
+            payload = message.payload if isinstance(message.payload, dict) else {}
+            capability = payload.get('capability', 'model_execution')
+            limit = payload.get('limit', 20)
+            if not isinstance(limit, int) or limit <= 0:
+                limit = 20
+
+            discovered_peers = await self.discover_peers(capability)
+            candidate_peers = [
+                {'peer_id': discovered_peer_id, 'address': discovered_peer_address}
+                for discovered_peer_id, discovered_peer_address in discovered_peers[:limit]
+            ]
+
+            return {
+                'status': 'success',
+                'handler': 'peer_discovery',
+                'peer_id': peer_id,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'data': {
+                    'capability': capability,
+                    'count': len(candidate_peers),
+                    'peers': candidate_peers
+                }
+            }
+        except Exception as e:
+            return {
+                'status': 'error',
+                'handler': 'peer_discovery',
+                'error_code': 'INTERNAL_ERROR',
+                'error': str(e),
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
     
     async def _handle_heartbeat(self, message: P2PMessage, peer_id: str):
         """Handle heartbeat from peer"""

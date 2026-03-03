@@ -1353,40 +1353,234 @@ TestProtocolCompletion (4 tests)     — success, failure, unknown protocol, get
 
 ---
 
-## 21. Updated "What Still Needs to Be Done"
+## 21. Core Collaboration Review Update (2026-03-03)
 
-### Completed Sprints
+This update reflects a completed review of PRSM core collaboration infrastructure across:
+- [`prsm/compute/federation/p2p_network.py`](prsm/compute/federation/p2p_network.py)
+- [`prsm/compute/federation/enhanced_p2p_network.py`](prsm/compute/federation/enhanced_p2p_network.py)
+- [`prsm/node/transport.py`](prsm/node/transport.py)
+- [`prsm/node/dag_ledger.py`](prsm/node/dag_ledger.py)
+- [`prsm/core/ipfs_client.py`](prsm/core/ipfs_client.py)
 
-- [x] **Sprint 1** (2026-02-20): Critical security fixes — signature verification, atomic balance ops, marketplace migration
-- [x] **Sprint 2** (2026-02-27): Code quality — IPFS consolidation, mock separation, thread safety, NWTN error handling
-- [x] **Sprint 3** (2026-03-01): Exception handling — bare except fixes, silent handler comments, integration tests
+### What Has Been Accomplished
 
-### Completed Sprints (continued)
+- **Transport locking discipline is in place** in [`WebSocketTransport`](prsm/node/transport.py), with async lock patterns that reduce concurrent state corruption risk.
+- **DAG ledger atomicity intent and implementation are established** in [`LocalDAGLedger`](prsm/node/dag_ledger.py), including atomic balance operation patterns introduced in earlier remediation work.
+- **NWTN orchestration remains DI-oriented and structurally extensible**, supporting future replacement of mock/placeholder paths with production providers.
+- **IPFS failover architecture concept exists** in [`prsm/core/ipfs_client.py`](prsm/core/ipfs_client.py), providing a useful resilience direction even where API consistency work remains.
+- **Core collaboration review scope is now explicit**, with overlap and boundary issues identified across federation, node transport/ledger, and core storage pathways.
 
-- [x] **Sprint 4** (2026-03-02): Core Collaboration Robustness
-  - [x] Phase 1: FTNS payment integration for collaboration protocols
-  - [x] Phase 2: Network-wide state change broadcasts
-  - [x] Phase 3: Expiry enforcement and bounded memory
-  - [x] Phase 4: Content retrieval API
-  - [x] Phase 5: Collaboration system bridge
+### Implementation Progress Update — P0 Tranches Completed (2026-03-03)
 
-### Current Sprint
+#### Tranche 1: Transport handshake hardening ✅
 
-- [x] **Sprint 5, Item 1** (2026-03-02): Extract hardcoded values to `NodeConfig` for runtime tuning
-- [x] **Sprint 5, Item 2** (2026-03-02): Bid Selection Strategy
+**Files updated:**
+- [`prsm/node/transport.py`](prsm/node/transport.py)
+- [`tests/security/test_transport_handshake_auth.py`](tests/security/test_transport_handshake_auth.py)
+- [`tests/security/test_transport_handshake_replay.py`](tests/security/test_transport_handshake_replay.py)
 
-### Next Sprint Candidates
+**Outcomes:**
+- Authenticated peer promotion only
+- Identity↔key binding enforced during handshake state transition
+- Replay nonce rejection enforced
+- `ack_for` binding checks enforced
 
-- [ ] **Compute Provider Integration**: Wire `_run_inference()` to NWTN orchestrator for real inference on network
-- [ ] **Capability-Based Discovery**: Extend peer discovery with agent capabilities and resource metadata
-- [ ] **Gossip Persistence / Catch-Up**: Allow late-joining nodes to receive recent collaboration offers
-- [ ] **SQLite Persistence for Collaboration State**: Persist active tasks/reviews/queries across node restarts
+#### Tranche 2: IPFS API/accessor normalization ✅
 
-### Technical Debt Backlog
+**Files updated:**
+- [`prsm/core/ipfs_client.py`](prsm/core/ipfs_client.py)
+- [`prsm/compute/federation/p2p_network.py`](prsm/compute/federation/p2p_network.py)
+- [`prsm/compute/federation/enhanced_p2p_network.py`](prsm/compute/federation/enhanced_p2p_network.py)
+- [`prsm/data/ipfs/__init__.py`](prsm/data/ipfs/__init__.py)
+- [`prsm/data/data_layer/__init__.py`](prsm/data/data_layer/__init__.py)
+- [`tests/unit/test_ipfs_accessor_contract.py`](tests/unit/test_ipfs_accessor_contract.py)
 
-- [ ] **LOW**: Document deprecation timeline for legacy compatibility shim in `prsm/__init__.py`
-- [ ] **LOW**: Complete type hint coverage across all public APIs
-- [ ] **LOW**: Increase test coverage from 50% to 80% for security components
+**Outcomes:**
+- Canonical accessor decision finalized: [`get_ipfs_client()`](prsm/core/ipfs_client.py:1)
+- Helper path consistency fixed
+- Compatibility shims aligned to canonical accessor
+- Federation and data-layer consumer imports normalized
+
+#### Tranche 3: Consensus defect remediation ✅
+
+**Files updated:**
+- [`prsm/compute/federation/consensus.py`](prsm/compute/federation/consensus.py)
+- [`tests/unit/test_federation_consensus_p0.py`](tests/unit/test_federation_consensus_p0.py)
+
+**Outcomes:**
+- Duplicate constant and method definitions removed/merged
+- Missing `Decimal` import runtime hazard eliminated
+- Consensus smoke path validated through compile + targeted execution
+
+### Verification Summary (P0)
+
+Verified command runs and pass counts:
+
+- `pytest -q tests/security/test_transport_handshake_auth.py tests/security/test_transport_handshake_replay.py` → **7 passed**
+- `pytest -q tests/test_transport.py::TestWebSocketTransport::test_two_nodes_connect tests/test_transport.py::TestWebSocketTransport::test_self_connection_rejected tests/test_transport.py::TestWebSocketTransport::test_nonce_dedup` → **3 passed**
+- `pytest -q tests/unit/test_ipfs_accessor_contract.py` → **4 passed**
+- `pytest -q tests/test_ipfs_system_integration.py::test_ipfs_system_integration` → **1 passed**
+- `pytest tests/unit/test_federation_consensus_p0.py -q` → **4 passed**
+- `python3 -m py_compile prsm/compute/federation/consensus.py && pytest tests/unit/test_federation_consensus_p0.py -k p2p_network_consensus_smoke_path_uses_consensus_engine -q` → **compile success, 1 selected passed**
+
+### Implementation Progress Update — P1 Tranches Completed (2026-03-03)
+
+#### Tranche 1: Production federation handler completion ✅
+
+**Files updated:**
+- [`prsm/compute/federation/enhanced_p2p_network.py`](prsm/compute/federation/enhanced_p2p_network.py)
+- [`tests/unit/test_enhanced_p2p_network_p1_tranche1.py`](tests/unit/test_enhanced_p2p_network_p1_tranche1.py)
+
+**Outcomes:**
+- Implemented production handlers: `_handle_shard_retrieve`, `_handle_task_execute`, `_handle_peer_discovery`
+- Added request-style handler wiring and response dispatch with `request_id` propagation
+- Added signed-capability trust-gating baseline in DHT routing
+
+#### Tranche 2: Trust lifecycle and routing enforcement ✅
+
+**Files updated:**
+- [`prsm/compute/federation/enhanced_p2p_network.py`](prsm/compute/federation/enhanced_p2p_network.py)
+- [`tests/unit/test_enhanced_p2p_network_p1_tranche2.py`](tests/unit/test_enhanced_p2p_network_p1_tranche2.py)
+
+**Outcomes:**
+- Implemented trust lifecycle semantics:
+  - identity registration/update rules
+  - key rotation
+  - revocation and capability revocation
+  - stale cutoff policy
+  - structured trust decision logging
+- Enforced trust-gated routing candidate filtering consistently
+
+#### Tranche 3: Reconnect and partition reconciliation semantics ✅
+
+**Files updated:**
+- [`prsm/compute/federation/enhanced_p2p_network.py`](prsm/compute/federation/enhanced_p2p_network.py)
+- [`tests/unit/test_enhanced_p2p_network_p1_tranche3.py`](tests/unit/test_enhanced_p2p_network_p1_tranche3.py)
+
+**Outcomes:**
+- Added reconnect and partition reconciliation behavior:
+  - peer state transitions
+  - reconcile generation handling
+  - deterministic shard location reconciliation
+  - fail-closed in-flight task reconciliation
+- Added RPC idempotency via canonical operation id
+
+### Verification Summary (P1)
+
+Verified command runs and reported outcomes:
+
+- `pytest -q tests/unit/test_enhanced_p2p_network_p1_tranche1.py` → **8 passed**
+- `pytest -q tests/unit/test_enhanced_p2p_network_p1_tranche1.py tests/unit/test_enhanced_p2p_network_p1_tranche2.py` → **14 passed**
+- `pytest -q tests/unit/test_enhanced_p2p_network_p1_tranche3.py` → **4 passed**
+- Tranche 1 smoke test run (reported) → **passed**
+- Tranche 2 targeted smoke run (reported) → **passed**
+- Deterministic repeat reconciliation scenario (Tranche 3) → **passed twice**
+
+### Implementation Progress Update — P2 Tranches Completed (2026-03-03)
+
+#### Tranche 1: Collaboration observability instrumentation ✅
+
+**Files updated:**
+- [`prsm/node/transport.py`](prsm/node/transport.py)
+- [`prsm/node/gossip.py`](prsm/node/gossip.py)
+- [`prsm/node/agent_collaboration.py`](prsm/node/agent_collaboration.py)
+- [`prsm/collaboration/__init__.py`](prsm/collaboration/__init__.py)
+- [`tests/unit/test_collab_observability_tranche1.py`](tests/unit/test_collab_observability_tranche1.py)
+- [`tests/unit/test_collab_canonical_boundaries_tranche1.py`](tests/unit/test_collab_canonical_boundaries_tranche1.py)
+
+**Outcomes:**
+- Added additive observability hooks for handshake/auth taxonomy
+- Added gossip subtype publish, forward, and drop observability
+- Added collaboration transition and terminal outcome observability
+- Added dispatch success and failure reason instrumentation
+- Regression run passed including security and IPFS contract subsets
+
+#### Tranche 2: Canonical boundary compatibility fences ✅
+
+**Files updated:**
+- [`prsm/compute/federation/p2p_network.py`](prsm/compute/federation/p2p_network.py)
+- [`prsm/compute/federation/enhanced_p2p_network.py`](prsm/compute/federation/enhanced_p2p_network.py)
+- [`tests/unit/test_collab_canonical_boundaries_tranche2.py`](tests/unit/test_collab_canonical_boundaries_tranche2.py)
+
+**Outcomes:**
+- Added compatibility fences with warnings and redirect guidance for collaboration-like federation entrypoints
+- Preserved canonical path through collaboration manager bridge
+- Targeted tranche validation passed
+
+#### Tranche 3: CI guardrails for canonical collaboration boundaries ✅
+
+**Files updated:**
+- [`tests/unit/test_collab_canonical_boundaries_tranche2.py`](tests/unit/test_collab_canonical_boundaries_tranche2.py)
+- [`tests/unit/test_collab_canonical_ci_gates_tranche3.py`](tests/unit/test_collab_canonical_ci_gates_tranche3.py)
+
+**Outcomes:**
+- Extended canonical boundary coverage for compatibility fence semantics
+- Added CI-style gates for canonical collaboration suite presence and ownership
+- Added CI-style gates for compatibility fence coverage
+- Validation passed for tranche suite and Sprint 4 collaboration security tests
+
+### Verification Summary (P2)
+
+Verified command runs and reported outcomes:
+
+- `pytest -q tests/unit/test_collab_observability_tranche1.py tests/unit/test_collab_canonical_boundaries_tranche1.py` (from earlier tranche) and/or combined variants
+- `pytest -q tests/security/test_transport_handshake_auth.py tests/security/test_transport_handshake_replay.py tests/security/test_sprint4_collaboration.py tests/security/test_sprint4_collab_bridge.py tests/unit/test_ipfs_accessor_contract.py` → **61 passed**
+- `pytest -q tests/unit/test_collab_canonical_boundaries_tranche2.py tests/unit/test_collab_canonical_boundaries_tranche1.py tests/unit/test_collab_observability_tranche1.py` → **13 passed** (final rerun)
+- `pytest -q tests/unit/test_collab_observability_tranche1.py tests/unit/test_collab_canonical_boundaries_tranche1.py tests/unit/test_collab_canonical_boundaries_tranche2.py tests/unit/test_collab_canonical_ci_gates_tranche3.py` → **19 passed** (final run)
+- `pytest -q tests/security/test_sprint4_collaboration.py tests/security/test_sprint4_collab_bridge.py` → **50 passed**
+
+### What Still Needs to Be Done
+
+#### P0 — Stabilize a Works-on-Clone Collaboration Spine ✅ COMPLETED (2026-03-03)
+
+P0 scope items originally identified in this section are now implemented and verified in three completed tranches.
+
+**P0 Validation / Acceptance Checklist**
+- [x] Fresh clone boots and executes collaboration-critical startup path without import or symbol collisions
+- [x] IPFS helper and accessor paths pass integration tests for success, failure, and failover branches
+- [x] Unauthenticated or weakly authenticated handshake attempts are rejected in transport tests
+- [x] Consensus flow produces deterministic outcomes under repeated identical inputs
+
+**Residual risks carried forward after P0 completion:**
+- Capability announcements and routing trust are not yet cryptographically bound end-to-end
+- Multi-node reconnect and partition/rejoin convergence semantics still require full production validation
+- Observability remains limited for handshake-failure taxonomy, consensus branch outcomes, and failover-path usage
+
+#### P1 — Complete Production P2P Operational Semantics ✅ COMPLETED (2026-03-03)
+
+P1 scope items in this section were implemented across three completed tranches in [`prsm/compute/federation/enhanced_p2p_network.py`](prsm/compute/federation/enhanced_p2p_network.py), with tranche-specific tests and smoke validation.
+
+**P1 Validation / Acceptance Checklist**
+- [x] Production federation handlers implemented with request/response correlation via `request_id`
+- [x] Trust lifecycle and trust-gated routing candidate filtering enforced
+- [x] Reconnect and partition reconciliation semantics implemented with deterministic shard reconciliation
+- [x] RPC idempotency established via canonical operation id
+
+**Residual risks carried forward to P2 (from execution summaries):**
+- Capability trust-gating is in place as a baseline, but full end-to-end cryptographic binding and broader authenticity hardening remain follow-on work
+- Reconnect/partition reconciliation now has deterministic scenario validation, but broader multi-node production validation remains pending
+- Observability remains limited for trust-decision pathways, reconciliation branch outcomes, and failure taxonomy coverage
+
+#### P2 — Reduce Maintenance Cost and Improve Operability ✅ COMPLETED (2026-03-03)
+
+P2 scope was implemented across three completed tranches spanning observability instrumentation, canonical boundary compatibility fences, and CI gate enforcement in collaboration-focused test suites.
+
+**P2 Validation / Acceptance Checklist**
+- [x] Dashboards-alert precursor signals established via additive collaboration observability hooks and structured taxonomy coverage
+- [x] Canonical-vs-legacy boundaries are documented and reflected in tranche boundary tests
+- [x] Duplicate-path regressions are prevented by CI checks over designated canonical collaboration interfaces
+- [x] Test suites map to the selected production collaboration stack through canonical ownership and fence coverage gates
+
+**Residual follow-ons after P2 completion:**
+- Expand observability from test-level hooks to operational dashboard and alert wiring
+- Broaden canonical boundary checks from targeted suites to full CI matrix coverage
+- Continue multi-node reliability hardening for reconciliation and trust path telemetry
+
+### Suggested 30/60/90-Day Rollout (Concise)
+
+- **Next 30 days**: Operationalize P2 observability outputs into dashboards and actionable alerts for trust and collaboration pathways.
+- **Day 31-60**: Extend canonical boundary and compatibility fence enforcement from targeted suites to broader CI coverage.
+- **Day 61-90**: Advance post-P2 reliability hardening for multi-node reconciliation and trust-path telemetry depth.
 
 ---
 
@@ -1478,6 +1672,73 @@ Preparatory fields for future reputation scoring. Updated `to_dict()` to include
 - `from prsm.node.agent_collaboration import BidStrategy` — enum imports correctly
 - `from prsm.node.node import PRSMNode` — wiring imports correctly
 - Config round-trip: save with `bid_strategy="fastest"`, load, value preserved
+
+---
+
+## 23. P3 Operationalization Tranche 3 — Runbook + Canary Validation (2026-03-03)
+
+### Scope Completed
+
+This tranche finalized operationalization of collaboration observability delivered in prior P3 work by:
+
+1. Adding production runbook guidance for collaboration telemetry and alert handling.
+2. Running a focused canary suite across collaboration telemetry/alerts and critical collaboration security regressions.
+3. Recording exact command-level validation outcomes in architecture/progress documentation.
+
+### Files Updated
+
+- [`docs/PRODUCTION_OPERATIONS_MANUAL.md`](docs/PRODUCTION_OPERATIONS_MANUAL.md)
+- [`plans/prsm_architecture_analysis.md`](plans/prsm_architecture_analysis.md)
+
+### Runbook Content Added
+
+Added section: **"Collaboration Telemetry & Alert Handling Runbook (P3)"** to [`docs/PRODUCTION_OPERATIONS_MANUAL.md`](docs/PRODUCTION_OPERATIONS_MANUAL.md), including:
+
+- Key collaboration metrics with expected healthy ranges and investigation thresholds.
+- Alert meaning mapping tied to [`AlertManager.setup_collaboration_rules()`](prsm/core/monitoring/alerts.py:694).
+- Triage flow (exporter/rules verification, trust vs reliability path classification, reason taxonomy correlation, protocol-stall confirmation).
+- Rollback/safing steps (fail-closed peer isolation for trust anomalies, temporary collaboration dispatch safing, rollback to known-good deployment/rules, recovery gates).
+
+### Canary Validation — Exact Command and Outcome
+
+Executed focused canary suite:
+
+```bash
+pytest -q \
+  tests/unit/test_collab_operational_monitoring_p3_tranche1.py \
+  tests/unit/test_collab_operational_monitoring_p3_tranche2.py \
+  tests/security/test_transport_handshake_auth.py \
+  tests/security/test_transport_handshake_replay.py \
+  tests/security/test_sprint4_collaboration.py \
+  tests/security/test_sprint4_collab_bridge.py
+```
+
+Outcome:
+
+- **65 passed in 12.55s**
+- Exit code: **0**
+
+This canary set covers:
+
+- P3 observability + alert threshold behavior (`tranche1`, `tranche2` tests)
+- Transport handshake auth + replay protections
+- Sprint 4 collaboration protocol and collaboration-manager bridge regressions
+
+### P3 Progress Status Update
+
+#### P3 — Collaboration Operationalization and Monitoring Hardening ✅ COMPLETED (2026-03-03)
+
+| Tranche | Status | Outcome |
+|---|---|---|
+| Tranche 1 | ✅ Completed | Collaboration observability instrumentation and taxonomy hooks |
+| Tranche 2 | ✅ Completed | Telemetry export path wiring + collaboration alert threshold tuning |
+| Tranche 3 | ✅ Completed | Runbook operationalization + canary validation + architecture/progress capture |
+
+### Residual Follow-up Items
+
+- Promote canary command above into CI/nightly job for continuous regression guardrails.
+- Add Grafana panel links and dashboard JSON references to the runbook once dashboard IDs are finalized.
+- Continue multi-node production validation for reconciliation/trust-path telemetry under sustained load.
 
 ---
 
