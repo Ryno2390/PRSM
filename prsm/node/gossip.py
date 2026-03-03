@@ -8,6 +8,7 @@ and other network-wide announcements with deduplication and TTL.
 """
 
 import asyncio
+import collections
 import logging
 import time
 from dataclasses import dataclass, field
@@ -16,6 +17,19 @@ from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
 from prsm.node.transport import MSG_GOSSIP, P2PMessage, PeerConnection, WebSocketTransport
 
 logger = logging.getLogger(__name__)
+
+_BOUNDED_GOSSIP_LABELS = {
+    "heartbeat",
+    "agent_task_offer",
+    "agent_task_bid",
+    "agent_task_assign",
+    "agent_task_complete",
+    "agent_task_cancel",
+    "agent_review_request",
+    "agent_review_submit",
+    "agent_knowledge_query",
+    "agent_knowledge_response",
+}
 
 # Gossip subtypes for the compute/storage marketplace
 GOSSIP_JOB_OFFER = "job_offer"
@@ -72,8 +86,63 @@ class GossipProtocol:
         # Ledger for gossip persistence (set post-construction by node.py)
         self.ledger: Optional[Any] = None
 
+        # Additive observability counters (must never change gossip behavior)
+        self._telemetry: Dict[str, Any] = {
+            "publish_total": 0,
+            "publish_by_subtype": collections.Counter(),
+            "forward_total": 0,
+            "forward_by_subtype": collections.Counter(),
+            "drop_total": 0,
+            "drop_by_subtype": collections.Counter(),
+            "drop_by_reason": collections.Counter(),
+        }
+
         # Register as handler for all gossip messages
         self.transport.on_message(MSG_GOSSIP, self._handle_gossip)
+
+    @staticmethod
+    def _telemetry_subtype_label(subtype: str) -> str:
+        """Map raw subtypes to a bounded cardinality label set."""
+        if subtype in _BOUNDED_GOSSIP_LABELS:
+            return subtype
+        return "other"
+
+    def _record_publish(self, subtype: str) -> None:
+        try:
+            label = self._telemetry_subtype_label(subtype)
+            self._telemetry["publish_total"] += 1
+            self._telemetry["publish_by_subtype"][label] += 1
+        except Exception:
+            pass
+
+    def _record_forward(self, subtype: str) -> None:
+        try:
+            label = self._telemetry_subtype_label(subtype)
+            self._telemetry["forward_total"] += 1
+            self._telemetry["forward_by_subtype"][label] += 1
+        except Exception:
+            pass
+
+    def _record_drop(self, subtype: str, reason: str) -> None:
+        try:
+            label = self._telemetry_subtype_label(subtype)
+            self._telemetry["drop_total"] += 1
+            self._telemetry["drop_by_subtype"][label] += 1
+            self._telemetry["drop_by_reason"][reason] += 1
+        except Exception:
+            pass
+
+    def get_telemetry_snapshot(self) -> Dict[str, Any]:
+        """Return a stable copy of gossip telemetry counters for tests/debugging."""
+        return {
+            "publish_total": int(self._telemetry["publish_total"]),
+            "publish_by_subtype": dict(self._telemetry["publish_by_subtype"]),
+            "forward_total": int(self._telemetry["forward_total"]),
+            "forward_by_subtype": dict(self._telemetry["forward_by_subtype"]),
+            "drop_total": int(self._telemetry["drop_total"]),
+            "drop_by_subtype": dict(self._telemetry["drop_by_subtype"]),
+            "drop_by_reason": dict(self._telemetry["drop_by_reason"]),
+        }
 
     def subscribe(self, subtype: str, callback: GossipCallback) -> None:
         """Subscribe to a specific gossip subtype."""
@@ -84,6 +153,7 @@ class GossipProtocol:
 
         Returns number of peers the message was sent to.
         """
+        self._record_publish(subtype)
         msg = P2PMessage(
             msg_type=MSG_GOSSIP,
             sender_id=self.transport.identity.node_id,
@@ -117,6 +187,9 @@ class GossipProtocol:
         data = msg.payload.get("data", {})
         origin = msg.payload.get("origin", msg.sender_id)
 
+        if not subtype:
+            self._record_drop("", "missing_subtype")
+
         # Deliver to local subscribers
         callbacks = self._subscribers.get(subtype, [])
         for cb in callbacks:
@@ -140,6 +213,7 @@ class GossipProtocol:
 
         # Re-propagate with decremented TTL
         if msg.ttl > 1:
+            self._record_forward(subtype)
             fwd = P2PMessage(
                 msg_type=MSG_GOSSIP,
                 sender_id=self.transport.identity.node_id,
@@ -148,6 +222,8 @@ class GossipProtocol:
                 nonce=msg.nonce,  # preserve nonce for dedup
             )
             await self.transport.gossip(fwd, fanout=self.fanout)
+        else:
+            self._record_drop(subtype, "ttl_exhausted")
 
     async def get_catchup_messages(
         self,

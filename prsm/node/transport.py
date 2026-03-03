@@ -8,6 +8,9 @@ handshake protocol, and connection health monitoring.
 """
 
 import asyncio
+import base64
+import collections
+import hashlib
 import json
 import logging
 import time
@@ -22,6 +25,22 @@ import websockets.client
 from prsm.node.identity import NodeIdentity, verify_signature
 
 logger = logging.getLogger(__name__)
+
+_HANDSHAKE_REASON_TAXONOMY: Dict[str, str] = {
+    "Missing public key": "missing_public_key",
+    "Missing signature": "missing_signature",
+    "Sender identity mismatch": "sender_identity_mismatch",
+    "Invalid signature": "invalid_signature",
+    "Missing ack binding": "missing_ack_binding",
+    "Ack nonce mismatch": "ack_nonce_mismatch",
+    "Missing nonce": "missing_nonce",
+    "Replay nonce": "replay_nonce",
+    "Expected handshake": "unexpected_message_type",
+    "Self-connection rejected": "self_connection_rejected",
+    "Already connected": "already_connected",
+    "Timeout": "timeout",
+    "Invalid handshake ack type": "invalid_ack_type",
+}
 
 # Message type constants
 MSG_HANDSHAKE = "handshake"
@@ -147,6 +166,61 @@ class WebSocketTransport:
         self._peers_lock = asyncio.Lock()  # Protects self.peers dictionary
         self._nonces_lock = asyncio.Lock()  # Protects _seen_nonces and _nonce_timestamps
 
+        # Additive observability counters (must never alter protocol behavior)
+        self._telemetry: Dict[str, Any] = {
+            "handshake_success_total": 0,
+            "handshake_failure_total": 0,
+            "handshake_failure_reasons": collections.Counter(),
+            "dispatch_success_total": 0,
+            "dispatch_failure_total": 0,
+            "dispatch_failure_reasons": collections.Counter(),
+        }
+
+    @staticmethod
+    def _handshake_reason_label(reason: str) -> str:
+        """Map free-form internal reason strings to bounded telemetry labels."""
+        return _HANDSHAKE_REASON_TAXONOMY.get(reason, "other")
+
+    def _record_handshake_outcome(self, *, success: bool, reason: str = "") -> None:
+        """Best-effort telemetry sink for handshake validation outcomes."""
+        try:
+            if success:
+                self._telemetry["handshake_success_total"] += 1
+            else:
+                self._telemetry["handshake_failure_total"] += 1
+                label = self._handshake_reason_label(reason)
+                self._telemetry["handshake_failure_reasons"][label] += 1
+                logger.debug("telemetry_event=transport_handshake_auth outcome=failure reason=%s", label)
+        except Exception:
+            # Fail closed for telemetry internals only.
+            pass
+
+    def _record_dispatch_outcome(self, *, success: bool, reason: str = "") -> None:
+        """Best-effort telemetry sink for internal message dispatch outcomes."""
+        try:
+            if success:
+                self._telemetry["dispatch_success_total"] += 1
+            else:
+                self._telemetry["dispatch_failure_total"] += 1
+                self._telemetry["dispatch_failure_reasons"][reason or "handler_exception"] += 1
+                logger.debug(
+                    "telemetry_event=transport_dispatch outcome=failure reason=%s",
+                    reason or "handler_exception",
+                )
+        except Exception:
+            pass
+
+    def get_telemetry_snapshot(self) -> Dict[str, Any]:
+        """Return a stable copy of transport telemetry counters for tests/debugging."""
+        return {
+            "handshake_success_total": int(self._telemetry["handshake_success_total"]),
+            "handshake_failure_total": int(self._telemetry["handshake_failure_total"]),
+            "handshake_failure_reasons": dict(self._telemetry["handshake_failure_reasons"]),
+            "dispatch_success_total": int(self._telemetry["dispatch_success_total"]),
+            "dispatch_failure_total": int(self._telemetry["dispatch_failure_total"]),
+            "dispatch_failure_reasons": dict(self._telemetry["dispatch_failure_reasons"]),
+        }
+
     @property
     def peer_count(self) -> int:
         """Return the number of connected peers (thread-safe read)."""
@@ -182,8 +256,10 @@ class WebSocketTransport:
         for handler in handlers:
             try:
                 await handler(msg, peer)
+                self._record_dispatch_outcome(success=True)
             except Exception as e:
                 logger.error(f"Handler error for {msg.msg_type}: {e}")
+                self._record_dispatch_outcome(success=False, reason="handler_exception")
 
     # ── Server (incoming connections) ────────────────────────────
 
@@ -232,25 +308,29 @@ class WebSocketTransport:
             msg = P2PMessage.from_json(raw)
 
             if msg.msg_type != MSG_HANDSHAKE:
+                self._record_handshake_outcome(success=False, reason="Expected handshake")
                 await websocket.close(1002, "Expected handshake")
                 return
 
             peer_id = msg.sender_id
             if peer_id == self.identity.node_id:
+                self._record_handshake_outcome(success=False, reason="Self-connection rejected")
                 await websocket.close(1002, "Self-connection rejected")
+                return
+
+            ok, failure_reason = await self._validate_handshake_message(msg, require_ack_for=False)
+            if not ok:
+                await websocket.close(1002, failure_reason)
                 return
 
             # Thread-safe check and add for peer connection
             async with self._peers_lock:
                 if peer_id in self.peers:
+                    self._record_handshake_outcome(success=False, reason="Already connected")
                     await websocket.close(1002, "Already connected")
                     return
 
-            # Verify handshake signature
             pub_key_b64 = msg.payload.get("public_key", "")
-            if pub_key_b64 and not verify_signature(pub_key_b64, msg.to_bytes(), msg.signature):
-                await websocket.close(1002, "Invalid signature")
-                return
 
             peer = PeerConnection(
                 peer_id=peer_id,
@@ -266,6 +346,7 @@ class WebSocketTransport:
             async with self._peers_lock:
                 # Double-check after acquiring lock (race condition prevention)
                 if peer_id in self.peers:
+                    self._record_handshake_outcome(success=False, reason="Already connected")
                     await websocket.close(1002, "Already connected")
                     return
                 self.peers[peer_id] = peer
@@ -279,12 +360,15 @@ class WebSocketTransport:
                     "public_key": self.identity.public_key_b64,
                     "display_name": self.identity.display_name if hasattr(self.identity, 'display_name') else "",
                     "peer_count": peer_count,
+                    # Bind ack to this exact handshake to prevent replay/downgrade.
+                    "ack_for": msg.nonce,
                 },
             )
             ack.sign(self.identity)
             await websocket.send(ack.to_json())
 
             logger.info(f"Peer connected (inbound): {peer_id[:8]}... from {peer.address}")
+            self._record_handshake_outcome(success=True)
             await self._dispatch(
                 P2PMessage(msg_type="peer_connected", sender_id=peer_id, payload={"direction": "inbound"}),
                 peer,
@@ -295,6 +379,7 @@ class WebSocketTransport:
 
         except asyncio.TimeoutError:
             logger.debug("Incoming connection timed out during handshake")
+            self._record_handshake_outcome(success=False, reason="Timeout")
         except websockets.exceptions.ConnectionClosed:
             pass
         except Exception as e:
@@ -349,6 +434,17 @@ class WebSocketTransport:
             ack = P2PMessage.from_json(raw)
 
             if ack.msg_type != MSG_HANDSHAKE_ACK:
+                self._record_handshake_outcome(success=False, reason="Invalid handshake ack type")
+                await websocket.close()
+                return None
+
+            ok, failure_reason = await self._validate_handshake_message(
+                ack,
+                require_ack_for=True,
+                expected_ack_for=hs.nonce,
+            )
+            if not ok:
+                self._record_handshake_outcome(success=False, reason=failure_reason)
                 await websocket.close()
                 return None
 
@@ -369,6 +465,7 @@ class WebSocketTransport:
                 self.peers[peer.peer_id] = peer
 
             logger.info(f"Peer connected (outbound): {peer.peer_id[:8]}... at {address}")
+            self._record_handshake_outcome(success=True)
 
             # Start reading in background
             task = asyncio.create_task(self._read_loop(peer))
@@ -382,7 +479,66 @@ class WebSocketTransport:
 
         except Exception as e:
             logger.debug(f"Failed to connect to {address}: {e}")
+            self._record_handshake_outcome(success=False, reason="other")
             return None
+
+    @staticmethod
+    def _derive_node_id_from_public_key(public_key_b64: str) -> Optional[str]:
+        """Derive node_id from base64-encoded Ed25519 public key."""
+        try:
+            pub_bytes = base64.b64decode(public_key_b64)
+        except Exception:
+            return None
+        return hashlib.sha256(pub_bytes).hexdigest()[:32]
+
+    async def _validate_handshake_message(
+        self,
+        msg: P2PMessage,
+        *,
+        require_ack_for: bool,
+        expected_ack_for: Optional[str] = None,
+    ) -> tuple[bool, str]:
+        """Validate handshake/handshake-ack auth properties and reject weak/replay paths."""
+        public_key_b64 = msg.payload.get("public_key", "") if isinstance(msg.payload, dict) else ""
+        if not public_key_b64:
+            self._record_handshake_outcome(success=False, reason="Missing public key")
+            return False, "Missing public key"
+
+        if not msg.signature:
+            self._record_handshake_outcome(success=False, reason="Missing signature")
+            return False, "Missing signature"
+
+        expected_node_id = self._derive_node_id_from_public_key(public_key_b64)
+        if not expected_node_id or expected_node_id != msg.sender_id:
+            self._record_handshake_outcome(success=False, reason="Sender identity mismatch")
+            return False, "Sender identity mismatch"
+
+        if not verify_signature(public_key_b64, msg.to_bytes(), msg.signature):
+            self._record_handshake_outcome(success=False, reason="Invalid signature")
+            return False, "Invalid signature"
+
+        if require_ack_for:
+            ack_for = msg.payload.get("ack_for", "") if isinstance(msg.payload, dict) else ""
+            if not ack_for:
+                self._record_handshake_outcome(success=False, reason="Missing ack binding")
+                return False, "Missing ack binding"
+            if expected_ack_for is not None and ack_for != expected_ack_for:
+                self._record_handshake_outcome(success=False, reason="Ack nonce mismatch")
+                return False, "Ack nonce mismatch"
+
+        if not msg.nonce:
+            self._record_handshake_outcome(success=False, reason="Missing nonce")
+            return False, "Missing nonce"
+
+        # Replay protection applies to handshake and ack messages before promotion.
+        async with self._nonces_lock:
+            if msg.nonce in self._seen_nonces:
+                self._record_handshake_outcome(success=False, reason="Replay nonce")
+                return False, "Replay nonce"
+            self._seen_nonces.add(msg.nonce)
+            self._nonce_timestamps[msg.nonce] = time.time()
+
+        return True, ""
 
     # ── Messaging ────────────────────────────────────────────────
 

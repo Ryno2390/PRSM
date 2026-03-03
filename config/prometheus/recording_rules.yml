@@ -302,3 +302,55 @@ groups:
       ) * 100
     labels:
       component: "kubernetes"
+
+# =============================================================================
+# Collaboration Telemetry Recording Rules (P3 Tranche 2)
+# =============================================================================
+- name: prsm.collaboration.recording
+  interval: 30s
+  rules:
+  # Dashboard-ready ratio smoothing for handshake reliability
+  - record: prsm:collab_handshake_failure_rate_5m
+    expr: avg_over_time(collab_transport_handshake_failure_rate[5m])
+    labels:
+      component: "collaboration"
+      signal: "handshake"
+
+  # Replay nonce rejections are burst-sensitive; track max + sum views.
+  - record: prsm:collab_replay_nonce_delta_max_5m
+    expr: max_over_time(collab_transport_handshake_replay_nonce_delta[5m])
+    labels:
+      component: "collaboration"
+      signal: "replay"
+
+  - record: prsm:collab_replay_nonce_delta_sum_5m
+    expr: sum_over_time(collab_transport_handshake_replay_nonce_delta[5m])
+    labels:
+      component: "collaboration"
+      signal: "replay"
+
+  # Transport and manager dispatch failure rates for reliability dashboards.
+  - record: prsm:collab_transport_dispatch_failure_rate_5m
+    expr: avg_over_time(collab_transport_dispatch_failure_rate[5m])
+    labels:
+      component: "collaboration"
+      signal: "transport_dispatch"
+
+  - record: prsm:collab_manager_dispatch_failure_rate_5m
+    expr: avg_over_time(collab_manager_dispatch_failure_rate[5m])
+    labels:
+      component: "collaboration"
+      signal: "manager_dispatch"
+
+  # Stalled collaboration protocols as both absolute and ratio views.
+  - record: prsm:collab_protocol_stalled_total_max_5m
+    expr: max_over_time(collab_protocol_stalled_total[5m])
+    labels:
+      component: "collaboration"
+      signal: "stalled_total"
+
+  - record: prsm:collab_protocol_stalled_ratio_5m
+    expr: avg_over_time(collab_protocol_stalled_ratio[5m])
+    labels:
+      component: "collaboration"
+      signal: "stalled_ratio"

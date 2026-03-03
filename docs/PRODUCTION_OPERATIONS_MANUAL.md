@@ -184,6 +184,69 @@ kubectl rollout status deployment/prsm-api -n prsm-production
 - Configuration changes
 - Capacity planning alerts
 
+### Collaboration Telemetry & Alert Handling Runbook (P3)
+
+This runbook operationalizes collaboration telemetry exported by [`prsm/core/monitoring/metrics.py`](prsm/core/monitoring/metrics.py) and evaluated by collaboration alert rules in [`prsm/core/monitoring/alerts.py`](prsm/core/monitoring/alerts.py).
+
+#### Key Metrics and Expected Healthy Ranges
+
+| Metric | Healthy Range | Investigation Trigger |
+|---|---|---|
+| `collab_transport_handshake_failure_rate` | `< 0.10` sustained | `> 0.15` for 5m |
+| `collab_transport_handshake_replay_nonce_delta` | `0–1` per 2m window | `>= 5` in 2m |
+| `collab_transport_dispatch_failure_rate` | `< 0.05` sustained | `> 0.10` for 5m |
+| `collab_manager_dispatch_failure_rate` | `< 0.05` sustained | `> 0.08` for 5m |
+| `collab_protocol_stalled_total` | `0–1` | `> 2` for 5m |
+| `collab_protocol_stalled_ratio` | `< 0.15` | `> 0.25` for 5m |
+
+For dashboards and smoothing, use recording rules from [`config/prometheus/recording_rules.yml`](config/prometheus/recording_rules.yml):
+- `prsm:collab_handshake_failure_rate_5m`
+- `prsm:collab_replay_nonce_delta_max_5m`
+- `prsm:collab_transport_dispatch_failure_rate_5m`
+- `prsm:collab_manager_dispatch_failure_rate_5m`
+- `prsm:collab_protocol_stalled_ratio_5m`
+
+#### Alert Meanings
+
+Configured by [`AlertManager.setup_collaboration_rules()`](prsm/core/monitoring/alerts.py:694):
+
+- `collab_handshake_failure_rate_high` (warning): elevated handshake rejects; often trust/auth mismatch or malformed peer handshake behavior.
+- `collab_replay_nonce_spike` (critical): likely replay attempt burst or nonce state desynchronization.
+- `collab_dispatch_failure_rate_high` (warning): transport-level handler dispatch path instability.
+- `collab_manager_dispatch_failure_rate_high` (warning): collaboration manager dispatch path degraded.
+- `collab_stalled_protocols_detected` (warning): collaboration transitions not reaching terminal states.
+- `collab_stalled_protocol_ratio_high` (warning): broad degradation where many protocols stall.
+
+#### Triage Steps (15-minute first pass)
+
+1. **Validate exporter visibility**
+   - Confirm collaboration metrics are enabled in [`config/metrics-exporter.yml`](config/metrics-exporter.yml) (`collaboration: true`).
+   - Confirm recording rules are loaded from [`config/prometheus/recording_rules.yml`](config/prometheus/recording_rules.yml).
+2. **Classify alert type**
+   - Trust-path: handshake/replay metrics.
+   - Reliability-path: dispatch/stalled protocol metrics.
+3. **Correlate reason taxonomies**
+   - Handshake reason series: `collab_transport_handshake_failures_by_reason_total{reason=...}`
+   - Dispatch reason series: `collab_transport_dispatch_failures_by_reason_total{reason=...}`
+   - Gossip drop reasons: `collab_gossip_drop_by_reason_total{reason=...}`
+4. **Confirm impact on protocol flow**
+   - Check `collab_protocol_transition_total` vs `collab_protocol_terminal_outcome_total` divergence.
+   - Verify `collab_protocol_stalled_total` and `collab_protocol_stalled_ratio` trend direction over 15m.
+5. **Run focused canary suite**
+   - Execute targeted collaboration/trust regression tests listed in the P3 canary procedure before and after mitigation.
+
+#### Rollback / Safing Steps
+
+1. **Fail closed on suspicious trust traffic**
+   - Temporarily block or isolate peers with dominant replay/timestamp/auth failures while investigation proceeds.
+2. **Safing on collaboration protocol instability**
+   - Pause new collaboration session dispatch while allowing in-flight sessions to complete/cancel.
+3. **Rollback path (code/config regression suspected)**
+   - Roll back to last known-good deployment using standard rollback procedure in this document.
+   - Restore previous alert/recording rule config if a recent tuning change increased false positives.
+4. **Recovery gate**
+   - Keep safing in place until canary suite passes and key collaboration metrics return to healthy ranges for at least one full 5-minute rule window.
+
 ## Backup & Disaster Recovery
 
 ### Backup Schedule

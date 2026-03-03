@@ -690,6 +690,116 @@ class AlertManager:
             self.add_rule(rule)
         
         logger.info(f"Setup {len(self.rules)} default alert rules")
+
+    def setup_collaboration_rules(self) -> None:
+        """Setup collaboration/trust-path alert rules for P3 observability.
+
+        These rules are intentionally focused on bounded telemetry surfaces emitted
+        by the collaboration observability bridge metrics.
+        """
+        logger.info("Setting up collaboration/trust alert rules")
+
+        # Conservative production defaults:
+        # - avoid noise on transient spikes,
+        # - still escalate quickly on likely trust/reliability regressions.
+        handshake_failure_rate_warning = 0.15
+        replay_nonce_spike_critical = 5
+        transport_dispatch_failure_rate_warning = 0.10
+        manager_dispatch_failure_rate_warning = 0.08
+        stalled_protocol_total_warning = 2
+        stalled_protocol_ratio_warning = 0.25
+
+        rules = [
+            AlertRule(
+                name="collab_handshake_failure_rate_high",
+                description="Transport handshake failure rate is elevated",
+                condition=AlertCondition(
+                    metric_name="collab_transport_handshake_failure_rate",
+                    operator="gt",
+                    threshold=handshake_failure_rate_warning,
+                    duration=timedelta(minutes=5),
+                    aggregation="avg",
+                ),
+                severity=AlertSeverity.WARNING,
+                channels=["email", "slack"],
+                tags={"category": "trust", "component": "transport"},
+            ),
+            AlertRule(
+                name="collab_replay_nonce_spike",
+                description="Replay nonce rejection spike detected",
+                condition=AlertCondition(
+                    metric_name="collab_transport_handshake_replay_nonce_delta",
+                    operator="gte",
+                    threshold=replay_nonce_spike_critical,
+                    duration=timedelta(minutes=2),
+                    aggregation="max",
+                ),
+                severity=AlertSeverity.CRITICAL,
+                channels=["email", "slack", "webhook"],
+                tags={"category": "trust", "component": "transport"},
+            ),
+            AlertRule(
+                name="collab_dispatch_failure_rate_high",
+                description="Transport dispatch failure rate is elevated",
+                condition=AlertCondition(
+                    metric_name="collab_transport_dispatch_failure_rate",
+                    operator="gt",
+                    threshold=transport_dispatch_failure_rate_warning,
+                    duration=timedelta(minutes=5),
+                    aggregation="avg",
+                ),
+                severity=AlertSeverity.WARNING,
+                channels=["email", "slack"],
+                tags={"category": "collaboration", "component": "transport"},
+            ),
+            AlertRule(
+                name="collab_manager_dispatch_failure_rate_high",
+                description="Collaboration manager dispatch failure rate is elevated",
+                condition=AlertCondition(
+                    metric_name="collab_manager_dispatch_failure_rate",
+                    operator="gt",
+                    threshold=manager_dispatch_failure_rate_warning,
+                    duration=timedelta(minutes=5),
+                    aggregation="avg",
+                ),
+                severity=AlertSeverity.WARNING,
+                channels=["email", "slack"],
+                tags={"category": "collaboration", "component": "manager"},
+            ),
+            AlertRule(
+                name="collab_stalled_protocols_detected",
+                description="Collaboration protocols appear stalled (no terminal outcomes)",
+                condition=AlertCondition(
+                    metric_name="collab_protocol_stalled_total",
+                    operator="gt",
+                    threshold=stalled_protocol_total_warning,
+                    duration=timedelta(minutes=5),
+                    aggregation="max",
+                ),
+                severity=AlertSeverity.WARNING,
+                channels=["email", "slack"],
+                tags={"category": "collaboration", "component": "protocols"},
+            ),
+            AlertRule(
+                name="collab_stalled_protocol_ratio_high",
+                description="High ratio of collaboration protocols appears stalled",
+                condition=AlertCondition(
+                    metric_name="collab_protocol_stalled_ratio",
+                    operator="gt",
+                    threshold=stalled_protocol_ratio_warning,
+                    duration=timedelta(minutes=5),
+                    aggregation="avg",
+                ),
+                severity=AlertSeverity.WARNING,
+                channels=["email", "slack"],
+                tags={"category": "collaboration", "component": "protocols"},
+            ),
+        ]
+
+        for rule in rules:
+            self.add_rule(rule)
+
+        logger.info("Setup %d collaboration/trust alert rules", len(rules))
     
     def setup_default_channels(self) -> None:
         """Setup default alert channels"""

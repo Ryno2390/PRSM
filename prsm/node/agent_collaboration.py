@@ -40,6 +40,34 @@ from prsm.node.gossip import (
 
 logger = logging.getLogger(__name__)
 
+_COLLAB_TRANSITIONS = {
+    "task_posted",
+    "task_assigned",
+    "task_completed",
+    "task_cancelled",
+    "task_expired",
+    "review_requested",
+    "review_submitted",
+    "review_finalized",
+    "review_expired",
+    "query_posted",
+    "query_response_submitted",
+    "query_exhausted",
+    "query_expired",
+}
+
+_COLLAB_TERMINAL_REASONS = {
+    "task_completed",
+    "task_cancelled",
+    "task_expired",
+    "review_accepted",
+    "review_rejected",
+    "review_revision_requested",
+    "review_expired",
+    "query_exhausted",
+    "query_expired",
+}
+
 # Gossip subtypes for collaboration protocols
 GOSSIP_TASK_OFFER = "agent_task_offer"
 GOSSIP_TASK_BID = "agent_task_bid"
@@ -195,6 +223,47 @@ class AgentCollaboration:
         self._running = False
         self._tasks: List[asyncio.Task] = []
 
+        # Additive observability counters (must never alter collaboration behavior)
+        self._telemetry: Dict[str, Any] = {
+            "protocol_transition_total": 0,
+            "protocol_transition_by_type": collections.Counter(),
+            "terminal_outcome_total": 0,
+            "terminal_outcome_by_reason": collections.Counter(),
+        }
+
+    @staticmethod
+    def _bounded_transition_label(label: str) -> str:
+        return label if label in _COLLAB_TRANSITIONS else "other"
+
+    @staticmethod
+    def _bounded_terminal_reason(reason: str) -> str:
+        return reason if reason in _COLLAB_TERMINAL_REASONS else "other"
+
+    def _record_transition(self, transition: str) -> None:
+        try:
+            key = self._bounded_transition_label(transition)
+            self._telemetry["protocol_transition_total"] += 1
+            self._telemetry["protocol_transition_by_type"][key] += 1
+        except Exception:
+            pass
+
+    def _record_terminal_outcome(self, reason: str) -> None:
+        try:
+            key = self._bounded_terminal_reason(reason)
+            self._telemetry["terminal_outcome_total"] += 1
+            self._telemetry["terminal_outcome_by_reason"][key] += 1
+        except Exception:
+            pass
+
+    def get_telemetry_snapshot(self) -> Dict[str, Any]:
+        """Return a stable copy of collaboration telemetry counters for tests/debugging."""
+        return {
+            "protocol_transition_total": int(self._telemetry["protocol_transition_total"]),
+            "protocol_transition_by_type": dict(self._telemetry["protocol_transition_by_type"]),
+            "terminal_outcome_total": int(self._telemetry["terminal_outcome_total"]),
+            "terminal_outcome_by_reason": dict(self._telemetry["terminal_outcome_by_reason"]),
+        }
+
     def start(self) -> None:
         """Subscribe to collaboration gossip subtypes and start cleanup loop."""
         # Original subtypes
@@ -273,6 +342,7 @@ class AgentCollaboration:
             escrow_tx_id=escrow_tx_id,
         )
         self.tasks[task.task_id] = task
+        self._record_transition("task_posted")
         await self._persist_task(task)
 
         await self.gossip.publish(GOSSIP_TASK_OFFER, {
@@ -337,6 +407,7 @@ class AgentCollaboration:
             return False
         task.assigned_agent_id = agent_id
         task.status = TaskStatus.ASSIGNED
+        self._record_transition("task_assigned")
         await self._persist_task(task)
 
         # Broadcast assignment so all nodes (especially the assigned agent) know
@@ -357,6 +428,8 @@ class AgentCollaboration:
 
         task.result = result
         task.status = TaskStatus.COMPLETED
+        self._record_transition("task_completed")
+        self._record_terminal_outcome("task_completed")
         await self._persist_task(task)
 
         # Pay the assigned agent from escrow
@@ -389,6 +462,8 @@ class AgentCollaboration:
             return False
 
         task.status = TaskStatus.CANCELLED
+        self._record_transition("task_cancelled")
+        self._record_terminal_outcome("task_cancelled")
         await self._persist_task(task)
 
         # Refund escrow if we own this task
@@ -578,6 +653,7 @@ class AgentCollaboration:
             escrow_tx_id=escrow_tx_id,
         )
         self.reviews[review.review_id] = review
+        self._record_transition("review_requested")
         await self._persist_review(review)
 
         await self.gossip.publish(GOSSIP_REVIEW_REQUEST, {
@@ -617,6 +693,7 @@ class AgentCollaboration:
             "comments": comments,
             "timestamp": time.time(),
         })
+        self._record_transition("review_submitted")
         await self._persist_review(review)
 
         # Pay the reviewer from escrow if we own this review
@@ -632,10 +709,15 @@ class AgentCollaboration:
             accept_count = verdicts.count("accept")
             if accept_count > len(verdicts) / 2:
                 review.status = ReviewStatus.ACCEPTED
+                self._record_terminal_outcome("review_accepted")
             elif verdicts.count("reject") > len(verdicts) / 2:
                 review.status = ReviewStatus.REJECTED
+                self._record_terminal_outcome("review_rejected")
             else:
                 review.status = ReviewStatus.REVISION_REQUESTED
+                self._record_terminal_outcome("review_revision_requested")
+
+            self._record_transition("review_finalized")
 
             # Refund unused escrow (if fewer reviewers than max)
             if review.submitter_node_id == self.node_id:
@@ -696,6 +778,7 @@ class AgentCollaboration:
             escrow_tx_id=escrow_tx_id,
         )
         self.queries[query.query_id] = query
+        self._record_transition("query_posted")
         await self._persist_query(query)
 
         await self.gossip.publish(GOSSIP_KNOWLEDGE_QUERY, {
@@ -734,6 +817,7 @@ class AgentCollaboration:
             "content_cids": content_cids or [],
             "timestamp": time.time(),
         })
+        self._record_transition("query_response_submitted")
         await self._persist_query(query)
 
         # Pay the responder from escrow if we own this query
@@ -745,6 +829,8 @@ class AgentCollaboration:
 
         # If we've reached max responses, refund unused escrow and archive
         if len(query.responses) >= query.max_responses:
+            self._record_transition("query_exhausted")
+            self._record_terminal_outcome("query_exhausted")
             if query.requester_node_id == self.node_id:
                 unused_slots = query.max_responses - len(query.paid_responders)
                 if unused_slots > 0 and self.ledger:
@@ -1063,6 +1149,8 @@ class AgentCollaboration:
                 age = now - task.created_at
                 if age > task.deadline_seconds:
                     task.status = TaskStatus.CANCELLED
+                    self._record_transition("task_expired")
+                    self._record_terminal_outcome("task_expired")
                     if task.requester_node_id == self.node_id:
                         await self._refund_task_escrow(task)
                         await self.gossip.publish(GOSSIP_TASK_CANCEL, {
@@ -1079,6 +1167,8 @@ class AgentCollaboration:
                 age = now - review.created_at
                 if age > self.review_timeout:
                     review.status = ReviewStatus.REJECTED
+                    self._record_transition("review_expired")
+                    self._record_terminal_outcome("review_expired")
                     if review.submitter_node_id == self.node_id:
                         unused = review.max_reviewers - len(review.paid_reviewers)
                         if unused > 0:
@@ -1090,6 +1180,8 @@ class AgentCollaboration:
         for query in list(self.queries.values()):
             age = now - query.created_at
             if age > self.query_timeout and len(query.responses) < query.max_responses:
+                self._record_transition("query_expired")
+                self._record_terminal_outcome("query_expired")
                 if query.requester_node_id == self.node_id:
                     unused = query.max_responses - len(query.paid_responders)
                     if unused > 0:
