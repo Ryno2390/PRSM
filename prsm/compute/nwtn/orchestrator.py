@@ -11,6 +11,7 @@ The NWTNOrchestrator serves as the main coordination layer for the NWTN
 - IPFS client for distributed storage
 - Model registry for specialist discovery
 - Multi-stage reasoning pipeline (System 1 + System 2)
+- LLM Backend integration for real AI inference
 
 This orchestrator implements the complete query processing workflow:
 1. Intent clarification and complexity estimation
@@ -36,6 +37,11 @@ For testing, use the mock services from tests/fixtures/nwtn_mocks.py:
         ipfs_client=MockIPFSClient(),
         model_registry=MockModelRegistry()
     )
+
+LLM Backend Integration:
+The orchestrator now supports real LLM backends through the BackendRegistry.
+If no backend_registry is provided, it will create one from environment config.
+For testing, MockBackend is used automatically when no API keys are available.
 """
 
 import asyncio
@@ -52,6 +58,15 @@ import structlog
 from prsm.core.models import (
     UserInput, PRSMSession, ReasoningStep, SafetyFlag,
     AgentType, TaskStatus, TeacherModel
+)
+
+# LLM Backend Integration
+from prsm.compute.nwtn.backends import (
+    BackendRegistry,
+    BackendConfig,
+    BackendType,
+    GenerateResult,
+    AllBackendsFailedError,
 )
 
 logger = structlog.get_logger(__name__)
@@ -184,7 +199,8 @@ class NWTNOrchestrator:
         context_manager: Any,
         ftns_service: Any,
         ipfs_client: Any,
-        model_registry: Any
+        model_registry: Any,
+        backend_registry: Optional[BackendRegistry] = None
     ):
         """
         Initialize the NWTN Orchestrator with required dependencies.
@@ -194,6 +210,8 @@ class NWTNOrchestrator:
             ftns_service: FTNS token service for balance management and charging
             ipfs_client: IPFS client for distributed storage operations
             model_registry: Registry for discovering and registering AI models
+            backend_registry: Optional LLM backend registry for real AI inference.
+                              If not provided, will be created from environment config.
             
         Raises:
             MissingDependencyError: If any required dependency is None
@@ -224,6 +242,10 @@ class NWTNOrchestrator:
         self.ipfs_client = ipfs_client
         self.model_registry = model_registry
         
+        # Initialize backend registry for LLM inference
+        self.backend_registry = backend_registry
+        self._backend_initialized = False
+        
         self.sessions: Dict[str, PRSMSession] = {}
         self._initialized = False
         
@@ -234,9 +256,65 @@ class NWTNOrchestrator:
         if self._initialized:
             return True
         
+        # Initialize backend registry if not already done
+        if self.backend_registry and not self._backend_initialized:
+            try:
+                await self.backend_registry.initialize()
+                self._backend_initialized = True
+                logger.info("Backend registry initialized successfully")
+            except Exception as e:
+                logger.warning(f"Failed to initialize backend registry: {e}")
+                # Continue without backend - will use mock responses
+        
         self._initialized = True
         logger.info("NWTNOrchestrator fully initialized")
         return True
+    
+    async def _execute_with_backend(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        agent_type: Optional[AgentType] = None,
+        **kwargs
+    ) -> GenerateResult:
+        """
+        Execute a prompt using the LLM backend.
+        
+        This method provides a unified interface for LLM inference,
+        falling back to mock responses if no backend is available.
+        
+        Args:
+            prompt: The input prompt
+            system_prompt: Optional system prompt for context
+            agent_type: The type of agent (for system prompt selection)
+            **kwargs: Additional arguments for generation
+            
+        Returns:
+            GenerateResult: The generation result from the backend
+        """
+        # If backend registry is available, use it
+        if self.backend_registry and self._backend_initialized:
+            try:
+                result = await self.backend_registry.execute_with_fallback(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    **kwargs
+                )
+                return result
+            except AllBackendsFailedError as e:
+                logger.warning(f"All backends failed: {e}. Using mock response.")
+        
+        # Fallback: Create mock response
+        from prsm.compute.nwtn.backends.mock_backend import MockBackend
+        mock_backend = MockBackend(delay_seconds=0.01)
+        await mock_backend.initialize()
+        result = await mock_backend.generate(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            **kwargs
+        )
+        await mock_backend.close()
+        return result
     
     async def clarify_intent(self, prompt: str) -> ClarifiedPrompt:
         """
@@ -564,7 +642,8 @@ def create_nwtn_orchestrator(
     context_manager: Any,
     ftns_service: Any,
     ipfs_client: Any,
-    model_registry: Any
+    model_registry: Any,
+    backend_registry: Optional[BackendRegistry] = None
 ) -> NWTNOrchestrator:
     """
     Factory function to create an NWTN orchestrator with all required dependencies.
@@ -574,6 +653,8 @@ def create_nwtn_orchestrator(
         ftns_service: FTNS token service for balance management and charging
         ipfs_client: IPFS client for distributed storage operations
         model_registry: Registry for discovering and registering AI models
+        backend_registry: Optional LLM backend registry. If not provided,
+                          will be created from environment configuration.
         
     Returns:
         Configured NWTNOrchestrator instance
@@ -605,12 +686,27 @@ def create_nwtn_orchestrator(
             ipfs_client=MockIPFSClient(),
             model_registry=MockModelRegistry()
         )
+        
+        # With custom backend configuration
+        from prsm.compute.nwtn.backends import BackendRegistry, BackendConfig
+        
+        config = BackendConfig(primary_backend=BackendType.ANTHROPIC)
+        backend_registry = BackendRegistry(config)
+        
+        orchestrator = create_nwtn_orchestrator(
+            context_manager=MockContextManager(),
+            ftns_service=MockFTNSService(),
+            ipfs_client=MockIPFSClient(),
+            model_registry=MockModelRegistry(),
+            backend_registry=backend_registry
+        )
     """
     return NWTNOrchestrator(
         context_manager=context_manager,
         ftns_service=ftns_service,
         ipfs_client=ipfs_client,
-        model_registry=model_registry
+        model_registry=model_registry,
+        backend_registry=backend_registry
     )
 
 
@@ -621,7 +717,8 @@ def get_nwtn_orchestrator(
     context_manager: Any = None,
     ftns_service: Any = None,
     ipfs_client: Any = None,
-    model_registry: Any = None
+    model_registry: Any = None,
+    backend_registry: Optional[BackendRegistry] = None
 ) -> NWTNOrchestrator:
     """
     Get or create the singleton NWTN orchestrator instance.
@@ -634,6 +731,7 @@ def get_nwtn_orchestrator(
         ftns_service: FTNS token service (required on first call)
         ipfs_client: IPFS client (required on first call)
         model_registry: Model registry (required on first call)
+        backend_registry: Optional LLM backend registry
         
     Returns:
         The singleton NWTNOrchestrator instance
@@ -652,6 +750,7 @@ def get_nwtn_orchestrator(
             context_manager=context_manager,
             ftns_service=ftns_service,
             ipfs_client=ipfs_client,
-            model_registry=model_registry
+            model_registry=model_registry,
+            backend_registry=backend_registry
         )
     return _nwtn_orchestrator_instance

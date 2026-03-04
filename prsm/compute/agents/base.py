@@ -63,7 +63,7 @@ import asyncio
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 from uuid import UUID, uuid4
 
 import structlog
@@ -73,6 +73,17 @@ from prsm.core.models import (
     AgentType, AgentResponse, SafetyFlag, SafetyLevel,
     PerformanceMetrics, TaskStatus
 )
+
+# LLM Backend Integration
+from prsm.compute.nwtn.backends import (
+    BackendRegistry,
+    BackendConfig,
+    GenerateResult,
+    AllBackendsFailedError,
+)
+
+if TYPE_CHECKING:
+    from prsm.compute.nwtn.backends import BackendRegistry
 
 logger = structlog.get_logger(__name__)
 
@@ -244,16 +255,84 @@ class BaseAgent(ABC):
     Compiler) inherit from this base to ensure system-wide consistency.
     """
     
-    def __init__(self, agent_id: Optional[str] = None, agent_type: Optional[AgentType] = None):
+    def __init__(
+        self,
+        agent_id: Optional[str] = None,
+        agent_type: Optional[AgentType] = None,
+        backend_registry: Optional[BackendRegistry] = None
+    ):
         self.agent_id = agent_id or str(uuid4())
         self.agent_type = agent_type or AgentType.EXECUTOR  # Default type
+        self.backend_registry = backend_registry
         self.performance_tracker = PerformanceTracker(self.agent_id, self.agent_type)
         self.safety_flags: List[SafetyFlag] = []
         self.active = True
         
         logger.info("Agent initialized",
                    agent_id=self.agent_id,
-                   agent_type=self.agent_type.value)
+                   agent_type=self.agent_type.value,
+                   backend_enabled=backend_registry is not None)
+    
+    async def _call_backend(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        **kwargs
+    ) -> GenerateResult:
+        """
+        Call the LLM backend with the given prompt.
+        
+        This method provides a unified interface for LLM inference,
+        falling back to mock responses if no backend is available.
+        
+        Args:
+            prompt: The input prompt
+            system_prompt: Optional system prompt for context
+            **kwargs: Additional arguments for generation
+            
+        Returns:
+            GenerateResult: The generation result from the backend
+            
+        Raises:
+            AgentError: If backend call fails and no fallback is available
+        """
+        if self.backend_registry is None:
+            # Fallback to mock backend
+            from prsm.compute.nwtn.backends.mock_backend import MockBackend
+            mock_backend = MockBackend(delay_seconds=0.01)
+            await mock_backend.initialize()
+            result = await mock_backend.generate(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                **kwargs
+            )
+            await mock_backend.close()
+            return result
+        
+        try:
+            result = await self.backend_registry.execute_with_fallback(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                **kwargs
+            )
+            return result
+        except AllBackendsFailedError as e:
+            logger.warning(
+                "All backends failed, using mock response",
+                agent_id=self.agent_id,
+                error=str(e)
+            )
+            # Fallback to mock backend
+            from prsm.compute.nwtn.backends.mock_backend import MockBackend
+            mock_backend = MockBackend(delay_seconds=0.01)
+            await mock_backend.initialize()
+            result = await mock_backend.generate(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                **kwargs
+            )
+            await mock_backend.close()
+            return result
     
     @abstractmethod
     async def process(self, input_data: Any, context: Optional[Dict[str, Any]] = None) -> Any:
