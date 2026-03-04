@@ -244,6 +244,8 @@ export { FTNSManager, type FTNSManagerConfig } from './ftns';
 export { MarketplaceManager, type MarketplaceManagerConfig } from './marketplace';
 export { ToolsManager, type ToolsManagerConfig } from './tools';
 export { WebSocketManager, type WebSocketManagerConfig, WebSocketState, MessageType } from './websocket';
+export { StorageManager, type StorageManagerConfig } from './storage';
+export { GovernanceManager, type GovernanceManagerConfig } from './governance';
 
 // ============================================================================
 // TOKEN STORAGE EXPORTS
@@ -293,6 +295,40 @@ export type {
   StreamEvent,
   SafetyAlertEvent,
 } from './websocket';
+
+export type {
+  // Storage specific types
+  StorageUploadOptions,
+  StorageUploadResult,
+  StorageInfo,
+  StorageSearchRequest,
+  StorageSearchResult,
+  PinInfo,
+  StorageStats,
+} from './storage';
+
+export type {
+  // Governance specific types (not already in types.ts)
+  ProposalCreate,
+  Vote,
+  GovernanceStats,
+  DelegationInfo,
+  ProposalListOptions,
+} from './governance';
+
+// ============================================================================
+// STORAGE AND GOVERNANCE ENUM EXPORTS
+// ============================================================================
+
+export {
+  StorageStatus,
+  ContentType,
+} from './storage';
+
+export {
+  ProposalType,
+  VoteChoice,
+} from './governance';
 
 // ============================================================================
 // CONVENIENCE EXPORTS

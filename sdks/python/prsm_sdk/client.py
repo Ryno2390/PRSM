@@ -13,12 +13,15 @@ from .auth import AuthManager
 from .ftns import FTNSManager
 from .marketplace import ModelMarketplace
 from .tools import ToolExecutor
+from .compute import ComputeClient
+from .storage import StorageClient
+from .governance import GovernanceClient
+from .websocket import WebSocketClient
 from .models import (
     PRSMResponse, QueryRequest, FTNSBalance, ModelInfo, 
-    ToolSpec, SafetyStatus, WebSocketMessage
+    ToolSpec, SafetyStatus, WebSocketMessage, SafetyLevel
 )
 from .exceptions import PRSMError, NetworkError, AuthenticationError
-from .websocket import WebSocketClient
 
 logger = structlog.get_logger(__name__)
 
@@ -48,6 +51,17 @@ class PRSMClient:
         # Use marketplace models
         models = await client.marketplace.search_models("gpt")
         response = await client.query("Hello", model_id=models[0].id)
+        
+        # Submit compute jobs
+        job = await client.compute.submit_job("Analyze data", model="nwtn")
+        result = await client.compute.wait_for_completion(job.job_id)
+        
+        # Upload to IPFS storage
+        result = await client.storage.upload_bytes(b"file content")
+        
+        # Participate in governance
+        proposals = await client.governance.list_proposals()
+        await client.governance.vote(proposals[0].proposal_id, VoteChoice.YES)
     """
     
     def __init__(
@@ -76,11 +90,16 @@ class PRSMClient:
         self.max_retries = max_retries
         self.config = kwargs
         
-        # Initialize managers
+        # Initialize auth manager
         self.auth = AuthManager(api_key)
+        
+        # Initialize sub-clients
         self.ftns = FTNSManager(self)
         self.marketplace = ModelMarketplace(self)
         self.tools = ToolExecutor(self)
+        self.compute = ComputeClient(self)
+        self.storage = StorageClient(self)
+        self.governance = GovernanceClient(self)
         
         # HTTP session will be created on first use
         self._session: Optional[aiohttp.ClientSession] = None
@@ -105,6 +124,8 @@ class PRSMClient:
         endpoint: str, 
         json_data: Optional[Dict[str, Any]] = None,
         params: Optional[Dict[str, Any]] = None,
+        files: Optional[Dict[str, Any]] = None,
+        raw_response: bool = False,
         **kwargs
     ) -> Dict[str, Any]:
         """Make HTTP request with retry logic"""
@@ -113,18 +134,42 @@ class PRSMClient:
         
         for attempt in range(self.max_retries + 1):
             try:
-                async with session.request(
-                    method, url, json=json_data, params=params, **kwargs
-                ) as response:
+                # Handle file uploads
+                if files:
+                    # Use multipart form data
+                    data = aiohttp.FormData()
+                    for key, (filename, file_obj) in files.items():
+                        data.add_field(key, file_obj, filename=filename)
+                    if json_data:
+                        data.add_field('metadata', str(json_data))
                     
-                    if response.status == 401:
-                        raise AuthenticationError("Invalid API key or expired token")
-                    elif response.status >= 400:
-                        error_data = await response.json() if response.content_type == 'application/json' else {}
-                        raise PRSMError(f"API error {response.status}: {error_data.get('message', 'Unknown error')}")
-                    
-                    return await response.json()
-                    
+                    async with session.request(
+                        method, url, data=data, params=params, **kwargs
+                    ) as response:
+                        if response.status == 401:
+                            raise AuthenticationError("Invalid API key or expired token")
+                        elif response.status >= 400:
+                            error_data = await response.json() if response.content_type == 'application/json' else {}
+                            raise PRSMError(f"API error {response.status}: {error_data.get('message', 'Unknown error')}")
+                        
+                        if raw_response:
+                            return await response.read()
+                        return await response.json()
+                else:
+                    async with session.request(
+                        method, url, json=json_data, params=params, **kwargs
+                    ) as response:
+                        
+                        if response.status == 401:
+                            raise AuthenticationError("Invalid API key or expired token")
+                        elif response.status >= 400:
+                            error_data = await response.json() if response.content_type == 'application/json' else {}
+                            raise PRSMError(f"API error {response.status}: {error_data.get('message', 'Unknown error')}")
+                        
+                        if raw_response:
+                            return await response.read()
+                        return await response.json()
+                        
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 if attempt == self.max_retries:
                     raise NetworkError(f"Failed after {self.max_retries + 1} attempts: {e}")
@@ -250,6 +295,14 @@ class PRSMClient:
     async def health_check(self) -> Dict[str, Any]:
         """Check API health and connectivity"""
         return await self._request("GET", "/health")
+    
+    async def get_status(self) -> Dict[str, Any]:
+        """Get network status"""
+        return await self._request("GET", "/status")
+    
+    async def get_node_info(self) -> Dict[str, Any]:
+        """Get connected node information"""
+        return await self._request("GET", "/node/info")
     
     @asynccontextmanager
     async def session(self):
