@@ -1,0 +1,79 @@
+# Prometheus Configuration for PRSM Bootstrap Server
+# Scrapes metrics from bootstrap servers and related services
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'prsm-bootstrap'
+    region: 'us-east-1'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Rule files
+rule_files:
+  - /etc/prometheus/alert_rules.yml
+
+# Scrape configurations
+scrape_configs:
+  # ===================================
+  # PRSM Bootstrap Server
+  # ===================================
+  - job_name: 'prsm-bootstrap'
+    scrape_interval: 10s
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - 'bootstrap:8000'
+          - 'bootstrap-replica:8000'
+        labels:
+          service: 'bootstrap'
+          component: 'p2p'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '([^:]+):\d+'
+        replacement: '${1}'
+
+  # ===================================
+  # Prometheus Self-Monitoring
+  # ===================================
+  - job_name: 'prometheus'
+    scrape_interval: 10s
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # ===================================
+  # Node Exporter (System Metrics)
+  # ===================================
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # ===================================
+  # PostgreSQL Exporter
+  # ===================================
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    metrics_path: /metrics
+
+  # ===================================
+  # Redis Exporter
+  # ===================================
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+
+  # ===================================
+  # Nginx Exporter (if using load balancer)
+  # ===================================
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx-exporter:9113']
+    metrics_path: /metrics

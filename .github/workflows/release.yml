@@ -1,0 +1,373 @@
+# PRSM Release Pipeline
+# Automated PyPI publishing and release management
+
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.1.0)'
+        required: true
+        type: string
+      skip_pypi:
+        description: 'Skip PyPI publishing'
+        required: false
+        default: false
+        type: boolean
+      skip_docker:
+        description: 'Skip Docker publishing'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  PYTHON_VERSION: '3.11'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write  # Required for PyPI trusted publishing
+
+jobs:
+  # ===================================
+  # Validate Release
+  # ===================================
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
+            # Remove 'v' prefix if present
+            VERSION="${VERSION#v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          
+          # Validate version format
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "❌ Invalid version format: $VERSION"
+            echo "Expected format: X.Y.Z or X.Y.Z-prerelease"
+            exit 1
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+          echo "✅ Version: $VERSION"
+      
+      - name: Verify version in pyproject.toml
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PYPROJECT_VERSION=$(grep -oP '^version\s*=\s*"\K[^"]+' pyproject.toml)
+          
+          if [[ "$PYPROJECT_VERSION" != "$VERSION" ]]; then
+            echo "⚠️ Version mismatch!"
+            echo "  pyproject.toml: $PYPROJECT_VERSION"
+            echo "  Release version: $VERSION"
+            echo ""
+            echo "Please update pyproject.toml version before releasing."
+            exit 1
+          fi
+          echo "✅ Version matches pyproject.toml"
+      
+      - name: Verify CHANGELOG update
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if grep -q "## \[$VERSION\]" CHANGELOG.md; then
+            echo "✅ CHANGELOG.md contains entry for version $VERSION"
+          else
+            echo "⚠️ CHANGELOG.md may not contain entry for version $VERSION"
+            echo "Consider updating CHANGELOG.md before releasing."
+          fi
+
+  # ===================================
+  # Build Python Package
+  # ===================================
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    needs: validate
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+      
+      - name: Build package
+        run: |
+          python -m build
+          echo "✅ Package built successfully"
+      
+      - name: Check package
+        run: |
+          twine check dist/*
+          echo "✅ Package checks passed"
+      
+      - name: List package contents
+        run: |
+          echo "📦 Package contents:"
+          tar -tvf dist/*.tar.gz
+          echo ""
+          echo "📋 Wheel contents:"
+          unzip -l dist/*.whl
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 30
+
+  # ===================================
+  # Publish to PyPI
+  # ===================================
+  publish-pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [validate, build]
+    if: |
+      (github.event_name == 'release' && !github.event.release.prerelease) ||
+      (github.event_name == 'workflow_dispatch' && !inputs.skip_pypi)
+    
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
+      
+      - name: Verify publication
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          echo "✅ Package published to PyPI"
+          echo "📦 Install with: pip install prsm==$VERSION"
+
+  # ===================================
+  # Publish to TestPyPI (for pre-releases)
+  # ===================================
+  publish-testpypi:
+    name: Publish to TestPyPI
+    runs-on: ubuntu-latest
+    needs: [validate, build]
+    if: |
+      github.event_name == 'release' && github.event.release.prerelease
+    
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          password: ${{ secrets.TESTPYPI_API_TOKEN }}
+          skip-existing: true
+      
+      - name: Verify publication
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          echo "✅ Package published to TestPyPI"
+          echo "📦 Install with: pip install --index-url https://test.pypi.org/simple/ prsm==$VERSION"
+
+  # ===================================
+  # Build and Push Docker Image
+  # ===================================
+  publish-docker:
+    name: Publish Docker Image
+    runs-on: ubuntu-latest
+    needs: [validate, build]
+    if: |
+      (github.event_name == 'release' && !github.event.release.prerelease) ||
+      (github.event_name == 'workflow_dispatch' && !inputs.skip_docker)
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+        continue-on-error: true
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+            prsm/prsm
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.validate.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.validate.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.validate.outputs.version }},enable=${{ !startsWith(needs.validate.outputs.version, '0.') }}
+            type=raw,value=latest,enable=${{ !startsWith(needs.validate.outputs.version, '0.') || needs.validate.outputs.version == '0.1.0' }}
+      
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile.production
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ needs.validate.outputs.version }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+      
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.validate.outputs.version }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+        continue-on-error: true
+      
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+        continue-on-error: true
+
+  # ===================================
+  # Update Documentation
+  # ===================================
+  update-docs:
+    name: Update Documentation
+    runs-on: ubuntu-latest
+    needs: [validate, publish-pypi]
+    if: |
+      (github.event_name == 'release' && !github.event.release.prerelease)
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Install documentation dependencies
+        run: |
+          pip install sphinx sphinx-rtd-theme myst-parser sphinxcontrib-mermaid
+          pip install -e .
+      
+      - name: Build documentation
+        run: |
+          cd docs
+          make clean html
+      
+      - name: Upload documentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation
+          path: docs/_build/html/
+          retention-days: 30
+
+  # ===================================
+  # Create Release Summary
+  # ===================================
+  release-summary:
+    name: Release Summary
+    runs-on: ubuntu-latest
+    needs: [validate, build, publish-pypi, publish-docker]
+    if: always()
+    
+    steps:
+      - name: Generate release summary
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          TAG="${{ needs.validate.outputs.tag }}"
+          
+          echo "## 🚀 Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Version: $VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Step | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ${{ needs.build.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| PyPI | ${{ needs.publish-pypi.result == 'success' && '✅' || needs.publish-pypi.result == 'skipped' && '⏭️' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker | ${{ needs.publish-docker.result == 'success' && '✅' || needs.publish-docker.result == 'skipped' && '⏭️' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Installation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "pip install prsm==$VERSION" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ghcr.io/prsm-org/prsm:$VERSION" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
