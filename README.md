@@ -2,7 +2,7 @@
 
 PRSM is a peer-to-peer collaboration framework for neuro-symbolic AI research. It combines three pillars — a compute network for AI orchestration, decentralized storage for scientific artifacts, and a token economy (FTNS) that incentivizes contributions. The goal is to make scientific AI development open, reproducible, and collectively owned.
 
-**Current version: 0.1.0 (Alpha)**
+**Current version: 0.1.0 (Alpha)** | [www.prsm-network.com](https://www.prsm-network.com)
 
 ---
 
@@ -16,7 +16,105 @@ python3 -m venv .venv && source .venv/bin/activate
 
 # Install (includes all runtime dependencies)
 pip install -e .
+```
 
+### Start a PRSM node
+
+This is the primary way to use PRSM. A node runs locally, contributes compute resources, and connects to the P2P network when peers are available.
+
+```bash
+# Recommended: interactive setup wizard
+prsm node start --wizard
+
+# Or start with defaults (zero config required)
+prsm node start
+```
+
+The node starts a live dashboard showing your identity, FTNS balance, connected peers, compute activity, and more. A local management API is also available at `http://localhost:8000`.
+
+### Verify your node is running
+
+In a separate terminal:
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Full node status (identity, peers, balance, compute, storage)
+curl http://localhost:8000/status
+
+# Check your FTNS balance (new nodes receive a 100 FTNS welcome grant)
+curl http://localhost:8000/balance
+```
+
+---
+
+## Try It: Submit a Compute Job
+
+A single PRSM node can execute compute jobs locally. Try submitting a CPU benchmark:
+
+```bash
+# Submit a benchmark job (costs 1.0 FTNS from your balance)
+curl -s -X POST http://localhost:8000/compute/submit \
+  -H 'Content-Type: application/json' \
+  -d '{"job_type": "benchmark", "payload": {"iterations": 100000}, "ftns_budget": 1.0}'
+```
+
+The response includes a `job_id`. Check the result:
+
+```bash
+# Replace <job_id> with the job_id from the response above
+curl -s http://localhost:8000/compute/job/<job_id> | python3 -m json.tool
+```
+
+Once the job completes, verify your balance reflects the compute earnings:
+
+```bash
+curl -s http://localhost:8000/balance | python3 -m json.tool
+```
+
+You can also submit `inference` and `embedding` job types. See `POST /compute/submit` in the API reference below.
+
+---
+
+## Connect Two Nodes Locally
+
+To test P2P features (peer discovery, cross-node compute, gossip), run two nodes on different ports:
+
+```bash
+# Terminal 1: Start the first node
+prsm node start --p2p-port 9001 --api-port 8001 --no-dashboard
+
+# Terminal 2: Start the second node, bootstrapping to the first
+prsm node start --p2p-port 9002 --api-port 8002 --bootstrap 127.0.0.1:9001 --no-dashboard
+```
+
+Verify they connected:
+
+```bash
+# Check peers on node 1
+curl -s http://localhost:8001/peers | python3 -m json.tool
+
+# Check peers on node 2
+curl -s http://localhost:8002/peers | python3 -m json.tool
+```
+
+Both should show `connected_count: 1`. Now submit a compute job on node 2 — node 1 will pick it up and execute it:
+
+```bash
+# Submit job from node 2
+curl -s -X POST http://localhost:8002/compute/submit \
+  -H 'Content-Type: application/json' \
+  -d '{"job_type": "benchmark", "payload": {"iterations": 50000}, "ftns_budget": 1.0}'
+```
+
+---
+
+## Running the PRSM API Server
+
+For application development against PRSM's platform APIs (separate from the P2P node), use:
+
+```bash
 # Configure (optional — works with defaults)
 cp .env.example .env   # edit if needed
 
@@ -27,30 +125,11 @@ prsm serve
 curl http://localhost:8000/health
 ```
 
-The server starts on `localhost:8000` by default. The health endpoint returns component status — external services (Redis, PostgreSQL, IPFS) show as "unhealthy" until configured, but the core API is fully functional. See `prsm --help` for all CLI options.
+The server starts on `localhost:8000`. External services (Redis, PostgreSQL, IPFS) show as "unhealthy" until configured, but the core API is fully functional. See `prsm --help` for all CLI options.
 
 ---
 
-## Running a PRSM Node
-
-Any user can join the PRSM network by running a node. Nodes contribute compute, storage, or both, and earn FTNS tokens for their contributions.
-
-```bash
-# Interactive setup wizard (recommended for first run)
-prsm node start --wizard
-
-# Or start with defaults
-prsm node start
-
-# Start with a specific bootstrap node
-prsm node start --bootstrap 203.0.113.10:9001
-
-# Check node identity and config
-prsm node info
-
-# List connected peers (while node is running)
-prsm node peers
-```
+## Node Configuration
 
 ### What the wizard configures
 
@@ -61,6 +140,8 @@ prsm node peers
 5. **Ports** — P2P (default 9001) and management API (default 8000)
 6. **Bootstrap** — address of an existing node to join the network
 
+Configuration is saved to `~/.prsm/node_config.json`. You can edit this file directly or re-run the wizard.
+
 ### Node management API
 
 While a node is running, a local management API is available:
@@ -68,12 +149,29 @@ While a node is running, a local management API is available:
 | Endpoint | Description |
 |---|---|
 | `GET /status` | Node status, peers, balance, capabilities |
+| `GET /health` | Health check |
 | `GET /peers` | Connected and known peers |
 | `GET /balance` | FTNS balance and recent transactions |
-| `POST /compute/submit` | Submit a compute job to the network |
+| `POST /compute/submit` | Submit a compute job (`benchmark`, `inference`, `embedding`) |
+| `GET /compute/job/{id}` | Check job status and result |
+| `GET /compute/stats` | Compute provider statistics |
 | `POST /content/upload` | Upload content with provenance tracking |
+| `GET /content/search?q=` | Search the content index |
 | `GET /transactions` | Transaction history |
-| `GET /health` | Health check |
+| `GET /agents` | List known agents |
+| `GET /storage/stats` | Storage provider statistics |
+| `POST /ledger/transfer` | Transfer FTNS to another wallet |
+
+### CLI commands
+
+```bash
+prsm node start              # Start with defaults or saved config
+prsm node start --wizard     # Interactive setup wizard
+prsm node start --bootstrap HOST:PORT  # Join via a specific peer
+prsm node start --no-dashboard         # Static output (no live TUI)
+prsm node info               # Show node identity and config
+prsm node peers              # List connected peers (requires running node)
+```
 
 ### Optional: IPFS for storage
 
@@ -86,11 +184,15 @@ ipfs daemon &
 prsm node start   # storage features auto-detected
 ```
 
+### Network and bootstrap
+
+PRSM nodes discover each other through bootstrap peers. The default configuration points to `wss://bootstrap.prsm-network.com`. If the bootstrap server is unavailable, the node starts in **local mode** — fully functional for local compute, but peer discovery is deferred until inbound connections arrive or bootstrap recovers. See `docs/SECURE_SETUP.md` for bootstrap configuration details.
+
 ---
 
 ## Architecture Overview
 
-PRSM is organized around three pillars:
+PRSM is organized around four pillars:
 
 ### 1. Compute Network (NWTN)
 The Neural Web for Transformation Networking orchestrates multi-agent AI pipelines. It includes state-space models for efficient inference, Monte Carlo tree search for hypothesis exploration, and a 5-agent pipeline (Architect, Primer, Solver, Verifier, Scribe).
@@ -118,20 +220,18 @@ WebSocket-based peer-to-peer connectivity with gossip protocol, peer discovery, 
 
 | Component | Status | Notes |
 |---|---|---|
-| FastAPI server + health endpoint | **Working** | `prsm serve` starts the API |
-| CLI (`prsm` command) | **Working** | `serve`, `status`, `init`, `node` commands |
+| P2P node (`prsm node start`) | **Working** | Single-node and multi-node |
+| CLI (`prsm` command) | **Working** | `serve`, `node start`, `node info`, `node peers` |
+| Local compute (single-node) | **Working** | Benchmark, inference, embedding jobs |
+| FastAPI server (`prsm serve`) | **Working** | Platform API for app development |
 | NWTN 5-agent pipeline | **Working** | Orchestration with mocked LLM backends |
-| FTNS accounting ledger | **Working** | Microsecond-precision transactions |
-| Deterministic SSM inference | **Working** | Reproducible results across instances |
-| MCTS search reasoning | **Working** | Hypothesis tree exploration |
-| Teacher model framework | **Working** | Create and train specialized models |
-| Test suite | **Working** | 920+ tests passing |
+| FTNS accounting ledger | **Working** | SQLite-backed, zero config, DAG-based |
 | P2P networking | **Working** | WebSocket transport with gossip protocol |
 | Node identity | **Working** | Ed25519 keypair, persisted to `~/.prsm/` |
-| Local FTNS ledger | **Working** | SQLite-backed, zero config |
 | Compute marketplace | **Working** | Job offers, acceptance, execution, payment |
 | IPFS storage integration | **Working** | Requires local IPFS daemon (Kubo) |
-| Blockchain consensus | **In Development** | Local validation only |
+| Test suite | **Working** | 920+ tests passing |
+| Bootstrap network | **Alpha** | `wss://bootstrap.prsm-network.com` |
 | Production deployment (K8s) | **Planned** | Configs exist, not production-tested |
 
 ---
@@ -214,6 +314,8 @@ scripts/                    # Utility scripts
 3. Run the test suite: `pytest`
 4. Submit a pull request
 
+See `docs/CONTRIBUTOR_ONBOARDING.md` for detailed contributor guides at all experience levels.
+
 ---
 
 ## For Investors
@@ -225,4 +327,4 @@ See the `docs/business/` directory for:
 
 ---
 
-**License:** MIT | **Python:** 3.11 - 3.13 (3.14 supported but some optional C extensions may not build) | **Repo:** [github.com/Ryno2390/PRSM](https://github.com/Ryno2390/PRSM)
+**License:** MIT | **Python:** 3.11+ | **Website:** [www.prsm-network.com](https://www.prsm-network.com) | **Repo:** [github.com/Ryno2390/PRSM](https://github.com/Ryno2390/PRSM)

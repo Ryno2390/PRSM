@@ -1268,15 +1268,26 @@ class TestDAGLedgerAdapter:
         assert isinstance(ids, list)
 
     @pytest.mark.asyncio
-    async def test_stub_methods(self, adapter):
-        """Test stub methods that return defaults."""
+    async def test_agent_allowance_methods(self, adapter):
+        """Test agent allowance methods on DAGLedgerAdapter."""
+        # Create a principal wallet with balance for agent debit
+        await adapter.credit("p1", 100.0, TransactionType.WELCOME_GRANT)
+
         await adapter.grant_agent_allowance("p1", "a1", 10.0)
         result = await adapter.get_agent_allowance("a1")
-        assert result is None
-        result = await adapter.agent_debit("a1", 5.0, TransactionType.TRANSFER)
-        assert result is None
-        result = await adapter.revoke_agent_allowance("p1", "a1")
-        assert result is False
+        assert result is not None
+        assert result["allowance"] == 10.0
+        assert result["remaining"] == 10.0
+
+        debit_tx = await adapter.agent_debit("a1", 5.0, TransactionType.TRANSFER)
+        assert debit_tx is not None
+        updated = await adapter.get_agent_allowance("a1")
+        assert updated["spent"] == 5.0
+
+        revoked = await adapter.revoke_agent_allowance("p1", "a1")
+        assert revoked is True
+        after_revoke = await adapter.get_agent_allowance("a1")
+        assert after_revoke["revoked"] is True
 
     def test_get_stats_sync(self, adapter):
         """Test the sync get_stats wrapper.
