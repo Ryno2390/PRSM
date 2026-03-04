@@ -42,6 +42,17 @@ import aiohttp
 import aiofiles
 from prsm.core.config import get_settings
 from prsm.core.redis_client import get_model_cache
+from prsm.core.ipfs_sharding import (
+    ContentSharder,
+    ShardingConfig,
+    ShardManifest,
+    ShardInfo,
+    ShardIndex,
+    ShardingError,
+    ShardVerificationError,
+    ShardMissingError,
+    ManifestError
+)
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -805,7 +816,7 @@ class IPFSClient:
     and automatic failover with comprehensive error handling and monitoring
     """
     
-    def __init__(self, config: Optional[IPFSConfig] = None):
+    def __init__(self, config: Optional[IPFSConfig] = None, sharding_config: Optional[ShardingConfig] = None):
         default_api_url = "http://localhost:5001"
         if getattr(settings, "ipfs_host", None) and getattr(settings, "ipfs_port", None):
             default_api_url = f"http://{settings.ipfs_host}:{settings.ipfs_port}"
@@ -824,6 +835,10 @@ class IPFSClient:
         # Content cache for frequently accessed items
         self.content_cache_enabled = True
         self.max_cache_size = 100 * 1024 * 1024  # 100MB cache
+        
+        # Sharding support for large files
+        self.sharding_config = sharding_config or ShardingConfig()
+        self._sharder: Optional[ContentSharder] = None
     
     async def initialize(self):
         """
@@ -1195,8 +1210,310 @@ class IPFSClient:
         self.gateway_nodes.clear()
         self.primary_node = None
         self.connected = False
+        self._sharder = None  # Reset sharder on cleanup
         
         logger.info("IPFS client cleanup completed")
+    
+    # =========================================================================
+    # Sharding Support Methods
+    # =========================================================================
+    
+    @property
+    def sharder(self) -> ContentSharder:
+        """Get or create the content sharder."""
+        if self._sharder is None:
+            self._sharder = ContentSharder(self, self.sharding_config)
+        return self._sharder
+    
+    async def upload_content_sharded(
+        self,
+        content: bytes,
+        metadata: Optional[Dict[str, Any]] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> Tuple[ShardManifest, str]:
+        """
+        Upload content with automatic sharding for large files.
+        
+        This method splits large content into shards, uploads them in parallel,
+        and creates a manifest for tracking.
+        
+        Args:
+            content: The content bytes to upload
+            metadata: Optional metadata to include in the manifest
+            progress_callback: Optional callback(completed, total) for progress
+            
+        Returns:
+            Tuple of (ShardManifest, manifest_cid)
+            
+        Raises:
+            ShardingError: If sharding or upload fails
+        """
+        return await self.sharder.shard_content(
+            content=content,
+            metadata=metadata,
+            progress_callback=progress_callback
+        )
+    
+    async def download_content_sharded(
+        self,
+        manifest_cid: str,
+        verify: bool = True,
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> bytes:
+        """
+        Download and reassemble sharded content.
+        
+        This method downloads the manifest, retrieves all shards in parallel,
+        and reassembles the original content.
+        
+        Args:
+            manifest_cid: CID of the shard manifest
+            verify: Whether to verify shard hashes
+            progress_callback: Optional callback(completed, total) for progress
+            
+        Returns:
+            The reassembled content bytes
+            
+        Raises:
+            ManifestError: If manifest cannot be loaded
+            ShardMissingError: If shards cannot be downloaded
+            ShardVerificationError: If hash verification fails
+        """
+        manifest = await self.sharder.get_shard_manifest(manifest_cid)
+        return await self.sharder.reassemble_content(
+            manifest=manifest,
+            verify=verify,
+            progress_callback=progress_callback
+        )
+    
+    def should_shard(self, content_size: int) -> bool:
+        """
+        Determine if content should be sharded based on size.
+        
+        Args:
+            content_size: Size of the content in bytes
+            
+        Returns:
+            True if content exceeds the sharding threshold
+        """
+        return self.sharding_config.auto_shard_threshold > 0 and \
+               content_size > self.sharding_config.auto_shard_threshold
+    
+    async def upload_content_auto(
+        self,
+        content: Union[bytes, str, Path],
+        filename: Optional[str] = None,
+        pin: bool = True,
+        progress_callback: Optional[Callable[..., None]] = None,
+        force_shard: bool = False
+    ) -> IPFSResult:
+        """
+        Upload content with automatic sharding decision.
+        
+        This method automatically decides whether to shard based on content size.
+        For large files, it uses sharding. For smaller files, it uses regular upload.
+        
+        Args:
+            content: Content to upload (bytes, string, or file path)
+            filename: Optional filename
+            pin: Whether to pin the content
+            progress_callback: Optional progress callback
+            force_shard: Force sharding regardless of size
+            
+        Returns:
+            IPFSResult with CID and metadata (includes sharding info if sharded)
+        """
+        start_time = time.time()
+        
+        try:
+            # Convert content to bytes for size check
+            if isinstance(content, Path):
+                content_size = content.stat().st_size
+            elif isinstance(content, str):
+                content_bytes = content.encode('utf-8')
+                content_size = len(content_bytes)
+                content = content_bytes
+            else:
+                content_size = len(content)
+            
+            # Decide whether to shard
+            should_use_sharding = force_shard or self.should_shard(content_size)
+            
+            if should_use_sharding and isinstance(content, bytes):
+                logger.info("Using sharding for large content upload",
+                           content_size=content_size,
+                           threshold=self.sharding_config.auto_shard_threshold)
+                
+                # Use sharding
+                def shard_progress(completed: int, total: int):
+                    if progress_callback:
+                        progress_callback(completed, total)
+                
+                manifest, manifest_cid = await self.upload_content_sharded(
+                    content=content,
+                    progress_callback=shard_progress
+                )
+                
+                execution_time = time.time() - start_time
+                
+                return IPFSResult(
+                    success=True,
+                    cid=manifest_cid,  # Return manifest CID as the primary CID
+                    size=content_size,
+                    execution_time=execution_time,
+                    connection_type=IPFSConnectionType.HTTP_API,
+                    metadata={
+                        "sharded": True,
+                        "manifest_cid": manifest_cid,
+                        "total_shards": manifest.total_shards,
+                        "original_size": content_size,
+                        "original_hash": manifest.original_hash,
+                        "shard_size": manifest.shard_size
+                    }
+                )
+            else:
+                # Use regular upload
+                logger.debug("Using regular upload",
+                           content_size=content_size)
+                
+                # Convert progress callback for regular upload
+                def regular_progress(progress: IPFSUploadProgress):
+                    if progress_callback:
+                        progress_callback(progress.bytes_uploaded, progress.total_bytes)
+                
+                result = await self.upload_content(
+                    content=content,
+                    filename=filename,
+                    pin=pin,
+                    progress_callback=regular_progress if progress_callback else None
+                )
+                
+                if result.success:
+                    result.metadata = result.metadata or {}
+                    result.metadata["sharded"] = False
+                
+                return result
+                
+        except ShardingError as e:
+            execution_time = time.time() - start_time
+            logger.error("Sharding upload failed", error=str(e))
+            return IPFSResult(
+                success=False,
+                error=f"Sharding failed: {str(e)}",
+                execution_time=execution_time
+            )
+        except Exception as e:
+            execution_time = time.time() - start_time
+            logger.error("Auto upload failed", error=str(e))
+            return IPFSResult(
+                success=False,
+                error=str(e),
+                execution_time=execution_time
+            )
+    
+    async def download_content_auto(
+        self,
+        cid: str,
+        output_path: Optional[Path] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        verify_integrity: bool = True
+    ) -> IPFSResult:
+        """
+        Download content with automatic sharding detection.
+        
+        This method attempts to detect if the CID refers to a shard manifest
+        and handles both regular and sharded content transparently.
+        
+        Args:
+            cid: Content identifier (regular CID or manifest CID)
+            output_path: Optional path to save content
+            progress_callback: Optional progress callback
+            verify_integrity: Whether to verify content integrity
+            
+        Returns:
+            IPFSResult with content or file path
+        """
+        start_time = time.time()
+        
+        try:
+            # First, try to load as a shard manifest
+            try:
+                manifest = await self.sharder.get_shard_manifest(cid)
+                
+                # It's a manifest - download and reassemble
+                logger.info("Detected shard manifest, reassembling content",
+                           manifest_cid=cid,
+                           total_shards=manifest.total_shards)
+                
+                content = await self.sharder.reassemble_content(
+                    manifest=manifest,
+                    verify=verify_integrity,
+                    progress_callback=progress_callback
+                )
+                
+                # Save to file if requested
+                if output_path:
+                    async with aiofiles.open(output_path, 'wb') as f:
+                        await f.write(content)
+                    
+                    execution_time = time.time() - start_time
+                    return IPFSResult(
+                        success=True,
+                        cid=cid,
+                        size=len(content),
+                        execution_time=execution_time,
+                        connection_type=IPFSConnectionType.HTTP_API,
+                        metadata={
+                            "sharded": True,
+                            "output_path": str(output_path),
+                            "total_shards": manifest.total_shards
+                        }
+                    )
+                else:
+                    execution_time = time.time() - start_time
+                    return IPFSResult(
+                        success=True,
+                        cid=cid,
+                        size=len(content),
+                        execution_time=execution_time,
+                        connection_type=IPFSConnectionType.HTTP_API,
+                        metadata={
+                            "sharded": True,
+                            "content": content,
+                            "total_shards": manifest.total_shards
+                        }
+                    )
+                    
+            except (ManifestError, json.JSONDecodeError, KeyError):
+                # Not a manifest, try regular download
+                pass
+            
+            # Regular download
+            result = await self.download_content(
+                cid=cid,
+                output_path=output_path,
+                progress_callback=progress_callback,
+                verify_integrity=verify_integrity
+            )
+            
+            if result.success:
+                result.metadata = result.metadata or {}
+                result.metadata["sharded"] = False
+            
+            return result
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            logger.error("Auto download failed", cid=cid, error=str(e))
+            return IPFSResult(
+                success=False,
+                error=str(e),
+                execution_time=execution_time
+            )
+    
+    def get_shard_index(self) -> 'ShardIndex':
+        """Get the shard index for tracking sharded content."""
+        return self.sharder.get_index()
 
 
 # === Global IPFS Client ===
