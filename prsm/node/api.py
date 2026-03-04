@@ -4,11 +4,32 @@ Node Management API
 
 FastAPI endpoints for monitoring and controlling a running PRSM node.
 This is the node-local API (not the main PRSM platform API).
+
+Security Features (Phase 4.2):
+- JWT authentication on protected endpoints
+- Rate limiting with configurable limits
+- WebSocket status updates
+- OpenAPI specification
 """
 
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, HTTPException
+from datetime import datetime, timezone
+
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Request
+from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, Field
+
+from prsm.node.api_hardening import (
+    APIHardening,
+    APISecurityConfig,
+    StatusWebSocket,
+    RateLimitConfig,
+    RateLimiter,
+    generate_openapi_schema,
+    get_current_user,
+    require_auth,
+    websocket_status_endpoint,
+)
 
 
 class JobSubmission(BaseModel):
@@ -33,19 +54,82 @@ class ContentUploadRequest(BaseModel):
     )
 
 
-def create_api_app(node: Any) -> FastAPI:
-    """Create the node management FastAPI app with a reference to the running node."""
+def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
+    """
+    Create the node management FastAPI app with a reference to the running node.
+    
+    Args:
+        node: The PRSM node instance
+        enable_security: Whether to enable security hardening (default: True)
+    
+    Returns:
+        FastAPI application with security hardening applied
+    """
 
     app = FastAPI(
         title="PRSM Node API",
         description="Management API for a PRSM network node",
         version="0.1.0",
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
     )
 
-    @app.get("/status")
+    # Initialize security hardening
+    api_hardening: Optional[APIHardening] = None
+    status_websocket: Optional[StatusWebSocket] = None
+    
+    if enable_security:
+        # Create security configuration
+        security_config = APISecurityConfig(
+            enable_rate_limiting=True,
+            enable_jwt_auth=True,
+            enable_websocket=True,
+            enable_openapi=True,
+            rate_limit_requests_per_minute=100,
+            rate_limit_requests_per_hour=1000,
+        )
+        
+        # Initialize hardening
+        api_hardening = APIHardening(app, security_config)
+        
+        # Apply middleware (must be done before adding routes)
+        # Note: Middleware is applied in reverse order, so we add it after route definition
+        # We'll apply it at the end of this function
+        
+        # Setup OpenAPI schema
+        api_hardening.setup_openapi()
+        
+        # Get WebSocket manager for status updates
+        status_websocket = api_hardening.get_status_websocket()
+
+    # Store WebSocket manager in app state for access
+    app.state.status_websocket = status_websocket
+    app.state.api_hardening = api_hardening
+
+    # ── Public Endpoints (no auth required) ─────────────────────────────────────
+
+    @app.get("/", tags=["status"])
+    async def root() -> Dict[str, Any]:
+        """Root endpoint with API information."""
+        return {
+            "name": "PRSM Node API",
+            "version": "0.1.0",
+            "docs": "/docs",
+            "openapi": "/openapi.json",
+            "websocket": "/ws/status",
+        }
+
+    @app.get("/status", tags=["status"])
     async def get_status() -> Dict[str, Any]:
         """Get comprehensive node status."""
-        return await node.get_status()
+        status = await node.get_status()
+        
+        # Broadcast status update via WebSocket if available
+        if app.state.status_websocket:
+            await app.state.status_websocket.broadcast_status(status)
+        
+        return status
 
     @app.get("/peers")
     async def get_peers() -> Dict[str, Any]:
@@ -460,7 +544,7 @@ def create_api_app(node: Any) -> FastAPI:
 
     # ── Compute endpoints ────────────────────────────────────────
 
-    @app.get("/compute/stats")
+    @app.get("/compute/stats", tags=["compute"])
     async def get_compute_stats() -> Dict[str, Any]:
         """Get compute provider statistics."""
         if not node.compute_provider:
@@ -471,5 +555,92 @@ def create_api_app(node: Any) -> FastAPI:
                 "message": "Compute provider not initialized"
             }
         return node.compute_provider.get_stats()
+
+    # ── WebSocket Endpoints ───────────────────────────────────────
+
+    @app.websocket("/ws/status")
+    async def websocket_status(websocket: WebSocket):
+        """
+        WebSocket endpoint for real-time status updates.
+        
+        Connect to receive live updates about:
+        - Node status changes
+        - Peer connections/disconnections
+        - Job status updates
+        - Transaction notifications
+        
+        Send JSON messages with type field to interact:
+        - {"type": "heartbeat"} - Receive heartbeat acknowledgment
+        - {"type": "get_status"} - Request current status
+        """
+        if not app.state.status_websocket:
+            await websocket.close(code=1011, reason="WebSocket not initialized")
+            return
+        
+        status_ws = app.state.status_websocket
+        
+        try:
+            await status_ws.connect(websocket)
+            
+            while True:
+                # Wait for messages from client
+                data = await websocket.receive_json()
+                
+                # Handle heartbeat
+                if data.get("type") == "heartbeat":
+                    await status_ws.send_personal_status(websocket, {
+                        "type": "heartbeat_ack",
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                
+                # Handle status request
+                elif data.get("type") == "get_status":
+                    status = await node.get_status()
+                    await status_ws.send_personal_status(websocket, {
+                        "type": "status_update",
+                        "data": status,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    
+        except WebSocketDisconnect:
+            status_ws.disconnect(websocket)
+        except Exception as e:
+            status_ws.disconnect(websocket)
+
+    # ── Authentication Endpoints ───────────────────────────────────
+
+    @app.get("/auth/verify", tags=["auth"])
+    async def verify_token(request: Request, user: Dict[str, Any] = Depends(require_auth)) -> Dict[str, Any]:
+        """
+        Verify JWT token and return user information.
+        
+        Requires valid JWT token in Authorization header.
+        """
+        return {
+            "valid": True,
+            "user_id": user.get("user_id"),
+            "username": user.get("username"),
+            "role": user.get("role"),
+            "permissions": user.get("permissions", []),
+        }
+
+    # ── Apply Security Hardening ───────────────────────────────────
+    
+    if enable_security and api_hardening:
+        # Initialize the hardening components
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If loop is already running, schedule initialization
+                asyncio.create_task(api_hardening.initialize())
+            else:
+                loop.run_until_complete(api_hardening.initialize())
+        except RuntimeError:
+            # No event loop, create one
+            asyncio.run(api_hardening.initialize())
+        
+        # Apply middleware
+        api_hardening.apply_middleware()
 
     return app

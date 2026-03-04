@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRSM Dashboard</title>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <style>
+        /* Inline critical styles for faster initial render */
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .loading-screen { display: flex; align-items: center; justify-content: center; height: 100vh; background: #0f172a; color: #f8fafc; }
+    </style>
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="loading-screen">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="login-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title">Login to PRSM</h2>
+            </div>
+            <div class="modal-body">
+                <form id="login-form">
+                    <div class="form-group">
+                        <label class="form-label" for="username">Username</label>
+                        <input type="text" id="username" name="username" class="form-input" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="password">Password</label>
+                        <input type="password" id="password" name="password" class="form-input" required>
+                    </div>
+                    <div id="login-error" class="alert alert-error hidden"></div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div id="dashboard" class="dashboard-container hidden">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">
+                    <svg viewBox="0 0 32 32" fill="currentColor">
+                        <circle cx="16" cy="16" r="14" fill="none" stroke="currentColor" stroke-width="2"/>
+                        <circle cx="16" cy="16" r="6" fill="currentColor"/>
+                        <line x1="16" y1="2" x2="16" y2="10" stroke="currentColor" stroke-width="2"/>
+                        <line x1="16" y1="22" x2="16" y2="30" stroke="currentColor" stroke-width="2"/>
+                        <line x1="2" y1="16" x2="10" y2="16" stroke="currentColor" stroke-width="2"/>
+                        <line x1="22" y1="16" x2="30" y2="16" stroke="currentColor" stroke-width="2"/>
+                    </svg>
+                    <span>PRSM</span>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <div class="nav-section-title">Overview</div>
+                    <a class="nav-item active" data-page="dashboard">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="7" height="7"/>
+                            <rect x="14" y="3" width="7" height="7"/>
+                            <rect x="14" y="14" width="7" height="7"/>
+                            <rect x="3" y="14" width="7" height="7"/>
+                        </svg>
+                        <span>Dashboard</span>
+                    </a>
+                    <a class="nav-item" data-page="network">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"/>
+                            <circle cx="19" cy="5" r="2"/>
+                            <circle cx="5" cy="5" r="2"/>
+                            <circle cx="5" cy="19" r="2"/>
+                            <circle cx="19" cy="19" r="2"/>
+                            <line x1="12" y1="9" x2="12" y2="3"/>
+                            <line x1="9.5" y1="14.5" x2="6.5" y2="17.5"/>
+                            <line x1="14.5" y1="14.5" x2="17.5" y2="17.5"/>
+                        </svg>
+                        <span>Network</span>
+                        <span class="nav-item-badge" id="peer-count-badge">0</span>
+                    </a>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Compute</div>
+                    <a class="nav-item" data-page="jobs">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="3" width="20" height="14" rx="2"/>
+                            <line x1="8" y1="21" x2="16" y2="21"/>
+                            <line x1="12" y1="17" x2="12" y2="21"/>
+                        </svg>
+                        <span>Jobs</span>
+                        <span class="nav-item-badge" id="active-jobs-badge">0</span>
+                    </a>
+                    <a class="nav-item" data-page="agents">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2a3 3 0 0 0-3 3v4a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                            <line x1="12" y1="19" x2="12" y2="23"/>
+                            <line x1="8" y1="23" x2="16" y2="23"/>
+                        </svg>
+                        <span>Agents</span>
+                    </a>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Finance</div>
+                    <a class="nav-item" data-page="wallet">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="1" y="4" width="22" height="16" rx="2"/>
+                            <line x1="1" y1="10" x2="23" y2="10"/>
+                        </svg>
+                        <span>Wallet</span>
+                    </a>
+                    <a class="nav-item" data-page="transactions">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="17 1 21 5 17 9"/>
+                            <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+                            <polyline points="7 23 3 19 7 15"/>
+                            <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+                        </svg>
+                        <span>Transactions</span>
+                    </a>
+                    <a class="nav-item" data-page="staking">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="1" x2="12" y2="23"/>
+                            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                        </svg>
+                        <span>Staking</span>
+                    </a>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Content</div>
+                    <a class="nav-item" data-page="content">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                            <polyline points="10 9 9 9 8 9"/>
+                        </svg>
+                        <span>Content</span>
+                    </a>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Settings</div>
+                    <a class="nav-item" data-page="settings">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                        </svg>
+                        <span>Settings</span>
+                    </a>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="header">
+                <h1 class="header-title" id="page-title">Dashboard</h1>
+                <div class="header-actions">
+                    <div class="status-indicator">
+                        <span class="status-dot" id="connection-status"></span>
+                        <span id="connection-text">Connecting...</span>
+                    </div>
+                    <div class="user-menu">
+                        <button class="user-menu-btn" id="user-menu-btn">
+                            <div class="user-avatar" id="user-avatar">R</div>
+                            <span id="user-name">Researcher</span>
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="6 9 12 15 18 9"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Content Area -->
+            <div class="content-area" id="content-area">
+                <!-- Dashboard Page -->
+                <div id="page-dashboard" class="page active">
+                    <!-- Stats Grid -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon primary">
+                                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="3"/>
+                                    <circle cx="19" cy="5" r="2"/>
+                                    <circle cx="5" cy="5" r="2"/>
+                                    <circle cx="5" cy="19" r="2"/>
+                                    <circle cx="19" cy="19" r="2"/>
+                                </svg>
+                            </div>
+                            <div class="stat-value" id="stat-peers">0</div>
+                            <div class="stat-label">Connected Peers</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon success">
+                                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="12" y1="1" x2="12" y2="23"/>
+                                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                                </svg>
+                            </div>
+                            <div class="stat-value" id="stat-balance">0</div>
+                            <div class="stat-label">FTNS Balance</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon warning">
+                                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="2" y="3" width="20" height="14" rx="2"/>
+                                    <line x1="8" y1="21" x2="16" y2="21"/>
+                                    <line x1="12" y1="17" x2="12" y2="21"/>
+                                </svg>
+                            </div>
+                            <div class="stat-value" id="stat-jobs">0</div>
+                            <div class="stat-label">Active Jobs</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon info">
+                                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <polyline points="12 6 12 12 16 14"/>
+                                </svg>
+                            </div>
+                            <div class="stat-value" id="stat-uptime">0s</div>
+                            <div class="stat-label">Uptime</div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Activity -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Recent Activity</h2>
+                            <button class="btn btn-secondary btn-sm" onclick="refreshActivity()">Refresh</button>
+                        </div>
+                        <div class="card-body">
+                            <div id="activity-list">
+                                <div class="empty-state">
+                                    <div class="empty-state-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <circle cx="12" cy="12" r="10"/>
+                                            <line x1="12" y1="8" x2="12" y2="12"/>
+                                            <line x1="12" y1="16" x2="12.01" y2="16"/>
+                                        </svg>
+                                    </div>
+                                    <div class="empty-state-title">No recent activity</div>
+                                    <p>Activity will appear here as you use PRSM</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Network Page -->
+                <div id="page-network" class="page hidden">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Connected Peers</h2>
+                            <button class="btn btn-secondary btn-sm" onclick="refreshPeers()">Refresh</button>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-container">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Peer ID</th>
+                                            <th>Address</th>
+                                            <th>Status</th>
+                                            <th>Last Seen</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="peers-table-body">
+                                        <tr>
+                                            <td colspan="4" class="text-center text-muted">No peers connected</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Jobs Page -->
+                <div id="page-jobs" class="page hidden">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Submit New Job</h2>
+                        </div>
+                        <div class="card-body">
+                            <form id="job-submit-form">
+                                <div class="form-group">
+                                    <label class="form-label" for="job-type">Job Type</label>
+                                    <select id="job-type" class="form-select" required>
+                                        <option value="inference">Inference</option>
+                                        <option value="embedding">Embedding</option>
+                                        <option value="benchmark">Benchmark</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="job-budget">FTNS Budget</label>
+                                    <input type="number" id="job-budget" class="form-input" value="1.0" min="0.01" step="0.01" required>
+                                    <span class="form-help">Maximum FTNS to spend on this job</span>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="job-payload">Payload (JSON)</label>
+                                    <textarea id="job-payload" class="form-textarea" placeholder='{"prompt": "Hello, world!"}'></textarea>
+                                    <span class="form-help">Optional JSON payload for the job</span>
+                                </div>
+                                <button type="submit" class="btn btn-primary">Submit Job</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Job History</h2>
+                            <button class="btn btn-secondary btn-sm" onclick="refreshJobs()">Refresh</button>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-container">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Job ID</th>
+                                            <th>Type</th>
+                                            <th>Status</th>
+                                            <th>Budget</th>
+                                            <th>Created</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="jobs-table-body">
+                                        <tr>
+                                            <td colspan="6" class="text-center text-muted">No jobs submitted</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Wallet Page -->
+                <div id="page-wallet" class="page hidden">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon success">
+                                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="12" y1="1" x2="12" y2="23"/>
+                                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                                </svg>
+                            </div>
+                            <div class="stat-value" id="wallet-available">0</div>
+                            <div class="stat-label">Available FTNS</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon warning">
+                                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="11" width="18" height="11" rx="2"/>
+                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                                </svg>
+                            </div>
+                            <div class="stat-value" id="wallet-staked">0</div>
+                            <div class="stat-label">Staked FTNS</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon info">
+                                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                                </svg>
+                            </div>
+                            <div class="stat-value" id="wallet-total">0</div>
+                            <div class="stat-label">Total FTNS</div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Transfer FTNS</h2>
+                        </div>
+                        <div class="card-body">
+                            <form id="transfer-form">
+                                <div class="form-group">
+                                    <label class="form-label" for="transfer-to">Recipient Wallet ID</label>
+                                    <input type="text" id="transfer-to" class="form-input" placeholder="Enter wallet ID" required>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="transfer-amount">Amount</label>
+                                    <input type="number" id="transfer-amount" class="form-input" min="0.01" step="0.01" required>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="transfer-description">Description (Optional)</label>
+                                    <input type="text" id="transfer-description" class="form-input" placeholder="Payment for...">
+                                </div>
+                                <button type="submit" class="btn btn-primary">Transfer</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Transactions Page -->
+                <div id="page-transactions" class="page hidden">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Transaction History</h2>
+                            <button class="btn btn-secondary btn-sm" onclick="refreshTransactions()">Refresh</button>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-container">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Transaction ID</th>
+                                            <th>Type</th>
+                                            <th>From</th>
+                                            <th>To</th>
+                                            <th>Amount</th>
+                                            <th>Time</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="transactions-table-body">
+                                        <tr>
+                                            <td colspan="6" class="text-center text-muted">No transactions yet</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Staking Page -->
+                <div id="page-staking" class="page hidden">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Stake FTNS</h2>
+                        </div>
+                        <div class="card-body">
+                            <form id="stake-form">
+                                <div class="form-group">
+                                    <label class="form-label" for="stake-amount">Amount to Stake</label>
+                                    <input type="number" id="stake-amount" class="form-input" min="0.01" step="0.01" required>
+                                    <span class="form-help">Available: <span id="stake-available">0</span> FTNS</span>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="stake-duration">Duration (Epochs)</label>
+                                    <input type="number" id="stake-duration" class="form-input" value="10" min="1" required>
+                                </div>
+                                <button type="submit" class="btn btn-primary">Stake</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Active Stakes</h2>
+                        </div>
+                        <div class="card-body">
+                            <div class="empty-state">
+                                <div class="empty-state-icon">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <rect x="3" y="11" width="18" height="11" rx="2"/>
+                                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                                    </svg>
+                                </div>
+                                <div class="empty-state-title">No active stakes</div>
+                                <p>Stake FTNS to earn rewards and support the network</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Agents Page -->
+                <div id="page-agents" class="page hidden">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Registered Agents</h2>
+                            <button class="btn btn-secondary btn-sm" onclick="refreshAgents()">Refresh</button>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-container">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Agent ID</th>
+                                            <th>Name</th>
+                                            <th>Status</th>
+                                            <th>Allowance</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="agents-table-body">
+                                        <tr>
+                                            <td colspan="5" class="text-center text-muted">No agents registered</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Content Page -->
+                <div id="page-content" class="page hidden">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Search Content</h2>
+                        </div>
+                        <div class="card-body">
+                            <form id="content-search-form">
+                                <div class="form-group">
+                                    <input type="text" id="content-search-query" class="form-input" placeholder="Search for content...">
+                                </div>
+                                <button type="submit" class="btn btn-primary">Search</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Results</h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="content-results">
+                                <div class="empty-state">
+                                    <div class="empty-state-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <circle cx="11" cy="11" r="8"/>
+                                            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                                        </svg>
+                                    </div>
+                                    <div class="empty-state-title">Search for content</div>
+                                    <p>Enter a search query to find content on the network</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Page -->
+                <div id="page-settings" class="page hidden">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Node Settings</h2>
+                        </div>
+                        <div class="card-body">
+                            <div class="form-group">
+                                <label class="form-label">Node ID</label>
+                                <input type="text" class="form-input" id="settings-node-id" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Theme</label>
+                                <select id="theme-select" class="form-select">
+                                    <option value="dark">Dark</option>
+                                    <option value="light">Light</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">About</h2>
+                        </div>
+                        <div class="card-body">
+                            <p>PRSM Dashboard v1.0.0</p>
+                            <p class="text-muted mt-sm">Protocol for Research and Science Management</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" style="position: fixed; bottom: 20px; right: 20px; z-index: 2000;"></div>
+
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

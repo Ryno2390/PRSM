@@ -4,9 +4,12 @@ Main entry point for PRSM CLI commands
 """
 
 import asyncio
+import socket
 import sys
 from pathlib import Path
-from typing import Optional
+from dataclasses import dataclass
+from typing import List, Optional
+from urllib.parse import urlparse
 
 import click
 import uvicorn
@@ -14,6 +17,237 @@ from rich.console import Console
 from rich.table import Table
 
 console = Console()
+
+
+PREFLIGHT_PASS = "PASS"
+PREFLIGHT_WARN = "WARN"
+PREFLIGHT_FAIL = "FAIL"
+PREFLIGHT_BOOTSTRAP_TIMEOUT_SECONDS = 1.5
+
+
+@dataclass
+class PreflightCheckResult:
+    """Node startup preflight check result."""
+
+    name: str
+    status: str
+    required: bool
+    details: str
+    remediation: str
+
+
+def _probe_tcp_endpoint(host: str, port: int, timeout_seconds: float) -> tuple[bool, str]:
+    """Attempt a bounded TCP connection probe to a host:port endpoint."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout_seconds):
+            return True, f"reachable at {host}:{port}"
+    except Exception as exc:
+        return False, f"unreachable at {host}:{port} ({exc})"
+
+
+def _parse_endpoint(address: str, default_port: int) -> tuple[Optional[str], Optional[int], Optional[str]]:
+    """Parse host/port endpoint from either URL or host:port style strings."""
+    if not address or not address.strip():
+        return None, None, "empty address"
+
+    address = address.strip()
+
+    try:
+        if "://" in address:
+            parsed = urlparse(address)
+            if not parsed.hostname:
+                return None, None, f"invalid URL: {address}"
+            return parsed.hostname, int(parsed.port or default_port), None
+
+        host, sep, port_text = address.rpartition(":")
+        if sep and host:
+            return host, int(port_text), None
+
+        return address, default_port, None
+    except Exception as exc:
+        return None, None, f"unable to parse '{address}' ({exc})"
+
+
+def _node_preflight_diagnostics(config: "NodeConfig") -> List[PreflightCheckResult]:
+    """Run non-breaking node startup diagnostics with required/optional classification."""
+    from prsm.node.config import NodeRole
+
+    checks: List[PreflightCheckResult] = []
+
+    # Required: Python runtime basics.
+    py_ok = sys.version_info >= (3, 10)
+    checks.append(
+        PreflightCheckResult(
+            name="Python runtime",
+            status=PREFLIGHT_PASS if py_ok else PREFLIGHT_FAIL,
+            required=True,
+            details=f"detected {sys.version.split()[0]}",
+            remediation="Install Python 3.10+ and re-run 'prsm node start'.",
+        )
+    )
+
+    # Required but non-blocking by itself: config presence (defaults are supported).
+    config_exists = config.config_path.exists()
+    checks.append(
+        PreflightCheckResult(
+            name="Node config file",
+            status=PREFLIGHT_PASS if config_exists else PREFLIGHT_WARN,
+            required=False,
+            details=(
+                f"found at {config.config_path}"
+                if config_exists
+                else f"missing at {config.config_path}; defaults will be used"
+            ),
+            remediation=(
+                "Run 'prsm node start --wizard' to generate explicit node settings."
+                if not config_exists
+                else "None"
+            ),
+        )
+    )
+
+    # Required hard precondition: local API bind availability.
+    api_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    api_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        api_sock.bind(("127.0.0.1", config.api_port))
+        api_status = PREFLIGHT_PASS
+        api_details = f"127.0.0.1:{config.api_port} is available"
+    except Exception as exc:
+        api_status = PREFLIGHT_FAIL
+        api_details = f"127.0.0.1:{config.api_port} unavailable ({exc})"
+    finally:
+        api_sock.close()
+
+    checks.append(
+        PreflightCheckResult(
+            name="Local API bind",
+            status=api_status,
+            required=True,
+            details=api_details,
+            remediation="Choose a free --api-port or stop the process using this port.",
+        )
+    )
+
+    # Optional: quick bootstrap reachability probe (bounded timeout).
+    bootstrap_nodes = list(config.bootstrap_nodes or [])
+    if not bootstrap_nodes:
+        checks.append(
+            PreflightCheckResult(
+                name="Bootstrap target reachability",
+                status=PREFLIGHT_WARN,
+                required=False,
+                details="no bootstrap targets configured",
+                remediation="Configure --bootstrap or node_config bootstrap_nodes for peer discovery.",
+            )
+        )
+    else:
+        any_reachable = False
+        probe_notes: List[str] = []
+        for address in bootstrap_nodes:
+            host, port, parse_error = _parse_endpoint(address, default_port=config.p2p_port)
+            if parse_error:
+                probe_notes.append(f"{address}: {parse_error}")
+                continue
+            ok, detail = _probe_tcp_endpoint(host, port, PREFLIGHT_BOOTSTRAP_TIMEOUT_SECONDS)
+            probe_notes.append(f"{address}: {detail}")
+            if ok:
+                any_reachable = True
+                break
+
+        checks.append(
+            PreflightCheckResult(
+                name="Bootstrap target reachability",
+                status=PREFLIGHT_PASS if any_reachable else PREFLIGHT_WARN,
+                required=False,
+                details=(
+                    "at least one target reachable"
+                    if any_reachable
+                    else "; ".join(probe_notes[:2]) or "no reachable targets"
+                ),
+                remediation=(
+                    "None"
+                    if any_reachable
+                    else "Startup will continue in degraded mode; verify DNS/network or update bootstrap targets."
+                ),
+            )
+        )
+
+    # Optional dependency: IPFS daemon availability.
+    ipfs_host, ipfs_port, ipfs_parse_error = _parse_endpoint(config.ipfs_api_url, default_port=5001)
+    ipfs_role_expected = any(role in (NodeRole.FULL, NodeRole.STORAGE) for role in config.roles)
+    if ipfs_parse_error or not ipfs_host or not ipfs_port:
+        checks.append(
+            PreflightCheckResult(
+                name="IPFS dependency (optional)",
+                status=PREFLIGHT_WARN,
+                required=False,
+                details=f"invalid ipfs_api_url '{config.ipfs_api_url}'",
+                remediation="Set a valid ipfs_api_url or install/start IPFS if storage features are needed.",
+            )
+        )
+    else:
+        ipfs_ok, ipfs_detail = _probe_tcp_endpoint(ipfs_host, ipfs_port, timeout_seconds=1.0)
+        checks.append(
+            PreflightCheckResult(
+                name="IPFS dependency (optional)",
+                status=PREFLIGHT_PASS if ipfs_ok else PREFLIGHT_WARN,
+                required=False,
+                details=(
+                    f"{ipfs_detail}; storage role active"
+                    if ipfs_role_expected
+                    else f"{ipfs_detail}; storage role not active"
+                ),
+                remediation=(
+                    "None"
+                    if ipfs_ok
+                    else "Install/start IPFS for storage features; compute/routing startup remains available."
+                ),
+            )
+        )
+
+    return checks
+
+
+def _render_preflight_summary(results: List[PreflightCheckResult]) -> None:
+    """Render startup diagnostics summary with remediation hints."""
+    table = Table(title="Node Startup Preflight Diagnostics")
+    table.add_column("Check", style="cyan")
+    table.add_column("Req", style="magenta")
+    table.add_column("Status", style="bold")
+    table.add_column("Details", style="green")
+    table.add_column("Remediation", style="yellow")
+
+    for result in results:
+        status_style = {
+            PREFLIGHT_PASS: "green",
+            PREFLIGHT_WARN: "yellow",
+            PREFLIGHT_FAIL: "red",
+        }.get(result.status, "white")
+        table.add_row(
+            result.name,
+            "required" if result.required else "optional",
+            f"[{status_style}]{result.status}[/{status_style}]",
+            result.details,
+            result.remediation,
+        )
+
+    console.print()
+    console.print(table)
+    console.print()
+
+
+def _has_hard_preflight_failures(results: List[PreflightCheckResult]) -> bool:
+    """True when a required preflight check has failed."""
+    return any(r.required and r.status == PREFLIGHT_FAIL for r in results)
+
+
+def _should_announce_degraded_mode(results: List[PreflightCheckResult]) -> bool:
+    """Determine whether startup should explicitly mention degraded mode continuation."""
+    for result in results:
+        if result.name == "Bootstrap target reachability" and result.status in (PREFLIGHT_WARN, PREFLIGHT_FAIL):
+            return True
+    return False
 
 
 def _init_config():
@@ -391,6 +625,17 @@ def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str, no_dashboa
                 table.add_row("P2P Address", status["p2p_address"])
                 table.add_row("API Address", status["api_address"])
                 table.add_row("FTNS Balance", f"{status['ftns_balance']:.2f}")
+                bootstrap = status.get("peers", {}).get("bootstrap", {})
+                if bootstrap.get("degraded_mode"):
+                    table.add_row("Bootstrap", "DEGRADED local mode")
+                    table.add_row(
+                        "Limited Features",
+                        "Remote peer discovery/collaboration may be unavailable until peers connect",
+                    )
+                elif bootstrap.get("success_node"):
+                    table.add_row("Bootstrap", f"connected via {bootstrap['success_node']}")
+                elif bootstrap.get("configured_nodes") == []:
+                    table.add_row("Bootstrap", "none configured (first node/local mode)")
                 if status.get("compute"):
                     res = status["compute"]["resources"]
                     table.add_row("CPU", f"{res['cpu_count']} cores")
@@ -526,6 +771,711 @@ def create(specialization: str):
     console.print(f"🎓 Creating teacher model for {specialization}...", style="bold green")
     console.print("🚧 CLI teacher management coming in v0.2.0", style="yellow")
     console.print("💡 Teacher models available via API endpoints", style="blue")
+
+
+# ============================================================================
+# COMPUTE COMMANDS
+# ============================================================================
+
+@main.group()
+def compute():
+    """Compute job management commands"""
+    pass
+
+
+@compute.command()
+@click.option('--prompt', required=True, help='Prompt to process')
+@click.option('--model', default='nwtn', help='Model to use (default: nwtn)')
+@click.option('--max-tokens', default=1000, type=int, help='Maximum tokens in response')
+@click.option('--budget', type=float, help='Maximum FTNS to spend')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def submit(prompt: str, model: str, max_tokens: int, budget: float, api_url: str):
+    """Submit a compute job to the PRSM network."""
+    import httpx
+    
+    console.print(f"🚀 Submitting compute job...", style="bold blue")
+    console.print(f"   Model: {model}")
+    console.print(f"   Max tokens: {max_tokens}")
+    if budget:
+        console.print(f"   Budget: {budget} FTNS")
+    
+    try:
+        response = httpx.post(
+            f"{api_url}/api/v1/compute/jobs",
+            json={
+                "prompt": prompt,
+                "model": model,
+                "max_tokens": max_tokens,
+                "budget": budget
+            },
+            timeout=30.0
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            console.print(f"✅ Job submitted successfully!", style="bold green")
+            console.print(f"   Job ID: {data.get('job_id')}")
+            console.print(f"   Status: {data.get('status')}")
+            console.print(f"   Estimated cost: {data.get('estimated_cost', 0):.4f} FTNS")
+        else:
+            console.print(f"❌ Failed to submit job: {response.status_code}", style="red")
+            console.print(f"   {response.text}")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+        console.print("   Make sure the server is running: prsm serve")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@compute.command()
+@click.argument('job-id')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def status(job_id: str, api_url: str):
+    """Get status of a compute job."""
+    import httpx
+    
+    try:
+        response = httpx.get(f"{api_url}/api/v1/compute/jobs/{job_id}", timeout=10.0)
+        
+        if response.status_code == 200:
+            data = response.json()
+            table = Table(title=f"Job Status: {job_id}")
+            table.add_column("Property", style="cyan")
+            table.add_column("Value", style="green")
+            table.add_row("Job ID", data.get('job_id', 'N/A'))
+            table.add_row("Status", data.get('status', 'N/A'))
+            table.add_row("Progress", f"{data.get('progress', 0) * 100:.1f}%")
+            table.add_row("Model", data.get('model', 'N/A'))
+            if data.get('result'):
+                table.add_row("Result", "Available")
+            console.print(table)
+        elif response.status_code == 404:
+            console.print(f"❌ Job not found: {job_id}", style="red")
+        else:
+            console.print(f"❌ Failed to get job status: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@compute.command()
+@click.argument('job-id')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def result(job_id: str, api_url: str):
+    """Get result of a completed compute job."""
+    import httpx
+    
+    try:
+        response = httpx.get(f"{api_url}/api/v1/compute/jobs/{job_id}/result", timeout=10.0)
+        
+        if response.status_code == 200:
+            data = response.json()
+            console.print("📄 Job Result:", style="bold green")
+            console.print(data.get('content', 'No content'))
+            console.print()
+            console.print(f"💰 Cost: {data.get('ftns_cost', 0):.4f} FTNS")
+            console.print(f"⏱️  Execution time: {data.get('execution_time', 0):.2f}s")
+        elif response.status_code == 404:
+            console.print(f"❌ Job not found or not complete: {job_id}", style="red")
+        else:
+            console.print(f"❌ Failed to get result: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@compute.command()
+@click.argument('job-id')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def cancel(job_id: str, api_url: str):
+    """Cancel a running compute job."""
+    import httpx
+    
+    try:
+        response = httpx.post(f"{api_url}/api/v1/compute/jobs/{job_id}/cancel", timeout=10.0)
+        
+        if response.status_code == 200:
+            console.print(f"✅ Job {job_id} cancelled", style="green")
+        else:
+            console.print(f"❌ Failed to cancel job: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@compute.command()
+@click.option('--limit', default=10, type=int, help='Maximum number of jobs to list')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def list(limit: int, api_url: str):
+    """List recent compute jobs."""
+    import httpx
+    
+    try:
+        response = httpx.get(f"{api_url}/api/v1/compute/jobs?limit={limit}", timeout=10.0)
+        
+        if response.status_code == 200:
+            data = response.json()
+            jobs = data.get('jobs', [])
+            
+            if not jobs:
+                console.print("No jobs found.", style="dim")
+                return
+            
+            table = Table(title="Recent Compute Jobs")
+            table.add_column("Job ID", style="cyan")
+            table.add_column("Status", style="magenta")
+            table.add_column("Model", style="blue")
+            table.add_column("Created", style="green")
+            
+            for job in jobs:
+                table.add_row(
+                    job.get('job_id', 'N/A')[:16] + "...",
+                    job.get('status', 'N/A'),
+                    job.get('model', 'N/A'),
+                    job.get('created_at', 'N/A')[:19]
+                )
+            console.print(table)
+        else:
+            console.print(f"❌ Failed to list jobs: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+# ============================================================================
+# FTNS COMMANDS
+# ============================================================================
+
+@main.group()
+def ftns():
+    """FTNS token management commands"""
+    pass
+
+
+@ftns.command()
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def balance(api_url: str):
+    """Show FTNS token balance."""
+    import httpx
+    
+    try:
+        response = httpx.get(f"{api_url}/api/v1/ftns/balance", timeout=10.0)
+        
+        if response.status_code == 200:
+            data = response.json()
+            table = Table(title="FTNS Balance")
+            table.add_column("Type", style="cyan")
+            table.add_column("Amount", style="green")
+            table.add_row("Total", f"{data.get('total_balance', 0):.4f}")
+            table.add_row("Available", f"{data.get('available_balance', 0):.4f}")
+            table.add_row("Reserved", f"{data.get('reserved_balance', 0):.4f}")
+            if 'staked_balance' in data:
+                table.add_row("Staked", f"{data.get('staked_balance', 0):.4f}")
+            console.print(table)
+        else:
+            console.print(f"❌ Failed to get balance: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@ftns.command()
+@click.option('--to', required=True, help='Recipient address')
+@click.option('--amount', required=True, type=float, help='Amount to transfer')
+@click.option('--memo', help='Transaction memo')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def transfer(to: str, amount: float, memo: str, api_url: str):
+    """Transfer FTNS tokens to another address."""
+    import httpx
+    
+    console.print(f"💸 Transferring {amount} FTNS to {to}...", style="bold blue")
+    
+    try:
+        response = httpx.post(
+            f"{api_url}/api/v1/ftns/transfer",
+            json={"to_address": to, "amount": amount, "memo": memo},
+            timeout=10.0
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            console.print(f"✅ Transfer successful!", style="bold green")
+            console.print(f"   Transaction ID: {data.get('transaction_id')}")
+            console.print(f"   Amount: {data.get('amount')} FTNS")
+            console.print(f"   Fee: {data.get('fee', 0):.4f} FTNS")
+        else:
+            console.print(f"❌ Transfer failed: {response.status_code}", style="red")
+            console.print(f"   {response.text}")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@ftns.command()
+@click.option('--amount', required=True, type=float, help='Amount to stake')
+@click.option('--lock-period', default=30, type=int, help='Lock period in days')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def stake(amount: float, lock_period: int, api_url: str):
+    """Stake FTNS tokens for network participation."""
+    import httpx
+    
+    console.print(f"🔒 Staking {amount} FTNS for {lock_period} days...", style="bold blue")
+    
+    try:
+        response = httpx.post(
+            f"{api_url}/api/v1/ftns/stake",
+            json={"amount": amount, "lock_period": lock_period},
+            timeout=10.0
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            console.print(f"✅ Staking successful!", style="bold green")
+            console.print(f"   Staked: {data.get('staked_amount')} FTNS")
+            console.print(f"   APY: {data.get('apy', 0) * 100:.1f}%")
+            console.print(f"   Rewards earned: {data.get('rewards_earned', 0):.4f} FTNS")
+        else:
+            console.print(f"❌ Staking failed: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@ftns.command()
+@click.option('--limit', default=20, type=int, help='Maximum transactions to show')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def history(limit: int, api_url: str):
+    """Show FTNS transaction history."""
+    import httpx
+    
+    try:
+        response = httpx.get(f"{api_url}/api/v1/ftns/history?limit={limit}", timeout=10.0)
+        
+        if response.status_code == 200:
+            data = response.json()
+            transactions = data.get('transactions', [])
+            
+            if not transactions:
+                console.print("No transactions found.", style="dim")
+                return
+            
+            table = Table(title="FTNS Transaction History")
+            table.add_column("ID", style="dim")
+            table.add_column("Type", style="cyan")
+            table.add_column("Amount", style="green")
+            table.add_column("Status", style="magenta")
+            table.add_column("Time", style="blue")
+            
+            for tx in transactions:
+                table.add_row(
+                    tx.get('transaction_id', 'N/A')[:12] + "...",
+                    tx.get('transaction_type', 'N/A'),
+                    f"{tx.get('amount', 0):.4f}",
+                    tx.get('status', 'N/A'),
+                    tx.get('timestamp', 'N/A')[:19]
+                )
+            console.print(table)
+        else:
+            console.print(f"❌ Failed to get history: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+# ============================================================================
+# STORAGE COMMANDS
+# ============================================================================
+
+@main.group()
+def storage():
+    """IPFS storage management commands"""
+    pass
+
+
+@storage.command()
+@click.argument('file-path', type=click.Path(exists=True))
+@click.option('--description', help='Content description')
+@click.option('--tags', help='Comma-separated tags')
+@click.option('--public', is_flag=True, help='Make content public')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def upload(file_path: str, description: str, tags: str, public: bool, api_url: str):
+    """Upload a file to IPFS storage."""
+    import httpx
+    
+    console.print(f"📤 Uploading {file_path}...", style="bold blue")
+    
+    try:
+        with open(file_path, 'rb') as f:
+            files = {'file': (Path(file_path).name, f)}
+            data = {}
+            if description:
+                data['description'] = description
+            if tags:
+                data['tags'] = tags
+            if public:
+                data['is_public'] = 'true'
+            
+            response = httpx.post(
+                f"{api_url}/api/v1/storage/upload",
+                files=files,
+                data=data,
+                timeout=60.0
+            )
+        
+        if response.status_code == 200:
+            data = response.json()
+            console.print(f"✅ Upload successful!", style="bold green")
+            console.print(f"   CID: {data.get('cid')}")
+            console.print(f"   Size: {data.get('size')} bytes")
+            console.print(f"   Cost: {data.get('ftns_cost', 0):.4f} FTNS")
+            console.print(f"   Gateway: {data.get('gateway_url')}")
+        else:
+            console.print(f"❌ Upload failed: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@storage.command()
+@click.argument('cid')
+@click.option('--output', '-o', type=click.Path(), help='Output file path')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def download(cid: str, output: str, api_url: str):
+    """Download content from IPFS by CID."""
+    import httpx
+    
+    console.print(f"📥 Downloading {cid}...", style="bold blue")
+    
+    try:
+        response = httpx.get(f"{api_url}/api/v1/storage/{cid}/download", timeout=60.0)
+        
+        if response.status_code == 200:
+            if output:
+                with open(output, 'wb') as f:
+                    f.write(response.content)
+                console.print(f"✅ Downloaded to {output}", style="green")
+            else:
+                # Print to console if no output file
+                try:
+                    console.print(response.content.decode('utf-8'))
+                except UnicodeDecodeError:
+                    console.print(f"Binary content ({len(response.content)} bytes)", style="dim")
+        else:
+            console.print(f"❌ Download failed: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@storage.command()
+@click.argument('cid')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def info(cid: str, api_url: str):
+    """Get information about stored content."""
+    import httpx
+    
+    try:
+        response = httpx.get(f"{api_url}/api/v1/storage/{cid}", timeout=10.0)
+        
+        if response.status_code == 200:
+            data = response.json()
+            table = Table(title=f"Storage Info: {cid}")
+            table.add_column("Property", style="cyan")
+            table.add_column("Value", style="green")
+            table.add_row("CID", data.get('cid', 'N/A'))
+            table.add_row("Content Type", data.get('content_type', 'N/A'))
+            table.add_row("Size", f"{data.get('size', 0)} bytes")
+            table.add_row("Status", data.get('status', 'N/A'))
+            table.add_row("Pinned", "Yes" if data.get('is_pinned') else "No")
+            table.add_row("Public", "Yes" if data.get('is_public') else "No")
+            if data.get('filename'):
+                table.add_row("Filename", data.get('filename'))
+            console.print(table)
+        elif response.status_code == 404:
+            console.print(f"❌ Content not found: {cid}", style="red")
+        else:
+            console.print(f"❌ Failed to get info: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@storage.command()
+@click.argument('cid')
+@click.option('--replication', default=3, type=int, help='Replication factor')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def pin(cid: str, replication: int, api_url: str):
+    """Pin content for persistent storage."""
+    import httpx
+    
+    console.print(f"📌 Pinning {cid}...", style="bold blue")
+    
+    try:
+        response = httpx.post(
+            f"{api_url}/api/v1/storage/{cid}/pin",
+            json={"replication": replication},
+            timeout=10.0
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            console.print(f"✅ Content pinned!", style="bold green")
+            console.print(f"   Replication: {data.get('replication')}")
+            console.print(f"   Monthly cost: {data.get('monthly_cost', 0):.4f} FTNS")
+        else:
+            console.print(f"❌ Pinning failed: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@storage.command()
+@click.option('--limit', default=20, type=int, help='Maximum results')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def pins(limit: int, api_url: str):
+    """List pinned content."""
+    import httpx
+    
+    try:
+        response = httpx.get(f"{api_url}/api/v1/storage/pins?limit={limit}", timeout=10.0)
+        
+        if response.status_code == 200:
+            data = response.json()
+            pins = data.get('pins', [])
+            
+            if not pins:
+                console.print("No pinned content.", style="dim")
+                return
+            
+            table = Table(title="Pinned Content")
+            table.add_column("CID", style="cyan")
+            table.add_column("Size", style="green")
+            table.add_column("Replication", style="magenta")
+            table.add_column("Monthly Cost", style="blue")
+            
+            for pin in pins:
+                table.add_row(
+                    pin.get('cid', 'N/A')[:20] + "...",
+                    f"{pin.get('size', 0)} bytes",
+                    str(pin.get('replication', 0)),
+                    f"{pin.get('monthly_cost', 0):.4f} FTNS"
+                )
+            console.print(table)
+        else:
+            console.print(f"❌ Failed to list pins: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+# ============================================================================
+# GOVERNANCE COMMANDS
+# ============================================================================
+
+@main.group()
+def governance():
+    """Governance and voting commands"""
+    pass
+
+
+@governance.command()
+@click.option('--limit', default=10, type=int, help='Maximum proposals to show')
+@click.option('--status', type=click.Choice(['draft', 'active', 'voting', 'passed', 'rejected', 'executed']), help='Filter by status')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def proposals(limit: int, status: str, api_url: str):
+    """List governance proposals."""
+    import httpx
+    
+    params = f"limit={limit}"
+    if status:
+        params += f"&status={status}"
+    
+    try:
+        response = httpx.get(f"{api_url}/api/v1/governance/proposals?{params}", timeout=10.0)
+        
+        if response.status_code == 200:
+            data = response.json()
+            proposals = data.get('proposals', [])
+            
+            if not proposals:
+                console.print("No proposals found.", style="dim")
+                return
+            
+            table = Table(title="Governance Proposals")
+            table.add_column("ID", style="dim")
+            table.add_column("Title", style="cyan")
+            table.add_column("Status", style="magenta")
+            table.add_column("Type", style="blue")
+            table.add_column("Votes", style="green")
+            
+            for prop in proposals:
+                votes = f"✓{prop.get('votes_yes', 0):.0f} ✗{prop.get('votes_no', 0):.0f}"
+                table.add_row(
+                    prop.get('proposal_id', 'N/A')[:12] + "...",
+                    prop.get('title', 'N/A')[:30],
+                    prop.get('status', 'N/A'),
+                    prop.get('proposal_type', 'N/A'),
+                    votes
+                )
+            console.print(table)
+        else:
+            console.print(f"❌ Failed to list proposals: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@governance.command()
+@click.argument('proposal-id')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def proposal(proposal_id: str, api_url: str):
+    """Get details of a specific proposal."""
+    import httpx
+    
+    try:
+        response = httpx.get(f"{api_url}/api/v1/governance/proposals/{proposal_id}", timeout=10.0)
+        
+        if response.status_code == 200:
+            data = response.json()
+            console.print(f"\n📋 {data.get('title')}", style="bold cyan")
+            console.print(f"   ID: {data.get('proposal_id')}")
+            console.print(f"   Status: {data.get('status')}")
+            console.print(f"   Type: {data.get('proposal_type')}")
+            console.print(f"   Proposer: {data.get('proposer', 'N/A')[:16]}...")
+            console.print()
+            console.print("Description:", style="bold")
+            console.print(data.get('description', 'N/A'))
+            console.print()
+            
+            table = Table(title="Voting Results")
+            table.add_column("Choice", style="cyan")
+            table.add_column("Votes (FTNS)", style="green")
+            table.add_row("Yes", f"{data.get('votes_yes', 0):.2f}")
+            table.add_row("No", f"{data.get('votes_no', 0):.2f}")
+            table.add_row("Abstain", f"{data.get('votes_abstain', 0):.2f}")
+            console.print(table)
+            
+            console.print(f"\n   Quorum required: {data.get('quorum', 0) * 100:.1f}%")
+            console.print(f"   Threshold: {data.get('threshold', 0) * 100:.1f}%")
+            console.print(f"   Voting ends: {data.get('voting_ends', 'N/A')}")
+        elif response.status_code == 404:
+            console.print(f"❌ Proposal not found: {proposal_id}", style="red")
+        else:
+            console.print(f"❌ Failed to get proposal: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@governance.command()
+@click.argument('proposal-id')
+@click.option('--choice', required=True, type=click.Choice(['yes', 'no', 'abstain']), help='Vote choice')
+@click.option('--reason', help='Reason for your vote')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def vote(proposal_id: str, choice: str, reason: str, api_url: str):
+    """Cast a vote on a proposal."""
+    import httpx
+    
+    console.print(f"🗳️  Casting vote '{choice}' on proposal {proposal_id}...", style="bold blue")
+    
+    try:
+        response = httpx.post(
+            f"{api_url}/api/v1/governance/proposals/{proposal_id}/vote",
+            json={"choice": choice, "reason": reason},
+            timeout=10.0
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            console.print(f"✅ Vote cast successfully!", style="bold green")
+            console.print(f"   Vote ID: {data.get('vote_id')}")
+            console.print(f"   Voting power: {data.get('voting_power', 0):.2f} FTNS")
+        else:
+            console.print(f"❌ Failed to cast vote: {response.status_code}", style="red")
+            console.print(f"   {response.text}")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@governance.command()
+@click.option('--title', required=True, help='Proposal title')
+@click.option('--description', required=True, help='Proposal description')
+@click.option('--type', 'proposal_type', required=True,
+              type=click.Choice(['parameter_change', 'protocol_upgrade', 'treasury_spend',
+                                'model_addition', 'model_removal', 'fee_adjustment',
+                                'governance_change', 'other']),
+              help='Type of proposal')
+@click.option('--duration', default=7, type=int, help='Voting duration in days')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def create_proposal(title: str, description: str, proposal_type: str, duration: int, api_url: str):
+    """Create a new governance proposal."""
+    import httpx
+    
+    console.print(f"📝 Creating proposal: {title}...", style="bold blue")
+    
+    try:
+        response = httpx.post(
+            f"{api_url}/api/v1/governance/proposals",
+            json={
+                "title": title,
+                "description": description,
+                "proposal_type": proposal_type,
+                "duration_days": duration
+            },
+            timeout=10.0
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            console.print(f"✅ Proposal created!", style="bold green")
+            console.print(f"   Proposal ID: {data.get('proposal_id')}")
+            console.print(f"   Status: {data.get('status')}")
+            console.print(f"   Voting starts: {data.get('voting_starts')}")
+            console.print(f"   Voting ends: {data.get('voting_ends')}")
+        else:
+            console.print(f"❌ Failed to create proposal: {response.status_code}", style="red")
+            console.print(f"   {response.text}")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@governance.command()
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def voting_power(api_url: str):
+    """Show your voting power."""
+    import httpx
+    
+    try:
+        response = httpx.get(f"{api_url}/api/v1/governance/voting-power", timeout=10.0)
+        
+        if response.status_code == 200:
+            data = response.json()
+            console.print(f"🗳️  Your voting power: {data.get('voting_power', 0):.2f} FTNS", style="bold green")
+        else:
+            console.print(f"❌ Failed to get voting power: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
 
 
 if __name__ == "__main__":

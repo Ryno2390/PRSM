@@ -148,6 +148,23 @@ class PRSMSettings(BaseSettings):
     embedding_model: str = Field(default="text-embedding-3-small", env="PRSM_EMBEDDING_MODEL")
     embedding_dimensions: int = Field(default=1536, env="PRSM_EMBEDDING_DIMENSIONS")
     
+    # === LLM Backend Configuration ===
+    # Primary backend: anthropic, openai, local, mock
+    backend_primary: str = Field(default="mock", env="PRSM_PRIMARY_BACKEND")
+    backend_fallback_chain: str = Field(default="anthropic,openai,local,mock", env="PRSM_FALLBACK_CHAIN")
+    backend_timeout_seconds: int = Field(default=120, env="PRSM_BACKEND_TIMEOUT")
+    backend_max_retries: int = Field(default=3, env="PRSM_BACKEND_MAX_RETRIES")
+    backend_retry_delay: float = Field(default=1.0, env="PRSM_BACKEND_RETRY_DELAY")
+    backend_rate_limit_rpm: int = Field(default=60, env="PRSM_RATE_LIMIT_RPM")
+    
+    # Local backend settings
+    local_model_path: Optional[str] = Field(default=None, env="PRSM_LOCAL_MODEL_PATH")
+    ollama_host: str = Field(default="http://localhost:11434", env="PRSM_OLLAMA_HOST")
+    use_ollama: bool = Field(default=True, env="PRSM_USE_OLLAMA")
+    
+    # Mock backend settings (for testing)
+    mock_delay_seconds: float = Field(default=0.1, env="PRSM_MOCK_DELAY")
+    
     # === Vector Database Configuration ===
     # Pinecone
     pinecone_api_key: Optional[str] = Field(default=None, env="PINECONE_API_KEY")
@@ -289,6 +306,63 @@ class PRSMSettings(BaseSettings):
             "embedding_model": self.embedding_model,
             "embedding_dimensions": self.embedding_dimensions,
         }
+    
+    @property
+    def backend_config(self) -> Dict[str, Any]:
+        """LLM Backend configuration for NWTN pipeline"""
+        return {
+            "primary_backend": self.backend_primary,
+            "fallback_chain": self.backend_fallback_chain,
+            "anthropic_api_key": self.anthropic_api_key,
+            "openai_api_key": self.openai_api_key,
+            "local_model_path": self.local_model_path,
+            "ollama_host": self.ollama_host,
+            "use_ollama": self.use_ollama,
+            "timeout_seconds": self.backend_timeout_seconds,
+            "max_retries": self.backend_max_retries,
+            "retry_delay_seconds": self.backend_retry_delay,
+            "rate_limit_rpm": self.backend_rate_limit_rpm,
+            "mock_delay_seconds": self.mock_delay_seconds,
+        }
+    
+    def get_backend_config(self) -> "BackendConfig":
+        """
+        Get a BackendConfig instance for the NWTN pipeline.
+        
+        Returns:
+            BackendConfig: Configuration for LLM backends
+        """
+        from prsm.compute.nwtn.backends import BackendConfig, BackendType
+        
+        # Parse primary backend
+        try:
+            primary = BackendType(self.backend_primary.lower())
+        except ValueError:
+            primary = BackendType.MOCK
+        
+        # Parse fallback chain
+        fallback_chain = []
+        for b in self.backend_fallback_chain.split(","):
+            b = b.strip().lower()
+            try:
+                fallback_chain.append(BackendType(b))
+            except ValueError:
+                continue
+        
+        return BackendConfig(
+            primary_backend=primary,
+            fallback_chain=fallback_chain or [BackendType.MOCK],
+            anthropic_api_key=self.anthropic_api_key,
+            openai_api_key=self.openai_api_key,
+            local_model_path=self.local_model_path,
+            ollama_host=self.ollama_host,
+            use_ollama=self.use_ollama,
+            timeout_seconds=self.backend_timeout_seconds,
+            max_retries=self.backend_max_retries,
+            retry_delay_seconds=self.backend_retry_delay,
+            rate_limit_rpm=self.backend_rate_limit_rpm,
+            mock_delay_seconds=self.mock_delay_seconds,
+        )
     
     @property
     def is_development(self) -> bool:
