@@ -5,6 +5,11 @@ Implements safety governance system for submitting safety proposals,
 voting on safety measures, and implementing approved safety policies.
 
 Based on execution_plan.md Week 9-10 requirements.
+
+Integration with Governance Execution (Phase 3.3):
+- Connects approved proposals to GovernanceExecutor
+- Supports timelocked execution for sensitive changes
+- Provides execution transparency and audit trails
 """
 
 import asyncio
@@ -19,6 +24,18 @@ import structlog
 
 from pydantic import Field, BaseModel, validator
 from prsm.core.models import SafetyLevel, SafetyFlag, GovernanceProposal, PRSMBaseModel
+
+# Import governance execution system
+from prsm.governance.execution import (
+    GovernanceExecutor,
+    GovernanceAction,
+    GovernanceActionStatus,
+    ExecutionResult,
+    ProposalType as ExecutionProposalType,
+    TimelockController,
+    GovernableParameterRegistry,
+    get_governance_executor
+)
 
 logger = structlog.get_logger()
 
@@ -281,9 +298,14 @@ class SafetyGovernance:
     """
     Safety governance system that manages safety proposals, voting,
     and implementation of approved safety measures.
+    
+    Integration with Governance Execution (Phase 3.3):
+    - Uses GovernanceExecutor for actual parameter changes
+    - Supports timelocked execution for sensitive changes
+    - Provides execution transparency and audit trails
     """
     
-    def __init__(self, governance_id: str = None):
+    def __init__(self, governance_id: str = None, governance_executor: GovernanceExecutor = None):
         self.governance_id = governance_id or str(uuid4())
         self.logger = logger.bind(component="safety_governance", governance_id=self.governance_id)
         
@@ -306,6 +328,13 @@ class SafetyGovernance:
         # Implementation tracking
         self.active_implementations: Dict[UUID, Any] = {}
         self.implementation_queue: List[UUID] = []
+        
+        # Governance executor integration (Phase 3.3)
+        self.governance_executor = governance_executor or get_governance_executor()
+        
+        # Execution tracking
+        self.execution_results: Dict[UUID, ExecutionResult] = {}
+        self.pending_executions: Dict[UUID, str] = {}  # proposal_id -> action_id
         
     async def submit_safety_proposal(self, proposal: SafetyProposal) -> UUID:
         """
@@ -700,39 +729,71 @@ class SafetyGovernance:
         )
     
     async def _execute_implementation(self, proposal: SafetyProposal) -> ImplementationResult:
-        """Execute implementation of approved proposal"""
+        """
+        Execute implementation of approved proposal.
+        
+        Integration with GovernanceExecutor (Phase 3.3):
+        - Creates governance action from proposal
+        - Routes through timelock controller
+        - Executes actual configuration changes
+        """
         implementation_notes = []
         verification_steps = []
         success = True
         
         try:
-            # Simulate implementation based on proposal type
-            if proposal.proposal_type == ProposalType.SAFETY_POLICY:
-                implementation_notes.append("Safety policy configuration updated")
-                verification_steps.append("Policy rules validated")
-                
-            elif proposal.proposal_type == ProposalType.CIRCUIT_BREAKER_CONFIG:
-                implementation_notes.append("Circuit breaker thresholds updated")
-                verification_steps.append("Circuit breaker functionality tested")
-                
-            elif proposal.proposal_type == ProposalType.MODEL_RESTRICTIONS:
-                implementation_notes.append("Model access restrictions applied")
-                verification_steps.append("Access control rules verified")
-                
-            elif proposal.proposal_type == ProposalType.EMERGENCY_PROCEDURE:
-                implementation_notes.append("Emergency procedures updated")
-                verification_steps.append("Emergency response tested")
-                
-            else:
-                implementation_notes.append(f"Generic implementation for {_proposal_type_value(proposal.proposal_type)}")
-                verification_steps.append("Implementation verified")
+            # Map proposal type to execution proposal type
+            execution_type = self._map_proposal_type_to_execution_type(proposal.proposal_type)
             
+            # Build proposal data for execution
+            proposal_data = {
+                "target_module": proposal.implementation_details.get("target_module", "system"),
+                "target_parameter": proposal.implementation_details.get("target_parameter", ""),
+                "current_value": proposal.implementation_details.get("current_value"),
+                "proposed_value": proposal.implementation_details.get("proposed_value"),
+                "proposer_id": proposal.proposer_id,
+                "urgency": _urgency_level_value(proposal.urgency_level),
+                "metadata": proposal.implementation_details.get("metadata", {
+                    "title": proposal.title,
+                    "description": proposal.description,
+                    "affected_components": proposal.affected_components,
+                })
+            }
+            
+            # Execute through governance executor
+            execution_result = await self.governance_executor.execute_proposal(
+                proposal_id=str(proposal.proposal_id),
+                proposal_type=execution_type.value,
+                proposal_data=proposal_data
+            )
+            
+            # Track execution
+            self.execution_results[proposal.proposal_id] = execution_result
+            self.pending_executions[proposal.proposal_id] = execution_result.action_id
+            
+            if execution_result.success:
+                implementation_notes.append(f"Governance action executed: {execution_result.message}")
+                verification_steps.extend(execution_result.verification_steps)
+                
+                # If action was scheduled (not immediately executed), note the timelock
+                if "scheduled" in execution_result.message.lower():
+                    implementation_notes.append(f"Action ID: {execution_result.action_id}")
+                    verification_steps.append("Action scheduled with timelock")
+            else:
+                success = False
+                implementation_notes.append(f"Execution failed: {execution_result.error_details or execution_result.message}")
+                
             # Add to implementation queue for monitoring
             self.implementation_queue.append(proposal.proposal_id)
             
         except Exception as e:
             success = False
             implementation_notes.append(f"Implementation failed: {str(e)}")
+            self.logger.error(
+                "Governance execution failed",
+                proposal_id=str(proposal.proposal_id),
+                error=str(e)
+            )
         
         return ImplementationResult(
             proposal_id=proposal.proposal_id,
@@ -741,7 +802,134 @@ class SafetyGovernance:
             implementation_notes="; ".join(implementation_notes),
             verification_steps=verification_steps,
             monitoring_metrics={
-                "implementation_duration": 0.1,  # Simulated
-                "verification_passed": success
+                "implementation_duration": 0.1,  # Will be updated by executor
+                "verification_passed": success,
+                "action_id": self.pending_executions.get(proposal.proposal_id, "")
             }
         )
+    
+    def _map_proposal_type_to_execution_type(self, proposal_type: ProposalType) -> ExecutionProposalType:
+        """Map safety proposal type to execution proposal type."""
+        mapping = {
+            ProposalType.SAFETY_POLICY: ExecutionProposalType.PARAMETER_CHANGE,
+            ProposalType.CIRCUIT_BREAKER_CONFIG: ExecutionProposalType.CIRCUIT_BREAKER,
+            ProposalType.MODEL_RESTRICTIONS: ExecutionProposalType.ACCESS_CONTROL,
+            ProposalType.EMERGENCY_PROCEDURE: ExecutionProposalType.EMERGENCY_ACTION,
+            ProposalType.NETWORK_PROTOCOL: ExecutionProposalType.PROTOCOL_UPGRADE,
+            ProposalType.GOVERNANCE_RULE: ExecutionProposalType.PARAMETER_CHANGE,
+            ProposalType.MONITORING_ENHANCEMENT: ExecutionProposalType.PARAMETER_CHANGE,
+        }
+        return mapping.get(proposal_type, ExecutionProposalType.PARAMETER_CHANGE)
+    
+    async def get_execution_status(self, proposal_id: UUID) -> Optional[Dict[str, Any]]:
+        """
+        Get the execution status of a proposal.
+        
+        Args:
+            proposal_id: ID of the proposal
+            
+        Returns:
+            Execution status dict or None if not found
+        """
+        if proposal_id not in self.proposals:
+            return None
+        
+        # Check if we have an execution result
+        if proposal_id in self.execution_results:
+            result = self.execution_results[proposal_id]
+            return {
+                "proposal_id": str(proposal_id),
+                "action_id": result.action_id,
+                "success": result.success,
+                "message": result.message,
+                "execution_time": result.execution_time.isoformat(),
+                "verification_steps": result.verification_steps,
+                "affected_resources": result.affected_resources,
+            }
+        
+        # Check if there's a pending execution
+        if proposal_id in self.pending_executions:
+            action_id = self.pending_executions[proposal_id]
+            record = await self.governance_executor.timelock.get_action_record(action_id)
+            if record:
+                return {
+                    "proposal_id": str(proposal_id),
+                    "action_id": action_id,
+                    "status": record.status.value,
+                    "scheduled_at": record.scheduled_at.isoformat(),
+                    "execute_at": record.execute_at.isoformat(),
+                    "is_ready": record.is_ready,
+                    "time_remaining_seconds": record.time_remaining.total_seconds(),
+                }
+        
+        return None
+    
+    async def process_ready_executions(self) -> List[Dict[str, Any]]:
+        """
+        Process all executions that are ready.
+        
+        This should be called periodically by a background task.
+        
+        Returns:
+            List of execution results
+        """
+        results = await self.governance_executor.process_ready_executions()
+        
+        # Update tracking
+        for result in results:
+            for proposal_id, action_id in list(self.pending_executions.items()):
+                if action_id == result.action_id:
+                    self.execution_results[proposal_id] = result
+                    break
+        
+        return [r.to_dict() for r in results]
+    
+    async def cancel_execution(self, proposal_id: UUID, reason: str) -> bool:
+        """
+        Cancel a pending execution.
+        
+        Args:
+            proposal_id: ID of the proposal
+            reason: Reason for cancellation
+            
+        Returns:
+            True if cancelled successfully
+        """
+        if proposal_id not in self.pending_executions:
+            self.logger.warning("No pending execution for proposal", proposal_id=str(proposal_id))
+            return False
+        
+        action_id = self.pending_executions[proposal_id]
+        success = await self.governance_executor.cancel_execution(action_id, reason)
+        
+        if success:
+            del self.pending_executions[proposal_id]
+            self.logger.info(
+                "Execution cancelled",
+                proposal_id=str(proposal_id),
+                action_id=action_id,
+                reason=reason
+            )
+        
+        return success
+    
+    def set_execution_services(
+        self,
+        ftns_service=None,
+        staking_manager=None,
+        network_manager=None
+    ):
+        """
+        Set service references for governance execution.
+        
+        Args:
+            ftns_service: FTNS service instance
+            staking_manager: Staking manager instance
+            network_manager: Network manager instance
+        """
+        if ftns_service:
+            self.governance_executor.set_ftns_service(ftns_service)
+        if staking_manager:
+            self.governance_executor.set_staking_manager(staking_manager)
+        if network_manager:
+            self.governance_executor.set_network_manager(network_manager)

@@ -45,7 +45,19 @@ from .models import (
     FTNSMarketplaceListing, FTNSMarketplaceTransaction,
     FTNSGovernanceVote, FTNSAuditLog,
     TransactionType, TransactionStatus, WalletType,
-    DividendStatus, RoyaltyStatus
+    DividendStatus, RoyaltyStatus,
+    # Staking models
+    FTNSStake, FTNSUnstakeRequest, FTNSSlashEvent,
+    FTNSStakingConfig, FTNSRewardDistribution,
+    StakeStatus, UnstakeRequestStatus, SlashReason, StakeType
+)
+
+# Export staking manager
+from .staking_manager import (
+    StakingManager, StakingConfig, StakeRecord, UnstakeRequest,
+    SlashRecord, RewardCalculation, get_staking_manager,
+    StakeStatus as StakeStatusEnum, UnstakeRequestStatus as UnstakeRequestStatusEnum,
+    SlashReason as SlashReasonEnum, StakeType as StakeTypeEnum
 )
 
 __all__ = [
@@ -70,7 +82,16 @@ __all__ = [
     "FTNSMarketplaceListing", "FTNSMarketplaceTransaction",
     "FTNSGovernanceVote", "FTNSAuditLog",
 
+    # Staking Models
+    "FTNSStake", "FTNSUnstakeRequest", "FTNSSlashEvent",
+    "FTNSStakingConfig", "FTNSRewardDistribution",
+
     # Enums
     "TransactionType", "TransactionStatus", "WalletType",
-    "DividendStatus", "RoyaltyStatus"
+    "DividendStatus", "RoyaltyStatus",
+    "StakeStatus", "UnstakeRequestStatus", "SlashReason", "StakeType",
+
+    # Staking Manager
+    "StakingManager", "StakingConfig", "StakeRecord", "UnstakeRequest",
+    "SlashRecord", "RewardCalculation", "get_staking_manager"
 ]

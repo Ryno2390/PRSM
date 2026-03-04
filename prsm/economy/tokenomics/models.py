@@ -1384,5 +1384,272 @@ class FTNSEmergencyConfig(Base):
     )
 
 
+# === PHASE 3.2: STAKING AND INCENTIVE MODELS ===
+
+class StakeStatus(str, Enum):
+    """Status of a stake"""
+    ACTIVE = "active"              # Currently staked and earning rewards
+    UNSTAKING = "unstaking"         # Unstake requested, waiting for period
+    WITHDRAWN = "withdrawn"         # Fully withdrawn
+    SLASHED = "slashed"             # Partially or fully slashed
+    LOCKED = "locked"               # Locked due to dispute or investigation
+
+
+class UnstakeRequestStatus(str, Enum):
+    """Status of an unstake request"""
+    PENDING = "pending"            # Waiting for unstaking period
+    AVAILABLE = "available"         # Ready for withdrawal
+    COMPLETED = "completed"         # Withdrawn successfully
+    CANCELLED = "cancelled"         # Request cancelled
+    SLASHED = "slashed"             # Slashed during unstaking
+
+
+class SlashReason(str, Enum):
+    """Reasons for slashing"""
+    MISCONDUCT = "misconduct"                    # General misbehavior
+    VALIDATION_FAILURE = "validation_failure"    # Failed to validate properly
+    DOUBLE_SIGNING = "double_signing"           # Signed conflicting blocks
+    DOWNTIME = "downtime"                        # Excessive offline time
+    GOVERNANCE_VIOLATION = "governance_violation"  # Violated governance rules
+    FRAUD = "fraud"                              # Fraudulent activity
+    COLLUSION = "collusion"                       # Collusion with other nodes
+    DATA_MANIPULATION = "data_manipulation"      # Manipulated data
+    SECURITY_BREACH = "security_breach"          # Security violation
+    APPEAL_REJECTED = "appeal_rejected"           # Appeal was rejected
+
+
+class StakeType(str, Enum):
+    """Types of staking"""
+    GOVERNANCE = "governance"        # Staking for governance participation
+    VALIDATION = "validation"        # Staking for network validation
+    COMPUTE = "compute"              # Staking for compute provision
+    STORAGE = "storage"              # Staking for storage provision
+    LIQUIDITY = "liquidity"          # Staking for liquidity provision
+    GENERAL = "general"              # General purpose staking
+
+
+class FTNSStake(Base):
+    """Database model for stakes"""
+    __tablename__ = "ftns_stakes"
+    
+    # Primary identification
+    stake_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = Column(String(255), nullable=False, index=True)
+    wallet_id = Column(PG_UUID(as_uuid=True), ForeignKey('ftns_wallets.wallet_id'), nullable=False)
+    
+    # Stake details
+    amount = Column(DECIMAL(20, 8), nullable=False)
+    stake_type = Column(String(50), nullable=False, default=StakeType.GENERAL.value)
+    status = Column(String(50), nullable=False, default=StakeStatus.ACTIVE.value, index=True)
+    
+    # Reward tracking
+    rewards_earned = Column(DECIMAL(20, 8), nullable=False, default=Decimal('0'))
+    rewards_claimed = Column(DECIMAL(20, 8), nullable=False, default=Decimal('0'))
+    last_reward_calculation = Column(DateTime(timezone=True), nullable=False)
+    
+    # Timestamps
+    staked_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    unstake_requested_at = Column(DateTime(timezone=True), nullable=True)
+    withdrawn_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Lock status
+    lock_reason = Column(Text, nullable=True)
+    
+    # Metadata (renamed to avoid SQLAlchemy reserved word)
+    stake_metadata = Column(JSONB, nullable=True)
+    
+    # Relationships
+    wallet = relationship("FTNSWallet", backref="stakes")
+    unstake_requests = relationship("FTNSUnstakeRequest", backref="stake")
+    slash_events = relationship("FTNSSlashEvent", backref="stake")
+    
+    # Constraints
+    __table_args__ = (
+        CheckConstraint('amount > 0', name='positive_stake_amount'),
+        CheckConstraint('rewards_earned >= 0', name='non_negative_rewards_earned'),
+        CheckConstraint('rewards_claimed >= 0', name='non_negative_rewards_claimed'),
+        Index('idx_stakes_user_status', 'user_id', 'status'),
+        Index('idx_stakes_type', 'stake_type'),
+        Index('idx_stakes_staked_at', 'staked_at'),
+    )
+
+
+class FTNSUnstakeRequest(Base):
+    """Database model for unstake requests"""
+    __tablename__ = "ftns_unstake_requests"
+    
+    # Primary identification
+    request_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    stake_id = Column(PG_UUID(as_uuid=True), ForeignKey('ftns_stakes.stake_id'), nullable=False)
+    user_id = Column(String(255), nullable=False, index=True)
+    
+    # Request details
+    amount = Column(DECIMAL(20, 8), nullable=False)
+    status = Column(String(50), nullable=False, default=UnstakeRequestStatus.PENDING.value, index=True)
+    
+    # Timing
+    requested_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    available_at = Column(DateTime(timezone=True), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Cancellation
+    cancellation_reason = Column(Text, nullable=True)
+    
+    # Metadata (renamed to avoid SQLAlchemy reserved word)
+    request_metadata = Column(JSONB, nullable=True)
+    
+    # Constraints
+    __table_args__ = (
+        CheckConstraint('amount > 0', name='positive_unstake_amount'),
+        Index('idx_unstake_requests_user', 'user_id'),
+        Index('idx_unstake_requests_status', 'status'),
+        Index('idx_unstake_requests_available', 'available_at'),
+    )
+
+
+class FTNSSlashEvent(Base):
+    """Database model for slash events"""
+    __tablename__ = "ftns_slash_events"
+    
+    # Primary identification
+    slash_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    stake_id = Column(PG_UUID(as_uuid=True), ForeignKey('ftns_stakes.stake_id'), nullable=False)
+    user_id = Column(String(255), nullable=False, index=True)
+    
+    # Slash details
+    amount_slashed = Column(DECIMAL(20, 8), nullable=False)
+    reason = Column(String(50), nullable=False)
+    slash_rate = Column(Float, nullable=False)
+    
+    # Evidence
+    evidence = Column(JSONB, nullable=True)
+    
+    # Timing
+    slashed_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    
+    # Slasher info
+    slashed_by = Column(String(255), nullable=False)  # Governance proposal or system
+    
+    # Appeal tracking
+    appeal_deadline = Column(DateTime(timezone=True), nullable=True)
+    appeal_status = Column(String(50), nullable=True)  # pending, approved, rejected
+    appeal_evidence = Column(JSONB, nullable=True)
+    appeal_resolved_at = Column(DateTime(timezone=True), nullable=True)
+    appeal_resolution_note = Column(Text, nullable=True)
+    
+    # Metadata (renamed to avoid SQLAlchemy reserved word)
+    slash_metadata = Column(JSONB, nullable=True)
+    
+    # Constraints
+    __table_args__ = (
+        CheckConstraint('amount_slashed > 0', name='positive_slash_amount'),
+        CheckConstraint('slash_rate > 0 AND slash_rate <= 1', name='valid_slash_rate'),
+        Index('idx_slash_events_user', 'user_id'),
+        Index('idx_slash_events_reason', 'reason'),
+        Index('idx_slash_events_slashed_at', 'slashed_at'),
+    )
+
+
+class FTNSStakingConfig(Base):
+    """Configuration for staking mechanism"""
+    __tablename__ = "ftns_staking_config"
+    
+    # Primary identification
+    config_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    config_name = Column(String(100), nullable=False, unique=True, index=True)
+    config_version = Column(String(20), nullable=False, default="1.0")
+    
+    # Stake limits
+    minimum_stake = Column(DECIMAL(20, 8), nullable=False, default=Decimal('1000'))
+    max_stake_per_user = Column(DECIMAL(20, 8), nullable=False, default=Decimal('10000000'))
+    max_total_stake = Column(DECIMAL(20, 8), nullable=False, default=Decimal('1000000000'))
+    
+    # Time periods
+    unstaking_period_seconds = Column(Integer, nullable=False, default=604800)  # 7 days
+    min_stake_age_for_rewards_seconds = Column(Integer, nullable=False, default=86400)  # 1 day
+    appeal_period_seconds = Column(Integer, nullable=False, default=259200)  # 3 days
+    
+    # Reward parameters
+    reward_rate_annual = Column(Float, nullable=False, default=0.05)  # 5%
+    reward_compounding = Column(Boolean, nullable=False, default=False)
+    reward_calculation_interval_seconds = Column(Integer, nullable=False, default=3600)  # 1 hour
+    min_reward_claim_interval_seconds = Column(Integer, nullable=False, default=86400)  # 1 day
+    
+    # Slashing parameters
+    slashing_rate_base = Column(Float, nullable=False, default=0.1)  # 10%
+    governance_slash_multiplier = Column(Float, nullable=False, default=2.0)
+    max_slash_per_event = Column(Float, nullable=False, default=0.5)  # 50%
+    downtime_slash_threshold_seconds = Column(Integer, nullable=False, default=86400)  # 24 hours
+    
+    # Rate limits
+    max_stake_operations_per_day = Column(Integer, nullable=False, default=5)
+    max_unstake_operations_per_day = Column(Integer, nullable=False, default=3)
+    
+    # Configuration lifecycle
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    effective_date = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    deactivated_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(String(255), nullable=False)
+    approved_by = Column(String(255), nullable=True)
+    
+    # Metadata
+    config_metadata = Column(JSONB, nullable=True)
+    
+    # Constraints
+    __table_args__ = (
+        CheckConstraint('minimum_stake > 0', name='positive_minimum_stake'),
+        CheckConstraint('max_stake_per_user > minimum_stake', name='valid_max_user_stake'),
+        CheckConstraint('max_total_stake > max_stake_per_user', name='valid_max_total_stake'),
+        CheckConstraint('unstaking_period_seconds > 0', name='positive_unstaking_period'),
+        CheckConstraint('reward_rate_annual >= 0', name='non_negative_reward_rate'),
+        CheckConstraint('slashing_rate_base > 0 AND slashing_rate_base <= 1', name='valid_slashing_rate'),
+        CheckConstraint('max_slash_per_event > 0 AND max_slash_per_event <= 1', name='valid_max_slash'),
+        Index('idx_staking_config_active', 'active'),
+        Index('idx_staking_config_effective', 'effective_date'),
+    )
+
+
+class FTNSRewardDistribution(Base):
+    """Track staking reward distributions"""
+    __tablename__ = "ftns_reward_distributions"
+    
+    # Primary identification
+    distribution_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    stake_id = Column(PG_UUID(as_uuid=True), ForeignKey('ftns_stakes.stake_id'), nullable=False)
+    user_id = Column(String(255), nullable=False, index=True)
+    
+    # Reward details
+    principal_amount = Column(DECIMAL(20, 8), nullable=False)
+    reward_amount = Column(DECIMAL(20, 8), nullable=False)
+    annual_rate = Column(Float, nullable=False)
+    days_staked = Column(Float, nullable=False)
+    
+    # Timing
+    calculation_timestamp = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    next_calculation = Column(DateTime(timezone=True), nullable=False)
+    
+    # Distribution status
+    status = Column(String(50), nullable=False, default="calculated", index=True)
+    claimed_at = Column(DateTime(timezone=True), nullable=True)
+    transaction_id = Column(PG_UUID(as_uuid=True), ForeignKey('ftns_transactions.transaction_id'), nullable=True)
+    
+    # Metadata
+    distribution_metadata = Column(JSONB, nullable=True)
+    
+    # Relationships
+    stake = relationship("FTNSStake", backref="reward_distributions")
+    transaction = relationship("FTNSTransaction", backref="reward_distribution")
+    
+    # Constraints
+    __table_args__ = (
+        CheckConstraint('principal_amount > 0', name='positive_principal'),
+        CheckConstraint('reward_amount >= 0', name='non_negative_reward'),
+        CheckConstraint('days_staked >= 0', name='non_negative_days'),
+        Index('idx_reward_distributions_user', 'user_id'),
+        Index('idx_reward_distributions_status', 'status'),
+        Index('idx_reward_distributions_calculated', 'calculation_timestamp'),
+    )
+
+
 # Re-export Pydantic FTNSBalance from core models for convenience
 from prsm.core.models import FTNSBalance  # noqa: E402, F401
