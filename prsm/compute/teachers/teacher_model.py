@@ -6,19 +6,28 @@ adaptive teaching strategies, and RLVR-based optimization.
 
 Based on execution_plan.md Week 7-8 requirements and enhanced data models.
 🔄 INTEGRATION: Now integrates with real teacher implementation for production ML capabilities
+🎯 TRAINING: Now includes real training infrastructure from Phase 1.3
 """
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Union
 from uuid import UUID, uuid4
+from pathlib import Path
 import structlog
 
 from prsm.core.models import (
-    TeacherModel, Curriculum, LearningSession, 
+    TeacherModel, Curriculum, LearningSession,
     ModelType, PRSMBaseModel
 )
 from .real_teacher_implementation import create_real_teacher, RealTeacherModel
+
+# Import training infrastructure from Phase 1.3
+from .training_config import (
+    TrainingConfig, TrainingStrategy, Hyperparameters,
+    TrainingExample, TrainingResult, EvaluationResult
+)
+from .trainer import TeacherTrainer, create_teacher_trainer
 
 logger = structlog.get_logger()
 
@@ -515,7 +524,7 @@ async def create_production_teacher(teacher_model: TeacherModel, use_real_implem
 
 
 async def create_teacher_with_specialization(
-    specialization: str, 
+    specialization: str,
     domain: str,
     use_real_implementation: bool = True
 ) -> Any:
@@ -537,3 +546,343 @@ async def create_teacher_with_specialization(
     )
     
     return await create_production_teacher(teacher_model, use_real_implementation)
+
+
+# === Training Integration (Phase 1.3) ===
+
+class TrainableTeacher(DistilledTeacher):
+    """
+    Extended teacher model with real training capabilities.
+    
+    This class integrates the training infrastructure from Phase 1.3
+    with the DistilledTeacher framework, enabling:
+    - Real model training with gradient descent
+    - Checkpoint management
+    - Evaluation metrics
+    - Integration with backend registry for LLM inference
+    
+    Usage:
+        config = TrainingConfig(
+            model_name="science_teacher",
+            strategy=TrainingStrategy.SUPERVISED,
+            hyperparameters=Hyperparameters(learning_rate=2e-5, epochs=5)
+        )
+        
+        teacher = TrainableTeacher(teacher_model, config)
+        result = await teacher.train(training_data)
+    """
+    
+    def __init__(
+        self,
+        teacher_model: TeacherModel,
+        training_config: Optional[TrainingConfig] = None,
+        backend_registry: Optional[Any] = None
+    ):
+        """
+        Initialize trainable teacher.
+        
+        Args:
+            teacher_model: Base teacher model configuration
+            training_config: Training configuration (uses defaults if None)
+            backend_registry: Optional backend registry for LLM inference
+        """
+        super().__init__(teacher_model)
+        
+        self.training_config = training_config or TrainingConfig(
+            model_name=f"teacher_{teacher_model.teacher_id}",
+            strategy=TrainingStrategy.SUPERVISED
+        )
+        self.backend_registry = backend_registry
+        self.trainer: Optional[TeacherTrainer] = None
+        self._is_trained: bool = False
+        self._training_result: Optional[TrainingResult] = None
+        self._evaluation_result: Optional[EvaluationResult] = None
+        
+    async def initialize_trainer(self) -> None:
+        """
+        Initialize the trainer component.
+        
+        This creates the TeacherTrainer instance with the configured
+        training parameters and backend registry.
+        """
+        self.trainer = await create_teacher_trainer(
+            config=self.training_config,
+            backend_registry=self.backend_registry
+        )
+        self.logger.info(
+            "Trainer initialized",
+            model_name=self.training_config.model_name,
+            strategy=self.training_config.strategy.value
+        )
+    
+    async def train(
+        self,
+        training_data: Optional[List[TrainingExample]] = None,
+        validation_data: Optional[List[TrainingExample]] = None
+    ) -> TrainingResult:
+        """
+        Train the teacher model.
+        
+        Executes the full training pipeline including:
+        - Data loading and preprocessing
+        - Training loop with gradient descent
+        - Validation and early stopping
+        - Checkpoint saving
+        
+        Args:
+            training_data: Optional pre-loaded training examples
+            validation_data: Optional pre-loaded validation examples
+            
+        Returns:
+            TrainingResult with metrics and checkpoint info
+        """
+        if self.trainer is None:
+            await self.initialize_trainer()
+        
+        self.logger.info(
+            "Starting teacher model training",
+            model_name=self.training_config.model_name,
+            epochs=self.training_config.hyperparameters.epochs
+        )
+        
+        # Execute training
+        self._training_result = await self.trainer.train(
+            training_data=training_data,
+            validation_data=validation_data
+        )
+        
+        self._is_trained = self._training_result.success
+        
+        if self._is_trained:
+            self.logger.info(
+                "Training completed successfully",
+                final_loss=self._training_result.final_train_loss,
+                total_epochs=self._training_result.total_epochs,
+                training_time=self._training_result.training_time_seconds
+            )
+        else:
+            self.logger.error(
+                "Training failed",
+                error=self._training_result.error_message
+            )
+        
+        return self._training_result
+    
+    async def evaluate(
+        self,
+        eval_data: List[TrainingExample]
+    ) -> EvaluationResult:
+        """
+        Evaluate the trained model.
+        
+        Computes evaluation metrics on the provided dataset.
+        
+        Args:
+            eval_data: Evaluation examples
+            
+        Returns:
+            EvaluationResult with accuracy, perplexity, and other metrics
+        """
+        if self.trainer is None:
+            await self.initialize_trainer()
+        
+        if not self._is_trained and self.training_config.resume_from_checkpoint:
+            # Try to load from checkpoint
+            self.logger.info("Loading model from checkpoint for evaluation")
+        
+        self._evaluation_result = await self.trainer.evaluate(
+            model=self.trainer.model,
+            eval_data=eval_data
+        )
+        
+        self.logger.info(
+            "Evaluation completed",
+            accuracy=self._evaluation_result.accuracy,
+            perplexity=self._evaluation_result.perplexity
+        )
+        
+        return self._evaluation_result
+    
+    def save_checkpoint(self, path: Optional[str] = None) -> Optional[str]:
+        """
+        Save the trained model checkpoint.
+        
+        Args:
+            path: Optional custom path for checkpoint
+            
+        Returns:
+            Path to saved checkpoint or None if not trained
+        """
+        if not self._is_trained or self.trainer is None:
+            self.logger.warning("Cannot save checkpoint: model not trained")
+            return None
+        
+        checkpoint_path = path or str(
+            Path(self.training_config.checkpoint.checkpoint_dir) /
+            f"{self.training_config.model_name}_final.pt"
+        )
+        
+        self.trainer.save_checkpoint(self.trainer.model, checkpoint_path)
+        
+        self.logger.info("Checkpoint saved", path=checkpoint_path)
+        return checkpoint_path
+    
+    def load_checkpoint(self, path: str) -> bool:
+        """
+        Load a trained model from checkpoint.
+        
+        Args:
+            path: Path to checkpoint file
+            
+        Returns:
+            True if loaded successfully
+        """
+        if self.trainer is None:
+            # Need to initialize trainer first
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                # Already in an async context — schedule and wait
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    pool.submit(asyncio.run, self.initialize_trainer()).result()
+            except RuntimeError:
+                # No running loop — safe to use asyncio.run
+                asyncio.run(self.initialize_trainer())
+        
+        try:
+            self.trainer.load_checkpoint(path)
+            self._is_trained = True
+            self.logger.info("Checkpoint loaded", path=path)
+            return True
+        except Exception as e:
+            self.logger.error("Failed to load checkpoint", error=str(e))
+            return False
+    
+    async def generate_curriculum_with_training(
+        self,
+        student_model: str,
+        domain: str,
+        use_trained_model: bool = True
+    ) -> Curriculum:
+        """
+        Generate curriculum using trained model capabilities.
+        
+        If use_trained_model is True and the model is trained,
+        uses the trained model for curriculum generation.
+        Otherwise, falls back to the base implementation.
+        
+        Args:
+            student_model: Identifier for the student model
+            domain: Domain/subject area for curriculum
+            use_trained_model: Whether to use trained model if available
+            
+        Returns:
+            Generated curriculum
+        """
+        if use_trained_model and self._is_trained and self._evaluation_result:
+            # Use trained model for enhanced curriculum generation
+            curriculum = await self._generate_curriculum_from_trained(
+                student_model, domain
+            )
+        else:
+            # Fall back to base implementation
+            curriculum = await self.generate_curriculum(student_model, domain)
+        
+        return curriculum
+    
+    async def _generate_curriculum_from_trained(
+        self,
+        student_model: str,
+        domain: str
+    ) -> Curriculum:
+        """
+        Generate curriculum using trained model.
+        
+        Uses the trained model's evaluation capabilities to create
+        more targeted and effective curricula.
+        """
+        # Get base curriculum
+        base_curriculum = await self.generate_curriculum(student_model, domain)
+        
+        # Enhance with trained model insights
+        if self._evaluation_result:
+            # Adjust difficulty based on model performance
+            performance_factor = self._evaluation_result.accuracy
+            
+            # Scale difficulty levels based on model confidence
+            enhanced_examples = []
+            for example in base_curriculum.training_examples:
+                enhanced_example = example.copy()
+                # Adjust difficulty based on model's domain performance
+                if domain in self._evaluation_result.domain_scores:
+                    domain_score = self._evaluation_result.domain_scores[domain]
+                    enhanced_example['difficulty'] = (
+                        example.get('difficulty', 0.5) * (0.5 + 0.5 * domain_score)
+                    )
+                enhanced_examples.append(enhanced_example)
+            
+            base_curriculum.training_examples = enhanced_examples
+        
+        return base_curriculum
+    
+    @property
+    def is_trained(self) -> bool:
+        """Check if model has been trained"""
+        return self._is_trained
+    
+    @property
+    def training_result(self) -> Optional[TrainingResult]:
+        """Get the last training result"""
+        return self._training_result
+    
+    @property
+    def evaluation_result(self) -> Optional[EvaluationResult]:
+        """Get the last evaluation result"""
+        return self._evaluation_result
+
+
+async def create_trainable_teacher(
+    teacher_model: TeacherModel,
+    training_config: Optional[TrainingConfig] = None,
+    backend_registry: Optional[Any] = None
+) -> TrainableTeacher:
+    """
+    Create a trainable teacher with training infrastructure.
+    
+    Factory function that creates a TrainableTeacher instance
+    with proper configuration and backend integration.
+    
+    Args:
+        teacher_model: Base teacher model configuration
+        training_config: Optional training configuration
+        backend_registry: Optional backend registry for LLM inference
+        
+    Returns:
+        Configured TrainableTeacher instance
+    """
+    # Create default config if not provided
+    if training_config is None:
+        training_config = TrainingConfig(
+            model_name=f"teacher_{teacher_model.teacher_id}",
+            strategy=TrainingStrategy.SUPERVISED,
+            hyperparameters=Hyperparameters(
+                learning_rate=1e-5,
+                batch_size=8,
+                epochs=3
+            )
+        )
+    
+    teacher = TrainableTeacher(
+        teacher_model=teacher_model,
+        training_config=training_config,
+        backend_registry=backend_registry
+    )
+    
+    logger.info(
+        "Trainable teacher created",
+        teacher_id=str(teacher_model.teacher_id),
+        model_name=training_config.model_name
+    )
+    
+    return teacher
