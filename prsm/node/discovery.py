@@ -8,11 +8,14 @@ and periodically share their own presence on the network.
 """
 
 import asyncio
+import collections
 import logging
 import random
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import urlparse
 
 from prsm.node.transport import (
     MSG_GOSSIP,
@@ -40,6 +43,50 @@ class PeerInfo:
     last_seen: float = field(default_factory=time.time)
 
 
+def validate_bootstrap_address(address: str) -> Tuple[bool, str]:
+    """Validate that a bootstrap address is well-formed.
+
+    Returns (is_valid, reason).  Accepts formats:
+      - wss://host:port  or  ws://host:port
+      - host:port  (bare host:port, port must be numeric)
+      - hostname only (accepted, uses default port)
+
+    Rejects empty strings, whitespace-only, addresses with no parseable
+    host, and URLs with unsupported schemes.
+    """
+    if not address or not address.strip():
+        return False, "empty address"
+
+    address = address.strip()
+
+    # URL form
+    if "://" in address:
+        try:
+            parsed = urlparse(address)
+        except Exception as exc:
+            return False, f"unparseable URL ({exc})"
+
+        if parsed.scheme not in ("ws", "wss"):
+            return False, f"unsupported scheme '{parsed.scheme}'"
+        if not parsed.hostname:
+            return False, "missing hostname"
+        return True, ""
+
+    # Bare host:port form
+    host, sep, port_str = address.rpartition(":")
+    if sep and host:
+        try:
+            port = int(port_str)
+            if not (1 <= port <= 65535):
+                return False, f"port {port} out of range"
+        except ValueError:
+            return False, f"non-numeric port '{port_str}'"
+        return True, ""
+
+    # Single token (hostname only, no port) — accept
+    return True, ""
+
+
 class PeerDiscovery:
     """Discovers and maintains connections to network peers.
 
@@ -54,6 +101,13 @@ class PeerDiscovery:
         self,
         transport: WebSocketTransport,
         bootstrap_nodes: Optional[List[str]] = None,
+        bootstrap_connect_timeout: float = 5.0,
+        bootstrap_retry_attempts: int = 2,
+        bootstrap_fallback_enabled: bool = True,
+        bootstrap_fallback_nodes: Optional[List[str]] = None,
+        bootstrap_validate_addresses: bool = True,
+        bootstrap_backoff_base: float = 1.0,
+        bootstrap_backoff_max: float = 8.0,
         target_peers: int = 8,
         announce_interval: float = 60.0,
         maintenance_interval: float = 30.0,
@@ -62,11 +116,37 @@ class PeerDiscovery:
     ):
         self.transport = transport
         self.bootstrap_nodes = bootstrap_nodes or []
+        self.bootstrap_connect_timeout = max(1.0, float(bootstrap_connect_timeout))
+        self.bootstrap_retry_attempts = max(1, int(bootstrap_retry_attempts))
+        self.bootstrap_fallback_enabled = bootstrap_fallback_enabled
+        self.bootstrap_fallback_nodes = bootstrap_fallback_nodes or []
+        self.bootstrap_validate_addresses = bootstrap_validate_addresses
+        self.bootstrap_backoff_base = max(0.1, float(bootstrap_backoff_base))
+        self.bootstrap_backoff_max = max(self.bootstrap_backoff_base, float(bootstrap_backoff_max))
         self.target_peers = target_peers
         self.announce_interval = announce_interval
         self.maintenance_interval = maintenance_interval
         self.peer_stale_timeout = peer_stale_timeout
         self._local_capabilities = local_capabilities or []
+
+        # Startup bootstrap status (for first-run observability)
+        self.bootstrap_degraded_mode: bool = False
+        self.bootstrap_connected_count: int = 0
+        self.bootstrap_attempted_nodes: List[str] = []
+        self.bootstrap_success_node: Optional[str] = None
+        self.bootstrap_failed_nodes: List[str] = []
+
+        # Bootstrap decision telemetry (additive, never alters behavior)
+        self._bootstrap_telemetry: Dict[str, Any] = {
+            "addresses_validated": 0,
+            "addresses_rejected": 0,
+            "rejected_reasons": collections.Counter(),
+            "fallback_activated": False,
+            "fallback_attempted": 0,
+            "fallback_succeeded": False,
+            "backoff_total_seconds": 0.0,
+            "source_policy": "primary_only",
+        }
 
         # Known peers (may not be connected)
         self.known_peers: Dict[str, PeerInfo] = {}
@@ -82,40 +162,221 @@ class PeerDiscovery:
         await self.bootstrap()
         self._tasks.append(asyncio.create_task(self._announce_loop()))
         self._tasks.append(asyncio.create_task(self._maintenance_loop()))
+        if self.bootstrap_degraded_mode:
+            logger.warning(
+                "Discovery started in DEGRADED local mode: bootstrap unavailable; "
+                "peer discovery may be delayed until inbound peers or local announcements arrive"
+            )
         logger.info(f"Discovery started with {len(self.bootstrap_nodes)} bootstrap node(s)")
 
     async def stop(self) -> None:
         self._running = False
         for task in self._tasks:
             task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
         self._tasks.clear()
 
+    def _build_bootstrap_candidate_list(self) -> Tuple[List[str], List[str]]:
+        """Build ordered candidate list: primary nodes first, then fallback.
+
+        Returns:
+            (valid_candidates, rejected_addresses) where rejected_addresses
+            contains any addresses that failed validation.
+        """
+        candidates: List[str] = []
+        rejected: List[str] = []
+
+        # Phase 1: configured primary nodes
+        for addr in self.bootstrap_nodes:
+            if self.bootstrap_validate_addresses:
+                ok, reason = validate_bootstrap_address(addr)
+                self._bootstrap_telemetry["addresses_validated"] += 1
+                if not ok:
+                    self._bootstrap_telemetry["addresses_rejected"] += 1
+                    self._bootstrap_telemetry["rejected_reasons"][reason] += 1
+                    rejected.append(addr)
+                    logger.warning(
+                        "Bootstrap address rejected (validation): %s — %s",
+                        addr, reason,
+                    )
+                    continue
+            candidates.append(addr)
+
+        # Phase 2: fallback nodes (only if feature flag enabled)
+        if self.bootstrap_fallback_enabled and self.bootstrap_fallback_nodes:
+            self._bootstrap_telemetry["source_policy"] = "primary_then_fallback"
+            for addr in self.bootstrap_fallback_nodes:
+                if addr in candidates:
+                    continue  # Already in primary list, skip duplicate
+                if self.bootstrap_validate_addresses:
+                    ok, reason = validate_bootstrap_address(addr)
+                    self._bootstrap_telemetry["addresses_validated"] += 1
+                    if not ok:
+                        self._bootstrap_telemetry["addresses_rejected"] += 1
+                        self._bootstrap_telemetry["rejected_reasons"][reason] += 1
+                        rejected.append(addr)
+                        logger.warning(
+                            "Fallback bootstrap address rejected (validation): %s — %s",
+                            addr, reason,
+                        )
+                        continue
+                candidates.append(addr)
+
+        return candidates, rejected
+
     async def bootstrap(self) -> int:
-        """Connect to bootstrap nodes and request their peer lists."""
+        """Connect to bootstrap nodes and request their peer lists.
+
+        Uses source ordering policy: configured nodes first, then trusted
+        fallback nodes (when bootstrap_fallback_enabled is True).
+        Applies address validation and exponential backoff between retries.
+        """
         connected = 0
-        for address in self.bootstrap_nodes:
-            peer = await self.transport.connect_to_peer(address)
-            if peer:
-                connected += 1
-                # Request their peer list
-                req = P2PMessage(
-                    msg_type=MSG_GOSSIP,
-                    sender_id=self.transport.identity.node_id,
-                    payload={
-                        "subtype": DISCOVERY_PEER_REQUEST,
-                        "max_peers": 20,
-                    },
+        self.bootstrap_connected_count = 0
+        self.bootstrap_degraded_mode = False
+        self.bootstrap_attempted_nodes = []
+        self.bootstrap_success_node = None
+        self.bootstrap_failed_nodes = []
+
+        # Reset telemetry for this bootstrap attempt
+        self._bootstrap_telemetry = {
+            "addresses_validated": 0,
+            "addresses_rejected": 0,
+            "rejected_reasons": collections.Counter(),
+            "fallback_activated": False,
+            "fallback_attempted": 0,
+            "fallback_succeeded": False,
+            "backoff_total_seconds": 0.0,
+            "source_policy": "primary_only",
+        }
+
+        candidates, rejected = self._build_bootstrap_candidate_list()
+        primary_count = len([a for a in self.bootstrap_nodes if a in candidates])
+
+        for idx, address in enumerate(candidates):
+            is_fallback = idx >= primary_count
+            if is_fallback and not self._bootstrap_telemetry["fallback_activated"]:
+                self._bootstrap_telemetry["fallback_activated"] = True
+                logger.info(
+                    "Primary bootstrap nodes exhausted; activating fallback peers"
                 )
-                await self.transport.send_to_peer(peer.peer_id, req)
+            if is_fallback:
+                self._bootstrap_telemetry["fallback_attempted"] += 1
+
+            self.bootstrap_attempted_nodes.append(address)
+
+            for attempt in range(1, self.bootstrap_retry_attempts + 1):
+                try:
+                    peer = await asyncio.wait_for(
+                        self.transport.connect_to_peer(address),
+                        timeout=self.bootstrap_connect_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    peer = None
+                    logger.debug(
+                        "Bootstrap timeout for %s (attempt %d/%d)",
+                        address,
+                        attempt,
+                        self.bootstrap_retry_attempts,
+                    )
+
+                if peer:
+                    connected = 1
+                    self.bootstrap_success_node = address
+                    if is_fallback:
+                        self._bootstrap_telemetry["fallback_succeeded"] = True
+
+                    # Request their peer list
+                    req = P2PMessage(
+                        msg_type=MSG_GOSSIP,
+                        sender_id=self.transport.identity.node_id,
+                        payload={
+                            "subtype": DISCOVERY_PEER_REQUEST,
+                            "max_peers": 20,
+                        },
+                    )
+                    await self.transport.send_to_peer(peer.peer_id, req)
+                    break
+
+                # Exponential backoff between retries (not after last attempt)
+                if attempt < self.bootstrap_retry_attempts:
+                    backoff = min(
+                        self.bootstrap_backoff_base * (2 ** (attempt - 1)),
+                        self.bootstrap_backoff_max,
+                    )
+                    self._bootstrap_telemetry["backoff_total_seconds"] += backoff
+                    await asyncio.sleep(backoff)
+
+            if connected:
+                break
+
+            self.bootstrap_failed_nodes.append(address)
+
+        self.bootstrap_connected_count = connected
 
         if connected:
-            logger.info(f"Bootstrap: connected to {connected}/{len(self.bootstrap_nodes)} nodes")
-        elif self.bootstrap_nodes:
-            logger.warning("Bootstrap: could not connect to any bootstrap nodes")
+            logger.info(
+                "Bootstrap success via %s (attempted %d/%d candidates)%s",
+                self.bootstrap_success_node,
+                len(self.bootstrap_attempted_nodes),
+                len(candidates),
+                " [fallback]" if self._bootstrap_telemetry.get("fallback_succeeded") else "",
+            )
+        elif candidates:
+            self.bootstrap_degraded_mode = True
+            logger.warning(
+                "Bootstrap unavailable after %d candidate(s), %d attempt(s) each; "
+                "continuing in DEGRADED local mode",
+                len(candidates),
+                self.bootstrap_retry_attempts,
+            )
         else:
-            logger.info("No bootstrap nodes configured — this node is the first on the network")
+            if rejected:
+                self.bootstrap_degraded_mode = True
+                logger.warning(
+                    "All %d bootstrap address(es) rejected as malformed; "
+                    "continuing in DEGRADED local mode",
+                    len(rejected),
+                )
+            else:
+                logger.info("No bootstrap nodes configured — this node is the first on the network")
 
         return connected
+
+    def get_bootstrap_status(self) -> Dict[str, object]:
+        """Return startup bootstrap state for node/CLI status reporting."""
+        return {
+            "configured_nodes": list(self.bootstrap_nodes),
+            "attempted_nodes": list(self.bootstrap_attempted_nodes),
+            "failed_nodes": list(self.bootstrap_failed_nodes),
+            "success_node": self.bootstrap_success_node,
+            "connected_count": self.bootstrap_connected_count,
+            "degraded_mode": self.bootstrap_degraded_mode,
+            "retry_attempts": self.bootstrap_retry_attempts,
+            "connect_timeout_seconds": self.bootstrap_connect_timeout,
+            "fallback_enabled": self.bootstrap_fallback_enabled,
+            "fallback_activated": self._bootstrap_telemetry.get("fallback_activated", False),
+            "fallback_succeeded": self._bootstrap_telemetry.get("fallback_succeeded", False),
+            "addresses_rejected": self._bootstrap_telemetry.get("addresses_rejected", 0),
+            "source_policy": self._bootstrap_telemetry.get("source_policy", "primary_only"),
+        }
+
+    def get_bootstrap_telemetry(self) -> Dict[str, Any]:
+        """Return a stable copy of bootstrap decision telemetry for observability.
+
+        This data is purely additive and never alters bootstrap behavior.
+        """
+        return {
+            "addresses_validated": int(self._bootstrap_telemetry.get("addresses_validated", 0)),
+            "addresses_rejected": int(self._bootstrap_telemetry.get("addresses_rejected", 0)),
+            "rejected_reasons": dict(self._bootstrap_telemetry.get("rejected_reasons", {})),
+            "fallback_activated": bool(self._bootstrap_telemetry.get("fallback_activated", False)),
+            "fallback_attempted": int(self._bootstrap_telemetry.get("fallback_attempted", 0)),
+            "fallback_succeeded": bool(self._bootstrap_telemetry.get("fallback_succeeded", False)),
+            "backoff_total_seconds": float(self._bootstrap_telemetry.get("backoff_total_seconds", 0.0)),
+            "source_policy": str(self._bootstrap_telemetry.get("source_policy", "primary_only")),
+        }
 
     async def announce_self(self) -> int:
         """Broadcast our presence to the network."""

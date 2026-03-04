@@ -295,6 +295,78 @@ class DAGLedger:
             );
             
             CREATE INDEX IF NOT EXISTS idx_wallet_balances_version ON wallet_balances(wallet_id, version);
+
+            -- Supplementary tables: agent allowances, gossip log, collaboration state.
+            -- These match the LocalLedger schema so DAGLedgerAdapter can provide full
+            -- feature parity for gossip persistence and collaboration state persistence.
+
+            CREATE TABLE IF NOT EXISTS agent_allowances (
+                agent_id TEXT PRIMARY KEY,
+                principal_id TEXT NOT NULL,
+                allowance REAL NOT NULL DEFAULT 0,
+                spent REAL NOT NULL DEFAULT 0,
+                epoch_hours REAL NOT NULL DEFAULT 24,
+                epoch_start REAL NOT NULL,
+                created_at REAL NOT NULL,
+                revoked INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS gossip_log (
+                nonce TEXT PRIMARY KEY,
+                subtype TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                ttl INTEGER NOT NULL DEFAULT 5,
+                received_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_gossip_received ON gossip_log(received_at);
+
+            CREATE TABLE IF NOT EXISTS collab_tasks (
+                task_id TEXT PRIMARY KEY,
+                requester_agent_id TEXT NOT NULL,
+                requester_node_id TEXT NOT NULL,
+                title TEXT DEFAULT '',
+                description TEXT DEFAULT '',
+                required_capabilities TEXT DEFAULT '[]',
+                ftns_budget REAL DEFAULT 0,
+                deadline_seconds REAL DEFAULT 3600,
+                status TEXT DEFAULT 'open',
+                assigned_agent_id TEXT,
+                bids TEXT DEFAULT '[]',
+                result TEXT,
+                created_at REAL NOT NULL,
+                escrow_tx_id TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS collab_reviews (
+                review_id TEXT PRIMARY KEY,
+                submitter_agent_id TEXT NOT NULL,
+                submitter_node_id TEXT NOT NULL,
+                content_cid TEXT DEFAULT '',
+                description TEXT DEFAULT '',
+                required_capabilities TEXT DEFAULT '[]',
+                ftns_per_review REAL DEFAULT 0.1,
+                max_reviewers INTEGER DEFAULT 3,
+                status TEXT DEFAULT 'pending',
+                reviews TEXT DEFAULT '[]',
+                created_at REAL NOT NULL,
+                escrow_tx_id TEXT,
+                paid_reviewers TEXT DEFAULT '[]'
+            );
+
+            CREATE TABLE IF NOT EXISTS collab_queries (
+                query_id TEXT PRIMARY KEY,
+                requester_agent_id TEXT NOT NULL,
+                requester_node_id TEXT NOT NULL,
+                topic TEXT DEFAULT '',
+                question TEXT DEFAULT '',
+                ftns_per_response REAL DEFAULT 0.05,
+                max_responses INTEGER DEFAULT 5,
+                responses TEXT DEFAULT '[]',
+                created_at REAL NOT NULL,
+                escrow_tx_id TEXT,
+                paid_responders TEXT DEFAULT '[]'
+            );
         """)
         
     async def _load_state(self) -> None:
@@ -1335,6 +1407,8 @@ class DAGLedgerAdapter:
     async def issue_welcome_grant(self, wallet_id: str, amount: float = 100.0) -> DAGTransaction:
         return await self._dag.issue_welcome_grant(wallet_id, amount)
         
+    # ── Agent Allowances ────────────────────────────────────────
+
     async def grant_agent_allowance(
         self,
         principal_id: str,
@@ -1342,11 +1416,51 @@ class DAGLedgerAdapter:
         amount: float,
         epoch_hours: float = 24.0,
     ) -> None:
-        pass
-        
+        now = time.time()
+        await self._dag._db.execute(
+            """INSERT INTO agent_allowances
+               (agent_id, principal_id, allowance, spent, epoch_hours, epoch_start, created_at, revoked)
+               VALUES (?, ?, ?, 0, ?, ?, ?, 0)
+               ON CONFLICT(agent_id) DO UPDATE SET
+                   allowance = excluded.allowance,
+                   spent = 0,
+                   epoch_hours = excluded.epoch_hours,
+                   epoch_start = excluded.epoch_start,
+                   revoked = 0""",
+            (agent_id, principal_id, amount, epoch_hours, now, now),
+        )
+        await self._dag._db.commit()
+
     async def get_agent_allowance(self, agent_id: str) -> Optional[dict]:
-        return None
-        
+        cursor = await self._dag._db.execute(
+            "SELECT principal_id, allowance, spent, epoch_hours, epoch_start, revoked "
+            "FROM agent_allowances WHERE agent_id = ?",
+            (agent_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        principal_id, allowance, spent, epoch_hours, epoch_start, revoked = row
+        now = time.time()
+        if now - epoch_start >= epoch_hours * 3600:
+            spent = 0.0
+            epoch_start = now
+            await self._dag._db.execute(
+                "UPDATE agent_allowances SET spent = 0, epoch_start = ? WHERE agent_id = ?",
+                (now, agent_id),
+            )
+            await self._dag._db.commit()
+        return {
+            "agent_id": agent_id,
+            "principal_id": principal_id,
+            "allowance": allowance,
+            "spent": spent,
+            "remaining": max(0.0, allowance - spent),
+            "epoch_hours": epoch_hours,
+            "epoch_start": epoch_start,
+            "revoked": bool(revoked),
+        }
+
     async def agent_debit(
         self,
         agent_id: str,
@@ -1354,11 +1468,234 @@ class DAGLedgerAdapter:
         tx_type: TransactionType,
         description: str = "",
     ) -> Optional[DAGTransaction]:
-        return None
-        
+        allowance = await self.get_agent_allowance(agent_id)
+        if not allowance or allowance["revoked"]:
+            return None
+        if amount > allowance["remaining"]:
+            return None
+        principal_id = allowance["principal_id"]
+        balance = await self.get_balance(principal_id)
+        if balance < amount:
+            return None
+        tx = await self.debit(
+            wallet_id=principal_id,
+            amount=amount,
+            tx_type=tx_type,
+            description=f"[agent:{agent_id[:12]}] {description}",
+        )
+        await self._dag._db.execute(
+            "UPDATE agent_allowances SET spent = spent + ? WHERE agent_id = ?",
+            (amount, agent_id),
+        )
+        await self._dag._db.commit()
+        return tx
+
     async def revoke_agent_allowance(self, principal_id: str, agent_id: str) -> bool:
-        return False
-        
+        cursor = await self._dag._db.execute(
+            "UPDATE agent_allowances SET revoked = 1 "
+            "WHERE agent_id = ? AND principal_id = ?",
+            (agent_id, principal_id),
+        )
+        await self._dag._db.commit()
+        return cursor.rowcount > 0
+
+    # ── Gossip Log Persistence ────────────────────────────────
+
+    async def log_gossip(
+        self,
+        nonce: str,
+        subtype: str,
+        origin: str,
+        payload: Dict[str, Any],
+        ttl: int = 5,
+    ) -> None:
+        await self._dag._db.execute(
+            """INSERT OR IGNORE INTO gossip_log
+               (nonce, subtype, origin, payload, ttl, received_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (nonce, subtype, origin, json.dumps(payload), ttl, time.time()),
+        )
+        await self._dag._db.commit()
+
+    async def get_recent_gossip(
+        self,
+        since: float,
+        subtypes: Optional[List[str]] = None,
+        limit: int = 500,
+    ) -> List[Dict[str, Any]]:
+        if subtypes:
+            placeholders = ",".join("?" for _ in subtypes)
+            cursor = await self._dag._db.execute(
+                f"""SELECT nonce, subtype, origin, payload, ttl, received_at
+                    FROM gossip_log
+                    WHERE received_at > ? AND subtype IN ({placeholders})
+                    ORDER BY received_at ASC LIMIT ?""",
+                (since, *subtypes, limit),
+            )
+        else:
+            cursor = await self._dag._db.execute(
+                """SELECT nonce, subtype, origin, payload, ttl, received_at
+                   FROM gossip_log
+                   WHERE received_at > ?
+                   ORDER BY received_at ASC LIMIT ?""",
+                (since, limit),
+            )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "nonce": r[0], "subtype": r[1], "origin": r[2],
+                "payload": json.loads(r[3]), "ttl": r[4], "received_at": r[5],
+            }
+            for r in rows
+        ]
+
+    async def prune_gossip_log(self, max_age: float) -> int:
+        cutoff = time.time() - max_age
+        cursor = await self._dag._db.execute(
+            "DELETE FROM gossip_log WHERE received_at < ?", (cutoff,)
+        )
+        await self._dag._db.commit()
+        return cursor.rowcount
+
+    # ── Collaboration State Persistence ───────────────────────
+
+    async def save_task(self, data: Dict[str, Any]) -> None:
+        await self._dag._db.execute(
+            """INSERT OR REPLACE INTO collab_tasks
+               (task_id, requester_agent_id, requester_node_id, title, description,
+                required_capabilities, ftns_budget, deadline_seconds, status,
+                assigned_agent_id, bids, result, created_at, escrow_tx_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                data["task_id"], data["requester_agent_id"], data["requester_node_id"],
+                data.get("title", ""), data.get("description", ""),
+                json.dumps(data.get("required_capabilities", [])),
+                data.get("ftns_budget", 0), data.get("deadline_seconds", 3600),
+                data.get("status", "open"), data.get("assigned_agent_id"),
+                json.dumps(data.get("bids", [])),
+                json.dumps(data.get("result")) if data.get("result") else None,
+                data["created_at"], data.get("escrow_tx_id"),
+            ),
+        )
+        await self._dag._db.commit()
+
+    async def save_review(self, data: Dict[str, Any]) -> None:
+        await self._dag._db.execute(
+            """INSERT OR REPLACE INTO collab_reviews
+               (review_id, submitter_agent_id, submitter_node_id, content_cid,
+                description, required_capabilities, ftns_per_review, max_reviewers,
+                status, reviews, created_at, escrow_tx_id, paid_reviewers)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                data["review_id"], data["submitter_agent_id"], data["submitter_node_id"],
+                data.get("content_cid", ""), data.get("description", ""),
+                json.dumps(data.get("required_capabilities", [])),
+                data.get("ftns_per_review", 0.1), data.get("max_reviewers", 3),
+                data.get("status", "pending"), json.dumps(data.get("reviews", [])),
+                data["created_at"], data.get("escrow_tx_id"),
+                json.dumps(data.get("paid_reviewers", [])),
+            ),
+        )
+        await self._dag._db.commit()
+
+    async def save_query(self, data: Dict[str, Any]) -> None:
+        await self._dag._db.execute(
+            """INSERT OR REPLACE INTO collab_queries
+               (query_id, requester_agent_id, requester_node_id, topic, question,
+                ftns_per_response, max_responses, responses, created_at,
+                escrow_tx_id, paid_responders)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                data["query_id"], data["requester_agent_id"], data["requester_node_id"],
+                data.get("topic", ""), data.get("question", ""),
+                data.get("ftns_per_response", 0.05), data.get("max_responses", 5),
+                json.dumps(data.get("responses", [])),
+                data["created_at"], data.get("escrow_tx_id"),
+                json.dumps(data.get("paid_responders", [])),
+            ),
+        )
+        await self._dag._db.commit()
+
+    async def load_active_tasks(self) -> List[Dict[str, Any]]:
+        cursor = await self._dag._db.execute(
+            """SELECT task_id, requester_agent_id, requester_node_id, title,
+                      description, required_capabilities, ftns_budget,
+                      deadline_seconds, status, assigned_agent_id, bids,
+                      result, created_at, escrow_tx_id
+               FROM collab_tasks WHERE status NOT IN ('completed', 'cancelled')"""
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "task_id": r[0], "requester_agent_id": r[1],
+                "requester_node_id": r[2], "title": r[3],
+                "description": r[4], "required_capabilities": json.loads(r[5]),
+                "ftns_budget": r[6], "deadline_seconds": r[7],
+                "status": r[8], "assigned_agent_id": r[9],
+                "bids": json.loads(r[10]),
+                "result": json.loads(r[11]) if r[11] else None,
+                "created_at": r[12], "escrow_tx_id": r[13],
+            }
+            for r in rows
+        ]
+
+    async def load_active_reviews(self) -> List[Dict[str, Any]]:
+        cursor = await self._dag._db.execute(
+            """SELECT review_id, submitter_agent_id, submitter_node_id,
+                      content_cid, description, required_capabilities,
+                      ftns_per_review, max_reviewers, status, reviews,
+                      created_at, escrow_tx_id, paid_reviewers
+               FROM collab_reviews WHERE status NOT IN ('accepted', 'rejected')"""
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "review_id": r[0], "submitter_agent_id": r[1],
+                "submitter_node_id": r[2], "content_cid": r[3],
+                "description": r[4], "required_capabilities": json.loads(r[5]),
+                "ftns_per_review": r[6], "max_reviewers": r[7],
+                "status": r[8], "reviews": json.loads(r[9]),
+                "created_at": r[10], "escrow_tx_id": r[11],
+                "paid_reviewers": json.loads(r[12]),
+            }
+            for r in rows
+        ]
+
+    async def load_active_queries(self) -> List[Dict[str, Any]]:
+        cursor = await self._dag._db.execute(
+            """SELECT query_id, requester_agent_id, requester_node_id,
+                      topic, question, ftns_per_response, max_responses,
+                      responses, created_at, escrow_tx_id, paid_responders
+               FROM collab_queries"""
+        )
+        rows = await cursor.fetchall()
+        results = []
+        for r in rows:
+            responses = json.loads(r[7])
+            if len(responses) < r[6]:
+                results.append({
+                    "query_id": r[0], "requester_agent_id": r[1],
+                    "requester_node_id": r[2], "topic": r[3],
+                    "question": r[4], "ftns_per_response": r[5],
+                    "max_responses": r[6], "responses": responses,
+                    "created_at": r[8], "escrow_tx_id": r[9],
+                    "paid_responders": json.loads(r[10]),
+                })
+        return results
+
+    async def delete_collab_record(self, table: str, id_column: str, record_id: str) -> None:
+        allowed = {"collab_tasks": "task_id", "collab_reviews": "review_id", "collab_queries": "query_id"}
+        if table not in allowed or allowed[table] != id_column:
+            return
+        await self._dag._db.execute(f"DELETE FROM {table} WHERE {id_column} = ?", (record_id,))
+        await self._dag._db.commit()
+
+    # ── Stats ─────────────────────────────────────────────────
+
+    async def get_stats_async(self) -> Dict:
+        """Async version of get_stats for use in async contexts."""
+        return await self._dag.get_stats()
+
     def get_stats(self) -> Dict:
         try:
             loop = asyncio.get_event_loop()
@@ -1367,7 +1704,7 @@ class DAGLedgerAdapter:
                     "total_transactions": 0,
                     "tips": 0,
                     "dag_mode": True,
-                    "note": "Use async stats for live data"
+                    "note": "Use get_stats_async() for live data"
                 }
             return loop.run_until_complete(self._dag.get_stats())
         except Exception:

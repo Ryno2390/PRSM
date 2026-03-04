@@ -137,6 +137,7 @@ class ComputeProvider:
         self.active_jobs: Dict[str, ComputeJob] = {}
         self.completed_jobs: Dict[str, ComputeJob] = {}
         self._running = False
+        self.allow_self_compute = True  # Execute own jobs when no peers (single-node mode)
         self.ledger_sync = None  # Set by node.py after construction
         self.orchestrator = None  # NWTN orchestrator, set by node.py after construction
 
@@ -174,9 +175,14 @@ class ComputeProvider:
         ftns_budget = data.get("ftns_budget", 0.0)
         requester_id = data.get("requester_id", origin)
 
-        # Don't accept our own jobs
+        # In network mode (peers connected), don't accept own jobs to avoid
+        # double-counting.  In local mode (no peers), execute our own jobs
+        # so a single-node setup is functional out of the box.
         if requester_id == self.identity.node_id:
-            return
+            if not self.allow_self_compute:
+                return
+            if self.transport and self.transport.peer_count > 0:
+                return
 
         # Check if we already have this job
         if job_id in self.active_jobs or job_id in self.completed_jobs:
@@ -347,23 +353,62 @@ class ComputeProvider:
         }
 
     async def _run_embedding(self, job: ComputeJob) -> Dict[str, Any]:
-        """Compute embeddings. For alpha, returns a mock embedding vector.
-        # TODO: wire to embedding pipeline when available
+        """Compute embeddings using the backend registry.
+        
+        Uses real embedding models when available (OpenAI, Local, etc.),
+        falls back to deterministic mock embeddings when no backend is configured.
         """
         text = job.payload.get("text", "")
-        dimensions = job.payload.get("dimensions", 128)
-
-        # For alpha: generate a deterministic pseudo-embedding
+        dimensions = job.payload.get("dimensions", 1536)  # Default to OpenAI small dimensions
+        model_id = job.payload.get("model_id")  # Optional specific model
+        
+        # Try to use backend registry if available (wired via orchestrator)
+        if self.orchestrator is not None and hasattr(self.orchestrator, 'backend_registry'):
+            try:
+                registry = self.orchestrator.backend_registry
+                if registry is not None:
+                    result = await registry.embed_with_fallback(
+                        text=text,
+                        model_id=model_id,
+                        dimensions=dimensions
+                    )
+                    return {
+                        "text_length": len(text),
+                        "dimensions": len(result.embedding),
+                        "embedding": result.embedding,
+                        "model_id": result.model_id,
+                        "provider": result.provider.value,
+                        "token_count": result.token_count,
+                        "provider_node": self.identity.node_id,
+                        "source": "backend_registry",
+                    }
+            except Exception as e:
+                logger.warning(f"Backend registry embedding failed, falling back to mock: {e}")
+        
+        # Fallback: generate a deterministic pseudo-embedding (for testing/alpha)
         import hashlib
-        h = hashlib.sha256(text.encode()).digest()
-        # Generate a simple deterministic vector from the hash
-        embedding = [((b % 200) - 100) / 100.0 for b in h * (dimensions // 32 + 1)][:dimensions]
+        text_hash = hashlib.sha256(text.encode()).digest()
+        
+        # Create embedding with requested dimensions
+        embedding = []
+        for i in range(dimensions):
+            byte_val = text_hash[i % len(text_hash)]
+            # Normalize to [-1, 1] range
+            embedding.append((byte_val - 128) / 128.0)
+        
+        # Normalize to unit vector for cosine similarity
+        magnitude = sum(x * x for x in embedding) ** 0.5
+        if magnitude > 0:
+            embedding = [x / magnitude for x in embedding]
 
         return {
             "text_length": len(text),
             "dimensions": dimensions,
             "embedding": embedding,
+            "model_id": "fallback-hash",
+            "provider": "mock",
             "provider_node": self.identity.node_id,
+            "source": "fallback",
         }
 
     def get_stats(self) -> Dict[str, Any]:

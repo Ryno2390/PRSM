@@ -13,6 +13,19 @@ from typing import List, Optional
 import json
 
 
+DEFAULT_BOOTSTRAP_NODES = [
+    "wss://bootstrap.prsm-network.com",
+]
+
+# Trusted fallback bootstrap nodes used when all configured bootstrap
+# nodes are unreachable.  These are PRSM-operated community relays
+# designed to give new nodes a reliable first-run path.
+FALLBACK_BOOTSTRAP_NODES = [
+    "wss://fallback1.prsm-network.com",
+    "wss://fallback2.prsm-network.com",
+]
+
+
 class NodeRole(str, Enum):
     """Operating mode for the node."""
     FULL = "full"           # Compute + storage + routing
@@ -37,8 +50,20 @@ class NodeConfig:
     listen_host: str = "0.0.0.0"
     p2p_port: int = 9001
     api_port: int = 8000
-    bootstrap_nodes: List[str] = field(default_factory=lambda: ["wss://bootstrap.prsm-network.com"])
+    bootstrap_nodes: List[str] = field(default_factory=lambda: list(DEFAULT_BOOTSTRAP_NODES))
+    bootstrap_connect_timeout: float = 5.0
+    bootstrap_retry_attempts: int = 2
+    bootstrap_fallback_enabled: bool = True
+    bootstrap_fallback_nodes: List[str] = field(
+        default_factory=lambda: list(FALLBACK_BOOTSTRAP_NODES)
+    )
+    bootstrap_validate_addresses: bool = True
+    bootstrap_backoff_base: float = 1.0
+    bootstrap_backoff_max: float = 8.0
     max_peers: int = 50
+
+    # Compute behavior
+    allow_self_compute: bool = True        # Execute own jobs when no peers (single-node mode)
 
     # Resources
     storage_gb: float = 10.0
@@ -116,7 +141,15 @@ class NodeConfig:
             "p2p_port": self.p2p_port,
             "api_port": self.api_port,
             "bootstrap_nodes": self.bootstrap_nodes,
+            "bootstrap_connect_timeout": self.bootstrap_connect_timeout,
+            "bootstrap_retry_attempts": self.bootstrap_retry_attempts,
+            "bootstrap_fallback_enabled": self.bootstrap_fallback_enabled,
+            "bootstrap_fallback_nodes": self.bootstrap_fallback_nodes,
+            "bootstrap_validate_addresses": self.bootstrap_validate_addresses,
+            "bootstrap_backoff_base": self.bootstrap_backoff_base,
+            "bootstrap_backoff_max": self.bootstrap_backoff_max,
             "max_peers": self.max_peers,
+            "allow_self_compute": self.allow_self_compute,
             "storage_gb": self.storage_gb,
             "cpu_allocation_pct": self.cpu_allocation_pct,
             "memory_allocation_pct": self.memory_allocation_pct,

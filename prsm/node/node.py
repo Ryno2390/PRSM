@@ -31,6 +31,7 @@ from prsm.node.compute_requester import ComputeRequester
 from prsm.node.storage_provider import StorageProvider
 from prsm.node.content_uploader import ContentUploader
 from prsm.node.content_index import ContentIndex
+from prsm.node.content_provider import ContentProvider
 from prsm.node.ledger_sync import LedgerSync
 from prsm.node.agent_registry import AgentRegistry
 from prsm.node.agent_collaboration import AgentCollaboration, BidStrategy
@@ -159,6 +160,7 @@ class PRSMNode:
         self.storage_provider: Optional[StorageProvider] = None
         self.content_uploader: Optional[ContentUploader] = None
         self.content_index: Optional[ContentIndex] = None
+        self.content_provider: Optional[ContentProvider] = None
         self.ledger_sync: Optional[LedgerSync] = None
         self.agent_registry: Optional[AgentRegistry] = None
         self.agent_collaboration: Optional[AgentCollaboration] = None
@@ -230,6 +232,13 @@ class PRSMNode:
         self.discovery = PeerDiscovery(
             transport=self.transport,
             bootstrap_nodes=self.config.bootstrap_nodes,
+            bootstrap_connect_timeout=self.config.bootstrap_connect_timeout,
+            bootstrap_retry_attempts=self.config.bootstrap_retry_attempts,
+            bootstrap_fallback_enabled=self.config.bootstrap_fallback_enabled,
+            bootstrap_fallback_nodes=self.config.bootstrap_fallback_nodes,
+            bootstrap_validate_addresses=self.config.bootstrap_validate_addresses,
+            bootstrap_backoff_base=self.config.bootstrap_backoff_base,
+            bootstrap_backoff_max=self.config.bootstrap_backoff_max,
             target_peers=self.config.target_peers,
             announce_interval=self.config.announce_interval,
             maintenance_interval=self.config.maintenance_interval,
@@ -247,6 +256,7 @@ class PRSMNode:
                 cpu_allocation_pct=self.config.cpu_allocation_pct,
                 memory_allocation_pct=self.config.memory_allocation_pct,
             )
+            self.compute_provider.allow_self_compute = self.config.allow_self_compute
 
         self.compute_requester = ComputeRequester(
             identity=self.identity,
@@ -277,6 +287,15 @@ class PRSMNode:
             ledger=self.ledger,
             ipfs_api_url=self.config.ipfs_api_url,
             transport=self.transport,
+            content_index=self.content_index,
+        )
+
+        # ── Content Provider (Cross-Node Retrieval) ───────────────────────
+        self.content_provider = ContentProvider(
+            identity=self.identity,
+            transport=self.transport,
+            gossip=self.gossip,
+            ipfs_api_url=self.config.ipfs_api_url,
             content_index=self.content_index,
         )
 
@@ -361,6 +380,8 @@ class PRSMNode:
             self.content_index.start()
         if self.content_uploader:
             self.content_uploader.start()
+        if self.content_provider:
+            self.content_provider.start()
         if self.ledger_sync:
             self.ledger_sync.start()
         if self.agent_registry:
@@ -374,6 +395,38 @@ class PRSMNode:
 
         self._started = True
         self._start_time = time.time()
+        bootstrap_status = self.discovery.get_bootstrap_status() if self.discovery else {}
+        if bootstrap_status.get("degraded_mode"):
+            logger.warning(
+                "Node startup in DEGRADED local mode: no bootstrap peers reachable. "
+                "Limited features: remote peer discovery and cross-node collaboration may be unavailable "
+                "until peers connect or bootstrap targets recover."
+            )
+        elif bootstrap_status.get("success_node"):
+            logger.info(
+                "Node startup bootstrap path: connected via %s",
+                bootstrap_status.get("success_node"),
+            )
+
+        # Emit bootstrap decision telemetry (additive, best-effort)
+        if self.discovery:
+            bt = self.discovery.get_bootstrap_telemetry()
+            if bt.get("fallback_activated"):
+                logger.info(
+                    "Bootstrap decision: fallback activated, "
+                    "fallback_attempted=%d, fallback_succeeded=%s, "
+                    "addresses_rejected=%d, source_policy=%s",
+                    bt.get("fallback_attempted", 0),
+                    bt.get("fallback_succeeded", False),
+                    bt.get("addresses_rejected", 0),
+                    bt.get("source_policy", "unknown"),
+                )
+            elif bt.get("addresses_rejected", 0) > 0:
+                logger.warning(
+                    "Bootstrap decision: %d address(es) rejected during validation",
+                    bt["addresses_rejected"],
+                )
+
         logger.info(
             f"PRSM node started — "
             f"P2P: ws://{self.config.listen_host}:{self.config.p2p_port}, "
@@ -435,14 +488,21 @@ class PRSMNode:
             "peers": {
                 "connected": self.transport.peer_count if self.transport else 0,
                 "known": len(self.discovery.known_peers) if self.discovery else 0,
+                "bootstrap": self.discovery.get_bootstrap_status() if self.discovery else {},
+                "bootstrap_telemetry": self.discovery.get_bootstrap_telemetry() if self.discovery else {},
             },
             "ftns_balance": balance,
-            "dag_stats": self.ledger.get_stats() if hasattr(self.ledger, 'get_stats') else None,
+            "dag_stats": (
+                await self.ledger.get_stats_async()
+                if hasattr(self.ledger, 'get_stats_async')
+                else self.ledger.get_stats() if hasattr(self.ledger, 'get_stats') else None
+            ),
             "compute": self.compute_provider.get_stats() if self.compute_provider else None,
             "compute_requester": self.compute_requester.get_stats() if self.compute_requester else None,
             "storage": self.storage_provider.get_stats() if self.storage_provider else None,
             "content": self.content_uploader.get_stats() if self.content_uploader else None,
             "content_index": self.content_index.get_stats() if self.content_index else None,
+            "content_provider": self.content_provider.get_stats() if self.content_provider else None,
             "ledger_sync": self.ledger_sync.get_stats() if self.ledger_sync else None,
             "agents": self.agent_registry.get_stats() if self.agent_registry else None,
             "collaboration": self.agent_collaboration.get_stats() if self.agent_collaboration else None,
