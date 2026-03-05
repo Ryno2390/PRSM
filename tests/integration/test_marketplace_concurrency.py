@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # Import marketplace components
 from prsm.economy.tokenomics.advanced_ftns import AtomicFTNSService
 from prsm.economy.tokenomics.ftns_service import FTNSService
-from prsm.economy.marketplace.core import MarketplaceCore
+from prsm.economy.marketplace.ecosystem.marketplace_core import MarketplaceCore
 
 
 class TestMarketplaceConcurrency:

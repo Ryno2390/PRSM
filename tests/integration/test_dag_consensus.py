@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 # Import DAG ledger components
 from prsm.node.dag_ledger import (
-    DAGLedger, TransactionType, Transaction,
+    DAGLedger, TransactionType, DAGTransaction,
     InsufficientBalanceError, ConcurrentModificationError, BalanceLockError
 )
 

@@ -235,3 +235,19 @@ simplified_integration_validation_report.json
 # New Architecture Data Exclusions
 prsm/compute/nwtn/corpus/
 prsm/compute/nwtn/processed_corpus/
+
+# PRSM local data directory
+.prsm/
+
+# Runtime data directories
+.nwtn_cache/
+cache/
+marketplace_data/
+model_data/
+models/deployed/
+models/distilled/
+plugin_data/
+temp/
+
+# Netlify build artifacts
+.netlify/
