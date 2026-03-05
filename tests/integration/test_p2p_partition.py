@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import uuid
 
 # Import P2P components
-from prsm.compute.federation.p2p_network import P2PNetwork, PeerNode, Message
+from prsm.compute.federation.p2p_network import P2PModelNetwork
 
 
 class MockPeerNode:

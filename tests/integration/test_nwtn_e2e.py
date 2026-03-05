@@ -15,8 +15,6 @@ import uuid
 
 # Import NWTN components
 from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
-from prsm.compute.nwtn.reasoning_engine import ReasoningEngine
-from prsm.compute.nwtn.graph_of_thoughts import GraphOfThoughts
 
 
 class MockNWTNSession:

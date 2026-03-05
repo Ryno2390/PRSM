@@ -152,6 +152,9 @@ class GossipProtocol:
         """Publish a gossip message to the network.
 
         Returns number of peers the message was sent to.
+        
+        In single-node mode (no peers), also delivers to local subscribers
+        to enable self-compute and other local operations.
         """
         self._record_publish(subtype)
         msg = P2PMessage(
@@ -165,7 +168,21 @@ class GossipProtocol:
             },
             ttl=ttl if ttl is not None else self.default_ttl,
         )
-        return await self.transport.gossip(msg, fanout=self.fanout)
+        
+        # Send to peers
+        sent = await self.transport.gossip(msg, fanout=self.fanout)
+        
+        # In single-node mode (no peers), deliver to local subscribers
+        # This enables self-compute and other local operations
+        if sent == 0:
+            callbacks = self._subscribers.get(subtype, [])
+            for cb in callbacks:
+                try:
+                    await cb(subtype, data, self.transport.identity.node_id)
+                except Exception as e:
+                    logger.error(f"Gossip local subscriber error ({subtype}): {e}")
+        
+        return sent
 
     async def start(self) -> None:
         """Start heartbeat loop."""
