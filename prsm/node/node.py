@@ -13,6 +13,7 @@ import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+from decimal import Decimal
 
 from prsm.node.config import NodeConfig, NodeRole
 from prsm.node.identity import (
@@ -35,6 +36,7 @@ from prsm.node.content_provider import ContentProvider
 from prsm.node.ledger_sync import LedgerSync
 from prsm.node.agent_registry import AgentRegistry
 from prsm.node.agent_collaboration import AgentCollaboration, BidStrategy
+from prsm.economy.tokenomics.staking_manager import StakingManager, StakingConfig, StakeType
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +99,70 @@ class _NodeFTNSAdapter:
 
     async def reward_contribution(self, user_id: str, contribution_type: str, amount: float) -> bool:
         return True
+
+
+class _StakingFTNSAdapter:
+    """Bridges node ledger to the FTNS interface expected by StakingManager."""
+
+    def __init__(self, ledger: Any, node_id: str) -> None:
+        self._ledger = ledger
+        self._node_id = node_id
+        self._locked_balances: Dict[str, Decimal] = {}  # user_id -> locked amount
+
+    async def get_available_balance(self, user_id: str) -> Decimal:
+        """Get available (unlocked) balance for a user."""
+        balance = await self._ledger.get_balance(user_id)
+        locked = self._locked_balances.get(user_id, Decimal('0'))
+        return max(Decimal('0'), Decimal(str(balance)) - locked)
+
+    async def lock_tokens(self, user_id: str, amount: Decimal, reason: str = "") -> bool:
+        """Lock tokens for staking."""
+        try:
+            available = await self.get_available_balance(user_id)
+            if available < amount:
+                raise ValueError(f"Insufficient available balance: {available} < {amount}")
+            self._locked_balances[user_id] = self._locked_balances.get(user_id, Decimal('0')) + amount
+            return True
+        except Exception:
+            return False
+
+    async def unlock_tokens(self, user_id: str, amount: Decimal, reason: str = "") -> bool:
+        """Unlock tokens when unstaking."""
+        try:
+            current_locked = self._locked_balances.get(user_id, Decimal('0'))
+            self._locked_balances[user_id] = max(Decimal('0'), current_locked - amount)
+            return True
+        except Exception:
+            return False
+
+    async def burn_tokens(self, user_id: str, amount: Decimal, reason: str = "") -> bool:
+        """Burn tokens (for slashing)."""
+        try:
+            await self._ledger.debit(
+                wallet_id=user_id,
+                amount=float(amount),
+                tx_type=TransactionType.PENALTY,
+                description=reason or "Slashing penalty",
+            )
+            # Also reduce locked balance
+            current_locked = self._locked_balances.get(user_id, Decimal('0'))
+            self._locked_balances[user_id] = max(Decimal('0'), current_locked - amount)
+            return True
+        except Exception:
+            return False
+
+    async def mint_tokens(self, user_id: str, amount: Decimal, reason: str = "") -> bool:
+        """Mint tokens (for rewards or appeal refunds)."""
+        try:
+            await self._ledger.credit(
+                wallet_id=user_id,
+                amount=float(amount),
+                tx_type=TransactionType.REWARD,
+                description=reason or "Staking reward",
+            )
+            return True
+        except Exception:
+            return False
 
 
 class _NodeIPFSAdapter:
@@ -164,6 +230,7 @@ class PRSMNode:
         self.ledger_sync: Optional[LedgerSync] = None
         self.agent_registry: Optional[AgentRegistry] = None
         self.agent_collaboration: Optional[AgentCollaboration] = None
+        self.staking_manager: Optional[StakingManager] = None
 
         self._started = False
         self._start_time: Optional[float] = None
@@ -327,6 +394,16 @@ class PRSMNode:
             max_completed_records=self.config.max_completed_records,
             cleanup_interval=self.config.collab_cleanup_interval,
         )
+
+        # ── Staking Manager ─────────────────────────────────────────
+        # Create FTNS adapter for staking operations
+        staking_ftns_adapter = _StakingFTNSAdapter(self.ledger, self.identity.node_id)
+        self.staking_manager = StakingManager(
+            db_session=None,  # StakingManager uses in-memory storage for now
+            ftns_service=staking_ftns_adapter,
+            config=StakingConfig(),
+        )
+        logger.info("Staking manager initialized")
 
         # Wire ledger_sync and agent_registry into subsystems
         self.content_uploader.ledger_sync = self.ledger_sync

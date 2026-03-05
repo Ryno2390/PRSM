@@ -1091,6 +1091,282 @@ def history(limit: int, api_url: str):
 
 
 # ============================================================================
+# BRIDGE COMMANDS (under ftns group)
+# ============================================================================
+
+@ftns.group()
+def bridge():
+    """FTNS token bridge commands for cross-chain transfers."""
+    pass
+
+
+@bridge.command()
+@click.option('--amount', required=True, type=float, help='Amount of FTNS to deposit')
+@click.option('--address', required=True, help='Destination on-chain address')
+@click.option('--chain', default=137, type=int, help='Destination chain ID (default: 137 for Polygon)')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def deposit(amount: float, address: str, chain: int, api_url: str):
+    """
+    Deposit FTNS tokens from local balance to external chain.
+    
+    Burns local FTNS and initiates bridge transfer to mint tokens on the destination chain.
+    The transaction will go through validation, processing, and confirmation stages.
+    """
+    import httpx
+    
+    console.print(f"🌉 Depositing {amount} FTNS to chain {chain}...", style="bold blue")
+    console.print(f"   Destination address: {address}")
+    
+    try:
+        response = httpx.post(
+            f"{api_url}/bridge/deposit",
+            json={
+                "amount": amount,
+                "chain_address": address,
+                "destination_chain": chain
+            },
+            timeout=30.0
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            tx = data.get('transaction', {})
+            console.print(f"✅ Bridge deposit initiated!", style="bold green")
+            console.print(f"   Transaction ID: {tx.get('transaction_id')}")
+            console.print(f"   Status: {tx.get('status')}")
+            console.print(f"   Amount: {int(tx.get('amount', 0)) / 10**18:.4f} FTNS")
+            console.print(f"   Fee: {int(tx.get('fee_amount', 0)) / 10**18:.4f} FTNS")
+            console.print(f"   Created: {tx.get('created_at', 'N/A')[:19]}")
+            
+            if tx.get('status') == 'completed':
+                console.print(f"   🎉 Transaction completed!", style="green")
+            elif tx.get('status') == 'pending':
+                console.print(f"   ⏳ Transaction pending - check status with: prsm ftns bridge status", style="yellow")
+        else:
+            error_detail = response.json().get('detail', response.text)
+            console.print(f"❌ Bridge deposit failed: {response.status_code}", style="red")
+            console.print(f"   {error_detail}")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@bridge.command()
+@click.option('--amount', required=True, type=float, help='Amount of FTNS to withdraw')
+@click.option('--address', required=True, help='Source on-chain address')
+@click.option('--chain', default=137, type=int, help='Source chain ID (default: 137 for Polygon)')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def withdraw(amount: float, address: str, chain: int, api_url: str):
+    """
+    Withdraw FTNS tokens from external chain to local balance.
+    
+    Locks on-chain FTNS and initiates bridge transfer to mint local FTNS to your account.
+    The transaction will go through validation, processing, and confirmation stages.
+    """
+    import httpx
+    
+    console.print(f"🌉 Withdrawing {amount} FTNS from chain {chain}...", style="bold blue")
+    console.print(f"   Source address: {address}")
+    
+    try:
+        response = httpx.post(
+            f"{api_url}/bridge/withdraw",
+            json={
+                "amount": amount,
+                "chain_address": address,
+                "source_chain": chain
+            },
+            timeout=30.0
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            tx = data.get('transaction', {})
+            console.print(f"✅ Bridge withdraw initiated!", style="bold green")
+            console.print(f"   Transaction ID: {tx.get('transaction_id')}")
+            console.print(f"   Status: {tx.get('status')}")
+            console.print(f"   Amount: {int(tx.get('amount', 0)) / 10**18:.4f} FTNS")
+            console.print(f"   Fee: {int(tx.get('fee_amount', 0)) / 10**18:.4f} FTNS")
+            console.print(f"   Created: {tx.get('created_at', 'N/A')[:19]}")
+            
+            if tx.get('status') == 'completed':
+                console.print(f"   🎉 Transaction completed!", style="green")
+            elif tx.get('status') == 'pending':
+                console.print(f"   ⏳ Transaction pending - check status with: prsm ftns bridge status", style="yellow")
+        else:
+            error_detail = response.json().get('detail', response.text)
+            console.print(f"❌ Bridge withdraw failed: {response.status_code}", style="red")
+            console.print(f"   {error_detail}")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@bridge.command()
+@click.option('--tx-id', help='Specific transaction ID to look up')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def status(tx_id: str, api_url: str):
+    """
+    Get bridge status and pending operations.
+    
+    Without --tx-id: Shows overall bridge statistics and pending transactions.
+    With --tx-id: Shows status of a specific bridge transaction.
+    """
+    import httpx
+    
+    try:
+        if tx_id:
+            # Get specific transaction status
+            response = httpx.get(f"{api_url}/bridge/transactions/{tx_id}", timeout=10.0)
+            
+            if response.status_code == 200:
+                data = response.json()
+                tx = data.get('transaction', {})
+                
+                table = Table(title=f"Bridge Transaction: {tx_id[:20]}...")
+                table.add_column("Field", style="cyan")
+                table.add_column("Value", style="green")
+                
+                table.add_row("Transaction ID", tx.get('transaction_id', 'N/A'))
+                table.add_row("Direction", tx.get('direction', 'N/A').upper())
+                table.add_row("Status", tx.get('status', 'N/A'))
+                table.add_row("Amount", f"{int(tx.get('amount', 0)) / 10**18:.4f} FTNS")
+                table.add_row("Fee", f"{int(tx.get('fee_amount', 0)) / 10**18:.4f} FTNS")
+                table.add_row("Chain Address", tx.get('chain_address', 'N/A'))
+                table.add_row("Source Chain", str(tx.get('source_chain', 'N/A')))
+                table.add_row("Dest Chain", str(tx.get('destination_chain', 'N/A')))
+                table.add_row("Created", tx.get('created_at', 'N/A')[:19] if tx.get('created_at') else 'N/A')
+                table.add_row("Updated", tx.get('updated_at', 'N/A')[:19] if tx.get('updated_at') else 'N/A')
+                
+                if tx.get('completed_at'):
+                    table.add_row("Completed", tx.get('completed_at')[:19])
+                if tx.get('source_tx_hash'):
+                    table.add_row("Source TX Hash", tx.get('source_tx_hash')[:20] + "...")
+                if tx.get('destination_tx_hash'):
+                    table.add_row("Dest TX Hash", tx.get('destination_tx_hash')[:20] + "...")
+                if tx.get('error_message'):
+                    table.add_row("Error", tx.get('error_message'), style="red")
+                
+                console.print(table)
+            elif response.status_code == 404:
+                console.print(f"❌ Transaction not found: {tx_id}", style="red")
+            else:
+                console.print(f"❌ Failed to get transaction: {response.status_code}", style="red")
+        else:
+            # Get overall bridge status
+            response = httpx.get(f"{api_url}/bridge/status", timeout=10.0)
+            
+            if response.status_code == 200:
+                data = response.json()
+                stats = data.get('stats', {})
+                limits = data.get('limits', {})
+                pending = data.get('pending_transactions', [])
+                
+                # Stats table
+                stats_table = Table(title="Bridge Statistics")
+                stats_table.add_column("Metric", style="cyan")
+                stats_table.add_column("Value", style="green")
+                
+                stats_table.add_row("Total Deposited", f"{int(stats.get('total_deposited', 0)) / 10**18:.4f} FTNS")
+                stats_table.add_row("Total Withdrawn", f"{int(stats.get('total_withdrawn', 0)) / 10**18:.4f} FTNS")
+                stats_table.add_row("Total Fees Collected", f"{int(stats.get('total_fees_collected', 0)) / 10**18:.4f} FTNS")
+                stats_table.add_row("Pending Transactions", str(stats.get('pending_transactions', 0)))
+                stats_table.add_row("Completed Transactions", str(stats.get('completed_transactions', 0)))
+                stats_table.add_row("Failed Transactions", str(stats.get('failed_transactions', 0)))
+                
+                console.print(stats_table)
+                
+                # Limits table
+                if limits:
+                    limits_table = Table(title="Bridge Limits")
+                    limits_table.add_column("Limit", style="cyan")
+                    limits_table.add_column("Value", style="magenta")
+                    
+                    limits_table.add_row("Minimum Amount", f"{int(limits.get('min_amount', 0)) / 10**18:.4f} FTNS")
+                    limits_table.add_row("Maximum Amount", f"{int(limits.get('max_amount', 0)) / 10**18:.4f} FTNS")
+                    limits_table.add_row("Daily Limit", f"{int(limits.get('daily_limit', 0)) / 10**18:.4f} FTNS")
+                    limits_table.add_row("Fee (BPS)", str(limits.get('fee_bps', 0)))
+                    
+                    console.print(limits_table)
+                
+                # Pending transactions
+                if pending:
+                    pending_table = Table(title=f"Pending Transactions ({len(pending)})")
+                    pending_table.add_column("TX ID", style="dim")
+                    pending_table.add_column("Direction", style="cyan")
+                    pending_table.add_column("Amount", style="green")
+                    pending_table.add_column("Status", style="magenta")
+                    pending_table.add_column("Created", style="blue")
+                    
+                    for tx in pending[:10]:  # Show max 10
+                        pending_table.add_row(
+                            tx.get('transaction_id', 'N/A')[:20] + "...",
+                            tx.get('direction', 'N/A').upper(),
+                            f"{int(tx.get('amount', 0)) / 10**18:.4f}",
+                            tx.get('status', 'N/A'),
+                            tx.get('created_at', 'N/A')[:19]
+                        )
+                    
+                    console.print(pending_table)
+                    if len(pending) > 10:
+                        console.print(f"   ... and {len(pending) - 10} more pending transactions", style="dim")
+            else:
+                console.print(f"❌ Failed to get bridge status: {response.status_code}", style="red")
+                
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@bridge.command()
+@click.option('--limit', default=20, type=int, help='Maximum transactions to show')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def history(limit: int, api_url: str):
+    """Show bridge transaction history for the current user."""
+    import httpx
+    
+    try:
+        response = httpx.get(f"{api_url}/bridge/transactions?limit={limit}", timeout=10.0)
+        
+        if response.status_code == 200:
+            data = response.json()
+            transactions = data.get('transactions', [])
+            
+            if not transactions:
+                console.print("No bridge transactions found.", style="dim")
+                return
+            
+            table = Table(title="Bridge Transaction History")
+            table.add_column("TX ID", style="dim")
+            table.add_column("Direction", style="cyan")
+            table.add_column("Amount", style="green")
+            table.add_column("Fee", style="yellow")
+            table.add_column("Status", style="magenta")
+            table.add_column("Created", style="blue")
+            
+            for tx in transactions:
+                table.add_row(
+                    tx.get('transaction_id', 'N/A')[:16] + "...",
+                    tx.get('direction', 'N/A').upper(),
+                    f"{int(tx.get('amount', 0)) / 10**18:.4f}",
+                    f"{int(tx.get('fee_amount', 0)) / 10**18:.4f}",
+                    tx.get('status', 'N/A'),
+                    tx.get('created_at', 'N/A')[:19]
+                )
+            
+            console.print(table)
+        else:
+            console.print(f"❌ Failed to get bridge history: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+# ============================================================================
 # STORAGE COMMANDS
 # ============================================================================
 

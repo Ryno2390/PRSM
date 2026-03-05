@@ -21,8 +21,14 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
+from prsm.core.ipfs_sharding import (
+    ContentSharder,
+    ShardingConfig,
+    ShardManifest,
+    ShardingError,
+)
 from prsm.node.gossip import (
     GOSSIP_CONTENT_ACCESS,
     GOSSIP_CONTENT_ADVERTISE,
@@ -46,6 +52,9 @@ DERIVATIVE_CREATOR_SHARE = 0.70   # 70% to the derivative creator
 SOURCE_CREATOR_SHARE = 0.25       # 25% to each source creator (split evenly)
 NETWORK_FEE_SHARE = 0.05          # 5% network fee
 
+# Default sharding threshold: 10MB - files larger than this will be sharded
+DEFAULT_SHARDING_THRESHOLD = 10 * 1024 * 1024  # 10MB
+
 
 @dataclass
 class UploadedContent:
@@ -61,6 +70,10 @@ class UploadedContent:
     parent_cids: List[str] = field(default_factory=list)
     access_count: int = 0
     total_royalties: float = 0.0
+    # Sharding metadata
+    is_sharded: bool = False
+    manifest_cid: Optional[str] = None  # CID of the shard manifest if sharded
+    total_shards: int = 0
 
 
 class ContentUploader:
@@ -83,6 +96,8 @@ class ContentUploader:
         transport: Optional[WebSocketTransport] = None,
         content_index: Optional[Any] = None,
         ledger_sync: Optional[Any] = None,
+        sharding_threshold: int = DEFAULT_SHARDING_THRESHOLD,
+        sharding_config: Optional[ShardingConfig] = None,
     ):
         self.identity = identity
         self.gossip = gossip
@@ -92,17 +107,33 @@ class ContentUploader:
         self.content_index = content_index  # For looking up parent content creators
         self.ledger_sync = ledger_sync      # For broadcasting transactions
 
+        # Sharding configuration
+        self.sharding_threshold = sharding_threshold
+        self.sharding_config = sharding_config or ShardingConfig()
+        self._content_sharder: Optional[ContentSharder] = None
+
         self.uploaded_content: Dict[str, UploadedContent] = {}
         self._ipfs_session = None
 
         # Pending content retrieval requests: request_id → asyncio.Future[dict]
         self._pending_requests: Dict[str, asyncio.Future] = {}
+        
+        # Manifest tracking: manifest_cid -> ShardManifest
+        self.shard_manifests: Dict[str, ShardManifest] = {}
 
     async def _get_ipfs_session(self) -> Any:
         if self._ipfs_session is None or self._ipfs_session.closed:
             import aiohttp
             self._ipfs_session = aiohttp.ClientSession()
         return self._ipfs_session
+
+    async def _get_content_sharder(self) -> ContentSharder:
+        """Get or create the ContentSharder instance."""
+        if self._content_sharder is None:
+            # Create a minimal IPFS client wrapper for the sharder
+            ipfs_client = _IPFSClientWrapper(self)
+            self._content_sharder = ContentSharder(ipfs_client, self.sharding_config)
+        return self._content_sharder
 
     async def close(self) -> None:
         if self._ipfs_session:
@@ -117,6 +148,7 @@ class ContentUploader:
         replicas: int = 3,
         royalty_rate: Optional[float] = None,
         parent_cids: Optional[List[str]] = None,
+        force_shard: bool = False,
     ) -> Optional[UploadedContent]:
         """Upload content to IPFS and register provenance.
 
@@ -127,6 +159,7 @@ class ContentUploader:
             replicas: Number of storage replicas to request
             royalty_rate: FTNS earned per access (clamped to 0.001–0.1, default 0.01)
             parent_cids: CIDs of source material this content derives from
+            force_shard: If True, force sharding regardless of file size
 
         Returns:
             UploadedContent with CID and provenance info, or None on failure
@@ -136,15 +169,33 @@ class ContentUploader:
         rate = max(MIN_ROYALTY_RATE, min(MAX_ROYALTY_RATE, rate))
 
         content_hash = hashlib.sha256(content).hexdigest()
+        size_bytes = len(content)
+        parents = parent_cids or []
 
-        # Upload to IPFS
+        # Check if content should be sharded
+        should_shard = force_shard or size_bytes > self.sharding_threshold
+
+        if should_shard:
+            # Use sharding for large files
+            logger.info(
+                f"File {filename} ({size_bytes} bytes) exceeds threshold "
+                f"({self.sharding_threshold} bytes), using sharding"
+            )
+            return await self._upload_with_sharding(
+                content=content,
+                filename=filename,
+                metadata=metadata,
+                replicas=replicas,
+                royalty_rate=rate,
+                parent_cids=parents,
+                content_hash=content_hash,
+            )
+
+        # Standard monolithic upload for small files
         cid = await self._ipfs_add(content, filename)
         if not cid:
             logger.error(f"Failed to upload {filename} to IPFS")
             return None
-
-        size_bytes = len(content)
-        parents = parent_cids or []
 
         # Create provenance record
         provenance_data = {
@@ -158,6 +209,7 @@ class ContentUploader:
             "metadata": metadata or {},
             "royalty_rate": rate,
             "parent_cids": parents,
+            "is_sharded": False,
         }
         provenance_bytes = json.dumps(provenance_data, sort_keys=True).encode()
         provenance_signature = self.identity.sign(provenance_bytes)
@@ -171,6 +223,7 @@ class ContentUploader:
             provenance_signature=provenance_signature,
             royalty_rate=rate,
             parent_cids=parents,
+            is_sharded=False,
         )
         self.uploaded_content[cid] = uploaded
 
@@ -208,6 +261,207 @@ class ContentUploader:
             f"royalty={rate} FTNS/access, parents={len(parents)}, replicas={replicas}"
         )
         return uploaded
+
+    async def _upload_with_sharding(
+        self,
+        content: bytes,
+        filename: str,
+        metadata: Optional[Dict[str, Any]],
+        replicas: int,
+        royalty_rate: float,
+        parent_cids: List[str],
+        content_hash: str,
+    ) -> Optional[UploadedContent]:
+        """Upload large content using sharding.
+
+        This method delegates to ContentSharder for large files, handling
+        the manifest and provenance registration.
+
+        Args:
+            content: Raw bytes to upload
+            filename: Display name for the content
+            metadata: Optional metadata dict
+            replicas: Number of storage replicas to request
+            royalty_rate: FTNS earned per access
+            parent_cids: CIDs of source material this content derives from
+            content_hash: Pre-calculated SHA-256 hash of content
+
+        Returns:
+            UploadedContent with manifest CID and provenance info, or None on failure
+        """
+        try:
+            # Get the content sharder
+            sharder = await self._get_content_sharder()
+
+            # Shard and upload the content
+            manifest, manifest_cid = await sharder.shard_content(
+                content=content,
+                original_cid=None,  # We don't have the original CID yet
+                metadata={
+                    "filename": filename,
+                    "uploader_metadata": metadata or {},
+                    "parent_cids": parent_cids,
+                },
+            )
+
+            # Store the manifest for later retrieval
+            self.shard_manifests[manifest_cid] = manifest
+
+            size_bytes = len(content)
+
+            # Create provenance record for the sharded content
+            # The manifest CID serves as the primary identifier for sharded content
+            provenance_data = {
+                "cid": manifest_cid,  # Use manifest CID as the primary CID
+                "content_hash": content_hash,
+                "creator_id": self.identity.node_id,
+                "creator_public_key": self.identity.public_key_b64,
+                "filename": filename,
+                "size_bytes": size_bytes,
+                "created_at": time.time(),
+                "metadata": metadata or {},
+                "royalty_rate": royalty_rate,
+                "parent_cids": parent_cids,
+                "is_sharded": True,
+                "total_shards": manifest.total_shards,
+                "shard_size": manifest.shard_size,
+            }
+            provenance_bytes = json.dumps(provenance_data, sort_keys=True).encode()
+            provenance_signature = self.identity.sign(provenance_bytes)
+
+            uploaded = UploadedContent(
+                cid=manifest_cid,  # Use manifest CID as primary identifier
+                filename=filename,
+                size_bytes=size_bytes,
+                content_hash=content_hash,
+                creator_id=self.identity.node_id,
+                provenance_signature=provenance_signature,
+                royalty_rate=royalty_rate,
+                parent_cids=parent_cids,
+                is_sharded=True,
+                manifest_cid=manifest_cid,
+                total_shards=manifest.total_shards,
+            )
+            self.uploaded_content[manifest_cid] = uploaded
+
+            # Gossip provenance registration
+            await self.gossip.publish(GOSSIP_PROVENANCE_REGISTER, {
+                **provenance_data,
+                "signature": provenance_signature,
+            })
+
+            # Advertise content availability to the network
+            await self.gossip.publish(GOSSIP_CONTENT_ADVERTISE, {
+                "cid": manifest_cid,
+                "filename": filename,
+                "size_bytes": size_bytes,
+                "content_hash": content_hash,
+                "creator_id": self.identity.node_id,
+                "provider_id": self.identity.node_id,
+                "created_at": provenance_data["created_at"],
+                "metadata": metadata or {},
+                "royalty_rate": royalty_rate,
+                "parent_cids": parent_cids,
+                "is_sharded": True,
+                "total_shards": manifest.total_shards,
+            })
+
+            # Request storage replication for each shard
+            if replicas > 0:
+                # Request replication for the manifest
+                await self.gossip.publish(GOSSIP_STORAGE_REQUEST, {
+                    "cid": manifest_cid,
+                    "size_bytes": len(manifest.to_json()),
+                    "requester_id": self.identity.node_id,
+                    "replicas_needed": replicas,
+                })
+
+                # Request replication for each shard
+                for shard_info in manifest.shards:
+                    await self.gossip.publish(GOSSIP_STORAGE_REQUEST, {
+                        "cid": shard_info.cid,
+                        "size_bytes": shard_info.size,
+                        "requester_id": self.identity.node_id,
+                        "replicas_needed": replicas,
+                    })
+
+            logger.info(
+                f"Uploaded {filename} ({size_bytes} bytes) with sharding -> "
+                f"manifest={manifest_cid}, shards={manifest.total_shards}, "
+                f"royalty={royalty_rate} FTNS/access, parents={len(parent_cids)}"
+            )
+            return uploaded
+
+        except ShardingError as e:
+            logger.error(f"Sharding failed for {filename}: {e}")
+            # Fall back to monolithic upload
+            logger.info(f"Falling back to monolithic upload for {filename}")
+            cid = await self._ipfs_add(content, filename)
+            if not cid:
+                logger.error(f"Failed to upload {filename} to IPFS (fallback)")
+                return None
+
+            size_bytes = len(content)
+            provenance_data = {
+                "cid": cid,
+                "content_hash": content_hash,
+                "creator_id": self.identity.node_id,
+                "creator_public_key": self.identity.public_key_b64,
+                "filename": filename,
+                "size_bytes": size_bytes,
+                "created_at": time.time(),
+                "metadata": metadata or {},
+                "royalty_rate": royalty_rate,
+                "parent_cids": parent_cids,
+                "is_sharded": False,
+                "sharding_failed": True,
+            }
+            provenance_bytes = json.dumps(provenance_data, sort_keys=True).encode()
+            provenance_signature = self.identity.sign(provenance_bytes)
+
+            uploaded = UploadedContent(
+                cid=cid,
+                filename=filename,
+                size_bytes=size_bytes,
+                content_hash=content_hash,
+                creator_id=self.identity.node_id,
+                provenance_signature=provenance_signature,
+                royalty_rate=royalty_rate,
+                parent_cids=parent_cids,
+                is_sharded=False,
+            )
+            self.uploaded_content[cid] = uploaded
+
+            # Still advertise and request replication for fallback
+            await self.gossip.publish(GOSSIP_PROVENANCE_REGISTER, {
+                **provenance_data,
+                "signature": provenance_signature,
+            })
+            await self.gossip.publish(GOSSIP_CONTENT_ADVERTISE, {
+                "cid": cid,
+                "filename": filename,
+                "size_bytes": size_bytes,
+                "content_hash": content_hash,
+                "creator_id": self.identity.node_id,
+                "provider_id": self.identity.node_id,
+                "created_at": provenance_data["created_at"],
+                "metadata": metadata or {},
+                "royalty_rate": royalty_rate,
+                "parent_cids": parent_cids,
+            })
+            if replicas > 0:
+                await self.gossip.publish(GOSSIP_STORAGE_REQUEST, {
+                    "cid": cid,
+                    "size_bytes": size_bytes,
+                    "requester_id": self.identity.node_id,
+                    "replicas_needed": replicas,
+                })
+
+            return uploaded
+
+        except Exception as e:
+            logger.error(f"Unexpected error during sharding of {filename}: {e}")
+            return None
 
     async def upload_json(
         self,
@@ -705,9 +959,132 @@ class ContentUploader:
         total_bytes = sum(c.size_bytes for c in self.uploaded_content.values())
         total_royalties = sum(c.total_royalties for c in self.uploaded_content.values())
         total_accesses = sum(c.access_count for c in self.uploaded_content.values())
+        sharded_count = sum(1 for c in self.uploaded_content.values() if c.is_sharded)
+        total_shards = sum(c.total_shards for c in self.uploaded_content.values() if c.is_sharded)
         return {
             "uploaded_count": len(self.uploaded_content),
             "total_bytes": total_bytes,
             "total_royalties_ftns": total_royalties,
             "total_accesses": total_accesses,
+            "sharded_count": sharded_count,
+            "total_shards": total_shards,
+            "sharding_threshold": self.sharding_threshold,
         }
+
+    async def retrieve_sharded_content(self, manifest_cid: str) -> Optional[bytes]:
+        """Retrieve and reassemble sharded content by manifest CID.
+
+        Args:
+            manifest_cid: CID of the shard manifest
+
+        Returns:
+            Reassembled content bytes, or None on failure
+        """
+        try:
+            # Check if we have the manifest locally
+            manifest = self.shard_manifests.get(manifest_cid)
+
+            if not manifest:
+                # Try to fetch the manifest from IPFS
+                manifest_json = await self._ipfs_cat(manifest_cid)
+                if manifest_json:
+                    manifest = ShardManifest.from_json(manifest_json.decode())
+                    self.shard_manifests[manifest_cid] = manifest
+
+            if not manifest:
+                logger.error(f"Manifest not found for CID {manifest_cid[:12]}...")
+                return None
+
+            # Get the sharder and reassemble
+            sharder = await self._get_content_sharder()
+            content = await sharder.reassemble_content(manifest, verify=True)
+
+            logger.info(
+                f"Retrieved and reassembled sharded content from manifest "
+                f"{manifest_cid[:12]}... ({len(content)} bytes, {manifest.total_shards} shards)"
+            )
+            return content
+
+        except Exception as e:
+            logger.error(f"Failed to retrieve sharded content {manifest_cid[:12]}...: {e}")
+            return None
+
+    def get_manifest(self, manifest_cid: str) -> Optional[ShardManifest]:
+        """Get a stored shard manifest by CID.
+
+        Args:
+            manifest_cid: CID of the manifest
+
+        Returns:
+            ShardManifest if found, None otherwise
+        """
+        return self.shard_manifests.get(manifest_cid)
+
+
+class _IPFSClientWrapper:
+    """Wrapper to make ContentUploader compatible with ContentSharder's IPFS client interface.
+
+    ContentSharder expects an IPFS client with upload_content() and download_content()
+    methods that return objects with specific attributes. This wrapper adapts
+    ContentUploader's methods to that interface.
+    """
+
+    def __init__(self, uploader: ContentUploader):
+        self._uploader = uploader
+
+    async def upload_content(
+        self,
+        content: bytes,
+        filename: str = "content.bin",
+        pin: bool = True,
+    ) -> "_UploadResult":
+        """Upload content to IPFS.
+
+        Args:
+            content: Raw bytes to upload
+            filename: Name for the content
+            pin: Whether to pin the content (ignored, always pinned)
+
+        Returns:
+            _UploadResult with success status and CID
+        """
+        cid = await self._uploader._ipfs_add(content, filename)
+        if cid:
+            return _UploadResult(success=True, cid=cid, error=None)
+        else:
+            return _UploadResult(success=False, cid=None, error="IPFS add failed")
+
+    async def download_content(self, cid: str) -> "_DownloadResult":
+        """Download content from IPFS.
+
+        Args:
+            cid: Content identifier to download
+
+        Returns:
+            _DownloadResult with success status and content
+        """
+        content = await self._uploader._ipfs_cat(cid)
+        if content is not None:
+            return _DownloadResult(
+                success=True,
+                metadata={"content": content},
+                error=None,
+            )
+        else:
+            return _DownloadResult(success=False, metadata=None, error="IPFS cat failed")
+
+
+@dataclass
+class _UploadResult:
+    """Result object for IPFS uploads, compatible with ContentSharder interface."""
+    success: bool
+    cid: Optional[str]
+    error: Optional[str]
+
+
+@dataclass
+class _DownloadResult:
+    """Result object for IPFS downloads, compatible with ContentSharder interface."""
+    success: bool
+    metadata: Optional[Dict[str, Any]]
+    error: Optional[str]
