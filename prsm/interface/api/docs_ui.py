@@ -210,7 +210,7 @@ def create_enhanced_docs_ui(app: FastAPI) -> None:
     async def api_status():
         """API status and health information for documentation"""
         return JSONResponse(content={
-            "api_version": "0.1.0",
+                "api_version": "0.2.0",
             "documentation_version": "1.0.0",
             "last_updated": "2024-01-15T10:00:00Z",
             "features": {

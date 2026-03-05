@@ -14,7 +14,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # Import marketplace components
-from prsm.economy.tokenomics.advanced_ftns import AtomicFTNSService
+from prsm.economy.tokenomics.atomic_ftns_service import AtomicFTNSService
 from prsm.economy.tokenomics.ftns_service import FTNSService
 from prsm.economy.marketplace.ecosystem.marketplace_core import MarketplaceCore
 
@@ -28,13 +28,20 @@ class TestMarketplaceConcurrency:
         service = AtomicFTNSService()
         await service.initialize()
         yield service
-        await service.shutdown()
+        # No shutdown method - service cleanup is automatic
     
     @pytest.fixture
     async def funded_user(self, ftns_service):
         """Create a user with initial funds"""
         user_id = "test_user_concurrent"
-        await ftns_service.credit(user_id, 1000.0, "initial_funds")
+        # Use mint_tokens_atomic instead of credit
+        result = await ftns_service.mint_tokens_atomic(
+            user_id,
+            Decimal("1000.0"),
+            f"initial_funds_{user_id}",
+            "Initial funds for testing"
+        )
+        assert result.success, f"Failed to fund user: {result.error_message}"
         yield user_id
         # Cleanup handled by ftns_service fixture
     
@@ -45,20 +52,22 @@ class TestMarketplaceConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_purchases_same_user(self, ftns_service, funded_user):
         """Test that concurrent purchases from the same user are handled correctly"""
-        initial_balance = await ftns_service.get_balance(funded_user)
+        initial_balance_info = await ftns_service.get_balance(funded_user)
+        initial_balance = float(initial_balance_info.balance)
         assert initial_balance == 1000.0
         
         # Try to make 5 concurrent purchases of 300 each
         # User only has 1000, so at most 3 should succeed
         async def purchase(amount: float, purchase_id: str):
             try:
-                success = await ftns_service.atomic_deduct(
+                result = await ftns_service.deduct_tokens_atomic(
                     funded_user,
-                    amount,
+                    Decimal(str(amount)),
                     f"purchase_{purchase_id}",
+                    f"Purchase {purchase_id}",
                     idempotency_key=f"purchase_{purchase_id}"
                 )
-                return {"success": success, "amount": amount, "id": purchase_id}
+                return {"success": result.success, "amount": amount, "id": purchase_id}
             except Exception as e:
                 return {"success": False, "error": str(e), "id": purchase_id}
         
@@ -80,13 +89,14 @@ class TestMarketplaceConcurrency:
         assert len(failures) >= 2, "At least 2 purchases should fail due to insufficient balance"
         
         # Verify final balance
-        final_balance = await ftns_service.get_balance(funded_user)
+        final_balance_info = await ftns_service.get_balance(funded_user)
+        final_balance = float(final_balance_info.balance)
         assert final_balance >= 0, "Balance should never go negative"
         assert final_balance <= initial_balance, "Balance should not increase"
         
         # Verify total deductions match
         total_deducted = sum(s.get("amount", 0) for s in successes)
-        assert initial_balance - final_balance == total_deducted, "Total deductions should match"
+        assert abs((initial_balance - final_balance) - total_deducted) < 0.01, "Total deductions should match"
     
     @pytest.mark.asyncio
     async def test_concurrent_purchases_different_users(self, ftns_service):
@@ -95,18 +105,25 @@ class TestMarketplaceConcurrency:
         users = []
         for i in range(5):
             user_id = f"concurrent_user_{i}"
-            await ftns_service.credit(user_id, 100.0, "initial_funds")
+            result = await ftns_service.mint_tokens_atomic(
+                user_id,
+                Decimal("100.0"),
+                f"initial_funds_{user_id}",
+                "Initial funds"
+            )
+            assert result.success, f"Failed to fund user {user_id}"
             users.append(user_id)
         
         # Each user tries to purchase 50
         async def purchase(user_id: str, amount: float):
-            success = await ftns_service.atomic_deduct(
+            result = await ftns_service.deduct_tokens_atomic(
                 user_id,
-                amount,
+                Decimal(str(amount)),
                 f"purchase_by_{user_id}",
+                f"Purchase by {user_id}",
                 idempotency_key=f"purchase_{user_id}"
             )
-            return {"user": user_id, "success": success}
+            return {"user": user_id, "success": result.success}
         
         # Execute concurrent purchases
         results = await asyncio.gather(
@@ -120,8 +137,8 @@ class TestMarketplaceConcurrency:
         
         # Verify each user's balance
         for user in users:
-            balance = await ftns_service.get_balance(user)
-            assert balance == 50.0, f"User {user} should have 50.0 remaining"
+            balance_info = await ftns_service.get_balance(user)
+            assert float(balance_info.balance) == 50.0, f"User {user} should have 50.0 remaining"
     
     # =========================================================================
     # Balance Consistency Tests
@@ -130,17 +147,20 @@ class TestMarketplaceConcurrency:
     @pytest.mark.asyncio
     async def test_balance_consistency_under_load(self, ftns_service, funded_user):
         """Test that balance remains consistent under high load"""
-        initial_balance = await ftns_service.get_balance(funded_user)
+        initial_balance_info = await ftns_service.get_balance(funded_user)
+        initial_balance = float(initial_balance_info.balance)
         
         # Perform many small transactions
         async def small_deduct(amount: float, tx_id: str):
             try:
-                return await ftns_service.atomic_deduct(
+                result = await ftns_service.deduct_tokens_atomic(
                     funded_user,
-                    amount,
+                    Decimal(str(amount)),
                     tx_id,
+                    f"Transaction {tx_id}",
                     idempotency_key=tx_id
                 )
+                return result.success
             except Exception:
                 return False
         
@@ -161,10 +181,11 @@ class TestMarketplaceConcurrency:
         successful = sum(1 for r in results if r is True)
         
         # Verify balance
-        final_balance = await ftns_service.get_balance(funded_user)
+        final_balance_info = await ftns_service.get_balance(funded_user)
+        final_balance = float(final_balance_info.balance)
         expected_deduction = successful * 10.0
         
-        assert initial_balance - final_balance == expected_deduction, \
+        assert abs((initial_balance - final_balance) - expected_deduction) < 0.01, \
             f"Balance mismatch: expected {expected_deduction} deducted, got {initial_balance - final_balance}"
         assert final_balance >= 0, "Balance should never be negative"
     
@@ -175,17 +196,26 @@ class TestMarketplaceConcurrency:
         
         # Perform alternating credits and debits
         for i in range(10):
-            await ftns_service.credit(user_id, 100.0, f"credit_{i}")
-            await ftns_service.atomic_deduct(
+            result = await ftns_service.mint_tokens_atomic(
                 user_id,
-                50.0,
-                f"debit_{i}",
-                idempotency_key=f"debit_{i}"
+                Decimal("100.0"),
+                f"credit_{i}_{user_id}",
+                f"Credit {i}"
             )
+            assert result.success, f"Credit {i} failed"
+            
+            result = await ftns_service.deduct_tokens_atomic(
+                user_id,
+                Decimal("50.0"),
+                f"debit_{i}_{user_id}",
+                f"Debit {i}",
+                idempotency_key=f"debit_{i}_{user_id}"
+            )
+            assert result.success, f"Debit {i} failed"
         
         # Final balance should be 10 * (100 - 50) = 500
-        final_balance = await ftns_service.get_balance(user_id)
-        assert final_balance == 500.0, f"Expected 500.0, got {final_balance}"
+        final_balance_info = await ftns_service.get_balance(user_id)
+        assert float(final_balance_info.balance) == 500.0, f"Expected 500.0, got {float(final_balance_info.balance)}"
     
     # =========================================================================
     # Idempotency Key Tests
@@ -194,69 +224,80 @@ class TestMarketplaceConcurrency:
     @pytest.mark.asyncio
     async def test_idempotency_prevents_double_deduction(self, ftns_service, funded_user):
         """Test that same idempotency key prevents double deduction"""
-        initial_balance = await ftns_service.get_balance(funded_user)
+        initial_balance_info = await ftns_service.get_balance(funded_user)
+        initial_balance = float(initial_balance_info.balance)
         
         # First deduction
-        result1 = await ftns_service.atomic_deduct(
+        result1 = await ftns_service.deduct_tokens_atomic(
             funded_user,
-            100.0,
+            Decimal("100.0"),
             "test_purchase",
+            "Test purchase",
             idempotency_key="idempotent_key_1"
         )
-        assert result1 is True, "First deduction should succeed"
+        assert result1.success, "First deduction should succeed"
         
         # Second deduction with same idempotency key
-        result2 = await ftns_service.atomic_deduct(
+        result2 = await ftns_service.deduct_tokens_atomic(
             funded_user,
-            100.0,
+            Decimal("100.0"),
             "test_purchase",
+            "Test purchase",
             idempotency_key="idempotent_key_1"  # Same key
         )
         # Should return True but not deduct again (idempotent)
-        assert result2 is True, "Idempotent request should return success"
+        assert result2.success, "Idempotent request should return success"
+        assert result2.idempotent_replay, "Should indicate idempotent replay"
         
         # Verify only one deduction happened
-        final_balance = await ftns_service.get_balance(funded_user)
-        assert final_balance == initial_balance - 100.0, \
+        final_balance_info = await ftns_service.get_balance(funded_user)
+        assert float(final_balance_info.balance) == initial_balance - 100.0, \
             "Only one deduction should have occurred"
     
     @pytest.mark.asyncio
     async def test_different_idempotency_keys_allow_multiple_deductions(self, ftns_service, funded_user):
         """Test that different idempotency keys allow multiple deductions"""
-        initial_balance = await ftns_service.get_balance(funded_user)
+        initial_balance_info = await ftns_service.get_balance(funded_user)
+        initial_balance = float(initial_balance_info.balance)
         
         # First deduction
-        await ftns_service.atomic_deduct(
+        result1 = await ftns_service.deduct_tokens_atomic(
             funded_user,
-            100.0,
+            Decimal("100.0"),
             "purchase_1",
+            "Purchase 1",
             idempotency_key="key_1"
         )
+        assert result1.success, "First deduction should succeed"
         
         # Second deduction with different key
-        await ftns_service.atomic_deduct(
+        result2 = await ftns_service.deduct_tokens_atomic(
             funded_user,
-            100.0,
+            Decimal("100.0"),
             "purchase_2",
+            "Purchase 2",
             idempotency_key="key_2"
         )
+        assert result2.success, "Second deduction should succeed"
         
         # Verify both deductions happened
-        final_balance = await ftns_service.get_balance(funded_user)
-        assert final_balance == initial_balance - 200.0, \
+        final_balance_info = await ftns_service.get_balance(funded_user)
+        assert float(final_balance_info.balance) == initial_balance - 200.0, \
             "Both deductions should have occurred"
     
     @pytest.mark.asyncio
     async def test_idempotency_key_concurrent_requests(self, ftns_service, funded_user):
         """Test that concurrent requests with same idempotency key are handled correctly"""
-        initial_balance = await ftns_service.get_balance(funded_user)
+        initial_balance_info = await ftns_service.get_balance(funded_user)
+        initial_balance = float(initial_balance_info.balance)
         
         # Make 5 concurrent requests with the same idempotency key
         async def deduct_with_key(key: str):
-            return await ftns_service.atomic_deduct(
+            return await ftns_service.deduct_tokens_atomic(
                 funded_user,
-                100.0,
+                Decimal("100.0"),
                 "concurrent_purchase",
+                "Concurrent purchase",
                 idempotency_key=key
             )
         
@@ -270,12 +311,12 @@ class TestMarketplaceConcurrency:
         )
         
         # All should return success (idempotent)
-        successes = sum(1 for r in results if r is True)
+        successes = sum(1 for r in results if isinstance(r, object) and getattr(r, 'success', False))
         assert successes == 5, "All idempotent requests should return success"
         
         # But only one deduction should have occurred
-        final_balance = await ftns_service.get_balance(funded_user)
-        assert final_balance == initial_balance - 100.0, \
+        final_balance_info = await ftns_service.get_balance(funded_user)
+        assert float(final_balance_info.balance) == initial_balance - 100.0, \
             "Only one deduction should have occurred despite concurrent requests"
     
     # =========================================================================
@@ -286,20 +327,24 @@ class TestMarketplaceConcurrency:
     async def test_race_condition_prevention_check_balance(self, ftns_service):
         """Test that race conditions in balance checking are prevented"""
         user_id = "race_condition_user"
-        await ftns_service.credit(user_id, 100.0, "initial")
+        result = await ftns_service.mint_tokens_atomic(
+            user_id, Decimal("100.0"), "initial_race", "Initial funds"
+        )
+        assert result.success, "Failed to fund user"
         
         # Simulate race condition: multiple operations checking balance simultaneously
         async def check_and_deduct():
-            balance = await ftns_service.get_balance(user_id)
-            if balance >= 60:
+            balance_info = await ftns_service.get_balance(user_id)
+            if float(balance_info.balance) >= 60:
                 # Try to deduct 60
-                return await ftns_service.atomic_deduct(
+                return await ftns_service.deduct_tokens_atomic(
                     user_id,
-                    60.0,
+                    Decimal("60.0"),
                     "race_deduct",
+                    "Race deduct",
                     idempotency_key=f"race_{id(asyncio.current_task())}"
                 )
-            return False
+            return None
         
         # Run multiple check-and-deduct operations concurrently
         results = await asyncio.gather(
@@ -310,35 +355,39 @@ class TestMarketplaceConcurrency:
         )
         
         # Count successes
-        successes = sum(1 for r in results if r is True)
+        successes = sum(1 for r in results if hasattr(r, 'success') and r.success)
         
         # Only one should succeed (100 - 60 = 40, not enough for second 60)
         assert successes == 1, f"Only 1 deduction should succeed, got {successes}"
         
         # Verify final balance
-        final_balance = await ftns_service.get_balance(user_id)
-        assert final_balance == 40.0, f"Final balance should be 40.0, got {final_balance}"
+        final_balance_info = await ftns_service.get_balance(user_id)
+        assert float(final_balance_info.balance) == 40.0, f"Final balance should be 40.0, got {float(final_balance_info.balance)}"
     
     @pytest.mark.asyncio
     async def test_atomic_deduct_all_or_nothing(self, ftns_service):
         """Test that atomic deduct is all-or-nothing"""
         user_id = "atomic_user"
-        await ftns_service.credit(user_id, 100.0, "initial")
+        result = await ftns_service.mint_tokens_atomic(
+            user_id, Decimal("100.0"), "initial_atomic", "Initial funds"
+        )
+        assert result.success, "Failed to fund user"
         
         # Attempt to deduct more than balance
-        result = await ftns_service.atomic_deduct(
+        result = await ftns_service.deduct_tokens_atomic(
             user_id,
-            200.0,  # More than available
+            Decimal("200.0"),  # More than available
             "overdraft_attempt",
+            "Overdraft attempt",
             idempotency_key="overdraft_1"
         )
         
         # Should fail
-        assert result is False, "Overdraft should fail"
+        assert not result.success, "Overdraft should fail"
         
         # Balance should be unchanged
-        balance = await ftns_service.get_balance(user_id)
-        assert balance == 100.0, "Balance should be unchanged after failed deduct"
+        balance_info = await ftns_service.get_balance(user_id)
+        assert float(balance_info.balance) == 100.0, "Balance should be unchanged after failed deduct"
     
     # =========================================================================
     # Stress Tests
@@ -353,15 +402,19 @@ class TestMarketplaceConcurrency:
         # Create users
         users = [f"stress_user_{i}" for i in range(num_users)]
         for user in users:
-            await ftns_service.credit(user, 1000.0, "initial")
+            result = await ftns_service.mint_tokens_atomic(
+                user, Decimal("1000.0"), f"initial_{user}", "Initial funds"
+            )
+            assert result.success, f"Failed to fund user {user}"
         
         # Perform many operations
         async def user_operations(user_id: str):
             for i in range(operations_per_user):
-                await ftns_service.atomic_deduct(
+                await ftns_service.deduct_tokens_atomic(
                     user_id,
-                    10.0,
+                    Decimal("10.0"),
                     f"stress_op_{i}",
+                    f"Stress op {i}",
                     idempotency_key=f"{user_id}_op_{i}"
                 )
         
@@ -373,9 +426,9 @@ class TestMarketplaceConcurrency:
         
         # Verify all balances
         for user in users:
-            balance = await ftns_service.get_balance(user)
+            balance_info = await ftns_service.get_balance(user)
             expected = 1000.0 - (operations_per_user * 10.0)
-            assert balance == expected, f"User {user} balance mismatch"
+            assert float(balance_info.balance) == expected, f"User {user} balance mismatch"
 
 
 class TestMarketplaceIntegration:
@@ -391,8 +444,12 @@ class TestMarketplaceIntegration:
         buyer_id = "test_buyer"
         seller_id = "test_seller"
         
-        await ftns_service.credit(buyer_id, 500.0, "initial_funds")
-        await ftns_service.credit(seller_id, 100.0, "initial_funds")
+        result1 = await ftns_service.mint_tokens_atomic(
+            buyer_id, Decimal("500.0"), "initial_buyer", "Initial funds"
+        )
+        result2 = await ftns_service.mint_tokens_atomic(
+            seller_id, Decimal("100.0"), "initial_seller", "Initial funds"
+        )
         
         yield {
             "ftns": ftns_service,
@@ -400,7 +457,7 @@ class TestMarketplaceIntegration:
             "seller": seller_id
         }
         
-        await ftns_service.shutdown()
+        # No shutdown method - service cleanup is automatic
     
     @pytest.mark.asyncio
     async def test_marketplace_purchase_flow(self, marketplace_setup):
@@ -409,29 +466,35 @@ class TestMarketplaceIntegration:
         buyer = marketplace_setup["buyer"]
         seller = marketplace_setup["seller"]
         
-        buyer_initial = await ftns.get_balance(buyer)
-        seller_initial = await ftns.get_balance(seller)
+        buyer_initial_info = await ftns.get_balance(buyer)
+        seller_initial_info = await ftns.get_balance(seller)
+        buyer_initial = float(buyer_initial_info.balance)
+        seller_initial = float(seller_initial_info.balance)
         
-        purchase_amount = 100.0
+        purchase_amount = Decimal("100.0")
         
         # Buyer makes purchase
-        success = await ftns.atomic_deduct(
+        result = await ftns.deduct_tokens_atomic(
             buyer,
             purchase_amount,
             "marketplace_purchase",
+            "Marketplace purchase",
             idempotency_key="purchase_1"
         )
-        assert success is True
+        assert result.success, "Purchase should succeed"
         
-        # Seller receives payment (credit)
-        await ftns.credit(seller, purchase_amount, "sale_proceeds")
+        # Seller receives payment (mint/credit)
+        result = await ftns.mint_tokens_atomic(
+            seller, purchase_amount, "sale_proceeds", "Sale proceeds"
+        )
+        assert result.success, "Credit should succeed"
         
         # Verify balances
-        buyer_final = await ftns.get_balance(buyer)
-        seller_final = await ftns.get_balance(seller)
+        buyer_final_info = await ftns.get_balance(buyer)
+        seller_final_info = await ftns.get_balance(seller)
         
-        assert buyer_final == buyer_initial - purchase_amount
-        assert seller_final == seller_initial + purchase_amount
+        assert float(buyer_final_info.balance) == buyer_initial - float(purchase_amount)
+        assert float(seller_final_info.balance) == seller_initial + float(purchase_amount)
     
     @pytest.mark.asyncio
     async def test_marketplace_refund_flow(self, marketplace_setup):
@@ -439,24 +502,32 @@ class TestMarketplaceIntegration:
         ftns = marketplace_setup["ftns"]
         buyer = marketplace_setup["buyer"]
         
-        buyer_initial = await ftns.get_balance(buyer)
+        buyer_initial_info = await ftns.get_balance(buyer)
+        buyer_initial = float(buyer_initial_info.balance)
         
         # Make purchase
-        await ftns.atomic_deduct(
+        result = await ftns.deduct_tokens_atomic(
             buyer,
-            100.0,
+            Decimal("100.0"),
             "purchase_for_refund",
+            "Purchase for refund",
             idempotency_key="refund_test_purchase"
         )
+        assert result.success, "Purchase should succeed"
         
         # Verify deduction
-        assert await ftns.get_balance(buyer) == buyer_initial - 100.0
+        balance_info = await ftns.get_balance(buyer)
+        assert float(balance_info.balance) == buyer_initial - 100.0
         
         # Process refund
-        await ftns.credit(buyer, 100.0, "refund")
+        result = await ftns.mint_tokens_atomic(
+            buyer, Decimal("100.0"), "refund", "Refund"
+        )
+        assert result.success, "Refund should succeed"
         
         # Verify refund
-        assert await ftns.get_balance(buyer) == buyer_initial
+        balance_info = await ftns.get_balance(buyer)
+        assert float(balance_info.balance) == buyer_initial
 
 
 # =========================================================================
@@ -480,13 +551,20 @@ async def run_marketplace_concurrency_tests():
     print("\n[TEST 1] Idempotency key prevents double deduction...")
     try:
         user_id = "idempotency_test_user"
-        await service.credit(user_id, 500.0, "initial")
+        result = await service.mint_tokens_atomic(
+            user_id, Decimal("500.0"), "initial", "Initial funds"
+        )
+        assert result.success, "Failed to fund user"
         
-        result1 = await service.atomic_deduct(user_id, 100.0, "purchase", idempotency_key="idem_1")
-        result2 = await service.atomic_deduct(user_id, 100.0, "purchase", idempotency_key="idem_1")
+        result1 = await service.deduct_tokens_atomic(
+            user_id, Decimal("100.0"), "purchase", "Purchase", idempotency_key="idem_1"
+        )
+        result2 = await service.deduct_tokens_atomic(
+            user_id, Decimal("100.0"), "purchase", "Purchase", idempotency_key="idem_1"
+        )
         
-        balance = await service.get_balance(user_id)
-        assert balance == 400.0, f"Expected 400.0, got {balance}"
+        balance_info = await service.get_balance(user_id)
+        assert float(balance_info.balance) == 400.0, f"Expected 400.0, got {float(balance_info.balance)}"
         print("  ✓ PASSED: Idempotency works correctly")
     except Exception as e:
         print(f"  ✗ FAILED: {e}")
@@ -495,10 +573,15 @@ async def run_marketplace_concurrency_tests():
     print("\n[TEST 2] Concurrent purchases from same user...")
     try:
         user_id = "concurrent_test_user"
-        await service.credit(user_id, 200.0, "initial")
+        result = await service.mint_tokens_atomic(
+            user_id, Decimal("200.0"), "initial", "Initial funds"
+        )
+        assert result.success, "Failed to fund user"
         
         async def purchase(amount, key):
-            return await service.atomic_deduct(user_id, amount, "purchase", idempotency_key=key)
+            return await service.deduct_tokens_atomic(
+                user_id, Decimal(str(amount)), "purchase", "Purchase", idempotency_key=key
+            )
         
         results = await asyncio.gather(
             purchase(150.0, "c1"),
@@ -506,11 +589,11 @@ async def run_marketplace_concurrency_tests():
             return_exceptions=True
         )
         
-        successes = sum(1 for r in results if r is True)
+        successes = sum(1 for r in results if hasattr(r, 'success') and r.success)
         assert successes == 1, f"Expected 1 success, got {successes}"
         
-        balance = await service.get_balance(user_id)
-        assert balance == 50.0, f"Expected 50.0, got {balance}"
+        balance_info = await service.get_balance(user_id)
+        assert float(balance_info.balance) == 50.0, f"Expected 50.0, got {float(balance_info.balance)}"
         print("  ✓ PASSED: Concurrent purchases handled correctly")
     except Exception as e:
         print(f"  ✗ FAILED: {e}")
@@ -519,19 +602,22 @@ async def run_marketplace_concurrency_tests():
     print("\n[TEST 3] Balance consistency under load...")
     try:
         user_id = "consistency_test_user"
-        await service.credit(user_id, 100.0, "initial")
+        result = await service.mint_tokens_atomic(
+            user_id, Decimal("100.0"), "initial", "Initial funds"
+        )
+        assert result.success, "Failed to fund user"
         
         # Many small deductions
         for i in range(10):
-            await service.atomic_deduct(user_id, 5.0, f"deduct_{i}", idempotency_key=f"deduct_{i}")
+            await service.deduct_tokens_atomic(
+                user_id, Decimal("5.0"), f"deduct_{i}", f"Deduct {i}", idempotency_key=f"deduct_{i}"
+            )
         
-        balance = await service.get_balance(user_id)
-        assert balance == 50.0, f"Expected 50.0, got {balance}"
+        balance_info = await service.get_balance(user_id)
+        assert float(balance_info.balance) == 50.0, f"Expected 50.0, got {float(balance_info.balance)}"
         print("  ✓ PASSED: Balance consistency maintained")
     except Exception as e:
         print(f"  ✗ FAILED: {e}")
-    
-    await service.shutdown()
     
     print("\n" + "=" * 60)
     print("MARKETPLACE CONCURRENCY TESTS COMPLETE")

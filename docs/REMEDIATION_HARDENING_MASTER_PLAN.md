@@ -1403,7 +1403,7 @@ settings = get_settings()
 def create_app(
     lifespan: Optional[Callable] = None,
     title: str = "PRSM API",
-    version: str = "0.1.0"
+    version: str = "0.2.0"
 ) -> FastAPI:
     """
     Create and configure FastAPI application.

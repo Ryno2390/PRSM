@@ -48,7 +48,7 @@ from prsm.interface.api.websocket import websocket_manager
 logger.info(
     "PRSM API application initialized",
     environment=settings.environment.value if settings else "unknown",
-    version="0.1.0"
+    version="0.2.0"
 )
 
 

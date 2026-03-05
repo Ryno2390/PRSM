@@ -487,6 +487,21 @@ class PRSMConfig(BaseConfigSchema):
         return 5001
 
     @property
+    def database_echo(self):
+        """Return database echo setting for compatibility."""
+        return self.logging.level == "DEBUG" if self.logging else False
+
+    @property
+    def database_pool_size(self):
+        """Return database pool size for compatibility."""
+        return self.database.pool_size if self.database else 5
+
+    @property
+    def database_max_overflow(self):
+        """Return database max overflow for compatibility."""
+        return self.database.max_overflow if self.database else 10
+
+    @property
     def nwtn_enabled(self):
         return True
 

@@ -5,6 +5,79 @@ All notable changes to NWTN (Neural Web for Transformation Networking) will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-05
+
+### 🚀 Major Release: Production-Ready Infrastructure
+
+This release represents a significant milestone in PRSM's development, delivering production-ready infrastructure, multi-provider LLM support, blockchain integration, and comprehensive user interfaces.
+
+### Added
+
+#### Sprint 6: Core Enhancements
+- **Bootstrap Fallback Mechanism** - Resilient system initialization with automatic fallback to alternative bootstrap nodes when primary nodes are unavailable
+- **Self-Compute Functionality** - Local computation capabilities enabling autonomous processing without external dependencies
+- **DAG Adapter Parity** - Unified interface for directed acyclic graph operations across all compute backends
+
+#### Phase 1: LLM Backend Integration
+- **Anthropic Claude Integration** - Native support for Claude models with streaming responses and function calling
+- **OpenAI Integration** - Full compatibility with GPT-4, GPT-3.5, and other OpenAI models
+- **Local LLM Support (Ollama)** - Self-hosted model inference with Ollama integration for privacy-sensitive deployments
+
+#### Phase 2: Cross-Node Content
+- **Cross-Node Content Retrieval** - Distributed content access across federation nodes with intelligent routing
+- **IPFS Sharding** - Large file handling through automatic sharding and reassembly
+- **Storage Proofs** - Cryptographic verification of content storage and availability
+
+#### Phase 3: Blockchain & Tokenomics
+- **Contract Deployment** - Production smart contracts for FTNS token operations
+- **FTNS Bridge** - Cross-chain bridge enabling token transfers between networks
+- **Staking Mechanism** - Token staking for network participation and reward earning
+- **Governance Execution** - On-chain execution of approved governance proposals
+
+#### Phase 4: User Interfaces
+- **Web Dashboard** - Real-time monitoring and management interface for system operations
+- **API Hardening** - Production-grade API security with rate limiting, input validation, and error handling
+- **Python SDK** - Comprehensive developer SDK for programmatic access to PRSM capabilities
+
+#### Phase 5: Infrastructure
+- **Bootstrap Server** - Dedicated bootstrap server infrastructure for reliable node discovery
+- **CI/CD Pipelines** - Automated testing, building, and deployment workflows
+- **Security Hardening** - Enhanced security measures including transport encryption and authentication
+
+#### Sprint 7: Quality Assurance
+- **Preflight Diagnostics** - Pre-deployment validation checks ensuring system readiness
+- **Mock Response Warnings** - Development-time alerts when using mock/test responses
+
+#### Sprint 8: Testing & Cleanup
+- **E2E Smoke Test** - End-to-end validation suite for critical system paths
+- **Dead Code Cleanup** - Removal of deprecated and unused code paths
+
+#### Sprint 9: Documentation
+- **Documentation Overhaul** - Comprehensive documentation update with improved organization and examples
+
+### Changed
+
+- **API Endpoints** - Standardized response formats across all endpoints
+- **Configuration System** - Enhanced environment variable handling for deployment flexibility
+- **Error Messages** - Improved error messages with actionable guidance
+
+### Breaking Changes
+
+- **API Authentication** - All API endpoints now require authentication tokens (previously optional for some endpoints)
+- **Configuration Format** - Some configuration keys have been renamed for consistency; see migration guide
+- **Minimum Python Version** - Python 3.9+ is now required (previously 3.8+)
+
+### Migration Notes
+
+#### From 0.1.0
+- **Authentication**: Generate and configure API tokens for all service-to-service communication
+- **Configuration**: Update environment variables to use new naming conventions
+- **Dependencies**: Run `pip install -r requirements.txt` to update dependencies
+
+### Contributors & Acknowledgments
+
+This release includes contributions from the core development team across infrastructure, LLM integration, blockchain, and user interface development.
+
 ## [1.0.0] - 2025-07-24
 
 ### 🎉 MAJOR RELEASE: Complete NWTN 7-Phase Architecture

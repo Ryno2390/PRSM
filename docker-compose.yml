@@ -18,7 +18,7 @@ services:
       target: production
       args:
         BUILD_ENV: production
-        PRSM_VERSION: 0.1.0
+        PRSM_VERSION: 0.2.0
         BUILDKIT_INLINE_CACHE: 1
       cache_from:
         - prsm:latest

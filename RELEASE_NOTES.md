@@ -1,3 +1,198 @@
+# PRSM v0.2.0 Release Notes
+
+**Release Date**: March 5, 2026
+**Version**: 0.2.0 (Production Infrastructure Release)
+
+---
+
+## 🌟 What is PRSM?
+
+**PRSM (Protocol for Research and Science Markets)** is a decentralized network that connects researchers with AI compute resources. Think of it as a marketplace where you can:
+
+- **Access AI models** without running them on your own hardware
+- **Share your compute resources** with the research community
+- **Collaborate with other nodes** in a distributed network
+- **Earn tokens** by contributing to the network
+
+PRSM makes it easy for researchers to run AI workloads—whether you're analyzing scientific papers, running language models, or processing large datasets—without needing expensive local infrastructure.
+
+---
+
+## 🚀 What's New in 0.2.0
+
+This release transforms PRSM from an experimental platform into a production-ready system. Here's what you can now do:
+
+### 🤖 Run Real AI Inference
+
+**Connect to multiple AI providers and run actual workloads:**
+
+- **Use Claude, GPT-4, or local models** — Choose from Anthropic Claude, OpenAI GPT models, or run your own models locally with Ollama
+- **No more mock responses** — All AI queries now process through real model backends
+- **Stream responses in real-time** — See results as they're generated, not just final outputs
+
+**Getting started is simple:**
+```python
+from prsm import PRSMClient
+
+client = PRSMClient()
+response = await client.query("Analyze this research paper for key findings...")
+```
+
+### 🌐 Connect and Collaborate with Other Nodes
+
+**Join the federated network and share resources:**
+
+- **Discover other nodes automatically** — Bootstrap servers help you find and connect to the network
+- **Retrieve content from any connected node** — Access data stored across the entire federation
+- **Share your resources** — Contribute your compute power and storage to help others
+
+The network is resilient: if one node is unavailable, the system automatically finds alternatives.
+
+### 💰 Stake FTNS Tokens
+
+**Participate in the network economy:**
+
+- **Stake tokens to earn rewards** — Lock your FTNS tokens to support network operations and earn participation rewards
+- **Validate and secure the network** — Your stake helps ensure network integrity
+- **Flexible staking options** — Choose how much to stake and for how long
+
+### 🌉 Bridge Tokens Across Networks
+
+**Move tokens between blockchain networks:**
+
+- **Transfer FTNS tokens** between supported networks
+- **Secure cross-chain operations** — All transfers are cryptographically verified
+- **Track your transactions** — Full visibility into token movements
+
+### 📊 Monitor Everything with the Web Dashboard
+
+**Real-time visibility into your node and the network:**
+
+- **See your node status** — Health, performance, and resource usage at a glance
+- **Track your token balance** — Monitor earnings, stakes, and transactions
+- **View network activity** — See what's happening across the federation
+- **Manage your connections** — Configure which nodes you connect to
+
+Access the dashboard at `http://localhost:8000/dashboard` after starting your node.
+
+### 🛠️ Submit Compute Jobs via SDK
+
+**Programmatic access for developers and researchers:**
+
+- **Python SDK** — Full-featured library for integrating PRSM into your workflows
+- **Submit batch jobs** — Process multiple queries or datasets efficiently
+- **Monitor job progress** — Track status and retrieve results programmatically
+- **Integrate with existing tools** — Works with Jupyter notebooks, scripts, and applications
+
+---
+
+## 📋 Getting Started
+
+### For New Users
+
+1. **Install PRSM:**
+   ```bash
+   git clone https://github.com/PRSM-AI/PRSM.git
+   cd PRSM
+   pip install -r requirements.txt
+   ```
+
+2. **Configure your AI provider** (choose one):
+   - Set `ANTHROPIC_API_KEY` for Claude
+   - Set `OPENAI_API_KEY` for GPT models
+   - Install Ollama for local models
+
+3. **Start your node:**
+   ```bash
+   python -m prsm.node
+   ```
+
+4. **Access the dashboard:**
+   Open your browser to `http://localhost:8000/dashboard`
+
+### For Users Upgrading from 0.1.0
+
+**Important changes to be aware of:**
+
+- **Authentication is now required** — All API calls need an authentication token. Generate one via the dashboard or CLI.
+- **Configuration changes** — Some environment variable names have changed. Check the migration guide below.
+- **Python 3.9+ required** — If you're on Python 3.8, you'll need to upgrade.
+
+**Migration steps:**
+```bash
+# Update your repository
+git pull origin main
+
+# Update dependencies
+pip install -r requirements.txt
+
+# Generate an API token
+python -m prsm.cli tokens create --name "my-token"
+```
+
+---
+
+## ⚠️ Important Notes
+
+### Authentication Changes
+All API endpoints now require authentication. Previously, some endpoints allowed unauthenticated access for development. You'll need to:
+1. Generate an API token through the dashboard or CLI
+2. Include the token in all API requests
+
+### Configuration Updates
+Several configuration keys have been renamed for consistency:
+- `PRSM_NODE_ID` → `PRSM_NODE_ID` (unchanged)
+- `BOOTSTRAP_NODES` → `PRSM_BOOTSTRAP_NODES`
+- `LLM_PROVIDER` → `PRSM_LLM_PROVIDER`
+
+### Breaking Changes
+- **Minimum Python version**: 3.9+ (previously 3.8+)
+- **API format**: Standardized response format across all endpoints
+- **Error handling**: Improved error messages with actionable guidance
+
+---
+
+## 🎯 What Can You Do Now?
+
+| Task | How |
+|------|-----|
+| Run AI queries | Use the Python SDK or Web Dashboard |
+| Connect to the network | Start your node with default bootstrap servers |
+| Stake tokens | Use the dashboard or `prsm stake` CLI command |
+| Bridge tokens | Access via dashboard → Token Management → Bridge |
+| Monitor your node | Open the Web Dashboard at localhost:8000 |
+| Submit batch jobs | Use `PRSMClient.batch_query()` in the SDK |
+
+---
+
+## 📚 Learn More
+
+- **[Quick Start Guide](docs/quickstart.md)** — Get up and running in 10 minutes
+- **[SDK Documentation](docs/)** — Full API reference and examples
+- **[Safety Guidelines](docs/safety.md)** — Best practices for secure operation
+
+---
+
+## 🐛 Known Issues
+
+- **Initial sync time**: First-time node startup may take several minutes to sync with the network
+- **Large file handling**: Files over 100MB may require manual sharding configuration
+- **Dashboard refresh**: Some metrics may require manual page refresh to update
+
+---
+
+## 🤝 Getting Help
+
+- **Documentation**: Check the `docs/` directory for guides and references
+- **GitHub Issues**: Report bugs or request features
+- **Community**: Join discussions on GitHub
+
+---
+
+*Ready to join the network? Follow the [Quick Start Guide](docs/quickstart.md) to get started in minutes.*
+
+---
+
 # NWTN v1.0.0 Release Notes
 
 **Release Date**: July 24, 2025

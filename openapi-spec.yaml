@@ -25,7 +25,7 @@ info:
     - **Community**: [https://community.prsm.org](https://community.prsm.org)
     - **Support**: [api-support@prsm.org](mailto:api-support@prsm.org)
 
-  version: "0.1.0"
+  version: "0.2.0"
   contact:
     name: PRSM API Support
     email: api-support@prsm.org

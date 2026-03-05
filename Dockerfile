@@ -8,7 +8,7 @@ FROM python:3.11-slim as builder
 
 # Set build arguments
 ARG BUILD_ENV=production
-ARG PRSM_VERSION=0.1.0
+ARG PRSM_VERSION=0.2.0
 ARG BUILDKIT_INLINE_CACHE=1
 
 # Set environment variables for build
