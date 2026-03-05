@@ -38,10 +38,12 @@ cp .env.example .env
 # Edit .env file with your own API keys and configuration
 
 # 6. Run tests to ensure everything works
-python test_foundation.py
-python test_agent_framework.py
+pytest --timeout=120
 
-# 7. Create a new branch for your contribution
+# 7. Run the smoke test to verify core functionality
+python scripts/smoke_test.py
+
+# 8. Create a new branch for your contribution
 git checkout -b feature/your-feature-name
 ```
 
@@ -49,7 +51,7 @@ git checkout -b feature/your-feature-name
 
 ```
 PRSM/
-├── prsm/                           # Core PRSM system
+├── prsm/                           # Main source code
 │   ├── nwtn/                       # NWTN Orchestrator
 │   ├── agents/                     # 5-layer agent system
 │   │   ├── prompters/              # Prompt optimization
@@ -64,26 +66,37 @@ PRSM/
 │   ├── governance/                 # Democratic governance
 │   ├── improvement/                # Self-improvement
 │   ├── data_layer/                 # IPFS and storage
+│   ├── node/                       # Node implementation
+│   ├── collaboration/              # Multi-agent collaboration
 │   └── core/                       # Models and config
+├── tests/                          # Test suite
+│   ├── unit/                       # Unit tests
+│   ├── integration/                # Integration tests
+│   ├── security/                   # Security tests
+│   └── performance/                # Performance tests
+├── docs/                           # Documentation
+│   ├── api/                        # API documentation
+│   ├── performance/                # Performance documentation
+│   ├── tokenomics/                 # Tokenomics documentation
+│   └── metadata/                   # Architecture metadata
+├── scripts/                        # Utility scripts
+│   ├── smoke_test.py               # End-to-end smoke test
+│   └── release/                    # Release management
+├── sdks/                           # SDK packages
+├── config/                         # Configuration files
+├── docker/                         # Docker configurations
+│   ├── monitoring/                 # Monitoring configurations
+│   └── Dockerfile.*                # Docker images
 ├── PRSM_ui_mockup/                 # Web interface and real-time UI
 │   ├── js/                         # JavaScript API client and WebSocket integration
 │   ├── css/                        # Responsive styling and themes
 │   └── test_*.html                 # Testing interfaces for UI validation
-├── docs/                           # Documentation and business materials
-│   ├── source_documents/           # Research papers and citations
-│   ├── Prismatica_Business_Case.md # Business case for Prismatica Holdings
-│   ├── GAME_THEORETIC_INVESTOR_THESIS.md # Investment thesis
-│   ├── WEBSOCKET_API.md            # WebSocket API documentation
-│   ├── MACOS_SETUP.md             # macOS setup guide
-│   └── DEPENDENCY_COMPATIBILITY.md # Dependency compatibility guide
-├── prsm-demo/                      # Demo applications
-├── prsm-demo-test/                 # Test demo applications
-├── test_results/                   # Comprehensive test documentation
-├── examples/                       # Usage examples
-├── tests/                          # Additional test suites
+├── examples_and_demos/             # Usage examples and demos
+├── tools/                          # Development tools
+├── utilities/                      # Utility scripts
 ├── CONTRIBUTING.md                 # Contribution guidelines
 ├── README.md                       # Main project documentation
-└── CLAUDE.md                       # Project instructions for Claude
+└── pytest.ini                      # Test configuration
 ```
 
 ## 🤝 Ways to Contribute
@@ -339,7 +352,8 @@ Brief description of what this PR does and why.
 - Note any breaking changes
 
 ## Testing
-- [ ] Unit tests pass
+- [ ] Unit tests pass (`pytest --timeout=120`)
+- [ ] Smoke test passes (`python scripts/smoke_test.py`)
 - [ ] Integration tests pass
 - [ ] Added new tests for new functionality
 - [ ] Tested on [specific environment/conditions]
@@ -358,6 +372,113 @@ Related to #456
 - [ ] Self-review completed
 - [ ] Changes work as expected
 - [ ] No performance regressions introduced
+```
+
+### **Pre-PR Checklist**
+
+Before submitting a pull request, ensure all of the following pass:
+
+```bash
+# 1. Run the full test suite with timeout
+pytest --timeout=120
+
+# 2. Run the smoke test (end-to-end validation)
+python scripts/smoke_test.py
+
+# 3. For P2P/federation changes, run the two-node integration test
+pytest tests/integration/test_two_node_network.py -v --timeout=120
+```
+
+### **Running Tests**
+
+#### **Unit Tests**
+```bash
+# Run all unit tests
+pytest tests/unit/ --timeout=120
+
+# Run specific test file
+pytest tests/unit/test_specific_module.py -v
+
+# Run with coverage
+pytest --cov=prsm --cov-report=term-missing --cov-report=html
+```
+
+#### **Integration Tests**
+```bash
+# Run all integration tests
+pytest tests/integration/ -v --timeout=120
+
+# Run specific integration test
+pytest tests/integration/test_two_node_network.py -v
+```
+
+#### **Security Tests**
+```bash
+# Run security test suite
+pytest tests/security/ -v --timeout=120
+```
+
+#### **Smoke Test**
+The smoke test validates the core node workflow end-to-end without external dependencies:
+```bash
+python scripts/smoke_test.py
+```
+
+This test:
+- Creates a PRSM node with in-memory configuration
+- Initializes and starts the node
+- Submits a benchmark compute job
+- Verifies results and FTNS balance changes
+
+#### **Local Two-Node P2P Test**
+
+For testing P2P functionality locally, use the two-node integration test:
+
+```bash
+# Run the two-node network tests
+pytest tests/integration/test_two_node_network.py -v --timeout=120
+```
+
+This test validates:
+- Node discovery via bootstrap
+- Compute job submission and execution between nodes
+- Payment settlement between nodes
+- Embedding job processing
+
+To run a manual two-node test:
+```python
+import asyncio
+from prsm.node.node import PRSMNode
+from prsm.node.config import NodeConfig, NodeRole
+
+async def test_two_nodes():
+    # Create bootstrap node
+    config_a = NodeConfig(
+        display_name="node-a",
+        roles=[NodeRole.FULL],
+        p2p_port=19400,
+        data_dir="/tmp/prsm_node_a",
+    )
+    node_a = PRSMNode(config_a)
+    await node_a.initialize()
+    await node_a.start()
+    
+    # Create second node connecting to bootstrap
+    config_b = NodeConfig(
+        display_name="node-b",
+        roles=[NodeRole.FULL],
+        p2p_port=19401,
+        data_dir="/tmp/prsm_node_b",
+        bootstrap_nodes=["127.0.0.1:19400"],
+    )
+    node_b = PRSMNode(config_b)
+    await node_b.initialize()
+    await node_b.start()
+    
+    # Nodes can now communicate via P2P
+    # ... test P2P functionality ...
+
+asyncio.run(test_two_nodes())
 ```
 
 ## 🎯 Current Priority Areas (2025)
