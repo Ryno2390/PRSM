@@ -4,10 +4,23 @@
 
 1. [Overview](#overview)
 2. [Authentication](#authentication)
-3. [Core API Endpoints](#core-api-endpoints)
-4. [Health & Monitoring](#health--monitoring)
-5. [User Management](#user-management)
-6. [Model & Training](#model--training)
+3. [Node API Endpoints](#node-api-endpoints)
+   - [Core Endpoints](#node-core-endpoints)
+   - [Compute Endpoints](#node-compute-endpoints)
+   - [Content Endpoints](#node-content-endpoints)
+   - [Agent Endpoints](#node-agent-endpoints)
+   - [Ledger Endpoints](#node-ledger-endpoints)
+   - [Staking Endpoints](#node-staking-endpoints)
+   - [Bridge Endpoints](#node-bridge-endpoints)
+   - [Storage Endpoints](#node-storage-endpoints)
+   - [WebSocket Endpoints](#node-websocket-endpoints)
+   - [Authentication Endpoints](#node-authentication-endpoints)
+4. [Platform API Endpoints](#platform-api-endpoints)
+   - [NWTN (Neural Web of Thought Networks)](#nwtn-neural-web-of-thought-networks)
+   - [SEAL Technology API](#seal-technology-api)
+   - [Model Management](#model-management)
+5. [Health & Monitoring](#health--monitoring)
+6. [User Management](#user-management)
 7. [Marketplace](#marketplace)
 8. [Governance](#governance)
 9. [Web3 & FTNS](#web3--ftns)
@@ -104,7 +117,1382 @@ For programmatic access, use API keys:
 X-API-Key: your_api_key
 ```
 
-## Core API Endpoints
+---
+
+## Node API Endpoints
+
+The Node API provides endpoints for monitoring and controlling a running PRSM node. These are node-local endpoints distinct from the main PRSM platform API.
+
+**Base URL**: `http://localhost:8000` (default node API port)
+
+### Node Core Endpoints
+
+#### Get API Information
+```http
+GET /
+```
+
+Returns basic API information and available endpoints.
+
+**Response**:
+```json
+{
+  "name": "PRSM Node API",
+  "version": "0.1.0",
+  "docs": "/docs",
+  "openapi": "/openapi.json",
+  "websocket": "/ws/status"
+}
+```
+
+#### Get Node Status
+```http
+GET /status
+```
+
+Returns comprehensive node status including system health and component states.
+
+**Response**:
+```json
+{
+  "node_id": "node_abc123",
+  "status": "online",
+  "uptime_seconds": 86400,
+  "components": {
+    "transport": "healthy",
+    "discovery": "healthy",
+    "ledger": "healthy"
+  }
+}
+```
+
+#### Get Connected Peers
+```http
+GET /peers
+```
+
+Lists all connected and known peers on the P2P network.
+
+**Response**:
+```json
+{
+  "connected": [
+    {
+      "peer_id": "peer_123",
+      "address": "192.168.1.100:8080",
+      "display_name": "Research Node 1",
+      "connected_at": "2025-06-11T10:00:00Z",
+      "last_seen": "2025-06-11T12:00:00Z",
+      "outbound": true
+    }
+  ],
+  "known": [
+    {
+      "node_id": "node_xyz",
+      "address": "10.0.0.50:8080",
+      "display_name": "Storage Provider",
+      "last_seen": "2025-06-11T11:30:00Z"
+    }
+  ],
+  "connected_count": 5,
+  "known_count": 12
+}
+```
+
+#### Get FTNS Balance
+```http
+GET /balance
+```
+
+Returns the node's FTNS balance and recent transaction history.
+
+**Response**:
+```json
+{
+  "wallet_id": "node_abc123",
+  "balance": 1250.50,
+  "recent_transactions": [
+    {
+      "tx_id": "tx_001",
+      "type": "reward",
+      "from": "system",
+      "to": "node_abc123",
+      "amount": 50.0,
+      "description": "Compute job reward",
+      "timestamp": "2025-06-11T11:00:00Z"
+    }
+  ]
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 503 | Node not initialized |
+
+#### Get Transaction History
+```http
+GET /transactions?limit=50
+```
+
+Returns transaction history for the node.
+
+**Query Parameters**:
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| limit | integer | No | 50 | Maximum transactions to return (max: 200) |
+
+**Response**:
+```json
+{
+  "transactions": [
+    {
+      "tx_id": "tx_001",
+      "type": "transfer",
+      "from": "node_abc123",
+      "to": "node_xyz",
+      "amount": 100.0,
+      "description": "Payment for service",
+      "timestamp": "2025-06-11T10:00:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+#### Health Check
+```http
+GET /health
+```
+
+Simple health check endpoint.
+
+**Response**:
+```json
+{
+  "status": "ok",
+  "node_id": "node_abc123"
+}
+```
+
+---
+
+### Node Compute Endpoints
+
+#### Submit Compute Job
+```http
+POST /compute/submit
+Content-Type: application/json
+
+{
+  "job_type": "inference",
+  "payload": {
+    "model": "llama-7b",
+    "prompt": "Analyze this data..."
+  },
+  "ftns_budget": 10.0
+}
+```
+
+**Request Body**:
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| job_type | string | Yes | Type: `inference`, `embedding`, or `benchmark` |
+| payload | object | No | Job-specific data |
+| ftns_budget | float | No | Maximum FTNS to spend (default: 1.0) |
+
+**Response**:
+```json
+{
+  "job_id": "job_abc123",
+  "status": "pending",
+  "job_type": "inference",
+  "ftns_budget": 10.0
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 400 | Invalid job type |
+| 503 | Compute requester not initialized |
+
+#### Get Job Status
+```http
+GET /compute/job/{job_id}
+```
+
+Returns the status of a submitted compute job.
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| job_id | string | Yes | ID of the job to retrieve |
+
+**Response**:
+```json
+{
+  "job_id": "job_abc123",
+  "status": "completed",
+  "job_type": "inference",
+  "provider_id": "provider_xyz",
+  "result": {
+    "output": "Analysis results..."
+  },
+  "result_verified": true,
+  "error": null,
+  "created_at": "2025-06-11T10:00:00Z",
+  "completed_at": "2025-06-11T10:05:00Z"
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 404 | Job not found |
+| 503 | Compute requester not initialized |
+
+#### Get Compute Stats
+```http
+GET /compute/stats
+```
+
+Returns compute provider statistics.
+
+**Response**:
+```json
+{
+  "available": true,
+  "jobs_completed": 150,
+  "jobs_queued": 3,
+  "total_ftns_earned": 500.0,
+  "average_job_time_seconds": 45.2
+}
+```
+
+---
+
+### Node Content Endpoints
+
+#### Upload Content
+```http
+POST /content/upload
+Content-Type: application/json
+
+{
+  "text": "Research paper content...",
+  "filename": "paper.txt",
+  "replicas": 3,
+  "royalty_rate": 0.01,
+  "parent_cids": ["QmParentCID123"]
+}
+```
+
+**Request Body**:
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| text | string | Yes | - | Text content to upload |
+| filename | string | No | "document.txt" | Original filename |
+| replicas | integer | No | 3 | Number of storage replicas |
+| royalty_rate | float | No | 0.01 | FTNS per access (0.001-0.1) |
+| parent_cids | string[] | No | [] | Source material CIDs |
+
+**Response**:
+```json
+{
+  "cid": "QmXxx...yyy",
+  "filename": "paper.txt",
+  "size_bytes": 12345,
+  "content_hash": "sha256:abc123...",
+  "creator_id": "node_abc123",
+  "royalty_rate": 0.01,
+  "parent_cids": ["QmParentCID123"]
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 502 | Upload failed - IPFS not running |
+| 503 | Content uploader not initialized |
+
+#### Search Content
+```http
+GET /content/search?q=climate&limit=20
+```
+
+Searches the network content index by keyword.
+
+**Query Parameters**:
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| q | string | No | "" | Search query |
+| limit | integer | No | 20 | Max results (max: 100) |
+
+**Response**:
+```json
+{
+  "query": "climate",
+  "results": [
+    {
+      "cid": "QmXxx...yyy",
+      "filename": "climate_paper.pdf",
+      "size_bytes": 50000,
+      "content_hash": "sha256:abc123...",
+      "creator_id": "researcher_1",
+      "providers": ["provider_a", "provider_b"],
+      "created_at": "2025-06-10T14:00:00Z",
+      "metadata": {},
+      "royalty_rate": 0.02,
+      "parent_cids": []
+    }
+  ],
+  "count": 1
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 503 | Content index not initialized |
+
+#### Get Content Record
+```http
+GET /content/{cid}
+```
+
+Looks up a specific content record by CID.
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| cid | string | Yes | IPFS content identifier |
+
+**Response**:
+```json
+{
+  "cid": "QmXxx...yyy",
+  "filename": "document.pdf",
+  "size_bytes": 12345,
+  "content_hash": "sha256:abc123...",
+  "creator_id": "node_abc123",
+  "providers": ["provider_1"],
+  "created_at": "2025-06-11T10:00:00Z",
+  "metadata": {},
+  "royalty_rate": 0.01,
+  "parent_cids": []
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 404 | Content not found in index |
+| 503 | Content index not initialized |
+
+#### Retrieve Content
+```http
+GET /content/retrieve/{cid}?timeout=30.0&verify_hash=true
+```
+
+Retrieves content from the P2P network by CID.
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| cid | string | Yes | IPFS content identifier |
+
+**Query Parameters**:
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| timeout | float | No | 30.0 | Seconds to wait for response |
+| verify_hash | boolean | No | true | Verify SHA-256 hash |
+
+**Response**:
+```json
+{
+  "cid": "QmXxx...yyy",
+  "status": "success",
+  "data": "base64-encoded-content...",
+  "size_bytes": 12345,
+  "content_hash": "sha256:abc123...",
+  "filename": "document.pdf",
+  "providers_tried": 2
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 503 | Content provider not initialized |
+| 504 | Retrieval timed out |
+
+#### Get Content Index Stats
+```http
+GET /content/index/stats
+```
+
+Returns content index statistics.
+
+**Response**:
+```json
+{
+  "total_items": 1500,
+  "total_size_bytes": 50000000,
+  "categories": {
+    "papers": 800,
+    "datasets": 400,
+    "models": 300
+  }
+}
+```
+
+---
+
+### Node Agent Endpoints
+
+#### List Agents
+```http
+GET /agents?local_only=false
+```
+
+Lists known agents (local and/or remote).
+
+**Query Parameters**:
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| local_only | boolean | No | false | Only return local agents |
+
+**Response**:
+```json
+{
+  "agents": [
+    {
+      "agent_id": "agent_001",
+      "agent_name": "Research Assistant",
+      "capabilities": ["analysis", "summarization"],
+      "status": "online"
+    }
+  ],
+  "count": 1
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 503 | Agent registry not initialized |
+
+#### Search Agents by Capability
+```http
+GET /agents/search?capability=analysis&limit=20
+```
+
+Searches agents by capability.
+
+**Query Parameters**:
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| capability | string | Yes | - | Capability to search for |
+| limit | integer | No | 20 | Max results (max: 100) |
+
+**Response**:
+```json
+{
+  "capability": "analysis",
+  "agents": [
+    {
+      "agent_id": "agent_001",
+      "agent_name": "Research Assistant",
+      "capabilities": ["analysis", "summarization"],
+      "status": "online"
+    }
+  ],
+  "count": 1
+}
+```
+
+#### Get Agent Spending
+```http
+GET /agents/spending
+```
+
+Returns aggregate spending dashboard for all local agents.
+
+**Response**:
+```json
+{
+  "agents": [
+    {
+      "agent_id": "agent_001",
+      "agent_name": "Research Assistant",
+      "allowance": {
+        "amount": 100.0,
+        "spent": 25.0,
+        "remaining": 75.0,
+        "epoch_hours": 24.0
+      }
+    }
+  ],
+  "count": 1
+}
+```
+
+#### Get Agent Details
+```http
+GET /agents/{agent_id}
+```
+
+Gets agent details, spending, and status.
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| agent_id | string | Yes | Agent identifier |
+
+**Response**:
+```json
+{
+  "agent_id": "agent_001",
+  "agent_name": "Research Assistant",
+  "capabilities": ["analysis", "summarization"],
+  "status": "online",
+  "allowance": {
+    "amount": 100.0,
+    "spent": 25.0,
+    "remaining": 75.0
+  }
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 404 | Agent not found |
+| 503 | Agent registry not initialized |
+
+#### Get Agent Conversations
+```http
+GET /agents/{agent_id}/conversations?limit=10
+```
+
+Gets recent conversation threads involving an agent.
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| agent_id | string | Yes | Agent identifier |
+
+**Query Parameters**:
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| limit | integer | No | 10 | Max conversations to return |
+
+**Response**:
+```json
+{
+  "conversations": [
+    {
+      "conversation_id": "conv_001",
+      "message_count": 15,
+      "messages": [
+        {"role": "user", "content": "Analyze this..."},
+        {"role": "assistant", "content": "Here's the analysis..."}
+      ]
+    }
+  ],
+  "count": 1
+}
+```
+
+#### Set Agent Allowance
+```http
+POST /agents/{agent_id}/allowance?amount=100.0&epoch_hours=24.0
+```
+
+Sets or updates an agent's spending allowance.
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| agent_id | string | Yes | Agent identifier |
+
+**Query Parameters**:
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| amount | float | Yes | - | Allowance amount (must be positive) |
+| epoch_hours | float | No | 24.0 | Allowance period in hours |
+
+**Response**:
+```json
+{
+  "agent_id": "agent_001",
+  "amount": 100.0,
+  "epoch_hours": 24.0,
+  "remaining": 100.0
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 400 | Amount must be positive |
+| 503 | Node not initialized |
+
+#### Revoke Agent Allowance
+```http
+DELETE /agents/{agent_id}/allowance
+```
+
+Revokes an agent's spending authority.
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| agent_id | string | Yes | Agent identifier |
+
+**Response**:
+```json
+{
+  "agent_id": "agent_001",
+  "revoked": true
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 404 | Agent allowance not found |
+| 503 | Node not initialized |
+
+#### Pause Agent
+```http
+POST /agents/{agent_id}/pause
+```
+
+Temporarily suspends an agent.
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| agent_id | string | Yes | Agent identifier |
+
+**Response**:
+```json
+{
+  "agent_id": "agent_001",
+  "status": "paused"
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 404 | Agent not found |
+| 503 | Agent registry not initialized |
+
+#### Resume Agent
+```http
+POST /agents/{agent_id}/resume
+```
+
+Resumes a paused agent.
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| agent_id | string | Yes | Agent identifier |
+
+**Response**:
+```json
+{
+  "agent_id": "agent_001",
+  "status": "online"
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 404 | Agent not found |
+| 503 | Agent registry not initialized |
+
+---
+
+### Node Ledger Endpoints
+
+#### Get Ledger Sync Stats
+```http
+GET /ledger/sync/stats
+```
+
+Returns ledger synchronization statistics.
+
+**Response**:
+```json
+{
+  "sync_status": "synced",
+  "last_sync": "2025-06-11T12:00:00Z",
+  "pending_transactions": 0,
+  "sync_errors": 0
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 503 | Ledger sync not initialized |
+
+#### Transfer FTNS
+```http
+POST /ledger/transfer?to_wallet=node_xyz&amount=50.0
+```
+
+Transfers FTNS to another node (signed, gossip-broadcast).
+
+**Query Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| to_wallet | string | Yes | Recipient wallet/node ID |
+| amount | float | Yes | Amount to transfer (must be positive) |
+
+**Response**:
+```json
+{
+  "tx_id": "tx_abc123",
+  "from": "node_abc123",
+  "to": "node_xyz",
+  "amount": 50.0,
+  "timestamp": "2025-06-11T12:00:00Z"
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 400 | Amount must be positive; Insufficient balance |
+| 503 | Ledger sync not initialized |
+
+---
+
+### Node Staking Endpoints
+
+#### Stake FTNS Tokens
+```http
+POST /staking/stake
+Content-Type: application/json
+
+{
+  "amount": 100.0,
+  "stake_type": "general",
+  "metadata": {}
+}
+```
+
+Stakes FTNS tokens for the node's identity.
+
+**Request Body**:
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| amount | float | Yes | - | Amount of FTNS to stake (must be > 0) |
+| stake_type | string | No | "general" | Type: `governance`, `validation`, `compute`, `storage`, `liquidity`, `general` |
+| metadata | object | No | null | Optional metadata for the stake |
+
+**Response**:
+```json
+{
+  "stake_id": "stake_abc123",
+  "user_id": "node_abc123",
+  "amount": 100.0,
+  "stake_type": "general",
+  "status": "active",
+  "staked_at": "2025-06-11T12:00:00Z",
+  "rewards_earned": 0.0
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 400 | Invalid stake_type; Staking validation failed |
+| 500 | Staking failed |
+| 503 | Staking manager or node identity not initialized |
+
+#### Request Unstake
+```http
+POST /staking/unstake
+Content-Type: application/json
+
+{
+  "stake_id": "stake_abc123",
+  "amount": null
+}
+```
+
+Creates an unstake request available after the unstaking period (default: 7 days).
+
+**Request Body**:
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| stake_id | string | Yes | ID of the stake to unstake |
+| amount | float | No | Amount to unstake (null = full stake) |
+
+**Response**:
+```json
+{
+  "request_id": "req_xyz",
+  "stake_id": "stake_abc123",
+  "user_id": "node_abc123",
+  "amount": 100.0,
+  "requested_at": "2025-06-11T12:00:00Z",
+  "available_at": "2025-06-18T12:00:00Z",
+  "status": "pending"
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 400 | Unstake validation failed |
+| 404 | Stake not found |
+| 500 | Unstake failed |
+| 503 | Staking manager or node identity not initialized |
+
+#### Get Staking Status
+```http
+GET /staking/status
+```
+
+Returns comprehensive staking information for the node's identity.
+
+**Response**:
+```json
+{
+  "user_id": "node_abc123",
+  "total_staked": 500.0,
+  "active_stakes": [
+    {
+      "stake_id": "stake_abc123",
+      "amount": 100.0,
+      "stake_type": "general",
+      "status": "active",
+      "staked_at": "2025-06-11T12:00:00Z",
+      "rewards_earned": 5.0,
+      "rewards_claimed": 0.0
+    }
+  ],
+  "pending_unstake_requests": [
+    {
+      "request_id": "req_xyz",
+      "stake_id": "stake_def456",
+      "amount": 50.0,
+      "requested_at": "2025-06-10T12:00:00Z",
+      "available_at": "2025-06-17T12:00:00Z",
+      "status": "pending"
+    }
+  ],
+  "total_rewards_earned": 25.0,
+  "total_rewards_claimed": 10.0
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 503 | Staking manager or node identity not initialized |
+
+#### Claim Staking Rewards
+```http
+POST /staking/claim-rewards?stake_id=stake_abc123
+```
+
+Claims accumulated staking rewards.
+
+**Query Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| stake_id | string | No | Specific stake ID (null = all stakes) |
+
+**Response**:
+```json
+{
+  "user_id": "node_abc123",
+  "total_rewards_claimed": 15.0,
+  "stakes_processed": 3
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 400 | Claim validation failed |
+| 500 | Claim rewards failed |
+| 503 | Staking manager or node identity not initialized |
+
+#### Get Specific Stake
+```http
+GET /staking/stakes/{stake_id}
+```
+
+Returns details of a specific stake.
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| stake_id | string | Yes | The stake ID |
+
+**Response**:
+```json
+{
+  "stake_id": "stake_abc123",
+  "user_id": "node_abc123",
+  "amount": 100.0,
+  "stake_type": "general",
+  "status": "active",
+  "staked_at": "2025-06-11T12:00:00Z",
+  "rewards_earned": 5.0,
+  "rewards_claimed": 0.0,
+  "last_reward_calculation": "2025-06-11T12:00:00Z",
+  "lock_reason": null,
+  "metadata": {}
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 404 | Stake not found |
+| 503 | Staking manager not initialized |
+
+#### Get Unstake Request
+```http
+GET /staking/unstake-requests/{request_id}
+```
+
+Returns details of a specific unstake request.
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| request_id | string | Yes | The unstake request ID |
+
+**Response**:
+```json
+{
+  "request_id": "req_xyz",
+  "stake_id": "stake_abc123",
+  "user_id": "node_abc123",
+  "amount": 100.0,
+  "requested_at": "2025-06-11T12:00:00Z",
+  "available_at": "2025-06-18T12:00:00Z",
+  "status": "pending",
+  "completed_at": null,
+  "cancellation_reason": null,
+  "is_available": false
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 404 | Unstake request not found |
+| 503 | Staking manager not initialized |
+
+#### Withdraw Unstaked Tokens
+```http
+POST /staking/withdraw/{request_id}
+```
+
+Withdraws unstaked tokens after the unstaking period.
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| request_id | string | Yes | The unstake request ID |
+
+**Response**:
+```json
+{
+  "request_id": "req_xyz",
+  "success": true,
+  "amount_withdrawn": 100.0
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 400 | Withdrawal validation failed |
+| 404 | Request not found |
+| 500 | Withdrawal failed |
+| 503 | Staking manager or node identity not initialized |
+
+#### Cancel Unstake Request
+```http
+POST /staking/cancel-unstake/{request_id}?reason=Changed%20mind
+```
+
+Cancels a pending unstake request and restores tokens to active staking.
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| request_id | string | Yes | The unstake request ID |
+
+**Query Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| reason | string | No | Reason for cancellation |
+
+**Response**:
+```json
+{
+  "request_id": "req_xyz",
+  "cancelled": true,
+  "reason": "Changed mind"
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 400 | Cancellation validation failed |
+| 404 | Request not found |
+| 500 | Cancellation failed |
+| 503 | Staking manager or node identity not initialized |
+
+---
+
+### Node Bridge Endpoints
+
+The Bridge enables FTNS token transfers between the local PRSM network and external blockchain networks (e.g., Polygon).
+
+#### Bridge Deposit
+```http
+POST /bridge/deposit
+Content-Type: application/json
+
+{
+  "amount": 100.0,
+  "chain_address": "0x742d35cc6bf4532c95a0e96a7bdc86c0b3e11888",
+  "destination_chain": 137
+}
+```
+
+Deposits FTNS tokens from local balance to external chain.
+
+**Request Body**:
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| amount | float | Yes | - | Amount of FTNS to deposit (must be > 0) |
+| chain_address | string | Yes | - | Destination on-chain address |
+| destination_chain | integer | No | 137 | Destination chain ID (137 = Polygon mainnet) |
+
+**Response**:
+```json
+{
+  "success": true,
+  "transaction": {
+    "transaction_id": "tx_bridge_001",
+    "direction": "deposit",
+    "user_id": "node_abc123",
+    "chain_address": "0x742d35...",
+    "amount": "100000000000000000000",
+    "source_chain": 0,
+    "destination_chain": 137,
+    "status": "pending",
+    "source_tx_hash": null,
+    "destination_tx_hash": null,
+    "fee_amount": "100000000000000000",
+    "created_at": "2025-06-11T12:00:00Z",
+    "updated_at": "2025-06-11T12:00:00Z",
+    "completed_at": null,
+    "error_message": null
+  }
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 400 | Insufficient balance; Invalid address; Amount outside limits |
+| 500 | Bridge deposit failed |
+| 503 | FTNS bridge or node identity not initialized |
+
+#### Bridge Withdraw
+```http
+POST /bridge/withdraw
+Content-Type: application/json
+
+{
+  "amount": 50.0,
+  "chain_address": "0x742d35cc6bf4532c95a0e96a7bdc86c0b3e11888",
+  "source_chain": 137
+}
+```
+
+Withdraws FTNS tokens from external chain to local balance.
+
+**Request Body**:
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| amount | float | Yes | - | Amount of FTNS to withdraw (must be > 0) |
+| chain_address | string | Yes | - | Source on-chain address |
+| source_chain | integer | No | 137 | Source chain ID (137 = Polygon mainnet) |
+
+**Response**:
+```json
+{
+  "success": true,
+  "transaction": {
+    "transaction_id": "tx_bridge_002",
+    "direction": "withdraw",
+    "user_id": "node_abc123",
+    "chain_address": "0x742d35...",
+    "amount": "50000000000000000000",
+    "source_chain": 137,
+    "destination_chain": 0,
+    "status": "pending",
+    "source_tx_hash": "0xabc123...",
+    "destination_tx_hash": null,
+    "fee_amount": "50000000000000000",
+    "created_at": "2025-06-11T12:00:00Z",
+    "updated_at": "2025-06-11T12:00:00Z",
+    "completed_at": null,
+    "error_message": null
+  }
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 400 | Insufficient balance; Invalid address; Amount outside limits |
+| 500 | Bridge withdraw failed |
+| 503 | FTNS bridge or node identity not initialized |
+
+#### Get Bridge Status
+```http
+GET /bridge/status
+```
+
+Returns bridge status and pending operations.
+
+**Response**:
+```json
+{
+  "stats": {
+    "total_deposited": "10000000000000000000000",
+    "total_withdrawn": "5000000000000000000000",
+    "total_fees_collected": "150000000000000000000",
+    "pending_transactions": 2,
+    "completed_transactions": 150,
+    "failed_transactions": 3
+  },
+  "limits": {
+    "min_amount": "1000000000000000000",
+    "max_amount": "100000000000000000000000",
+    "daily_limit": "1000000000000000000000000",
+    "fee_bps": 100
+  },
+  "pending_transactions": [],
+  "pending_count": 2
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 500 | Failed to get bridge status |
+| 503 | FTNS bridge not initialized |
+
+#### Get Bridge Transaction
+```http
+GET /bridge/transactions/{tx_id}
+```
+
+Returns status of a specific bridge transaction.
+
+**Path Parameters**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| tx_id | string | Yes | Transaction ID to look up |
+
+**Response**:
+```json
+{
+  "transaction": {
+    "transaction_id": "tx_bridge_001",
+    "direction": "deposit",
+    "user_id": "node_abc123",
+    "chain_address": "0x742d35...",
+    "amount": "100000000000000000000",
+    "source_chain": 0,
+    "destination_chain": 137,
+    "status": "completed",
+    "source_tx_hash": "0xdef456...",
+    "destination_tx_hash": "0xabc123...",
+    "fee_amount": "100000000000000000",
+    "created_at": "2025-06-11T12:00:00Z",
+    "updated_at": "2025-06-11T12:30:00Z",
+    "completed_at": "2025-06-11T12:30:00Z",
+    "error_message": null
+  }
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 404 | Transaction not found |
+| 503 | FTNS bridge not initialized |
+
+#### List Bridge Transactions
+```http
+GET /bridge/transactions?limit=50
+```
+
+Lists bridge transactions for the current user.
+
+**Query Parameters**:
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| limit | integer | No | 50 | Max transactions (max: 200) |
+
+**Response**:
+```json
+{
+  "transactions": [
+    {
+      "transaction_id": "tx_bridge_001",
+      "direction": "deposit",
+      "amount": "100000000000000000000",
+      "status": "completed",
+      "created_at": "2025-06-11T12:00:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+**Error Codes**:
+| Code | Description |
+|------|-------------|
+| 503 | FTNS bridge or node identity not initialized |
+
+---
+
+### Node Storage Endpoints
+
+#### Get Storage Stats
+```http
+GET /storage/stats
+```
+
+Returns storage provider statistics.
+
+**Response**:
+```json
+{
+  "available": true,
+  "pledged_gb": 1000.0,
+  "used_gb": 450.5,
+  "pinned_count": 150,
+  "ftns_earned": 25.50
+}
+```
+
+**Response (when not initialized)**:
+```json
+{
+  "available": false,
+  "pledged_gb": 0,
+  "used_gb": 0,
+  "pinned_count": 0,
+  "message": "Storage provider not initialized"
+}
+```
+
+---
+
+### Node WebSocket Endpoints
+
+#### Status WebSocket
+```websocket
+WS /ws/status
+```
+
+WebSocket endpoint for real-time status updates.
+
+**Connection**:
+```javascript
+const ws = new WebSocket('ws://localhost:8000/ws/status');
+```
+
+**Client Messages**:
+
+Send heartbeat:
+```json
+{
+  "type": "heartbeat"
+}
+```
+
+Request current status:
+```json
+{
+  "type": "get_status"
+}
+```
+
+**Server Messages**:
+
+Heartbeat acknowledgment:
+```json
+{
+  "type": "heartbeat_ack",
+  "timestamp": "2025-06-11T12:00:00Z"
+}
+```
+
+Status update:
+```json
+{
+  "type": "status_update",
+  "data": {
+    "node_id": "node_abc123",
+    "status": "online"
+  },
+  "timestamp": "2025-06-11T12:00:00Z"
+}
+```
+
+---
+
+### Node Authentication Endpoints
+
+#### Verify JWT Token
+```http
+GET /auth/verify
+Authorization: Bearer <jwt_token>
+```
+
+Verifies JWT token and returns user information.
+
+**Response**:
+```json
+{
+  "valid": true,
+  "user_id": "user_123",
+  "username": "researcher1",
+  "role": "researcher",
+  "permissions": ["read", "submit_queries"]
+}
+```
+
+---
+
+## Platform API Endpoints
 
 ### NWTN (Neural Web of Thought Networks)
 
@@ -836,14 +2224,50 @@ curl -X GET "https://api.prsm.org/api/v1/web3/balance" \
 
 ## Document Information
 
-**Version**: 1.0  
-**Last Updated**: June 11, 2025  
-**API Version**: v1  
-**Contact**: api-support@prsm.org  
+**Version**: 2.0
+**Last Updated**: March 5, 2026
+**API Version**: v1
+**Contact**: api-support@prsm.org
 
-**Related Documentation**:
-- [WebSocket API Documentation](WEBSOCKET_API.md)
-- [Authentication Guide](API_KEY_MANAGEMENT.md)
+### Endpoint Summary
+
+This documentation covers **two API layers**:
+
+#### Node API (Local Node Management)
+| Category | Endpoints | Description |
+|----------|-----------|-------------|
+| Core | 6 | Status, peers, balance, health, transactions |
+| Compute | 3 | Job submission, status, stats |
+| Content | 5 | Upload, search, retrieve, index stats |
+| Agent | 10 | List, search, manage, allowance control |
+| Ledger | 2 | Sync stats, transfers |
+| Staking | 8 | Stake, unstake, withdraw, rewards |
+| Bridge | 5 | Deposit, withdraw, status, transactions |
+| Storage | 1 | Storage stats |
+| WebSocket | 1 | Real-time status updates |
+| Auth | 1 | Token verification |
+| **Total Node API** | **42** | |
+
+#### Platform API (Cloud Services)
+| Category | Endpoints | Description |
+|----------|-----------|-------------|
+| NWTN | 3 | Query processing, sessions |
+| SEAL | 3 | Performance metrics, improvement |
+| Models | 3 | List, details, training |
+| Health | 4 | System health, probes, metrics |
+| Users | 3 | Profile, password management |
+| Marketplace | 3 | Browse, rent, submit models |
+| Governance | 3 | Proposals, voting |
+| Web3/FTNS | 4 | Balance, transfer, purchase, history |
+| Security | 3 | Status, 2FA, API keys |
+| **Total Platform API** | **29** | |
+
+**Grand Total: 71 documented endpoints**
+
+### Related Documentation
+- [WebSocket API](#websocket-api) - Real-time communication endpoints
+- [Authentication](#authentication) - JWT Bearer and API Key authentication
+- [FTNS Tokenomics Documentation](FTNS_API_DOCUMENTATION.md)
 - [SDK Documentation](https://docs.prsm.org/sdks)
 - [Postman Collection](https://docs.prsm.org/postman)
 
