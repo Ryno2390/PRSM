@@ -2276,6 +2276,253 @@ NOT YET FUNCTIONAL (scaffolded):
 
 ---
 
+## 27. Phase Implementation Completion Summary (2026-03-04)
+
+All five phases from the technology audit plan (Section 26) have been implemented:
+
+| Phase | Commit | Key Deliverables |
+|---|---|---|
+| Phase 1: Real AI Compute | `0fd9dc7` | BackendRegistry with Anthropic/OpenAI/local/mock backends, TeacherTrainer with PyTorch loop, real embedding pipeline |
+| Phase 2: Cross-Node Content | `046c303` | ContentProvider P2P protocol, ContentSharder with parallel chunks, StorageProofVerifier with Merkle proofs |
+| Phase 3: Blockchain/Tokens | `28de01a` | ContractDeployer (5 networks), FTNSBridge (deposit/withdraw), StakingManager (full lifecycle), GovernanceExecutor |
+| Phase 4: UI/DX | `3e6b402` | Web dashboard (FastAPI+WebSocket), API hardening (JWT+rate limiting), 13-module Python SDK, enhanced CLI |
+| Phase 5: Production | `671b8fa` | Bootstrap server (SSL+federation), CI/CD release pipeline, security module (audit+scanner+pentest+secrets) |
+
+Test results after all phases: **1,326 passed, 0 failed, 5 skipped, 4 xfailed**
+
+---
+
+## 28. Integration Wiring Audit (2026-03-05)
+
+### Purpose
+
+A code-level audit was conducted to verify which Phase 1-5 modules are actually wired end-to-end into the running node versus existing as standalone modules that are never called.
+
+### Fully Working End-to-End
+
+These features have complete code paths from user action through to result:
+
+| Feature | User Entry Point | Internal Path | Status |
+|---|---|---|---|
+| Multi-node compute | `POST /compute/submit` | Requester → gossip `job_offer` → Provider accepts → executes → gossip `job_result` → payment | **Working** |
+| Node dashboard | `prsm node start` | Auto-launches Rich TUI, polls `get_status()` every 2s | **Working** |
+| Governance execution | `SafetyGovernance.submit_proposal()` → vote → conclude | GovernanceExecutor with TimelockController processes approved proposals | **Working** |
+| Bootstrap/discovery | `prsm node start --bootstrap HOST:PORT` | PeerDiscovery → connect → request peer list → announce loop | **Working** |
+| Self-compute | `POST /compute/submit` (0 peers) | ComputeProvider accepts own job when `allow_self_compute=True` and `peer_count == 0` | **Working** |
+| DAG ledger + persistence | Node initialization | Agent allowances, gossip log, collaboration state all persist in SQLite | **Working** |
+
+### Built But Not Wired (Integration Gaps)
+
+These modules have real, production-quality implementations but are **not connected** to the execution pipeline or user-facing interfaces:
+
+#### Gap 1: NWTN Executor → LLM Backend (HIGH PRIORITY)
+
+**What exists:**
+- `prsm/compute/nwtn/backends/registry.py` — `BackendRegistry.execute_with_fallback()` with retry + health monitoring
+- `prsm/compute/nwtn/orchestrator.py` — `_execute_with_backend()` method (lines 273-307)
+
+**What's missing:**
+- `process_query()` Stage 4 (lines 487-499) still creates `ReasoningStep` objects with hardcoded output:
+  ```python
+  output_data={
+      "analysis": f"Processed query using {len(models_used)} specialist models",
+      "key_findings": ["Finding 1", "Finding 2", "Finding 3"]
+  }
+  ```
+- `_execute_with_backend()` is never called from the Executor or Compiler steps
+- **Impact:** Users get static fake analysis instead of real LLM inference
+
+**Fix:** Replace hardcoded Executor/Compiler `ReasoningStep` construction with calls to `await self._execute_with_backend(prompt, system_prompt)` and use the real response.
+
+**Files:** `prsm/compute/nwtn/orchestrator.py` (lines 487-499)
+
+---
+
+#### Gap 2: Content Retrieval API Endpoint (HIGH PRIORITY)
+
+**What exists:**
+- `prsm/node/content_provider.py` — `ContentProvider.request_content(cid)` with P2P request/response, hash verification, provider discovery
+
+**What's missing:**
+- `prsm/node/api.py` has no endpoint for cross-node content retrieval
+- Only `/content/upload` (local IPFS) and `/content/search` (index query) exist
+- ContentProvider is started by the node but has no HTTP-accessible entry point
+
+**Fix:** Add `GET /content/retrieve/{cid}` endpoint to `prsm/node/api.py` that calls `content_provider.request_content(cid)`.
+
+**Files:** `prsm/node/api.py`
+
+---
+
+#### Gap 3: Staking API Endpoints (MEDIUM PRIORITY)
+
+**What exists:**
+- `prsm/economy/tokenomics/staking_manager.py` — Full staking lifecycle: stake, unstake (7-day lockup), withdraw, slash, appeal, rewards
+
+**What's missing:**
+- No staking endpoints in `prsm/node/api.py`
+- No `prsm staking` CLI command group
+- StakingManager is not instantiated by `PRSMNode`
+
+**Fix:** Add staking endpoints (`POST /staking/stake`, `POST /staking/unstake`, `GET /staking/status`, `POST /staking/claim-rewards`) to node API. Wire StakingManager into PRSMNode initialization.
+
+**Files:** `prsm/node/api.py`, `prsm/node/node.py`
+
+---
+
+#### Gap 4: Storage Proofs → StorageProvider (MEDIUM PRIORITY)
+
+**What exists:**
+- `prsm/node/storage_proofs.py` — `StorageProofVerifier`, `StorageProver`, `MerkleProofGenerator` with challenge-response protocol
+
+**What's missing:**
+- `StorageProvider` never imports or calls `StorageProofVerifier`
+- No challenge-response loop in `StorageProvider.start()` or reward cycle
+- Storage providers claim to pin content but are never challenged to prove it
+
+**Fix:** Wire `StorageProofVerifier` into `StorageProvider._verify_pins()` cycle. Add periodic challenge-response for pinned CIDs.
+
+**Files:** `prsm/node/storage_provider.py`
+
+---
+
+#### Gap 5: IPFS Sharding → ContentUploader (MEDIUM PRIORITY)
+
+**What exists:**
+- `prsm/core/ipfs_sharding.py` — `ContentSharder` with configurable chunk sizes, parallel upload/download, manifest tracking
+
+**What's missing:**
+- `ContentUploader` uploads files monolithically — never calls `ContentSharder`
+- Large files bypass the sharding system entirely
+
+**Fix:** In `ContentUploader.upload()`, check file size against shard threshold. If above threshold, delegate to `ContentSharder.shard_content()` instead of direct `_ipfs_add()`.
+
+**Files:** `prsm/node/content_uploader.py`
+
+---
+
+#### Gap 6: FTNS Bridge API/CLI Exposure (LOWER PRIORITY)
+
+**What exists:**
+- `prsm/economy/blockchain/ftns_bridge.py` — `FTNSBridge` with deposit/withdraw, validators, rate limits
+
+**What's missing:**
+- No bridge endpoints in any API file
+- No `prsm bridge` or `prsm ftns bridge` CLI commands
+- Bridge is completely inaccessible from user-facing interfaces
+
+**Fix:** Add bridge endpoints to node API (`POST /bridge/deposit`, `POST /bridge/withdraw`, `GET /bridge/status`). Add CLI commands under `prsm ftns` group.
+
+**Files:** `prsm/node/api.py`, `prsm/cli.py`
+
+---
+
+### Integration Priority and Estimated Effort
+
+| Gap | Priority | Effort | Impact |
+|---|---|---|---|
+| **Gap 1:** NWTN → LLM backend | P0 Critical | 1-2 days | Transforms fake analysis into real AI responses |
+| **Gap 2:** Content retrieval API | P1 High | 1 day | Enables cross-node content sharing via API |
+| **Gap 3:** Staking API | P2 Medium | 1-2 days | Exposes staking to users |
+| **Gap 4:** Storage proofs integration | P2 Medium | 2-3 days | Validates storage claims cryptographically |
+| **Gap 5:** Sharding integration | P2 Medium | 1 day | Efficient large file handling |
+| **Gap 6:** Bridge API/CLI | P3 Lower | 1 day | Exposes on-chain operations |
+
+**Total estimated effort:** ~8-10 days of integration work.
+
+### Updated Status Summary
+
+```
+FULLY WORKING END-TO-END:
+  ✅ P2P networking (transport, gossip, discovery, handshake, replay prevention)
+  ✅ Node runtime (identity, startup, dashboard, management API, preflight)
+  ✅ DAG ledger (atomic ops, TOCTOU prevention, allowances, gossip + collab persistence)
+  ✅ Safety system (circuit breaker, emergency halt, rule-based monitoring)
+  ✅ Authentication (JWT, RBAC, audit logging)
+  ✅ Local FTNS economy (tracking, transfers, welcome grants, agent allowances)
+  ✅ Compute benchmarks (real CPU computation)
+  ✅ Multi-node compute jobs (submit → accept → execute → result → payment)
+  ✅ Collaboration protocol (tasks, reviews, queries, bid selection, persistence)
+  ✅ Self-compute for single nodes
+  ✅ Bootstrap fallback with address validation
+  ✅ Governance voting + execution (votes → timelock → parameter changes)
+  ✅ Web dashboard (auto-launched with node)
+
+MODULES BUILT, WIRING NEEDED:
+  (none — all gaps resolved, see Section 29)
+
+INFRASTRUCTURE READY, DEPLOYMENT NEEDED:
+  📦 Bootstrap server (code + Docker + monitoring ready, needs cloud deployment)
+  📦 CI/CD pipeline (GitHub Actions ready, needs PyPI/Docker credentials)
+  📦 Security tooling (audit/scanner/pentest ready, needs scheduled runs)
+```
+
+---
+
+## 29. Integration Wiring Completion (2026-03-05)
+
+All 6 integration gaps identified in Section 28 have been resolved.
+
+### Gap Resolutions
+
+| Gap | Fix | Files Modified |
+|---|---|---|
+| **Gap 1:** NWTN → LLM backend | `process_query()` Stage 4 now calls `_execute_with_backend()` for Executor and Compiler steps; added `_build_executor_system_prompt()` and `_extract_key_findings()` | `prsm/compute/nwtn/orchestrator.py` |
+| **Gap 2:** Content retrieval API | Added `GET /content/retrieve/{cid}` endpoint calling `ContentProvider.request_content()` with timeout and hash verification | `prsm/node/api.py` |
+| **Gap 3:** Staking API | Wired `StakingManager` into `PRSMNode` via `_StakingFTNSAdapter`; added 8 staking endpoints (stake, unstake, status, claim-rewards, withdraw, cancel-unstake, history, config) | `prsm/node/node.py`, `prsm/node/api.py` |
+| **Gap 4:** Storage proofs | Integrated `StorageProofVerifier` into `StorageProvider` with periodic challenge loop, provider reputation tracking, and configurable `ChallengeConfig` | `prsm/node/storage_provider.py` |
+| **Gap 5:** Content sharding | Integrated `ContentSharder` into `ContentUploader.upload()` for files above threshold (default 10MB); automatic fallback to monolithic upload on sharding failure | `prsm/node/content_uploader.py` |
+| **Gap 6:** Bridge API/CLI | Added 5 bridge API endpoints (`/bridge/deposit`, `/bridge/withdraw`, `/bridge/status`, `/bridge/tx/{id}`, `/bridge/transactions`) and 4 CLI commands under `prsm ftns bridge` | `prsm/node/api.py`, `prsm/cli.py` |
+
+### Verification
+
+- **New test file:** `tests/unit/test_section28_integrations.py` — 40 passed, 1 skipped
+- **Full unit + security suite:** All passing, 0 regressions
+
+### Updated Status Summary
+
+```
+FULLY WORKING END-TO-END:
+  ✅ P2P networking (transport, gossip, discovery, handshake, replay prevention)
+  ✅ Node runtime (identity, startup, dashboard, management API, preflight)
+  ✅ DAG ledger (atomic ops, TOCTOU prevention, allowances, gossip + collab persistence)
+  ✅ Safety system (circuit breaker, emergency halt, rule-based monitoring)
+  ✅ Authentication (JWT, RBAC, audit logging)
+  ✅ Local FTNS economy (tracking, transfers, welcome grants, agent allowances)
+  ✅ Compute benchmarks (real CPU computation)
+  ✅ Multi-node compute jobs (submit → accept → execute → result → payment)
+  ✅ Collaboration protocol (tasks, reviews, queries, bid selection, persistence)
+  ✅ Self-compute for single nodes
+  ✅ Bootstrap fallback with address validation
+  ✅ Governance voting + execution (votes → timelock → parameter changes)
+  ✅ Web dashboard (auto-launched with node)
+  ✅ NWTN LLM inference (Anthropic/OpenAI/local backends via BackendRegistry)
+  ✅ Cross-node content retrieval (GET /content/retrieve/{cid})
+  ✅ Staking lifecycle (stake/unstake/withdraw/slash/rewards via API)
+  ✅ Storage proof verification (challenge-response integrated into StorageProvider)
+  ✅ IPFS content sharding (auto-shard large files in ContentUploader)
+  ✅ FTNS bridge (deposit/withdraw via API and CLI)
+
+INFRASTRUCTURE READY, DEPLOYMENT NEEDED:
+  📦 Bootstrap server (code + Docker + monitoring ready, needs cloud deployment)
+  📦 CI/CD pipeline (GitHub Actions ready, needs PyPI/Docker credentials)
+  📦 Security tooling (audit/scanner/pentest ready, needs scheduled runs)
+```
+
+### What Remains
+
+PRSM's core technology stack is now feature-complete. The remaining work is operational:
+
+1. **Deploy bootstrap infrastructure** — Run bootstrap server on cloud (AWS/GCP scripts ready), point `bootstrap.prsm-network.com` DNS to it
+2. **Configure CI/CD credentials** — Add PyPI token and Docker Hub credentials to GitHub repository secrets, enable release workflow
+3. **Schedule security scans** — Set up automated security audit runs (audit checklist + vulnerability scanner) on a recurring schedule
+4. **Provision API keys for production LLM inference** — Configure Anthropic/OpenAI API keys on production nodes so NWTN pipeline returns real AI responses
+5. **Deploy to testnet** — Deploy FTNS ERC-20 contract to a testnet (Sepolia or Polygon Mumbai) using the ContractDeployer
+
+These are infrastructure/ops tasks, not engineering tasks. The codebase is ready.
+
+---
+
 *Analysis completed: 2026-02-20*
 *Code Review completed: 2026-02-20*
 *Sprint 1 completed: 2026-02-20*
@@ -2286,4 +2533,7 @@ NOT YET FUNCTIONAL (scaffolded):
 *Sprint 5 Item 2 completed: 2026-03-02*
 *Sprint 6 completed: 2026-03-03*
 *Technology audit completed: 2026-03-03*
+*Phase 1-5 implementation completed: 2026-03-04*
+*Integration wiring audit completed: 2026-03-05*
+*Integration wiring completed: 2026-03-05*
 *PRSM Version: 0.1.0*

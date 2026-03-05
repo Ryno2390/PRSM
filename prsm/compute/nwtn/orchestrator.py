@@ -484,17 +484,58 @@ class NWTNOrchestrator:
             )
             reasoning_trace.append(step2)
             
-            # Step 3: Executor - Query Processing
+            # Step 3: Executor - Query Processing (Real LLM Backend Integration)
+            executor_start_time = time.time()
+            
+            # Build system prompt based on intent category
+            executor_system_prompt = self._build_executor_system_prompt(
+                intent_category=clarified.intent_category,
+                models_used=models_used
+            )
+            
+            # Call the real LLM backend
+            backend_result = None
+            backend_error = None
+            try:
+                backend_result = await self._execute_with_backend(
+                    prompt=user_input.prompt,
+                    system_prompt=executor_system_prompt,
+                    agent_type=AgentType.EXECUTOR
+                )
+            except Exception as e:
+                logger.warning(f"Backend execution failed, using fallback: {e}")
+                backend_error = str(e)
+            
+            executor_execution_time = time.time() - executor_start_time
+            
+            # Build output_data from real backend response
+            if backend_result is not None:
+                output_data = {
+                    "analysis": backend_result.content,
+                    "model_used": backend_result.model_id,
+                    "provider": backend_result.provider.value,
+                    "token_usage": backend_result.token_usage.to_dict() if backend_result.token_usage else None,
+                    "key_findings": self._extract_key_findings(backend_result.content),
+                    "finish_reason": backend_result.finish_reason,
+                }
+                confidence_score = 0.88 if backend_result.finish_reason == "stop" else 0.75
+            else:
+                # Fallback when backend fails
+                output_data = {
+                    "analysis": f"Backend execution failed: {backend_error or 'Unknown error'}",
+                    "error": backend_error,
+                    "key_findings": ["Backend unavailable - using fallback response"],
+                    "fallback_mode": True
+                }
+                confidence_score = 0.5
+            
             step3 = ReasoningStep(
                 agent_type=AgentType.EXECUTOR,
                 agent_id="nwtn_executor",
                 input_data={"models": models_used, "prompt": user_input.prompt},
-                output_data={
-                    "analysis": f"Processed query using {len(models_used)} specialist models",
-                    "key_findings": ["Finding 1", "Finding 2", "Finding 3"]
-                },
-                execution_time=0.3 * clarified.complexity_estimate,
-                confidence_score=0.88
+                output_data=output_data,
+                execution_time=executor_execution_time,
+                confidence_score=confidence_score
             )
             reasoning_trace.append(step3)
             
@@ -596,6 +637,90 @@ class NWTNOrchestrator:
             models_used=models_used,
             processing_time=processing_time
         )
+    
+    def _build_executor_system_prompt(
+        self,
+        intent_category: str,
+        models_used: List[str]
+    ) -> str:
+        """
+        Build a system prompt for the Executor agent based on intent category.
+        
+        Args:
+            intent_category: The classified intent category
+            models_used: List of models selected for this query
+            
+        Returns:
+            A system prompt string tailored to the intent category
+        """
+        base_prompt = """You are an expert AI analyst in the NWTN (Neural Web for Transformation Networking) system.
+Your role is to process user queries and provide comprehensive, well-structured analysis.
+
+Provide your response in a clear, structured format with:
+1. A brief summary of your understanding of the query
+2. Key findings or insights (list 2-4 main points)
+3. Any relevant recommendations or conclusions
+
+Be thorough but concise. Focus on actionable insights."""
+        
+        # Add category-specific guidance
+        category_prompts = {
+            IntentCategory.RESEARCH.value: "\n\nAs a research specialist, provide evidence-based analysis with citations where possible. Structure your findings academically.",
+            IntentCategory.DATA_ANALYSIS.value: "\n\nAs a data analysis specialist, focus on patterns, trends, and statistical insights. Present findings in a structured analytical format.",
+            IntentCategory.CODING.value: "\n\nAs a coding specialist, provide practical code examples and technical explanations. Focus on best practices and efficient solutions.",
+            IntentCategory.THEORETICAL_PHYSICS.value: "\n\nAs a theoretical physics specialist, provide rigorous scientific analysis. Include relevant equations, theories, and physical principles.",
+            IntentCategory.MACHINE_LEARNING.value: "\n\nAs a machine learning specialist, focus on model architectures, training approaches, and performance considerations. Provide technical depth.",
+            IntentCategory.CREATIVE.value: "\n\nAs a creative specialist, explore innovative ideas and novel perspectives. Think outside conventional boundaries.",
+            IntentCategory.ANALYSIS.value: "\n\nAs an analysis specialist, provide comprehensive breakdown of the topic. Consider multiple perspectives and implications.",
+            IntentCategory.REASONING.value: "\n\nAs a reasoning specialist, apply logical analysis and critical thinking. Show your reasoning chain clearly.",
+            IntentCategory.GENERAL.value: "\n\nProvide a balanced, comprehensive response that addresses the query thoroughly."
+        }
+        
+        category_addition = category_prompts.get(intent_category, category_prompts[IntentCategory.GENERAL.value])
+        
+        models_context = f"\n\nAvailable specialist models for this query: {', '.join(models_used) if models_used else 'general purpose'}"
+        
+        return base_prompt + category_addition + models_context
+    
+    def _extract_key_findings(self, content: str) -> List[str]:
+        """
+        Extract key findings from LLM response content.
+        
+        Parses the response to identify key points, findings, or insights.
+        
+        Args:
+            content: The LLM response content
+            
+        Returns:
+            List of key findings extracted from the content
+        """
+        findings = []
+        
+        if not content:
+            return ["No content generated"]
+        
+        # Split content into lines and look for structured findings
+        lines = content.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            # Look for numbered or bulleted items
+            if line.startswith(('1.', '2.', '3.', '4.', '5.', '-', '·', '*')):
+                # Clean up the finding text
+                finding = line.lstrip('0123456789.-·* ').strip()
+                if finding and len(finding) > 10:  # Filter out very short items
+                    findings.append(finding)
+        
+        # If no structured findings found, extract sentences
+        if not findings:
+            # Split by periods and take first few substantial sentences
+            sentences = [s.strip() for s in content.split('.') if s.strip()]
+            for sentence in sentences[:3]:
+                if len(sentence) > 20:  # Only substantial sentences
+                    findings.append(sentence)
+        
+        # Limit to 5 findings max
+        return findings[:5] if findings else ["Analysis completed - see full response for details"]
     
     def _compile_response(
         self,

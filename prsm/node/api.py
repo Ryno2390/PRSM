@@ -12,6 +12,8 @@ Security Features (Phase 4.2):
 - OpenAPI specification
 """
 
+import asyncio
+import logging
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 
@@ -30,6 +32,8 @@ from prsm.node.api_hardening import (
     require_auth,
     websocket_status_endpoint,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class JobSubmission(BaseModel):
@@ -325,6 +329,97 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "parent_cids": record.parent_cids,
         }
 
+    class ContentRetrieveResponse(BaseModel):
+        """Response model for content retrieval."""
+        cid: str
+        status: str = Field(description="Retrieval status: 'success', 'not_found', or 'error'")
+        data: Optional[str] = Field(
+            default=None,
+            description="Base64-encoded content data (only if status is 'success')"
+        )
+        size_bytes: Optional[int] = Field(default=None, description="Size of retrieved content")
+        content_hash: Optional[str] = Field(default=None, description="SHA-256 hash of content")
+        filename: Optional[str] = Field(default=None, description="Original filename if available")
+        providers_tried: int = Field(default=0, description="Number of providers attempted")
+        error: Optional[str] = Field(default=None, description="Error message if status is 'error'")
+
+    @app.get("/content/retrieve/{cid}", response_model=ContentRetrieveResponse)
+    async def retrieve_content(cid: str, timeout: float = 30.0, verify_hash: bool = True) -> ContentRetrieveResponse:
+        """
+        Retrieve content from the network by CID.
+        
+        This endpoint retrieves content from the P2P network using the ContentProvider.
+        It will:
+        1. Check if content is available locally
+        2. Query the content index for providers
+        3. Request content from available providers
+        4. Verify content hash if verification is enabled
+        
+        Args:
+            cid: IPFS content identifier
+            timeout: Seconds to wait for response (default: 30.0)
+            verify_hash: Whether to verify SHA-256 hash (default: True)
+        
+        Returns:
+            ContentRetrieveResponse with status and data (base64-encoded) or error
+        """
+        import base64
+        
+        if not node.content_provider:
+            raise HTTPException(status_code=503, detail="Content provider not initialized")
+        
+        # Get provider stats before retrieval to determine providers tried
+        stats_before = node.content_provider.get_stats()
+        
+        try:
+            content_bytes = await node.content_provider.request_content(
+                cid=cid,
+                timeout=timeout,
+                verify_hash=verify_hash,
+            )
+            
+            if content_bytes is None:
+                # Content not found or retrieval failed
+                return ContentRetrieveResponse(
+                    cid=cid,
+                    status="not_found",
+                    error="Content not found on any available provider",
+                )
+            
+            # Get content metadata if available
+            content_hash = None
+            filename = None
+            if node.content_index:
+                record = node.content_index.lookup(cid)
+                if record:
+                    content_hash = record.content_hash
+                    filename = record.filename
+            
+            # Encode content as base64 for JSON response
+            data_b64 = base64.b64encode(content_bytes).decode('utf-8')
+            
+            return ContentRetrieveResponse(
+                cid=cid,
+                status="success",
+                data=data_b64,
+                size_bytes=len(content_bytes),
+                content_hash=content_hash,
+                filename=filename,
+            )
+            
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=504,
+                detail=f"Content retrieval timed out after {timeout} seconds"
+            )
+        except Exception as e:
+            logger.error(f"Error retrieving content {cid}: {e}")
+            return ContentRetrieveResponse(
+                cid=cid,
+                status="error",
+                error=str(e),
+            )
+
     @app.get("/transactions")
     async def get_transactions(limit: int = 50) -> Dict[str, Any]:
         """Get transaction history."""
@@ -527,6 +622,435 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         return {"status": "ok", "node_id": node.identity.node_id if node.identity else "unknown"}
 
 
+    # ── Staking Endpoints ─────────────────────────────────────────
+
+    class StakeRequest(BaseModel):
+        """Request body for staking FTNS tokens."""
+        amount: float = Field(..., gt=0, description="Amount of FTNS to stake")
+        stake_type: str = Field(default="general", description="Type of staking: governance, validation, compute, storage, liquidity, general")
+        metadata: Optional[Dict[str, Any]] = Field(default=None, description="Optional metadata for the stake")
+
+    class StakeResponse(BaseModel):
+        """Response model for a stake operation."""
+        stake_id: str
+        user_id: str
+        amount: float
+        stake_type: str
+        status: str
+        staked_at: str
+        rewards_earned: float = 0.0
+
+    class UnstakeRequest(BaseModel):
+        """Request body for unstaking FTNS tokens."""
+        stake_id: str = Field(..., description="ID of the stake to unstake")
+        amount: Optional[float] = Field(default=None, gt=0, description="Amount to unstake (None = full stake)")
+
+    class UnstakeResponse(BaseModel):
+        """Response model for an unstake operation."""
+        request_id: str
+        stake_id: str
+        user_id: str
+        amount: float
+        requested_at: str
+        available_at: str
+        status: str
+
+    class StakingStatusResponse(BaseModel):
+        """Response model for staking status."""
+        user_id: str
+        total_staked: float
+        active_stakes: List[Dict[str, Any]]
+        pending_unstake_requests: List[Dict[str, Any]]
+        total_rewards_earned: float
+        total_rewards_claimed: float
+
+    class ClaimRewardsResponse(BaseModel):
+        """Response model for claiming rewards."""
+        user_id: str
+        total_rewards_claimed: float
+        stakes_processed: int
+
+    @app.post("/staking/stake", response_model=StakeResponse, tags=["staking"])
+    async def stake_tokens(req: StakeRequest) -> StakeResponse:
+        """
+        Stake FTNS tokens.
+        
+        Stakes the specified amount of FTNS tokens for the node's identity.
+        The tokens will be locked and start earning rewards based on the
+        configured annual reward rate.
+        
+        Args:
+            req: StakeRequest containing amount, stake_type, and optional metadata
+            
+        Returns:
+            StakeResponse with the created stake details
+            
+        Raises:
+            HTTPException 503: If staking manager not initialized
+            HTTPException 400: If stake validation fails
+        """
+        if not node.staking_manager:
+            raise HTTPException(status_code=503, detail="Staking manager not initialized")
+        
+        if not node.identity:
+            raise HTTPException(status_code=503, detail="Node identity not initialized")
+        
+        # Validate stake_type
+        from prsm.economy.tokenomics.staking_manager import StakeType
+        try:
+            stake_type = StakeType(req.stake_type.lower())
+        except ValueError:
+            valid_types = [t.value for t in StakeType]
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid stake_type: {req.stake_type}. Valid types: {valid_types}"
+            )
+        
+        try:
+            from decimal import Decimal
+            stake = await node.staking_manager.stake(
+                user_id=node.identity.node_id,
+                amount=Decimal(str(req.amount)),
+                stake_type=stake_type,
+                metadata=req.metadata
+            )
+            
+            return StakeResponse(
+                stake_id=stake.stake_id,
+                user_id=stake.user_id,
+                amount=float(stake.amount),
+                stake_type=stake.stake_type.value,
+                status=stake.status.value,
+                staked_at=stake.staked_at.isoformat(),
+                rewards_earned=float(stake.rewards_earned)
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error(f"Error staking tokens: {e}")
+            raise HTTPException(status_code=500, detail=f"Staking failed: {str(e)}")
+
+    @app.post("/staking/unstake", response_model=UnstakeResponse, tags=["staking"])
+    async def unstake_tokens(req: UnstakeRequest) -> UnstakeResponse:
+        """
+        Request to unstake FTNS tokens.
+        
+        Creates an unstake request that will be available for withdrawal
+        after the configured unstaking period (default: 7 days).
+        
+        Args:
+            req: UnstakeRequest containing stake_id and optional amount
+            
+        Returns:
+            UnstakeResponse with the unstake request details
+            
+        Raises:
+            HTTPException 503: If staking manager not initialized
+            HTTPException 400: If unstake validation fails
+            HTTPException 404: If stake not found
+        """
+        if not node.staking_manager:
+            raise HTTPException(status_code=503, detail="Staking manager not initialized")
+        
+        if not node.identity:
+            raise HTTPException(status_code=503, detail="Node identity not initialized")
+        
+        try:
+            from decimal import Decimal
+            amount = Decimal(str(req.amount)) if req.amount else None
+            
+            unstake_request = await node.staking_manager.unstake(
+                user_id=node.identity.node_id,
+                stake_id=req.stake_id,
+                amount=amount
+            )
+            
+            return UnstakeResponse(
+                request_id=unstake_request.request_id,
+                stake_id=unstake_request.stake_id,
+                user_id=unstake_request.user_id,
+                amount=float(unstake_request.amount),
+                requested_at=unstake_request.requested_at.isoformat(),
+                available_at=unstake_request.available_at.isoformat(),
+                status=unstake_request.status.value
+            )
+        except ValueError as e:
+            if "not found" in str(e).lower():
+                raise HTTPException(status_code=404, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error(f"Error unstaking tokens: {e}")
+            raise HTTPException(status_code=500, detail=f"Unstake failed: {str(e)}")
+
+    @app.get("/staking/status", response_model=StakingStatusResponse, tags=["staking"])
+    async def get_staking_status() -> StakingStatusResponse:
+        """
+        Get staking status for the current node identity.
+        
+        Returns information about all active stakes, pending unstake requests,
+        and reward totals for the node's identity.
+        
+        Returns:
+            StakingStatusResponse with comprehensive staking information
+            
+        Raises:
+            HTTPException 503: If staking manager not initialized
+        """
+        if not node.staking_manager:
+            raise HTTPException(status_code=503, detail="Staking manager not initialized")
+        
+        if not node.identity:
+            raise HTTPException(status_code=503, detail="Node identity not initialized")
+        
+        user_id = node.identity.node_id
+        
+        # Get all stakes for the user
+        stakes = await node.staking_manager.get_user_stakes(user_id)
+        
+        # Get pending unstake requests
+        pending_requests = await node.staking_manager.get_pending_unstake_requests(user_id)
+        
+        # Calculate totals
+        total_staked = sum(float(s.amount) for s in stakes if s.status.value == "active")
+        total_rewards_earned = sum(float(s.rewards_earned) for s in stakes)
+        total_rewards_claimed = sum(float(s.rewards_claimed) for s in stakes)
+        
+        return StakingStatusResponse(
+            user_id=user_id,
+            total_staked=total_staked,
+            active_stakes=[
+                {
+                    "stake_id": s.stake_id,
+                    "amount": float(s.amount),
+                    "stake_type": s.stake_type.value,
+                    "status": s.status.value,
+                    "staked_at": s.staked_at.isoformat(),
+                    "rewards_earned": float(s.rewards_earned),
+                    "rewards_claimed": float(s.rewards_claimed)
+                }
+                for s in stakes
+            ],
+            pending_unstake_requests=[
+                {
+                    "request_id": r.request_id,
+                    "stake_id": r.stake_id,
+                    "amount": float(r.amount),
+                    "requested_at": r.requested_at.isoformat(),
+                    "available_at": r.available_at.isoformat(),
+                    "status": r.status.value
+                }
+                for r in pending_requests
+            ],
+            total_rewards_earned=total_rewards_earned,
+            total_rewards_claimed=total_rewards_claimed
+        )
+
+    @app.post("/staking/claim-rewards", response_model=ClaimRewardsResponse, tags=["staking"])
+    async def claim_staking_rewards(stake_id: Optional[str] = None) -> ClaimRewardsResponse:
+        """
+        Claim accumulated staking rewards.
+        
+        Claims all pending rewards for the node's stakes. If stake_id is provided,
+        only claims rewards for that specific stake.
+        
+        Args:
+            stake_id: Optional specific stake ID to claim rewards from
+            
+        Returns:
+            ClaimRewardsResponse with total rewards claimed and stakes processed
+            
+        Raises:
+            HTTPException 503: If staking manager not initialized
+            HTTPException 400: If claim validation fails
+        """
+        if not node.staking_manager:
+            raise HTTPException(status_code=503, detail="Staking manager not initialized")
+        
+        if not node.identity:
+            raise HTTPException(status_code=503, detail="Node identity not initialized")
+        
+        try:
+            total_rewards = await node.staking_manager.claim_rewards(
+                user_id=node.identity.node_id,
+                stake_id=stake_id
+            )
+            
+            # Count stakes processed
+            stakes = await node.staking_manager.get_user_stakes(node.identity.node_id)
+            stakes_processed = len(stakes) if not stake_id else 1
+            
+            return ClaimRewardsResponse(
+                user_id=node.identity.node_id,
+                total_rewards_claimed=float(total_rewards),
+                stakes_processed=stakes_processed
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error(f"Error claiming rewards: {e}")
+            raise HTTPException(status_code=500, detail=f"Claim rewards failed: {str(e)}")
+
+    @app.get("/staking/stakes/{stake_id}", tags=["staking"])
+    async def get_stake(stake_id: str) -> Dict[str, Any]:
+        """
+        Get details of a specific stake.
+        
+        Args:
+            stake_id: The ID of the stake to retrieve
+            
+        Returns:
+            Detailed stake information
+            
+        Raises:
+            HTTPException 503: If staking manager not initialized
+            HTTPException 404: If stake not found
+        """
+        if not node.staking_manager:
+            raise HTTPException(status_code=503, detail="Staking manager not initialized")
+        
+        stake = await node.staking_manager.get_stake(stake_id)
+        if not stake:
+            raise HTTPException(status_code=404, detail="Stake not found")
+        
+        return {
+            "stake_id": stake.stake_id,
+            "user_id": stake.user_id,
+            "amount": float(stake.amount),
+            "stake_type": stake.stake_type.value,
+            "status": stake.status.value,
+            "staked_at": stake.staked_at.isoformat(),
+            "rewards_earned": float(stake.rewards_earned),
+            "rewards_claimed": float(stake.rewards_claimed),
+            "last_reward_calculation": stake.last_reward_calculation.isoformat() if stake.last_reward_calculation else None,
+            "lock_reason": stake.lock_reason,
+            "metadata": stake.metadata
+        }
+
+    @app.get("/staking/unstake-requests/{request_id}", tags=["staking"])
+    async def get_unstake_request(request_id: str) -> Dict[str, Any]:
+        """
+        Get details of a specific unstake request.
+        
+        Args:
+            request_id: The ID of the unstake request to retrieve
+            
+        Returns:
+            Detailed unstake request information
+            
+        Raises:
+            HTTPException 503: If staking manager not initialized
+            HTTPException 404: If request not found
+        """
+        if not node.staking_manager:
+            raise HTTPException(status_code=503, detail="Staking manager not initialized")
+        
+        request = await node.staking_manager.get_unstake_request(request_id)
+        if not request:
+            raise HTTPException(status_code=404, detail="Unstake request not found")
+        
+        return {
+            "request_id": request.request_id,
+            "stake_id": request.stake_id,
+            "user_id": request.user_id,
+            "amount": float(request.amount),
+            "requested_at": request.requested_at.isoformat(),
+            "available_at": request.available_at.isoformat(),
+            "status": request.status.value,
+            "completed_at": request.completed_at.isoformat() if request.completed_at else None,
+            "cancellation_reason": request.cancellation_reason,
+            "is_available": request.is_available
+        }
+
+    @app.post("/staking/withdraw/{request_id}", tags=["staking"])
+    async def withdraw_unstaked_tokens(request_id: str) -> Dict[str, Any]:
+        """
+        Withdraw unstaked tokens after the unstaking period.
+        
+        Completes an unstake request and returns the tokens to the user's
+        available balance.
+        
+        Args:
+            request_id: The ID of the unstake request to withdraw
+            
+        Returns:
+            Withdrawal confirmation with amount
+            
+        Raises:
+            HTTPException 503: If staking manager not initialized
+            HTTPException 400: If withdrawal validation fails
+            HTTPException 404: If request not found
+        """
+        if not node.staking_manager:
+            raise HTTPException(status_code=503, detail="Staking manager not initialized")
+        
+        if not node.identity:
+            raise HTTPException(status_code=503, detail="Node identity not initialized")
+        
+        try:
+            success, amount = await node.staking_manager.withdraw(
+                user_id=node.identity.node_id,
+                request_id=request_id
+            )
+            
+            return {
+                "request_id": request_id,
+                "success": success,
+                "amount_withdrawn": float(amount)
+            }
+        except ValueError as e:
+            if "not found" in str(e).lower():
+                raise HTTPException(status_code=404, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error(f"Error withdrawing tokens: {e}")
+            raise HTTPException(status_code=500, detail=f"Withdrawal failed: {str(e)}")
+
+    @app.post("/staking/cancel-unstake/{request_id}", tags=["staking"])
+    async def cancel_unstake_request(request_id: str, reason: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Cancel a pending unstake request.
+        
+        Cancels an unstake request and restores the tokens to active staking.
+        
+        Args:
+            request_id: The ID of the unstake request to cancel
+            reason: Optional reason for cancellation
+            
+        Returns:
+            Cancellation confirmation
+            
+        Raises:
+            HTTPException 503: If staking manager not initialized
+            HTTPException 400: If cancellation validation fails
+            HTTPException 404: If request not found
+        """
+        if not node.staking_manager:
+            raise HTTPException(status_code=503, detail="Staking manager not initialized")
+        
+        if not node.identity:
+            raise HTTPException(status_code=503, detail="Node identity not initialized")
+        
+        try:
+            success = await node.staking_manager.cancel_unstake(
+                user_id=node.identity.node_id,
+                request_id=request_id,
+                reason=reason
+            )
+            
+            return {
+                "request_id": request_id,
+                "cancelled": success,
+                "reason": reason
+            }
+        except ValueError as e:
+            if "not found" in str(e).lower():
+                raise HTTPException(status_code=404, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error(f"Error cancelling unstake: {e}")
+            raise HTTPException(status_code=500, detail=f"Cancellation failed: {str(e)}")
+
+
     # ── Storage endpoints ────────────────────────────────────────
 
     @app.get("/storage/stats")
@@ -555,6 +1079,246 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "message": "Compute provider not initialized"
             }
         return node.compute_provider.get_stats()
+
+    # ── Bridge Endpoints ─────────────────────────────────────────
+
+    class BridgeDepositRequest(BaseModel):
+        """Request body for bridge deposit operation."""
+        amount: float = Field(..., gt=0, description="Amount of FTNS to deposit (in token units)")
+        chain_address: str = Field(..., description="Destination on-chain address")
+        destination_chain: int = Field(default=137, description="Destination chain ID (default: Polygon mainnet)")
+
+    class BridgeWithdrawRequest(BaseModel):
+        """Request body for bridge withdraw operation."""
+        amount: float = Field(..., gt=0, description="Amount of FTNS to withdraw (in token units)")
+        chain_address: str = Field(..., description="Source on-chain address")
+        source_chain: int = Field(default=137, description="Source chain ID (default: Polygon mainnet)")
+
+    class BridgeTransactionResponse(BaseModel):
+        """Response model for bridge transactions."""
+        transaction_id: str
+        direction: str
+        user_id: str
+        chain_address: str
+        amount: str
+        source_chain: int
+        destination_chain: int
+        status: str
+        source_tx_hash: Optional[str]
+        destination_tx_hash: Optional[str]
+        fee_amount: str
+        created_at: str
+        updated_at: str
+        completed_at: Optional[str]
+        error_message: Optional[str]
+
+    @app.post("/bridge/deposit", tags=["bridge"])
+    async def bridge_deposit(request: BridgeDepositRequest) -> Dict[str, Any]:
+        """
+        Deposit FTNS tokens from local balance to external chain.
+        
+        Burns local FTNS and initiates bridge transfer to mint tokens on the destination chain.
+        
+        Args:
+            request: BridgeDepositRequest with amount, chain_address, and destination_chain
+            
+        Returns:
+            Bridge transaction details including transaction_id and status
+            
+        Raises:
+            HTTPException 503: If bridge not initialized
+            HTTPException 400: If validation fails (insufficient balance, invalid address, etc.)
+            HTTPException 500: If bridge operation fails
+        """
+        if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
+            raise HTTPException(status_code=503, detail="FTNS bridge not initialized")
+        
+        if not node.identity:
+            raise HTTPException(status_code=503, detail="Node identity not initialized")
+        
+        try:
+            # Convert amount to wei (assuming 18 decimals like ETH)
+            amount_wei = int(request.amount * 10**18)
+            
+            # Execute deposit
+            tx = await node.ftns_bridge.deposit_to_chain(
+                user_id=node.identity.node_id,
+                amount=amount_wei,
+                chain_address=request.chain_address,
+                destination_chain=request.destination_chain
+            )
+            
+            return {
+                "success": True,
+                "transaction": tx.to_dict()
+            }
+            
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Bridge deposit failed: {error_msg}")
+            
+            # Map specific errors to HTTP status codes
+            if "Insufficient" in error_msg:
+                raise HTTPException(status_code=400, detail=error_msg)
+            elif "outside limits" in error_msg:
+                raise HTTPException(status_code=400, detail=error_msg)
+            elif "Invalid" in error_msg:
+                raise HTTPException(status_code=400, detail=error_msg)
+            else:
+                raise HTTPException(status_code=500, detail=f"Bridge deposit failed: {error_msg}")
+
+    @app.post("/bridge/withdraw", tags=["bridge"])
+    async def bridge_withdraw(request: BridgeWithdrawRequest) -> Dict[str, Any]:
+        """
+        Withdraw FTNS tokens from external chain to local balance.
+        
+        Locks on-chain FTNS and initiates bridge transfer to mint local FTNS.
+        
+        Args:
+            request: BridgeWithdrawRequest with amount, chain_address, and source_chain
+            
+        Returns:
+            Bridge transaction details including transaction_id and status
+            
+        Raises:
+            HTTPException 503: If bridge not initialized
+            HTTPException 400: If validation fails (insufficient balance, invalid address, etc.)
+            HTTPException 500: If bridge operation fails
+        """
+        if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
+            raise HTTPException(status_code=503, detail="FTNS bridge not initialized")
+        
+        if not node.identity:
+            raise HTTPException(status_code=503, detail="Node identity not initialized")
+        
+        try:
+            # Convert amount to wei (assuming 18 decimals like ETH)
+            amount_wei = int(request.amount * 10**18)
+            
+            # Execute withdraw
+            tx = await node.ftns_bridge.withdraw_from_chain(
+                chain_address=request.chain_address,
+                amount=amount_wei,
+                user_id=node.identity.node_id,
+                source_chain=request.source_chain
+            )
+            
+            return {
+                "success": True,
+                "transaction": tx.to_dict()
+            }
+            
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Bridge withdraw failed: {error_msg}")
+            
+            # Map specific errors to HTTP status codes
+            if "Insufficient" in error_msg:
+                raise HTTPException(status_code=400, detail=error_msg)
+            elif "outside limits" in error_msg:
+                raise HTTPException(status_code=400, detail=error_msg)
+            elif "Invalid" in error_msg:
+                raise HTTPException(status_code=400, detail=error_msg)
+            else:
+                raise HTTPException(status_code=500, detail=f"Bridge withdraw failed: {error_msg}")
+
+    @app.get("/bridge/status", tags=["bridge"])
+    async def get_bridge_status() -> Dict[str, Any]:
+        """
+        Get bridge status and pending operations.
+        
+        Returns:
+            Bridge statistics including:
+            - total_deposited: Total FTNS deposited to chain
+            - total_withdrawn: Total FTNS withdrawn from chain
+            - total_fees_collected: Total fees collected
+            - pending_transactions: Number of pending transactions
+            - completed_transactions: Number of completed transactions
+            - failed_transactions: Number of failed transactions
+            - limits: Bridge limits (min/max amounts, fees)
+            
+        Raises:
+            HTTPException 503: If bridge not initialized
+        """
+        if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
+            raise HTTPException(status_code=503, detail="FTNS bridge not initialized")
+        
+        try:
+            stats = await node.ftns_bridge.get_bridge_stats()
+            limits = await node.ftns_bridge.get_bridge_limits()
+            pending = await node.ftns_bridge.get_pending_transactions()
+            
+            return {
+                "stats": stats.to_dict(),
+                "limits": {
+                    "min_amount": str(limits.min_amount) if limits else "0",
+                    "max_amount": str(limits.max_amount) if limits else "0",
+                    "daily_limit": str(limits.daily_limit) if limits else "0",
+                    "fee_bps": limits.fee_bps if limits else 0,
+                } if limits else None,
+                "pending_transactions": [tx.to_dict() for tx in pending],
+                "pending_count": len(pending),
+            }
+        except Exception as e:
+            logger.error(f"Failed to get bridge status: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to get bridge status: {str(e)}")
+
+    @app.get("/bridge/transactions/{tx_id}", tags=["bridge"])
+    async def get_bridge_transaction(tx_id: str) -> Dict[str, Any]:
+        """
+        Get status of a specific bridge transaction.
+        
+        Args:
+            tx_id: Transaction ID to look up
+            
+        Returns:
+            Bridge transaction details including status, amounts, and timestamps
+            
+        Raises:
+            HTTPException 503: If bridge not initialized
+            HTTPException 404: If transaction not found
+        """
+        if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
+            raise HTTPException(status_code=503, detail="FTNS bridge not initialized")
+        
+        tx = await node.ftns_bridge.get_bridge_status(tx_id)
+        
+        if not tx:
+            raise HTTPException(status_code=404, detail=f"Transaction {tx_id} not found")
+        
+        return {
+            "transaction": tx.to_dict()
+        }
+
+    @app.get("/bridge/transactions", tags=["bridge"])
+    async def list_bridge_transactions(limit: int = 50) -> Dict[str, Any]:
+        """
+        List bridge transactions for the current user.
+        
+        Args:
+            limit: Maximum number of transactions to return (default: 50, max: 200)
+            
+        Returns:
+            List of bridge transactions for the current user
+            
+        Raises:
+            HTTPException 503: If bridge not initialized
+        """
+        if not hasattr(node, 'ftns_bridge') or not node.ftns_bridge:
+            raise HTTPException(status_code=503, detail="FTNS bridge not initialized")
+        
+        if not node.identity:
+            raise HTTPException(status_code=503, detail="Node identity not initialized")
+        
+        transactions = await node.ftns_bridge.get_user_transactions(
+            user_id=node.identity.node_id,
+            limit=min(limit, 200)
+        )
+        
+        return {
+            "transactions": [tx.to_dict() for tx in transactions],
+            "count": len(transactions),
+        }
 
     # ── WebSocket Endpoints ───────────────────────────────────────
 
