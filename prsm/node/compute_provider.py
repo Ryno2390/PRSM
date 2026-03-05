@@ -29,6 +29,7 @@ from prsm.node.gossip import (
 from prsm.node.identity import NodeIdentity
 from prsm.node.local_ledger import LocalLedger, TransactionType
 from prsm.node.transport import P2PMessage, WebSocketTransport
+from prsm.compute.nwtn.backends.config import detect_available_backends
 
 logger = logging.getLogger(__name__)
 
@@ -350,6 +351,7 @@ class ComputeProvider:
             "tokens_used": len(prompt.split()),
             "provider_node": self.identity.node_id,
             "source": "mock",
+            "warning": "No LLM backend configured. This is a mock response.",
         }
 
     async def _run_embedding(self, job: ComputeJob) -> Dict[str, Any]:
@@ -408,7 +410,8 @@ class ComputeProvider:
             "model_id": "fallback-hash",
             "provider": "mock",
             "provider_node": self.identity.node_id,
-            "source": "fallback",
+            "source": "mock",
+            "warning": "No embedding backend configured. Using pseudo-vectors.",
         }
 
     def get_stats(self) -> Dict[str, Any]:

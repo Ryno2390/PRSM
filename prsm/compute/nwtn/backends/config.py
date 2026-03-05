@@ -349,3 +349,37 @@ class BackendConfig:
             f"timeout={self.timeout_seconds}s, "
             f"retries={self.max_retries})"
         )
+
+
+def detect_available_backends() -> dict:
+    """
+    Check which LLM backends have valid API keys configured.
+    
+    Scans environment variables to determine which backend providers
+    are available for use. This is useful for automatic backend
+    selection and configuration validation.
+    
+    Returns:
+        dict: A dictionary with the following keys:
+            - "anthropic": True if ANTHROPIC_API_KEY env var is set and non-empty
+            - "openai": True if OPENAI_API_KEY env var is set and non-empty
+            - "local": True if PRSM_LOCAL_MODEL_URL env var is set and non-empty
+            - "any_real_backend": True if any of the above are True
+    
+    Example:
+        >>> backends = detect_available_backends()
+        >>> if backends["any_real_backend"]:
+        ...     print("At least one backend is configured")
+        >>> if backends["anthropic"]:
+        ...     print("Anthropic API key is available")
+    """
+    anthropic_available = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    openai_available = bool(os.environ.get("OPENAI_API_KEY"))
+    local_available = bool(os.environ.get("PRSM_LOCAL_MODEL_URL"))
+    
+    return {
+        "anthropic": anthropic_available,
+        "openai": openai_available,
+        "local": local_available,
+        "any_real_backend": anthropic_available or openai_available or local_available,
+    }

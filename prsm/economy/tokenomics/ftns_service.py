@@ -74,7 +74,6 @@ __all__ = [
     'get_ftns_service',
     'award_training_tokens',
     'get_user_ftns_balance',
-    'ftns_service',
     'INITIAL_BALANCE',
     'MIN_TRANSACTION_AMOUNT',
     'MAX_TRANSACTION_AMOUNT',
@@ -515,5 +514,6 @@ def get_user_ftns_balance(user_id: str) -> Decimal:
     return get_ftns_service().get_user_balance(user_id)
 
 
-# Module-level singleton for direct import
-ftns_service = get_ftns_service()
+# NOTE: Module-level singleton removed to prevent deprecation warning on import.
+# Use get_ftns_service() for lazy initialization, or import from prsm.economy.tokenomics
+# where ftns_service is aliased to database_ftns_service (the recommended production service).

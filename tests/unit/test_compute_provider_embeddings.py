@@ -87,7 +87,7 @@ class TestComputeProviderEmbedding:
         assert "embedding" in result
         assert result["dimensions"] == 1536
         assert len(result["embedding"]) == 1536
-        assert result["source"] == "fallback"
+        assert result["source"] == "mock"
         assert result["provider"] == "mock"
     
     @pytest.mark.asyncio
@@ -193,7 +193,7 @@ class TestComputeProviderEmbedding:
         result = await compute_provider._run_embedding(embedding_job)
         
         # Should fall back to hash-based embedding
-        assert result["source"] == "fallback"
+        assert result["source"] == "mock"
         assert result["provider"] == "mock"
         assert len(result["embedding"]) == 1536
     
