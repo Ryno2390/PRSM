@@ -101,7 +101,7 @@ class PRSMSettings(BaseSettings):
     
     # === Core Application Settings ===
     app_name: str = "PRSM"
-    app_version: str = "0.1.0"
+    app_version: str = "0.2.0"
     environment: Environment = Environment.DEVELOPMENT
     debug: bool = Field(default=False, env="PRSM_DEBUG")
     log_level: LogLevel = LogLevel.INFO

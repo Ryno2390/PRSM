@@ -572,7 +572,7 @@ export class PRSMClient extends EventEmitter {
     this.timeout = config.timeout ?? 30000;
     this.maxRetries = config.maxRetries ?? 3;
     this.headers = {
-      'User-Agent': '@prsm/sdk/0.1.0',
+      'User-Agent': '@prsm/sdk/0.2.0',
       'Content-Type': 'application/json',
       ...config.headers,
     };

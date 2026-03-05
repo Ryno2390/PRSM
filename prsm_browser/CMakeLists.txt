@@ -37,7 +37,7 @@ target_compile_options(prsm_browser PRIVATE
     -Wall
     -Wextra
     -O2
-    -DPRSM_BROWSER_VERSION="0.1.0"
+    -DPRSM_BROWSER_VERSION="0.2.0"
 )
 
 # Installation

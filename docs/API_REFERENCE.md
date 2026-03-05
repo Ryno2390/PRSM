@@ -138,7 +138,7 @@ Returns basic API information and available endpoints.
 ```json
 {
   "name": "PRSM Node API",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "docs": "/docs",
   "openapi": "/openapi.json",
   "websocket": "/ws/status"

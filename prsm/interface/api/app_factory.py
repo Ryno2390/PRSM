@@ -44,7 +44,7 @@ async def default_lifespan(app: FastAPI):
 def create_app(
     lifespan: Optional[Callable] = None,
     title: str = "PRSM API",
-    version: str = "0.1.0",
+    version: str = "0.2.0",
     include_middleware: bool = True,
     include_routers: bool = True,
     include_core_endpoints: bool = True

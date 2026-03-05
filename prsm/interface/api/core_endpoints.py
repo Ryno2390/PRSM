@@ -52,7 +52,7 @@ def _register_root_endpoint(app: FastAPI) -> None:
         _settings = settings or get_settings()
         return {
             "name": "PRSM API",
-            "version": "0.1.0",
+            "version": "0.2.0",
             "description": "Protocol for Recursive Scientific Modeling",
             "environment": _settings.environment.value if _settings else "unknown",
             "status": "operational",

@@ -345,7 +345,9 @@ def mock_redis():
     with patch('redis.asyncio.Redis') as mock_async_redis, \
          patch('redis.asyncio.from_url') as mock_async_from_url, \
          patch('redis.Redis') as mock_sync_redis, \
-         patch('redis.from_url') as mock_sync_from_url:
+         patch('redis.from_url') as mock_sync_from_url, \
+         patch('prsm.core.redis_client.get_redis_client', return_value=fake_redis_instance) as mock_get_redis, \
+         patch('prsm.core.auth.middleware.get_redis_client', return_value=fake_redis_instance) as mock_auth_redis:
         
         # Return fake Redis for all connection methods
         mock_async_redis.return_value = fake_redis_instance
@@ -858,9 +860,12 @@ def mock_audit_logger():
     mock_logger = AsyncMock()
     mock_logger.log_security_event = AsyncMock()
     mock_logger.log_auth_event = AsyncMock()  # Alias for compatibility
+    mock_logger.log_access_event = AsyncMock()  # For request logging
     mock_logger.log = AsyncMock()
     
-    with patch('prsm.core.auth.auth_manager.audit_logger', mock_logger):
+    with patch('prsm.core.auth.auth_manager.audit_logger', mock_logger), \
+         patch('prsm.core.auth.middleware.audit_logger', mock_logger), \
+         patch('prsm.core.integrations.security.audit_logger.audit_logger', mock_logger):
         yield mock_logger
 
 

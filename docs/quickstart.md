@@ -83,7 +83,7 @@ curl http://localhost:8000/health
 
 Expected response:
 ```json
-{"status": "healthy", "version": "0.1.0"}
+{"status": "healthy", "version": "0.2.0"}
 ```
 
 ```bash

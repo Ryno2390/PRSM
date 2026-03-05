@@ -45,6 +45,6 @@ __all__ = [
 ]
 
 # Version info
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "PRSM Team"
 __description__ = "LangChain integration for PRSM (Protocol for Recursive Scientific Modeling)"

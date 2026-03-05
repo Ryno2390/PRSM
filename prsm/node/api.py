@@ -73,7 +73,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     app = FastAPI(
         title="PRSM Node API",
         description="Management API for a PRSM network node",
-        version="0.1.0",
+        version="0.2.0",
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
@@ -118,7 +118,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         """Root endpoint with API information."""
         return {
             "name": "PRSM Node API",
-            "version": "0.1.0",
+            "version": "0.2.0",
             "docs": "/docs",
             "openapi": "/openapi.json",
             "websocket": "/ws/status",
