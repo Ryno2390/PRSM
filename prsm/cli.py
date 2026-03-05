@@ -16,6 +16,8 @@ import uvicorn
 from rich.console import Console
 from rich.table import Table
 
+from prsm.compute.nwtn.backends.config import detect_available_backends
+
 console = Console()
 
 
@@ -567,6 +569,15 @@ def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str, no_dashboa
     if bootstrap:
         config.bootstrap_nodes = [b.strip() for b in bootstrap.split(",")]
 
+    # Run preflight diagnostics before starting the node
+    results = _node_preflight_diagnostics(config)
+    _render_preflight_summary(results)
+
+    if _has_hard_preflight_failures(results):
+        print("\n❌ Preflight checks failed. Cannot start node.")
+        print("   Fix the issues above and try again.")
+        sys.exit(1)
+
     # When using the live dashboard, suppress startup noise so the
     # terminal is clean.  The dashboard captures prsm.node.* activity
     # via its own log handler.
@@ -610,6 +621,17 @@ def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str, no_dashboa
         prsm_node = PRSMNode(config)
         await prsm_node.initialize()
         await prsm_node.start()
+
+        # Check for LLM backends and warn if only mock is available
+        backends = detect_available_backends()
+        if not backends.get("any_real_backend"):
+            print()
+            print("⚠️   No LLM API keys detected — inference will return mock responses.")
+            print("    To enable real AI inference:")
+            print("      1. cp .env.example .env")
+            print("      2. Set ANTHROPIC_API_KEY or OPENAI_API_KEY in .env")
+            print("      3. Restart the node")
+            print()
 
         try:
             if no_dashboard:
