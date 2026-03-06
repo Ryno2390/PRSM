@@ -2509,17 +2509,412 @@ INFRASTRUCTURE READY, DEPLOYMENT NEEDED:
   📦 Security tooling (audit/scanner/pentest ready, needs scheduled runs)
 ```
 
-### What Remains
+---
 
-PRSM's core technology stack is now feature-complete. The remaining work is operational:
+## 30. Sprint 7–13 Completion Log (2026-03-05 — 2026-03-06)
 
-1. **Deploy bootstrap infrastructure** — Run bootstrap server on cloud (AWS/GCP scripts ready), point `bootstrap.prsm-network.com` DNS to it
-2. **Configure CI/CD credentials** — Add PyPI token and Docker Hub credentials to GitHub repository secrets, enable release workflow
-3. **Schedule security scans** — Set up automated security audit runs (audit checklist + vulnerability scanner) on a recurring schedule
-4. **Provision API keys for production LLM inference** — Configure Anthropic/OpenAI API keys on production nodes so NWTN pipeline returns real AI responses
-5. **Deploy to testnet** — Deploy FTNS ERC-20 contract to a testnet (Sepolia or Polygon Mumbai) using the ContractDeployer
+Following the integration wiring completion, seven additional sprints were executed to bring PRSM from "code-complete" to "release-ready":
 
-These are infrastructure/ops tasks, not engineering tasks. The codebase is ready.
+### Sprint 7 — Production Polish: Silent Failures & First-Run UX ✅
+
+**Commit:** `f3e7a06`
+
+| Deliverable | Files |
+|---|---|
+| LLM mock warning at node startup when no API keys detected | `prsm/cli.py` |
+| Mock response tagging (`"source": "mock"`, `"warning"` field) on inference and embedding jobs | `prsm/node/compute_provider.py` |
+| Preflight diagnostics wired into `prsm node start` (port, Python, config, bootstrap, IPFS checks) | `prsm/cli.py` |
+| `detect_available_backends()` utility for checking configured LLM providers | `prsm/compute/nwtn/backends/config.py` |
+| Deprecated FTNSService singleton warning silenced during normal startup | `prsm/economy/tokenomics/ftns_service.py` |
+| 25 new UX tests | `tests/unit/test_sprint7_ux.py` |
+
+### Sprint 8 — End-to-End Validation & Cleanup ✅
+
+**Commit:** `ae419b9`
+
+| Deliverable | Files |
+|---|---|
+| End-to-end smoke test script (14 checks: init → start → benchmark → inference → balance → shutdown) | `scripts/smoke_test.py` |
+| Gossip local delivery fix (messages reach local subscribers with 0 peers, enabling self-compute) | `prsm/node/gossip.py` |
+| Fixed 4 stale integration test imports (dag_consensus, marketplace, nwtn_e2e, p2p_partition) | `tests/integration/` |
+| Removed dead code: `prsm/compute/nwtn/archive_unused_files.py`, `do_archive_cleanup.py`, `prsm/core/database/optimized_queries.py` | — |
+| Repo hygiene: moved stray files from root, updated `.gitignore` | — |
+
+### Sprint 9 — Documentation & Developer Onboarding ✅
+
+**Commit:** `25d5d9c`
+
+| Deliverable | Files |
+|---|---|
+| Quickstart rewrite: 10-minute guide from clone to cross-node compute (397 lines) | `docs/quickstart.md` |
+| API reference: 71 endpoints documented with request/response formats (2,275 lines) | `docs/API_REFERENCE.md` |
+| Environment variables: 140+ vars across 15 categories documented | `.env.example` |
+| Contributing guide: smoke test reference, updated project structure, pre-PR checklist | `CONTRIBUTING.md` |
+
+### Sprint 10 — Version 0.2.0 Release Preparation ✅
+
+**Commit:** `ae9505f` | **Tag:** `v0.2.0`
+
+| Deliverable | Files |
+|---|---|
+| Version bumped to 0.2.0 across 27 occurrences in 24 files | `pyproject.toml`, `prsm/__init__.py`, `prsm/cli.py`, `README.md`, + 20 others |
+| CHANGELOG.md: complete 0.2.0 entry with Added/Changed/Breaking Changes/Migration Notes | `CHANGELOG.md` |
+| RELEASE_NOTES.md: user-facing summary of capabilities | `RELEASE_NOTES.md` |
+
+### Sprint 11 — Infrastructure Deployment Readiness ✅
+
+**Commit:** `f844956`
+
+| Deliverable | Files |
+|---|---|
+| Deleted `setup.py` (outdated 0.1.0 conflicting with pyproject.toml 0.2.0) | `setup.py` (deleted) |
+| Fixed release workflow Dockerfile path (`./docker/Dockerfile.production` → `./Dockerfile`) | `.github/workflows/release.yml` |
+| Fixed bootstrap Dockerfile to remove deleted setup.py reference | `docker/Dockerfile.bootstrap` |
+| Makefile deployment targets: build, publish-test, publish, docker-build, smoke, test | `Makefile` |
+| TestPyPI publishing guide | `docs/PUBLISHING_TESTPYPI.md` |
+| Build verified: `prsm-0.2.0-py3-none-any.whl` + `.tar.gz` install cleanly, `prsm --version` → 0.2.0 | — |
+
+### Sprint 12 — PyPI Package Name & Publication Prep ✅
+
+**Commit:** `e198771`
+
+| Deliverable | Files |
+|---|---|
+| PyPI distribution name changed from `prsm` (taken) to `prsm-network` | `pyproject.toml` |
+| All docs updated: `pip install prsm-network` (import name `prsm` unchanged) | `README.md`, `docs/quickstart.md`, `CONTRIBUTING.md`, + 3 others |
+| PyPI badge added to README | `README.md` |
+| Build verified: `prsm_network-0.2.0-py3-none-any.whl` + `.tar.gz` | — |
+| Comprehensive publication guide (TestPyPI + PyPI + GitHub Actions) | `docs/PUBLISHING_TESTPYPI.md` |
+
+### Sprint 13 — Bootstrap Server Deployment ✅
+
+**Commit:** `ca2ef73`
+
+| Deliverable | Files |
+|---|---|
+| Local bootstrap Docker Compose (simplified, no SSL, for testing) | `docker/docker-compose.bootstrap-local.yml` |
+| Standalone health check script for containers | `docker/healthcheck.py` |
+| Local bootstrap server test runner (start → health → WebSocket → shutdown) | `scripts/test_bootstrap_local.py` |
+| Bootstrap connectivity test suite | `tests/integration/test_bootstrap_connectivity.py` |
+| Step-by-step production deployment guide (DNS, SSL, Docker, verification) | `docs/BOOTSTRAP_DEPLOYMENT_GUIDE.md` |
+| Local bootstrap verified: server starts, health endpoint responds, WebSocket accepts connections | — |
+
+### Sprint 7–13 Cumulative Results
+
+| Metric | Value |
+|---|---|
+| Sprints completed | 7 |
+| Commits pushed | 8 |
+| Test suite size | 1,391 unit+security tests passing |
+| Smoke test | 14/14 checks |
+| Integration test collection | 194 tests, 0 collection errors |
+| Package build | `prsm_network-0.2.0` (.whl + .tar.gz) verified |
+| Release tag | `v0.2.0` on GitHub |
+
+---
+
+## 31. Operational Deployment Checklist — Outside-the-Codebase Tasks
+
+PRSM's codebase is feature-complete and release-ready. The remaining work to bring PRSM live as a functioning network is entirely operational — infrastructure provisioning, account setup, and credential configuration. None of these require code changes.
+
+### Step 1: Publish to PyPI (~10 minutes)
+
+**Goal:** Researchers worldwide can run `pip install prsm-network` to get PRSM.
+
+**1.1 Create PyPI account**
+- Go to https://pypi.org/account/register/
+- Register with an email address
+- Verify the email
+
+**1.2 Create API token**
+- Go to https://pypi.org/manage/account/#api-tokens
+- Click "Add API token"
+- Scope: "Entire account" (for first upload; can be scoped to `prsm-network` afterwards)
+- Copy the token (starts with `pypi-`)
+- Store it securely (password manager, not in code)
+
+**1.3 Build and upload**
+```bash
+cd /path/to/PRSM
+rm -rf dist/ build/ *.egg-info
+python -m build
+twine upload dist/* --username __token__ --password pypi-YOUR_TOKEN_HERE
+```
+
+**1.4 Verify**
+```bash
+pip install prsm-network
+prsm --version   # Should output: PRSM, version 0.2.0
+```
+
+**1.5 (Optional) TestPyPI first**
+If you want to test without touching the real PyPI:
+- Create account at https://test.pypi.org/account/register/
+- Get API token from https://test.pypi.org/manage/account/#api-tokens
+```bash
+twine upload --repository testpypi dist/* --username __token__ --password pypi-YOUR_TEST_TOKEN
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ prsm-network
+```
+
+**Troubleshooting:**
+- `HTTPError: 403 Forbidden` → Token is wrong or expired; regenerate
+- `HTTPError: 400 ... already exists` → This version is already published; bump version
+- Package name conflict → `prsm-network` is confirmed available as of 2026-03-06
+
+---
+
+### Step 2: Deploy Bootstrap Server (~30 minutes)
+
+**Goal:** New PRSM nodes can discover peers via `wss://bootstrap.prsm-network.com` instead of starting in degraded local mode.
+
+**2.1 Provision a VPS**
+
+Any cloud provider works. Minimum requirements: 2 CPU cores, 4GB RAM, 20GB SSD, Ubuntu 22.04.
+
+| Provider | Recommended Plan | Cost |
+|---|---|---|
+| DigitalOcean | Basic Droplet (2 vCPU, 4GB) | ~$24/month |
+| Linode | Linode 4GB | ~$24/month |
+| Vultr | Cloud Compute (2 vCPU, 4GB) | ~$24/month |
+| AWS | t3.medium (2 vCPU, 4GB) | ~$30/month |
+| GCP | e2-medium (2 vCPU, 4GB) | ~$25/month |
+
+For initial deployment, a single server is sufficient. All three bootstrap subdomains can point to the same IP.
+
+**2.2 Server setup**
+```bash
+# SSH into the server
+ssh root@YOUR_SERVER_IP
+
+# Install Docker
+curl -fsSL https://get.docker.com | sh
+apt-get install -y docker-compose-plugin
+
+# Clone PRSM
+git clone https://github.com/Ryno2390/PRSM.git
+cd PRSM/docker
+
+# Start bootstrap server
+docker compose -f docker-compose.bootstrap.yml up -d
+
+# Verify it's running
+curl http://localhost:8000/health
+```
+
+**2.3 Open firewall ports**
+```bash
+# If using UFW (Ubuntu default)
+ufw allow 8765/tcp   # WebSocket (bootstrap protocol)
+ufw allow 8000/tcp   # HTTP API (health/metrics)
+ufw allow 443/tcp    # HTTPS/WSS (SSL-terminated)
+ufw allow 22/tcp     # SSH (already open)
+ufw enable
+```
+
+**2.4 Alternative: AWS automated deployment**
+```bash
+# From local machine (requires AWS CLI configured)
+cd /path/to/PRSM
+./scripts/deploy_bootstrap_aws.sh -r us-east-1 -e production
+```
+
+**2.5 Alternative: GCP automated deployment**
+```bash
+# From local machine (requires gcloud CLI configured)
+cd /path/to/PRSM
+./scripts/deploy_bootstrap_gcp.sh -p YOUR_GCP_PROJECT -r us-east1 -e production
+```
+
+**Verification:**
+```bash
+# From local machine
+curl http://YOUR_SERVER_IP:8000/health
+# Expected: {"status":"healthy", ...}
+```
+
+---
+
+### Step 3: DNS Records (~5 minutes)
+
+**Goal:** Bootstrap subdomains resolve to the server provisioned in Step 2.
+
+**3.1 Access DNS management**
+- Log into the DNS provider for `prsm-network.com` (likely the domain registrar or Cloudflare)
+- Navigate to DNS records management
+
+**3.2 Create A records**
+
+| Hostname | Type | Value | TTL |
+|---|---|---|---|
+| `bootstrap.prsm-network.com` | A | `YOUR_SERVER_IP` | 300 |
+| `fallback1.prsm-network.com` | A | `YOUR_SERVER_IP` | 300 |
+| `fallback2.prsm-network.com` | A | `YOUR_SERVER_IP` | 300 |
+
+For initial deployment, all three can point to the same IP. When scaling, point `fallback1` and `fallback2` to servers in different regions.
+
+**3.3 Verify DNS propagation**
+```bash
+dig bootstrap.prsm-network.com +short
+# Should return: YOUR_SERVER_IP
+
+dig fallback1.prsm-network.com +short
+dig fallback2.prsm-network.com +short
+```
+
+DNS propagation typically takes 5–30 minutes. Use https://dnschecker.org to monitor.
+
+---
+
+### Step 4: SSL Certificate (~5 minutes)
+
+**Goal:** Bootstrap connections use `wss://` (secure WebSocket) instead of `ws://`.
+
+**4.1 Install certbot on the server**
+```bash
+ssh root@YOUR_SERVER_IP
+apt-get install -y certbot
+```
+
+**4.2 Generate certificates**
+```bash
+# Stop any service using port 80 temporarily
+docker compose -f docker-compose.bootstrap.yml stop nginx 2>/dev/null || true
+
+# Generate certificates for all bootstrap subdomains
+certbot certonly --standalone \
+  -d bootstrap.prsm-network.com \
+  -d fallback1.prsm-network.com \
+  -d fallback2.prsm-network.com \
+  --agree-tos \
+  --email admin@prsm-network.com
+
+# Restart services
+docker compose -f docker-compose.bootstrap.yml up -d
+```
+
+Certificates are saved to `/etc/letsencrypt/live/bootstrap.prsm-network.com/`.
+
+**4.3 Configure the bootstrap server to use SSL**
+
+Update the environment in `docker-compose.bootstrap.yml` (or create a `.env` file on the server):
+```bash
+PRSM_SSL_CERT=/etc/letsencrypt/live/bootstrap.prsm-network.com/fullchain.pem
+PRSM_SSL_KEY=/etc/letsencrypt/live/bootstrap.prsm-network.com/privkey.pem
+```
+
+Mount the certificate directory into the Docker container (add to docker-compose volumes):
+```yaml
+volumes:
+  - /etc/letsencrypt:/etc/letsencrypt:ro
+```
+
+Restart the container:
+```bash
+docker compose -f docker-compose.bootstrap.yml down
+docker compose -f docker-compose.bootstrap.yml up -d
+```
+
+**4.4 Set up auto-renewal**
+```bash
+# Certbot auto-renews via systemd timer (installed automatically)
+# Verify timer is active:
+systemctl status certbot.timer
+
+# Test renewal:
+certbot renew --dry-run
+```
+
+**4.5 Verify SSL**
+```bash
+# From local machine
+curl https://bootstrap.prsm-network.com:8000/health
+
+# Test WebSocket
+python3 -c "
+import asyncio, websockets
+async def test():
+    async with websockets.connect('wss://bootstrap.prsm-network.com:8765') as ws:
+        print('WSS connection successful!')
+asyncio.run(test())
+"
+```
+
+---
+
+### Step 5: GitHub Repository Secrets (~2 minutes)
+
+**Goal:** Automated releases publish to PyPI and Docker registries without manual token entry.
+
+**5.1 Navigate to repository secrets**
+- Go to https://github.com/Ryno2390/PRSM/settings/secrets/actions
+- Click "New repository secret"
+
+**5.2 Add required secrets**
+
+| Secret Name | Value | Purpose |
+|---|---|---|
+| `PYPI_API_TOKEN` | `pypi-...` (from Step 1.2) | Automated PyPI publishing on GitHub Release |
+| `TESTPYPI_API_TOKEN` | `pypi-...` (from TestPyPI, optional) | Pre-release testing |
+| `DOCKER_USERNAME` | Docker Hub username (optional) | Docker image publishing |
+| `DOCKER_PASSWORD` | Docker Hub access token (optional) | Docker image publishing |
+
+**Note:** `GITHUB_TOKEN` is automatically available — no setup needed for GitHub Container Registry (ghcr.io).
+
+**5.3 Verify automated release works**
+
+After adding secrets, test the pipeline:
+1. Go to https://github.com/Ryno2390/PRSM/releases
+2. Click "Create a new release"
+3. Tag: `v0.2.1` (or next version)
+4. Title: "PRSM v0.2.1"
+5. Publish release
+6. Watch the Actions tab — the release workflow should build, test, and publish automatically
+
+---
+
+### Post-Deployment Verification
+
+After completing all 5 steps, run this end-to-end verification:
+
+```bash
+# 1. Install from PyPI (proves Step 1 worked)
+pip install prsm-network
+prsm --version
+
+# 2. Start a node (proves Steps 2-4 worked)
+prsm node start --no-dashboard
+
+# Expected output should include:
+#   "Bootstrap success via wss://bootstrap.prsm-network.com"
+# Instead of:
+#   "DEGRADED local mode"
+
+# 3. Verify health (proves bootstrap is live)
+curl https://bootstrap.prsm-network.com:8000/health
+
+# 4. Submit a compute job
+curl -s -X POST http://localhost:8000/compute/submit \
+  -H 'Content-Type: application/json' \
+  -d '{"job_type": "benchmark", "payload": {"iterations": 100000}, "ftns_budget": 1.0}'
+```
+
+If a second person runs `prsm node start` on a different machine, both nodes should discover each other via the bootstrap server and be able to exchange compute jobs.
+
+---
+
+### Future Operational Tasks (Lower Priority)
+
+These are not required for launch but improve reliability and scale:
+
+| Task | Priority | Description |
+|---|---|---|
+| **Multi-region bootstrap** | Medium | Deploy fallback1/fallback2 to different regions (EU, Asia) for latency and redundancy |
+| **Monitoring dashboards** | Medium | Connect Grafana to bootstrap Prometheus metrics; set up alerts for peer count drops |
+| **Automated security scans** | Medium | Schedule `prsm/security/audit_checklist.py` and `prsm/security/scanner.py` as cron or GitHub Action |
+| **FTNS testnet deployment** | Medium | Deploy ERC-20 contract to Sepolia or Polygon Mumbai using `prsm/economy/blockchain/deployment.py` |
+| **Production LLM keys** | Low | Configure Anthropic/OpenAI API keys on bootstrap nodes for real inference demos |
+| **CDN for SDK docs** | Low | Host SDK documentation on GitHub Pages or ReadTheDocs |
+| **PyPI trusted publishing** | Low | Configure OIDC-based trusted publishing (no stored API tokens) at pypi.org |
 
 ---
 
@@ -2536,4 +2931,11 @@ These are infrastructure/ops tasks, not engineering tasks. The codebase is ready
 *Phase 1-5 implementation completed: 2026-03-04*
 *Integration wiring audit completed: 2026-03-05*
 *Integration wiring completed: 2026-03-05*
+*Sprint 7 (UX polish) completed: 2026-03-05*
+*Sprint 8 (E2E validation) completed: 2026-03-05*
+*Sprint 9 (documentation) completed: 2026-03-05*
+*Sprint 10 (v0.2.0 release) completed: 2026-03-05*
+*Sprint 11 (deployment readiness) completed: 2026-03-06*
+*Sprint 12 (PyPI package name) completed: 2026-03-06*
+*Sprint 13 (bootstrap deployment) completed: 2026-03-06*
 *PRSM Version: 0.2.0*
