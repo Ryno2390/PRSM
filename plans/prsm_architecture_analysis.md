@@ -2948,37 +2948,24 @@ PRSM is operational as of 2026-03-06. The critical path is complete:
 
 The remaining work is **polish and scale** — nothing blocks users from using PRSM today.
 
-### Near-Term (Quick Wins)
+### Near-Term (Quick Wins) ✅ ALL COMPLETED (2026-03-06)
 
-These are small, high-impact tasks that should be done soon:
+| # | Task | Status | Details |
+|---|---|---|---|
+| 1 | **v0.2.1 release** | ✅ Complete | Published to PyPI with `wss://bootstrap1.prsm-network.com:8765` URLs. Tag `v0.2.1` pushed. `pip install prsm-network` now auto-connects to the live bootstrap server. |
+| 2 | **SSL for bootstrap** | ✅ Complete | Let's Encrypt certificates obtained for bootstrap1, fallback1, fallback2. Certs copied to `/root/ssl/` on server and mounted into Docker container. Bootstrap URLs upgraded from `ws://` to `wss://`. Auto-renewal configured via certbot systemd timer. |
+| 3 | **Server SSH access** | ✅ Complete | SSH key generated (`id_ed25519`), added to DigitalOcean Droplet. `ssh root@159.203.129.218` working. |
 
-| # | Task | Effort | Impact | Details |
-|---|---|---|---|---|
-| 1 | **v0.2.1 release with live bootstrap URLs** | 30 min | **Critical** | The PyPI package (v0.2.0) still has the old `wss://bootstrap.prsm-network.com` URLs. A v0.2.1 release with the corrected `ws://bootstrap1.prsm-network.com:8765` URLs means `pip install prsm-network` users auto-connect to the live bootstrap without manual config changes. |
-| 2 | **SSL for bootstrap server** | 15 min | High | Run certbot on the DigitalOcean Droplet to get a Let's Encrypt certificate, then update the bootstrap URLs from `ws://` to `wss://`. Encrypts all peer discovery traffic. |
-| 3 | **Server SSH key setup** | 5 min | Medium | Add the new `id_ed25519` key to the DigitalOcean Droplet's authorized keys so it can be managed going forward. Already done for root access; verify backup access paths. |
+**Implementation notes for future reference:**
 
-**How to do v0.2.1 release:**
+SSL cert renewal: Certs expire 2026-06-04. Certbot auto-renews, but after renewal the certs need to be re-copied to `/root/ssl/` and the container restarted:
 ```bash
-# 1. Bump version in pyproject.toml, prsm/__init__.py, prsm/cli.py
-# 2. Rebuild: python -m build
-# 3. Upload: twine upload dist/*
-# 4. Or: create a GitHub Release tagged v0.2.1 (auto-publishes via CI)
-```
-
-**How to add SSL:**
-```bash
-# On the DigitalOcean server:
 ssh root@159.203.129.218
-apt-get install -y certbot
-certbot certonly --standalone \
-  -d bootstrap1.prsm-network.com \
-  -d fallback1.prsm-network.com \
-  -d fallback2.prsm-network.com \
-  --agree-tos --email admin@prsm-network.com
-
-# Then update docker-compose to mount certs and switch to wss://
-# Then update prsm/node/config.py URLs back to wss://
+cp /etc/letsencrypt/live/bootstrap1.prsm-network.com/fullchain.pem /root/ssl/
+cp /etc/letsencrypt/live/bootstrap1.prsm-network.com/privkey.pem /root/ssl/
+chmod 644 /root/ssl/*.pem
+cd ~/PRSM/docker
+docker compose -f docker-compose.bootstrap-local.yml restart
 ```
 
 ### Medium-Term (When Users Start Joining)
@@ -3053,4 +3040,6 @@ Once two or more nodes discover each other via bootstrap, they communicate direc
 *GitHub secrets configured: 2026-03-06 — PYPI_API_TOKEN for automated releases*
 *All operational deployment steps complete: 2026-03-06*
 *Polish & scale roadmap published: 2026-03-06*
-*PRSM Version: 0.2.0*
+*Near-term items completed: 2026-03-06 — v0.2.1 release, SSL certs, server access*
+*PyPI v0.2.1 published: 2026-03-06 — https://pypi.org/project/prsm-network/0.2.1/*
+*PRSM Version: 0.2.1*
