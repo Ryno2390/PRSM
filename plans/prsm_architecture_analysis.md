@@ -2451,9 +2451,12 @@ FULLY WORKING END-TO-END:
 MODULES BUILT, WIRING NEEDED:
   (none — all gaps resolved, see Section 29)
 
+PUBLISHED & DEPLOYED:
+  ✅ PyPI package live: pip install prsm-network (v0.2.0)
+
 INFRASTRUCTURE READY, DEPLOYMENT NEEDED:
   📦 Bootstrap server (code + Docker + monitoring ready, needs cloud deployment)
-  📦 CI/CD pipeline (GitHub Actions ready, needs PyPI/Docker credentials)
+  📦 CI/CD pipeline (GitHub Actions ready, needs PYPI_API_TOKEN in GitHub secrets)
   📦 Security tooling (audit/scanner/pentest ready, needs scheduled runs)
 ```
 
@@ -2503,9 +2506,12 @@ FULLY WORKING END-TO-END:
   ✅ IPFS content sharding (auto-shard large files in ContentUploader)
   ✅ FTNS bridge (deposit/withdraw via API and CLI)
 
+PUBLISHED & DEPLOYED:
+  ✅ PyPI package live: pip install prsm-network (v0.2.0)
+
 INFRASTRUCTURE READY, DEPLOYMENT NEEDED:
   📦 Bootstrap server (code + Docker + monitoring ready, needs cloud deployment)
-  📦 CI/CD pipeline (GitHub Actions ready, needs PyPI/Docker credentials)
+  📦 CI/CD pipeline (GitHub Actions ready, needs PYPI_API_TOKEN in GitHub secrets)
   📦 Security tooling (audit/scanner/pentest ready, needs scheduled runs)
 ```
 
@@ -2617,49 +2623,33 @@ Following the integration wiring completion, seven additional sprints were execu
 
 PRSM's codebase is feature-complete and release-ready. The remaining work to bring PRSM live as a functioning network is entirely operational — infrastructure provisioning, account setup, and credential configuration. None of these require code changes.
 
-### Step 1: Publish to PyPI (~10 minutes)
+### Step 1: Publish to PyPI ✅ COMPLETED (2026-03-06)
 
 **Goal:** Researchers worldwide can run `pip install prsm-network` to get PRSM.
 
-**1.1 Create PyPI account**
-- Go to https://pypi.org/account/register/
-- Register with an email address
-- Verify the email
+**Status:** Published and verified. Live at https://pypi.org/project/prsm-network/0.2.0/
 
-**1.2 Create API token**
-- Go to https://pypi.org/manage/account/#api-tokens
-- Click "Add API token"
-- Scope: "Entire account" (for first upload; can be scoped to `prsm-network` afterwards)
-- Copy the token (starts with `pypi-`)
-- Store it securely (password manager, not in code)
+**What was done:**
+1. PyPI account created and API token generated
+2. Package built: `prsm_network-0.2.0-py3-none-any.whl` + `prsm_network-0.2.0.tar.gz`
+3. Both artifacts passed `twine check` validation
+4. Uploaded via `twine upload dist/* --username __token__`
+5. Verified installation: `pip install prsm-network` → installs all dependencies → `prsm --version` → `0.2.0`
 
-**1.3 Build and upload**
-```bash
-cd /path/to/PRSM
-rm -rf dist/ build/ *.egg-info
-python -m build
-twine upload dist/* --username __token__ --password pypi-YOUR_TOKEN_HERE
-```
-
-**1.4 Verify**
+**Install command (works now for anyone):**
 ```bash
 pip install prsm-network
-prsm --version   # Should output: PRSM, version 0.2.0
+prsm --version   # → PRSM, version 0.2.0
+prsm node start  # → starts a PRSM node
 ```
 
-**1.5 (Optional) TestPyPI first**
-If you want to test without touching the real PyPI:
-- Create account at https://test.pypi.org/account/register/
-- Get API token from https://test.pypi.org/manage/account/#api-tokens
+**For future releases:**
 ```bash
-twine upload --repository testpypi dist/* --username __token__ --password pypi-YOUR_TEST_TOKEN
-pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ prsm-network
+# Bump version in pyproject.toml, rebuild, re-upload
+rm -rf dist/ build/ *.egg-info
+python -m build
+twine upload dist/* --username __token__
 ```
-
-**Troubleshooting:**
-- `HTTPError: 403 Forbidden` → Token is wrong or expired; regenerate
-- `HTTPError: 400 ... already exists` → This version is already published; bump version
-- Package name conflict → `prsm-network` is confirmed available as of 2026-03-06
 
 ---
 
@@ -2938,4 +2928,5 @@ These are not required for launch but improve reliability and scale:
 *Sprint 11 (deployment readiness) completed: 2026-03-06*
 *Sprint 12 (PyPI package name) completed: 2026-03-06*
 *Sprint 13 (bootstrap deployment) completed: 2026-03-06*
+*PyPI published: 2026-03-06 — https://pypi.org/project/prsm-network/0.2.0/*
 *PRSM Version: 0.2.0*
