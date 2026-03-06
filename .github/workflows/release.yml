@@ -180,7 +180,7 @@ jobs:
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
           echo "✅ Package published to PyPI"
-          echo "📦 Install with: pip install prsm==$VERSION"
+          echo "📦 Install with: pip install prsm-network==$VERSION"
 
   # ===================================
   # Publish to TestPyPI (for pre-releases)
@@ -363,7 +363,7 @@ jobs:
           echo "### Installation" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "pip install prsm==$VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "pip install prsm-network==$VERSION" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker" >> $GITHUB_STEP_SUMMARY

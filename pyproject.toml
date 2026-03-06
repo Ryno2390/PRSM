@@ -6,7 +6,7 @@ requires = ["setuptools>=61.0", "wheel", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "prsm"
+name = "prsm-network"
 version = "0.2.0"
 description = "Protocol for Recursive Scientific Modeling - A decentralized AI-powered scientific research platform"
 readme = "README.md"
@@ -129,11 +129,11 @@ all = [
 prsm = "prsm.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/PRSM-org/PRSM"
+Homepage = "https://github.com/Ryno2390/PRSM"
 Documentation = "https://prsm.readthedocs.io"
-Repository = "https://github.com/PRSM-org/PRSM.git"
-Issues = "https://github.com/PRSM-org/PRSM/issues"
-Changelog = "https://github.com/PRSM-org/PRSM/blob/main/CHANGELOG.md"
+Repository = "https://github.com/Ryno2390/PRSM.git"
+Issues = "https://github.com/Ryno2390/PRSM/issues"
+Changelog = "https://github.com/Ryno2390/PRSM/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
 packages = {find = {}}

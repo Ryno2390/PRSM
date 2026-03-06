@@ -2184,7 +2184,7 @@ prsm/compute/nwtn/
 #### 5.2 CI/CD and Release Pipeline
 
 - Automated test matrix (Python 3.11-3.14, Linux/macOS)
-- PyPI package publishing (`pip install prsm`)
+- PyPI package publishing (`pip install prsm-network`)
 - Docker image publishing
 - Automated changelog generation
 

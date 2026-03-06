@@ -15,6 +15,14 @@ Get from zero to cross-node compute in 10 minutes. This guide walks you through 
 
 ## Install
 
+### Install from PyPI
+
+```bash
+pip install prsm-network
+```
+
+### Install from Source
+
 Clone the repository and install PRSM in editable mode:
 
 ```bash
