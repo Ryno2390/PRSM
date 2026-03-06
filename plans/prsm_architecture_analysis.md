@@ -2453,10 +2453,12 @@ MODULES BUILT, WIRING NEEDED:
 
 PUBLISHED & DEPLOYED:
   ✅ PyPI package live: pip install prsm-network (v0.2.0)
+  ✅ Bootstrap server live: bootstrap1.prsm-network.com:8765 (DigitalOcean NYC3)
+  ✅ DNS records: bootstrap1, fallback1, fallback2 on Cloudflare
+  ✅ GitHub Actions: PYPI_API_TOKEN configured for automated releases
 
-INFRASTRUCTURE READY, DEPLOYMENT NEEDED:
-  📦 Bootstrap server (code + Docker + monitoring ready, needs cloud deployment)
-  📦 CI/CD pipeline (GitHub Actions ready, needs PYPI_API_TOKEN in GitHub secrets)
+REMAINING (LOWER PRIORITY):
+  📦 SSL certificate (certbot on server to upgrade ws:// → wss://)
   📦 Security tooling (audit/scanner/pentest ready, needs scheduled runs)
 ```
 
@@ -2508,10 +2510,12 @@ FULLY WORKING END-TO-END:
 
 PUBLISHED & DEPLOYED:
   ✅ PyPI package live: pip install prsm-network (v0.2.0)
+  ✅ Bootstrap server live: bootstrap1.prsm-network.com:8765 (DigitalOcean NYC3)
+  ✅ DNS records: bootstrap1, fallback1, fallback2 on Cloudflare
+  ✅ GitHub Actions: PYPI_API_TOKEN configured for automated releases
 
-INFRASTRUCTURE READY, DEPLOYMENT NEEDED:
-  📦 Bootstrap server (code + Docker + monitoring ready, needs cloud deployment)
-  📦 CI/CD pipeline (GitHub Actions ready, needs PYPI_API_TOKEN in GitHub secrets)
+REMAINING (LOWER PRIORITY):
+  📦 SSL certificate (certbot on server to upgrade ws:// → wss://)
   📦 Security tooling (audit/scanner/pentest ready, needs scheduled runs)
 ```
 
@@ -2653,9 +2657,28 @@ twine upload dist/* --username __token__
 
 ---
 
-### Step 2: Deploy Bootstrap Server (~30 minutes)
+### Step 2: Deploy Bootstrap Server ✅ COMPLETED (2026-03-06)
 
-**Goal:** New PRSM nodes can discover peers via `wss://bootstrap.prsm-network.com` instead of starting in degraded local mode.
+**Goal:** New PRSM nodes can discover peers via the bootstrap server instead of starting in degraded local mode.
+
+**Status:** Live at `http://bootstrap1.prsm-network.com:8000/health`
+
+**What was done:**
+1. DigitalOcean Droplet provisioned (Ubuntu, 1 vCPU / 2GB RAM, NYC3 region, IP: 159.203.129.218)
+2. Docker installed, PRSM cloned, bootstrap server built with minimal dependencies
+3. Simplified Dockerfile (single-stage, 6 pip packages instead of 100+)
+4. Server running and accepting connections on ports 8765 (WebSocket) and 8000 (HTTP API)
+5. UFW firewall configured (ports 8765, 8000, 443 open)
+
+**Verification:**
+```bash
+curl http://bootstrap1.prsm-network.com:8000/health
+# → {"status":"healthy","active_connections":0,...}
+curl http://159.203.129.218:8000/health
+# → {"status":"healthy",...}
+```
+
+**Previous documentation (for reference/future servers):**
 
 **2.1 Provision a VPS**
 
@@ -2724,9 +2747,23 @@ curl http://YOUR_SERVER_IP:8000/health
 
 ---
 
-### Step 3: DNS Records (~5 minutes)
+### Step 3: DNS Records ✅ COMPLETED (2026-03-06)
 
 **Goal:** Bootstrap subdomains resolve to the server provisioned in Step 2.
+
+**Status:** All three subdomains resolving via Cloudflare (DNS only, no proxy).
+
+**Records created:**
+
+| Hostname | Type | Content | Mode |
+|---|---|---|---|
+| `bootstrap1.prsm-network.com` | A | `159.203.129.218` | DNS only |
+| `fallback1.prsm-network.com` | A | `159.203.129.218` | DNS only |
+| `fallback2.prsm-network.com` | A | `159.203.129.218` | DNS only |
+
+**Note:** `bootstrap.prsm-network.com` (without the "1") was already used by a Cloudflare Tunnel record, so the primary bootstrap uses `bootstrap1` instead. Code updated in `prsm/node/config.py`.
+
+**Previous documentation (for reference):**
 
 **3.1 Access DNS management**
 - Log into the DNS provider for `prsm-network.com` (likely the domain registrar or Cloudflare)
@@ -2755,9 +2792,13 @@ DNS propagation typically takes 5–30 minutes. Use https://dnschecker.org to mo
 
 ---
 
-### Step 4: SSL Certificate (~5 minutes)
+### Step 4: SSL Certificate — DEFERRED (using ws:// for alpha)
 
 **Goal:** Bootstrap connections use `wss://` (secure WebSocket) instead of `ws://`.
+
+**Current status:** Using `ws://` (non-SSL) for alpha deployment. Cloudflare proxy was incompatible with non-standard ports (8765, 8000), so DNS-only mode is used. SSL via certbot can be added later to upgrade to `wss://`.
+
+**To add SSL later:**
 
 **4.1 Install certbot on the server**
 ```bash
@@ -2831,9 +2872,13 @@ asyncio.run(test())
 
 ---
 
-### Step 5: GitHub Repository Secrets (~2 minutes)
+### Step 5: GitHub Repository Secrets ✅ COMPLETED (2026-03-06)
 
 **Goal:** Automated releases publish to PyPI and Docker registries without manual token entry.
+
+**Status:** `PYPI_API_TOKEN` secret added to GitHub repository. Future releases will auto-publish via the release workflow.
+
+**Previous documentation (for reference):**
 
 **5.1 Navigate to repository secrets**
 - Go to https://github.com/Ryno2390/PRSM/settings/secrets/actions
@@ -2929,4 +2974,8 @@ These are not required for launch but improve reliability and scale:
 *Sprint 12 (PyPI package name) completed: 2026-03-06*
 *Sprint 13 (bootstrap deployment) completed: 2026-03-06*
 *PyPI published: 2026-03-06 — https://pypi.org/project/prsm-network/0.2.0/*
+*Bootstrap server live: 2026-03-06 — bootstrap1.prsm-network.com:8765 (159.203.129.218)*
+*DNS records created: 2026-03-06 — bootstrap1, fallback1, fallback2 on Cloudflare*
+*GitHub secrets configured: 2026-03-06 — PYPI_API_TOKEN for automated releases*
+*All operational deployment steps complete: 2026-03-06*
 *PRSM Version: 0.2.0*
