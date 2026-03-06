@@ -1,0 +1,134 @@
+# PRSM Bootstrap Server Local Development Docker Compose
+# Simplified version for local testing without SSL or external dependencies
+# 
+# Usage:
+#   docker compose -f docker/docker-compose.bootstrap-local.yml up -d
+#   docker compose -f docker/docker-compose.bootstrap-local.yml logs -f bootstrap
+#   docker compose -f docker/docker-compose.bootstrap-local.yml down
+
+version: '3.8'
+
+networks:
+  prsm-bootstrap-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  postgres-data:
+  redis-data:
+  peer-data:
+
+services:
+  # ===================================
+  # Bootstrap Server (Primary)
+  # ===================================
+  bootstrap:
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile.bootstrap
+      target: production
+    image: prsm-bootstrap:latest
+    container_name: prsm-bootstrap-local
+    restart: unless-stopped
+    ports:
+      - "8765:8765"   # WebSocket P2P
+      - "8000:8000"   # HTTP API
+    environment:
+      PRSM_ENV: development
+      PRSM_LOG_LEVEL: DEBUG
+      PRSM_DOMAIN: localhost
+      PRSM_BOOTSTRAP_PORT: 8765
+      PRSM_API_PORT: 8000
+      PRSM_MAX_PEERS: 100
+      PRSM_PEER_TIMEOUT: 300
+      PRSM_HEARTBEAT_INTERVAL: 30
+      PRSM_SSL_ENABLED: "false"
+      PRSM_METRICS_ENABLED: "false"
+      PRSM_REGION: local
+      DATABASE_URL: postgresql://prsm:prsm_local_pass@postgres:5432/prsm
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - peer-data:/app/data
+      - ../config:/app/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - prsm-bootstrap-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ===================================
+  # PostgreSQL Database
+  # ===================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: prsm-bootstrap-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: prsm
+      POSTGRES_PASSWORD: prsm_local_pass
+      POSTGRES_DB: prsm
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - prsm-bootstrap-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prsm -d prsm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # ===================================
+  # Redis Cache
+  # ===================================
+  redis:
+    image: redis:7-alpine
+    container_name: prsm-bootstrap-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - prsm-bootstrap-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
