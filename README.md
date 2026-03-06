@@ -4,9 +4,19 @@ PRSM is a peer-to-peer collaboration framework for neuro-symbolic AI research. I
 
 **Current version: 0.2.0 (Alpha)** | [www.prsm-network.com](https://www.prsm-network.com)
 
+[![PyPI version](https://badge.fury.io/py/prsm-network.svg)](https://badge.fury.io/py/prsm-network)
+
 ---
 
 ## Quick Start
+
+### Install from PyPI
+
+```bash
+pip install prsm-network
+```
+
+### Install from Source
 
 ```bash
 # Clone and set up

@@ -188,7 +188,7 @@ Every collaboration tool includes **NWTN (Novel World Tensor Network)** AI integ
 
 ```bash
 # Install PRSM collaboration platform
-pip install prsm[collaboration]
+pip install prsm-network[collaboration]
 
 # Initialize P2P network
 prsm collaboration init --network-id "your-project"
