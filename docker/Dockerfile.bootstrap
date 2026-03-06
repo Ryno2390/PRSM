@@ -46,7 +46,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Copy source code
 COPY prsm/ ./prsm/
 COPY pyproject.toml ./
-COPY setup.py ./
 
 # Install the package
 RUN pip install --no-cache-dir -e .

@@ -1,7 +1,8 @@
 # PRSM Development Makefile
 # Provides common development tasks
 
-.PHONY: help install install-dev test test-cov lint format clean run docker docker-optimized docs nwtn-test nwtn-stress load-test
+.PHONY: help install install-dev test test-cov lint format clean run docker docker-optimized docs nwtn-test nwtn-stress load-test \
+        build publish-test publish docker-push bootstrap-build smoke
 
 # Default target
 help:
@@ -36,6 +37,16 @@ help:
 	@echo "  validate-phase1  Complete Phase 1 validation suite"
 	@echo "  safeguard-test   Test Recursive Self-Improvement Safeguards"
 	@echo "  validate-phase3  Complete Phase 3 validation suite"
+	@echo ""
+	@echo "Deployment Commands:"
+	@echo "  build           Build Python package (wheel + sdist)"
+	@echo "  publish-test    Publish to TestPyPI (dry run)"
+	@echo "  publish         Publish to PyPI (production)"
+	@echo "  docker-build    Build Docker image"
+	@echo "  docker-push     Push Docker image to GHCR"
+	@echo "  bootstrap-build Build bootstrap Docker image"
+	@echo "  smoke           Run smoke test (quick validation)"
+	@echo "  test            Run full test suite"
 
 # Installation
 install:
@@ -400,3 +411,73 @@ validate-phase3: p2p-network-test marketplace-test onboarding-test data-spine-te
 	@echo "  👥 Contributor Onboarding System: COMPLETED"
 	@echo "  🌐 PRSM Data Spine Proxy: COMPLETED"
 	@echo "  🛡️ Recursive Self-Improvement Safeguards: COMPLETED"
+
+# =============================================================================
+# Deployment Targets (Sprint 11 - PyPI Publishing & Bootstrap Deployment)
+# =============================================================================
+# These are thin wrappers around deployment commands for one-liner execution.
+# Customize variables below for your environment.
+# ----------------------------------------------------------------------------
+
+# Docker image registry configuration
+# Override these with environment variables or edit directly
+GHCR_OWNER ?= ryneschultz
+IMAGE_NAME ?= prsm
+IMAGE_TAG ?= latest
+
+# Build Python package (creates .whl and .tar.gz in dist/)
+build: clean
+	@echo "📦 Building Python package..."
+	python -m build
+	@echo "✅ Package built successfully! Check dist/ directory."
+
+# Publish to TestPyPI (dry run before production)
+# Requires: TWINE_USERNAME and TWINE_PASSWORD environment variables
+# Or use: twine upload --repository testpypi dist/* --verbose
+publish-test:
+	@echo "🧪 Publishing to TestPyPI..."
+	@if [ ! -d "dist" ] || [ -z "$$(ls -A dist 2>/dev/null)" ]; then \
+		echo "❌ No dist/ directory found. Run 'make build' first."; \
+		exit 1; \
+	fi
+	twine upload --repository testpypi dist/*
+	@echo "✅ Published to TestPyPI! Verify at: https://test.pypi.org/project/prsm/"
+
+# Publish to PyPI (production)
+# Requires: TWINE_USERNAME and TWINE_PASSWORD environment variables
+# WARNING: This is irreversible - ensure you've tested on TestPyPI first!
+publish:
+	@echo "🚀 Publishing to PyPI (production)..."
+	@if [ ! -d "dist" ] || [ -z "$$(ls -A dist 2>/dev/null)" ]; then \
+		echo "❌ No dist/ directory found. Run 'make build' first."; \
+		exit 1; \
+	fi
+	twine upload dist/*
+	@echo "✅ Published to PyPI! Verify at: https://pypi.org/project/prsm/"
+
+# Build Docker image (main PRSM image)
+docker-build:
+	@echo "🐳 Building Docker image..."
+	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) .
+	@echo "✅ Docker image built: $(IMAGE_NAME):$(IMAGE_TAG)"
+
+# Push Docker image to GitHub Container Registry
+docker-push:
+	@echo "📤 Pushing Docker image to GHCR..."
+	docker tag $(IMAGE_NAME):$(IMAGE_TAG) ghcr.io/$(GHCR_OWNER)/$(IMAGE_NAME):$(IMAGE_TAG)
+	docker push ghcr.io/$(GHCR_OWNER)/$(IMAGE_NAME):$(IMAGE_TAG)
+	@echo "✅ Image pushed to: ghcr.io/$(GHCR_OWNER)/$(IMAGE_NAME):$(IMAGE_TAG)"
+
+# Build bootstrap Docker image (for bootstrap server deployment)
+# Uses Dockerfile.bootstrap from docker/ directory
+bootstrap-build:
+	@echo "🚀 Building bootstrap Docker image..."
+	cd docker && docker build -f Dockerfile.bootstrap -t prsm-bootstrap:$(IMAGE_TAG) ..
+	@echo "✅ Bootstrap image built: prsm-bootstrap:$(IMAGE_TAG)"
+
+# Run smoke test (quick validation of core functionality)
+# Tests bootstrap server imports and basic functionality
+smoke:
+	@echo "🔥 Running smoke test..."
+	pytest tests/unit/test_bootstrap_server.py -v --tb=short
+	@echo "✅ Smoke test passed!"
