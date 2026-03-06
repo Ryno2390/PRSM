@@ -2916,16 +2916,16 @@ After completing all 5 steps, run this end-to-end verification:
 pip install prsm-network
 prsm --version
 
-# 2. Start a node (proves Steps 2-4 worked)
+# 2. Start a node (proves Steps 2-3 worked)
 prsm node start --no-dashboard
 
 # Expected output should include:
-#   "Bootstrap success via wss://bootstrap.prsm-network.com"
+#   "Bootstrap success via ws://bootstrap1.prsm-network.com:8765"
 # Instead of:
 #   "DEGRADED local mode"
 
 # 3. Verify health (proves bootstrap is live)
-curl https://bootstrap.prsm-network.com:8000/health
+curl http://bootstrap1.prsm-network.com:8000/health
 
 # 4. Submit a compute job
 curl -s -X POST http://localhost:8000/compute/submit \
@@ -2937,19 +2937,93 @@ If a second person runs `prsm node start` on a different machine, both nodes sho
 
 ---
 
-### Future Operational Tasks (Lower Priority)
+## 32. Polish & Scale Roadmap (Post-Launch)
 
-These are not required for launch but improve reliability and scale:
+PRSM is operational as of 2026-03-06. The critical path is complete:
+- Researchers can `pip install prsm-network` and run a node
+- Nodes connect to a live bootstrap server
+- Single-node compute works out of the box
+- Multi-node P2P works when multiple nodes are running
+- All code is tested (1,391+ tests), documented, and on GitHub
 
-| Task | Priority | Description |
-|---|---|---|
-| **Multi-region bootstrap** | Medium | Deploy fallback1/fallback2 to different regions (EU, Asia) for latency and redundancy |
-| **Monitoring dashboards** | Medium | Connect Grafana to bootstrap Prometheus metrics; set up alerts for peer count drops |
-| **Automated security scans** | Medium | Schedule `prsm/security/audit_checklist.py` and `prsm/security/scanner.py` as cron or GitHub Action |
-| **FTNS testnet deployment** | Medium | Deploy ERC-20 contract to Sepolia or Polygon Mumbai using `prsm/economy/blockchain/deployment.py` |
-| **Production LLM keys** | Low | Configure Anthropic/OpenAI API keys on bootstrap nodes for real inference demos |
-| **CDN for SDK docs** | Low | Host SDK documentation on GitHub Pages or ReadTheDocs |
-| **PyPI trusted publishing** | Low | Configure OIDC-based trusted publishing (no stored API tokens) at pypi.org |
+The remaining work is **polish and scale** — nothing blocks users from using PRSM today.
+
+### Near-Term (Quick Wins)
+
+These are small, high-impact tasks that should be done soon:
+
+| # | Task | Effort | Impact | Details |
+|---|---|---|---|---|
+| 1 | **v0.2.1 release with live bootstrap URLs** | 30 min | **Critical** | The PyPI package (v0.2.0) still has the old `wss://bootstrap.prsm-network.com` URLs. A v0.2.1 release with the corrected `ws://bootstrap1.prsm-network.com:8765` URLs means `pip install prsm-network` users auto-connect to the live bootstrap without manual config changes. |
+| 2 | **SSL for bootstrap server** | 15 min | High | Run certbot on the DigitalOcean Droplet to get a Let's Encrypt certificate, then update the bootstrap URLs from `ws://` to `wss://`. Encrypts all peer discovery traffic. |
+| 3 | **Server SSH key setup** | 5 min | Medium | Add the new `id_ed25519` key to the DigitalOcean Droplet's authorized keys so it can be managed going forward. Already done for root access; verify backup access paths. |
+
+**How to do v0.2.1 release:**
+```bash
+# 1. Bump version in pyproject.toml, prsm/__init__.py, prsm/cli.py
+# 2. Rebuild: python -m build
+# 3. Upload: twine upload dist/*
+# 4. Or: create a GitHub Release tagged v0.2.1 (auto-publishes via CI)
+```
+
+**How to add SSL:**
+```bash
+# On the DigitalOcean server:
+ssh root@159.203.129.218
+apt-get install -y certbot
+certbot certonly --standalone \
+  -d bootstrap1.prsm-network.com \
+  -d fallback1.prsm-network.com \
+  -d fallback2.prsm-network.com \
+  --agree-tos --email admin@prsm-network.com
+
+# Then update docker-compose to mount certs and switch to wss://
+# Then update prsm/node/config.py URLs back to wss://
+```
+
+### Medium-Term (When Users Start Joining)
+
+These improve reliability and observability as the network grows:
+
+| # | Task | Effort | Impact | Details |
+|---|---|---|---|---|
+| 4 | **Multi-region bootstrap** | 2 hours | High | Deploy separate bootstrap servers for `fallback1` (EU) and `fallback2` (Asia-Pacific). Update DNS A records to point to the new server IPs. Provides redundancy and lower latency for international users. Reuse the same Docker setup — just provision two more VPS instances. |
+| 5 | **Monitoring dashboards** | 1–2 hours | High | Connect Grafana to bootstrap Prometheus metrics. The Docker compose stack (`docker-compose.bootstrap.yml`) already includes Prometheus and Grafana services. Key metrics to track: active peer count, connection rate, message throughput, peer churn. Set up alerts for peer count drops or sustained connection failures. |
+| 6 | **Automated security scans** | 1 hour | Medium | Schedule `prsm/security/audit_checklist.py` and `prsm/security/scanner.py` as a weekly GitHub Actions cron job or a cron task on the server. The code is ready — just needs a trigger. |
+| 7 | **FTNS testnet deployment** | 2–3 hours | Medium | Deploy the FTNS ERC-20 token contract to Sepolia (Ethereum testnet) or Polygon Mumbai using `prsm/economy/blockchain/deployment.py`. Requires: an Ethereum wallet with testnet ETH (free from faucets), an Infura/Alchemy RPC URL. This enables real on-chain token operations for testing. |
+
+### Longer-Term (Product Growth)
+
+These are strategic initiatives for scaling PRSM from alpha to a real research platform:
+
+| # | Task | Effort | Impact | Details |
+|---|---|---|---|---|
+| 8 | **Production LLM API keys** | 30 min setup | **High** | Configure Anthropic and/or OpenAI API keys on nodes so the NWTN pipeline returns real AI-generated research analysis instead of mock responses. Without keys, inference works but returns `"source": "mock"` responses. With keys, researchers get real Claude/GPT-powered analysis. |
+| 9 | **Web dashboard hosting** | 1–2 days | High | The web dashboard (`prsm/dashboard/`) exists but currently runs as part of the node. Could be deployed as a standalone web app (hosted on the server or a separate service) so researchers can monitor the network from a browser without running a node. |
+| 10 | **SDK documentation site** | 1 day | Medium | Host the Python SDK documentation on GitHub Pages or ReadTheDocs. The SDK (`sdks/python/prsm_sdk/`) has 13 modules — proper API docs would help developers integrate with PRSM programmatically. |
+| 11 | **PyPI trusted publishing** | 30 min | Low | Configure OIDC-based trusted publishing at pypi.org so releases don't need a stored API token. More secure than the current token-based approach. See https://docs.pypi.org/trusted-publishers/ |
+| 12 | **Community & adoption** | Ongoing | **Critical** | Get researchers running nodes, filing issues, and contributing. Write blog posts, submit to Hacker News/Reddit, present at ML meetups. The technology is ready — adoption is the bottleneck. |
+
+### Current Network Topology
+
+```
+                    ┌─────────────────────────────────────┐
+                    │   bootstrap1.prsm-network.com:8765  │
+                    │   (DigitalOcean NYC3, 159.203.129.218)│
+                    │   fallback1 ──┘  └── fallback2      │
+                    │   (same server for alpha)            │
+                    └──────────┬──────────────────────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              │                │                │
+         ┌────▼────┐    ┌─────▼─────┐   ┌──────▼──────┐
+         │ Node A  │    │  Node B   │   │   Node C    │
+         │ (user)  │◄──►│  (user)   │◄─►│   (user)    │
+         └─────────┘    └───────────┘   └─────────────┘
+              P2P direct connections after discovery
+```
+
+Once two or more nodes discover each other via bootstrap, they communicate directly via P2P WebSocket — the bootstrap server is only used for initial discovery.
 
 ---
 
@@ -2978,4 +3052,5 @@ These are not required for launch but improve reliability and scale:
 *DNS records created: 2026-03-06 — bootstrap1, fallback1, fallback2 on Cloudflare*
 *GitHub secrets configured: 2026-03-06 — PYPI_API_TOKEN for automated releases*
 *All operational deployment steps complete: 2026-03-06*
+*Polish & scale roadmap published: 2026-03-06*
 *PRSM Version: 0.2.0*
