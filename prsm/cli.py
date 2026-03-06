@@ -277,7 +277,7 @@ def _get_debug() -> bool:
 
 
 @click.group()
-@click.version_option(version="0.2.0", prog_name="PRSM")
+@click.version_option(version="0.2.1", prog_name="PRSM")
 def main():
     """
     PRSM: Protocol for Recursive Scientific Modeling

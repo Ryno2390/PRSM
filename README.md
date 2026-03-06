@@ -2,7 +2,7 @@
 
 PRSM is a peer-to-peer collaboration framework for neuro-symbolic AI research. It combines three pillars — a compute network for AI orchestration, decentralized storage for scientific artifacts, and a token economy (FTNS) that incentivizes contributions. The goal is to make scientific AI development open, reproducible, and collectively owned.
 
-**Current version: 0.2.0 (Alpha)** | [www.prsm-network.com](https://www.prsm-network.com)
+**Current version: 0.2.1 (Alpha)** | [www.prsm-network.com](https://www.prsm-network.com)
 
 [![PyPI version](https://badge.fury.io/py/prsm-network.svg)](https://badge.fury.io/py/prsm-network)
 
