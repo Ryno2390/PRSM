@@ -5,6 +5,12 @@
 #   docker compose -f docker-compose.bootstrap-local.yml up -d
 #   docker compose -f docker-compose.bootstrap-local.yml logs -f
 #   docker compose -f docker-compose.bootstrap-local.yml down
+#
+# SSL setup (run once on server):
+#   mkdir -p /root/ssl
+#   cp /etc/letsencrypt/live/bootstrap1.prsm-network.com/fullchain.pem /root/ssl/
+#   cp /etc/letsencrypt/live/bootstrap1.prsm-network.com/privkey.pem /root/ssl/
+#   chmod 644 /root/ssl/*.pem
 
 services:
   bootstrap:
@@ -14,16 +20,16 @@ services:
     container_name: prsm-bootstrap
     restart: unless-stopped
     ports:
-      - "8765:8765"   # WebSocket (P2P peer discovery)
-      - "8000:8000"   # HTTP API (health + metrics)
+      - "8765:8765"
+      - "8000:8000"
     environment:
       PRSM_ENV: production
       PRSM_LOG_LEVEL: INFO
       PRSM_BOOTSTRAP_PORT: "8765"
       PRSM_API_PORT: "8000"
       PRSM_SSL_ENABLED: "true"
-      PRSM_SSL_CERT_PATH: "/etc/letsencrypt/live/bootstrap1.prsm-network.com/fullchain.pem"
-      PRSM_SSL_KEY_PATH: "/etc/letsencrypt/live/bootstrap1.prsm-network.com/privkey.pem"
+      PRSM_SSL_CERT_PATH: "/ssl/fullchain.pem"
+      PRSM_SSL_KEY_PATH: "/ssl/privkey.pem"
       PRSM_MAX_PEERS: "500"
     volumes:
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /root/ssl:/ssl:ro
