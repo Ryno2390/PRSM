@@ -1,4 +1,4 @@
-# PRSM Bootstrap Server — Local Development
+# PRSM Bootstrap Server — Production with SSL
 #
 # Usage:
 #   cd docker
@@ -17,9 +17,13 @@ services:
       - "8765:8765"   # WebSocket (P2P peer discovery)
       - "8000:8000"   # HTTP API (health + metrics)
     environment:
-      PRSM_ENV: development
-      PRSM_LOG_LEVEL: DEBUG
+      PRSM_ENV: production
+      PRSM_LOG_LEVEL: INFO
       PRSM_BOOTSTRAP_PORT: "8765"
       PRSM_API_PORT: "8000"
-      PRSM_SSL_ENABLED: "false"
-      PRSM_MAX_PEERS: "100"
+      PRSM_SSL_ENABLED: "true"
+      PRSM_SSL_CERT_PATH: "/etc/letsencrypt/live/bootstrap1.prsm-network.com/fullchain.pem"
+      PRSM_SSL_KEY_PATH: "/etc/letsencrypt/live/bootstrap1.prsm-network.com/privkey.pem"
+      PRSM_MAX_PEERS: "500"
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt:ro

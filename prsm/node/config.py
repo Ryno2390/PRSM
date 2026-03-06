@@ -14,15 +14,15 @@ import json
 
 
 DEFAULT_BOOTSTRAP_NODES = [
-    "ws://bootstrap1.prsm-network.com:8765",
+    "wss://bootstrap1.prsm-network.com:8765",
 ]
 
 # Trusted fallback bootstrap nodes used when all configured bootstrap
 # nodes are unreachable.  These are PRSM-operated community relays
 # designed to give new nodes a reliable first-run path.
 FALLBACK_BOOTSTRAP_NODES = [
-    "ws://fallback1.prsm-network.com:8765",
-    "ws://fallback2.prsm-network.com:8765",
+    "wss://fallback1.prsm-network.com:8765",
+    "wss://fallback2.prsm-network.com:8765",
 ]
 
 
