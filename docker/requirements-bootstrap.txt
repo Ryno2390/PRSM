@@ -1,0 +1,9 @@
+# Minimal dependencies for PRSM Bootstrap Server
+# This avoids the heavy ML/blockchain deps that cause version conflicts
+
+websockets>=12.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
