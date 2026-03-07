@@ -21,7 +21,14 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+try:
+    import numpy as np
+    _HAS_NUMPY = True
+except ImportError:
+    _HAS_NUMPY = False
 
 from prsm.core.ipfs_sharding import (
     ContentSharder,
@@ -56,6 +63,87 @@ NETWORK_FEE_SHARE = 0.05          # 5% network fee
 DEFAULT_SHARDING_THRESHOLD = 10 * 1024 * 1024  # 10MB
 
 
+class _SemanticIndex:
+    """In-memory semantic similarity index for near-duplicate detection on upload.
+
+    Stores L2-normalised embeddings keyed by CID, persisted as JSON so the
+    index survives node restarts.  Cosine similarity is computed via dot
+    product (O(n) scan — acceptable for early-network scale; swap to a FAISS
+    index once the corpus grows into the tens of thousands).
+
+    Similarity thresholds
+    ---------------------
+    DERIVATIVE_THRESHOLD (0.92): content this similar is auto-registered as a
+        derivative work; parent_cids is updated to include the matching CID and
+        the 70/25/5 royalty split kicks in automatically.
+    DUPLICATE_THRESHOLD (0.99): content this similar is an effective re-upload
+        of the same material and is logged as such (upload still proceeds so the
+        new creator gets their own provenance record at the derivative rate).
+    """
+
+    DERIVATIVE_THRESHOLD: float = 0.92
+    DUPLICATE_THRESHOLD: float = 0.99
+
+    def __init__(self, persist_path: Optional[Path] = None) -> None:
+        # cid → (normalised_embedding, creator_id)
+        self._index: Dict[str, Tuple] = {}
+        self._persist_path = persist_path
+        if persist_path and persist_path.exists():
+            self._load()
+
+    def __len__(self) -> int:
+        return len(self._index)
+
+    def store(self, cid: str, embedding: "np.ndarray", creator_id: str) -> None:
+        """Normalise and store an embedding keyed by CID."""
+        if not _HAS_NUMPY:
+            return
+        norm = float(np.linalg.norm(embedding))
+        normalised = embedding / norm if norm > 0 else embedding
+        self._index[cid] = (normalised, creator_id)
+        if self._persist_path:
+            self._save()
+
+    def find_nearest(self, embedding: "np.ndarray") -> Optional[Tuple[str, float, str]]:
+        """Return (cid, cosine_similarity, creator_id) for the closest stored
+        embedding, or None if the index is empty."""
+        if not _HAS_NUMPY or not self._index:
+            return None
+        norm = float(np.linalg.norm(embedding))
+        if norm == 0:
+            return None
+        query = embedding / norm
+        best_cid, best_sim, best_creator = None, -1.0, ""
+        for cid, (stored, creator) in self._index.items():
+            sim = float(np.dot(query, stored))
+            if sim > best_sim:
+                best_sim, best_cid, best_creator = sim, cid, creator
+        return (best_cid, best_sim, best_creator)
+
+    def _save(self) -> None:
+        try:
+            data = {
+                cid: {"embedding": emb.tolist(), "creator_id": creator}
+                for cid, (emb, creator) in self._index.items()
+            }
+            with open(self._persist_path, "w") as fh:
+                json.dump(data, fh)
+        except Exception as exc:
+            logger.warning(f"Semantic index persist failed: {exc}")
+
+    def _load(self) -> None:
+        try:
+            with open(self._persist_path) as fh:
+                data = json.load(fh)
+            self._index = {
+                cid: (np.array(entry["embedding"], dtype=np.float32), entry["creator_id"])
+                for cid, entry in data.items()
+            }
+            logger.info(f"Loaded semantic index: {len(self._index)} entries")
+        except Exception as exc:
+            logger.warning(f"Semantic index load failed: {exc}")
+
+
 @dataclass
 class UploadedContent:
     """Tracks content uploaded by this node."""
@@ -74,6 +162,10 @@ class UploadedContent:
     is_sharded: bool = False
     manifest_cid: Optional[str] = None  # CID of the shard manifest if sharded
     total_shards: int = 0
+    # Semantic fingerprint metadata
+    embedding_id: Optional[str] = None          # "emb:<cid>" when an embedding was generated
+    near_duplicate_of: Optional[str] = None     # CID of most-similar existing content
+    near_duplicate_similarity: Optional[float] = None  # Cosine similarity to that CID
 
 
 class ContentUploader:
@@ -98,6 +190,8 @@ class ContentUploader:
         ledger_sync: Optional[Any] = None,
         sharding_threshold: int = DEFAULT_SHARDING_THRESHOLD,
         sharding_config: Optional[ShardingConfig] = None,
+        embedding_fn: Optional[Callable] = None,
+        semantic_index_path: Optional[Path] = None,
     ):
         self.identity = identity
         self.gossip = gossip
@@ -112,12 +206,17 @@ class ContentUploader:
         self.sharding_config = sharding_config or ShardingConfig()
         self._content_sharder: Optional[ContentSharder] = None
 
+        # Semantic deduplication
+        # embedding_fn: async (text: str) -> np.ndarray  — optional, skipped if None
+        self._embedding_fn: Optional[Callable] = embedding_fn
+        self._semantic_index = _SemanticIndex(persist_path=semantic_index_path)
+
         self.uploaded_content: Dict[str, UploadedContent] = {}
         self._ipfs_session = None
 
         # Pending content retrieval requests: request_id → asyncio.Future[dict]
         self._pending_requests: Dict[str, asyncio.Future] = {}
-        
+
         # Manifest tracking: manifest_cid -> ShardManifest
         self.shard_manifests: Dict[str, ShardManifest] = {}
 
@@ -139,6 +238,28 @@ class ContentUploader:
         if self._ipfs_session:
             await self._ipfs_session.close()
             self._ipfs_session = None
+
+    async def _get_embedding(self, content: bytes) -> "Optional[np.ndarray]":
+        """Attempt to generate a semantic embedding for content.
+
+        Decodes content as UTF-8 text and calls the configured embedding_fn.
+        Returns None if:
+        - no embedding_fn was provided at construction
+        - content is not valid text (binary blobs)
+        - the text is too short to be meaningful (<50 chars)
+        - the embedding call fails for any reason (non-fatal)
+        """
+        if self._embedding_fn is None or not _HAS_NUMPY:
+            return None
+        try:
+            text = content.decode("utf-8", errors="ignore").strip()
+            if len(text) < 50:
+                return None
+            # Truncate to ~32 k chars to stay within typical embedding token limits
+            return await self._embedding_fn(text[:32_000])
+        except Exception as exc:
+            logger.debug(f"Embedding generation skipped: {exc}")
+            return None
 
     async def upload(
         self,
@@ -172,6 +293,37 @@ class ContentUploader:
         size_bytes = len(content)
         parents = parent_cids or []
 
+        # ── Semantic deduplication ────────────────────────────────────────────
+        # Generate an embedding and check for near-duplicates *before* committing
+        # to IPFS so we can auto-register derivative relationships early.
+        embedding = await self._get_embedding(content)
+        near_dup_cid: Optional[str] = None
+        near_dup_sim: Optional[float] = None
+
+        if embedding is not None:
+            match = self._semantic_index.find_nearest(embedding)
+            if match is not None:
+                match_cid, match_sim, _match_creator = match
+                if match_sim >= _SemanticIndex.DERIVATIVE_THRESHOLD:
+                    if match_sim >= _SemanticIndex.DUPLICATE_THRESHOLD:
+                        logger.warning(
+                            f"Near-exact duplicate detected for '{filename}': "
+                            f"CID {match_cid[:16]}... (similarity={match_sim:.4f}). "
+                            f"Registering as derivative work."
+                        )
+                    else:
+                        logger.info(
+                            f"Semantic near-duplicate found for '{filename}': "
+                            f"CID {match_cid[:16]}... (similarity={match_sim:.4f}). "
+                            f"Registering as derivative work."
+                        )
+                    near_dup_cid = match_cid
+                    near_dup_sim = match_sim
+                    # Auto-prepend matching CID as a parent so royalty splits apply
+                    if match_cid not in parents:
+                        parents = [match_cid] + parents
+        # ─────────────────────────────────────────────────────────────────────
+
         # Check if content should be sharded
         should_shard = force_shard or size_bytes > self.sharding_threshold
 
@@ -189,6 +341,9 @@ class ContentUploader:
                 royalty_rate=rate,
                 parent_cids=parents,
                 content_hash=content_hash,
+                embedding=embedding,
+                near_dup_cid=near_dup_cid,
+                near_dup_sim=near_dup_sim,
             )
 
         # Standard monolithic upload for small files
@@ -196,6 +351,8 @@ class ContentUploader:
         if not cid:
             logger.error(f"Failed to upload {filename} to IPFS")
             return None
+
+        embedding_id = f"emb:{cid}" if embedding is not None else None
 
         # Create provenance record
         provenance_data = {
@@ -210,6 +367,8 @@ class ContentUploader:
             "royalty_rate": rate,
             "parent_cids": parents,
             "is_sharded": False,
+            "embedding_id": embedding_id,
+            "near_duplicate_of": near_dup_cid,
         }
         provenance_bytes = json.dumps(provenance_data, sort_keys=True).encode()
         provenance_signature = self.identity.sign(provenance_bytes)
@@ -224,8 +383,15 @@ class ContentUploader:
             royalty_rate=rate,
             parent_cids=parents,
             is_sharded=False,
+            embedding_id=embedding_id,
+            near_duplicate_of=near_dup_cid,
+            near_duplicate_similarity=near_dup_sim,
         )
         self.uploaded_content[cid] = uploaded
+
+        # Register embedding so future uploads can be checked against this one
+        if embedding is not None:
+            self._semantic_index.store(cid, embedding, self.identity.node_id)
 
         # Gossip provenance registration
         await self.gossip.publish(GOSSIP_PROVENANCE_REGISTER, {
@@ -245,6 +411,7 @@ class ContentUploader:
             "metadata": metadata or {},
             "royalty_rate": rate,
             "parent_cids": parents,
+            "embedding_id": embedding_id,
         })
 
         # Request storage replication
@@ -256,9 +423,10 @@ class ContentUploader:
                 "replicas_needed": replicas,
             })
 
+        dup_msg = f", near_dup={near_dup_cid[:12]}... ({near_dup_sim:.3f})" if near_dup_cid else ""
         logger.info(
             f"Uploaded {filename} ({size_bytes} bytes) -> {cid}, "
-            f"royalty={rate} FTNS/access, parents={len(parents)}, replicas={replicas}"
+            f"royalty={rate} FTNS/access, parents={len(parents)}, replicas={replicas}{dup_msg}"
         )
         return uploaded
 
@@ -271,6 +439,9 @@ class ContentUploader:
         royalty_rate: float,
         parent_cids: List[str],
         content_hash: str,
+        embedding: "Optional[np.ndarray]" = None,
+        near_dup_cid: Optional[str] = None,
+        near_dup_sim: Optional[float] = None,
     ) -> Optional[UploadedContent]:
         """Upload large content using sharding.
 
@@ -311,6 +482,7 @@ class ContentUploader:
 
             # Create provenance record for the sharded content
             # The manifest CID serves as the primary identifier for sharded content
+            embedding_id = f"emb:{manifest_cid}" if embedding is not None else None
             provenance_data = {
                 "cid": manifest_cid,  # Use manifest CID as the primary CID
                 "content_hash": content_hash,
@@ -325,6 +497,8 @@ class ContentUploader:
                 "is_sharded": True,
                 "total_shards": manifest.total_shards,
                 "shard_size": manifest.shard_size,
+                "embedding_id": embedding_id,
+                "near_duplicate_of": near_dup_cid,
             }
             provenance_bytes = json.dumps(provenance_data, sort_keys=True).encode()
             provenance_signature = self.identity.sign(provenance_bytes)
@@ -341,8 +515,15 @@ class ContentUploader:
                 is_sharded=True,
                 manifest_cid=manifest_cid,
                 total_shards=manifest.total_shards,
+                embedding_id=embedding_id,
+                near_duplicate_of=near_dup_cid,
+                near_duplicate_similarity=near_dup_sim,
             )
             self.uploaded_content[manifest_cid] = uploaded
+
+            # Register embedding for future deduplication checks
+            if embedding is not None:
+                self._semantic_index.store(manifest_cid, embedding, self.identity.node_id)
 
             # Gossip provenance registration
             await self.gossip.publish(GOSSIP_PROVENANCE_REGISTER, {
@@ -364,6 +545,7 @@ class ContentUploader:
                 "parent_cids": parent_cids,
                 "is_sharded": True,
                 "total_shards": manifest.total_shards,
+                "embedding_id": embedding_id,
             })
 
             # Request storage replication for each shard
@@ -961,6 +1143,7 @@ class ContentUploader:
         total_accesses = sum(c.access_count for c in self.uploaded_content.values())
         sharded_count = sum(1 for c in self.uploaded_content.values() if c.is_sharded)
         total_shards = sum(c.total_shards for c in self.uploaded_content.values() if c.is_sharded)
+        derivative_count = sum(1 for c in self.uploaded_content.values() if c.near_duplicate_of)
         return {
             "uploaded_count": len(self.uploaded_content),
             "total_bytes": total_bytes,
@@ -969,6 +1152,9 @@ class ContentUploader:
             "sharded_count": sharded_count,
             "total_shards": total_shards,
             "sharding_threshold": self.sharding_threshold,
+            "semantic_index_size": len(self._semantic_index),
+            "derivative_works_detected": derivative_count,
+            "embedding_fn_active": self._embedding_fn is not None,
         }
 
     async def retrieve_sharded_content(self, manifest_cid: str) -> Optional[bytes]:
