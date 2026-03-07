@@ -152,10 +152,17 @@ class ContentVerificationSystem:
     - Audit trail generation
     """
     
-    def __init__(self, ipfs_client: IPFSClient):
+    def __init__(
+        self,
+        ipfs_client: IPFSClient,
+        provenance_lookup_fn: Optional[Any] = None,
+    ):
         self.ipfs_client = ipfs_client
         self.provenance_chains: Dict[str, ProvenanceChain] = {}
         self.verification_cache: Dict[str, VerificationResult] = {}
+        # Optional async callable: (cid: str) -> Optional[dict]
+        # Injected by node.py to enable cross-node provenance lookups.
+        self._provenance_lookup_fn = provenance_lookup_fn
         
         # Cryptographic keys (would be loaded from secure storage in production)
         self.private_key = None
@@ -550,10 +557,60 @@ class ContentVerificationSystem:
             logger.error(f"Failed to store provenance chain for {chain.content_cid}: {e}")
     
     async def _load_provenance_chain(self, cid: str) -> Optional[ProvenanceChain]:
-        """Load provenance chain from IPFS"""
-        # This would require a registry or search mechanism in a full implementation
-        # For now, this is a placeholder
-        return None
+        """Load a provenance chain, trying the local cache then the network registry.
+
+        Resolution order:
+        1. In-memory cache (already loaded this session).
+        2. Network registry via the injected provenance_lookup_fn — this queries
+           the node's ContentIndex which checks local SQLite first, then broadcasts
+           a GOSSIP_PROVENANCE_QUERY to any peers that may have the record.
+        """
+        if self._provenance_lookup_fn is None:
+            return None
+
+        try:
+            data = await self._provenance_lookup_fn(cid)
+        except Exception as exc:
+            logger.debug(f"Provenance lookup failed for {cid}: {exc}")
+            return None
+
+        if not data:
+            return None
+
+        # Reconstruct a minimal ProvenanceChain from the flat provenance record.
+        # A full event history isn't stored in the registry — only the creation
+        # event is synthesised here. Full chain replay is available via IPFS if
+        # the chain JSON CID is known.
+        try:
+            now = datetime.now()
+            creation_event = ProvenanceEvent(
+                event_id=f"create_{cid}",
+                event_type=ProvenanceEventType.CREATED,
+                actor_id=data.get("creator_id", ""),
+                actor_name=data.get("creator_id", "unknown")[:16],
+                timestamp=datetime.fromtimestamp(data.get("registered_at", now.timestamp())),
+                description="Provenance loaded from network registry",
+                metadata={
+                    "content_hash": data.get("content_hash", ""),
+                    "filename": data.get("filename", ""),
+                    "parent_cids": data.get("parent_cids", []),
+                },
+                signature=data.get("signature"),
+            )
+            chain = ProvenanceChain(
+                content_cid=cid,
+                events=[creation_event],
+                created_at=datetime.fromtimestamp(data.get("registered_at", now.timestamp())),
+                updated_at=now,
+                chain_hash=self._compute_chain_hash([creation_event]),
+            )
+            # Cache locally to avoid repeated network lookups
+            self.provenance_chains[cid] = chain
+            logger.debug(f"Loaded provenance chain for {cid[:16]}... from network registry")
+            return chain
+        except Exception as exc:
+            logger.warning(f"Failed to reconstruct ProvenanceChain for {cid}: {exc}")
+            return None
     
     async def check_content_integrity(self, cid: str, 
                                     original_checksum: str) -> IntegrityCheck:
@@ -687,9 +744,21 @@ class ContentVerificationSystem:
 
 # Utility functions
 
-def create_verification_system(ipfs_client: IPFSClient) -> ContentVerificationSystem:
-    """Create a new content verification system"""
-    return ContentVerificationSystem(ipfs_client)
+def create_verification_system(
+    ipfs_client: IPFSClient,
+    provenance_lookup_fn: Optional[Any] = None,
+) -> ContentVerificationSystem:
+    """Create a new content verification system.
+
+    Args:
+        ipfs_client: IPFS client for content operations.
+        provenance_lookup_fn: Optional async callable ``(cid: str) -> Optional[dict]``
+            that resolves provenance records.  Pass
+            ``content_index.get_provenance`` when creating a system inside a
+            live PRSM node so that ``_load_provenance_chain`` can query across
+            the network rather than returning ``None``.
+    """
+    return ContentVerificationSystem(ipfs_client, provenance_lookup_fn=provenance_lookup_fn)
 
 
 async def verify_content_batch(verification_system: ContentVerificationSystem,

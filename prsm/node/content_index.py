@@ -11,13 +11,20 @@ Supports keyword search over filenames and metadata, and tracks
 which nodes can serve each CID (providers).
 """
 
+import asyncio
 import logging
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
-from prsm.node.gossip import GOSSIP_CONTENT_ADVERTISE, GossipProtocol
+from prsm.node.gossip import (
+    GOSSIP_CONTENT_ADVERTISE,
+    GOSSIP_PROVENANCE_QUERY,
+    GOSSIP_PROVENANCE_REGISTER,
+    GOSSIP_PROVENANCE_RESPONSE,
+    GossipProtocol,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +44,8 @@ class ContentRecord:
     metadata: Dict[str, Any] = field(default_factory=dict)
     royalty_rate: float = 0.01
     parent_cids: List[str] = field(default_factory=list)
+    embedding_id: Optional[str] = None
+    near_duplicate_of: Optional[str] = None
 
 
 class ContentIndex:
@@ -47,18 +56,29 @@ class ContentIndex:
     loop is single-threaded.
     """
 
-    def __init__(self, gossip: GossipProtocol, max_indexed_cids: int = MAX_INDEXED_CIDS):
+    def __init__(
+        self,
+        gossip: GossipProtocol,
+        max_indexed_cids: int = MAX_INDEXED_CIDS,
+        ledger: Optional[Any] = None,
+    ):
         self.gossip = gossip
         self.max_indexed_cids = max_indexed_cids
+        self.ledger = ledger  # Optional LocalLedger for durable provenance storage
         # OrderedDict for LRU eviction — most-recently-touched at the end
         self._records: OrderedDict[str, ContentRecord] = OrderedDict()
         # keyword → set of CIDs that match
         self._keyword_index: Dict[str, Set[str]] = {}
+        # Pending cross-node provenance lookups: cid → Future[dict]
+        self._pending_provenance: Dict[str, asyncio.Future] = {}
 
     def start(self) -> None:
-        """Subscribe to content advertisements on the gossip layer."""
+        """Subscribe to content and provenance gossip."""
         self.gossip.subscribe(GOSSIP_CONTENT_ADVERTISE, self._on_content_advertise)
-        logger.info("Content index started — listening for advertisements")
+        self.gossip.subscribe(GOSSIP_PROVENANCE_REGISTER, self._on_provenance_register)
+        self.gossip.subscribe(GOSSIP_PROVENANCE_QUERY, self._on_provenance_query)
+        self.gossip.subscribe(GOSSIP_PROVENANCE_RESPONSE, self._on_provenance_response)
+        logger.info("Content index started — listening for advertisements and provenance")
 
     # ── Gossip handler ────────────────────────────────────────────
 
@@ -90,12 +110,64 @@ class ContentIndex:
                 metadata=data.get("metadata", {}),
                 royalty_rate=data.get("royalty_rate", 0.01),
                 parent_cids=data.get("parent_cids", []),
+                embedding_id=data.get("embedding_id"),
+                near_duplicate_of=data.get("near_duplicate_of"),
             )
             self._records[cid] = record
             self._index_keywords(record)
             self._evict_if_needed()
 
         logger.debug(f"Content index: {cid[:12]}... now has {len(self._records[cid].providers)} provider(s)")
+
+    async def _on_provenance_register(
+        self, subtype: str, data: Dict[str, Any], origin: str
+    ) -> None:
+        """Persist a provenance registration to the local ledger."""
+        if not self.ledger or not data.get("cid"):
+            return
+        try:
+            await self.ledger.upsert_provenance(data)
+        except Exception as exc:
+            logger.warning(f"Failed to persist provenance for {data.get('cid', '?')[:12]}: {exc}")
+
+    async def _on_provenance_query(
+        self, subtype: str, data: Dict[str, Any], origin: str
+    ) -> None:
+        """Respond to a cross-node provenance query if we have the record locally."""
+        cid = data.get("cid", "")
+        requester_id = data.get("requester_id", "")
+        if not cid or not self.ledger:
+            return
+        try:
+            record = await self.ledger.get_provenance(cid)
+            if record:
+                await self.gossip.publish(GOSSIP_PROVENANCE_RESPONSE, {
+                    "cid": cid,
+                    "for_requester": requester_id,
+                    "provenance": record,
+                })
+                logger.debug(f"Answered provenance query for {cid[:12]}...")
+        except Exception as exc:
+            logger.warning(f"Error handling provenance query for {cid[:12]}: {exc}")
+
+    async def _on_provenance_response(
+        self, subtype: str, data: Dict[str, Any], origin: str
+    ) -> None:
+        """Handle a provenance response — persist it and resolve any pending query."""
+        cid = data.get("cid", "")
+        provenance = data.get("provenance", {})
+        if not cid or not provenance:
+            return
+        # Persist to local ledger so future lookups are instant
+        if self.ledger:
+            try:
+                await self.ledger.upsert_provenance(provenance)
+            except Exception as exc:
+                logger.warning(f"Failed to persist provenance response for {cid[:12]}: {exc}")
+        # Resolve any pending async get_provenance() call
+        future = self._pending_provenance.get(cid)
+        if future and not future.done():
+            future.set_result(provenance)
 
     # ── Public queries ────────────────────────────────────────────
 
@@ -138,6 +210,51 @@ class ContentIndex:
         """Return the set of node IDs that can serve this CID."""
         record = self._records.get(cid)
         return record.providers if record else set()
+
+    async def get_provenance(
+        self, cid: str, timeout: float = 5.0
+    ) -> Optional[Dict[str, Any]]:
+        """Return the provenance record for a CID.
+
+        Resolution order:
+        1. Local SQLite ledger (instant, survives restarts).
+        2. Cross-node gossip query: broadcasts GOSSIP_PROVENANCE_QUERY and
+           waits up to *timeout* seconds for a GOSSIP_PROVENANCE_RESPONSE.
+           The response is persisted locally so subsequent calls are instant.
+
+        Returns None if no record is found within the timeout.
+        """
+        # 1. Check local ledger first
+        if self.ledger:
+            try:
+                record = await self.ledger.get_provenance(cid)
+                if record:
+                    return record
+            except Exception as exc:
+                logger.warning(f"Ledger provenance lookup failed for {cid[:12]}: {exc}")
+
+        # 2. Broadcast a query and wait for a response from any peer
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None  # No event loop — can't do async query
+
+        future: asyncio.Future = loop.create_future()
+        self._pending_provenance[cid] = future
+        try:
+            await self.gossip.publish(GOSSIP_PROVENANCE_QUERY, {
+                "cid": cid,
+                "requester_id": "",  # origin is set automatically by gossip layer
+            })
+            return await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.debug(f"Provenance query timed out for {cid[:12]}...")
+            return None
+        except Exception as exc:
+            logger.warning(f"Provenance query failed for {cid[:12]}: {exc}")
+            return None
+        finally:
+            self._pending_provenance.pop(cid, None)
 
     def get_stats(self) -> Dict[str, Any]:
         """Index statistics for the status endpoint."""

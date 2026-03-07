@@ -2,12 +2,13 @@
 Provenance integration for vector store operations
 
 Links vector search with FTNS royalty system for creator compensation.
-This module will be integrated with the FTNS service in Phase 1C.
+Royalties are credited directly to creator wallets via LocalLedger on
+every search_with_royalty_tracking() call.
 """
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import numpy as np
 
@@ -30,10 +31,19 @@ class ProvenanceVectorIntegration:
     - Audit trails for governance and transparency
     """
     
-    def __init__(self, vector_store: PRSMVectorStore):
+    def __init__(
+        self,
+        vector_store: PRSMVectorStore,
+        ledger: Optional[Any] = None,
+        node_id: Optional[str] = None,
+    ):
         self.vector_store = vector_store
         self.usage_tracking_enabled = True
         self.usage_log: List[Dict[str, Any]] = []
+        # Optional LocalLedger instance for live royalty crediting
+        self._ledger = ledger
+        # The querying node's own wallet ID (excluded from receiving royalties)
+        self._node_id = node_id
         
     async def search_with_royalty_tracking(self,
                                          query_embedding: np.ndarray,
@@ -63,15 +73,30 @@ class ProvenanceVectorIntegration:
         
         return results
     
-    async def _track_content_access(self, 
-                                  content_matches: List[ContentMatch], 
-                                  user_id: str):
+    async def _track_content_access(
+        self, content_matches: List[ContentMatch], user_id: str
+    ) -> None:
+        """Track content access and credit FTNS royalties to creators.
+
+        For each search result the royalty paid is:
+            royalty = similarity_score * royalty_rate
+
+        This scales payment to relevance — a result with 0.95 similarity earns
+        more than one with 0.60, which is fair given the querier derives more
+        value from the more-relevant content.
+
+        Royalties are skipped when:
+        - No ledger was provided at construction time.
+        - The creator_id equals the querying user's own node_id (no self-royalties).
+        - The computed royalty rounds to zero.
         """
-        Track content access for royalty calculation
-        
-        This method records usage data that will be used by the FTNS service
-        to calculate and distribute royalty payments to content creators.
-        """
+        # Lazy import to avoid a hard dependency on the node layer from data layer
+        try:
+            from prsm.node.local_ledger import TransactionType
+            _tx_type = TransactionType.CONTENT_ROYALTY
+        except ImportError:
+            _tx_type = None
+
         for match in content_matches:
             usage_entry = {
                 "timestamp": datetime.utcnow(),
@@ -81,15 +106,45 @@ class ProvenanceVectorIntegration:
                 "royalty_rate": match.royalty_rate,
                 "similarity_score": match.similarity_score,
                 "content_type": match.content_type.value,
-                "access_type": "search_result"
+                "access_type": "search_result",
             }
-            
             self.usage_log.append(usage_entry)
-            
-            # In Phase 1C, this will integrate with the actual FTNS service:
-            # await self.ftns_service.record_content_usage(usage_entry)
-            
-        logger.debug(f"Tracked access for {len(content_matches)} content items by user {user_id}")
+
+            # Credit royalty to the creator via the local ledger
+            creator_id = match.creator_id
+            if (
+                self._ledger is not None
+                and _tx_type is not None
+                and creator_id
+                and creator_id != user_id
+                and creator_id != self._node_id
+                and match.royalty_rate > 0
+            ):
+                royalty = round(match.similarity_score * match.royalty_rate, 6)
+                if royalty > 0:
+                    try:
+                        await self._ledger.credit(
+                            wallet_id=creator_id,
+                            amount=royalty,
+                            tx_type=_tx_type,
+                            description=(
+                                f"Vector search royalty: {match.content_cid[:16]}... "
+                                f"(sim={match.similarity_score:.3f}, "
+                                f"rate={match.royalty_rate})"
+                            ),
+                        )
+                        logger.debug(
+                            f"Credited {royalty:.6f} FTNS to {creator_id[:12]} "
+                            f"for content {match.content_cid[:12]}..."
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            f"Royalty credit failed for creator {creator_id[:12]}: {exc}"
+                        )
+
+        logger.debug(
+            f"Tracked access for {len(content_matches)} content items by user {user_id}"
+        )
     
     async def get_usage_statistics(self, 
                                  time_period_hours: int = 24) -> Dict[str, Any]:
@@ -188,7 +243,3 @@ class ProvenanceVectorIntegration:
         cleared_count = len(self.usage_log)
         self.usage_log = []
         logger.info(f"Cleared {cleared_count} usage log entries")
-
-
-# Import fix for timedelta
-from datetime import timedelta

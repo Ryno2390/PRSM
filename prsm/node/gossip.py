@@ -45,6 +45,8 @@ GOSSIP_CONTENT_ACCESS = "content_access"
 GOSSIP_FTNS_TRANSACTION = "ftns_transaction"
 GOSSIP_AGENT_ADVERTISE = "agent_advertise"
 GOSSIP_AGENT_DEREGISTER = "agent_deregister"
+GOSSIP_PROVENANCE_QUERY = "provenance_query"
+GOSSIP_PROVENANCE_RESPONSE = "provenance_response"
 
 # Gossip subtypes for agent collaboration protocols
 GOSSIP_TASK_ASSIGN = "agent_task_assign"

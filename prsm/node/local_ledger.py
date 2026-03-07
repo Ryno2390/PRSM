@@ -109,6 +109,25 @@ class LocalLedger:
             CREATE INDEX IF NOT EXISTS idx_gossip_log_time ON gossip_log(received_at);
             CREATE INDEX IF NOT EXISTS idx_gossip_log_subtype ON gossip_log(subtype);
 
+            -- Durable provenance registry (populated from GOSSIP_PROVENANCE_REGISTER)
+            CREATE TABLE IF NOT EXISTS provenance_chains (
+                cid               TEXT PRIMARY KEY,
+                content_hash      TEXT NOT NULL DEFAULT '',
+                creator_id        TEXT NOT NULL,
+                creator_pubkey    TEXT NOT NULL DEFAULT '',
+                filename          TEXT NOT NULL DEFAULT '',
+                size_bytes        INTEGER NOT NULL DEFAULT 0,
+                royalty_rate      REAL NOT NULL DEFAULT 0.01,
+                parent_cids       TEXT NOT NULL DEFAULT '[]',
+                signature         TEXT NOT NULL DEFAULT '',
+                embedding_id      TEXT,
+                near_duplicate_of TEXT,
+                metadata          TEXT NOT NULL DEFAULT '{}',
+                registered_at     REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_prov_creator ON provenance_chains(creator_id);
+            CREATE INDEX IF NOT EXISTS idx_prov_hash ON provenance_chains(content_hash);
+
             -- Collaboration persistence tables
             CREATE TABLE IF NOT EXISTS collab_tasks (
                 task_id                 TEXT PRIMARY KEY,
@@ -464,6 +483,107 @@ class LocalLedger:
         )
         await self._db.commit()
         return cursor.rowcount > 0
+
+    # ── Provenance Registry ──────────────────────────────────────
+
+    async def upsert_provenance(self, data: Dict[str, Any]) -> None:
+        """Persist or update a provenance record received from the network.
+
+        Called whenever a GOSSIP_PROVENANCE_REGISTER message is received so
+        that every node builds a durable local registry of known content
+        provenance — independent of the ephemeral gossip_log.
+        """
+        cid = data.get("cid", "")
+        if not cid:
+            return
+        await self._db.execute(
+            """INSERT INTO provenance_chains
+               (cid, content_hash, creator_id, creator_pubkey, filename,
+                size_bytes, royalty_rate, parent_cids, signature,
+                embedding_id, near_duplicate_of, metadata, registered_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(cid) DO UPDATE SET
+                   content_hash      = excluded.content_hash,
+                   creator_id        = excluded.creator_id,
+                   creator_pubkey    = excluded.creator_pubkey,
+                   filename          = excluded.filename,
+                   size_bytes        = excluded.size_bytes,
+                   royalty_rate      = excluded.royalty_rate,
+                   parent_cids       = excluded.parent_cids,
+                   signature         = excluded.signature,
+                   embedding_id      = excluded.embedding_id,
+                   near_duplicate_of = excluded.near_duplicate_of,
+                   metadata          = excluded.metadata""",
+            (
+                cid,
+                data.get("content_hash", ""),
+                data.get("creator_id", ""),
+                data.get("creator_public_key", ""),
+                data.get("filename", ""),
+                data.get("size_bytes", 0),
+                data.get("royalty_rate", 0.01),
+                json.dumps(data.get("parent_cids", [])),
+                data.get("signature", ""),
+                data.get("embedding_id"),
+                data.get("near_duplicate_of"),
+                json.dumps(data.get("metadata", {})),
+                time.time(),
+            ),
+        )
+        await self._db.commit()
+
+    async def get_provenance(self, cid: str) -> Optional[Dict[str, Any]]:
+        """Return the provenance record for a CID, or None if unknown."""
+        cursor = await self._db.execute(
+            """SELECT cid, content_hash, creator_id, creator_pubkey, filename,
+                      size_bytes, royalty_rate, parent_cids, signature,
+                      embedding_id, near_duplicate_of, metadata, registered_at
+               FROM provenance_chains WHERE cid = ?""",
+            (cid,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "cid": row[0],
+            "content_hash": row[1],
+            "creator_id": row[2],
+            "creator_public_key": row[3],
+            "filename": row[4],
+            "size_bytes": row[5],
+            "royalty_rate": row[6],
+            "parent_cids": json.loads(row[7]),
+            "signature": row[8],
+            "embedding_id": row[9],
+            "near_duplicate_of": row[10],
+            "metadata": json.loads(row[11]),
+            "registered_at": row[12],
+        }
+
+    async def list_provenance_by_creator(
+        self, creator_id: str, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """Return all provenance records for a given creator, newest first."""
+        cursor = await self._db.execute(
+            """SELECT cid, content_hash, creator_id, creator_pubkey, filename,
+                      size_bytes, royalty_rate, parent_cids, signature,
+                      embedding_id, near_duplicate_of, metadata, registered_at
+               FROM provenance_chains WHERE creator_id = ?
+               ORDER BY registered_at DESC LIMIT ?""",
+            (creator_id, limit),
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "cid": r[0], "content_hash": r[1], "creator_id": r[2],
+                "creator_public_key": r[3], "filename": r[4],
+                "size_bytes": r[5], "royalty_rate": r[6],
+                "parent_cids": json.loads(r[7]), "signature": r[8],
+                "embedding_id": r[9], "near_duplicate_of": r[10],
+                "metadata": json.loads(r[11]), "registered_at": r[12],
+            }
+            for r in rows
+        ]
 
     # ── Gossip Log ────────────────────────────────────────────────
 
