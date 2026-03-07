@@ -425,3 +425,220 @@ class TestResponseHandler:
         # Should still have the original result
         assert future.result()["found"] is False
         loop.close()
+
+
+# =============================================================================
+# TEST: Semantic deduplication (_SemanticIndex + upload path wiring)
+# =============================================================================
+
+try:
+    import numpy as np
+    _HAS_NUMPY = True
+except ImportError:
+    _HAS_NUMPY = False
+
+pytestmark_numpy = pytest.mark.skipif(not _HAS_NUMPY, reason="numpy not installed")
+
+from prsm.node.content_uploader import _SemanticIndex
+
+
+class TestSemanticIndex:
+    """Unit tests for the _SemanticIndex class."""
+
+    @pytest.mark.skipif(not _HAS_NUMPY, reason="numpy not installed")
+    def test_empty_index_returns_none(self):
+        idx = _SemanticIndex()
+        vec = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        assert idx.find_nearest(vec) is None
+
+    @pytest.mark.skipif(not _HAS_NUMPY, reason="numpy not installed")
+    def test_store_and_retrieve(self):
+        idx = _SemanticIndex()
+        vec = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        idx.store("QmA", vec, "creator-1")
+        result = idx.find_nearest(vec)
+        assert result is not None
+        cid, sim, creator = result
+        assert cid == "QmA"
+        assert abs(sim - 1.0) < 1e-5
+        assert creator == "creator-1"
+
+    @pytest.mark.skipif(not _HAS_NUMPY, reason="numpy not installed")
+    def test_finds_most_similar(self):
+        idx = _SemanticIndex()
+        idx.store("QmA", np.array([1.0, 0.0, 0.0], dtype=np.float32), "c1")
+        idx.store("QmB", np.array([0.0, 1.0, 0.0], dtype=np.float32), "c2")
+        # Query close to QmA
+        query = np.array([0.99, 0.14, 0.0], dtype=np.float32)
+        cid, sim, _ = idx.find_nearest(query)
+        assert cid == "QmA"
+        assert sim > 0.9
+
+    @pytest.mark.skipif(not _HAS_NUMPY, reason="numpy not installed")
+    def test_zero_vector_returns_none(self):
+        idx = _SemanticIndex()
+        idx.store("QmA", np.array([1.0, 0.0, 0.0], dtype=np.float32), "c1")
+        result = idx.find_nearest(np.array([0.0, 0.0, 0.0], dtype=np.float32))
+        assert result is None
+
+    @pytest.mark.skipif(not _HAS_NUMPY, reason="numpy not installed")
+    def test_persist_and_reload(self, tmp_path):
+        path = tmp_path / "sem_idx.json"
+        idx = _SemanticIndex(persist_path=path)
+        vec = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        idx.store("QmPersist", vec, "creator-x")
+
+        # Reload from disk
+        idx2 = _SemanticIndex(persist_path=path)
+        result = idx2.find_nearest(vec)
+        assert result is not None
+        assert result[0] == "QmPersist"
+        assert result[2] == "creator-x"
+
+    @pytest.mark.skipif(not _HAS_NUMPY, reason="numpy not installed")
+    def test_len(self):
+        idx = _SemanticIndex()
+        assert len(idx) == 0
+        idx.store("QmA", np.array([1.0, 0.0], dtype=np.float32), "c1")
+        assert len(idx) == 1
+        idx.store("QmB", np.array([0.0, 1.0], dtype=np.float32), "c2")
+        assert len(idx) == 2
+
+
+class TestUploadSemanticWiring:
+    """Tests for semantic deduplication wired into ContentUploader.upload()."""
+
+    @pytest.fixture
+    def uploader_with_embedding(self, mock_identity, mock_gossip, mock_ledger,
+                                mock_transport, mock_content_index):
+        """ContentUploader with a fake synchronous embedding_fn."""
+        async def fake_embed(text: str):
+            # Returns a deterministic unit vector based on text content
+            vec = np.zeros(8, dtype=np.float32)
+            for i, ch in enumerate(text[:8]):
+                vec[i] = float(ord(ch))
+            norm = float(np.linalg.norm(vec))
+            return vec / norm if norm > 0 else vec
+
+        cu = ContentUploader(
+            identity=mock_identity,
+            gossip=mock_gossip,
+            ledger=mock_ledger,
+            transport=mock_transport,
+            content_index=mock_content_index,
+            embedding_fn=fake_embed,
+        )
+        return cu
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(not _HAS_NUMPY, reason="numpy not installed")
+    async def test_embedding_stored_after_upload(self, uploader_with_embedding):
+        """After a successful upload, the embedding should be in the semantic index."""
+        cu = uploader_with_embedding
+        cu._ipfs_add = AsyncMock(return_value="QmFakeHash1")
+
+        content = b"This is a unique research paper about quantum computing and entanglement."
+        result = await cu.upload(content, filename="paper.txt")
+
+        assert result is not None
+        assert result.embedding_id == "emb:QmFakeHash1"
+        assert len(cu._semantic_index) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(not _HAS_NUMPY, reason="numpy not installed")
+    async def test_near_duplicate_auto_registers_derivative(self, uploader_with_embedding):
+        """A near-duplicate upload should be auto-registered with the matching CID as parent."""
+        cu = uploader_with_embedding
+
+        # First upload — establish the original
+        cu._ipfs_add = AsyncMock(return_value="QmOriginal")
+        original_text = b"The quick brown fox jumps over the lazy dog, a classic test sentence."
+        await cu.upload(original_text, filename="original.txt")
+
+        # Manually inject a very similar (but not identical) embedding into the index
+        # to simulate a near-duplicate without relying on the fake_embed being 0.92+ similar
+        original_vec = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        duplicate_vec = np.array([0.999, 0.045, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        # Normalise and plant
+        original_vec /= np.linalg.norm(original_vec)
+        duplicate_vec /= np.linalg.norm(duplicate_vec)
+        cu._semantic_index._index["QmSeed"] = (original_vec, "creator-original")
+
+        # Override the embedding_fn to return the near-duplicate vector
+        async def near_dup_embed(text: str):
+            return duplicate_vec.copy()
+
+        cu._embedding_fn = near_dup_embed
+        cu._ipfs_add = AsyncMock(return_value="QmDerivative")
+
+        result = await cu.upload(b"A slightly modified version of the original text, with some extra words added.", filename="dup.txt")
+
+        assert result is not None
+        assert result.near_duplicate_of == "QmSeed"
+        assert result.near_duplicate_similarity is not None
+        assert result.near_duplicate_similarity >= _SemanticIndex.DERIVATIVE_THRESHOLD
+        # QmSeed should have been auto-added as a parent
+        assert "QmSeed" in result.parent_cids
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(not _HAS_NUMPY, reason="numpy not installed")
+    async def test_unrelated_upload_has_no_near_duplicate(self, uploader_with_embedding):
+        """Content that is semantically unrelated should not trigger the derivative path."""
+        cu = uploader_with_embedding
+
+        # Plant an orthogonal vector in the index
+        orthogonal = np.array([0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        cu._semantic_index._index["QmUnrelated"] = (orthogonal, "other-creator")
+
+        async def unrelated_embed(text: str):
+            # Returns vector close to [1,0,0,...] — far from [0,0,1,...]
+            v = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
+            return v
+
+        cu._embedding_fn = unrelated_embed
+        cu._ipfs_add = AsyncMock(return_value="QmNewContent")
+
+        result = await cu.upload(b"Completely different content about economics.", filename="econ.txt")
+
+        assert result is not None
+        assert result.near_duplicate_of is None
+        assert result.near_duplicate_similarity is None
+        assert "QmUnrelated" not in result.parent_cids
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(not _HAS_NUMPY, reason="numpy not installed")
+    async def test_no_embedding_fn_skips_semantic_check(self, mock_identity, mock_gossip,
+                                                        mock_ledger, mock_transport,
+                                                        mock_content_index):
+        """Without an embedding_fn, upload succeeds with no semantic metadata."""
+        cu = ContentUploader(
+            identity=mock_identity,
+            gossip=mock_gossip,
+            ledger=mock_ledger,
+            transport=mock_transport,
+            content_index=mock_content_index,
+            # No embedding_fn
+        )
+        cu._ipfs_add = AsyncMock(return_value="QmNoEmbed")
+
+        result = await cu.upload(b"Some content that will not be embedded.", filename="nobed.txt")
+
+        assert result is not None
+        assert result.embedding_id is None
+        assert result.near_duplicate_of is None
+        assert len(cu._semantic_index) == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(not _HAS_NUMPY, reason="numpy not installed")
+    async def test_get_stats_includes_semantic_fields(self, uploader_with_embedding):
+        """get_stats() should report semantic_index_size and embedding_fn_active."""
+        cu = uploader_with_embedding
+        cu._ipfs_add = AsyncMock(return_value="QmStat")
+
+        await cu.upload(b"Long enough content to generate an embedding for stats testing.", filename="stats.txt")
+        stats = cu.get_stats()
+
+        assert "semantic_index_size" in stats
+        assert stats["semantic_index_size"] >= 1
+        assert stats["embedding_fn_active"] is True
+        assert "derivative_works_detected" in stats

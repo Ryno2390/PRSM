@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from decimal import Decimal
 
+from pathlib import Path
+
 from prsm.node.config import NodeConfig, NodeRole
 from prsm.node.identity import (
     NodeIdentity,
@@ -22,6 +24,12 @@ from prsm.node.identity import (
     load_node_identity,
     save_node_identity,
 )
+
+try:
+    from prsm.data.embeddings.real_embedding_api import RealEmbeddingAPI
+    _HAS_EMBEDDING_API = True
+except Exception:
+    _HAS_EMBEDDING_API = False
 from prsm.node.local_ledger import LocalLedger, TransactionType
 from prsm.node.dag_ledger import DAGLedger, DAGLedgerAdapter
 from prsm.node.transport import WebSocketTransport
@@ -348,6 +356,17 @@ class PRSMNode:
             max_indexed_cids=self.config.max_indexed_cids,
         )
 
+        # Optionally attach semantic embedding for near-duplicate detection
+        _embedding_fn = None
+        if _HAS_EMBEDDING_API:
+            try:
+                _embed_api = RealEmbeddingAPI()
+                _embedding_fn = _embed_api.generate_embedding
+            except Exception as _e:
+                logger.debug(f"Embedding API unavailable, semantic dedup disabled: {_e}")
+
+        _semantic_index_path = Path.home() / ".prsm" / "semantic_index.json"
+
         self.content_uploader = ContentUploader(
             identity=self.identity,
             gossip=self.gossip,
@@ -355,6 +374,8 @@ class PRSMNode:
             ipfs_api_url=self.config.ipfs_api_url,
             transport=self.transport,
             content_index=self.content_index,
+            embedding_fn=_embedding_fn,
+            semantic_index_path=_semantic_index_path,
         )
 
         # ── Content Provider (Cross-Node Retrieval) ───────────────────────
