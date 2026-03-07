@@ -354,6 +354,7 @@ class PRSMNode:
         self.content_index = ContentIndex(
             gossip=self.gossip,
             max_indexed_cids=self.config.max_indexed_cids,
+            ledger=self.ledger,
         )
 
         # Optionally attach semantic embedding for near-duplicate detection
