@@ -18,8 +18,12 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from prsm.node.config import NodeConfig
+
+from prsm.node.config import is_active_now
 from prsm.node.gossip import (
     GOSSIP_JOB_ACCEPT,
     GOSSIP_JOB_OFFER,
@@ -125,6 +129,8 @@ class ComputeProvider:
         cpu_allocation_pct: int = 50,
         memory_allocation_pct: int = 50,
         max_concurrent_jobs: int = 3,
+        gpu_allocation_pct: int = 80,
+        config: Optional["NodeConfig"] = None,
     ):
         self.identity = identity
         self.transport = transport
@@ -133,6 +139,8 @@ class ComputeProvider:
         self.cpu_allocation_pct = cpu_allocation_pct
         self.memory_allocation_pct = memory_allocation_pct
         self.max_concurrent_jobs = max_concurrent_jobs
+        self.gpu_allocation_pct = gpu_allocation_pct
+        self.config = config  # NodeConfig for scheduling checks
 
         self.resources = detect_resources()
         self.active_jobs: Dict[str, ComputeJob] = {}
@@ -145,13 +153,18 @@ class ComputeProvider:
     @property
     def available_capacity(self) -> Dict[str, Any]:
         active_count = len(self.active_jobs)
-        return {
+        capacity = {
             "cpu_cores_allocated": max(1, int(self.resources.cpu_count * self.cpu_allocation_pct / 100)),
             "memory_gb_allocated": round(self.resources.memory_total_gb * self.memory_allocation_pct / 100, 2),
             "gpu_available": self.resources.gpu_available,
             "concurrent_slots": max(0, self.max_concurrent_jobs - active_count),
             "active_jobs": active_count,
         }
+        if self.resources.gpu_available:
+            capacity["gpu_memory_gb_allocated"] = round(
+                self.resources.gpu_memory_gb * self.gpu_allocation_pct / 100, 2
+            )
+        return capacity
 
     async def start(self) -> None:
         """Register gossip handlers and start provider."""
@@ -169,6 +182,11 @@ class ComputeProvider:
     async def _on_job_offer(self, subtype: str, data: Dict[str, Any], origin: str) -> None:
         """Evaluate a job offer and accept if we have capacity."""
         if not self._running:
+            return
+
+        # Check if we're within active hours
+        if self.config and not is_active_now(self.config):
+            logger.debug("Node is outside active hours, declining job offer")
             return
 
         job_id = data.get("job_id", "")
@@ -432,6 +450,65 @@ class ComputeProvider:
             "capacity": self.available_capacity,
             "active_jobs": len(self.active_jobs),
             "completed_jobs": len(self.completed_jobs),
+        }
+
+    def update_allocation(
+        self,
+        cpu_allocation_pct: Optional[int] = None,
+        memory_allocation_pct: Optional[int] = None,
+        max_concurrent_jobs: Optional[int] = None,
+        gpu_allocation_pct: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Update resource allocation settings at runtime.
+        
+        Changes take effect on next job acceptance. This method allows
+        live tuning of compute resource allocation without restarting
+        the node.
+        
+        Args:
+            cpu_allocation_pct: Percentage of CPU to allocate (10-90)
+            memory_allocation_pct: Percentage of memory to allocate (10-90)
+            max_concurrent_jobs: Maximum number of concurrent jobs
+            gpu_allocation_pct: Percentage of GPU memory to allocate (10-100)
+        
+        Returns:
+            Dict with updated allocation values
+        
+        Raises:
+            ValueError: If any value is out of valid range
+        """
+        # Validate ranges
+        if cpu_allocation_pct is not None:
+            if not 10 <= cpu_allocation_pct <= 90:
+                raise ValueError(f"cpu_allocation_pct must be 10-90, got {cpu_allocation_pct}")
+            self.cpu_allocation_pct = cpu_allocation_pct
+            
+        if memory_allocation_pct is not None:
+            if not 10 <= memory_allocation_pct <= 90:
+                raise ValueError(f"memory_allocation_pct must be 10-90, got {memory_allocation_pct}")
+            self.memory_allocation_pct = memory_allocation_pct
+            
+        if max_concurrent_jobs is not None:
+            if max_concurrent_jobs < 1:
+                raise ValueError(f"max_concurrent_jobs must be at least 1, got {max_concurrent_jobs}")
+            self.max_concurrent_jobs = max_concurrent_jobs
+            
+        if gpu_allocation_pct is not None:
+            if not 10 <= gpu_allocation_pct <= 100:
+                raise ValueError(f"gpu_allocation_pct must be 10-100, got {gpu_allocation_pct}")
+            self.gpu_allocation_pct = gpu_allocation_pct
+        
+        logger.info(
+            f"Updated compute allocation: CPU={self.cpu_allocation_pct}%, "
+            f"Memory={self.memory_allocation_pct}%, Jobs={self.max_concurrent_jobs}, "
+            f"GPU={self.gpu_allocation_pct}%"
+        )
+        
+        return {
+            "cpu_allocation_pct": self.cpu_allocation_pct,
+            "memory_allocation_pct": self.memory_allocation_pct,
+            "max_concurrent_jobs": self.max_concurrent_jobs,
+            "gpu_allocation_pct": self.gpu_allocation_pct,
         }
 
 
