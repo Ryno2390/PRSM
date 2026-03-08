@@ -1930,13 +1930,14 @@ A thorough code-level audit of every PRSM subsystem was conducted, reading funct
 | **Governance Voting** | PARTIAL | 60% | Vote casting and tallying work; executing approved proposals is simulated |
 | **FTNS Local Economy** | PARTIAL | 70% | Token tracking, transfers, agent allowances work locally; no on-chain backing |
 | **Inference Jobs** | PARTIAL | 25% | Falls back to mock string; works only if NWTN orchestrator wired with real LLM |
-| **NWTN 5-Agent Pipeline** | SCAFFOLD | 15% | Pipeline structure exists; agents produce hardcoded synthetic output, no LLM calls |
-| **Embedding Jobs** | SCAFFOLD | 10% | Returns SHA256-derived pseudo-vectors, not real embeddings |
-| **Teacher Models** | SCAFFOLD | 10% | Method signatures and data structures exist; no training loop or weight updates |
+| **NWTN 5-Agent Pipeline** | REAL | 90% | All 5 stages execute real logic; executor calls `_execute_with_backend()` for LLM inference; wired to P2P node via BackendRegistry (see Section 29) |
+| **Embedding Jobs** | REAL | 85% | RealEmbeddingAPI wired into ContentUploader for provenance; ComputeProvider dispatches to real embedding backend (see Section 34) |
+| **Teacher Models** | REAL | 75% | Full PyTorch training loop in `trainer.py`; SEAL, RLVR, RLT systems implemented; exposed via `prsm/interface/api/main.py` — **not yet wired into P2P node API** (see Section 36) |
 | **IPFS Cross-Node Retrieval** | SCAFFOLD | 20% | Local pin/unpin works; no cross-node content fetch, no sharding |
-| **Web3 / Blockchain** | SCAFFOLD | 10% | Solidity source generation; no deployment, mocked balances |
-| **Cross-Node Content Fetch** | SCAFFOLD | 15% | Metadata gossiped; no actual P2P content transfer |
-| **Web UI / Frontend** | NOT STARTED | 0% | CLI + terminal dashboard only |
+| **Web3 / Blockchain** | PARTIAL | 40% | Contracts built and deployer wired; testnet config ready (Section 34 Item 9); no live deployment yet |
+| **Cross-Node Content Fetch** | REAL | 90% | ContentProvider P2P protocol implemented and wired; GET /content/retrieve/{cid} endpoint live (Section 29) |
+| **Web UI / Frontend** | REAL | 70% | Two implementations: Streamlit SPA (`prsm/interface/dashboard/`) + FastAPI+HTML/JS (`prsm/dashboard/app.py`); launched via `prsm dashboard` — **not served by `prsm node start`** (see Section 36) |
+| **Distillation Pipeline** | REAL | 80% | 15-file production system with real training pipeline, architecture generator, knowledge extractor, safety validator — **not yet accessible via node API or CLI** (see Section 36) |
 
 ### Detailed Remaining Work
 
@@ -2264,14 +2265,16 @@ PARTIALLY COMPLETE (core works, edges need finishing):
   🔄 IPFS storage (local pin/unpin works, no cross-node)
   🔄 Inference (pipeline exists, falls back to mock without LLM keys)
 
-NOT YET FUNCTIONAL (scaffolded):
-  ⬜ NWTN 5-agent pipeline (hardcoded outputs, no real LLM calls)
-  ⬜ Embedding generation (fake vectors)
-  ⬜ Teacher model training (no ML training loop)
-  ⬜ Cross-node content retrieval (metadata only)
-  ⬜ Web3 / blockchain integration (interface code only)
-  ⬜ Web UI / frontend (CLI only)
-  ⬜ Bootstrap server infrastructure (domain exists, no WS servers)
+BUILT BUT NOT WIRED TO P2P NODE (see Section 36 — Two-Stack Gap):
+  🔌 Teacher model training — complete PyTorch system in prsm/interface/api/main.py,
+     not accessible via `prsm node start` or node API
+  🔌 Distillation pipeline — 15-file production system, not exposed via node API/CLI
+  🔌 Web UI dashboard — Streamlit + FastAPI+HTML/JS dashboards exist, launched via
+     `prsm dashboard` (separate process), not co-served with `prsm node start`
+
+PARTIALLY COMPLETE (remaining work):
+  🔄 Web3 / blockchain integration — deployer built, testnet config ready, no live deployment
+  🔄 Teacher CLI commands — prsm teacher list/create exist but return stub messages
 ```
 
 ---
@@ -3575,7 +3578,13 @@ PUBLISHED & DEPLOYED:
   ✅ DNS: bootstrap1, fallback1, fallback2 on Cloudflare
   ✅ GitHub Actions: automated releases + daily security scans
 
-REMAINING (MEDIUM-TERM):
+BUILT BUT NOT WIRED (highest priority — see Section 36):
+  🔌 Teacher model + distillation pipeline: production-ready systems in
+     prsm/interface/api/ and prsm/compute/ — not accessible from prsm node start
+  🔌 Web UI dashboard: Streamlit + FastAPI+HTML/JS dashboards exist but require
+     a separate `prsm dashboard` process; not co-served with `prsm node start`
+
+REMAINING (MEDIUM-TERM, OPERATIONAL):
   📦 Multi-region bootstrap: deploy fallback1 (EU) + fallback2 (APAC)
   📦 Monitoring: connect Grafana dashboards to live bootstrap Prometheus
   📦 FTNS testnet: deploy contracts to Sepolia/Polygon Mumbai (config ready)
@@ -3774,6 +3783,279 @@ Each device runs an independent `prsm node` process with its own `~/.prsm/node_c
 
 ---
 
+## 36. Two-Stack Architecture Gap — Unification Plan
+
+### The Problem
+
+PRSM has evolved into two parallel, disconnected server stacks. A researcher using one cannot access the capabilities of the other without running a second process and knowing which port serves what.
+
+#### Stack A — P2P Node (`prsm node start`)
+
+Entry point: `prsm/node/node.py` + `prsm/node/api.py`
+
+| Capability | Status |
+|---|---|
+| P2P transport, gossip, discovery | ✅ Working |
+| Compute jobs (submit/accept/pay) | ✅ Working |
+| Storage provider + proofs | ✅ Working |
+| DAG ledger + FTNS | ✅ Working |
+| Collaboration protocol | ✅ Working |
+| Semantic provenance + royalties | ✅ Working |
+| Resource contribution controls | ✅ Working |
+| Rich TUI dashboard | ✅ Working |
+| Teacher model access | ❌ Not wired |
+| Distillation pipeline access | ❌ Not wired |
+| Web UI (browser-accessible) | ❌ Not served |
+
+#### Stack B — Platform API (`prsm serve` + `prsm dashboard`)
+
+Entry point: `prsm/interface/api/main.py` + `prsm/interface/dashboard/streamlit_app.py`
+
+| Capability | Status |
+|---|---|
+| Teacher model create/train/assess | ✅ Working |
+| NWTN 5-agent pipeline (direct) | ✅ Working |
+| Governance endpoints | ✅ Working |
+| Marketplace endpoints | ✅ Working |
+| Streamlit web UI | ✅ Working |
+| FastAPI+HTML/JS dashboard (`prsm/dashboard/`) | ✅ Working |
+| P2P node access | ❌ Not connected |
+| DAG ledger / real FTNS | ❌ Uses mock ledger |
+| Compute marketplace routing | ❌ Not connected |
+
+#### The Core Issue
+
+A researcher who runs `prsm node start` gets a fully functional P2P node with real FTNS economy and compute marketplace — but cannot create a teacher model, start a distillation job, or view anything in a browser.
+
+A researcher who runs `prsm serve` + `prsm dashboard` gets teacher models and a web UI — but all FTNS operations hit a mock ledger and no P2P compute ever happens.
+
+The two stacks need to be unified under `prsm node start`.
+
+---
+
+### Architecture of the Unified Node
+
+The target architecture serves everything from a single `prsm node start` invocation:
+
+```
+prsm node start
+    │
+    ├── P2P Layer (port 9001)
+    │     WebSocket transport, gossip, discovery
+    │
+    ├── Node Management API (port 8000)
+    │     /node/*          existing node API
+    │     /compute/*       existing compute API
+    │     /content/*       existing content API
+    │     /staking/*       existing staking API
+    │     /bridge/*        existing bridge API
+    │     /teacher/*       NEW — wired to prsm/compute/teachers/
+    │     /distillation/*  NEW — wired to prsm/compute/distillation/
+    │
+    └── Web Dashboard (port 8000, path /dashboard)
+          Serves prsm/dashboard/ HTML/JS SPA
+          OR mounts Streamlit on /ui (optional)
+```
+
+All FTNS operations use the node's `LocalLedger` (SQLite). No PostgreSQL/Redis required. Teacher training jobs that need significant compute can be submitted to the P2P compute marketplace via `ComputeRequester`.
+
+---
+
+### Implementation Plan
+
+#### Phase 1 — Teacher Model Router in Node API (1–2 days)
+
+**Goal:** `prsm teacher create physics` and `GET /teacher/create` work from the P2P node without running `prsm serve`.
+
+**Files to modify:** `prsm/node/api.py`, `prsm/node/node.py`, `prsm/cli.py`
+
+**Step 1 — Add teacher router to `prsm/node/api.py`:**
+
+```python
+# New endpoints to add alongside existing node API routes
+
+@router.post("/teacher/create")
+async def create_teacher(request: TeacherCreateRequest):
+    """Create a teacher model and register it with the node."""
+    from prsm.compute.teachers.teacher_model import create_teacher_with_specialization
+    teacher = await create_teacher_with_specialization(
+        specialization=request.specialization,
+        domain=request.domain,
+        use_real_implementation=True,
+    )
+    teacher_id = str(teacher.teacher_model.teacher_id)
+    # Register in node's local registry for future lookup
+    await node_state.register_teacher(teacher_id, teacher)
+    # Award FTNS for creating a teacher (economic incentive)
+    await ledger.credit(node_id, TEACHER_CREATION_REWARD, "teacher_created")
+    return {"teacher_id": teacher_id, "specialization": request.specialization}
+
+@router.get("/teacher/list")
+async def list_teachers():
+    """List teacher models registered on this node."""
+    return {"teachers": await node_state.get_teachers()}
+
+@router.post("/teacher/{teacher_id}/train")
+async def train_teacher(teacher_id: str, request: TrainingRequest):
+    """Start a training run for a teacher model."""
+    # If training data is large, submit as a P2P compute job
+    # If small enough, run locally via TeacherTrainer
+    ...
+
+@router.get("/teacher/backends")
+async def get_teacher_backends():
+    """Return available ML training backends."""
+    from prsm.compute.teachers.real_teacher_implementation import get_available_training_backends
+    return {"backends": await get_available_training_backends()}
+```
+
+**Step 2 — Add teacher registry to `PRSMNode`:** A simple `Dict[str, Any]` mapping `teacher_id → teacher_instance`, persisted to `~/.prsm/teachers.json` on save.
+
+**Step 3 — Wire the `prsm teacher` CLI stubs to the live API:**
+
+```python
+# Replace the "coming in v0.2.0" stubs in cli.py
+
+@teacher.command()
+@click.argument("specialization")
+@click.option("--domain", default=None)
+@click.option("--api-url", default="http://localhost:8000")
+def create(specialization: str, domain: str, api_url: str):
+    """Create a new teacher model on the running node."""
+    import httpx
+    response = httpx.post(f"{api_url}/teacher/create",
+                          json={"specialization": specialization, "domain": domain or specialization})
+    data = response.json()
+    console.print(f"✅ Teacher created: {data['teacher_id']}", style="bold green")
+```
+
+**Tests:** Add `tests/unit/test_teacher_node_integration.py` — create via API, list, verify FTNS credited.
+
+---
+
+#### Phase 2 — Distillation Router in Node API (1–2 days)
+
+**Goal:** A researcher can request a distillation job from their node, which optionally farms it out to the P2P compute network.
+
+**Files to modify:** `prsm/node/api.py`, `prsm/node/node.py`
+
+**New endpoints:**
+
+```python
+@router.post("/distillation/submit")
+async def submit_distillation(request: DistillationRequest):
+    """Submit a model distillation job."""
+    from prsm.compute.distillation.orchestrator import get_distillation_orchestrator
+    orchestrator = await get_distillation_orchestrator()
+    job_id = await orchestrator.submit_job(
+        teacher_model_id=request.teacher_model_id,
+        target_size=request.target_size,           # e.g. ModelSize.SMALL
+        optimization_target=request.optimization,  # e.g. OptimizationTarget.SPEED
+        ftns_budget=request.ftns_budget,
+    )
+    # Deduct FTNS for the job
+    await ledger.debit(node_id, request.ftns_budget, f"distillation_job_{job_id}")
+    return {"job_id": job_id}
+
+@router.get("/distillation/{job_id}/status")
+async def get_distillation_status(job_id: str):
+    """Get the status of a running distillation job."""
+    ...
+
+@router.get("/distillation/{job_id}/result")
+async def get_distillation_result(job_id: str):
+    """Download the distilled model artifact."""
+    ...
+```
+
+**Key design decision:** Large distillation jobs (training a 7B → 1B model) should be submitted to the P2P compute network as a `JobType.TRAINING` job, distributed across willing compute providers. Small distillation jobs (fine-tuning a small classifier) run locally via `ProductionTrainingPipeline`.
+
+**Add `JobType.TRAINING` to `ComputeProvider`** to accept and execute training jobs from the network. This is the bridge that makes the P2P marketplace useful for ML researchers, not just inference.
+
+---
+
+#### Phase 3 — Web Dashboard Co-served with Node (1 day)
+
+**Goal:** Opening `http://localhost:8000/` in a browser shows the PRSM dashboard. No separate `prsm dashboard` command needed.
+
+**Approach — Mount the existing `prsm/dashboard/` HTML/JS SPA on the node API:**
+
+The `prsm/dashboard/` FastAPI app (`app.py`) already has the full 9-page SPA with WebSocket support. Rather than running it as a separate service, mount it as a sub-application on the node's FastAPI instance.
+
+**Files to modify:** `prsm/node/api.py`
+
+```python
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from pathlib import Path
+
+DASHBOARD_DIR = Path(__file__).parent.parent / "dashboard" / "static"
+DASHBOARD_HTML = Path(__file__).parent.parent / "dashboard" / "templates" / "dashboard.html"
+
+# Mount static assets (JS, CSS)
+app.mount("/static", StaticFiles(directory=str(DASHBOARD_DIR)), name="static")
+
+@app.get("/")
+@app.get("/dashboard")
+async def serve_dashboard():
+    """Serve the web dashboard SPA."""
+    return FileResponse(str(DASHBOARD_HTML))
+```
+
+**Update `dashboard.js`** to point API calls at the node's own port (relative paths — already works if served from the same origin).
+
+**Update `prsm node start` output** to show the dashboard URL:
+```
+  ✅ Node started
+  📡 P2P:       ws://0.0.0.0:9001
+  🌐 API:       http://localhost:8000
+  🖥️  Dashboard: http://localhost:8000/  ← open in browser
+```
+
+---
+
+#### Phase 4 — Connect Dashboard to Real Node Data (1 day)
+
+**Goal:** The web dashboard shows live P2P data (peer list, compute jobs, FTNS balance) from the node's DAG ledger, not the platform API's mock data.
+
+The `dashboard.js` currently calls endpoints like `/api/v1/wallet/balance`, `/api/v1/compute/jobs`, `/api/v1/peers`. These need to map to the node API's endpoints:
+
+| Dashboard call | Map to node API endpoint |
+|---|---|
+| `GET /api/v1/wallet/balance` | `GET /ftns/balance` |
+| `GET /api/v1/compute/jobs` | `GET /compute/jobs` |
+| `GET /api/v1/peers` | `GET /node/peers` |
+| `GET /api/v1/content` | `GET /content/index` |
+| `GET /api/v1/staking/status` | `GET /staking/status` |
+| `WS /ws` | `WS /ws` (already exists in node API) |
+
+Two options:
+- **A (fast):** Add alias routes to node API that proxy to existing endpoints
+- **B (clean):** Update `dashboard.js` to use the node API paths directly
+
+Option B is better long-term. The `dashboard.js` API base URL should be configurable (already uses a constant) and the node API paths are already well-defined.
+
+---
+
+### Summary
+
+| Phase | Feature | Effort | Priority | Unblocks |
+|---|---|---|---|---|
+| 1 | Teacher router + CLI wiring | 1–2 days | **P0** | Researcher adoption; "recursive" in PRSM's name |
+| 2 | Distillation router + `JobType.TRAINING` | 1–2 days | **P0** | P2P ML training marketplace |
+| 3 | Dashboard co-served with node | 1 day | **P1** | Browser access without separate command |
+| 4 | Dashboard ↔ node API data binding | 1 day | **P1** | Live data in web UI |
+
+**Total estimated effort: 4–6 days**
+
+This sprint completes PRSM's value proposition. After it:
+- `prsm node start` is the single command that starts everything
+- Researchers can create teacher models, submit distillation jobs, and see live network status in a browser
+- The P2P marketplace handles ML training jobs alongside inference and storage
+- The "recursive scientific modeling" loop is fully operational end-to-end
+
+---
+
 *Analysis completed: 2026-02-20*
 *Code Review completed: 2026-02-20*
 *Sprint 1 completed: 2026-02-20*
@@ -3813,4 +4095,6 @@ Each device runs an independent `prsm node` process with its own `~/.prsm/node_c
 *FTNS testnet deployment config completed: 2026-03-08*
 *Repository root cleaned: 55 test-artifact JSONs removed from git: 2026-03-08*
 *Section 35 (Resource Contribution Controls) completed: 2026-03-08*
+*Section 26 maturity matrix corrected: 2026-03-08 (teacher, distillation, NWTN, web UI)*
+*Section 36 (Two-Stack Integration Gap + Unification Plan) added: 2026-03-08*
 *PRSM Version: 0.2.1*
