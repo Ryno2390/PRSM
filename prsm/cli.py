@@ -680,6 +680,7 @@ def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str, no_dashboa
 
         console.print()
         console.print("  Starting PRSM Node...", style="bold green")
+        console.print(f"  🖥️   Dashboard:  http://localhost:{config.api_port}/", style="bold cyan")
 
     else:
         console.print()
@@ -719,6 +720,7 @@ def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str, no_dashboa
                 table.add_row("Roles", ", ".join(status["roles"]))
                 table.add_row("P2P Address", status["p2p_address"])
                 table.add_row("API Address", status["api_address"])
+                table.add_row("Dashboard", f"http://127.0.0.1:{config.api_port}/")
                 table.add_row("FTNS Balance", f"{status['ftns_balance']:.2f}")
                 bootstrap = status.get("peers", {}).get("bootstrap", {})
                 if bootstrap.get("degraded_mode"):
@@ -1111,20 +1113,149 @@ def teacher():
 
 
 @teacher.command()
-def list():
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def list(api_url: str):
     """List available teacher models"""
-    console.print("🎓 Available teacher models:", style="bold blue")
-    console.print("🚧 CLI teacher management coming in v0.2.0", style="yellow")
-    console.print("💡 Teacher models available via API endpoints", style="blue")
+    import httpx
+    
+    console.print("🎓 Fetching teacher models...", style="bold blue")
+    
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.get(f"{api_url}/teacher/list")
+            
+            if response.status_code == 200:
+                data = response.json()
+                teachers = data.get("teachers", [])
+                
+                if not teachers:
+                    console.print("No teacher models found.", style="yellow")
+                    console.print("💡 Create one with: prsm teacher create <specialization>", style="blue")
+                    return
+                
+                table = Table(title="Teacher Models")
+                table.add_column("ID", style="cyan", no_wrap=True)
+                table.add_column("Name", style="green")
+                table.add_column("Specialization", style="magenta")
+                table.add_column("Domain", style="blue")
+                table.add_column("Status", style="yellow")
+                
+                for t in teachers:
+                    # Truncate ID for display
+                    teacher_id = t.get("teacher_id", "unknown")
+                    short_id = teacher_id[:8] + "..." if len(teacher_id) > 8 else teacher_id
+                    table.add_row(
+                        short_id,
+                        t.get("name", "N/A"),
+                        t.get("specialization", "N/A"),
+                        t.get("domain", "N/A"),
+                        t.get("status", "unknown")
+                    )
+                
+                console.print(table)
+                console.print(f"\n📊 Total: {data.get('count', 0)} teacher models", style="blue")
+            else:
+                console.print(f"❌ Failed to fetch teachers: {response.status_code}", style="red")
+                console.print(response.text, style="dim")
+                
+    except httpx.ConnectError:
+        console.print("❌ Could not connect to PRSM API", style="red")
+        console.print(f"💡 Make sure the PRSM node is running at {api_url}", style="yellow")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
 
 
 @teacher.command()
 @click.argument("specialization")
-def create(specialization: str):
+@click.option('--domain', help='Sub-domain (defaults to specialization)')
+@click.option('--use-real/--no-real', default=True, help='Use PyTorch backend if available')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def create(specialization: str, domain: Optional[str], use_real: bool, api_url: str):
     """Create a new teacher model"""
+    import httpx
+    
     console.print(f"🎓 Creating teacher model for {specialization}...", style="bold green")
-    console.print("🚧 CLI teacher management coming in v0.2.0", style="yellow")
-    console.print("💡 Teacher models available via API endpoints", style="blue")
+    
+    payload = {
+        "specialization": specialization,
+        "domain": domain,
+        "use_real_implementation": use_real
+    }
+    
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(f"{api_url}/teacher/create", json=payload)
+            
+            if response.status_code == 200:
+                data = response.json()
+                console.print("✅ Teacher model created successfully!", style="bold green")
+                console.print(f"   ID: {data.get('teacher_id', 'N/A')}", style="cyan")
+                console.print(f"   Name: {data.get('name', 'N/A')}", style="green")
+                console.print(f"   Specialization: {data.get('specialization', 'N/A')}", style="magenta")
+                console.print(f"   Domain: {data.get('domain', 'N/A')}", style="blue")
+                if data.get('reward_ftns'):
+                    console.print(f"   Reward: {data.get('reward_ftns')} FTNS", style="yellow")
+            else:
+                console.print(f"❌ Failed to create teacher: {response.status_code}", style="red")
+                console.print(response.text, style="dim")
+                
+    except httpx.ConnectError:
+        console.print("❌ Could not connect to PRSM API", style="red")
+        console.print(f"💡 Make sure the PRSM node is running at {api_url}", style="yellow")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@teacher.command()
+@click.argument("teacher_id")
+@click.option('--epochs', type=int, help='Number of training epochs (1-100)')
+@click.option('--learning-rate', type=float, help='Learning rate for training')
+@click.option('--training-data-cid', help='IPFS CID of custom training data')
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def train(teacher_id: str, epochs: Optional[int], learning_rate: Optional[float],
+          training_data_cid: Optional[str], api_url: str):
+    """Start training for a teacher model"""
+    import httpx
+    
+    console.print(f"🎓 Starting training for teacher {teacher_id[:8]}...", style="bold green")
+    
+    payload = {}
+    if epochs is not None:
+        payload["epochs"] = epochs
+    if learning_rate is not None:
+        payload["learning_rate"] = learning_rate
+    if training_data_cid is not None:
+        payload["training_data_cid"] = training_data_cid
+    
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(f"{api_url}/teacher/{teacher_id}/train", json=payload)
+            
+            if response.status_code == 200:
+                data = response.json()
+                console.print("✅ Training started!", style="bold green")
+                console.print(f"   Status: {data.get('status', 'N/A')}", style="cyan")
+                console.print(f"   Cost: {data.get('cost_ftns', 'N/A')} FTNS", style="yellow")
+                if data.get('training_config'):
+                    config = data['training_config']
+                    if config.get('epochs'):
+                        console.print(f"   Epochs: {config['epochs']}", style="blue")
+                    if config.get('learning_rate'):
+                        console.print(f"   Learning Rate: {config['learning_rate']}", style="blue")
+            elif response.status_code == 404:
+                console.print(f"❌ Teacher not found: {teacher_id}", style="red")
+            elif response.status_code == 402:
+                console.print("❌ Insufficient FTNS balance for training", style="red")
+                console.print(response.json().get('detail', ''), style="dim")
+            else:
+                console.print(f"❌ Failed to start training: {response.status_code}", style="red")
+                console.print(response.text, style="dim")
+                
+    except httpx.ConnectError:
+        console.print("❌ Could not connect to PRSM API", style="red")
+        console.print(f"💡 Make sure the PRSM node is running at {api_url}", style="yellow")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
 
 
 # ============================================================================

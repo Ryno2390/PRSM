@@ -9,6 +9,7 @@ a single running node.
 
 import asyncio
 import hashlib
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -239,6 +240,7 @@ class PRSMNode:
         self.agent_registry: Optional[AgentRegistry] = None
         self.agent_collaboration: Optional[AgentCollaboration] = None
         self.staking_manager: Optional[StakingManager] = None
+        self.teacher_registry: Dict[str, Any] = {}  # teacher_id (str) → DistilledTeacher instance
 
         self._started = False
         self._start_time: Optional[float] = None
@@ -443,6 +445,9 @@ class PRSMNode:
         )
         logger.info("Staking manager initialized")
 
+        # Create FTNS adapter for teacher rewards/charges
+        self._ftns_adapter = _NodeFTNSAdapter(self.ledger, self.identity.node_id)
+
         # Wire ledger_sync and agent_registry into subsystems
         self.content_uploader.ledger_sync = self.ledger_sync
         if self.compute_provider:
@@ -553,7 +558,8 @@ class PRSMNode:
         logger.info(
             f"PRSM node started — "
             f"P2P: ws://{self.config.listen_host}:{self.config.p2p_port}, "
-            f"API: http://127.0.0.1:{self.config.api_port}"
+            f"API: http://127.0.0.1:{self.config.api_port}, "
+            f"Dashboard: http://127.0.0.1:{self.config.api_port}/"
         )
 
     async def stop(self) -> None:
@@ -631,6 +637,32 @@ class PRSMNode:
             "collaboration": self.agent_collaboration.get_stats() if self.agent_collaboration else None,
         }
         return status
+
+    def _save_teacher_registry(self) -> None:
+        """Persist teacher metadata (not model weights) across restarts."""
+        registry_path = Path(self.config.data_dir) / "teachers.json"
+        data = {}
+        for tid, t in self.teacher_registry.items():
+            # Get domain from teacher_model or fall back to specialization
+            domain = getattr(t.teacher_model, "domain", None)
+            if domain is None:
+                domain = t.teacher_model.specialization
+            
+            data[tid] = {
+                "name": t.teacher_model.name,
+                "specialization": t.teacher_model.specialization,
+                "domain": domain,
+                "model_type": t.teacher_model.model_type.value,
+                "created_at": getattr(t, "_created_at", time.time()),
+            }
+        registry_path.write_text(json.dumps(data, indent=2))
+
+    def _load_teacher_registry_meta(self) -> Dict[str, Any]:
+        """Load teacher metadata for display (instances are recreated on demand)."""
+        registry_path = Path(self.config.data_dir) / "teachers.json"
+        if registry_path.exists():
+            return json.loads(registry_path.read_text())
+        return {}
 
     async def _run_api(self) -> None:
         """Run the management API server."""
