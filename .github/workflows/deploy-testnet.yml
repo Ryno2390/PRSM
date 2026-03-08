@@ -1,0 +1,197 @@
+name: Deploy FTNS to Testnet
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: 'Target network'
+        required: true
+        default: 'polygon_mumbai'
+        type: choice
+        options:
+          - polygon_mumbai
+          - sepolia
+      contract:
+        description: 'Contract to deploy'
+        required: true
+        default: 'simple'
+        type: choice
+        options:
+          - simple
+          - full
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.check.outputs.should_deploy }}
+    steps:
+      - name: Validate deployment parameters
+        id: check
+        run: |
+          echo "Network: ${{ inputs.network }}"
+          echo "Contract: ${{ inputs.contract }}"
+          
+          # Prevent accidental mainnet deployment
+          if [[ "${{ inputs.network }}" == "mainnet" ]]; then
+            echo "::error::Mainnet deployment is not allowed via this workflow"
+            exit 1
+          fi
+          
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+
+  deploy:
+    needs: validate
+    if: needs.validate.outputs.should_deploy == 'true'
+    runs-on: ubuntu-latest
+    environment: testnet
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: contracts/package-lock.json
+      
+      - name: Install contract dependencies
+        working-directory: contracts
+        run: npm ci
+      
+      - name: Compile contracts
+        working-directory: contracts
+        run: npx hardhat compile
+      
+      - name: Run contract tests
+        working-directory: contracts
+        run: npx hardhat test
+      
+      - name: Configure deployment network
+        id: config
+        working-directory: contracts
+        env:
+          INFURA_KEY: ${{ secrets.INFURA_KEY }}
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+        run: |
+          if [[ "${{ inputs.network }}" == "sepolia" ]]; then
+            echo "rpc_url=https://sepolia.infura.io/v3/${INFURA_KEY}" >> $GITHUB_OUTPUT
+            echo "chain_id=11155111" >> $GITHUB_OUTPUT
+            echo "explorer=https://sepolia.etherscan.io" >> $GITHUB_OUTPUT
+          else
+            echo "rpc_url=https://polygon-mumbai.infura.io/v3/${INFURA_KEY}" >> $GITHUB_OUTPUT
+            echo "chain_id=80001" >> $GITHUB_OUTPUT
+            echo "explorer=https://mumbai.polygonscan.com" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Deploy FTNS Token (Simple)
+        if: inputs.contract == 'simple'
+        working-directory: contracts
+        env:
+          INFURA_KEY: ${{ secrets.INFURA_KEY }}
+          PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          POLYGONSCAN_API_KEY: ${{ secrets.POLYGONSCAN_API_KEY }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+        run: |
+          echo "🚀 Deploying FTNS Token (Simple) to ${{ inputs.network }}"
+          npx hardhat run scripts/deploy-simple.js --network ${{ inputs.network }}
+      
+      - name: Deploy FTNS Token (Full)
+        if: inputs.contract == 'full'
+        working-directory: contracts
+        env:
+          INFURA_KEY: ${{ secrets.INFURA_KEY }}
+          PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          POLYGONSCAN_API_KEY: ${{ secrets.POLYGONSCAN_API_KEY }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+        run: |
+          echo "🚀 Deploying FTNS Token (Full) to ${{ inputs.network }}"
+          npx hardhat run scripts/deploy.js --network ${{ inputs.network }}
+      
+      - name: Upload deployment artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-${{ inputs.network }}-${{ github.run_id }}
+          path: contracts/deployments/
+          retention-days: 30
+
+  verify:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: contracts/package-lock.json
+      
+      - name: Install contract dependencies
+        working-directory: contracts
+        run: npm ci
+      
+      - name: Download deployment artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: deployment-${{ inputs.network }}-${{ github.run_id }}
+          path: contracts/deployments/
+      
+      - name: Verify contract on block explorer
+        working-directory: contracts
+        env:
+          INFURA_KEY: ${{ secrets.INFURA_KEY }}
+          PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          POLYGONSCAN_API_KEY: ${{ secrets.POLYGONSCAN_API_KEY }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+        run: |
+          # Find the latest deployment file
+          DEPLOYMENT_FILE=$(ls -t deployments/${{ inputs.network }}*.json 2>/dev/null | head -1)
+          
+          if [[ -n "$DEPLOYMENT_FILE" ]]; then
+            CONTRACT_ADDRESS=$(jq -r '.contracts.ftnsToken' "$DEPLOYMENT_FILE")
+            echo "Verifying contract at: $CONTRACT_ADDRESS"
+            
+            if [[ "${{ inputs.network }}" == "sepolia" ]]; then
+              npx hardhat verify --network sepolia "$CONTRACT_ADDRESS"
+            else
+              npx hardhat verify --network polygon-mumbai "$CONTRACT_ADDRESS"
+            fi
+          else
+            echo "No deployment file found, skipping verification"
+          fi
+
+  summary:
+    needs: [deploy, verify]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deployment Summary
+        run: |
+          echo "## FTNS Testnet Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Network | ${{ inputs.network }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Contract | ${{ inputs.contract }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Run ID | ${{ github.run_id }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.deploy.result }}" == "success" ]]; then
+            echo "✅ Deployment completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Deployment failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [[ "${{ needs.verify.result }}" == "success" ]]; then
+            echo "✅ Contract verification completed" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.verify.result }}" == "skipped" ]]; then
+            echo "⏭️ Contract verification skipped" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Contract verification failed or incomplete" >> $GITHUB_STEP_SUMMARY
+          fi

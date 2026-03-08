@@ -451,6 +451,302 @@
             }
           }
         }
+      },
+      {
+        "id": 14,
+        "title": "Connection Rate",
+        "type": "timeseries",
+        "gridPos": {
+          "h": 6,
+          "w": 8,
+          "x": 0,
+          "y": 28
+        },
+        "targets": [
+          {
+            "expr": "rate(prsm_bootstrap_total_connections_total[1m]) * 60",
+            "refId": "A",
+            "legendFormat": "Connections/min"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          }
+        },
+        "description": "Rate of new connections per minute"
+      },
+      {
+        "id": 15,
+        "title": "Message Throughput",
+        "type": "timeseries",
+        "gridPos": {
+          "h": 6,
+          "w": 8,
+          "x": 8,
+          "y": 28
+        },
+        "targets": [
+          {
+            "expr": "rate(prsm_bootstrap_messages_processed_total[1m])",
+            "refId": "A",
+            "legendFormat": "Messages/sec"
+          },
+          {
+            "expr": "rate(prsm_bootstrap_messages_sent_total[1m])",
+            "refId": "B",
+            "legendFormat": "Sent/sec"
+          },
+          {
+            "expr": "rate(prsm_bootstrap_messages_received_total[1m])",
+            "refId": "C",
+            "legendFormat": "Received/sec"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          }
+        },
+        "description": "Message throughput in messages per second"
+      },
+      {
+        "id": 16,
+        "title": "Peer Churn Rate",
+        "type": "timeseries",
+        "gridPos": {
+          "h": 6,
+          "w": 8,
+          "x": 16,
+          "y": 28
+        },
+        "targets": [
+          {
+            "expr": "rate(prsm_bootstrap_peer_disconnections_total[1m]) * 60",
+            "refId": "A",
+            "legendFormat": "Disconnects/min"
+          },
+          {
+            "expr": "rate(prsm_bootstrap_peer_connections_total[1m]) * 60",
+            "refId": "B",
+            "legendFormat": "New Peers/min"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 10, "color": "yellow"},
+                {"value": 50, "color": "red"}
+              ]
+            }
+          }
+        },
+        "description": "Peer churn rate - disconnects and new connections per minute"
+      },
+      {
+        "id": 17,
+        "title": "FTNS Transaction Volume",
+        "type": "timeseries",
+        "gridPos": {
+          "h": 6,
+          "w": 12,
+          "x": 0,
+          "y": 34
+        },
+        "targets": [
+          {
+            "expr": "rate(prsm_ftns_transactions_total[5m]) * 60",
+            "refId": "A",
+            "legendFormat": "Transactions/min"
+          },
+          {
+            "expr": "rate(prsm_ftns_volume_total[5m])",
+            "refId": "B",
+            "legendFormat": "Volume/sec (FTNS)"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          }
+        },
+        "description": "FTNS token transaction volume and rate"
+      },
+      {
+        "id": 18,
+        "title": "Compute Job Queue Depth",
+        "type": "stat",
+        "gridPos": {
+          "h": 6,
+          "w": 6,
+          "x": 12,
+          "y": 34
+        },
+        "targets": [
+          {
+            "expr": "prsm_compute_queue_depth",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "reduceOptions": {
+            "calcs": ["lastNotNull"],
+            "fields": "",
+            "values": false
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 50, "color": "yellow"},
+                {"value": 100, "color": "red"}
+              ]
+            }
+          }
+        },
+        "description": "Current depth of compute job queue"
+      },
+      {
+        "id": 19,
+        "title": "Error Rate (Percentage)",
+        "type": "gauge",
+        "gridPos": {
+          "h": 6,
+          "w": 6,
+          "x": 18,
+          "y": 34
+        },
+        "targets": [
+          {
+            "expr": "(rate(prsm_bootstrap_errors_total[5m]) / (rate(prsm_bootstrap_requests_total[5m]) + 0.001)) * 100",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 5, "color": "yellow"},
+                {"value": 10, "color": "red"}
+              ]
+            }
+          }
+        },
+        "description": "Error rate as percentage of total requests"
+      },
+      {
+        "id": 20,
+        "title": "Active Peer Count",
+        "type": "stat",
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 40
+        },
+        "targets": [
+          {
+            "expr": "prsm_bootstrap_active_peers",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "colorMode": "background",
+          "graphMode": "area",
+          "reduceOptions": {
+            "calcs": ["lastNotNull"],
+            "fields": "",
+            "values": false
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "red"},
+                {"value": 1, "color": "green"}
+              ]
+            }
+          }
+        },
+        "description": "Currently active peers in the network"
+      },
+      {
+        "id": 21,
+        "title": "FTNS Balance (Bootstrap Server)",
+        "type": "stat",
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 40
+        },
+        "targets": [
+          {
+            "expr": "prsm_ftns_bootstrap_balance",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "reduceOptions": {
+            "calcs": ["lastNotNull"],
+            "fields": "",
+            "values": false
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "red"},
+                {"value": 1000, "color": "yellow"},
+                {"value": 10000, "color": "green"}
+              ]
+            }
+          }
+        },
+        "description": "FTNS token balance for bootstrap server operations"
       }
     ]
   }

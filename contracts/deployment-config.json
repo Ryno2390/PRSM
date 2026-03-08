@@ -1,0 +1,51 @@
+{
+  "testnets": {
+    "sepolia": {
+      "chainId": 11155111,
+      "rpcUrl": "https://sepolia.infura.io/v3/${INFURA_KEY}",
+      "explorer": "https://sepolia.etherscan.io",
+      "gas": 6000000,
+      "gasPrice": 20000000000,
+      "confirmations": 2,
+      "nativeCurrency": {
+        "name": "Sepolia Ether",
+        "symbol": "ETH",
+        "decimals": 18
+      }
+    },
+    "polygon_mumbai": {
+      "chainId": 80001,
+      "rpcUrl": "https://polygon-mumbai.infura.io/v3/${INFURA_KEY}",
+      "explorer": "https://mumbai.polygonscan.com",
+      "gas": 6000000,
+      "gasPrice": 10000000000,
+      "confirmations": 2,
+      "nativeCurrency": {
+        "name": "MATIC",
+        "symbol": "MATIC",
+        "decimals": 18
+      }
+    }
+  },
+  "ftns_token": {
+    "name": "PRSM Fungible Tokens for Node Support",
+    "symbol": "FTNS",
+    "decimals": 18,
+    "initialSupply": "100000000000000000000000000",
+    "maxSupply": "1000000000000000000000000000",
+    "proxyKind": "uups"
+  },
+  "verification": {
+    "sepolia": {
+      "etherscanApiKey": "${ETHERSCAN_API_KEY}"
+    },
+    "polygon_mumbai": {
+      "polygonscanApiKey": "${POLYGONSCAN_API_KEY}"
+    }
+  },
+  "deployment": {
+    "timeout": 300000,
+    "retries": 3,
+    "saveDir": "./deployments"
+  }
+}

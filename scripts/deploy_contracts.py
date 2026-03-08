@@ -26,8 +26,8 @@ async def main():
     parser = argparse.ArgumentParser(description='Deploy PRSM FTNS smart contracts')
     parser.add_argument('action', choices=['deploy', 'status', 'instructions'], 
                        help='Action to perform')
-    parser.add_argument('--network', default='polygon_mumbai', 
-                       choices=['polygon_mumbai', 'polygon_mainnet'],
+    parser.add_argument('--network', default='polygon_mumbai',
+                       choices=['polygon_mumbai', 'polygon_mainnet', 'sepolia'],
                        help='Target network')
     parser.add_argument('--private-key', 
                        help='Deployment wallet private key (or set PRIVATE_KEY env var)')
@@ -164,8 +164,11 @@ def check_environment():
         issues.append("eth_account module not installed (pip install eth-account)")
     
     # Check environment variables
-    if not os.getenv('POLYGON_MUMBAI_RPC_URL'):
-        issues.append("POLYGON_MUMBAI_RPC_URL not set (will use default)")
+    if not os.getenv('POLYGON_MUMBAI_RPC_URL') and not os.getenv('INFURA_KEY'):
+        issues.append("POLYGON_MUMBAI_RPC_URL or INFURA_KEY not set (will use default)")
+    
+    if not os.getenv('SEPOLIA_RPC_URL') and not os.getenv('INFURA_KEY'):
+        issues.append("SEPOLIA_RPC_URL or INFURA_KEY not set (will use default)")
     
     if issues:
         print("⚠️  Environment Issues:")

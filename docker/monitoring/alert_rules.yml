@@ -101,6 +101,50 @@ groups:
           summary: "Bootstrap server health checks failing"
           description: "Bootstrap server has {{ $value }} consecutive health check failures."
 
+      # Critical peer alerts
+      - alert: NoActivePeers
+        expr: prsm_bootstrap_active_peers < 1
+        for: 5m
+        labels:
+          severity: critical
+          service: bootstrap
+        annotations:
+          summary: "No active peers in the network"
+          description: "Bootstrap server has had no active peers for 5 minutes. The network may be isolated."
+
+      # Connection error rate alert
+      - alert: HighConnectionErrorRate
+        expr: (rate(prsm_bootstrap_failed_connections_total[5m]) / (rate(prsm_bootstrap_total_connections_total[5m]) + 0.001)) * 100 > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: bootstrap
+        annotations:
+          summary: "High connection error rate"
+          description: "Connection error rate is {{ $value | printf \"%.1f\" }}%, which exceeds the 10% threshold."
+
+      # Message queue depth alert
+      - alert: HighMessageQueueDepth
+        expr: prsm_bootstrap_message_queue_depth > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: bootstrap
+        annotations:
+          summary: "Message queue depth is high"
+          description: "Message queue has {{ $value }} pending messages, exceeding the 100 message threshold."
+
+      # FTNS balance alert
+      - alert: FTNSBalanceLow
+        expr: prsm_ftns_bootstrap_balance < 1000
+        for: 10m
+        labels:
+          severity: warning
+          service: bootstrap
+        annotations:
+          summary: "Bootstrap server FTNS balance is low"
+          description: "Bootstrap server FTNS balance is {{ $value }}, which is below the recommended minimum of 1000 FTNS."
+
   # ===================================
   # System Resource Alerts
   # ===================================
