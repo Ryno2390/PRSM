@@ -3319,6 +3319,272 @@ class ContentRecord:
 
 ---
 
+## 34. Priority Execution Plan — Completion Summary (2026-03-08)
+
+Nine priority items were identified and implemented following a comprehensive audit of outstanding work. The items spanned repository hygiene, core P2P compute, network intelligence, observability, and operational readiness.
+
+### Item 1: Repository Root Hygiene ✅
+
+**Problem:** 26+ JSON test-artifact files, build artifacts (`prsm_network-0.2.0/`, `*.egg-info/`, `dist/`), and virtual environments (`venv/`, `agents_venv/`) cluttered the root directory — an investor/developer red flag.
+
+**Resolution:**
+- Moved all test result and regression baseline JSON files to `reports/` (already existed)
+- Added `reports/`, `agents_venv/`, `prsm_embedding_cache/`, `prsm_network-*/` to `.gitignore`
+- Un-tracked 55 previously-committed JSON artifacts from git history (`git rm --cached`)
+- Root now contains only essential project files
+
+**Files changed:** `.gitignore`, `reports/` (55 files removed from tracking)
+
+---
+
+### Item 2: Architecture Analysis Update ✅
+
+**Problem:** The two most recent commits (semantic embedding provenance, FTNS cross-node royalties) were not reflected in the architecture documentation.
+
+**Resolution:** Added Section 33 documenting the complete Semantic Provenance System: `_SemanticIndex` implementation, gossip protocol extensions (`GOSSIP_PROVENANCE_QUERY/RESPONSE`), SQLite schema, royalty distribution mechanics, and cross-node resolution flow.
+
+**Files changed:** `plans/prsm_architecture_analysis.md`
+
+---
+
+### Item 3: Compute Provider → NWTN Orchestrator Wiring ✅
+
+**Problem:** `ComputeProvider._run_inference()` returned mock strings (`"[PRSM node XYZ processed inference]"`) regardless of API key configuration. The real NWTN pipeline (with `BackendRegistry`) existed but was only reachable via the REST API — not via P2P compute jobs. Any node accepting inference work from a peer returned fake data.
+
+**Resolution:**
+
+- `ComputeProvider.__init__()` now accepts `orchestrator: Optional[NWTNOrchestrator]`
+- `_run_inference()` dispatches to `orchestrator.process_query()` when orchestrator is injected; returns real LLM response with `source`, `tokens_used`, `reasoning_steps` fields
+- `_run_embedding()` wires to `RealEmbeddingAPI.generate_embedding()` when available
+- `prsm/node/node.py` passes both `orchestrator` and `embedding_api` to `ComputeProvider` during initialization
+- Graceful fallback to mock when no API keys configured; warning logged at startup
+
+**Impact:** Closes the P2P AI inference loop. `POST /compute/submit {"job_type":"inference"}` from Node A → Node B accepts and returns a real Anthropic/OpenAI response, billed in FTNS.
+
+**Files changed:** `prsm/node/compute_provider.py`, `prsm/node/node.py`
+**Tests added:** `tests/unit/test_compute_provider_nwtn_integration.py` (12 tests)
+
+---
+
+### Item 4: Capability-Based Peer Discovery ✅
+
+**Problem:** `PeerDiscovery` tracked `{node_id, address, roles}` only. The compute marketplace broadcast inference/embedding jobs to all peers indiscriminately — nodes without LLM backends wasted resources on jobs they couldn't fulfill.
+
+**Resolution:**
+
+**`prsm/node/discovery.py`:**
+- `PeerInfo` extended with `capabilities: List[str]`, `supported_backends: List[str]`, `gpu_available: bool`, `last_capability_update: float`
+- Added `find_peers_with_capability(capability)` and `find_peers_with_backend(backend)` query methods
+
+**`prsm/node/gossip.py`:**
+- Added `GOSSIP_CAPABILITY_ANNOUNCE` subtype
+- Broadcast on node start and when backend configuration changes
+
+**`prsm/node/capability_detection.py`** (new file):
+- `detect_node_capabilities()` auto-detects available backends from environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, CUDA presence)
+- Returns structured `NodeCapabilities` with `capabilities[]`, `supported_backends[]`, `gpu_available`
+
+**`prsm/node/compute_requester.py`:**
+- Prefers `find_peers_with_capability(job_type)` when routing jobs
+- Falls back to broadcast if no capable peers found
+
+**Files changed:** `prsm/node/discovery.py`, `prsm/node/gossip.py`, `prsm/node/compute_requester.py`, `prsm/node/node.py`
+**New files:** `prsm/node/capability_detection.py`
+**Tests added:** `tests/unit/test_capability_discovery.py` (24 tests)
+
+---
+
+### Item 5: Monitoring Dashboards ✅
+
+**Problem:** `docker/monitoring/grafana/` existed with a skeleton dashboard. Prometheus metrics were being exported by the bootstrap server but no panels were configured. No alert rules were defined.
+
+**Resolution:**
+
+**`docker/monitoring/grafana/dashboards/bootstrap-dashboard.json`:**
+- 8 new panels: Active Peer Count, Connection Rate (req/s), Message Throughput (msg/s), Peer Churn Rate, Connection Error Rate, Gossip Subtype Breakdown (pie), Job Completion Rate, FTNS Transaction Volume
+- All panels use the `prometheus` datasource with 30s refresh
+
+**`docker/monitoring/alert_rules.yml`:**
+- `prsm_bootstrap_peers_critical`: active peers < 1 for 5 min → critical
+- `prsm_connection_error_rate_high`: error rate > 10% for 2 min → warning
+- `prsm_gossip_backlog_high`: backlog > 1000 messages → warning
+- `prsm_bootstrap_health_degraded`: health endpoint non-200 for 3 min → critical
+
+**`docs/BOOTSTRAP_DEPLOYMENT_GUIDE.md`:** Added Grafana dashboard section with access URL, default credentials, and alert configuration instructions.
+
+**Files changed:** `docker/monitoring/grafana/dashboards/bootstrap-dashboard.json`, `docker/monitoring/alert_rules.yml`, `docs/BOOTSTRAP_DEPLOYMENT_GUIDE.md`
+
+---
+
+### Item 6: Gossip Persistence for Late-Joining Nodes ✅
+
+**Problem:** The gossip protocol used epidemic fanout with TTL but had no historical catch-up. A node starting after a task offer, content advertisement, or agent registration was broadcast would never learn about it — unless the originator re-broadcast, which doesn't happen for one-shot messages.
+
+**Resolution:**
+
+**`prsm/node/gossip.py`:**
+- Added `GOSSIP_DIGEST_REQUEST` and `GOSSIP_DIGEST_RESPONSE` message types
+- On new peer connection, node sends a digest of last-seen timestamps per subtype: `{subtype → last_timestamp}`
+- Peer queries its SQLite gossip log for messages newer than each timestamp and sends them in a `GOSSIP_DIGEST_RESPONSE`
+- Per-subtype retention policy constants:
+
+| Subtype | Retention |
+|---------|-----------|
+| `AGENT_TASK_POST`, `QUERY_POST` | 1 hour |
+| `CONTENT_ADVERTISE`, `AGENT_REGISTER`, `CAPABILITY_ANNOUNCE` | 24 hours |
+| All others | 30 minutes |
+
+- Periodic cleanup (runs every 10 min) prunes messages past retention window from SQLite
+
+**`prsm/node/transport.py`:** On peer handshake completion, fires digest request exchange.
+
+**Files changed:** `prsm/node/gossip.py`, `prsm/node/transport.py`
+**Tests added:** `tests/unit/test_gossip_persistence.py` (22 tests)
+
+---
+
+### Item 7: Multi-Region Bootstrap ✅
+
+**Problem:** All three bootstrap subdomains (`bootstrap1`, `fallback1`, `fallback2`) pointed to the same DigitalOcean NYC3 server. A regional outage or high-latency connection for international users would degrade the entire bootstrap layer.
+
+**Resolution:**
+
+- `config/secure.env.template`: Added `PRSM_REGION` and `PRSM_BOOTSTRAP_REGION` environment variables for region identification
+- `docker/docker-compose.bootstrap.yml`: Added `BOOTSTRAP_REGION` label to service definition for monitoring and routing
+- `docs/BOOTSTRAP_DEPLOYMENT_GUIDE.md`: Step-by-step guide for deploying `fallback1` to EU and `fallback2` to APAC — provision VPS, clone PRSM, update DNS A records, verify health endpoint
+
+**Target topology when fully deployed:**
+
+```
+bootstrap1.prsm-network.com → NYC3 (primary, live)
+fallback1.prsm-network.com  → EU (Amsterdam/Frankfurt)
+fallback2.prsm-network.com  → APAC (Singapore/Tokyo)
+```
+
+**Files changed:** `config/secure.env.template`, `docker/docker-compose.bootstrap.yml`, `docs/BOOTSTRAP_DEPLOYMENT_GUIDE.md`
+
+---
+
+### Item 8: Automated Security Scans ✅
+
+**Problem:** `prsm/security/audit_checklist.py` and `prsm/security/scanner.py` were production-ready but had no trigger. Security checks ran only when manually invoked — effectively never in practice.
+
+**Resolution:**
+
+**`.github/workflows/security.yml`** (new file):
+- Triggers: push to `main`/`develop`, pull requests, daily schedule (`0 2 * * *`), manual dispatch
+- Steps: install PRSM with `[security]` extras, run full audit + scan, upload report as artifact, fail CI if critical findings detected
+
+**`prsm/security/scanner.py`:**
+- Added CLI entry point: `python -m prsm.security.scanner --output-dir reports/`
+- Structured JSON output compatible with `check_security_reports.py` parser
+
+**`scripts/ci/check_security_reports.py`:**
+- Added `--fail-on-critical` flag: exits with code 1 if any critical-severity findings present
+- Used as the final CI gate step in the security workflow
+
+**Files changed:** `prsm/security/scanner.py`, `scripts/ci/check_security_reports.py`
+**New files:** `.github/workflows/security.yml`
+
+---
+
+### Item 9: FTNS Testnet Deployment ✅
+
+**Problem:** `prsm/economy/blockchain/` contained production-quality smart contract code and deployer logic but had no deployment configuration or operational workflow. The FTNS bridge was inaccessible to anyone wanting to test on-chain economics.
+
+**Resolution:**
+
+**`contracts/deployment-config.json`** (new file):
+```json
+{
+  "sepolia": {
+    "network": "sepolia",
+    "chain_id": 11155111,
+    "rpc_url": "${SEPOLIA_RPC_URL}",
+    "token_name": "FTNS Token (Testnet)",
+    "token_symbol": "FTNS",
+    "initial_supply": 1000000,
+    "gas_limit": 3000000
+  },
+  "polygon_mumbai": { ... }
+}
+```
+
+**`.github/workflows/deploy-testnet.yml`** (new file):
+- Manual-trigger workflow (`workflow_dispatch`) with `network` input (sepolia/polygon_mumbai)
+- Requires `PRIVATE_KEY` and `RPC_URL` GitHub secrets
+- Runs deployment script, saves contract addresses as workflow artifact
+
+**`docs/FTNS_TESTNET_DEPLOYMENT.md`** (new file):
+- Complete deployment guide: get testnet ETH from faucets, configure `.env`, run deployer, verify on Etherscan/Polygonscan, configure bridge in node settings
+
+**Files changed:** `contracts/.env.example`, `contracts/hardhat.config.js`, `scripts/deploy_contracts.py`
+**New files:** `contracts/deployment-config.json`, `.github/workflows/deploy-testnet.yml`, `docs/FTNS_TESTNET_DEPLOYMENT.md`
+
+---
+
+### Execution Summary
+
+| Item | Type | Files Changed | Tests Added | Status |
+|------|------|---------------|-------------|--------|
+| Root hygiene | chore | 56 (55 deleted) | — | ✅ |
+| Arch analysis update | docs | 1 | — | ✅ |
+| Compute → NWTN wiring | feat | 2 | 12 | ✅ |
+| Capability discovery | feat | 4 + 1 new | 24 | ✅ |
+| Monitoring dashboards | feat | 3 | — | ✅ |
+| Gossip persistence | feat | 2 | 22 | ✅ |
+| Multi-region bootstrap | feat | 3 | — | ✅ |
+| Security CI | ci | 2 + 1 new | — | ✅ |
+| FTNS testnet | feat | 3 + 3 new | — | ✅ |
+
+**Total new tests: 58 (all passing)**
+**Commits: 3 (`4020507`, `d54aefc`, `acea879`)**
+
+### Updated Status Matrix
+
+```
+FULLY WORKING END-TO-END:
+  ✅ P2P networking (transport, gossip, discovery, handshake, replay prevention)
+  ✅ Node runtime (identity, startup, dashboard, management API, preflight)
+  ✅ DAG ledger (atomic ops, TOCTOU prevention, allowances, gossip + collab persistence)
+  ✅ Safety system (circuit breaker, emergency halt, rule-based monitoring)
+  ✅ Authentication (JWT, RBAC, audit logging)
+  ✅ Local FTNS economy (tracking, transfers, welcome grants, agent allowances)
+  ✅ Compute benchmarks (real CPU computation)
+  ✅ Multi-node compute jobs (submit → accept → execute → result → payment)
+  ✅ Collaboration protocol (tasks, reviews, queries, bid selection, persistence)
+  ✅ Self-compute for single nodes
+  ✅ Bootstrap fallback with address validation
+  ✅ Governance voting + execution (votes → timelock → parameter changes)
+  ✅ Web dashboard (auto-launched with node)
+  ✅ NWTN LLM inference (Anthropic/OpenAI/local backends via BackendRegistry)
+  ✅ P2P inference via ComputeProvider → NWTN (real responses to remote nodes)
+  ✅ Cross-node content retrieval (GET /content/retrieve/{cid})
+  ✅ Staking lifecycle (stake/unstake/withdraw/slash/rewards via API)
+  ✅ Storage proof verification (challenge-response integrated into StorageProvider)
+  ✅ IPFS content sharding (auto-shard large files in ContentUploader)
+  ✅ FTNS bridge (deposit/withdraw via API and CLI)
+  ✅ Semantic provenance (embedding near-dup detection, FTNS royalties, cross-node query)
+  ✅ Capability-based peer discovery (smart job routing to capable nodes)
+  ✅ Gossip persistence (late-joining nodes receive catch-up on connect)
+
+PUBLISHED & DEPLOYED:
+  ✅ PyPI: pip install prsm-network (v0.2.1)
+  ✅ Bootstrap: wss://bootstrap1.prsm-network.com:8765 (DigitalOcean NYC3)
+  ✅ SSL: Let's Encrypt certs (expires 2026-06-04)
+  ✅ DNS: bootstrap1, fallback1, fallback2 on Cloudflare
+  ✅ GitHub Actions: automated releases + daily security scans
+
+REMAINING (MEDIUM-TERM):
+  📦 Multi-region bootstrap: deploy fallback1 (EU) + fallback2 (APAC)
+  📦 Monitoring: connect Grafana dashboards to live bootstrap Prometheus
+  📦 FTNS testnet: deploy contracts to Sepolia/Polygon Mumbai (config ready)
+  📦 LLM API keys: configure Anthropic/OpenAI keys on production nodes
+  📦 Community & adoption: researcher outreach, blog posts, conference demos
+```
+
+---
+
 *Analysis completed: 2026-02-20*
 *Code Review completed: 2026-02-20*
 *Sprint 1 completed: 2026-02-20*
@@ -3348,4 +3614,13 @@ class ContentRecord:
 *Near-term items completed: 2026-03-06 — v0.2.1 release, SSL certs, server access*
 *PyPI v0.2.1 published: 2026-03-06 — https://pypi.org/project/prsm-network/0.2.1/*
 *Section 33 (Semantic Provenance System) documented: 2026-03-08*
+*Section 34 (Priority Execution Plan completion) documented: 2026-03-08*
+*Compute Provider → NWTN wiring completed: 2026-03-08*
+*Capability-based peer discovery completed: 2026-03-08*
+*Gossip persistence for late-joining nodes completed: 2026-03-08*
+*Monitoring dashboards + alert rules completed: 2026-03-08*
+*Multi-region bootstrap config completed: 2026-03-08*
+*Security CI workflow completed: 2026-03-08*
+*FTNS testnet deployment config completed: 2026-03-08*
+*Repository root cleaned: 55 test-artifact JSONs removed from git: 2026-03-08*
 *PRSM Version: 0.2.1*
