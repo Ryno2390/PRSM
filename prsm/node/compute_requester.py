@@ -5,6 +5,8 @@ Compute Requester
 Submits compute jobs to the PRSM network and collects results.
 Broadcasts job offers via gossip, waits for provider acceptance,
 verifies results, and records payments.
+
+Supports capability-based smart routing to target capable peers first.
 """
 
 import asyncio
@@ -13,7 +15,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from prsm.node.compute_provider import JobStatus, JobType
 from prsm.node.gossip import (
@@ -27,7 +29,25 @@ from prsm.node.identity import NodeIdentity, verify_signature
 from prsm.node.local_ledger import LocalLedger, TransactionType
 from prsm.node.transport import WebSocketTransport
 
+if TYPE_CHECKING:
+    from prsm.node.discovery import PeerDiscovery
+
 logger = logging.getLogger(__name__)
+
+
+# Mapping of job types to required capabilities
+JOB_TYPE_CAPABILITIES = {
+    JobType.INFERENCE: "inference",
+    JobType.EMBEDDING: "embedding",
+    JobType.BENCHMARK: "benchmark",
+}
+
+# Mapping of job types to preferred backends
+JOB_TYPE_PREFERRED_BACKENDS = {
+    JobType.INFERENCE: ["anthropic", "openai", "local"],
+    JobType.EMBEDDING: ["openai", "local"],
+    JobType.BENCHMARK: ["local", "anthropic", "openai"],
+}
 
 
 @dataclass
@@ -64,15 +84,19 @@ class ComputeRequester:
         transport: WebSocketTransport,
         gossip: GossipProtocol,
         ledger: LocalLedger,
+        discovery: Optional["PeerDiscovery"] = None,
         accept_timeout: float = 30.0,
         result_timeout: float = 300.0,
+        smart_routing: bool = True,
     ):
         self.identity = identity
         self.transport = transport
         self.gossip = gossip
         self.ledger = ledger
+        self.discovery = discovery
         self.accept_timeout = accept_timeout
         self.result_timeout = result_timeout
+        self.smart_routing = smart_routing
 
         self.submitted_jobs: Dict[str, SubmittedJob] = {}
         self._running = False
@@ -88,15 +112,61 @@ class ComputeRequester:
     async def stop(self) -> None:
         self._running = False
 
+    def set_discovery(self, discovery: "PeerDiscovery") -> None:
+        """Set the peer discovery instance for smart routing."""
+        self.discovery = discovery
+
+    def _get_capable_peers(self, job_type: JobType) -> List[str]:
+        """Find peers capable of handling a specific job type.
+
+        Args:
+            job_type: The type of job to find capable peers for.
+
+        Returns:
+            List of peer IDs that have the required capabilities.
+        """
+        if not self.discovery:
+            return []
+
+        # Get required capability for job type
+        required_capability = JOB_TYPE_CAPABILITIES.get(job_type)
+        if not required_capability:
+            logger.debug(f"No capability mapping for job type {job_type.value}")
+            return []
+
+        # Find peers with the required capability
+        capable_peers = self.discovery.find_peers_with_capability(required_capability)
+
+        # Optionally filter by preferred backends
+        preferred_backends = JOB_TYPE_PREFERRED_BACKENDS.get(job_type, [])
+        if preferred_backends:
+            backend_peers = []
+            for backend in preferred_backends:
+                backend_peers.extend(self.discovery.find_peers_with_backend(backend))
+            # Prefer peers that have both capability and preferred backend
+            backend_peer_ids = {p.node_id for p in backend_peers}
+            capable_peers = [p for p in capable_peers if p.node_id in backend_peer_ids] or capable_peers
+
+        return [p.node_id for p in capable_peers]
+
     async def submit_job(
         self,
         job_type: JobType,
         payload: Dict[str, Any],
         ftns_budget: float,
+        target_peers: Optional[List[str]] = None,
     ) -> SubmittedJob:
         """Submit a compute job to the network.
 
-        Returns a SubmittedJob that can be awaited for results via get_result().
+        Args:
+            job_type: Type of job to submit.
+            payload: Job payload/parameters.
+            ftns_budget: Maximum FTNS to spend on this job.
+            target_peers: Optional list of specific peer IDs to target.
+                         If None and smart_routing is enabled, will route to capable peers.
+
+        Returns:
+            SubmittedJob that can be awaited for results via get_result().
         """
         # Check balance
         balance = await self.ledger.get_balance(self.identity.node_id)
@@ -111,16 +181,42 @@ class ComputeRequester:
         )
         self.submitted_jobs[job.job_id] = job
 
+        # Determine target peers for smart routing
+        routing_targets = target_peers
+        routing_mode = "broadcast"
+
+        if self.smart_routing and self.discovery and target_peers is None:
+            capable_peers = self._get_capable_peers(job_type)
+            if capable_peers:
+                routing_targets = capable_peers
+                routing_mode = "targeted"
+                logger.info(
+                    f"Smart routing: targeting {len(capable_peers)} capable peers for {job_type.value}"
+                )
+            else:
+                logger.info(
+                    f"No capable peers found for {job_type.value}, falling back to broadcast"
+                )
+
         # Broadcast job offer
-        await self.gossip.publish(GOSSIP_JOB_OFFER, {
+        job_offer = {
             "job_id": job.job_id,
             "job_type": job_type.value,
             "requester_id": self.identity.node_id,
             "payload": payload,
             "ftns_budget": ftns_budget,
-        })
+        }
 
-        logger.info(f"Submitted job {job.job_id[:8]} ({job_type.value}), budget: {ftns_budget} FTNS")
+        # Add target peers if smart routing
+        if routing_targets:
+            job_offer["target_peers"] = routing_targets
+
+        await self.gossip.publish(GOSSIP_JOB_OFFER, job_offer)
+
+        logger.info(
+            f"Submitted job {job.job_id[:8]} ({job_type.value}), "
+            f"budget: {ftns_budget} FTNS, routing: {routing_mode}"
+        )
         return job
 
     async def get_result(self, job_id: str, timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:

@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 DISCOVERY_ANNOUNCE = "discovery_announce"
 DISCOVERY_PEER_REQUEST = "discovery_peer_request"
 DISCOVERY_PEER_RESPONSE = "discovery_peer_response"
+DISCOVERY_CAPABILITY_ANNOUNCE = "capability_announce"
 
 
 @dataclass
@@ -39,8 +40,11 @@ class PeerInfo:
     address: str
     display_name: str = ""
     roles: List[str] = field(default_factory=list)
-    capabilities: List[str] = field(default_factory=list)
+    capabilities: List[str] = field(default_factory=list)  # e.g. ["inference", "embedding", "benchmark"]
+    supported_backends: List[str] = field(default_factory=list)  # e.g. ["anthropic", "openai", "local"]
+    gpu_available: bool = False
     last_seen: float = field(default_factory=time.time)
+    last_capability_update: float = field(default_factory=time.time)
 
 
 def validate_bootstrap_address(address: str) -> Tuple[bool, str]:
@@ -113,6 +117,8 @@ class PeerDiscovery:
         maintenance_interval: float = 30.0,
         peer_stale_timeout: float = 600.0,
         local_capabilities: Optional[List[str]] = None,
+        local_backends: Optional[List[str]] = None,
+        local_gpu_available: bool = False,
     ):
         self.transport = transport
         self.bootstrap_nodes = bootstrap_nodes or []
@@ -128,6 +134,8 @@ class PeerDiscovery:
         self.maintenance_interval = maintenance_interval
         self.peer_stale_timeout = peer_stale_timeout
         self._local_capabilities = local_capabilities or []
+        self._local_backends = local_backends or []
+        self._local_gpu_available = local_gpu_available
 
         # Startup bootstrap status (for first-run observability)
         self.bootstrap_degraded_mode: bool = False
@@ -389,6 +397,8 @@ class PeerDiscovery:
                 "display_name": getattr(self.transport.identity, "display_name", ""),
                 "roles": [],
                 "capabilities": self._local_capabilities,
+                "supported_backends": self._local_backends,
+                "gpu_available": self._local_gpu_available,
                 "peer_count": self.transport.peer_count,
             },
         )
@@ -447,6 +457,50 @@ class PeerDiscovery:
         results.sort(key=lambda p: p.last_seen, reverse=True)
         return results
 
+    def find_peers_with_capability(self, capability: str) -> List[PeerInfo]:
+        """Find peers that have a specific capability.
+
+        Args:
+            capability: The capability to search for (e.g., "inference", "embedding").
+
+        Returns:
+            List of peers with the specified capability, sorted by most-recently-seen.
+        """
+        capability_lower = capability.lower()
+        results = [
+            peer for peer in self.known_peers.values()
+            if capability_lower in {c.lower() for c in peer.capabilities}
+        ]
+        results.sort(key=lambda p: p.last_seen, reverse=True)
+        return results
+
+    def find_peers_with_backend(self, backend: str) -> List[PeerInfo]:
+        """Find peers that support a specific backend.
+
+        Args:
+            backend: The backend to search for (e.g., "anthropic", "openai", "local").
+
+        Returns:
+            List of peers with the specified backend support, sorted by most-recently-seen.
+        """
+        backend_lower = backend.lower()
+        results = [
+            peer for peer in self.known_peers.values()
+            if backend_lower in {b.lower() for b in peer.supported_backends}
+        ]
+        results.sort(key=lambda p: p.last_seen, reverse=True)
+        return results
+
+    def find_peers_with_gpu(self) -> List[PeerInfo]:
+        """Find peers that have GPU available.
+
+        Returns:
+            List of peers with GPU available, sorted by most-recently-seen.
+        """
+        results = [peer for peer in self.known_peers.values() if peer.gpu_available]
+        results.sort(key=lambda p: p.last_seen, reverse=True)
+        return results
+
     # ── Message handlers ─────────────────────────────────────────
 
     async def _handle_gossip(self, msg: P2PMessage, peer: PeerConnection) -> None:
@@ -459,6 +513,8 @@ class PeerDiscovery:
             await self._handle_peer_request(msg, peer)
         elif subtype == DISCOVERY_PEER_RESPONSE:
             await self._handle_peer_response(msg, peer)
+        elif subtype == DISCOVERY_CAPABILITY_ANNOUNCE:
+            await self._handle_capability_announce(msg, peer)
 
     async def _handle_announce(self, msg: P2PMessage, peer: PeerConnection) -> None:
         """Record a peer announcement."""
@@ -469,7 +525,10 @@ class PeerDiscovery:
             display_name=msg.payload.get("display_name", ""),
             roles=msg.payload.get("roles", []),
             capabilities=msg.payload.get("capabilities", []),
+            supported_backends=msg.payload.get("supported_backends", []),
+            gpu_available=msg.payload.get("gpu_available", False),
             last_seen=time.time(),
+            last_capability_update=time.time(),
         )
         # Re-gossip if TTL > 0
         if msg.ttl > 1:
@@ -493,6 +552,8 @@ class PeerDiscovery:
                 "display_name": info.display_name,
                 "roles": info.roles,
                 "capabilities": info.capabilities,
+                "supported_backends": info.supported_backends,
+                "gpu_available": info.gpu_available,
             })
 
         # Also include directly connected peers
@@ -504,6 +565,8 @@ class PeerDiscovery:
                     "display_name": pc.display_name,
                     "roles": pc.roles,
                     "capabilities": getattr(pc, "capabilities", []),
+                    "supported_backends": getattr(pc, "supported_backends", []),
+                    "gpu_available": getattr(pc, "gpu_available", False),
                 })
 
         resp = P2PMessage(
@@ -528,9 +591,106 @@ class PeerDiscovery:
                     display_name=p.get("display_name", ""),
                     roles=p.get("roles", []),
                     capabilities=p.get("capabilities", []),
+                    supported_backends=p.get("supported_backends", []),
+                    gpu_available=p.get("gpu_available", False),
                     last_seen=time.time(),
+                    last_capability_update=time.time(),
                 )
         logger.debug(f"Received {len(peers_data)} peers from {peer.peer_id[:8]}")
+
+    async def _handle_capability_announce(self, msg: P2PMessage, peer: PeerConnection) -> None:
+        """Handle capability announcement from a peer.
+
+        Updates the peer's capability information in the known_peers dict.
+        This allows late-joining nodes to receive capability updates.
+        """
+        node_id = msg.sender_id
+        capabilities = msg.payload.get("capabilities", [])
+        supported_backends = msg.payload.get("supported_backends", [])
+        gpu_available = msg.payload.get("gpu_available", False)
+
+        # Update existing peer info or create new entry
+        if node_id in self.known_peers:
+            existing = self.known_peers[node_id]
+            existing.capabilities = capabilities
+            existing.supported_backends = supported_backends
+            existing.gpu_available = gpu_available
+            existing.last_seen = time.time()
+            existing.last_capability_update = time.time()
+            logger.debug(
+                f"Updated capabilities for peer {node_id[:8]}: "
+                f"caps={capabilities}, backends={supported_backends}, gpu={gpu_available}"
+            )
+        else:
+            # Create new peer entry with capability info
+            self.known_peers[node_id] = PeerInfo(
+                node_id=node_id,
+                address=msg.payload.get("address", peer.address),
+                display_name=msg.payload.get("display_name", ""),
+                roles=msg.payload.get("roles", []),
+                capabilities=capabilities,
+                supported_backends=supported_backends,
+                gpu_available=gpu_available,
+                last_seen=time.time(),
+                last_capability_update=time.time(),
+            )
+            logger.debug(
+                f"Created new peer entry from capability announce: {node_id[:8]}"
+            )
+
+        # Re-gossip if TTL > 0
+        if msg.ttl > 1:
+            fwd = P2PMessage(
+                msg_type=msg.msg_type,
+                sender_id=msg.sender_id,
+                payload=msg.payload,
+                ttl=msg.ttl - 1,
+                nonce=msg.nonce,
+            )
+            await self.transport.gossip(fwd, fanout=2)
+
+    async def announce_capabilities(self) -> int:
+        """Broadcast our capabilities to the network.
+
+        This should be called on node startup and when capabilities change.
+        Returns the number of peers the announcement was sent to.
+        """
+        msg = P2PMessage(
+            msg_type=MSG_GOSSIP,
+            sender_id=self.transport.identity.node_id,
+            payload={
+                "subtype": DISCOVERY_CAPABILITY_ANNOUNCE,
+                "node_id": self.transport.identity.node_id,
+                "capabilities": self._local_capabilities,
+                "supported_backends": self._local_backends,
+                "gpu_available": self._local_gpu_available,
+            },
+        )
+        logger.info(
+            f"Announcing capabilities: caps={self._local_capabilities}, "
+            f"backends={self._local_backends}, gpu={self._local_gpu_available}"
+        )
+        return await self.transport.gossip(msg, fanout=3)
+
+    def set_local_capabilities(
+        self,
+        capabilities: List[str],
+        backends: List[str],
+        gpu_available: bool = False,
+    ) -> None:
+        """Set the local node's capabilities.
+
+        Args:
+            capabilities: List of capabilities this node offers (e.g., ["inference", "embedding"]).
+            backends: List of supported backends (e.g., ["anthropic", "openai", "local"]).
+            gpu_available: Whether this node has GPU resources.
+        """
+        self._local_capabilities = capabilities
+        self._local_backends = backends
+        self._local_gpu_available = gpu_available
+        logger.info(
+            f"Set local capabilities: caps={capabilities}, backends={backends}, gpu={gpu_available}"
+        )
 
     # ── Background loops ─────────────────────────────────────────
 

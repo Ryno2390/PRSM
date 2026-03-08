@@ -49,6 +49,8 @@ MSG_PING = "ping"
 MSG_PONG = "pong"
 MSG_GOSSIP = "gossip"
 MSG_DIRECT = "direct"
+MSG_PEER_CONNECTED = "peer_connected"
+MSG_PEER_DISCONNECTED = "peer_disconnected"
 
 
 @dataclass

@@ -11,18 +11,20 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Optional
 import json
+import os
 
 
+# Multi-region bootstrap server configuration
+# Primary server (US region by default)
 DEFAULT_BOOTSTRAP_NODES = [
-    "wss://bootstrap1.prsm-network.com:8765",
+    os.getenv("BOOTSTRAP_PRIMARY", "wss://bootstrap.prsm.io:9001"),
 ]
 
-# Trusted fallback bootstrap nodes used when all configured bootstrap
-# nodes are unreachable.  These are PRSM-operated community relays
-# designed to give new nodes a reliable first-run path.
+# Multi-region fallback bootstrap servers for high availability
+# Nodes try servers in order: Primary (US) → EU → APAC
 FALLBACK_BOOTSTRAP_NODES = [
-    "wss://fallback1.prsm-network.com:8765",
-    "wss://fallback2.prsm-network.com:8765",
+    os.getenv("BOOTSTRAP_FALLBACK_EU", "wss://bootstrap-eu.prsm.io:9001"),
+    os.getenv("BOOTSTRAP_FALLBACK_APAC", "wss://bootstrap-apac.prsm.io:9001"),
 ]
 
 
