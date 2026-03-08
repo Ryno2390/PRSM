@@ -222,6 +222,38 @@ const api = {
     async searchContent(query, limit = 20) {
         return await this.request(`/content/search?q=${encodeURIComponent(query)}&limit=${limit}`);
     },
+    
+    // Teachers
+    async listTeachers() {
+        return await this.request('/teacher/list');
+    },
+    
+    async createTeacher(specialization, domain) {
+        return await this.request('/teacher/create', {
+            method: 'POST',
+            body: JSON.stringify({ specialization, domain }),
+        });
+    },
+    
+    async getTeacher(teacherId) {
+        return await this.request(`/teacher/${teacherId}`);
+    },
+    
+    // Distillation
+    async listDistillationJobs() {
+        return await this.request('/distillation');
+    },
+    
+    async submitDistillation(payload) {
+        return await this.request('/distillation/submit', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        });
+    },
+    
+    async getDistillationJob(jobId) {
+        return await this.request(`/distillation/${jobId}`);
+    },
 };
 
 // ── WebSocket Management ──────────────────────────────────────────────────────────
@@ -750,6 +782,109 @@ async function handleContentSearch(event) {
     }
 }
 
+// ── Teachers Management ───────────────────────────────────────────────────────────
+async function refreshTeachers() {
+    try {
+        const result = await api.listTeachers();
+        const tbody = document.getElementById('teachers-table-body');
+        
+        if (!result.teachers || result.teachers.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No teachers registered</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = result.teachers.map(teacher => `
+            <tr>
+                <td><code>${truncateId(teacher.teacher_id)}</code></td>
+                <td>${teacher.specialization || 'N/A'}</td>
+                <td>${teacher.domain || 'N/A'}</td>
+                <td><span class="badge badge-${teacher.status === 'active' ? 'success' : 'warning'}">${teacher.status || 'unknown'}</span></td>
+                <td>
+                    <button class="btn btn-sm btn-secondary" onclick="viewTeacher('${teacher.teacher_id}')">View</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        console.error('Failed to refresh teachers:', e);
+    }
+}
+
+async function handleCreateTeacher(event) {
+    event.preventDefault();
+    
+    const specialization = document.getElementById('teacher-specialization').value;
+    const domain = document.getElementById('teacher-domain').value;
+    
+    try {
+        const result = await api.createTeacher(specialization, domain);
+        showToast(`Teacher created: ${result.teacher_id}`, 'success');
+        document.getElementById('create-teacher-form').reset();
+        refreshTeachers();
+    } catch (e) {
+        showToast(`Failed to create teacher: ${e.message}`, 'error');
+    }
+}
+
+// ── Distillation Management ───────────────────────────────────────────────────────
+async function refreshDistillation() {
+    try {
+        const result = await api.listDistillationJobs();
+        const tbody = document.getElementById('distillation-table-body');
+        
+        // Update stats
+        let active = 0, completed = 0, pending = 0;
+        if (result.jobs) {
+            result.jobs.forEach(job => {
+                if (job.status === 'running') active++;
+                else if (job.status === 'completed') completed++;
+                else if (job.status === 'pending') pending++;
+            });
+        }
+        
+        document.getElementById('distillation-active').textContent = active;
+        document.getElementById('distillation-completed').textContent = completed;
+        document.getElementById('distillation-pending').textContent = pending;
+        
+        if (!result.jobs || result.jobs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No distillation jobs</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = result.jobs.map(job => `
+            <tr>
+                <td><code>${truncateId(job.job_id)}</code></td>
+                <td><code>${truncateId(job.teacher_id)}</code></td>
+                <td><span class="badge badge-${job.status === 'completed' ? 'success' : job.status === 'running' ? 'primary' : 'warning'}">${job.status}</span></td>
+                <td>${job.progress ? `${Math.round(job.progress * 100)}%` : 'N/A'}</td>
+                <td>${formatTimestamp(job.created_at)}</td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        console.error('Failed to refresh distillation jobs:', e);
+    }
+}
+
+async function handleDistillationSubmit(event) {
+    event.preventDefault();
+    
+    const teacherId = document.getElementById('distillation-teacher').value;
+    const budget = parseFloat(document.getElementById('distillation-budget').value);
+    const datasetCid = document.getElementById('distillation-dataset').value || null;
+    
+    try {
+        const result = await api.submitDistillation({
+            teacher_id: teacherId,
+            ftns_budget: budget,
+            dataset_cid: datasetCid,
+        });
+        showToast(`Distillation job submitted: ${result.job_id}`, 'success');
+        document.getElementById('distillation-submit-form').reset();
+        refreshDistillation();
+    } catch (e) {
+        showToast(`Failed to submit job: ${e.message}`, 'error');
+    }
+}
+
 // ── Authentication ───────────────────────────────────────────────────────────────
 function showLoginModal() {
     document.getElementById('login-modal').classList.add('active');
@@ -855,6 +990,8 @@ async function initializeDashboard() {
     document.getElementById('stake-form')?.addEventListener('submit', handleStake);
     document.getElementById('content-search-form')?.addEventListener('submit', handleContentSearch);
     document.getElementById('login-form')?.addEventListener('submit', handleLogin);
+    document.getElementById('create-teacher-form')?.addEventListener('submit', handleCreateTeacher);
+    document.getElementById('distillation-submit-form')?.addEventListener('submit', handleDistillationSubmit);
     
     // Setup periodic refresh
     setInterval(refreshAll, CONFIG.STATUS_UPDATE_INTERVAL);
@@ -897,5 +1034,8 @@ window.refreshPeers = refreshPeers;
 window.refreshJobs = refreshJobs;
 window.refreshTransactions = refreshTransactions;
 window.refreshAgents = refreshAgents;
+window.refreshTeachers = refreshTeachers;
+window.refreshDistillation = refreshDistillation;
 window.viewJob = (jobId) => showToast(`Job details: ${jobId}`, 'info');
 window.viewAgent = (agentId) => showToast(`Agent details: ${agentId}`, 'info');
+window.viewTeacher = (teacherId) => showToast(`Teacher details: ${teacherId}`, 'info');

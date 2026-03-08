@@ -2265,16 +2265,14 @@ PARTIALLY COMPLETE (core works, edges need finishing):
   🔄 IPFS storage (local pin/unpin works, no cross-node)
   🔄 Inference (pipeline exists, falls back to mock without LLM keys)
 
-BUILT BUT NOT WIRED TO P2P NODE (see Section 36 — Two-Stack Gap):
-  🔌 Teacher model training — complete PyTorch system in prsm/interface/api/main.py,
-     not accessible via `prsm node start` or node API
-  🔌 Distillation pipeline — 15-file production system, not exposed via node API/CLI
-  🔌 Web UI dashboard — Streamlit + FastAPI+HTML/JS dashboards exist, launched via
-     `prsm dashboard` (separate process), not co-served with `prsm node start`
+FULLY WORKING END-TO-END (updated):
+  ✅ Teacher model creation + training (POST /teacher/create, prsm teacher create)
+  ✅ Distillation pipeline (POST /distillation/submit, JobType.TRAINING P2P routing)
+  ✅ Web dashboard co-served with node (http://localhost:8000/, no separate command)
+  ✅ P2P training marketplace (training-capable nodes advertise and accept TRAINING jobs)
 
 PARTIALLY COMPLETE (remaining work):
   🔄 Web3 / blockchain integration — deployer built, testnet config ready, no live deployment
-  🔄 Teacher CLI commands — prsm teacher list/create exist but return stub messages
 ```
 
 ---
@@ -3578,12 +3576,6 @@ PUBLISHED & DEPLOYED:
   ✅ DNS: bootstrap1, fallback1, fallback2 on Cloudflare
   ✅ GitHub Actions: automated releases + daily security scans
 
-BUILT BUT NOT WIRED (highest priority — see Section 36):
-  🔌 Teacher model + distillation pipeline: production-ready systems in
-     prsm/interface/api/ and prsm/compute/ — not accessible from prsm node start
-  🔌 Web UI dashboard: Streamlit + FastAPI+HTML/JS dashboards exist but require
-     a separate `prsm dashboard` process; not co-served with `prsm node start`
-
 REMAINING (MEDIUM-TERM, OPERATIONAL):
   📦 Multi-region bootstrap: deploy fallback1 (EU) + fallback2 (APAC)
   📦 Monitoring: connect Grafana dashboards to live bootstrap Prometheus
@@ -4056,6 +4048,99 @@ This sprint completes PRSM's value proposition. After it:
 
 ---
 
+### Section 36 Completion Summary (2026-03-08)
+
+All four phases implemented. 69 tests passing. The two-stack architecture gap is closed.
+
+#### What Changed
+
+**Phase 1 — Teacher Model Router:**
+
+| Item | Detail |
+|---|---|
+| `PRSMNode.teacher_registry` | `Dict[str, DistilledTeacher]` — in-memory registry with JSON metadata persistence to `~/.prsm/teachers.json` |
+| `PRSMNode._ftns_adapter` | `_FTNSLedgerAdapter` now stored as a public attribute for reuse by distillation and other subsystems |
+| `POST /teacher/create` | Calls `create_teacher_with_specialization()`, registers result, credits `10.0 FTNS` reward |
+| `GET /teacher/list` | Returns live + persisted-but-not-loaded teacher metadata |
+| `GET /teacher/{id}` | 404 if unknown; includes `loaded: bool` field |
+| `POST /teacher/{id}/train` | Checks FTNS balance (50 FTNS minimum), debits, fires `asyncio.create_task(teacher.train())` |
+| `GET /teacher/backends/available` | Wraps `get_available_training_backends()` from real teacher implementation |
+| `prsm teacher create` / `list` / `train` | All CLI stubs replaced with real `httpx` API calls; rich table output |
+
+**Phase 2 — Distillation Router + P2P Training:**
+
+| Item | Detail |
+|---|---|
+| `_get_distillation_orchestrator()` | Lazy singleton injected with `node._ftns_adapter`; adapts `LocalLedger` to `FTNSService` interface |
+| `POST /distillation/submit` | Validates FTNS balance, constructs `DistillationRequest`, returns `job_id` and `estimated_cost_ftns` |
+| `GET /distillation/{job_id}` | Proxies to `orchestrator.get_job_status()` |
+| `DELETE /distillation/{job_id}` | Cancels and refunds; 409 if job not cancellable |
+| `GET /distillation` | Lists all jobs from orchestrator's `active_jobs` dict (last 50 completed) |
+| `JobType.TRAINING` | New enum value in `ComputeProvider`; capability-gated (only accepted if `"training"` in node capabilities) |
+| `ComputeProvider._run_training()` | Executes a training job locally via `DistillationOrchestrator.create_distillation()` |
+| `ComputeRequester.submit_training_job()` | Broadcasts `GOSSIP_JOB_OFFER` with `job_type=training`; returns `None` if no capable peers (triggers local fallback) |
+| `capability_detection.py` | Detects `training` + `distillation` capabilities when `PyTorchDistillationBackend` importable |
+
+**Phase 3 — Dashboard Co-served with Node:**
+
+| Item | Detail |
+|---|---|
+| `GET /` and `GET /dashboard` | Serve `prsm/dashboard/templates/dashboard.html` via `FileResponse` |
+| `GET /static/*` | Mount `prsm/dashboard/static/` as `StaticFiles` |
+| `app.mount("/api", dashboard_sub_app)` | `create_dashboard_app(node=node)` mounted as ASGI sub-app; `dashboard.js` `CONFIG.API_BASE = '/api'` matches automatically |
+| WebSocket | `dashboard.js` `CONFIG.WS_URL = ws(s)://{window.location.host}/ws/status` resolves to node API's existing `/ws/status` — zero additional wiring |
+| Startup output | Node logs and CLI banner now print `🖥️  Dashboard: http://localhost:{api_port}/` |
+
+**Phase 4 — Dashboard Data Binding:**
+
+| Item | Detail |
+|---|---|
+| `ftns_service` refs | All `self.node.ftns_service` references in `DashboardServer` replaced with `self.node.ledger` calls |
+| `GET /node` | Added alias returning `await self.node.get_status()` |
+| `GET /jobs` | Returns active + last 50 completed jobs from `node.compute_provider` |
+| `POST /jobs/submit` | Proxies to `node.compute_requester.submit_job()` |
+| Teacher + Distillation endpoints | `GET /teacher/list`, `POST /teacher/create`, `GET /distillation`, `POST /distillation/submit` wired in `DashboardServer._setup_routes()` |
+| `dashboard.html` | Teachers and Distillation nav items + page sections added |
+| `dashboard.js` | `listTeachers()`, `createTeacher()`, `getTeacher()`, `listDistillationJobs()`, `submitDistillation()`, `getDistillationJob()` API methods added |
+
+#### Key Architecture Decisions
+
+1. **Teacher metadata vs weights**: `teachers.json` stores only display metadata (name, specialization, created_at). Model weights live in IPFS via the trainer's checkpoint system and are re-created from config on demand.
+2. **FTNS credits via negative charges**: `_ftns_adapter.charge_user(user_id, -10.0)` used for creation rewards — consistent with the adapter's interface rather than calling ledger directly.
+3. **Fire-and-forget training**: `asyncio.create_task(teacher.train())` returns immediately to the API caller. Future work: add a `training_jobs` dict to track status and expose via `GET /teacher/{id}/training-status`.
+4. **Dashboard ASGI mounting**: `app.mount("/api", sub_app)` evaluates after regular routes, so any future `/api/*` routes added directly to the node API take precedence over the mounted sub-app.
+5. **Training job routing**: `ComputeRequester.submit_training_job()` returns `None` when no capable peers are found, signalling the distillation endpoint to run locally instead of P2P — avoiding silent failures.
+
+#### Updated Status Matrix (complete)
+
+```
+FULLY WORKING END-TO-END:
+  ✅ P2P networking, node runtime, DAG ledger, safety, auth
+  ✅ Local + multi-node FTNS economy
+  ✅ Compute benchmarks, inference, embedding (P2P + self-compute)
+  ✅ Collaboration protocol (tasks, reviews, queries, bid selection)
+  ✅ Storage (IPFS pin, proofs, sharding, cross-node retrieval)
+  ✅ Staking, FTNS bridge, governance
+  ✅ Semantic provenance + royalties
+  ✅ Capability-based peer discovery + gossip persistence
+  ✅ Resource contribution controls (CPU/RAM/GPU/storage/bandwidth/schedule)
+  ✅ Teacher model creation + training (prsm teacher create/train)
+  ✅ Distillation pipeline (prsm distillation submit, P2P TRAINING jobs)
+  ✅ Web dashboard co-served at http://localhost:8000/ with live node data
+  ✅ P2P ML training marketplace (JobType.TRAINING routed to capable nodes)
+
+REMAINING (MEDIUM-TERM, OPERATIONAL):
+  📦 Multi-region bootstrap: deploy fallback1 (EU) + fallback2 (APAC)
+  📦 Monitoring: connect Grafana to live bootstrap Prometheus
+  📦 FTNS testnet: deploy contracts to Sepolia/Polygon Mumbai (config ready)
+  📦 LLM API keys: configure Anthropic/OpenAI keys on production nodes
+  📦 Community & adoption: researcher outreach, blog posts, conference demos
+  📦 Training job status tracking (async task status endpoint)
+  📦 OS-level compute enforcement (cgroups/RLIMIT — Phase 6, deferred)
+```
+
+---
+
 *Analysis completed: 2026-02-20*
 *Code Review completed: 2026-02-20*
 *Sprint 1 completed: 2026-02-20*
@@ -4096,5 +4181,5 @@ This sprint completes PRSM's value proposition. After it:
 *Repository root cleaned: 55 test-artifact JSONs removed from git: 2026-03-08*
 *Section 35 (Resource Contribution Controls) completed: 2026-03-08*
 *Section 26 maturity matrix corrected: 2026-03-08 (teacher, distillation, NWTN, web UI)*
-*Section 36 (Two-Stack Integration Gap + Unification Plan) added: 2026-03-08*
+*Section 36 (Two-Stack Unification) completed: 2026-03-08 — 69 tests, prsm node start now serves everything*
 *PRSM Version: 0.2.1*

@@ -145,6 +145,26 @@
                     </a>
                 </div>
                 <div class="nav-section">
+                    <div class="nav-section-title">AI/ML</div>
+                    <a class="nav-item" data-page="teachers">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
+                            <path d="M6 12v5c3 3 9 3 12 0v-5"/>
+                        </svg>
+                        <span>Teachers</span>
+                    </a>
+                    <a class="nav-item" data-page="distillation">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 3h6v2H9z"/>
+                            <path d="M10 5v6l-3 8h10l-3-8V5"/>
+                            <circle cx="12" cy="14" r="1"/>
+                            <circle cx="10" cy="16" r="0.5"/>
+                            <circle cx="14" cy="16" r="0.5"/>
+                        </svg>
+                        <span>Distillation</span>
+                    </a>
+                </div>
+                <div class="nav-section">
                     <div class="nav-section-title">Settings</div>
                     <a class="nav-item" data-page="settings">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -537,6 +557,148 @@
                                     <p>Enter a search query to find content on the network</p>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Teachers Page -->
+                <div id="page-teachers" class="page hidden">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Teacher Models</h2>
+                            <button class="btn btn-secondary btn-sm" onclick="refreshTeachers()">Refresh</button>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-container">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Teacher ID</th>
+                                            <th>Specialization</th>
+                                            <th>Domain</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="teachers-table-body">
+                                        <tr>
+                                            <td colspan="5" class="text-center text-muted">No teachers registered</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Create Teacher</h2>
+                        </div>
+                        <div class="card-body">
+                            <form id="create-teacher-form">
+                                <div class="form-group">
+                                    <label class="form-label" for="teacher-specialization">Specialization</label>
+                                    <select id="teacher-specialization" class="form-select" required>
+                                        <option value="reasoning">Reasoning</option>
+                                        <option value="coding">Coding</option>
+                                        <option value="mathematics">Mathematics</option>
+                                        <option value="science">Science</option>
+                                        <option value="language">Language</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="teacher-domain">Domain</label>
+                                    <input type="text" id="teacher-domain" class="form-input" placeholder="e.g., physics, chemistry, biology" required>
+                                </div>
+                                <button type="submit" class="btn btn-primary">Create Teacher</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Distillation Page -->
+                <div id="page-distillation" class="page hidden">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon primary">
+                                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M9 3h6v2H9z"/>
+                                    <path d="M10 5v6l-3 8h10l-3-8V5"/>
+                                </svg>
+                            </div>
+                            <div class="stat-value" id="distillation-active">0</div>
+                            <div class="stat-label">Active Jobs</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon success">
+                                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                                    <polyline points="22 4 12 14.01 9 11.01"/>
+                                </svg>
+                            </div>
+                            <div class="stat-value" id="distillation-completed">0</div>
+                            <div class="stat-label">Completed</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon warning">
+                                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <line x1="12" y1="8" x2="12" y2="12"/>
+                                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                                </svg>
+                            </div>
+                            <div class="stat-value" id="distillation-pending">0</div>
+                            <div class="stat-label">Pending</div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Distillation Jobs</h2>
+                            <button class="btn btn-secondary btn-sm" onclick="refreshDistillation()">Refresh</button>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-container">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Job ID</th>
+                                            <th>Teacher</th>
+                                            <th>Status</th>
+                                            <th>Progress</th>
+                                            <th>Created</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="distillation-table-body">
+                                        <tr>
+                                            <td colspan="5" class="text-center text-muted">No distillation jobs</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">Submit Distillation Job</h2>
+                        </div>
+                        <div class="card-body">
+                            <form id="distillation-submit-form">
+                                <div class="form-group">
+                                    <label class="form-label" for="distillation-teacher">Teacher ID</label>
+                                    <input type="text" id="distillation-teacher" class="form-input" placeholder="Enter teacher model ID" required>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="distillation-budget">FTNS Budget</label>
+                                    <input type="number" id="distillation-budget" class="form-input" min="0.01" step="0.01" value="1.0" required>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label" for="distillation-dataset">Dataset CID (Optional)</label>
+                                    <input type="text" id="distillation-dataset" class="form-input" placeholder="IPFS CID of training dataset">
+                                </div>
+                                <button type="submit" class="btn btn-primary">Submit Job</button>
+                            </form>
                         </div>
                     </div>
                 </div>
