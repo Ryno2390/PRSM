@@ -444,15 +444,23 @@ class PRSMNode:
         if self.compute_provider:
             try:
                 from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
+                from prsm.compute.nwtn.backends import BackendRegistry
+                from prsm.compute.nwtn.backends.config import BackendConfig
+                
+                # Create backend registry from environment for real LLM inference
+                backend_config = BackendConfig.from_environment()
+                backend_registry = BackendRegistry(backend_config)
+                
                 orchestrator = NWTNOrchestrator(
                     context_manager=_NodeContextAdapter(),
                     ftns_service=_NodeFTNSAdapter(self.ledger, self.identity.node_id),
                     ipfs_client=_NodeIPFSAdapter(self.config.ipfs_api_url),
                     model_registry=_NodeModelRegistryAdapter(),
+                    backend_registry=backend_registry,
                 )
                 await orchestrator.initialize()
                 self.compute_provider.orchestrator = orchestrator
-                logger.info("NWTN orchestrator wired to compute provider")
+                logger.info("NWTN orchestrator wired to compute provider with backend registry")
             except Exception as e:
                 logger.info(f"NWTN orchestrator not available: {e}")
 
