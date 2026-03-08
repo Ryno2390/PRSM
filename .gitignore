@@ -108,6 +108,7 @@ celerybeat.pid
 .venv
 env/
 venv/
+agents_venv/
 ENV/
 env.bak/
 venv.bak/
@@ -242,12 +243,18 @@ prsm/compute/nwtn/processed_corpus/
 # Runtime data directories
 .nwtn_cache/
 cache/
+db/
+logs/
 marketplace_data/
 model_data/
 models/deployed/
 models/distilled/
 plugin_data/
+prsm_embedding_cache/
 temp/
+
+# Build artifacts
+prsm_network-*/
 
 # Netlify build artifacts
 .netlify/
