@@ -3014,6 +3014,311 @@ Once two or more nodes discover each other via bootstrap, they communicate direc
 
 ---
 
+## 33. Semantic Provenance System
+
+The Semantic Provenance System provides content attribution, derivative work tracking, and automated royalty distribution across the PRSM network. It ensures that content creators receive FTNS compensation when their work is accessed or used as source material for derivative works.
+
+### System Architecture
+
+```mermaid
+flowchart TB
+    subgraph Upload Flow
+        CONTENT[Content Upload] --> EMBED[Generate Embedding]
+        EMBED --> SEMANTIC[_SemanticIndex Lookup]
+        SEMANTIC --> |Similarity >= 0.92| DERIV[Register as Derivative]
+        SEMANTIC --> |Similarity < 0.92| ORIGINAL[Register as Original]
+        DERIV --> PARENTS[Auto-link Parent CIDs]
+        ORIGINAL --> PROV[Create Provenance Record]
+        PARENTS --> PROV
+        PROV --> GOSSIP[Broadcast GOSSIP_PROVENANCE_REGISTER]
+        GOSSIP --> LEDGER[(SQLite Persistence)]
+    end
+
+    subgraph Cross-Node Resolution
+        QUERY[Content Access Request] --> LOCAL{Local Ledger?}
+        LOCAL --> |Yes| SERVE[Serve Content]
+        LOCAL --> |No| BROADCAST[Broadcast GOSSIP_PROVENANCE_QUERY]
+        BROADCAST --> PEER[Peer Node]
+        PEER --> |GOSSIP_PROVENANCE_RESPONSE| CACHE[Cache in Local Ledger]
+        CACHE --> SERVE
+    end
+
+    subgraph Royalty Distribution
+        ACCESS[Content Access] --> ROYALTY[Calculate Royalty]
+        ROYALTY --> |Has Parents| SPLIT[Multi-level Split]
+        ROYALTY --> |No Parents| SINGLE[Single Creator]
+        SPLIT --> D70[70% Derivative Creator]
+        SPLIT --> D25[25% Source Creators]
+        SPLIT --> D05[5% Network Fee]
+        SINGLE --> CREATOR[100% to Creator]
+    end
+```
+
+### Key Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `_SemanticIndex` | [`prsm/node/content_uploader.py`](prsm/node/content_uploader.py:66) | L2-normalized embedding index for near-duplicate detection |
+| `ContentIndex` | [`prsm/node/content_index.py`](prsm/node/content_index.py:51) | Network-wide content registry with provenance query handling |
+| `LocalLedger` | [`prsm/node/local_ledger.py`](prsm/node/local_ledger.py:100) | SQLite persistence for provenance records |
+| `ContentUploader` | [`prsm/node/content_uploader.py`](prsm/node/content_uploader.py:171) | Upload flow with provenance registration and royalty distribution |
+
+### _SemanticIndex: Near-Duplicate Detection
+
+The `_SemanticIndex` class provides semantic similarity matching to detect derivative works at upload time:
+
+**Implementation Details:**
+
+```python
+class _SemanticIndex:
+    DERIVATIVE_THRESHOLD: float = 0.92   # Auto-register as derivative
+    DUPLICATE_THRESHOLD: float = 0.99    # Near-exact duplicate warning
+    
+    def __init__(self, persist_path: Optional[Path] = None):
+        self._index: Dict[str, Tuple] = {}  # cid → (normalized_embedding, creator_id)
+    
+    def store(self, cid: str, embedding: np.ndarray, creator_id: str):
+        # L2-normalize and store for cosine similarity via dot product
+        norm = np.linalg.norm(embedding)
+        normalized = embedding / norm if norm > 0 else embedding
+        self._index[cid] = (normalized, creator_id)
+    
+    def find_nearest(self, embedding: np.ndarray) -> Optional[Tuple[str, float, str]]:
+        # O(n) scan — acceptable for early-network scale
+        # Returns (cid, cosine_similarity, creator_id)
+```
+
+**Similarity Thresholds:**
+
+| Threshold | Value | Behavior |
+|-----------|-------|----------|
+| Derivative | 0.92 | Content auto-registered as derivative; parent CID prepended to lineage |
+| Duplicate | 0.99 | Logged as near-exact duplicate; upload proceeds with derivative rate |
+
+**Persistence:** Index persisted as JSON to survive node restarts. Embedding vectors serialized as float arrays.
+
+### Gossip Protocol Extensions
+
+Two new message types enable cross-node provenance resolution:
+
+| Message Type | Direction | Purpose |
+|--------------|-----------|---------|
+| `GOSSIP_PROVENANCE_QUERY` | Request | Broadcast query for a CID's provenance record |
+| `GOSSIP_PROVENANCE_RESPONSE` | Response | Return provenance data from node with local record |
+
+**Query Flow:**
+
+```python
+# ContentIndex._on_provenance_query
+async def _on_provenance_query(self, subtype, data, origin):
+    cid = data.get("cid", "")
+    requester_id = data.get("requester_id", "")
+    record = await self.ledger.get_provenance(cid)
+    if record:
+        await self.gossip.publish(GOSSIP_PROVENANCE_RESPONSE, {
+            "cid": cid,
+            "for_requester": requester_id,
+            "provenance": record,
+        })
+```
+
+**Response Handling:**
+
+```python
+# ContentIndex._on_provenance_response
+async def _on_provenance_response(self, subtype, data, origin):
+    cid = data.get("cid", "")
+    provenance = data.get("provenance", {})
+    # Persist to local ledger for future lookups
+    await self.ledger.upsert_provenance(provenance)
+    # Resolve any pending async get_provenance() call
+    future = self._pending_provenance.get(cid)
+    if future and not future.done():
+        future.set_result(provenance)
+```
+
+### SQLite Persistence Schema
+
+Provenance records are stored durably in the `provenance_chains` table:
+
+```sql
+CREATE TABLE provenance_chains (
+    cid               TEXT PRIMARY KEY,
+    content_hash      TEXT NOT NULL DEFAULT '',
+    creator_id        TEXT NOT NULL,
+    creator_pubkey    TEXT NOT NULL DEFAULT '',
+    filename          TEXT NOT NULL DEFAULT '',
+    size_bytes        INTEGER NOT NULL DEFAULT 0,
+    royalty_rate      REAL NOT NULL DEFAULT 0.01,
+    parent_cids       TEXT NOT NULL DEFAULT '[]',   -- JSON array
+    signature         TEXT NOT NULL DEFAULT '',
+    embedding_id      TEXT,                         -- "emb:<cid>" if embedded
+    near_duplicate_of TEXT,                         -- CID of most-similar content
+    metadata          TEXT NOT NULL DEFAULT '{}',
+    registered_at     REAL NOT NULL
+);
+CREATE INDEX idx_prov_creator ON provenance_chains(creator_id);
+CREATE INDEX idx_prov_hash ON provenance_chains(content_hash);
+```
+
+### FTNS Royalty Distribution
+
+When content is accessed, royalties are distributed based on provenance lineage:
+
+**Single Creator (No Parents):**
+- 100% of royalty goes to content creator
+
+**Derivative Work (Has Parents):**
+
+| Share | Recipient | Description |
+|-------|-----------|-------------|
+| 70% | Derivative Creator | Node that uploaded the derivative work |
+| 25% | Source Creators | Split evenly among parent CID creators |
+| 5% | Network Fee | System treasury for infrastructure |
+
+**Implementation:**
+
+```python
+# Multi-level royalty constants
+DERIVATIVE_CREATOR_SHARE = 0.70
+SOURCE_CREATOR_SHARE = 0.25
+NETWORK_FEE_SHARE = 0.05
+
+async def _distribute_multilevel_royalty(self, content, total_royalty, accessor_id):
+    derivative_share = total_royalty * DERIVATIVE_CREATOR_SHARE
+    source_pool = total_royalty * SOURCE_CREATOR_SHARE
+    network_fee = total_royalty * NETWORK_FEE_SHARE
+    
+    # Credit derivative creator
+    await self.ledger.credit(wallet_id=self.identity.node_id, amount=derivative_share, ...)
+    
+    # Resolve and credit source creators
+    parent_creators = self._resolve_parent_creators(content.parent_cids)
+    if parent_creators:
+        per_parent = source_pool / len(parent_creators)
+        for parent_creator_id in parent_creators:
+            # Remote creators credited via GOSSIP_CONTENT_ACCESS
+            await self.ledger.credit(wallet_id=parent_creator_id, amount=per_parent, ...)
+    
+    # Network fee
+    await self.ledger.credit(wallet_id="system", amount=network_fee, ...)
+```
+
+### Content Upload Flow with Provenance
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant ContentUploader
+    participant SemanticIndex
+    participant IPFS
+    participant Gossip
+    participant Ledger
+
+    User->>ContentUploader: upload(content, filename, metadata)
+    ContentUploader->>ContentUploader: Generate SHA-256 hash
+    ContentUploader->>SemanticIndex: find_nearest(embedding)
+    
+    alt Similarity >= 0.92
+        SemanticIndex-->>ContentUploader: (cid, similarity, creator)
+        ContentUploader->>ContentUploader: Prepend parent CID
+    end
+    
+    ContentUploader->>IPFS: Add content
+    IPFS-->>ContentUploader: CID
+    ContentUploader->>ContentUploader: Create provenance record
+    ContentUploader->>ContentUploader: Sign with node key
+    ContentUploader->>Gossip: publish(GOSSIP_PROVENANCE_REGISTER)
+    Gossip->>Ledger: upsert_provenance(data)
+    ContentUploader->>SemanticIndex: store(cid, embedding, creator_id)
+    ContentUploader-->>User: UploadedContent
+```
+
+### Cross-Node Provenance Resolution
+
+When a node needs provenance for content it doesn't have locally:
+
+```mermaid
+sequenceDiagram
+    participant NodeA as Node A
+    participant Gossip
+    participant NodeB as Node B
+    participant LedgerB as Ledger B
+
+    NodeA->>NodeA: get_provenance(cid) - not found locally
+    NodeA->>Gossip: publish(GOSSIP_PROVENANCE_QUERY, cid, requester_id)
+    Gossip->>NodeB: Forward query
+    NodeB->>LedgerB: get_provenance(cid)
+    LedgerB-->>NodeB: provenance record
+    NodeB->>Gossip: publish(GOSSIP_PROVENANCE_RESPONSE, cid, provenance)
+    Gossip->>NodeA: Forward response
+    NodeA->>NodeA: Cache in local ledger
+    NodeA-->>NodeA: Return provenance
+```
+
+### Data Structures
+
+**UploadedContent:**
+
+```python
+@dataclass
+class UploadedContent:
+    cid: str
+    filename: str
+    size_bytes: int
+    content_hash: str           # SHA-256 of raw content
+    creator_id: str
+    created_at: float
+    provenance_signature: str   # Node's signature on provenance data
+    royalty_rate: float         # FTNS per access (0.001–0.1)
+    parent_cids: List[str]      # Source material CIDs
+    access_count: int
+    total_royalties: float
+    is_sharded: bool
+    manifest_cid: Optional[str]
+    embedding_id: Optional[str]     # "emb:<cid>" if embedded
+    near_duplicate_of: Optional[str]  # Most similar CID
+    near_duplicate_similarity: Optional[float]
+```
+
+**ContentRecord:**
+
+```python
+@dataclass
+class ContentRecord:
+    cid: str
+    filename: str
+    size_bytes: int
+    content_hash: str
+    creator_id: str
+    providers: Set[str]         # Nodes that can serve this content
+    created_at: float
+    metadata: Dict[str, Any]
+    royalty_rate: float
+    parent_cids: List[str]
+    embedding_id: Optional[str]
+    near_duplicate_of: Optional[str]
+```
+
+### Integration Points
+
+| System | Integration |
+|--------|-------------|
+| IPFS Storage | Content stored in IPFS; CID as primary identifier |
+| Gossip Protocol | Provenance registration and queries broadcast network-wide |
+| LocalLedger | SQLite persistence ensures provenance survives restarts |
+| FTNS Tokenomics | Royalty credits recorded as `CONTENT_ROYALTY` transactions |
+| ContentIndex | Tracks which nodes can serve each CID |
+
+### Performance Considerations
+
+- **Embedding Index:** O(n) similarity scan — acceptable for early network scale; planned migration to FAISS for tens of thousands of embeddings
+- **Persistence:** JSON serialization for semantic index; SQLite for provenance records
+- **Query Timeout:** 5-second default for cross-node provenance resolution
+- **LRU Eviction:** ContentIndex limits to 10,000 records to bound memory
+
+---
+
 *Analysis completed: 2026-02-20*
 *Code Review completed: 2026-02-20*
 *Sprint 1 completed: 2026-02-20*
@@ -3042,4 +3347,5 @@ Once two or more nodes discover each other via bootstrap, they communicate direc
 *Polish & scale roadmap published: 2026-03-06*
 *Near-term items completed: 2026-03-06 — v0.2.1 release, SSL certs, server access*
 *PyPI v0.2.1 published: 2026-03-06 — https://pypi.org/project/prsm-network/0.2.1/*
+*Section 33 (Semantic Provenance System) documented: 2026-03-08*
 *PRSM Version: 0.2.1*
