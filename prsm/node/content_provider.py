@@ -347,6 +347,7 @@ class ContentProvider:
         content_index: Optional[Any] = None,
         content_discovery: Optional[ContentDiscovery] = None,
         default_timeout: float = DEFAULT_REQUEST_TIMEOUT,
+        bandwidth_limiter: Optional[Any] = None,
     ):
         self.identity = identity
         self.transport = transport
@@ -356,6 +357,10 @@ class ContentProvider:
         self.content_index = content_index
         self.content_discovery = content_discovery or ContentDiscovery()
         self.default_timeout = default_timeout
+        
+        # Bandwidth limiter for throttling content serving
+        # This is typically the BandwidthLimiter from StorageProvider
+        self.bandwidth_limiter = bandwidth_limiter
         
         # Local content we can serve (cid -> metadata)
         self._local_content: Dict[str, Dict[str, Any]] = {}
@@ -507,6 +512,10 @@ class ContentProvider:
                 return
             
             size = len(content_bytes)
+            
+            # Apply bandwidth throttling before sending content
+            if self.bandwidth_limiter:
+                await self.bandwidth_limiter.throttle_upload(size)
             
             # Determine transfer mode
             if size <= MAX_INLINE_SIZE:

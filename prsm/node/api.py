@@ -43,6 +43,39 @@ class JobSubmission(BaseModel):
     ftns_budget: float = 1.0
 
 
+class ResourceUpdateRequest(BaseModel):
+    """Request model for updating node resource settings."""
+    cpu_allocation_pct: Optional[int] = Field(default=None, ge=10, le=90, description="CPU allocation percentage (10-90)")
+    memory_allocation_pct: Optional[int] = Field(default=None, ge=10, le=90, description="Memory allocation percentage (10-90)")
+    storage_gb: Optional[float] = Field(default=None, gt=0, description="Storage pledge in GB")
+    max_concurrent_jobs: Optional[int] = Field(default=None, ge=1, description="Maximum concurrent jobs")
+    gpu_allocation_pct: Optional[int] = Field(default=None, ge=10, le=100, description="GPU allocation percentage (10-100)")
+    upload_mbps_limit: Optional[float] = Field(default=None, ge=0, description="Upload bandwidth limit in Mbps (0=unlimited)")
+    download_mbps_limit: Optional[float] = Field(default=None, ge=0, description="Download bandwidth limit in Mbps (0=unlimited)")
+    active_hours_start: Optional[int] = Field(default=None, ge=0, le=23, description="Active hours start (0-23)")
+    active_hours_end: Optional[int] = Field(default=None, ge=0, le=23, description="Active hours end (0-23)")
+    active_days: Optional[List[int]] = Field(default=None, description="Active days (0=Mon...6=Sun, empty=every day)")
+
+
+class ResourceConfigResponse(BaseModel):
+    """Response model for current resource configuration."""
+    cpu_allocation_pct: int
+    memory_allocation_pct: int
+    storage_gb: float
+    max_concurrent_jobs: int
+    gpu_allocation_pct: int
+    upload_mbps_limit: float
+    download_mbps_limit: float
+    active_hours_start: Optional[int]
+    active_hours_end: Optional[int]
+    active_days: List[int]
+    # Computed values
+    effective_cpu_cores: float
+    effective_memory_gb: float
+    effective_gpu_memory_gb: Optional[float]
+    storage_available_gb: float
+
+
 class ContentUploadRequest(BaseModel):
     """Request body for uploading text content."""
     text: str
@@ -1079,6 +1112,181 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 "message": "Compute provider not initialized"
             }
         return node.compute_provider.get_stats()
+
+    # ── Resource Configuration Endpoints ─────────────────────────────────
+
+    @app.get("/node/resources", response_model=ResourceConfigResponse, tags=["resources"])
+    async def get_resources() -> ResourceConfigResponse:
+        """Get current node resource configuration.
+        
+        Returns the current resource allocation settings including:
+        - CPU and memory allocation percentages
+        - Storage pledge and availability
+        - GPU allocation (if available)
+        - Bandwidth limits
+        - Active hours/days schedule
+        - Computed effective values
+        """
+        if not node.config:
+            raise HTTPException(status_code=503, detail="Node configuration not initialized")
+        
+        config = node.config
+        
+        # Get compute provider for effective values
+        effective_cpu_cores = 0.0
+        effective_memory_gb = 0.0
+        effective_gpu_memory_gb = None
+        
+        if node.compute_provider:
+            cp = node.compute_provider
+            effective_cpu_cores = round(cp.resources.cpu_count * cp.cpu_allocation_pct / 100, 2)
+            effective_memory_gb = round(cp.resources.memory_total_gb * cp.memory_allocation_pct / 100, 2)
+            if cp.resources.gpu_available:
+                effective_gpu_memory_gb = round(cp.resources.gpu_memory_gb * cp.gpu_allocation_pct / 100, 2)
+        
+        # Get storage available
+        storage_available_gb = config.storage_gb
+        if node.storage_provider:
+            storage_available_gb = node.storage_provider.available_gb
+        
+        return ResourceConfigResponse(
+            cpu_allocation_pct=config.cpu_allocation_pct,
+            memory_allocation_pct=config.memory_allocation_pct,
+            storage_gb=config.storage_gb,
+            max_concurrent_jobs=config.max_concurrent_jobs,
+            gpu_allocation_pct=config.gpu_allocation_pct,
+            upload_mbps_limit=config.upload_mbps_limit,
+            download_mbps_limit=config.download_mbps_limit,
+            active_hours_start=config.active_hours_start,
+            active_hours_end=config.active_hours_end,
+            active_days=config.active_days,
+            effective_cpu_cores=effective_cpu_cores,
+            effective_memory_gb=effective_memory_gb,
+            effective_gpu_memory_gb=effective_gpu_memory_gb,
+            storage_available_gb=storage_available_gb,
+        )
+
+    @app.put("/node/resources", response_model=ResourceConfigResponse, tags=["resources"])
+    async def update_resources(request: ResourceUpdateRequest) -> ResourceConfigResponse:
+        """Update node resource allocation settings at runtime.
+        
+        Changes take effect immediately for storage and bandwidth limits.
+        Compute changes (CPU, memory, jobs) take effect on next job acceptance.
+        
+        All fields are optional - only provided fields will be updated.
+        
+        Validation:
+        - cpu_allocation_pct: 10-90
+        - memory_allocation_pct: 10-90
+        - gpu_allocation_pct: 10-100
+        - active_hours_start/end: 0-23
+        - storage_gb: must be positive
+        - max_concurrent_jobs: at least 1
+        - bandwidth limits: non-negative (0 = unlimited)
+        """
+        if not node.config:
+            raise HTTPException(status_code=503, detail="Node configuration not initialized")
+        
+        config = node.config
+        updates_applied = []
+        
+        # Validate active_hours consistency if both provided
+        if request.active_hours_start is not None and request.active_hours_end is not None:
+            if request.active_hours_start >= request.active_hours_end:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"active_hours_start ({request.active_hours_start}) must be less than active_hours_end ({request.active_hours_end})"
+                )
+        
+        # Validate active_days
+        if request.active_days is not None:
+            for day in request.active_days:
+                if not 0 <= day <= 6:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"active_days must be 0-6 (Mon-Sun), got {day}"
+                    )
+        
+        try:
+            # Update config fields
+            if request.cpu_allocation_pct is not None:
+                config.cpu_allocation_pct = request.cpu_allocation_pct
+                updates_applied.append(f"cpu_allocation_pct={request.cpu_allocation_pct}")
+            
+            if request.memory_allocation_pct is not None:
+                config.memory_allocation_pct = request.memory_allocation_pct
+                updates_applied.append(f"memory_allocation_pct={request.memory_allocation_pct}")
+            
+            if request.storage_gb is not None:
+                config.storage_gb = request.storage_gb
+                updates_applied.append(f"storage_gb={request.storage_gb}")
+            
+            if request.max_concurrent_jobs is not None:
+                config.max_concurrent_jobs = request.max_concurrent_jobs
+                updates_applied.append(f"max_concurrent_jobs={request.max_concurrent_jobs}")
+            
+            if request.gpu_allocation_pct is not None:
+                config.gpu_allocation_pct = request.gpu_allocation_pct
+                updates_applied.append(f"gpu_allocation_pct={request.gpu_allocation_pct}")
+            
+            if request.upload_mbps_limit is not None:
+                config.upload_mbps_limit = request.upload_mbps_limit
+                updates_applied.append(f"upload_mbps_limit={request.upload_mbps_limit}")
+            
+            if request.download_mbps_limit is not None:
+                config.download_mbps_limit = request.download_mbps_limit
+                updates_applied.append(f"download_mbps_limit={request.download_mbps_limit}")
+            
+            if request.active_hours_start is not None:
+                config.active_hours_start = request.active_hours_start
+                updates_applied.append(f"active_hours_start={request.active_hours_start}")
+            
+            if request.active_hours_end is not None:
+                config.active_hours_end = request.active_hours_end
+                updates_applied.append(f"active_hours_end={request.active_hours_end}")
+            
+            if request.active_days is not None:
+                config.active_days = request.active_days
+                updates_applied.append(f"active_days={request.active_days}")
+            
+            # Log schedule changes
+            if request.active_hours_start is not None or request.active_hours_end is not None:
+                start = config.active_hours_start
+                end = config.active_hours_end
+                if start is not None and end is not None:
+                    logger.info(f"Active hours schedule updated: {start:02d}:00 - {end:02d}:00")
+                else:
+                    logger.info("Active hours schedule cleared: node is always on")
+            
+            # Update live provider settings
+            if node.compute_provider:
+                node.compute_provider.update_allocation(
+                    cpu_allocation_pct=request.cpu_allocation_pct,
+                    memory_allocation_pct=request.memory_allocation_pct,
+                    max_concurrent_jobs=request.max_concurrent_jobs,
+                    gpu_allocation_pct=request.gpu_allocation_pct,
+                )
+            
+            if node.storage_provider:
+                await node.storage_provider.update_limits(
+                    pledged_gb=request.storage_gb,
+                    upload_mbps_limit=request.upload_mbps_limit,
+                    download_mbps_limit=request.download_mbps_limit,
+                )
+            
+            # Persist config to disk
+            config.save()
+            
+            logger.info(f"Resource configuration updated: {', '.join(updates_applied)}")
+            
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error(f"Failed to update resource configuration: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to save configuration: {str(e)}")
+        
+        # Return updated configuration
+        return await get_resources()
 
     # ── Bridge Endpoints ─────────────────────────────────────────
 

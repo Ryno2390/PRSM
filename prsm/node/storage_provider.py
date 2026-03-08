@@ -14,9 +14,15 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 from datetime import datetime, timezone
 
+from prsm.core.bandwidth_limiter import BandwidthLimiter
+
+if TYPE_CHECKING:
+    from prsm.node.config import NodeConfig
+
+from prsm.node.config import is_active_now
 from prsm.node.gossip import (
     GOSSIP_CONTENT_ADVERTISE,
     GOSSIP_PROOF_OF_STORAGE,
@@ -95,6 +101,7 @@ class StorageProvider:
         pledged_gb: float = 10.0,
         reward_interval: float = 3600.0,  # 1 hour
         challenge_config: Optional[ChallengeConfig] = None,
+        config: Optional["NodeConfig"] = None,
     ):
         self.identity = identity
         self.gossip = gossip
@@ -102,6 +109,17 @@ class StorageProvider:
         self.ipfs_api_url = ipfs_api_url
         self.pledged_gb = pledged_gb
         self.reward_interval = reward_interval
+        self.config = config  # NodeConfig for scheduling checks
+        
+        # Bandwidth limits (0 = unlimited)
+        self.upload_mbps_limit: float = 0.0
+        self.download_mbps_limit: float = 0.0
+        
+        # Bandwidth limiter for throttling content serving
+        self.bandwidth_limiter = BandwidthLimiter(
+            upload_mbps=self.upload_mbps_limit,
+            download_mbps=self.download_mbps_limit,
+        )
 
         # Challenge configuration
         self.challenge_config = challenge_config or ChallengeConfig()
@@ -286,6 +304,11 @@ class StorageProvider:
     async def _on_storage_request(self, subtype: str, data: Dict[str, Any], origin: str) -> None:
         """Handle a storage request from the network."""
         if not self._running or not self.ipfs_available:
+            return
+
+        # Check if we're within active hours
+        if self.config and not is_active_now(self.config):
+            logger.debug("Node is outside active hours, declining storage request")
             return
 
         cid = data.get("cid", "")
@@ -880,6 +903,70 @@ class StorageProvider:
             },
             "pending_challenges": len(self._pending_challenges),
             "tracked_providers": len(self._provider_reputation),
+        }
+
+    async def update_limits(
+        self,
+        pledged_gb: Optional[float] = None,
+        upload_mbps_limit: Optional[float] = None,
+        download_mbps_limit: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Update storage limits at runtime.
+        
+        Changes take effect immediately. This method allows live tuning
+        of storage allocation and bandwidth limits without restarting
+        the node.
+        
+        Args:
+            pledged_gb: Maximum storage to pledge in GB (must be positive)
+            upload_mbps_limit: Upload bandwidth limit in Mbps (0 = unlimited)
+            download_mbps_limit: Download bandwidth limit in Mbps (0 = unlimited)
+        
+        Returns:
+            Dict with updated limit values
+        
+        Raises:
+            ValueError: If any value is invalid
+        """
+        if pledged_gb is not None:
+            if pledged_gb <= 0:
+                raise ValueError(f"pledged_gb must be positive, got {pledged_gb}")
+            # Check if new pledge is less than current usage
+            if pledged_gb < self.used_gb:
+                logger.warning(
+                    f"Reducing pledged_gb from {self.pledged_gb} to {pledged_gb} "
+                    f"but {self.used_gb:.4f}GB is already in use. "
+                    "New pledge will be effective after content expires."
+                )
+            self.pledged_gb = pledged_gb
+            
+        if upload_mbps_limit is not None:
+            if upload_mbps_limit < 0:
+                raise ValueError(f"upload_mbps_limit cannot be negative, got {upload_mbps_limit}")
+            self.upload_mbps_limit = upload_mbps_limit
+            
+        if download_mbps_limit is not None:
+            if download_mbps_limit < 0:
+                raise ValueError(f"download_mbps_limit cannot be negative, got {download_mbps_limit}")
+            self.download_mbps_limit = download_mbps_limit
+        
+        # Update the bandwidth limiter with new limits
+        await self.bandwidth_limiter.update_limits(
+            upload_mbps=self.upload_mbps_limit,
+            download_mbps=self.download_mbps_limit,
+        )
+        
+        logger.info(
+            f"Updated storage limits: pledged={self.pledged_gb}GB, "
+            f"upload={self.upload_mbps_limit}Mbps, download={self.download_mbps_limit}Mbps"
+        )
+        
+        return {
+            "pledged_gb": self.pledged_gb,
+            "upload_mbps_limit": self.upload_mbps_limit,
+            "download_mbps_limit": self.download_mbps_limit,
+            "used_gb": self.used_gb,
+            "available_gb": self.available_gb,
         }
 
     def get_pinned_content_stats(self) -> List[Dict[str, Any]]:

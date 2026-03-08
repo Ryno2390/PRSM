@@ -8,7 +8,7 @@ import socket
 import sys
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
 import click
@@ -68,6 +68,52 @@ def _parse_endpoint(address: str, default_port: int) -> tuple[Optional[str], Opt
         return address, default_port, None
     except Exception as exc:
         return None, None, f"unable to parse '{address}' ({exc})"
+
+
+def parse_active_hours(value: Optional[str]) -> Tuple[Optional[int], Optional[int]]:
+    """Parse active hours string like '22-8' or 'off'.
+    
+    Returns:
+        Tuple of (start_hour, end_hour) where None values mean "always on".
+    
+    Raises:
+        click.BadParameter: If the format is invalid.
+    """
+    if value is None:
+        return None, None
+    if value.lower() == "off":
+        return None, None  # Always on
+    try:
+        parts = value.split("-")
+        if len(parts) == 2:
+            start, end = int(parts[0]), int(parts[1])
+            if 0 <= start <= 23 and 0 <= end <= 23:
+                return start, end
+    except (ValueError, AttributeError):
+        pass
+    raise click.BadParameter(f"Invalid active hours format: {value}. Use '22-8' or 'off'")
+
+
+def parse_active_days(value: Optional[str]) -> List[int]:
+    """Parse active days string like 'mon,tue,wed' or 'weekdays'.
+    
+    Returns:
+        List of day numbers (0=Mon, 6=Sun). Empty list means every day.
+    """
+    if value is None:
+        return []
+    value = value.lower()
+    if value == "weekdays":
+        return [0, 1, 2, 3, 4]  # Mon-Fri
+    if value == "weekends":
+        return [5, 6]  # Sat-Sun
+    day_map = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+    days = []
+    for part in value.split(","):
+        part = part.strip().lower()[:3]  # Take first 3 chars
+        if part in day_map:
+            days.append(day_map[part])
+    return sorted(days)
 
 
 def _node_preflight_diagnostics(config: "NodeConfig") -> List[PreflightCheckResult]:
@@ -551,7 +597,12 @@ def _run_node_wizard() -> "NodeConfig":
 @click.option("--api-port", default=None, type=int, help="API listen port (default: 8000)")
 @click.option("--bootstrap", default=None, help="Bootstrap node address (host:port)")
 @click.option("--no-dashboard", is_flag=True, help="Disable live dashboard (static output)")
-def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str, no_dashboard: bool):
+@click.option("--cpu", default=None, type=int, help="CPU allocation % (10-90)")
+@click.option("--memory", default=None, type=int, help="RAM allocation % (10-90)")
+@click.option("--storage", default=None, type=float, help="Storage to pledge in GB")
+@click.option("--jobs", default=None, type=int, help="Max concurrent compute jobs")
+def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str, no_dashboard: bool,
+          cpu: Optional[int], memory: Optional[int], storage: Optional[float], jobs: Optional[int]):
     """Start a PRSM network node with real P2P connectivity."""
     from prsm.node.config import NodeConfig
 
@@ -568,6 +619,28 @@ def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str, no_dashboa
         config.api_port = api_port
     if bootstrap:
         config.bootstrap_nodes = [b.strip() for b in bootstrap.split(",")]
+    
+    # Resource CLI overrides
+    if cpu is not None:
+        if not 10 <= cpu <= 90:
+            raise click.BadParameter("CPU allocation must be between 10-90%")
+        config.cpu_allocation_pct = cpu
+    if memory is not None:
+        if not 10 <= memory <= 90:
+            raise click.BadParameter("Memory allocation must be between 10-90%")
+        config.memory_allocation_pct = memory
+    if storage is not None:
+        if storage <= 0:
+            raise click.BadParameter("Storage must be a positive value in GB")
+        config.storage_gb = storage
+    if jobs is not None:
+        if jobs < 1:
+            raise click.BadParameter("Max concurrent jobs must be at least 1")
+        config.max_concurrent_jobs = jobs
+    
+    # Save config if any resource overrides were provided
+    if any(v is not None for v in [cpu, memory, storage, jobs]):
+        config.save()
 
     # Run preflight diagnostics before starting the node
     results = _node_preflight_diagnostics(config)
@@ -770,6 +843,265 @@ def info():
     table.add_row("Data Dir", config.data_dir)
     table.add_row("Bootstrap Nodes", ", ".join(config.bootstrap_nodes) if config.bootstrap_nodes else "none")
     console.print(table)
+
+
+@node.command("configure")
+@click.option("--show", is_flag=True, help="Show current configuration and exit")
+@click.option("--cpu", default=None, type=int, help="CPU allocation % (10-90)")
+@click.option("--memory", default=None, type=int, help="RAM allocation % (10-90)")
+@click.option("--storage", default=None, type=float, help="Storage to pledge in GB")
+@click.option("--jobs", default=None, type=int, help="Max concurrent compute jobs")
+@click.option("--gpu-pct", default=None, type=int, help="GPU allocation % (10-100)")
+@click.option("--upload-limit", default=None, type=float, help="Upload bandwidth limit in Mbps (0=unlimited)")
+@click.option("--active-hours", default=None, type=str, help="Active hours range (e.g., '22-8' for 10pm-8am, 'off' for always on)")
+@click.option("--active-days", default=None, type=str, help="Active days (e.g., 'mon,tue,wed' or 'weekdays' or 'weekends')")
+def configure(show: bool, cpu: Optional[int], memory: Optional[int], storage: Optional[float],
+              jobs: Optional[int], gpu_pct: Optional[int], upload_limit: Optional[float],
+              active_hours: Optional[str], active_days: Optional[str]):
+    """Configure node resource settings.
+    
+    Without arguments, runs interactively to prompt for settings.
+    With --show, prints current configuration.
+    With specific flags, updates only those settings.
+    """
+    from prsm.node.config import NodeConfig, NodeRole
+    from prsm.node.compute_provider import detect_resources
+    
+    config = NodeConfig.load()
+    
+    # Handle --show flag
+    if show:
+        _show_configuration(config)
+        return
+    
+    # Check if any flags were provided
+    has_flags = any(v is not None for v in [cpu, memory, storage, jobs, gpu_pct, upload_limit, active_hours, active_days])
+    
+    if has_flags:
+        # Update only specified fields
+        changes = []
+        
+        if cpu is not None:
+            if not 10 <= cpu <= 90:
+                raise click.BadParameter("CPU allocation must be between 10-90%")
+            old_val = config.cpu_allocation_pct
+            config.cpu_allocation_pct = cpu
+            changes.append(f"CPU allocation: {old_val}% → {cpu}%")
+        
+        if memory is not None:
+            if not 10 <= memory <= 90:
+                raise click.BadParameter("Memory allocation must be between 10-90%")
+            old_val = config.memory_allocation_pct
+            config.memory_allocation_pct = memory
+            changes.append(f"Memory allocation: {old_val}% → {memory}%")
+        
+        if storage is not None:
+            if storage <= 0:
+                raise click.BadParameter("Storage must be a positive value in GB")
+            old_val = config.storage_gb
+            config.storage_gb = storage
+            changes.append(f"Storage pledged: {old_val} GB → {storage} GB")
+        
+        if jobs is not None:
+            if jobs < 1:
+                raise click.BadParameter("Max concurrent jobs must be at least 1")
+            old_val = config.max_concurrent_jobs
+            config.max_concurrent_jobs = jobs
+            changes.append(f"Max concurrent jobs: {old_val} → {jobs}")
+        
+        if gpu_pct is not None:
+            if not 10 <= gpu_pct <= 100:
+                raise click.BadParameter("GPU allocation must be between 10-100%")
+            old_val = config.gpu_allocation_pct
+            config.gpu_allocation_pct = gpu_pct
+            changes.append(f"GPU allocation: {old_val}% → {gpu_pct}%")
+        
+        if upload_limit is not None:
+            if upload_limit < 0:
+                raise click.BadParameter("Upload limit cannot be negative")
+            old_val = config.upload_mbps_limit
+            config.upload_mbps_limit = upload_limit
+            old_str = f"{old_val} Mbps" if old_val > 0 else "unlimited"
+            new_str = f"{upload_limit} Mbps" if upload_limit > 0 else "unlimited"
+            changes.append(f"Upload limit: {old_str} → {new_str}")
+        
+        if active_hours is not None:
+            start, end = parse_active_hours(active_hours)
+            old_start, old_end = config.active_hours_start, config.active_hours_end
+            config.active_hours_start = start
+            config.active_hours_end = end
+            old_str = f"{old_start:02d}-{old_end:02d}" if old_start is not None and old_end is not None else "always on"
+            new_str = f"{start:02d}-{end:02d}" if start is not None and end is not None else "always on"
+            changes.append(f"Active hours: {old_str} → {new_str}")
+        
+        if active_days is not None:
+            days = parse_active_days(active_days)
+            old_days = config.active_days
+            config.active_days = days
+            day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            old_str = ", ".join(day_names[d] for d in old_days) if old_days else "every day"
+            new_str = ", ".join(day_names[d] for d in days) if days else "every day"
+            changes.append(f"Active days: {old_str} → {new_str}")
+        
+        config.save()
+        
+        console.print("✅ Configuration updated:", style="bold green")
+        for change in changes:
+            console.print(f"   {change}")
+        console.print(f"\n   Config saved to {config.config_path}")
+        
+    else:
+        # Interactive mode
+        _run_interactive_configure(config)
+
+
+def _show_configuration(config: "NodeConfig") -> None:
+    """Display current node configuration in human-readable format."""
+    from prsm.node.config import NodeRole
+    from prsm.node.compute_provider import detect_resources
+    
+    # Detect actual system resources
+    resources = detect_resources()
+    
+    # Format role display
+    role_display = " + ".join(r.value for r in config.roles)
+    
+    console.print()
+    console.print("PRSM Node Resource Configuration", style="bold magenta")
+    console.print("=" * 50)
+    console.print(f"  Role:             {role_display}", style="cyan")
+    
+    # CPU allocation
+    cpu_offered = round(resources.cpu_count * config.cpu_allocation_pct / 100, 1)
+    console.print(f"  CPU allocation:   {config.cpu_allocation_pct}% of {resources.cpu_count} cores → {cpu_offered:.1f} cores offered")
+    
+    # Memory allocation
+    mem_offered = round(resources.memory_total_gb * config.memory_allocation_pct / 100, 1)
+    console.print(f"  RAM allocation:   {config.memory_allocation_pct}% of {resources.memory_total_gb:.1f} GB → {mem_offered:.1f} GB offered")
+    
+    # Concurrent jobs
+    console.print(f"  Concurrent jobs:  {config.max_concurrent_jobs} slots")
+    
+    # GPU info
+    if resources.gpu_available:
+        gpu_offered = round(resources.gpu_memory_gb * config.gpu_allocation_pct / 100, 1)
+        console.print(f"  GPU:              {resources.gpu_name} ({resources.gpu_memory_gb:.1f} GB) — {config.gpu_allocation_pct}% → {gpu_offered:.1f} GB offered")
+    else:
+        console.print(f"  GPU:              not detected")
+    
+    # Storage
+    console.print(f"  Storage pledged:  {config.storage_gb:.1f} GB")
+    
+    # Upload limit
+    if config.upload_mbps_limit > 0:
+        console.print(f"  Upload limit:     {config.upload_mbps_limit:.1f} Mbps")
+    else:
+        console.print(f"  Upload limit:     unlimited")
+    
+    # Active hours
+    if config.active_hours_start is not None and config.active_hours_end is not None:
+        console.print(f"  Active hours:     {config.active_hours_start:02d}:00 - {config.active_hours_end:02d}:00")
+    else:
+        console.print(f"  Active hours:     always on")
+    
+    # Active days
+    if config.active_days:
+        day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        days_str = ", ".join(day_names[d] for d in config.active_days)
+        console.print(f"  Active days:      {days_str}")
+    else:
+        console.print(f"  Active days:      every day")
+    
+    console.print()
+
+
+def _run_interactive_configure(config: "NodeConfig") -> None:
+    """Run interactive configuration wizard for resource settings."""
+    from prsm.node.config import NodeRole
+    from prsm.node.compute_provider import detect_resources
+    
+    resources = detect_resources()
+    
+    console.print()
+    console.print("=" * 60, style="bold magenta")
+    console.print("  PRSM Node Resource Configuration", style="bold magenta")
+    console.print("=" * 60, style="bold magenta")
+    console.print()
+    
+    # Show current settings
+    console.print("  Current settings:", style="bold")
+    console.print(f"    CPU allocation:    {config.cpu_allocation_pct}%")
+    console.print(f"    Memory allocation: {config.memory_allocation_pct}%")
+    console.print(f"    Storage pledged:   {config.storage_gb} GB")
+    console.print(f"    Max concurrent jobs: {config.max_concurrent_jobs}")
+    console.print(f"    GPU allocation:    {config.gpu_allocation_pct}%")
+    console.print(f"    Upload limit:      {config.upload_mbps_limit} Mbps" if config.upload_mbps_limit > 0 else "    Upload limit:      unlimited")
+    if config.active_hours_start is not None:
+        console.print(f"    Active hours:      {config.active_hours_start:02d}-{config.active_hours_end:02d}")
+    else:
+        console.print(f"    Active hours:      always on")
+    console.print()
+    
+    # Prompt for each setting
+    console.print("  Detected system resources:", style="bold")
+    console.print(f"    CPUs: {resources.cpu_count}")
+    console.print(f"    RAM:  {resources.memory_total_gb:.1f} GB")
+    if resources.gpu_available:
+        console.print(f"    GPU:  {resources.gpu_name} ({resources.gpu_memory_gb:.1f} GB)")
+    console.print()
+    
+    # CPU allocation
+    cpu = click.prompt("  CPU allocation for compute jobs (%)", default=config.cpu_allocation_pct, type=int)
+    config.cpu_allocation_pct = max(10, min(90, cpu))
+    
+    # Memory allocation
+    mem = click.prompt("  Memory allocation for compute jobs (%)", default=config.memory_allocation_pct, type=int)
+    config.memory_allocation_pct = max(10, min(90, mem))
+    
+    # Storage
+    storage = click.prompt("  Storage to pledge (GB)", default=config.storage_gb, type=float)
+    config.storage_gb = storage
+    
+    # Max concurrent jobs
+    jobs = click.prompt("  Max concurrent compute jobs", default=config.max_concurrent_jobs, type=int)
+    config.max_concurrent_jobs = max(1, jobs)
+    
+    # GPU allocation (if GPU available)
+    if resources.gpu_available:
+        gpu = click.prompt("  GPU allocation %", default=config.gpu_allocation_pct, type=int)
+        config.gpu_allocation_pct = max(10, min(100, gpu))
+    
+    # Upload limit
+    upload_default = str(config.upload_mbps_limit) if config.upload_mbps_limit > 0 else "0"
+    upload_str = click.prompt("  Upload bandwidth limit in Mbps (0=unlimited)", default=upload_default)
+    config.upload_mbps_limit = float(upload_str)
+    
+    # Active hours
+    current_hours = f"{config.active_hours_start:02d}-{config.active_hours_end:02d}" if config.active_hours_start is not None else "off"
+    hours_input = click.prompt("  Active hours (e.g., '22-8' or 'off' for always on)", default=current_hours)
+    if hours_input.lower() != "off":
+        start, end = parse_active_hours(hours_input)
+        config.active_hours_start = start
+        config.active_hours_end = end
+    else:
+        config.active_hours_start = None
+        config.active_hours_end = None
+    
+    # Active days
+    day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    current_days = "weekdays" if config.active_days == [0, 1, 2, 3, 4] else \
+                   "weekends" if config.active_days == [5, 6] else \
+                   ",".join(day_names[d] for d in config.active_days) if config.active_days else "everyday"
+    days_input = click.prompt("  Active days (e.g., 'weekdays', 'weekends', 'mon,wed,fri', or 'everyday')", default=current_days)
+    if days_input.lower() not in ("everyday", ""):
+        config.active_days = parse_active_days(days_input)
+    else:
+        config.active_days = []
+    
+    # Save configuration
+    config.save()
+    console.print()
+    console.print(f"  ✅ Configuration saved to {config.config_path}", style="bold green")
 
 
 @main.group()

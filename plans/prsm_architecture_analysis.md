@@ -3585,6 +3585,195 @@ REMAINING (MEDIUM-TERM):
 
 ---
 
+## 35. Resource Contribution Controls (2026-03-08)
+
+Node participants can now precisely control how much CPU, RAM, GPU, storage, and network bandwidth each of their devices contributes to the PRSM network, with scheduling, live runtime updates, and bandwidth throttling.
+
+### Configuration Fields Added to `NodeConfig`
+
+| Field | Type | Default | Purpose |
+|-------|------|---------|---------|
+| `max_concurrent_jobs` | `int` | `3` | Parallel compute job slots accepted at once |
+| `gpu_allocation_pct` | `int` | `80` | % of detected GPU VRAM to offer to the network |
+| `upload_mbps_limit` | `float` | `0.0` | Upload bandwidth cap in Mbps (0 = unlimited) |
+| `download_mbps_limit` | `float` | `0.0` | Download bandwidth cap in Mbps (0 = unlimited) |
+| `active_hours_start` | `Optional[int]` | `None` | Hour 0–23 when node starts accepting work (None = always) |
+| `active_hours_end` | `Optional[int]` | `None` | Hour 0–23 when node stops accepting work |
+| `active_days` | `List[int]` | `[]` | Days active (0=Mon … 6=Sun; empty = every day) |
+
+All fields persist in `~/.prsm/node_config.json` and survive restarts.
+
+### Phase 1 — Config Foundation
+
+**Files:** `prsm/node/config.py`, `prsm/node/compute_provider.py`, `prsm/node/node.py`
+
+- Added the 7 new fields above to `NodeConfig.save()` / `NodeConfig.load()`
+- `ComputeProvider.__init__()` now accepts `max_concurrent_jobs` and `gpu_allocation_pct`
+- `available_capacity` property extended to include `gpu_memory_gb_allocated` when GPU is detected
+- `node.py` passes both new fields through from config at startup
+- `max_concurrent_jobs` is now enforced in `_on_job_offer()` instead of being hardcoded at 3
+
+### Phase 2 — CLI Flags + `prsm node configure`
+
+**Files:** `prsm/cli.py`
+
+**New flags on `prsm node start`:**
+```bash
+prsm node start --cpu 75 --memory 60 --storage 50 --jobs 4
+```
+
+**New command: `prsm node configure`**
+
+```bash
+# Inspect current settings (human-readable)
+prsm node configure --show
+# Output example:
+#   PRSM Node Resource Configuration
+#     Role:             full (compute + storage)
+#     CPU allocation:   75% of 8 cores → 6 cores offered
+#     RAM allocation:   60% of 16.0 GB → 9.6 GB offered
+#     Concurrent jobs:  4 slots
+#     GPU:              RTX 3080 (10.0 GB) — 80% → 8.0 GB offered
+#     Storage pledged:  50.0 GB  (used: 2.3 GB, available: 47.7 GB)
+#     Upload limit:     unlimited
+#     Active hours:     22:00 – 08:00 (weekdays only)
+
+# Update settings without re-running full wizard
+prsm node configure --cpu 75 --memory 60 --jobs 5
+prsm node configure --storage 100 --upload-limit 50
+
+# Configure time-based scheduling
+prsm node configure --active-hours "22-8" --active-days "weekdays"
+prsm node configure --active-hours off   # Clear schedule (always on)
+```
+
+Changes are saved to `~/.prsm/node_config.json` immediately and take effect on next start (or immediately via the live API for running nodes).
+
+### Phase 3 — Live Runtime Update API
+
+**Files:** `prsm/node/api.py`, `prsm/node/compute_provider.py`, `prsm/node/storage_provider.py`
+
+**New endpoints:**
+
+```
+GET  /node/resources   → current allocation + live utilization
+PUT  /node/resources   → update any allocation fields while node is running
+```
+
+`PUT /node/resources` request body (all fields optional):
+```json
+{
+  "cpu_allocation_pct": 75,
+  "memory_allocation_pct": 60,
+  "max_concurrent_jobs": 5,
+  "gpu_allocation_pct": 80,
+  "storage_gb": 50.0,
+  "upload_mbps_limit": 100.0,
+  "download_mbps_limit": 0.0,
+  "active_hours_start": 22,
+  "active_hours_end": 8
+}
+```
+
+`ComputeProvider.update_allocation()` and `StorageProvider.update_limits()` apply changes to the live provider instances without restart and persist the updated config to disk.
+
+### Phase 4 — Active Hours Scheduling
+
+**Files:** `prsm/node/config.py`, `prsm/node/compute_provider.py`, `prsm/node/storage_provider.py`
+
+`NodeConfig.is_active_now()` helper:
+
+```python
+def is_active_now(self) -> bool:
+    if self.active_hours_start is None:
+        return True  # Always on
+    now = datetime.now()
+    if self.active_days and now.weekday() not in self.active_days:
+        return False
+    start, end = self.active_hours_start, self.active_hours_end
+    hour = now.hour
+    if start <= end:
+        return start <= hour < end
+    return hour >= start or hour < end  # Wraps midnight
+```
+
+Both `ComputeProvider._on_job_offer()` and `StorageProvider._on_storage_request()` call `is_active_now()` before accepting work. Jobs offered during inactive hours are silently declined — the peer will find another provider.
+
+**Scheduling examples:**
+```bash
+# Laptop: only contribute at night (10pm–8am)
+prsm node configure --active-hours "22-8"
+
+# Old workstation: weekends only, all day
+prsm node configure --active-hours off --active-days "weekend"
+
+# Office server: business hours, weekdays
+prsm node configure --active-hours "9-17" --active-days "weekdays"
+```
+
+**Tests:** `tests/unit/test_active_hours_scheduling.py` — 14 tests covering normal ranges, midnight wrap-around, day filtering, and edge cases (start == end, always-on defaults).
+
+### Phase 5 — Bandwidth Limiting
+
+**Files:** `prsm/core/bandwidth_limiter.py` (new), `prsm/node/storage_provider.py`, `prsm/node/content_provider.py`
+
+**`TokenBucket` class** in `prsm/core/bandwidth_limiter.py`:
+
+```python
+class TokenBucket:
+    """Async token bucket for bandwidth rate limiting."""
+    def __init__(self, rate_mbps: float):
+        self.rate_bytes_per_sec = rate_mbps * 1024 * 1024 / 8
+        self._tokens = self.rate_bytes_per_sec   # Start full (1-second burst)
+        self._last_refill = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def consume(self, byte_count: int) -> None:
+        """Wait until enough tokens available, then consume."""
+        if self.rate_bytes_per_sec == 0:
+            return  # Unlimited — zero cost
+        async with self._lock:
+            while True:
+                now = time.monotonic()
+                self._tokens = min(
+                    self.rate_bytes_per_sec,
+                    self._tokens + (now - self._last_refill) * self.rate_bytes_per_sec
+                )
+                self._last_refill = now
+                if self._tokens >= byte_count:
+                    self._tokens -= byte_count
+                    return
+                await asyncio.sleep(0.05)
+```
+
+`BandwidthLimiter` wraps upload and download `TokenBucket` instances together. Initialized from `config.upload_mbps_limit` and `config.download_mbps_limit` in `node.py` and injected into:
+- `StorageProvider` — throttles IPFS content serving responses
+- `ContentProvider` — throttles inline content transfer in P2P responses
+
+Setting either limit to `0.0` disables throttling on that direction (no-overhead fast path).
+
+### Multi-Device Usage Patterns
+
+The combination of these controls enables the key multi-device scenarios:
+
+| Device | Example Config |
+|--------|---------------|
+| **Primary laptop** | `--cpu 30 --memory 25 --storage 5 --jobs 1 --active-hours "22-8"` — light contribution, only at night |
+| **Old workstation** | `--cpu 80 --memory 70 --storage 200 --jobs 6 --active-days "weekend"` — heavy contribution on weekends |
+| **Home server / NAS** | `--cpu 50 --storage 2000 --jobs 3 --upload-limit 20` — storage-focused, bandwidth-capped for metered connection |
+| **Office GPU box** | `--cpu 60 --memory 50 --jobs 4 --active-hours "18-9"` — contributes after-hours, GPU-enabled inference |
+
+Each device runs an independent `prsm node` process with its own `~/.prsm/node_config.json`. All devices connect to the same bootstrap server and are discoverable by the network. The capability advertisement (Phase 4 of Section 34) broadcasts each device's actual allocated resources so the compute marketplace can route jobs to the right machine.
+
+### Updated Status Matrix Entry
+
+```
+  ✅ Resource contribution controls (CPU%, RAM%, GPU%, storage GB, bandwidth
+     limits, active hours scheduling, live runtime updates via PUT /node/resources)
+```
+
+---
+
 *Analysis completed: 2026-02-20*
 *Code Review completed: 2026-02-20*
 *Sprint 1 completed: 2026-02-20*
@@ -3623,4 +3812,5 @@ REMAINING (MEDIUM-TERM):
 *Security CI workflow completed: 2026-03-08*
 *FTNS testnet deployment config completed: 2026-03-08*
 *Repository root cleaned: 55 test-artifact JSONs removed from git: 2026-03-08*
+*Section 35 (Resource Contribution Controls) completed: 2026-03-08*
 *PRSM Version: 0.2.1*

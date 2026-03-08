@@ -7,6 +7,7 @@ Defaults work out of the box for local development.
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional
@@ -71,6 +72,21 @@ class NodeConfig:
     storage_gb: float = 10.0
     cpu_allocation_pct: int = 50       # % of CPU to offer for jobs
     memory_allocation_pct: int = 50    # % of RAM to offer
+
+    # Compute limits
+    max_concurrent_jobs: int = 3          # Parallel job slots
+    gpu_allocation_pct: int = 80          # % of GPU VRAM to offer (if GPU detected)
+
+    # Network/bandwidth
+    upload_mbps_limit: float = 0.0        # 0 = unlimited; non-zero = cap in Mbps
+    download_mbps_limit: float = 0.0      # 0 = unlimited
+
+    # Scheduling
+    active_hours_start: Optional[int] = None  # Hour 0-23 (None = always on)
+    active_hours_end: Optional[int] = None    # Hour 0-23 (None = always on)
+    active_days: List[int] = field(          # 0=Mon ... 6=Sun (empty = every day)
+        default_factory=list
+    )
 
     # Gossip protocol
     gossip_fanout: int = 3
@@ -155,6 +171,13 @@ class NodeConfig:
             "storage_gb": self.storage_gb,
             "cpu_allocation_pct": self.cpu_allocation_pct,
             "memory_allocation_pct": self.memory_allocation_pct,
+            "max_concurrent_jobs": self.max_concurrent_jobs,
+            "gpu_allocation_pct": self.gpu_allocation_pct,
+            "upload_mbps_limit": self.upload_mbps_limit,
+            "download_mbps_limit": self.download_mbps_limit,
+            "active_hours_start": self.active_hours_start,
+            "active_hours_end": self.active_hours_end,
+            "active_days": self.active_days,
             "gossip_fanout": self.gossip_fanout,
             "gossip_ttl": self.gossip_ttl,
             "heartbeat_interval": self.heartbeat_interval,
@@ -193,3 +216,39 @@ class NodeConfig:
         data = json.loads(path.read_text())
         roles = [NodeRole(r) for r in data.pop("roles", ["full"])]
         return cls(roles=roles, **data)
+
+
+def is_active_now(config: NodeConfig) -> bool:
+    """Check if the node should be active based on configured schedule.
+    
+    Returns True if:
+    - No schedule configured (always on), OR
+    - Current time is within active hours AND current day is in active_days
+    
+    Args:
+        config: NodeConfig with active_hours_start, active_hours_end, active_days
+        
+    Returns:
+        True if node should accept work, False otherwise
+    """
+    # Always on if no schedule configured
+    if config.active_hours_start is None or config.active_hours_end is None:
+        return True
+    
+    now = datetime.now()
+    current_hour = now.hour
+    current_day = now.weekday()  # 0=Monday, 6=Sunday
+    
+    # Check if today is an active day
+    if config.active_days and current_day not in config.active_days:
+        return False
+    
+    start, end = config.active_hours_start, config.active_hours_end
+    
+    # Handle wrap-around (e.g., 22:00 - 06:00)
+    if start <= end:
+        # Normal range (e.g., 09:00 - 17:00)
+        return start <= current_hour < end
+    else:
+        # Wraps midnight (e.g., 22:00 - 06:00)
+        return current_hour >= start or current_hour < end

@@ -330,6 +330,9 @@ class PRSMNode:
                 ledger=self.ledger,
                 cpu_allocation_pct=self.config.cpu_allocation_pct,
                 memory_allocation_pct=self.config.memory_allocation_pct,
+                max_concurrent_jobs=self.config.max_concurrent_jobs,
+                gpu_allocation_pct=self.config.gpu_allocation_pct,
+                config=self.config,
             )
             self.compute_provider.allow_self_compute = self.config.allow_self_compute
 
@@ -348,7 +351,14 @@ class PRSMNode:
                 ledger=self.ledger,
                 ipfs_api_url=self.config.ipfs_api_url,
                 pledged_gb=self.config.storage_gb,
+                config=self.config,
             )
+            # Initialize bandwidth limits from config
+            if self.config.upload_mbps_limit > 0 or self.config.download_mbps_limit > 0:
+                # Update the bandwidth limiter with config values
+                # Note: This is synchronous initialization, the async update happens in start()
+                self.storage_provider.upload_mbps_limit = self.config.upload_mbps_limit
+                self.storage_provider.download_mbps_limit = self.config.download_mbps_limit
 
         # ── Content Index ─────────────────────────────────────────
         self.content_index = ContentIndex(
@@ -380,12 +390,18 @@ class PRSMNode:
         )
 
         # ── Content Provider (Cross-Node Retrieval) ───────────────────────
+        # Pass bandwidth limiter from storage_provider if available
+        _bandwidth_limiter = None
+        if self.storage_provider:
+            _bandwidth_limiter = self.storage_provider.bandwidth_limiter
+        
         self.content_provider = ContentProvider(
             identity=self.identity,
             transport=self.transport,
             gossip=self.gossip,
             ipfs_api_url=self.config.ipfs_api_url,
             content_index=self.content_index,
+            bandwidth_limiter=_bandwidth_limiter,
         )
 
         # ── Ledger Sync ──────────────────────────────────────────
