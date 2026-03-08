@@ -592,6 +592,166 @@ class DashboardServer:
                 "count": len(results),
             }
         
+        # ── Teacher Endpoints ─────────────────────────────────────────────────────
+        
+        @self.app.get("/api/teacher/list")
+        async def list_teachers():
+            """List available teacher models."""
+            if not self.node:
+                return {"teachers": [], "count": 0}
+            
+            # Check if node has teacher registry
+            teachers = []
+            if hasattr(self.node, 'teacher_registry') and self.node.teacher_registry:
+                for teacher_id, teacher in self.node.teacher_registry.items():
+                    teachers.append({
+                        "teacher_id": teacher_id,
+                        "specialization": getattr(teacher, 'specialization', 'general'),
+                        "domain": getattr(teacher, 'domain', 'unknown'),
+                        "status": getattr(teacher, 'status', 'active'),
+                        "created_at": getattr(teacher, 'created_at', None),
+                    })
+            
+            return {"teachers": teachers, "count": len(teachers)}
+        
+        @self.app.post("/api/teacher/create")
+        async def create_teacher(request: dict):
+            """Create a new teacher model."""
+            if not self.node:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Node not connected"
+                )
+            
+            specialization = request.get("specialization", "general")
+            domain = request.get("domain", "general")
+            
+            # Check if node supports teacher creation
+            if hasattr(self.node, 'create_teacher'):
+                teacher = await self.node.create_teacher(
+                    specialization=specialization,
+                    domain=domain,
+                )
+                return {
+                    "teacher_id": teacher.teacher_id,
+                    "specialization": specialization,
+                    "domain": domain,
+                    "status": "active",
+                }
+            else:
+                # Demo response
+                from uuid import uuid4
+                return {
+                    "teacher_id": f"teacher_{uuid4().hex[:12]}",
+                    "specialization": specialization,
+                    "domain": domain,
+                    "status": "active",
+                    "message": "Teacher created (demo mode)",
+                }
+        
+        @self.app.get("/api/teacher/{teacher_id}")
+        async def get_teacher(teacher_id: str):
+            """Get teacher model details."""
+            if not self.node:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Node not connected"
+                )
+            
+            if hasattr(self.node, 'teacher_registry') and self.node.teacher_registry:
+                teacher = self.node.teacher_registry.get(teacher_id)
+                if teacher:
+                    return {
+                        "teacher_id": teacher_id,
+                        "specialization": getattr(teacher, 'specialization', 'general'),
+                        "domain": getattr(teacher, 'domain', 'unknown'),
+                        "status": getattr(teacher, 'status', 'active'),
+                    }
+            
+            raise HTTPException(status_code=404, detail="Teacher not found")
+        
+        # ── Distillation Endpoints ────────────────────────────────────────────────
+        
+        @self.app.get("/api/distillation")
+        async def list_distillation_jobs():
+            """List distillation jobs."""
+            if not self.node:
+                return {"jobs": [], "count": 0}
+            
+            jobs = []
+            # Check if node has distillation tracking
+            if hasattr(self.node, 'distillation_jobs'):
+                for job_id, job in self.node.distillation_jobs.items():
+                    jobs.append({
+                        "job_id": job_id,
+                        "teacher_id": getattr(job, 'teacher_id', None),
+                        "status": getattr(job, 'status', 'unknown'),
+                        "progress": getattr(job, 'progress', 0),
+                        "created_at": getattr(job, 'created_at', None),
+                    })
+            
+            return {"jobs": jobs, "count": len(jobs)}
+        
+        @self.app.post("/api/distillation/submit")
+        async def submit_distillation(request: dict):
+            """Submit a distillation job."""
+            if not self.node:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Node not connected"
+                )
+            
+            teacher_id = request.get("teacher_id")
+            ftns_budget = request.get("ftns_budget", 1.0)
+            dataset_cid = request.get("dataset_cid")
+            
+            if not teacher_id:
+                raise HTTPException(status_code=400, detail="teacher_id is required")
+            
+            # Check if node supports distillation
+            if hasattr(self.node, 'submit_distillation'):
+                job = await self.node.submit_distillation(
+                    teacher_id=teacher_id,
+                    ftns_budget=ftns_budget,
+                    dataset_cid=dataset_cid,
+                )
+                return {
+                    "job_id": job.job_id,
+                    "teacher_id": teacher_id,
+                    "status": "pending",
+                }
+            else:
+                # Demo response
+                from uuid import uuid4
+                return {
+                    "job_id": f"distill_{uuid4().hex[:12]}",
+                    "teacher_id": teacher_id,
+                    "status": "pending",
+                    "message": "Distillation job submitted (demo mode)",
+                }
+        
+        @self.app.get("/api/distillation/{job_id}")
+        async def get_distillation_job(job_id: str):
+            """Get distillation job status."""
+            if not self.node:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Node not connected"
+                )
+            
+            if hasattr(self.node, 'distillation_jobs'):
+                job = self.node.distillation_jobs.get(job_id)
+                if job:
+                    return {
+                        "job_id": job_id,
+                        "teacher_id": getattr(job, 'teacher_id', None),
+                        "status": getattr(job, 'status', 'unknown'),
+                        "progress": getattr(job, 'progress', 0),
+                        "created_at": getattr(job, 'created_at', None),
+                    }
+            
+            raise HTTPException(status_code=404, detail="Distillation job not found")
+        
         # ── Health Endpoint ───────────────────────────────────────────────────────
         
         @self.app.get("/api/health")
