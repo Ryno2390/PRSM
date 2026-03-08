@@ -57,6 +57,9 @@ x-bootstrap-env: &bootstrap-env
   PRSM_REGION: ${PRSM_REGION:-us-east-1}
   PRSM_FEDERATION_PEERS: ${PRSM_FEDERATION_PEERS:-}
   PRSM_AUTH_SECRET: ${PRSM_AUTH_SECRET:-}
+  # Multi-region bootstrap identification
+  BOOTSTRAP_REGION: ${BOOTSTRAP_REGION:-us-east}
+  BOOTSTRAP_REGION_LABEL: ${BOOTSTRAP_REGION_LABEL:-US East (Primary)}
 
 x-healthcheck: &bootstrap-healthcheck
   test: ["CMD", "python", "/app/healthcheck.py"]

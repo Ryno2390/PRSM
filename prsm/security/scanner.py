@@ -9,6 +9,7 @@ import asyncio
 import os
 import re
 import subprocess
+import sys
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -1009,6 +1010,142 @@ class SecurityScanner:
             for secret in result.secrets:
                 html += f'<tr><td>{secret.secret_type}</td><td>{secret.file_path}</td><td>{secret.line_number}</td><td class="{secret.severity.value}">{secret.severity.value}</td></tr>'
             html += "</table>"
+            
+            html += "</body></html>"
+            return html
+    
+    
+    def main():
+        """CLI entry point for the security scanner."""
+        import argparse
         
-        html += "</body></html>"
-        return html
+        parser = argparse.ArgumentParser(
+            description="PRSM Security Scanner - Automated security scanning for PRSM"
+        )
+        parser.add_argument(
+            "--output", "-o",
+            default="security-report.json",
+            help="Output file path for the security report (default: security-report.json)"
+        )
+        parser.add_argument(
+            "--format", "-f",
+            choices=["json", "csv", "html"],
+            default="json",
+            help="Output format (default: json)"
+        )
+        parser.add_argument(
+            "--project-root", "-r",
+            default=".",
+            help="Project root directory to scan (default: current directory)"
+        )
+        parser.add_argument(
+            "--verbose", "-v",
+            action="store_true",
+            help="Enable verbose output"
+        )
+        parser.add_argument(
+            "--fail-on-critical",
+            action="store_true",
+            help="Exit with error code if critical vulnerabilities found"
+        )
+        
+        args = parser.parse_args()
+        
+        print("🔍 PRSM Security Scanner")
+        print("=" * 50)
+        print(f"Project root: {args.project_root}")
+        print(f"Output file: {args.output}")
+        print(f"Output format: {args.format}")
+        print("=" * 50)
+        
+        # Initialize scanner
+        scanner = SecurityScanner(project_root=args.project_root)
+        
+        # Run full scan
+        print("\n🔎 Running security scan...")
+        result = scanner.scan_all()
+        
+        # Print summary
+        print("\n" + "=" * 50)
+        print("📊 Security Scan Results")
+        print("=" * 50)
+        print(f"Scan ID: {result.scan_id}")
+        print(f"Timestamp: {result.timestamp.isoformat()}")
+        print(f"Duration: {result.duration_ms}ms")
+        print(f"Risk Level: {result.summary.get('risk_level', 'unknown').upper()}")
+        print(f"Risk Score: {result.summary.get('risk_score', 0)}")
+        print()
+        print(f"Vulnerabilities: {len(result.vulnerabilities)}")
+        print(f"  - Critical: {result.summary.get('vulnerabilities_by_severity', {}).get('critical', 0)}")
+        print(f"  - High: {result.summary.get('vulnerabilities_by_severity', {}).get('high', 0)}")
+        print(f"  - Medium: {result.summary.get('vulnerabilities_by_severity', {}).get('medium', 0)}")
+        print(f"  - Low: {result.summary.get('vulnerabilities_by_severity', {}).get('low', 0)}")
+        print()
+        print(f"Security Issues: {len(result.issues)}")
+        print(f"  - Critical: {result.summary.get('issues_by_severity', {}).get('critical', 0)}")
+        print(f"  - High: {result.summary.get('issues_by_severity', {}).get('high', 0)}")
+        print(f"  - Medium: {result.summary.get('issues_by_severity', {}).get('medium', 0)}")
+        print(f"  - Low: {result.summary.get('issues_by_severity', {}).get('low', 0)}")
+        print()
+        print(f"Secret Leaks: {len(result.secrets)}")
+        
+        # Export results
+        print(f"\n📄 Exporting results to {args.output}...")
+        output_content = scanner.export_results(result, format=args.format)
+        
+        # Ensure output directory exists
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(output_path, 'w') as f:
+            f.write(output_content)
+        
+        print(f"✅ Results saved to {args.output}")
+        
+        # Print detailed findings if verbose
+        if args.verbose:
+            print("\n" + "=" * 50)
+            print("📋 Detailed Findings")
+            print("=" * 50)
+            
+            if result.vulnerabilities:
+                print("\nVulnerabilities:")
+                for vuln in result.vulnerabilities:
+                    print(f"  - [{vuln.severity.value.upper()}] {vuln.id}: {vuln.package} {vuln.version}")
+                    print(f"    {vuln.description[:100]}...")
+            
+            if result.issues:
+                print("\nSecurity Issues:")
+                for issue in result.issues:
+                    print(f"  - [{issue.severity.value.upper()}] {issue.issue_id}")
+                    print(f"    {issue.file_path}:{issue.line_number}")
+                    print(f"    {issue.message[:100]}...")
+            
+            if result.secrets:
+                print("\nSecret Leaks:")
+                for secret in result.secrets:
+                    print(f"  - [{secret.severity.value.upper()}] {secret.secret_type}")
+                    print(f"    {secret.file_path}:{secret.line_number}")
+        
+        # Determine exit code
+        if args.fail_on_critical:
+            critical_count = (
+                result.summary.get('vulnerabilities_by_severity', {}).get('critical', 0) +
+                result.summary.get('issues_by_severity', {}).get('critical', 0) +
+                len([s for s in result.secrets if s.severity == VulnerabilitySeverity.CRITICAL])
+            )
+            high_count = (
+                result.summary.get('vulnerabilities_by_severity', {}).get('high', 0) +
+                result.summary.get('issues_by_severity', {}).get('high', 0)
+            )
+            
+            if critical_count > 0 or high_count > 0:
+                print(f"\n❌ BUILD FAILED: Found {critical_count} critical and {high_count} high severity issues")
+                sys.exit(1)
+        
+        print("\n✅ Security scan completed successfully")
+        sys.exit(0)
+    
+    
+    if __name__ == "__main__":
+        main()
