@@ -15,6 +15,7 @@ Security Features (Phase 4.2):
 import asyncio
 import logging
 import time
+import uuid as _uuid
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 
@@ -33,6 +34,7 @@ from prsm.node.api_hardening import (
     require_auth,
     websocket_status_endpoint,
 )
+from prsm.node.node import TrainingJob, TrainingJobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -1737,7 +1739,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             request: Training configuration parameters
             
         Returns:
-            Training run details
+            Training run details including run_id and poll_url
             
         Raises:
             HTTPException 404: If teacher not found
@@ -1776,33 +1778,158 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 description=f"Teacher training: {teacher.teacher_model.specialization}"
             )
         
-        # Build training config
-        training_config = {
-            "epochs": request.epochs,
-            "learning_rate": request.learning_rate,
-            "training_data_cid": request.training_data_cid,
-        }
+        # Generate a unique run ID for this training run
+        run_id = str(_uuid.uuid4())
+
+        # Read total_epochs from the teacher's config before launching
+        total_epochs = None
+        if hasattr(teacher, "training_config"):
+            total_epochs = getattr(
+                getattr(teacher.training_config, "hyperparameters", None),
+                "epochs", None
+            )
+
+        # Register the job in PENDING state before the task starts
+        job = TrainingJob(
+            run_id=run_id,
+            teacher_id=teacher_id,
+            status=TrainingJobStatus.PENDING,
+            started_at=time.time(),
+            total_epochs=total_epochs,
+        )
+        node.training_jobs[run_id] = job
+
+        # The training coroutine — updates job state as it progresses
+        # Note: Use globals()['asyncio'] for Python 3.14 closure compatibility
+        _asyncio_mod = globals()['asyncio']
         
-        # Start async training (fire-and-forget)
         async def run_training():
+            job.status = TrainingJobStatus.RUNNING
             try:
-                if hasattr(teacher, 'train'):
-                    await teacher.train()
+                if hasattr(teacher, "train"):
+                    result = await teacher.train()
                 else:
-                    # Simulate training for basic DistilledTeacher
-                    await asyncio.sleep(1)  # Placeholder
-                logger.info(f"Training completed for teacher: {teacher_id}")
+                    await _asyncio_mod.sleep(1)  # Basic DistilledTeacher has no real train()
+                    result = None
+                job.status = TrainingJobStatus.COMPLETED
+                job.result = result
+                job.completed_at = time.time()
+                logger.info("Training completed", teacher_id=teacher_id, run_id=run_id)
+            except _asyncio_mod.CancelledError:
+                job.status = TrainingJobStatus.CANCELLED
+                job.completed_at = time.time()
+                logger.info("Training cancelled", teacher_id=teacher_id, run_id=run_id)
             except Exception as e:
-                logger.error(f"Training failed for teacher {teacher_id}: {e}")
-        
-        asyncio.create_task(run_training())
-        
+                job.status = TrainingJobStatus.FAILED
+                job.error = str(e)
+                job.completed_at = time.time()
+                logger.error("Training failed", teacher_id=teacher_id, run_id=run_id, error=str(e))
+            finally:
+                node._save_training_runs()
+
+        task = _asyncio_mod.create_task(run_training())
+        job._task = task  # Keep reference for cancellation
+
         return {
-            "teacher_id": teacher_id,
-            "status": "training_started",
-            "training_config": training_config,
-            "cost_ftns": TEACHER_TRAINING_BASE_COST_FTNS,
+            "run_id":         run_id,
+            "teacher_id":     teacher_id,
+            "status":         "pending",
+            "total_epochs":   total_epochs,
+            "cost_ftns":      TEACHER_TRAINING_BASE_COST_FTNS,
+            "poll_url":       f"/teacher/{teacher_id}/training/{run_id}",
         }
+
+    @app.get("/teacher/{teacher_id}/training/{run_id}", tags=["teacher"])
+    async def get_training_status(teacher_id: str, run_id: str) -> Dict[str, Any]:
+        """
+        Poll the status of a specific training run.
+
+        Returns live progress (current_epoch, current_step, elapsed_seconds)
+        when status is 'running', and the full TrainingResult when 'completed'.
+        """
+        if run_id not in node.training_jobs:
+            raise HTTPException(404, f"Training run {run_id} not found")
+
+        job = node.training_jobs[run_id]
+
+        if job.teacher_id != teacher_id:
+            raise HTTPException(404, f"Training run {run_id} does not belong to teacher {teacher_id}")
+
+        response = job.to_dict()
+
+        # Augment with live progress when running
+        if job.status == TrainingJobStatus.RUNNING:
+            teacher = node.teacher_registry.get(teacher_id)
+            if teacher and hasattr(teacher, "trainer") and teacher.trainer is not None:
+                trainer = teacher.trainer
+                current_epoch  = getattr(trainer, "current_epoch",  0)
+                total_epochs   = job.total_epochs or getattr(
+                    getattr(trainer, "config", None), "hyperparameters", None
+                ) and trainer.config.hyperparameters.epochs or 1
+                elapsed = (
+                    time.time() - trainer.training_start_time
+                    if trainer.training_start_time else 0.0
+                )
+                response["progress"] = {
+                    "current_epoch":  current_epoch,
+                    "total_epochs":   total_epochs,
+                    "current_step":   getattr(trainer, "current_step", 0),
+                    "global_step":    getattr(trainer, "global_step",  0),
+                    "progress_pct":   round(current_epoch / max(total_epochs, 1) * 100, 1),
+                    "elapsed_seconds": round(elapsed, 1),
+                }
+
+        return response
+
+
+    @app.get("/teacher/{teacher_id}/training", tags=["teacher"])
+    async def list_training_runs(teacher_id: str) -> Dict[str, Any]:
+        """
+        List all training runs for a teacher model (running, completed, and failed).
+        """
+        runs = [
+            job.to_dict()
+            for job in node.training_jobs.values()
+            if job.teacher_id == teacher_id
+        ]
+        # Most-recent first
+        runs.sort(key=lambda r: r["started_at"], reverse=True)
+        return {"runs": runs, "count": len(runs)}
+
+
+    @app.delete("/teacher/{teacher_id}/training/{run_id}", tags=["teacher"])
+    async def cancel_training_run(teacher_id: str, run_id: str) -> Dict[str, Any]:
+        """
+        Cancel a pending or running training job.
+ 
+        Calls task.cancel() on the underlying asyncio.Task.
+        The task will transition to CANCELLED status asynchronously.
+        """
+        if run_id not in node.training_jobs:
+            raise HTTPException(404, f"Training run {run_id} not found")
+
+        job = node.training_jobs[run_id]
+
+        if job.teacher_id != teacher_id:
+            raise HTTPException(404, f"Training run {run_id} does not belong to teacher {teacher_id}")
+
+        if job.status not in (TrainingJobStatus.PENDING, TrainingJobStatus.RUNNING):
+            raise HTTPException(
+                409,
+                f"Cannot cancel a run in '{job.status.value}' state"
+            )
+
+        if job._task and not job._task.done():
+            job._task.cancel()
+            # Status transitions to CANCELLED inside run_training()'s CancelledError handler
+            return {"cancelled": True, "run_id": run_id,
+                    "note": "Cancellation requested. Poll status to confirm."}
+
+        # Task already done but status wasn't updated — edge case
+        job.status = TrainingJobStatus.CANCELLED
+        job.completed_at = time.time()
+        node._save_training_runs()
+        return {"cancelled": True, "run_id": run_id}
 
     @app.get("/teacher/backends/available", tags=["teacher"])
     async def get_available_backends() -> Dict[str, Any]:

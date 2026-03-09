@@ -4135,7 +4135,8 @@ REMAINING (MEDIUM-TERM, OPERATIONAL):
   📦 FTNS testnet: deploy contracts to Sepolia/Polygon Mumbai (config ready)
   📦 LLM API keys: configure Anthropic/OpenAI keys on production nodes
   📦 Community & adoption: researcher outreach, blog posts, conference demos
-  📦 Training job status tracking (async task status endpoint)
+  ✅ Training job status tracking (run_id, PENDING→RUNNING→COMPLETED/FAILED/CANCELLED,
+     live progress polling, persistence, prsm teacher status/cancel-training CLI)
   📦 OS-level compute enforcement (cgroups/RLIMIT — Phase 6, deferred)
 ```
 
@@ -4182,4 +4183,5 @@ REMAINING (MEDIUM-TERM, OPERATIONAL):
 *Section 35 (Resource Contribution Controls) completed: 2026-03-08*
 *Section 26 maturity matrix corrected: 2026-03-08 (teacher, distillation, NWTN, web UI)*
 *Section 36 (Two-Stack Unification) completed: 2026-03-08 — 69 tests, prsm node start now serves everything*
+*Training job status tracking completed: 2026-03-09 — 24 tests, run_id lifecycle, live progress, CLI --follow*
 *PRSM Version: 0.2.1*
