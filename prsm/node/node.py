@@ -12,7 +12,9 @@ import hashlib
 import json
 import logging
 import time
-from dataclasses import dataclass
+import uuid as _uuid
+from dataclasses import dataclass, field
+from enum import Enum as _Enum
 from typing import Any, Dict, List, Optional
 from decimal import Decimal
 
@@ -48,6 +50,50 @@ from prsm.node.agent_collaboration import AgentCollaboration, BidStrategy
 from prsm.economy.tokenomics.staking_manager import StakingManager, StakingConfig, StakeType
 
 logger = logging.getLogger(__name__)
+
+
+# ── Training Job Status Tracking ────────────────────────────────────────
+
+class TrainingJobStatus(str, _Enum):
+    """Status of an async training job for a teacher model."""
+    PENDING   = "pending"    # task created, not yet running
+    RUNNING   = "running"    # teacher.train() is executing
+    COMPLETED = "completed"  # succeeded, result available
+    FAILED    = "failed"     # raised an exception
+    CANCELLED = "cancelled"  # cancelled via DELETE endpoint
+
+
+@dataclass
+class TrainingJob:
+    """Tracks a single async training run for a teacher model."""
+    run_id: str
+    teacher_id: str
+    status: TrainingJobStatus
+    started_at: float
+    completed_at: Optional[float] = None
+    total_epochs: Optional[int] = None   # from training config, known before start
+    result: Optional[Any] = None         # TrainingResult on completion
+    error: Optional[str] = None
+    _task: Optional[asyncio.Task] = field(default=None, repr=False, compare=False)  # asyncio.Task — not serialized
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializable snapshot — safe for JSON and API responses."""
+        d = {
+            "run_id":        self.run_id,
+            "teacher_id":    self.teacher_id,
+            "status":        self.status.value,
+            "started_at":    self.started_at,
+            "completed_at":  self.completed_at,
+            "total_epochs":  self.total_epochs,
+            "error":         self.error,
+        }
+        if self.result is not None:
+            # Handle result with to_dict() method or convert to dict directly
+            if hasattr(self.result, 'to_dict'):
+                d["result"] = self.result.to_dict()
+            else:
+                d["result"] = self.result
+        return d
 
 
 # ── Lightweight NWTN adapters ────────────────────────────────────────
@@ -241,6 +287,7 @@ class PRSMNode:
         self.agent_collaboration: Optional[AgentCollaboration] = None
         self.staking_manager: Optional[StakingManager] = None
         self.teacher_registry: Dict[str, Any] = {}  # teacher_id (str) → DistilledTeacher instance
+        self.training_jobs: Dict[str, TrainingJob] = {}  # run_id (str UUID) → TrainingJob
 
         self._started = False
         self._start_time: Optional[float] = None
@@ -485,6 +532,9 @@ class PRSMNode:
             except Exception as e:
                 logger.info(f"NWTN orchestrator not available: {e}")
 
+        # Load persisted training run records from disk
+        self._load_training_runs()
+
         logger.info("Node initialized — all subsystems ready")
 
     async def start(self) -> None:
@@ -663,6 +713,40 @@ class PRSMNode:
         if registry_path.exists():
             return json.loads(registry_path.read_text())
         return {}
+
+    def _save_training_runs(self) -> None:
+        """Persist completed/failed run metadata for display after restart."""
+        path = Path(self.config.data_dir) / "training_runs.json"
+        # Only persist terminal states — pending/running don't survive restart
+        terminal = {
+            run_id: job.to_dict()
+            for run_id, job in self.training_jobs.items()
+            if job.status in (TrainingJobStatus.COMPLETED,
+                              TrainingJobStatus.FAILED,
+                              TrainingJobStatus.CANCELLED)
+        }
+        path.write_text(json.dumps(terminal, indent=2))
+
+    def _load_training_runs(self) -> None:
+        """Restore terminal training run records from disk on startup."""
+        path = Path(self.config.data_dir) / "training_runs.json"
+        if not path.exists():
+            return
+        data = json.loads(path.read_text())
+        for run_id, d in data.items():
+            job = TrainingJob(
+                run_id=run_id,
+                teacher_id=d["teacher_id"],
+                status=TrainingJobStatus(d["status"]),
+                started_at=d["started_at"],
+                completed_at=d.get("completed_at"),
+                total_epochs=d.get("total_epochs"),
+                error=d.get("error"),
+            )
+            if "result" in d:
+                # Re-attach result dict as a plain dict (no need to reconstruct dataclass)
+                job.result = d["result"]
+            self.training_jobs[run_id] = job
 
     async def _run_api(self) -> None:
         """Run the management API server."""

@@ -1211,13 +1211,12 @@ def create(specialization: str, domain: Optional[str], use_real: bool, api_url: 
 @click.option('--epochs', type=int, help='Number of training epochs (1-100)')
 @click.option('--learning-rate', type=float, help='Learning rate for training')
 @click.option('--training-data-cid', help='IPFS CID of custom training data')
+@click.option('--follow', '-f', is_flag=True, help='Poll until training completes')
 @click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
 def train(teacher_id: str, epochs: Optional[int], learning_rate: Optional[float],
-          training_data_cid: Optional[str], api_url: str):
-    """Start training for a teacher model"""
+          training_data_cid: Optional[str], follow: bool, api_url: str):
+    """Start training for a teacher model. Use -f to follow progress until completion."""
     import httpx
-    
-    console.print(f"🎓 Starting training for teacher {teacher_id[:8]}...", style="bold green")
     
     payload = {}
     if epochs is not None:
@@ -1228,34 +1227,133 @@ def train(teacher_id: str, epochs: Optional[int], learning_rate: Optional[float]
         payload["training_data_cid"] = training_data_cid
     
     try:
-        with httpx.Client(timeout=30.0) as client:
-            response = client.post(f"{api_url}/teacher/{teacher_id}/train", json=payload)
-            
-            if response.status_code == 200:
-                data = response.json()
-                console.print("✅ Training started!", style="bold green")
-                console.print(f"   Status: {data.get('status', 'N/A')}", style="cyan")
-                console.print(f"   Cost: {data.get('cost_ftns', 'N/A')} FTNS", style="yellow")
-                if data.get('training_config'):
-                    config = data['training_config']
-                    if config.get('epochs'):
-                        console.print(f"   Epochs: {config['epochs']}", style="blue")
-                    if config.get('learning_rate'):
-                        console.print(f"   Learning Rate: {config['learning_rate']}", style="blue")
-            elif response.status_code == 404:
-                console.print(f"❌ Teacher not found: {teacher_id}", style="red")
-            elif response.status_code == 402:
-                console.print("❌ Insufficient FTNS balance for training", style="red")
-                console.print(response.json().get('detail', ''), style="dim")
-            else:
-                console.print(f"❌ Failed to start training: {response.status_code}", style="red")
-                console.print(response.text, style="dim")
-                
+        r = httpx.post(f"{api_url}/teacher/{teacher_id}/train", json=payload, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        run_id = data["run_id"]
+        poll_url = f"{api_url}{data['poll_url']}"
+
+        console.print(f"🎓  Training started", style="bold green")
+        console.print(f"    Run ID:        {run_id}")
+        console.print(f"    Total epochs:  {data.get('total_epochs', 'unknown')}")
+        console.print(f"    FTNS charged:  {data['cost_ftns']}")
+        console.print(f"    Poll:          prsm teacher status {teacher_id} {run_id}", style="dim")
+
+        if follow:
+            console.print()
+            _poll_training_status(poll_url, run_id)
+
     except httpx.ConnectError:
-        console.print("❌ Could not connect to PRSM API", style="red")
-        console.print(f"💡 Make sure the PRSM node is running at {api_url}", style="yellow")
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
+        console.print("❌  Node not running. Start with: prsm node start", style="red")
+    except httpx.HTTPStatusError as e:
+        console.print(f"❌  {e.response.json().get('detail', str(e))}", style="red")
+
+
+def _poll_training_status(poll_url: str, run_id: str) -> None:
+    """Block and poll training status until a terminal state is reached."""
+    import httpx
+    import time
+    from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.percentage:>3.0f}%"),
+        TimeElapsedColumn(),
+    ) as progress:
+        task = progress.add_task("Training…", total=100)
+        while True:
+            try:
+                r = httpx.get(poll_url, timeout=10)
+                data = r.json()
+                status = data["status"]
+
+                if "progress" in data:
+                    pct = data["progress"]["progress_pct"]
+                    epoch = data["progress"]["current_epoch"]
+                    total = data["progress"]["total_epochs"]
+                    progress.update(task,
+                        completed=pct,
+                        description=f"Epoch {epoch}/{total}")
+
+                if status == "completed":
+                    progress.update(task, completed=100)
+                    console.print("✅  Training complete!", style="bold green")
+                    if "result" in data:
+                        r = data["result"]
+                        console.print(f"    Epochs:     {r.get('total_epochs')}")
+                        loss_val = r.get('final_train_loss', 'N/A')
+                        if isinstance(loss_val, (int, float)):
+                            console.print(f"    Final loss: {loss_val:.4f}")
+                        else:
+                            console.print(f"    Final loss: {loss_val}")
+                        if r.get("best_checkpoint_path"):
+                            console.print(f"    Checkpoint: {r['best_checkpoint_path']}", style="dim")
+                    return
+
+                if status == "failed":
+                    console.print(f"❌  Training failed: {data.get('error', 'unknown')}", style="red")
+                    return
+
+                if status == "cancelled":
+                    console.print("⚠️   Training was cancelled.", style="yellow")
+                    return
+
+            except Exception as e:
+                console.print(f"⚠️   Poll error: {e}", style="yellow")
+
+            time.sleep(3)
+
+
+@teacher.command()
+@click.argument("teacher_id")
+@click.argument("run_id")
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def status(teacher_id: str, run_id: str, api_url: str):
+    """Check the status of a training run."""
+    import httpx
+    try:
+        r = httpx.get(f"{api_url}/teacher/{teacher_id}/training/{run_id}", timeout=10)
+        r.raise_for_status()
+        data = r.json()
+
+        status_color = {
+            "pending":   "yellow", "running": "cyan",
+            "completed": "green",  "failed":  "red",
+            "cancelled": "dim",
+        }.get(data["status"], "white")
+
+        console.print(f"  Status:  [{status_color}]{data['status']}[/{status_color}]")
+        if "progress" in data:
+            p = data["progress"]
+            console.print(f"  Epoch:   {p['current_epoch']}/{p['total_epochs']} "
+                          f"({p['progress_pct']}%)")
+            console.print(f"  Elapsed: {p['elapsed_seconds']}s")
+        if data.get("error"):
+            console.print(f"  Error:   {data['error']}", style="red")
+        if data.get("result"):
+            r = data["result"]
+            console.print(f"  Loss:    {r.get('final_train_loss', 'N/A')}")
+            console.print(f"  Checkpoint: {r.get('best_checkpoint_path', 'none')}", style="dim")
+    except httpx.ConnectError:
+        console.print("❌  Node not running.", style="red")
+
+
+@teacher.command("cancel-training")
+@click.argument("teacher_id")
+@click.argument("run_id")
+@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+def cancel_training(teacher_id: str, run_id: str, api_url: str):
+    """Cancel a pending or running training job."""
+    import httpx
+    try:
+        r = httpx.delete(f"{api_url}/teacher/{teacher_id}/training/{run_id}", timeout=10)
+        r.raise_for_status()
+        console.print(f"✅  Cancellation requested for run {run_id}", style="yellow")
+        console.print("    Poll with: prsm teacher status <teacher_id> <run_id>", style="dim")
+    except httpx.HTTPStatusError as e:
+        console.print(f"❌  {e.response.json().get('detail', str(e))}", style="red")
 
 
 # ============================================================================
