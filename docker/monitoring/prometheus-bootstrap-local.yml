@@ -1,0 +1,38 @@
+# Prometheus Configuration — PRSM Bootstrap Server (local/single-node)
+# Scrapes only the services that run in docker-compose.bootstrap-local.yml
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'prsm-bootstrap'
+    region: 'us-east-1'
+
+rule_files:
+  - /etc/prometheus/alert_rules.yml
+
+scrape_configs:
+  - job_name: 'prsm-bootstrap'
+    scrape_interval: 10s
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - 'bootstrap:8000'
+        labels:
+          service: 'bootstrap'
+          component: 'p2p'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '([^:]+):\d+'
+        replacement: '${1}'
+
+  - job_name: 'prometheus'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'node-exporter'
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['node-exporter:9100']

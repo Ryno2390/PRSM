@@ -1,4 +1,4 @@
-# PRSM Bootstrap Server — Production with SSL
+# PRSM Bootstrap Server — Production with SSL + Monitoring
 #
 # Usage:
 #   cd docker
@@ -11,6 +11,18 @@
 #   cp /etc/letsencrypt/live/bootstrap1.prsm-network.com/fullchain.pem /root/ssl/
 #   cp /etc/letsencrypt/live/bootstrap1.prsm-network.com/privkey.pem /root/ssl/
 #   chmod 644 /root/ssl/*.pem
+#
+# Grafana access: http://YOUR_SERVER_IP:3000
+#   Default credentials: admin / set via GRAFANA_ADMIN_PASSWORD env var
+#   Recommend: export GRAFANA_ADMIN_PASSWORD=<strong-password> before starting
+
+networks:
+  prsm-monitor:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:
 
 services:
   bootstrap:
@@ -31,5 +43,64 @@ services:
       PRSM_SSL_CERT_PATH: "/ssl/fullchain.pem"
       PRSM_SSL_KEY_PATH: "/ssl/privkey.pem"
       PRSM_MAX_PEERS: "500"
+      PRSM_METRICS_ENABLED: "true"
     volumes:
       - /root/ssl:/ssl:ro
+    networks:
+      - prsm-monitor
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: prsm-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus-bootstrap-local.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks:
+      - prsm-monitor
+    depends_on:
+      - bootstrap
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: prsm-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-changeme}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: "http://bootstrap1.prsm-network.com:3000/"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - prsm-monitor
+    depends_on:
+      - prometheus
+
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: prsm-node-exporter
+    restart: unless-stopped
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    ports:
+      - "127.0.0.1:9100:9100"
+    networks:
+      - prsm-monitor
