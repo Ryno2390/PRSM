@@ -4185,3 +4185,159 @@ REMAINING (MEDIUM-TERM, OPERATIONAL):
 *Section 36 (Two-Stack Unification) completed: 2026-03-08 — 69 tests, prsm node start now serves everything*
 *Training job status tracking completed: 2026-03-09 — 24 tests, run_id lifecycle, live progress, CLI --follow*
 *PRSM Version: 0.2.1*
+
+---
+
+## 37. Operational Work Session Completion (2026-03-13)
+
+### Summary
+
+A focused operational session was conducted to complete the five outstanding items from Section 32's Medium-Term roadmap. Four of five items were completed; multi-region bootstrap was deferred on cost grounds.
+
+---
+
+### Item 1: Multi-Region Bootstrap — DEFERRED
+
+Provisioning two additional VPS servers (EU + Asia-Pacific) was scoped and ready to execute but deferred to control ongoing hosting costs. When ready:
+
+- Target regions: `fra1` or `ams3` (EU), `sgp1` or `syd1` (Asia-Pacific)
+- Same Docker setup as existing bootstrap1 server
+- Update Cloudflare DNS: `fallback1` → EU IP, `fallback2` → AP IP
+- Recommended spec: `s-1vcpu-2gb` (~$12/month each)
+- DigitalOcean API token required for automated provisioning via `doctl`
+
+---
+
+### Item 2: Grafana Live ✅ COMPLETED (2026-03-13)
+
+**Goal:** Connect live Grafana dashboards to bootstrap server Prometheus metrics.
+
+**What was done:**
+
+1. Extended `docker/docker-compose.bootstrap-local.yml` to add `prometheus`, `grafana`, and `node-exporter` services alongside the existing `bootstrap` service
+2. Created `docker/monitoring/prometheus-bootstrap-local.yml` — simplified scrape config for single-node setup (no postgres/redis/nginx exporters)
+3. Added a `/prometheus` endpoint to `prsm/bootstrap/server.py` that returns proper Prometheus text format (the existing `/metrics` endpoint returned JSON, which Prometheus cannot scrape)
+4. Updated Prometheus scrape path from `/metrics` to `/prometheus`
+5. Fixed Grafana dashboard JSON — was wrapped in `{"dashboard": {...}}` API envelope which Grafana file provisioning cannot load; unwrapped to bare dashboard object
+6. Opened UFW port 3000 for Grafana access
+7. Deployed to `bootstrap1.prsm-network.com` (159.203.129.218)
+
+**Access:**
+- Grafana: `http://159.203.129.218:3000` — credentials: `admin` / `PRSMgrafana2026`
+- Dashboard: PRSM Bootstrap Server — pre-loaded with panels for server status, uptime, active connections, messages processed, and node system metrics
+
+**Files modified:**
+- `docker/docker-compose.bootstrap-local.yml` — added monitoring stack
+- `docker/monitoring/prometheus-bootstrap-local.yml` — new file, single-node Prometheus config
+- `docker/monitoring/grafana/dashboards/bootstrap-dashboard.json` — unwrapped from API envelope
+- `prsm/bootstrap/server.py` — added `/prometheus` endpoint with Prometheus text format output
+
+**Infrastructure note:**
+During this session, the bootstrap server became unreachable due to UFW blocking port 22 on restart. The recovery process required:
+1. DigitalOcean Recovery ISO boot
+2. Mounting `vda1` disk and editing `/etc/ufw/ufw.conf` to `ENABLED=no`
+3. Rebooting to the real OS via `Boot from Hard Drive`
+4. Resolving PAM-enforced root password expiry using emailed temporary password via `expect`
+5. SSH config entry added to `~/.ssh/config` as `prsm-bootstrap` alias
+
+SSH config (`~/.ssh/config`):
+```
+Host prsm-bootstrap
+  HostName 159.203.129.218
+  User root
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
+  AddKeysToAgent yes
+```
+
+---
+
+### Item 3: FTNS Testnet Deployment ✅ COMPLETED (2026-03-13)
+
+**Goal:** Deploy FTNS ERC-20 token contract to Ethereum Sepolia testnet.
+
+**What was done:**
+
+1. Created Alchemy account; obtained Sepolia RPC URL
+2. Created MetaMask wallet; funded with 0.05 Sepolia ETH via Google/Coinbase faucet
+3. Deployed FTNS token contract using standalone `web3.py` + `py-solc-x` script (PRSM's built-in deployer could not be used due to heavy import chain requiring the full ML dependency stack)
+4. Contract compiled from self-contained Solidity source (ERC-20 with mint, no OpenZeppelin imports required)
+5. Deployment record saved to `/root/ftns_deployment.json` on server
+
+**Deployment details:**
+
+| Field | Value |
+|---|---|
+| Network | Ethereum Sepolia (chain ID 11155111) |
+| Contract address | `0xd979c096BE297F4C3a85175774Bc38C22b95E6a4` |
+| Transaction hash | `d489443716eddd7629def77b397e6e924d05dabc4ccf14920090baff08eaf79d` |
+| Deployer address | `0x8eaA00FF741323bc8B0ab1290c544738D9b2f012` |
+| Gas used | 1,101,764 |
+| Block | 10439997 |
+| Token name | FTNS Token |
+| Symbol | FTNS |
+| Initial supply | 1,000,000,000 FTNS |
+| Etherscan | https://sepolia.etherscan.io/address/0xd979c096BE297F4C3a85175774Bc38C22b95E6a4 |
+
+**Credentials stored in `/root/PRSM/docker/.env` on server (not committed to git):**
+- `FTNS_CONTRACT_ADDRESS`
+- `SEPOLIA_RPC_URL`
+- `FTNS_NETWORK`
+
+---
+
+### Item 4: LLM API Keys on Production Node ✅ COMPLETED (2026-03-13)
+
+**Goal:** Configure Anthropic and OpenAI API keys on the bootstrap server so the NWTN pipeline returns real AI-generated responses.
+
+**What was done:**
+
+1. Added `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` environment variable references to `docker/docker-compose.bootstrap-local.yml`
+2. Created `/root/PRSM/docker/.env` on the server with actual key values (chmod 600, not committed to git)
+3. Added `docker/.env` to `.gitignore`
+4. Rebuilt and restarted `prsm-bootstrap` container with keys injected
+
+**Result:** NWTN pipeline now returns real AI-generated responses. Inference source will be `"anthropic"` or `"openai"` rather than `"mock"`.
+
+**Files modified:**
+- `docker/docker-compose.bootstrap-local.yml` — added `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` env var references
+- `.gitignore` — added `docker/.env`
+
+---
+
+### Item 5: Community & Adoption ✅ COMPLETED (2026-03-13)
+
+**Goal:** Draft launch content for developer communities.
+
+**What was done:**
+
+Four launch pieces drafted and saved to `docs/community/`:
+
+| File | Platform | Focus |
+|---|---|---|
+| `hacker_news_launch.md` | Hacker News Show HN | Technical overview, install command, honest alpha state |
+| `blog_post_launch.md` | prsm-network.com / Medium | Problem framing, architecture, what works, roadmap |
+| `reddit_machinelearning.md` | r/MachineLearning | NWTN pipeline, neuro-symbolic approach, provenance, distillation roadmap |
+| `reddit_ethereum.md` | r/ethereum | FTNS token economics, Sepolia deployment, royalty distribution, honest caveats |
+
+All posts are technically honest about alpha state and avoid marketing language. Ready to post.
+
+---
+
+### Updated Status Summary (2026-03-13)
+
+```
+OPERATIONAL INFRASTRUCTURE:
+  ✅ PyPI: pip install prsm-network (v0.2.1)
+  ✅ Bootstrap server: wss://bootstrap1.prsm-network.com:8765 (DigitalOcean NYC3)
+  ✅ SSL: Let's Encrypt certs, auto-renewal via certbot
+  ✅ DNS: bootstrap1, fallback1, fallback2 on Cloudflare (all → 159.203.129.218)
+  ✅ Monitoring: Grafana live at http://159.203.129.218:3000
+  ✅ LLM inference: Anthropic + OpenAI keys active on production node
+  ✅ FTNS testnet: ERC-20 deployed on Sepolia at 0xd979c096BE297F4C3a85175774Bc38C22b95E6a4
+  ✅ Community content: 4 launch posts drafted, saved to docs/community/
+
+DEFERRED:
+  📦 Multi-region bootstrap (fallback1 EU + fallback2 AP) — deferred on cost
+  📦 SSL cert renewal automation for Docker (manual copy still required on renewal)
+```
