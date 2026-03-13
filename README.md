@@ -5,6 +5,9 @@ PRSM is a peer-to-peer collaboration framework for neuro-symbolic AI research. I
 **Current version: 0.2.1 (Alpha)** | [www.prsm-network.com](https://www.prsm-network.com)
 
 [![PyPI version](https://badge.fury.io/py/prsm-network.svg)](https://badge.fury.io/py/prsm-network)
+[![CI](https://github.com/Ryno2390/PRSM/actions/workflows/ci.yml/badge.svg)](https://github.com/Ryno2390/PRSM/actions/workflows/ci.yml)
+[![Security Audit](https://github.com/Ryno2390/PRSM/actions/workflows/security-audit.yml/badge.svg)](https://github.com/Ryno2390/PRSM/actions/workflows/security-audit.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > **What's live today:** Bootstrap server running at `wss://bootstrap1.prsm-network.com:8765` · Real AI inference via Anthropic + OpenAI · FTNS token on Ethereum Sepolia ([`0xd979c096BE297F4C3a85175774Bc38C22b95E6a4`](https://sepolia.etherscan.io/address/0xd979c096BE297F4C3a85175774Bc38C22b95E6a4)) · 1,391+ tests passing
 

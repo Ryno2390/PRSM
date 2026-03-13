@@ -2,6 +2,28 @@
 
 This guide covers deploying the FTNS (Fungible Tokens for Node Support) token to testnet networks for on-chain economics demonstration.
 
+## ✅ Live Deployment (Ethereum Sepolia)
+
+The FTNS token is **already deployed** on Ethereum Sepolia testnet:
+
+| Field | Value |
+|---|---|
+| **Contract Address** | [`0xd979c096BE297F4C3a85175774Bc38C22b95E6a4`](https://sepolia.etherscan.io/address/0xd979c096BE297F4C3a85175774Bc38C22b95E6a4) |
+| **Network** | Ethereum Sepolia (chain ID 11155111) |
+| **Token Name** | FTNS Token |
+| **Symbol** | FTNS |
+| **Decimals** | 18 |
+| **Initial Supply** | 1,000,000,000 FTNS |
+| **Deployer** | `0x8eaA00FF741323bc8B0ab1290c544738D9b2f012` |
+| **Deployed** | 2026-03-13 |
+| **RPC** | Alchemy Ethereum Sepolia |
+
+You can interact with the live contract on [Etherscan](https://sepolia.etherscan.io/address/0xd979c096BE297F4C3a85175774Bc38C22b95E6a4).
+
+---
+
+The rest of this guide covers how to deploy a fresh instance (e.g. for local testing or a new network).
+
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
