@@ -44,6 +44,8 @@ services:
       PRSM_SSL_KEY_PATH: "/ssl/privkey.pem"
       PRSM_MAX_PEERS: "500"
       PRSM_METRICS_ENABLED: "true"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - /root/ssl:/ssl:ro
     networks:

@@ -258,3 +258,4 @@ prsm_network-*/
 
 # Netlify build artifacts
 .netlify/
+docker/.env
