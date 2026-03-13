@@ -789,7 +789,30 @@ class BootstrapServer:
         @app.get("/metrics")
         async def metrics():
             return self.metrics.to_dict()
-        
+
+        @app.get("/prometheus")
+        async def prometheus_metrics():
+            from fastapi.responses import PlainTextResponse
+            m = self.metrics.to_dict()
+            lines = []
+            metric_map = {
+                "active_connections": ("gauge", "Number of active peer connections"),
+                "total_connections": ("counter", "Total peer connections since start"),
+                "failed_connections": ("counter", "Total failed connection attempts"),
+                "messages_processed": ("counter", "Total messages processed"),
+                "total_peers_served": ("counter", "Total unique peers served"),
+                "uptime_seconds": ("gauge", "Server uptime in seconds"),
+                "health_check_failures": ("counter", "Total health check failures"),
+                "errors_count": ("counter", "Total errors"),
+            }
+            for key, (mtype, help_text) in metric_map.items():
+                if key in m:
+                    lines.append(f"# HELP prsm_bootstrap_{key} {help_text}")
+                    lines.append(f"# TYPE prsm_bootstrap_{key} {mtype}")
+                    lines.append(f"prsm_bootstrap_{key} {m[key]}")
+            nl = chr(10)
+            return PlainTextResponse(nl.join(lines) + nl, media_type="text/plain; version=0.0.4")
+
         @app.get("/peers")
         async def peers():
             return {"peers": await self.get_peer_list()}
