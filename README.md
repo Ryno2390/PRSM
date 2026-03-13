@@ -6,6 +6,8 @@ PRSM is a peer-to-peer collaboration framework for neuro-symbolic AI research. I
 
 [![PyPI version](https://badge.fury.io/py/prsm-network.svg)](https://badge.fury.io/py/prsm-network)
 
+> **What's live today:** Bootstrap server running at `wss://bootstrap1.prsm-network.com:8765` · Real AI inference via Anthropic + OpenAI · FTNS token on Ethereum Sepolia ([`0xd979c096BE297F4C3a85175774Bc38C22b95E6a4`](https://sepolia.etherscan.io/address/0xd979c096BE297F4C3a85175774Bc38C22b95E6a4)) · 1,391+ tests passing
+
 ---
 
 ## Quick Start
@@ -196,7 +198,7 @@ prsm node start   # storage features auto-detected
 
 ### Network and bootstrap
 
-PRSM nodes discover each other through bootstrap peers. The default configuration points to `wss://bootstrap.prsm-network.com`. If the bootstrap server is unavailable, the node starts in **local mode** — fully functional for local compute, but peer discovery is deferred until inbound connections arrive or bootstrap recovers. See `docs/SECURE_SETUP.md` for bootstrap configuration details.
+PRSM nodes discover each other through bootstrap peers. The default configuration points to `wss://bootstrap1.prsm-network.com:8765` (DigitalOcean NYC3). If the bootstrap server is unavailable, the node starts in **local mode** — fully functional for local compute, but peer discovery is deferred until inbound connections arrive or bootstrap recovers. See `docs/SECURE_SETUP.md` for bootstrap configuration details.
 
 ---
 
@@ -234,15 +236,19 @@ WebSocket-based peer-to-peer connectivity with gossip protocol, peer discovery, 
 | CLI (`prsm` command) | **Working** | `serve`, `node start`, `node info`, `node peers` |
 | Local compute (single-node) | **Working** | Benchmark, inference, embedding jobs |
 | FastAPI server (`prsm serve`) | **Working** | Platform API for app development |
-| NWTN 5-agent pipeline | **Working** | Orchestration with mocked LLM backends |
+| NWTN 5-agent pipeline | **Working** | Real AI inference via Anthropic + OpenAI backends |
 | FTNS accounting ledger | **Working** | SQLite-backed, zero config, DAG-based |
 | P2P networking | **Working** | WebSocket transport with gossip protocol |
 | Node identity | **Working** | Ed25519 keypair, persisted to `~/.prsm/` |
 | Compute marketplace | **Working** | Job offers, acceptance, execution, payment |
 | IPFS storage integration | **Working** | Requires local IPFS daemon (Kubo) |
-| Test suite | **Working** | 920+ tests passing |
-| Bootstrap network | **Alpha** | `wss://bootstrap.prsm-network.com` |
-| Production deployment (K8s) | **Planned** | Configs exist, not production-tested |
+| Semantic provenance | **Working** | Content attribution + royalty distribution |
+| FTNS token (Sepolia testnet) | **Live** | [`0xd979c096...`](https://sepolia.etherscan.io/address/0xd979c096BE297F4C3a85175774Bc38C22b95E6a4) |
+| Bootstrap network | **Live** | `wss://bootstrap1.prsm-network.com:8765` |
+| Monitoring (Grafana) | **Live** | Prometheus + Grafana on bootstrap server |
+| Test suite | **Working** | 1,391+ tests passing |
+| Mainnet token deployment | **Planned** | Sepolia testnet first |
+| Multi-region bootstrap | **Planned** | EU + Asia-Pacific fallback nodes |
 
 ---
 
@@ -311,7 +317,7 @@ prsm/
   economics/                # Economic modeling
   storage/                  # Decentralized storage
   safety/                   # Safety and governance
-tests/                      # Test suite (920+ tests)
+tests/                      # Test suite (1,391+ tests)
 docs/                       # Documentation
 config/                     # Configuration templates
 scripts/                    # Utility scripts
@@ -325,6 +331,16 @@ scripts/                    # Utility scripts
 4. Submit a pull request
 
 See `docs/CONTRIBUTOR_ONBOARDING.md` for detailed contributor guides at all experience levels.
+
+---
+
+## Community
+
+- **GitHub Issues** — bug reports and feature requests
+- **GitHub Discussions** — questions, ideas, and general conversation
+- **[Hacker News](https://news.ycombinator.com)** — search "PRSM Protocol" for launch threads
+- **[r/MachineLearning](https://reddit.com/r/MachineLearning)** — ML architecture discussions
+- **[r/ethereum](https://reddit.com/r/ethereum)** — FTNS token and on-chain mechanics
 
 ---
 
