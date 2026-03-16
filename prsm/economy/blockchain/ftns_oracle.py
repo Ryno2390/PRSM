@@ -36,10 +36,20 @@ import structlog
 from enum import Enum
 
 import aiohttp
-from web3 import Web3, HTTPProvider
-from web3.middleware import ExtraDataToPOAMiddleware
-from eth_account import Account
-from hexbytes import HexBytes
+
+try:
+    from web3 import Web3, HTTPProvider
+    from web3.middleware import ExtraDataToPOAMiddleware
+    from eth_account import Account
+    from hexbytes import HexBytes
+    HAS_WEB3 = True
+except ImportError:
+    HAS_WEB3 = False
+    Web3 = None
+    HTTPProvider = None
+    ExtraDataToPOAMiddleware = None
+    Account = None
+    HexBytes = None
 
 from prsm.core.config import get_settings
 from prsm.economy.tokenomics.production_ledger import get_production_ledger, TransactionRequest
@@ -340,13 +350,49 @@ class FTNSOracle:
                     logger.warning(f"Price source failed: {e}")
             
             if not prices:
-                # Fallback to last known price
+                # All external sources failed — use internal oracle rate
+                import os
+                internal_rate = os.getenv("FTNS_USD_RATE", "")
+                if internal_rate:
+                    logger.warning("All external price sources unavailable — using FTNS_USD_RATE internal oracle")
+                    internal_price = Decimal(internal_rate)
+                    fallback = OraclePrice(
+                        token_symbol="FTNS",
+                        price_usd=internal_price,
+                        price_eth=Decimal('0'),
+                        price_btc=Decimal('0'),
+                        volume_24h=Decimal('0'),
+                        market_cap=Decimal('0'),
+                        timestamp=datetime.now(timezone.utc),
+                        source="internal_oracle",
+                        confidence=0.5  # Lower confidence for internal rate
+                    )
+                    self.price_cache[cache_key] = fallback
+                    return fallback
+
+                # Use last cached price if available (stale but better than nothing)
                 if cache_key in self.price_cache:
+                    logger.warning("Using stale cached FTNS price — no live sources available")
                     return self.price_cache[cache_key]
-                raise RuntimeError("No price sources available")
+
+                raise RuntimeError("No FTNS price sources available and FTNS_USD_RATE not configured")
             
             # Calculate weighted average
             oracle_price = self._calculate_weighted_price(prices)
+
+            # Guard: if weighted price is effectively zero, all sources returned bad data
+            if oracle_price.price_usd <= Decimal('0'):
+                import os
+                internal_rate = os.getenv("FTNS_USD_RATE", "")
+                if internal_rate:
+                    logger.warning("Weighted FTNS price is zero — falling back to internal oracle")
+                    oracle_price = OraclePrice(
+                        token_symbol="FTNS", price_usd=Decimal(internal_rate),
+                        price_eth=Decimal('0'), price_btc=Decimal('0'),
+                        volume_24h=Decimal('0'), market_cap=Decimal('0'),
+                        timestamp=datetime.now(timezone.utc),
+                        source="internal_oracle", confidence=0.5
+                    )
             
             # Cache result
             self.price_cache[cache_key] = oracle_price
@@ -730,18 +776,34 @@ class FTNSOracle:
         }
     
     async def _fetch_coingecko_price(self) -> Optional[OraclePrice]:
-        """Fetch price from CoinGecko API"""
+        """Fetch FTNS price from CoinGecko API"""
         try:
+            import os
+            api_key = os.getenv("COINGECKO_API_KEY", "")
+            headers = {"x-cg-demo-api-key": api_key} if api_key else {}
+
             async with aiohttp.ClientSession() as session:
-                url = "https://api.coingecko.com/api/v3/simple/price?ids=ftns&vs_currencies=usd,eth,btc&include_market_cap=true&include_24hr_vol=true"
-                async with session.get(url) as response:
+                # Use configured CoinGecko ID; FTNS may not be listed yet
+                coingecko_id = os.getenv("FTNS_COINGECKO_ID", "ftns-token")
+                url = (f"https://api.coingecko.com/api/v3/simple/price"
+                       f"?ids={coingecko_id}&vs_currencies=usd,eth,btc"
+                       f"&include_market_cap=true&include_24hr_vol=true")
+                async with session.get(url, headers=headers) as response:
                     if response.status == 200:
                         data = await response.json()
-                        ftns_data = data.get('ftns', {})
-                        
+                        ftns_data = data.get(coingecko_id, {})
+
+                        price_usd = Decimal(str(ftns_data.get('usd', 0)))
+
+                        # If CoinGecko doesn't have FTNS listed yet, return None
+                        # rather than propagating zero prices
+                        if price_usd == Decimal('0'):
+                            logger.debug("FTNS not yet listed on CoinGecko — skipping source")
+                            return None
+
                         return OraclePrice(
                             token_symbol="FTNS",
-                            price_usd=Decimal(str(ftns_data.get('usd', 0))),
+                            price_usd=price_usd,
                             price_eth=Decimal(str(ftns_data.get('eth', 0))),
                             price_btc=Decimal(str(ftns_data.get('btc', 0))),
                             volume_24h=Decimal(str(ftns_data.get('usd_24h_vol', 0))),
@@ -751,38 +813,135 @@ class FTNSOracle:
                             confidence=0.9
                         )
         except Exception as e:
-            logger.warning(f"CoinGecko price fetch failed: {e}")
-            return None
-    
+            logger.warning(f"CoinGecko FTNS price fetch failed: {e}")
+        return None
+
     async def _fetch_coinmarketcap_price(self) -> Optional[OraclePrice]:
-        """Fetch price from CoinMarketCap API"""
-        # Mock implementation - would use real CMC API
-        return OraclePrice(
-            token_symbol="FTNS",
-            price_usd=Decimal('1.25'),
-            price_eth=Decimal('0.0005'),
-            price_btc=Decimal('0.000025'),
-            volume_24h=Decimal('50000'),
-            market_cap=Decimal('125000000'),
-            timestamp=datetime.now(timezone.utc),
-            source="coinmarketcap",
-            confidence=0.85
-        )
-    
+        """Fetch FTNS price from CoinMarketCap API"""
+        import os
+        api_key = os.getenv("CMC_API_KEY", "")
+        if not api_key:
+            logger.debug("CMC_API_KEY not set — skipping CoinMarketCap source")
+            return None
+
+        cmc_slug = os.getenv("FTNS_CMC_SLUG", "ftns-token")  # CMC slug for FTNS
+
+        try:
+            headers = {
+                "X-CMC_PRO_API_KEY": api_key,
+                "Accept": "application/json"
+            }
+            url = "https://pro-api.coinmarketcap.com/v2/cryptocurrency/quotes/latest"
+            params = {"slug": cmc_slug, "convert": "USD,ETH,BTC"}
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # CMC returns data keyed by numeric ID under data.{id}
+                        tokens = data.get("data", {})
+                        if not tokens:
+                            return None
+
+                        token_data = next(iter(tokens.values()))
+                        quote_usd = token_data["quote"].get("USD", {})
+                        quote_eth = token_data["quote"].get("ETH", {})
+                        quote_btc = token_data["quote"].get("BTC", {})
+
+                        price_usd = Decimal(str(quote_usd.get("price", 0)))
+                        if price_usd == Decimal('0'):
+                            return None
+
+                        return OraclePrice(
+                            token_symbol="FTNS",
+                            price_usd=price_usd,
+                            price_eth=Decimal(str(quote_eth.get("price", 0))),
+                            price_btc=Decimal(str(quote_btc.get("price", 0))),
+                            volume_24h=Decimal(str(quote_usd.get("volume_24h", 0))),
+                            market_cap=Decimal(str(quote_usd.get("market_cap", 0))),
+                            timestamp=datetime.now(timezone.utc),
+                            source="coinmarketcap",
+                            confidence=0.85
+                        )
+                    elif response.status == 401:
+                        logger.warning("CMC API key invalid or expired")
+                        return None
+
+        except Exception as e:
+            logger.warning(f"CoinMarketCap FTNS price fetch failed: {e}")
+        return None
+
     async def _fetch_dex_prices(self) -> Optional[OraclePrice]:
-        """Fetch prices from DEX aggregators"""
-        # Mock implementation - would use Uniswap, PancakeSwap APIs
-        return OraclePrice(
-            token_symbol="FTNS",
-            price_usd=Decimal('1.23'),
-            price_eth=Decimal('0.0005'),
-            price_btc=Decimal('0.000024'),
-            volume_24h=Decimal('75000'),
-            market_cap=Decimal('123000000'),
-            timestamp=datetime.now(timezone.utc),
-            source="dex_aggregator",
-            confidence=0.8
-        )
+        """Fetch FTNS price from 1inch DEX aggregator"""
+        import os
+        ftns_address = os.getenv("FTNS_TOKEN_ADDRESS", "")
+        oneinch_key = os.getenv("ONEINCH_API_KEY", "")
+
+        if not ftns_address or ftns_address == "0x0000000000000000000000000000000000000000":
+            logger.debug("FTNS_TOKEN_ADDRESS not set — skipping DEX source")
+            return None
+
+        try:
+            # USDC on Polygon as the reference asset (stable, accurate)
+            usdc_address = "0x2791bca1f2de4661ed88a30c99a7a9449aa84174"
+            chain_id = int(os.getenv("ONEINCH_CHAIN_ID", "137"))  # Polygon default
+            amount_wei = "1000000000000000000"  # 1 FTNS (18 decimals)
+
+            headers = {}
+            if oneinch_key:
+                headers["Authorization"] = f"Bearer {oneinch_key}"
+
+            url = f"https://api.1inch.dev/v5.0/{chain_id}/quote"
+            params = {
+                "fromTokenAddress": ftns_address,
+                "toTokenAddress": usdc_address,
+                "amount": amount_wei
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # toTokenAmount is USDC (6 decimals) per 1 FTNS
+                        to_amount = Decimal(data["toTokenAmount"]) / Decimal("1000000")
+
+                        if to_amount == Decimal('0'):
+                            return None
+
+                        # Get ETH price to calculate FTNS/ETH rate
+                        eth_price_usd = await self._get_eth_usd_reference()
+                        price_eth = (to_amount / eth_price_usd) if eth_price_usd else Decimal('0')
+
+                        return OraclePrice(
+                            token_symbol="FTNS",
+                            price_usd=to_amount,
+                            price_eth=price_eth,
+                            price_btc=Decimal('0'),  # Calculated if needed
+                            volume_24h=Decimal('0'),  # 1inch doesn't provide volume
+                            market_cap=Decimal('0'),
+                            timestamp=datetime.now(timezone.utc),
+                            source="1inch_dex",
+                            confidence=0.75  # DEX prices have higher slippage risk
+                        )
+
+        except Exception as e:
+            logger.warning(f"1inch DEX FTNS price fetch failed: {e}")
+        return None
+
+    async def _get_eth_usd_reference(self) -> Optional[Decimal]:
+        """Get ETH/USD reference price for cross-rate calculation"""
+        import os
+        try:
+            async with aiohttp.ClientSession() as session:
+                api_key = os.getenv("COINGECKO_API_KEY", "")
+                headers = {"x-cg-demo-api-key": api_key} if api_key else {}
+                url = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
+                async with session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return Decimal(str(data.get("ethereum", {}).get("usd", 0))) or None
+        except Exception:
+            return None
     
     def _calculate_weighted_price(self, prices: List[OraclePrice]) -> OraclePrice:
         """Calculate weighted average price from multiple sources"""
