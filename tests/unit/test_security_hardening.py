@@ -1156,5 +1156,75 @@ class TestCORSSecurityValidation:
                 del os.environ["CORS_ORIGINS"]
 
 
+class TestJWTKeyEnforcement:
+    """Tests for JWT secret key length and strength enforcement"""
+
+    def test_known_weak_default_blocked_in_production(self):
+        """Known-weak placeholder must be rejected in production"""
+        from prsm.core.config.schemas import SecurityConfig
+        import os
+        original = os.environ.get("PRSM_ENV")
+        try:
+            os.environ["PRSM_ENV"] = "production"
+            with pytest.raises(ValueError, match="known-weak placeholder"):
+                SecurityConfig(
+                    jwt_secret_key="change-me-to-a-random-string-at-least-32-chars"
+                )
+        finally:
+            if original is not None:
+                os.environ["PRSM_ENV"] = original
+            elif "PRSM_ENV" in os.environ:
+                del os.environ["PRSM_ENV"]
+
+    def test_short_key_blocked_in_production(self):
+        """Keys under 64 chars must be rejected in production"""
+        from prsm.core.config.schemas import SecurityConfig
+        import os
+        original = os.environ.get("PRSM_ENV")
+        try:
+            os.environ["PRSM_ENV"] = "production"
+            # 40-char key: passes 32-char check but fails 64-char production check
+            with pytest.raises(ValueError, match="64 characters"):
+                SecurityConfig(jwt_secret_key="a" * 40)
+        finally:
+            if original is not None:
+                os.environ["PRSM_ENV"] = original
+            elif "PRSM_ENV" in os.environ:
+                del os.environ["PRSM_ENV"]
+
+    def test_strong_key_accepted_in_production(self):
+        """64-char random key must be accepted in production"""
+        from prsm.core.config.schemas import SecurityConfig
+        import os
+        original = os.environ.get("PRSM_ENV")
+        try:
+            os.environ["PRSM_ENV"] = "production"
+            # openssl rand -hex 32 produces exactly 64 hex chars
+            strong_key = "a1b2c3d4" * 8  # 64 chars, not a known default
+            config = SecurityConfig(jwt_secret_key=strong_key)
+            assert config.jwt_secret_key == strong_key
+        finally:
+            if original is not None:
+                os.environ["PRSM_ENV"] = original
+            elif "PRSM_ENV" in os.environ:
+                del os.environ["PRSM_ENV"]
+
+    def test_short_key_allowed_in_development(self):
+        """32-char key must be accepted in development"""
+        from prsm.core.config.schemas import SecurityConfig
+        import os
+        original = os.environ.get("PRSM_ENV")
+        try:
+            os.environ["PRSM_ENV"] = "development"
+            dev_key = "dev-key-that-is-exactly-thirty-two"  # 35 chars, fine in dev
+            config = SecurityConfig(jwt_secret_key=dev_key)
+            assert len(config.jwt_secret_key) >= 32
+        finally:
+            if original is not None:
+                os.environ["PRSM_ENV"] = original
+            elif "PRSM_ENV" in os.environ:
+                del os.environ["PRSM_ENV"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

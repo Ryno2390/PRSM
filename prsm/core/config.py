@@ -76,6 +76,16 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
+# Known-weak placeholders that must never be used in production
+_WEAK_SECRET_DEFAULTS = {
+    "test-secret-key-at-least-32-characters-long",
+    "change-me-to-a-random-string-at-least-32-chars",
+    "change-me",
+    "secret",
+    "development",
+}
+
+
 class Environment(str, Enum):
     """Environment types for PRSM deployment"""
     DEVELOPMENT = "development"
@@ -261,9 +271,25 @@ class PRSMSettings(BaseSettings):
     
     @field_validator("secret_key")
     @classmethod
-    def validate_secret_key(cls, v):
+    def validate_secret_key(cls, v, info):
+        env = os.getenv("PRSM_ENV", os.getenv("APP_ENV", "development")).lower()
+
         if len(v) < 32:
             raise ValueError("Secret key must be at least 32 characters long")
+
+        if env == "production":
+            if v in _WEAK_SECRET_DEFAULTS or v.startswith("change-me") or v.startswith("test-"):
+                raise ValueError(
+                    "FATAL: PRSM_SECRET_KEY is using a known-weak placeholder value. "
+                    "Generate a secure key with: openssl rand -hex 32"
+                )
+            if len(v) < 64:
+                raise ValueError(
+                    f"FATAL: PRSM_SECRET_KEY is {len(v)} characters. "
+                    "Production requires at least 64 characters (128 hex chars / 32 random bytes). "
+                    "Generate one with: openssl rand -hex 32"
+                )
+
         return v
     
     @property
@@ -398,8 +424,21 @@ class PRSMSettings(BaseSettings):
             missing_config.append("OPENAI_API_KEY - Required for semantic search and embeddings")
         
         # Security considerations
-        if self.is_production and not self.secret_key:
-            missing_config.append("SECRET_KEY - Required for production security")
+        if self.is_production:
+            weak_defaults = {
+                "test-secret-key-at-least-32-characters-long",
+                "change-me-to-a-random-string-at-least-32-chars",
+            }
+            if not self.secret_key or self.secret_key in weak_defaults:
+                missing_config.append(
+                    "PRSM_SECRET_KEY - Must be a cryptographically random string of "
+                    "at least 64 characters. Generate: openssl rand -hex 32"
+                )
+            elif len(self.secret_key) < 64:
+                missing_config.append(
+                    f"PRSM_SECRET_KEY - Current key is {len(self.secret_key)} chars; "
+                    "production requires at least 64 characters"
+                )
         
         return missing_config
 
