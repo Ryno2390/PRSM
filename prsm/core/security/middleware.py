@@ -259,27 +259,38 @@ def configure_cors() -> dict:
     """
     Configure CORS middleware with secure defaults
     """
-    allowed_origins = getattr(settings, 'allowed_origins', [
-        "https://localhost:3000",
-        "https://prsm.app", 
-        "https://api.prsm.app"
-    ])
-    
+    import os
+
+    # Priority 1: CORS_ORIGINS environment variable (comma-separated)
+    cors_env = os.getenv("CORS_ORIGINS", "").strip()
+    if cors_env:
+        allowed_origins = [o.strip() for o in cors_env.split(",") if o.strip()]
+    else:
+        # Priority 2: settings (defaults to production allowlist per schema fix)
+        allowed_origins = getattr(settings, 'allowed_origins', [
+            "https://prsm.ai",
+            "https://app.prsm.ai"
+        ])
+
+    # Safety check — never allow wildcard in non-dev environments
+    env = os.getenv("PRSM_ENV", "development").lower()
+    if "*" in allowed_origins and env != "development":
+        raise RuntimeError(
+            "Wildcard CORS origin is not permitted outside development. "
+            "Set CORS_ORIGINS env var to specific allowed origins."
+        )
+
     return {
         "allow_origins": allowed_origins,
         "allow_credentials": True,
         "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         "allow_headers": [
-            "Accept",
-            "Accept-Language", 
-            "Content-Language",
-            "Content-Type",
-            "Authorization",
-            "X-Requested-With",
-            "X-Request-ID"
+            "Accept", "Accept-Language", "Content-Language",
+            "Content-Type", "Authorization",
+            "X-Requested-With", "X-Request-ID"
         ],
         "expose_headers": ["X-Request-ID"],
-        "max_age": 3600,  # 1 hour
+        "max_age": 3600,
     }
 
 

@@ -349,7 +349,11 @@ class SecureEnvironment:
             
             cors_origins = os.getenv("CORS_ORIGINS", "")
             if cors_origins == "*":
-                result.errors.append("CORS_ORIGINS should not be '*' in production")
+                raise EnvironmentError(
+                    "FATAL: CORS_ORIGINS='*' is not allowed in production. "
+                    "Set CORS_ORIGINS to a comma-separated list of specific allowed origins "
+                    "(e.g., 'https://prsm.ai,https://app.prsm.ai')."
+                )
         
         # Determine if environment is valid
         result.valid = len(result.errors) == 0 and len(result.missing_required) == 0
