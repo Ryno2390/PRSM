@@ -41,7 +41,7 @@ from prsm.core.config import get_settings
 from prsm.economy.tokenomics.ftns_service import FTNSService
 from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork
 from ..federation.model_registry import ModelRegistry
-from prsm.core.ipfs_client import PRSMIPFSOperations
+from prsm.core.ipfs_client import PRSMIPFSOperations, PRSMIPFSClient
 from prsm.economy.governance.proposals import ProposalManager
 
 from .models import (

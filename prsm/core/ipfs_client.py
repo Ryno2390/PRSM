@@ -2071,5 +2071,8 @@ async def get_content_info(client: 'IPFSClient', cid: str) -> Dict[str, Any]:
         raise IPFSError(f"Content info retrieval failed: {e}")
 
 
+# Alias for backwards compatibility
+PRSMIPFSClient = PRSMIPFSOperations
+
 # Global PRSM IPFS operations
 prsm_ipfs = PRSMIPFSOperations(ipfs_client)

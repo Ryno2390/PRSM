@@ -863,7 +863,100 @@ __all__ = [
     'StreamBuffer',
     'StreamProcessor',
     'AggregationProcessor',
-    'AlertProcessor', 
+    'AlertProcessor',
     'FilterProcessor',
-    'RealTimeProcessor'
+    'RealTimeProcessor',
+    'initialize_real_time_processor',
+    'get_real_time_processor',
 ]
+
+
+# ── Global singleton ──────────────────────────────────────────────────────────
+_real_time_processor: Optional['RealTimeProcessor'] = None
+
+
+def initialize_real_time_processor(
+    buffer_size: int = 100000,
+    default_processors: Optional[List[StreamProcessor]] = None
+) -> 'RealTimeProcessor':
+    """
+    Initialize the global real-time processor.
+
+    Args:
+        buffer_size: Maximum number of events to hold in the circular buffer.
+        default_processors: Pre-configured processors to attach on startup.
+                            If None, a sensible default set is created.
+    Returns:
+        The initialized RealTimeProcessor instance.
+    """
+    global _real_time_processor
+
+    _real_time_processor = RealTimeProcessor(buffer_size=buffer_size)
+
+    if default_processors is None:
+        default_processors = _create_default_processors()
+
+    for processor in default_processors:
+        _real_time_processor.add_processor(processor)
+
+    logger.info(
+        "Real-time analytics processor initialized",
+        extra={"processors": len(default_processors), "buffer_size": buffer_size}
+    )
+    return _real_time_processor
+
+
+def get_real_time_processor() -> 'RealTimeProcessor':
+    """
+    Get the global real-time processor.
+
+    Raises:
+        RuntimeError: If the processor has not been initialized yet.
+    """
+    if _real_time_processor is None:
+        raise RuntimeError(
+            "Real-time analytics processor not initialized. "
+            "Call initialize_real_time_processor() first."
+        )
+    return _real_time_processor
+
+
+def _create_default_processors() -> List[StreamProcessor]:
+    """
+    Create the default set of processors for PRSM analytics.
+
+    Returns a list with:
+    - An AggregationProcessor tracking API latency and HTTP status codes.
+    - An AlertProcessor that fires on abnormally high request latency (> 5 s).
+    """
+    aggregation = AggregationProcessor(
+        processor_id="api_performance",
+        aggregation_fields=["latency_ms", "status_code"],
+        aggregation_functions=["sum", "count", "avg", "min", "max"]
+    )
+
+    alerting = AlertProcessor(
+        processor_id="latency_alerts",
+        alert_rules=[
+            {
+                "id": "high_latency",
+                "name": "High API Latency",
+                "field": "latency_ms",
+                "operator": "gt",
+                "threshold": 5000,      # 5 seconds
+                "severity": "warning",
+                "message": "API request latency exceeded 5 seconds"
+            },
+            {
+                "id": "server_error",
+                "name": "Server Error Rate",
+                "field": "status_code",
+                "operator": "gte",
+                "threshold": 500,
+                "severity": "critical",
+                "message": "Server error (5xx) detected"
+            }
+        ]
+    )
+
+    return [aggregation, alerting]
