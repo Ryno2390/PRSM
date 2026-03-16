@@ -4,6 +4,7 @@ Provides consistent request processing, security, and monitoring
 """
 
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import Callable, Dict, Any
@@ -18,6 +19,17 @@ from .standards import SECURITY_HEADERS, CORS_CONFIG
 
 
 logger = logging.getLogger(__name__)
+
+
+# Development-only CORS origins (never used in production)
+DEV_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:8080",
+    "http://localhost:8000",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:8080",
+    "http://127.0.0.1:8000",
+]
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
@@ -161,6 +173,52 @@ class PerformanceMonitoringMiddleware(BaseHTTPMiddleware):
                     "trace_id": getattr(request.state, 'trace_id', None)
                 }
             )
+        
+        # Record into Prometheus metrics
+        try:
+            from prsm.compute.performance.metrics import increment_counter, observe_histogram
+            increment_counter(
+                "http_requests_total",
+                method=request.method,
+                endpoint=request.url.path,
+                status_code=str(response.status_code)
+            )
+            observe_histogram(
+                "http_request_duration_seconds",
+                process_time,
+                method=request.method,
+                endpoint=request.url.path
+            )
+        except Exception:
+            pass  # Never let metrics recording fail a request
+        
+        # Ingest event into real-time analytics processor
+        try:
+            from prsm.data.analytics.real_time_processor import (
+                get_real_time_processor, StreamEvent, StreamEventType
+            )
+            import uuid
+
+            processor = get_real_time_processor()
+            event = StreamEvent(
+                event_id=str(uuid.uuid4()),
+                event_type=StreamEventType.PERFORMANCE_EVENT,
+                timestamp=datetime.now(timezone.utc),
+                data={
+                    "latency_ms": round(process_time * 1000, 2),
+                    "status_code": response.status_code,
+                    "method": request.method,
+                    "path": request.url.path,
+                },
+                source="api_middleware",
+                tags=["http", request.method.lower()]
+            )
+            await processor.ingest_event(event)
+
+        except RuntimeError:
+            pass  # Processor not initialized — skip silently
+        except Exception:
+            pass  # Never let analytics ingestion fail a request
         
         # Add performance headers
         response.headers["X-Process-Time"] = f"{process_time:.4f}"
@@ -333,9 +391,14 @@ def configure_middleware_stack(app) -> None:
     try:
         from prsm.core.security.middleware import configure_cors
         cors_config = configure_cors()
+        
+        # Use development origins only in development mode
+        env = os.getenv("PRSM_ENV", "development").lower()
+        origins = DEV_ORIGINS if env == "development" else cors_config["allow_origins"]
+        
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=cors_config["allow_origins"] if not settings.is_development else ["*"],
+            allow_origins=origins,
             allow_credentials=cors_config["allow_credentials"],
             allow_methods=cors_config["allow_methods"],
             allow_headers=cors_config["allow_headers"],

@@ -74,6 +74,12 @@ async def startup_sequence(app: FastAPI) -> None:
     # Step 8: Initialize authentication
     await _init_authentication()
 
+    # Step 9: Initialize observability (metrics collection + tracing)
+    await _init_observability()
+
+    # Step 10: Initialize real-time analytics
+    await _init_analytics()
+
     logger.info("PRSM API server startup completed successfully")
 
 
@@ -192,3 +198,66 @@ async def _init_authentication() -> None:
         logger.info("Authentication system initialized")
     except Exception as e:
         logger.error("Failed to initialize auth system", error=str(e))
+
+
+async def _init_observability() -> None:
+    """Initialize Prometheus metrics collection."""
+    import os
+
+    if os.getenv("PRSM_METRICS_ENABLED", "true").lower() != "true":
+        logger.info("Metrics collection disabled via PRSM_METRICS_ENABLED")
+        return
+
+    try:
+        from prsm.compute.performance.metrics import (
+            initialize_metrics, start_metrics_collection, MetricsConfig
+        )
+        from prsm.core.redis_client import redis_manager
+
+        config = MetricsConfig(
+            service_name="prsm-api",
+            service_version=getattr(settings, 'version', '0.2.1'),
+            environment=getattr(settings, 'environment', 'production'),
+            collection_interval=30,
+            enable_prometheus=True,
+            prometheus_port=None,  # Metrics served through /health/metrics
+            store_in_redis=getattr(redis_manager, 'client', None) is not None,
+            collect_system_metrics=True,
+            collect_process_metrics=True,
+            collect_runtime_metrics=True,
+        )
+
+        redis_client = getattr(redis_manager, 'client', None)
+        initialize_metrics(config, redis_client)
+        await start_metrics_collection()
+        logger.info("Metrics collection initialized and running")
+
+    except Exception as e:
+        logger.warning("Metrics initialization failed — monitoring disabled", error=str(e))
+
+
+async def _init_analytics() -> None:
+    """Initialize the real-time analytics stream processor."""
+    import os
+
+    if os.getenv("PRSM_ANALYTICS_ENABLED", "true").lower() != "true":
+        logger.info("Real-time analytics disabled via PRSM_ANALYTICS_ENABLED")
+        return
+
+    try:
+        from prsm.data.analytics.real_time_processor import (
+            initialize_real_time_processor
+        )
+
+        processor = initialize_real_time_processor(
+            buffer_size=int(os.getenv("PRSM_ANALYTICS_BUFFER_SIZE", "100000"))
+        )
+        await processor.start()
+        logger.info("Real-time analytics processor started")
+
+    except Exception as e:
+        logger.warning(
+            "Real-time analytics initialization failed — analytics disabled",
+            error=str(e)
+        )
+        # Non-fatal: never block startup due to analytics

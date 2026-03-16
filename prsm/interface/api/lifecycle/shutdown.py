@@ -42,6 +42,12 @@ async def shutdown_sequence(app: FastAPI) -> None:
     # Step 5: Shutdown security systems
     await _shutdown_security_systems()
 
+    # Step 6: Stop metrics collection
+    await _shutdown_observability()
+
+    # Step 7: Stop analytics processor
+    await _shutdown_analytics()
+
     logger.info("PRSM API server shutdown completed")
 
 
@@ -96,3 +102,26 @@ async def _shutdown_security_systems() -> None:
         logger.info("Security systems shutdown completed")
     except Exception as e:
         logger.error("Error shutting down security systems", error=str(e))
+
+
+async def _shutdown_observability() -> None:
+    """Stop metrics collection gracefully."""
+    try:
+        from prsm.compute.performance.metrics import stop_metrics_collection
+        await stop_metrics_collection()
+        logger.info("Metrics collection stopped")
+    except Exception as e:
+        logger.error("Error stopping metrics collection", error=str(e))
+
+
+async def _shutdown_analytics() -> None:
+    """Stop the real-time analytics stream processor."""
+    try:
+        from prsm.data.analytics.real_time_processor import get_real_time_processor
+        processor = get_real_time_processor()
+        await processor.stop()
+        logger.info("Real-time analytics processor stopped")
+    except RuntimeError:
+        pass  # Not initialized — nothing to stop
+    except Exception as e:
+        logger.error("Error stopping analytics processor", error=str(e))
