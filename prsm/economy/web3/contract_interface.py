@@ -13,9 +13,16 @@ from decimal import Decimal
 from dataclasses import dataclass
 from pathlib import Path
 
-from web3 import Web3
-from web3.contract import Contract
-from eth_utils import to_checksum_address
+try:
+    from web3 import Web3
+    from web3.contract import Contract
+    from eth_utils import to_checksum_address
+    HAS_WEB3 = True
+except ImportError:
+    HAS_WEB3 = False
+    Web3 = None
+    Contract = None
+    to_checksum_address = None
 
 from .wallet_connector import Web3WalletConnector, TransactionRequest, TransactionResult
 

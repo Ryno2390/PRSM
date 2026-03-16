@@ -15,8 +15,14 @@ from pathlib import Path
 import json
 import os
 
-from web3 import Web3
-from eth_account import Account
+try:
+    from web3 import Web3
+    from eth_account import Account
+    HAS_WEB3 = True
+except ImportError:
+    HAS_WEB3 = False
+    Web3 = None
+    Account = None
 import requests
 
 from prsm.core.config import get_settings

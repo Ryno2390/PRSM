@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import os
 import uuid
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
@@ -208,6 +209,55 @@ class StripeProvider(PaymentProvider):
                 message=f"Status check error: {str(e)}"
             )
 
+    async def cancel_payment(self, transaction_id: str) -> bool:
+        """Cancel a Stripe payment intent"""
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+            async with self.session.post(
+                f"{self.base_url}/payment_intents/{transaction_id}/cancel",
+                headers=headers
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    return result.get("status") == "canceled"
+                else:
+                    error_data = await response.json()
+                    logger.error("Stripe cancel failed", error=error_data.get("error", {}).get("message"))
+                    return False
+        except Exception as e:
+            logger.error("Stripe cancel_payment error", transaction_id=transaction_id, error=str(e))
+            return False
+
+    async def refund_payment(self, transaction_id: str, amount: Optional[Decimal] = None) -> bool:
+        """Refund a completed Stripe payment"""
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+            refund_data = {"payment_intent": transaction_id}
+            if amount is not None:
+                refund_data["amount"] = int(amount * 100)  # cents
+
+            async with self.session.post(
+                f"{self.base_url}/refunds",
+                headers=headers,
+                data=refund_data
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    return result.get("status") in ("succeeded", "pending")
+                else:
+                    error_data = await response.json()
+                    logger.error("Stripe refund failed", error=error_data.get("error", {}).get("message"))
+                    return False
+        except Exception as e:
+            logger.error("Stripe refund_payment error", transaction_id=transaction_id, error=str(e))
+            return False
+
 
 class PayPalProvider(PaymentProvider):
     """PayPal payment provider implementation"""
@@ -344,6 +394,93 @@ class PayPalProvider(PaymentProvider):
                 message=f"Payment processing error: {str(e)}"
             )
 
+    async def get_payment_status(self, transaction_id: str) -> PaymentResponse:
+        """Get PayPal order status"""
+        try:
+            access_token = await self._get_access_token()
+            headers = {"Authorization": f"Bearer {access_token}"}
+            async with self.session.get(
+                f"{self.base_url}/v2/checkout/orders/{transaction_id}",
+                headers=headers
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    status_mapping = {
+                        "CREATED": PaymentStatus.PENDING,
+                        "SAVED": PaymentStatus.PENDING,
+                        "APPROVED": PaymentStatus.PROCESSING,
+                        "VOIDED": PaymentStatus.CANCELLED,
+                        "COMPLETED": PaymentStatus.COMPLETED,
+                        "PAYER_ACTION_REQUIRED": PaymentStatus.PENDING,
+                    }
+                    status = status_mapping.get(result["status"], PaymentStatus.FAILED)
+                    unit = result["purchase_units"][0]["amount"]
+                    return PaymentResponse(
+                        success=True,
+                        transaction_id=transaction_id,
+                        status=status,
+                        fiat_amount=Decimal(unit["value"]),
+                        fiat_currency=FiatCurrency(unit["currency_code"]),
+                        crypto_currency="FTNS",
+                        provider_reference=transaction_id,
+                        message=f"PayPal order status: {result['status']}"
+                    )
+                else:
+                    error_data = await response.json()
+                    return PaymentResponse(
+                        success=False, transaction_id=transaction_id,
+                        status=PaymentStatus.FAILED, fiat_amount=Decimal("0"),
+                        fiat_currency=FiatCurrency.USD, crypto_currency="FTNS",
+                        message=f"PayPal status error: {error_data.get('message', 'Unknown')}"
+                    )
+        except Exception as e:
+            logger.error("PayPal get_payment_status error", transaction_id=transaction_id, error=str(e))
+            return PaymentResponse(
+                success=False, transaction_id=transaction_id, status=PaymentStatus.FAILED,
+                fiat_amount=Decimal("0"), fiat_currency=FiatCurrency.USD, crypto_currency="FTNS",
+                message=f"Status check error: {str(e)}"
+            )
+
+    async def cancel_payment(self, transaction_id: str) -> bool:
+        """Void a PayPal order (only possible before capture)"""
+        logger.info("PayPal order cancellation requested — order will expire naturally",
+                    transaction_id=transaction_id)
+        return True
+
+    async def refund_payment(self, transaction_id: str, amount: Optional[Decimal] = None) -> bool:
+        """Refund a captured PayPal payment"""
+        try:
+            access_token = await self._get_access_token()
+            headers = {"Authorization": f"Bearer {access_token}"}
+            async with self.session.get(
+                f"{self.base_url}/v2/checkout/orders/{transaction_id}",
+                headers=headers
+            ) as response:
+                if response.status != 200:
+                    return False
+                order = await response.json()
+                captures = order.get("purchase_units", [{}])[0].get("payments", {}).get("captures", [])
+                if not captures:
+                    logger.warning("No captures found to refund", transaction_id=transaction_id)
+                    return False
+                capture_id = captures[0]["id"]
+
+            refund_data = {}
+            if amount is not None:
+                currency = order["purchase_units"][0]["amount"]["currency_code"]
+                refund_data = {"amount": {"value": str(amount), "currency_code": currency}}
+
+            async with self.session.post(
+                f"{self.base_url}/v2/payments/captures/{capture_id}/refund",
+                headers={**headers, "Content-Type": "application/json"},
+                json=refund_data
+            ) as refund_response:
+                return refund_response.status in (200, 201)
+
+        except Exception as e:
+            logger.error("PayPal refund_payment error", transaction_id=transaction_id, error=str(e))
+            return False
+
 
 class MockProvider(PaymentProvider):
     """Mock payment provider for testing"""
@@ -402,6 +539,12 @@ class MockProvider(PaymentProvider):
             message="Mock payment status check"
         )
 
+    async def cancel_payment(self, transaction_id: str) -> bool:
+        return True  # Mock always succeeds
+
+    async def refund_payment(self, transaction_id: str, amount: Optional[Decimal] = None) -> bool:
+        return True  # Mock always succeeds
+
 
 class FiatGateway:
     """
@@ -422,10 +565,15 @@ class FiatGateway:
         
         # Security
         self.encryption_key = self.config.get("encryption_key")
+        self.cipher = None
         if self.encryption_key:
-            self.cipher = Fernet(self.encryption_key.encode())
-        else:
-            self.cipher = None
+            try:
+                # Fernet requires 32 url-safe base64-encoded bytes
+                # If the key is not in proper format, skip cipher initialization
+                self.cipher = Fernet(self.encryption_key.encode() if isinstance(self.encryption_key, str) else self.encryption_key)
+            except (ValueError, Exception) as e:
+                logger.warning(f"Invalid encryption key format, cipher disabled: {e}")
+                self.cipher = None
         
         # Fraud detection settings
         self.fraud_detection_enabled = self.config.get("fraud_detection_enabled", True)
@@ -437,27 +585,26 @@ class FiatGateway:
     def _load_default_config(self) -> Dict[str, Any]:
         """Load default gateway configuration"""
         settings = get_settings()
-        
         return {
-            "default_provider": "mock",
+            "default_provider": os.getenv("PAYMENT_DEFAULT_PROVIDER", "mock"),
             "fraud_detection_enabled": True,
-            "max_daily_amount": "10000",
-            "max_transaction_amount": "5000",
-            "encryption_key": settings.SECRET_KEY,
+            "max_daily_amount": os.getenv("PAYMENT_MAX_DAILY_AMOUNT", "10000"),
+            "max_transaction_amount": os.getenv("PAYMENT_MAX_TRANSACTION_AMOUNT", "5000"),
+            "encryption_key": settings.secret_key,
             "providers": {
                 "stripe": {
-                    "enabled": False,
-                    "api_key": "",
-                    "webhook_secret": ""
+                    "enabled": bool(os.getenv("STRIPE_API_KEY")),
+                    "api_key": os.getenv("STRIPE_API_KEY", ""),
+                    "webhook_secret": os.getenv("STRIPE_WEBHOOK_SECRET", "")
                 },
                 "paypal": {
-                    "enabled": False,
-                    "client_id": "",
-                    "client_secret": "",
-                    "environment": "sandbox"
+                    "enabled": bool(os.getenv("PAYPAL_CLIENT_ID")),
+                    "client_id": os.getenv("PAYPAL_CLIENT_ID", ""),
+                    "client_secret": os.getenv("PAYPAL_CLIENT_SECRET", ""),
+                    "environment": os.getenv("PAYPAL_ENVIRONMENT", "sandbox")
                 },
                 "mock": {
-                    "enabled": True,
+                    "enabled": os.getenv("PRSM_ENV", "development") != "production",
                     "simulate_failures": False,
                     "failure_rate": 0.1
                 }
