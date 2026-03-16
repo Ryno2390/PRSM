@@ -386,12 +386,23 @@ async def detailed_status(current_user = Depends(get_current_user)):
 
 @router.get("/metrics")
 async def prometheus_metrics():
-    """Prometheus metrics endpoint"""
-    metrics = generate_latest()
-    return JSONResponse(
-        content=metrics.decode('utf-8'),
-        media_type=CONTENT_TYPE_LATEST
-    )
+    """Prometheus metrics endpoint — returns PRSM-specific metrics in Prometheus text format"""
+    try:
+        # Prefer the PRSM MetricsCollector's custom registry
+        from prsm.compute.performance.metrics import get_metrics_collector
+        collector = get_metrics_collector()
+        metrics_output = collector.get_prometheus_metrics()
+        return JSONResponse(
+            content=metrics_output,
+            media_type="text/plain; version=0.0.4; charset=utf-8"
+        )
+    except RuntimeError:
+        # MetricsCollector not initialized - fall back to default registry
+        metrics_output = generate_latest()
+        return JSONResponse(
+            content=metrics_output.decode('utf-8'),
+            media_type=CONTENT_TYPE_LATEST
+        )
 
 @router.get("/version")
 async def version_info():
