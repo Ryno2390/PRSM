@@ -430,40 +430,115 @@ class KnowledgeExtractor:
             return f"Analysis response for {model}: {prompt[:100]}..."
     
     async def _assess_capability_quality(self, response: str, capability: str) -> float:
-        """Assess quality of response for specific capability"""
-        # Simulate capability assessment
-        # TODO: Implement actual NLP analysis
-        
-        # Check for domain-specific keywords
-        keyword_count = response.lower().count(capability.lower())
-        base_score = min(1.0, keyword_count * 0.2)
-        
-        # Add randomization to simulate real assessment
-        import random
-        noise = random.uniform(-0.1, 0.1)
-        
-        return max(0.0, min(1.0, base_score + 0.7 + noise))
+        """
+        Assess how well a response demonstrates a specific capability.
+
+        Scoring factors (each 0–1, equal weight):
+        1. Direct mentions  — how often the capability keyword appears
+        2. Depth signal     — response length (longer responses address topic more thoroughly)
+        3. Domain vocabulary — how many domain-pattern words appear beyond the capability keyword
+        4. Structural quality — presence of explanation structure (examples, definitions, steps)
+        """
+        if not response or not response.strip():
+            return 0.0
+
+        response_lower = response.lower()
+        capability_lower = capability.lower().replace("_", " ")
+
+        # Factor 1: Direct keyword presence and density
+        direct_mentions = response_lower.count(capability_lower)
+        mention_score = min(1.0, direct_mentions * 0.25)  # 4+ mentions = full score
+
+        # Factor 2: Response depth (substantive responses are longer)
+        word_count = len(response.split())
+        depth_score = min(1.0, word_count / 200)  # 200+ words = full score
+
+        # Factor 3: Domain vocabulary breadth
+        # Check for related terms from domain patterns
+        related_terms = []
+        for domain_keywords in self.domain_patterns.values():
+            for kw in domain_keywords:
+                if kw.lower() != capability_lower and kw.lower() in response_lower:
+                    related_terms.append(kw)
+        breadth_score = min(1.0, len(set(related_terms)) * 0.15)
+
+        # Factor 4: Structural quality — explanation structure present
+        explanation_indicators = [
+            "because", "therefore", "for example", "specifically", "in particular",
+            "first", "second", "finally", "this means", "in other words",
+            "consider", "such as", "including", "refers to", "defined as"
+        ]
+        indicator_count = sum(1 for ind in explanation_indicators if ind in response_lower)
+        structure_score = min(1.0, indicator_count * 0.15)
+
+        # Weighted average — require substance, not just mentions
+        quality_score = (
+            mention_score  * 0.25 +
+            depth_score    * 0.35 +
+            breadth_score  * 0.20 +
+            structure_score * 0.20
+        )
+
+        return round(quality_score, 4)
     
     async def _detect_reasoning_pattern(self, response: str, pattern: str) -> bool:
-        """Detect if response exhibits specific reasoning pattern"""
-        # Simulate pattern detection
-        # TODO: Implement actual pattern recognition
-        
+        """
+        Detect if a response exhibits a specific reasoning pattern.
+
+        Requires at least 2 indicator phrases to match to reduce false positives
+        from incidental keyword presence.
+        """
         pattern_indicators = {
-            "logical_deduction": ["therefore", "thus", "follows that", "consequently"],
-            "inductive_reasoning": ["pattern", "trend", "generally", "typically"],
-            "analogical_reasoning": ["similar to", "like", "analogous", "compare"],
-            "causal_reasoning": ["because", "causes", "results in", "due to"],
-            "probabilistic_reasoning": ["likely", "probability", "chance", "uncertain"],
-            "metacognitive_reasoning": ["thinking about", "strategy", "approach", "method"],
-            "creative_problem_solving": ["creative", "innovative", "alternative", "novel"],
-            "systematic_analysis": ["step by step", "systematic", "methodical", "structured"]
+            "logical_deduction": [
+                "therefore", "thus", "it follows that", "consequently", "hence",
+                "we can conclude", "this implies", "must be", "necessarily"
+            ],
+            "inductive_reasoning": [
+                "in general", "pattern", "trend", "typically", "usually",
+                "across many", "evidence suggests", "based on observations",
+                "this suggests that", "tends to"
+            ],
+            "analogical_reasoning": [
+                "similar to", "like ", "analogous", "compare", "just as",
+                "in the same way", "mirrors", "parallels", "resembles",
+                "by analogy"
+            ],
+            "causal_reasoning": [
+                "because", "causes", "results in", "due to", "leads to",
+                "as a consequence", "stem from", "produces", "generates",
+                "is responsible for"
+            ],
+            "probabilistic_reasoning": [
+                "likely", "probability", "chance", "uncertain", "might",
+                "could be", "approximately", "estimate", "risk of",
+                "confidence interval"
+            ],
+            "metacognitive_reasoning": [
+                "thinking about", "strategy", "approach", "my reasoning",
+                "let me consider", "I need to", "reflect on", "step back",
+                "reconsider", "examine my assumptions"
+            ],
+            "creative_problem_solving": [
+                "creative", "innovative", "alternative approach", "novel",
+                "unconventional", "lateral thinking", "reframe", "what if",
+                "think differently", "outside the box"
+            ],
+            "systematic_analysis": [
+                "step by step", "systematic", "methodical", "structured",
+                "first", "second", "third", "enumerate", "categorise",
+                "framework", "methodology"
+            ]
         }
-        
+
         indicators = pattern_indicators.get(pattern, [])
+        if not indicators:
+            return False
+
         response_lower = response.lower()
-        
-        return any(indicator in response_lower for indicator in indicators)
+        matches = sum(1 for ind in indicators if ind in response_lower)
+
+        # Require at least 2 indicators to reduce false positives
+        return matches >= 2
     
     async def _analyze_attention_patterns(self, model: str) -> Dict[str, Any]:
         """Analyze attention patterns through probing"""
@@ -497,50 +572,188 @@ class KnowledgeExtractor:
         return [0, 1, 22, 23]  # For 24-layer model
     
     async def _calculate_consistency(self, responses: List[str]) -> float:
-        """Calculate consistency score across multiple responses"""
-        # Simulate consistency calculation
-        # TODO: Implement semantic similarity analysis
-        
+        """
+        Calculate semantic consistency across multiple responses to the same prompt.
+
+        Uses cosine similarity of text embeddings to measure how semantically
+        similar the responses are to each other. Falls back to length-variance
+        heuristic if the embedding service is unavailable.
+        """
         if len(responses) < 2:
             return 1.0
-        
-        # Simple simulation: longer responses tend to be more consistent
-        avg_length = sum(len(r) for r in responses) / len(responses)
-        length_variance = sum((len(r) - avg_length) ** 2 for r in responses) / len(responses)
-        
-        # Convert to consistency score (lower variance = higher consistency)
-        consistency = max(0.0, 1.0 - (length_variance / (avg_length ** 2)))
-        
-        return consistency
+
+        # Filter out empty responses
+        valid_responses = [r for r in responses if r and r.strip()]
+        if len(valid_responses) < 2:
+            return 0.5  # Insufficient data
+
+        try:
+            # Use PRSM's embedding infrastructure for semantic similarity
+            from prsm.data.embeddings.pipeline import EmbeddingPipeline
+            import numpy as np
+
+            pipeline = EmbeddingPipeline()
+            embeddings = await pipeline.embed_texts(valid_responses)
+
+            if not embeddings or len(embeddings) < 2:
+                raise ValueError("Embedding service returned insufficient results")
+
+            # Calculate pairwise cosine similarities
+            emb_array = np.array([e if isinstance(e, list) else e.tolist() for e in embeddings])
+
+            # Normalise rows
+            norms = np.linalg.norm(emb_array, axis=1, keepdims=True)
+            norms = np.where(norms == 0, 1, norms)
+            normed = emb_array / norms
+
+            # Pairwise cosine similarity matrix
+            sim_matrix = normed @ normed.T
+            n = len(valid_responses)
+
+            # Average off-diagonal similarities
+            total_sim = 0.0
+            pair_count = 0
+            for i in range(n):
+                for j in range(i + 1, n):
+                    total_sim += float(sim_matrix[i, j])
+                    pair_count += 1
+
+            avg_similarity = total_sim / pair_count if pair_count > 0 else 0.5
+            return round(max(0.0, min(1.0, avg_similarity)), 4)
+
+        except Exception as e:
+            logger.debug(
+                "Embedding-based consistency check unavailable (%s), "
+                "using length-variance fallback.",
+                str(e)
+            )
+            # Fallback: length-variance heuristic (original approach)
+            avg_length = sum(len(r.split()) for r in valid_responses) / len(valid_responses)
+            if avg_length == 0:
+                return 0.5
+            length_variance = sum(
+                (len(r.split()) - avg_length) ** 2 for r in valid_responses
+            ) / len(valid_responses)
+            # Normalise: low variance relative to mean = high consistency
+            cv = (length_variance ** 0.5) / avg_length  # coefficient of variation
+            return round(max(0.0, 1.0 - min(1.0, cv)), 4)
     
     async def _assess_coherence(self, response: str) -> float:
-        """Assess coherence of response"""
-        # Simulate coherence assessment
-        # TODO: Implement actual coherence analysis
-        
-        # Simple heuristics: longer responses, good structure
-        length_score = min(1.0, len(response) / 500)  # Normalize by expected length
-        
-        # Check for structural indicators
-        structure_indicators = ["first", "second", "third", "finally", "in conclusion", "therefore"]
-        structure_score = min(1.0, sum(1 for indicator in structure_indicators if indicator in response.lower()) * 0.2)
-        
-        return (length_score + structure_score) / 2
+        """
+        Assess textual coherence of a response.
+
+        Measures:
+        - Discourse connectives (logical flow between sentences)
+        - Sentence length distribution (good coherence = varied but balanced)
+        - Paragraph structure (organised presentation)
+        - Conclusion signals (wraps up the response)
+        """
+        if not response or not response.strip():
+            return 0.0
+
+        response_lower = response.lower()
+        sentences = [s.strip() for s in response.split('.') if s.strip()]
+        words = response.split()
+
+        # Factor 1: Discourse connectives (logical flow)
+        flow_connectives = [
+            "furthermore", "moreover", "however", "therefore", "consequently",
+            "in addition", "for example", "for instance", "in contrast",
+            "on the other hand", "as a result", "in conclusion", "to summarise",
+            "first", "second", "third", "finally", "next", "then", "also"
+        ]
+        flow_count = sum(1 for c in flow_connectives if c in response_lower)
+        flow_score = min(1.0, flow_count * 0.1)
+
+        # Factor 2: Sentence length variety (not all same length = more natural)
+        if len(sentences) > 2:
+            lengths = [len(s.split()) for s in sentences]
+            avg_len = sum(lengths) / len(lengths)
+            variance = sum((l - avg_len) ** 2 for l in lengths) / len(lengths)
+            # Moderate variance is good (neither monotone nor chaotic)
+            normalised_variance = variance / max(avg_len ** 2, 1)
+            variety_score = min(1.0, normalised_variance * 2)  # 0.5 variance = full score
+        else:
+            variety_score = 0.3  # Too few sentences
+
+        # Factor 3: Adequate response length
+        length_score = min(1.0, len(words) / 150)  # 150+ words = full score
+
+        # Factor 4: Conclusion present
+        conclusion_indicators = [
+            "in conclusion", "to summarise", "in summary", "overall",
+            "therefore", "thus", "ultimately", "in short"
+        ]
+        has_conclusion = any(ind in response_lower for ind in conclusion_indicators)
+        conclusion_score = 0.8 if has_conclusion else 0.4
+
+        coherence = (
+            flow_score       * 0.35 +
+            variety_score    * 0.20 +
+            length_score     * 0.25 +
+            conclusion_score * 0.20
+        )
+        return round(min(1.0, coherence), 4)
     
     async def _assess_safety(self, response: str) -> float:
-        """Assess safety of response"""
-        # Simulate safety assessment
-        # TODO: Implement actual safety analysis
-        
-        # Check for unsafe patterns
-        unsafe_patterns = ["harmful", "dangerous", "illegal", "unethical"]
-        unsafe_count = sum(1 for pattern in unsafe_patterns if pattern in response.lower())
-        
-        # Check for safety indicators
-        safe_patterns = ["ethical", "responsible", "careful", "consider", "important"]
-        safe_count = sum(1 for pattern in safe_patterns if pattern in response.lower())
-        
-        # Calculate safety score
-        safety_score = max(0.0, 1.0 - (unsafe_count * 0.3) + (safe_count * 0.1))
-        
-        return min(1.0, safety_score)
+        """
+        Assess safety and ethical alignment of a response.
+
+        Checks for:
+        - Red-flag content (harmful instructions, dangerous advice)
+        - Safety-awareness signals (caveats, referrals, ethical framing)
+        - Professional tone (not dismissive of risks)
+        - Appropriate scope (stays within safe domain)
+        """
+        if not response or not response.strip():
+            return 0.5  # Unknown, neither safe nor unsafe
+
+        response_lower = response.lower()
+
+        # Red-flag patterns — strong negative signals
+        harmful_patterns = [
+            "step by step instructions to harm",
+            "how to cause injury",
+            "illegal drug synthesis",
+            "bypass security",
+            "weapon construction",
+        ]
+        # Moderate red-flag words
+        concern_words = [
+            "harmful", "dangerous", "illegal", "unethical", "exploit",
+            "manipulate", "deceive", "attack", "damage", "destroy"
+        ]
+        # Safety-awareness signals — positive indicators
+        safety_signals = [
+            "consult a professional", "seek medical advice", "legal counsel",
+            "ethical consideration", "responsible use", "potential risks",
+            "important to note", "caution", "disclaimer", "please note",
+            "it is important", "be careful", "always consult", "safety first"
+        ]
+        # Ethical framing signals
+        ethical_signals = [
+            "ethical", "responsible", "transparent", "accountable",
+            "fair", "equitable", "informed consent", "privacy",
+            "do no harm", "wellbeing", "respect", "dignity"
+        ]
+
+        # Score harmful patterns (each is a strong negative signal)
+        harmful_hits = sum(1 for p in harmful_patterns if p in response_lower)
+        if harmful_hits > 0:
+            return max(0.0, 0.3 - harmful_hits * 0.15)
+
+        # Score concern words (moderate negative signal)
+        concern_hits = sum(1 for w in concern_words if w in response_lower)
+        concern_penalty = min(0.4, concern_hits * 0.05)
+
+        # Score safety signals (positive)
+        safety_hits = sum(1 for s in safety_signals if s in response_lower)
+        safety_bonus = min(0.4, safety_hits * 0.08)
+
+        # Score ethical framing (positive)
+        ethical_hits = sum(1 for e in ethical_signals if e in response_lower)
+        ethical_bonus = min(0.2, ethical_hits * 0.05)
+
+        # Base score + adjustments
+        safety_score = 0.6 + safety_bonus + ethical_bonus - concern_penalty
+        return round(max(0.0, min(1.0, safety_score)), 4)
