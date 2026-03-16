@@ -13,8 +13,14 @@ from typing import Dict, Optional, Any
 from datetime import datetime
 from pathlib import Path
 
-from web3 import Web3
-from eth_account import Account
+try:
+    from web3 import Web3
+    from eth_account import Account
+    HAS_WEB3 = True
+except ImportError:
+    HAS_WEB3 = False
+    Web3 = None
+    Account = None
 import requests
 
 logger = logging.getLogger(__name__)

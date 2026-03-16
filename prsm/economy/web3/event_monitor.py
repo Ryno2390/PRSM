@@ -13,9 +13,18 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import json
 
-from web3 import Web3
-from web3.contract import Contract
-from web3.exceptions import BlockNotFound
+try:
+    from web3 import Web3
+    from web3.contract import Contract
+    from web3.exceptions import BlockNotFound
+    HAS_WEB3 = True
+except ImportError:
+    HAS_WEB3 = False
+    Web3 = None
+    Contract = None
+
+    class BlockNotFound(Exception):
+        pass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prsm.core.database_service import DatabaseService

@@ -10,7 +10,7 @@ import structlog
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, status, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, status, Query, BackgroundTasks, Request
 from pydantic import BaseModel, Field
 
 from prsm.core.auth import get_current_user
@@ -454,7 +454,7 @@ async def get_supported_currencies(
 @router.post("/webhooks/{provider}")
 async def process_webhook(
     provider: str,
-    payload: Dict[str, Any],
+    request: Request,
     background_tasks: BackgroundTasks
 ) -> PaymentApiResponse:
     """
@@ -470,11 +470,19 @@ async def process_webhook(
     try:
         payment_processor = await get_payment_processor()
         
+        # Get raw body and signature for verification
+        raw_body = await request.body()
+        signature = request.headers.get("stripe-signature", "") or \
+                    request.headers.get("paypal-transmission-sig", "")
+        payload = await request.json()
+        
         # Process webhook in background
         background_tasks.add_task(
             payment_processor.process_webhook,
             provider,
-            payload
+            payload,
+            raw_body,
+            signature
         )
         
         return PaymentApiResponse(

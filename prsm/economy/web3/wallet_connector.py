@@ -12,13 +12,30 @@ from decimal import Decimal
 from dataclasses import dataclass
 from enum import Enum
 
-from web3 import Web3, AsyncWeb3
-from web3.middleware.proof_of_authority import ExtraDataToPOAMiddleware
-from web3.exceptions import TransactionNotFound, BlockNotFound
-from eth_account import Account
-from eth_account.messages import encode_defunct
 import json
 import os
+
+# Web3 imports with graceful fallback (matches pattern in blockchain/contract_manager.py)
+try:
+    from web3 import Web3, AsyncWeb3
+    from web3.middleware.proof_of_authority import ExtraDataToPOAMiddleware
+    from web3.exceptions import TransactionNotFound, BlockNotFound
+    from eth_account import Account
+    from eth_account.messages import encode_defunct
+    HAS_WEB3 = True
+except ImportError:
+    HAS_WEB3 = False
+    Web3 = None
+    AsyncWeb3 = None
+    ExtraDataToPOAMiddleware = None
+    Account = None
+    encode_defunct = None
+
+    class TransactionNotFound(Exception):
+        pass
+
+    class BlockNotFound(Exception):
+        pass
 
 logger = logging.getLogger(__name__)
 

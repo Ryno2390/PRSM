@@ -8,6 +8,7 @@ liquidity sourcing, and automated token conversion with multiple DEX support.
 
 import asyncio
 import json
+import os
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Any, Union
@@ -278,7 +279,7 @@ class OneinchProvider(ExchangeProvider):
             "USDC": "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
             "USDT": "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",
             "ETH": "0x7ceb23fd6509b91748f5c0dd96b81b0f0b3e8b10",
-            "FTNS": "0x1234567890123456789012345678901234567890"  # Placeholder - actual FTNS address
+            "FTNS": os.getenv("FTNS_TOKEN_ADDRESS", "0x0000000000000000000000000000000000000000")  # Configurable via env
         }
     
     async def get_exchange_rate(self, from_currency: str, to_currency: str) -> Optional[ExchangeRate]:
@@ -430,7 +431,7 @@ class CryptoExchange:
             "providers": {
                 "coingecko": {
                     "enabled": True,
-                    "api_key": "",
+                    "api_key": os.getenv("COINGECKO_API_KEY", ""),
                     "priority": 1
                 },
                 "1inch": {
@@ -492,12 +493,33 @@ class CryptoExchange:
         """Get best exchange rate across providers"""
         try:
             if self.use_aggregation and len(self.providers) > 1:
-                return await self._get_aggregated_rate(from_currency, to_currency, amount)
+                rate = await self._get_aggregated_rate(from_currency, to_currency, amount)
             else:
-                return await self._get_single_provider_rate(from_currency, to_currency, amount)
+                rate = await self._get_single_provider_rate(from_currency, to_currency, amount)
+            
+            # FTNS fallback: if CoinGecko doesn't have FTNS listed yet,
+            # use the configured internal rate as authoritative source
+            if rate is None and "FTNS" in (from_currency, to_currency):
+                ftns_usd_rate = Decimal(os.getenv("FTNS_USD_RATE", "0.10"))  # $0.10/FTNS default
+                if from_currency == "USD" and to_currency == "FTNS":
+                    return ExchangeRate(
+                        from_currency="USD",
+                        to_currency="FTNS",
+                        rate=Decimal("1") / ftns_usd_rate,
+                        source="internal_oracle"
+                    )
+                elif from_currency == "FTNS" and to_currency == "USD":
+                    return ExchangeRate(
+                        from_currency="FTNS",
+                        to_currency="USD",
+                        rate=ftns_usd_rate,
+                        source="internal_oracle"
+                    )
+            
+            return rate
                 
         except Exception as e:
-            logger.error("Failed to get exchange rate", 
+            logger.error("Failed to get exchange rate",
                         from_currency=from_currency, to_currency=to_currency, error=str(e))
             return None
     
