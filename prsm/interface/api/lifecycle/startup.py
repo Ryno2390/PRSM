@@ -80,6 +80,9 @@ async def startup_sequence(app: FastAPI) -> None:
     # Step 10: Initialize real-time analytics
     await _init_analytics()
 
+    # Step 11: Initialize Web3 event monitoring
+    await _init_web3_monitoring()
+
     logger.info("PRSM API server startup completed successfully")
 
 
@@ -261,3 +264,63 @@ async def _init_analytics() -> None:
             error=str(e)
         )
         # Non-fatal: never block startup due to analytics
+
+
+async def _init_web3_monitoring() -> None:
+    """
+    Initialize blockchain event monitoring for FTNS token.
+
+    Only activates when all three conditions are met:
+    1. WEB3_MONITORING_ENABLED=true
+    2. FTNS_TOKEN_ADDRESS is set (contract deployed)
+    3. web3 library is installed
+
+    Never blocks startup — logs a warning and continues on failure.
+    """
+    import os
+
+    if os.getenv("WEB3_MONITORING_ENABLED", "true").lower() != "true":
+        logger.info("Web3 event monitoring disabled via WEB3_MONITORING_ENABLED")
+        return
+
+    if not os.getenv("FTNS_TOKEN_ADDRESS", "").strip():
+        logger.info(
+            "Web3 event monitoring skipped — FTNS_TOKEN_ADDRESS not configured. "
+            "Set this once the FTNS contract is deployed."
+        )
+        return
+
+    try:
+        from prsm.economy.web3.web3_service import initialize_web3_services
+
+        network = os.getenv("WEB3_NETWORK", "polygon_mumbai")
+        private_key = os.getenv("WALLET_PRIVATE_KEY", "")
+
+        success = await initialize_web3_services(
+            network=network,
+            private_key=private_key if private_key else None
+        )
+
+        if success:
+            logger.info(
+                "Web3 event monitoring started",
+                extra={"network": network}
+            )
+        else:
+            logger.warning(
+                "Web3 event monitoring failed to initialize — "
+                "blockchain events will not be tracked. "
+                "Check RPC URL and contract addresses."
+            )
+
+    except ImportError:
+        logger.info(
+            "Web3 event monitoring skipped — web3 library not installed. "
+            "Install with: pip install 'prsm[blockchain]'"
+        )
+    except Exception as e:
+        logger.warning(
+            "Web3 event monitoring initialization failed — monitoring disabled",
+            error=str(e)
+        )
+        # Never block startup due to blockchain connectivity issues
