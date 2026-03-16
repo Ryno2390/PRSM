@@ -43,13 +43,35 @@ class AggregatedPrice:
 
 
 class PriceOracle:
-    """Base class for price oracle implementations."""
+    """Base class for price oracle implementations with circuit breaker support."""
+    
+    MAX_ERRORS_BEFORE_DISABLE = 5
+    RECOVERY_WINDOW = timedelta(minutes=5)
     
     def __init__(self, source_name: str):
         self.source_name = source_name
         self.is_active = True
         self.error_count = 0
+        self.disabled_at: Optional[datetime] = None
         self.last_success = None
+        self._session: Optional[aiohttp.ClientSession] = None
+        
+    def _record_error(self):
+        """Record error and disable oracle if threshold exceeded."""
+        self.error_count += 1
+        if self.error_count >= self.MAX_ERRORS_BEFORE_DISABLE and self.is_active:
+            self.is_active = False
+            self.disabled_at = datetime.utcnow()
+            logger.warning(f"Oracle {self.source_name} disabled after {self.error_count} errors")
+
+    def _maybe_reenable(self):
+        """Re-enable oracle if recovery window has passed."""
+        if not self.is_active and self.disabled_at:
+            if datetime.utcnow() - self.disabled_at > self.RECOVERY_WINDOW:
+                self.is_active = True
+                self.error_count = 0
+                self.disabled_at = None
+                logger.info(f"Oracle {self.source_name} re-enabled after recovery window")
         
     async def get_price(self, asset: AssetType) -> Optional[PriceQuote]:
         """Get price for asset. Returns None if failed."""
@@ -63,6 +85,14 @@ class PriceOracle:
             if price:
                 results[asset] = price
         return results
+    
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Lazy-initialize a shared session for this oracle instance."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=10)
+            )
+        return self._session
 
 
 class CoinGeckoOracle(PriceOracle):
@@ -70,19 +100,29 @@ class CoinGeckoOracle(PriceOracle):
     
     def __init__(self):
         super().__init__("CoinGecko")
+        import os
         self.base_url = "https://api.coingecko.com/api/v3"
+        self.api_key = os.getenv("COINGECKO_API_KEY", "")
         self.asset_mapping = {
             AssetType.BTC: "bitcoin",
-            AssetType.ETH: "ethereum", 
+            AssetType.ETH: "ethereum",
             AssetType.USDC: "usd-coin",
             AssetType.USDT: "tether",
             AssetType.ADA: "cardano",
             AssetType.SOL: "solana",
-            AssetType.DOT: "polkadot"
+            AssetType.DOT: "polkadot",
+            AssetType.FTNS: os.getenv("FTNS_COINGECKO_ID", "ftns-token"),
         }
+
+    def _get_headers(self) -> dict:
+        """Return API headers, including key if configured."""
+        return {"x-cg-demo-api-key": self.api_key} if self.api_key else {}
         
     async def get_price(self, asset: AssetType) -> Optional[PriceQuote]:
         """Get price from CoinGecko."""
+        
+        # Check if oracle should be re-enabled
+        self._maybe_reenable()
         
         if asset == AssetType.USD:
             return PriceQuote(
@@ -104,29 +144,44 @@ class CoinGeckoOracle(PriceOracle):
                 "include_24hr_vol": "true"
             }
             
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
+            session = await self._get_session()
+            headers = self._get_headers()
+            async with session.get(url, params=params, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    if coin_id in data:
+                        coin_data = data[coin_id]
                         
-                        if coin_id in data:
-                            coin_data = data[coin_id]
-                            
-                            quote = PriceQuote(
-                                source=self.source_name,
-                                asset=asset,
-                                price_usd=Decimal(str(coin_data["usd"])),
-                                timestamp=datetime.utcnow(),
-                                volume_24h=Decimal(str(coin_data.get("usd_24h_vol", 0)))
-                            )
-                            
-                            self.error_count = 0
-                            self.last_success = datetime.utcnow()
-                            return quote
+                        quote = PriceQuote(
+                            source=self.source_name,
+                            asset=asset,
+                            price_usd=Decimal(str(coin_data["usd"])),
+                            timestamp=datetime.utcnow(),
+                            volume_24h=Decimal(str(coin_data.get("usd_24h_vol", 0)))
+                        )
+                        
+                        # Zero-price guard for FTNS
+                        if quote.price_usd == Decimal('0') and asset == AssetType.FTNS:
+                            # FTNS not yet listed on CoinGecko — fall back to internal rate
+                            import os
+                            internal_rate = os.getenv("FTNS_USD_RATE", "")
+                            if internal_rate:
+                                return PriceQuote(
+                                    source="internal_oracle",
+                                    asset=asset,
+                                    price_usd=Decimal(internal_rate),
+                                    timestamp=datetime.utcnow()
+                                )
+                            return None
+                        
+                        self.error_count = 0
+                        self.last_success = datetime.utcnow()
+                        return quote
                         
         except Exception as e:
             logger.warning(f"CoinGecko price fetch failed for {asset}: {e}")
-            self.error_count += 1
+            self._record_error()
             
         return None
 
@@ -136,19 +191,24 @@ class CoinCapOracle(PriceOracle):
     
     def __init__(self):
         super().__init__("CoinCap")
+        import os
         self.base_url = "https://api.coincap.io/v2"
         self.asset_mapping = {
             AssetType.BTC: "bitcoin",
             AssetType.ETH: "ethereum",
-            AssetType.USDC: "usd-coin", 
+            AssetType.USDC: "usd-coin",
             AssetType.USDT: "tether",
             AssetType.ADA: "cardano",
             AssetType.SOL: "solana",
-            AssetType.DOT: "polkadot"
+            AssetType.DOT: "polkadot",
+            AssetType.FTNS: os.getenv("FTNS_COINCAP_ID", "ftns-token"),
         }
     
     async def get_price(self, asset: AssetType) -> Optional[PriceQuote]:
         """Get price from CoinCap."""
+        
+        # Check if oracle should be re-enabled
+        self._maybe_reenable()
         
         if asset == AssetType.USD:
             return PriceQuote(
@@ -165,29 +225,29 @@ class CoinCapOracle(PriceOracle):
             asset_id = self.asset_mapping[asset]
             url = f"{self.base_url}/assets/{asset_id}"
             
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        data = await response.json()
+            session = await self._get_session()
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    if "data" in data:
+                        asset_data = data["data"]
                         
-                        if "data" in data:
-                            asset_data = data["data"]
-                            
-                            quote = PriceQuote(
-                                source=self.source_name,
-                                asset=asset,
-                                price_usd=Decimal(asset_data["priceUsd"]),
-                                timestamp=datetime.utcnow(),
-                                volume_24h=Decimal(asset_data.get("volumeUsd24Hr", "0"))
-                            )
-                            
-                            self.error_count = 0
-                            self.last_success = datetime.utcnow()
-                            return quote
+                        quote = PriceQuote(
+                            source=self.source_name,
+                            asset=asset,
+                            price_usd=Decimal(asset_data["priceUsd"]),
+                            timestamp=datetime.utcnow(),
+                            volume_24h=Decimal(asset_data.get("volumeUsd24Hr", "0"))
+                        )
+                        
+                        self.error_count = 0
+                        self.last_success = datetime.utcnow()
+                        return quote
                             
         except Exception as e:
             logger.warning(f"CoinCap price fetch failed for {asset}: {e}")
-            self.error_count += 1
+            self._record_error()
             
         return None
 
@@ -206,10 +266,13 @@ class BitstampOracle(PriceOracle):
     async def get_price(self, asset: AssetType) -> Optional[PriceQuote]:
         """Get price from Bitstamp."""
         
+        # Check if oracle should be re-enabled
+        self._maybe_reenable()
+        
         if asset == AssetType.USD:
             return PriceQuote(
                 source=self.source_name,
-                asset=asset, 
+                asset=asset,
                 price_usd=Decimal("1.0"),
                 timestamp=datetime.utcnow()
             )
@@ -221,31 +284,31 @@ class BitstampOracle(PriceOracle):
             pair = self.supported_pairs[asset]
             url = f"{self.base_url}/ticker/{pair}"
             
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        data = await response.json()
+            session = await self._get_session()
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    
+                    quote = PriceQuote(
+                        source=self.source_name,
+                        asset=asset,
+                        price_usd=Decimal(data["last"]),
+                        timestamp=datetime.utcnow(),
+                        volume_24h=Decimal(data.get("volume", "0")),
+                        bid=Decimal(data.get("bid", "0")),
+                        ask=Decimal(data.get("ask", "0"))
+                    )
+                    
+                    if quote.bid and quote.ask:
+                        quote.spread = quote.ask - quote.bid
                         
-                        quote = PriceQuote(
-                            source=self.source_name,
-                            asset=asset,
-                            price_usd=Decimal(data["last"]),
-                            timestamp=datetime.utcnow(),
-                            volume_24h=Decimal(data.get("volume", "0")),
-                            bid=Decimal(data.get("bid", "0")),
-                            ask=Decimal(data.get("ask", "0"))
-                        )
-                        
-                        if quote.bid and quote.ask:
-                            quote.spread = quote.ask - quote.bid
-                            
-                        self.error_count = 0
-                        self.last_success = datetime.utcnow()
-                        return quote
+                    self.error_count = 0
+                    self.last_success = datetime.utcnow()
+                    return quote
                         
         except Exception as e:
             logger.warning(f"Bitstamp price fetch failed for {asset}: {e}")
-            self.error_count += 1
+            self._record_error()
             
         return None
 
@@ -292,6 +355,19 @@ class PriceAggregator:
                 valid_quotes.append(result)
         
         if not valid_quotes:
+            # Last-resort fallback for FTNS specifically
+            if asset == AssetType.FTNS:
+                import os
+                internal_rate = os.getenv("FTNS_USD_RATE", "")
+                if internal_rate:
+                    return AggregatedPrice(
+                        asset=asset,
+                        price_usd=Decimal(internal_rate),
+                        confidence_score=Decimal("0.5"),
+                        sources_used=["internal_oracle"],
+                        price_range=(Decimal(internal_rate), Decimal(internal_rate)),
+                        last_updated=datetime.utcnow()
+                    )
             logger.error(f"No valid price quotes for {asset}")
             return None
         
