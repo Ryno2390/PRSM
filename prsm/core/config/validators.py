@@ -257,15 +257,36 @@ class SecurityConfigValidator(BaseValidator):
     
     def validate_authentication(self, config, result: ValidationResult):
         """Validate authentication settings"""
-        
-        # JWT secret strength
+        import os
+        env = os.getenv("PRSM_ENV", "development").lower()
+
         if len(config.jwt_secret_key) < 32:
             result.add_error("JWT secret key must be at least 32 characters")
         elif len(config.jwt_secret_key) < 64:
-            result.add_warning("JWT secret key should be at least 64 characters for better security")
-        
+            if env == "production":
+                result.add_error(
+                    f"JWT secret key is {len(config.jwt_secret_key)} characters — "
+                    "production requires at least 64 characters. "
+                    "Generate: openssl rand -hex 32"
+                )
+            else:
+                result.add_warning(
+                    "JWT secret key should be at least 64 characters for better security"
+                )
+
+        # Block known-weak defaults in production
+        weak_defaults = {
+            "change-me-to-a-random-string-at-least-32-chars",
+            "test-secret-key-at-least-32-characters-long",
+        }
+        if env == "production" and config.jwt_secret_key in weak_defaults:
+            result.add_error(
+                "JWT secret key is using a known-weak placeholder value. "
+                "Set to a cryptographically random value: openssl rand -hex 32"
+            )
+
         # Token expiry
-        if config.jwt_expiry_hours > 168:  # 7 days
+        if config.jwt_expiry_hours > 168:
             result.add_warning("Long JWT expiry may pose security risk")
         elif config.jwt_expiry_hours < 1:
             result.add_warning("Very short JWT expiry may impact user experience")

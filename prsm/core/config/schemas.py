@@ -228,6 +228,13 @@ class DatabaseConfig(BaseConfigSchema):
         return v
 
 
+# Known-weak JWT secret defaults that must never be used in production
+_WEAK_JWT_DEFAULTS = {
+    "change-me-to-a-random-string-at-least-32-chars",
+    "test-secret-key-at-least-32-characters-long",
+}
+
+
 class SecurityConfig(BaseConfigSchema):
     """Security configuration"""
     
@@ -282,6 +289,22 @@ class SecurityConfig(BaseConfigSchema):
     def validate_jwt_secret(cls, v):
         if len(v) < 32:
             raise ValueError("JWT secret key must be at least 32 characters long")
+
+        env = os.getenv("PRSM_ENV", "development").lower()
+        if env == "production":
+            if v in _WEAK_JWT_DEFAULTS or v.startswith("change-me") or v.startswith("test-"):
+                raise ValueError(
+                    "FATAL: JWT secret key is a known-weak placeholder. "
+                    "Set PRSM_SECRET_KEY to a cryptographically random value: "
+                    "openssl rand -hex 32"
+                )
+            if len(v) < 64:
+                raise ValueError(
+                    f"FATAL: JWT secret key is {len(v)} characters. "
+                    "Production requires at least 64 characters. "
+                    "Generate: openssl rand -hex 32"
+                )
+
         return v
 
 

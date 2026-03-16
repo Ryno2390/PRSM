@@ -165,10 +165,38 @@ async def _init_security_systems() -> None:
     """Initialize security monitoring and rate limiting."""
     try:
         from prsm.core.redis_client import redis_manager
+        import os
 
-        # Initialize enhanced authentication
-        from prsm.core.security.enhanced_authentication import initialize_auth_system
+        # === Pre-flight JWT secret enforcement ===
         jwt_secret = settings.jwt_secret or settings.secret_key
+        env = os.getenv("PRSM_ENV", "development").lower()
+
+        _WEAK_DEFAULTS = {
+            "test-secret-key-at-least-32-characters-long",
+            "change-me-to-a-random-string-at-least-32-chars",
+        }
+
+        if not jwt_secret:
+            raise RuntimeError(
+                "FATAL: No JWT secret configured. "
+                "Set PRSM_SECRET_KEY in your environment."
+            )
+
+        if env == "production":
+            if jwt_secret in _WEAK_DEFAULTS or jwt_secret.startswith("change-me") or jwt_secret.startswith("test-"):
+                raise RuntimeError(
+                    "FATAL: JWT secret is a known-weak placeholder. "
+                    "Set PRSM_SECRET_KEY to a random value: openssl rand -hex 32"
+                )
+            if len(jwt_secret) < 64:
+                raise RuntimeError(
+                    f"FATAL: JWT secret is {len(jwt_secret)} characters. "
+                    "Production requires at least 64 characters. "
+                    "Generate: openssl rand -hex 32"
+                )
+
+        # === Existing initialization (unchanged) ===
+        from prsm.core.security.enhanced_authentication import initialize_auth_system
         await initialize_auth_system(redis_manager.client, jwt_secret)
         logger.info("Enhanced authentication system initialized")
 
