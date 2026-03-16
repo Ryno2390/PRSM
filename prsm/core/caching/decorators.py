@@ -238,45 +238,75 @@ def embedding_cache(
 
 
 def api_cache(
-    ttl_seconds: int = 86400,  # 24 hours
+    ttl_seconds: int = 86400,
     include_auth: bool = False,
-    rate_limit_key: Optional[str] = None
+    rate_limit_key: Optional[str] = None,
+    rate_limit_max_calls: int = 60,
+    rate_limit_window_seconds: int = 60
 ) -> Callable[[F], F]:
     """
     Specialized cache decorator for API calls.
-    
+
     Args:
         ttl_seconds: Cache TTL (default 24 hours)
         include_auth: Whether to include auth info in cache key
-        rate_limit_key: Key for rate limiting (optional)
-        
-    Returns:
-        Decorated function with API-specific caching
-        
-    Example:
-        @api_cache(ttl_seconds=43200, rate_limit_key="anthropic_api")
-        async def call_anthropic_api(query: str, model: str) -> Dict:
-            # Expensive API call
-            return api_response
+        rate_limit_key: Named rate limit bucket. When set, calls that exceed
+                        rate_limit_max_calls within rate_limit_window_seconds
+                        are blocked (returns cached result if available, otherwise None).
+        rate_limit_max_calls: Maximum calls allowed per window (default 60)
+        rate_limit_window_seconds: Sliding window size in seconds (default 60)
     """
     exclude_args = []
     if not include_auth:
         exclude_args.extend(['api_key', 'auth', 'token', 'credentials'])
-    
-    def condition(*args, **kwargs):
-        # Check rate limiting if specified
-        if rate_limit_key:
-            # TODO: Implement rate limiting check
-            pass
-        return True
-    
-    return async_cache_result(
-        cache_name="api_response",
-        ttl_seconds=ttl_seconds,
-        key_prefix="api_call",
-        exclude_args=exclude_args,
-        condition=condition
-    )
+
+    def decorator(func: F) -> F:
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Generate cache key first (needed for both cache lookup and storing)
+            cache_key = _generate_cache_key(
+                func, args, kwargs, "api_call",
+                True, True, exclude_args
+            )
+
+            cache_manager = get_cache_manager()
+
+            # Rate limit check: if limited, return cached value or None
+            if rate_limit_key:
+                from .cache_manager import get_cache_rate_limiter
+                limiter = get_cache_rate_limiter(
+                    max_calls=rate_limit_max_calls,
+                    window_seconds=rate_limit_window_seconds
+                )
+                if not limiter.is_allowed(rate_limit_key):
+                    cached = await cache_manager.get("api_response", cache_key)
+                    if cached is not None:
+                        logger.debug(
+                            "Rate limited — serving stale cache for '%s'",
+                            rate_limit_key
+                        )
+                        return cached
+                    logger.warning(
+                        "Rate limited for '%s' and no cache available — "
+                        "returning None",
+                        rate_limit_key
+                    )
+                    return None
+
+            # Normal cache lookup
+            cached = await cache_manager.get("api_response", cache_key)
+            if cached is not None:
+                return cached
+
+            # Execute function and cache result
+            result = await func(*args, **kwargs)
+            if result is not None:
+                await cache_manager.set("api_response", cache_key, result, ttl_seconds)
+            return result
+
+        return wrapper
+
+    return decorator
 
 
 def db_cache(
@@ -347,7 +377,6 @@ def invalidate_cache(
                 if clear_all:
                     await cache_manager.invalidate(cache_name)
                 elif key_pattern:
-                    # TODO: Implement pattern-based invalidation
                     await cache_manager.invalidate(cache_name, key_pattern)
                 else:
                     cache_key = _generate_cache_key(func, args, kwargs)
