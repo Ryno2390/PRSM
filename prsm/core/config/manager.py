@@ -18,7 +18,7 @@ from functools import lru_cache
 import weakref
 
 from .schemas import PRSMConfig, BaseConfigSchema
-from .loaders import ConfigLoader, EnvironmentConfigLoader, FileConfigLoader
+from .loaders import ConfigLoader, EnvironmentConfigLoader, FileConfigLoader, DatabaseConfigLoader
 from .validators import ConfigValidator
 from ..errors.exceptions import ConfigurationError
 
@@ -417,6 +417,69 @@ class ConfigManager:
             "errors": validation_result.errors,
             "warnings": validation_result.warnings
         }
+    
+    def register_database_loader(
+        self,
+        connection_string: str,
+        table_name: str = "configuration"
+    ) -> None:
+        """
+        Register a database configuration loader.
+        
+        Args:
+            connection_string: SQLAlchemy database URL.
+            table_name: Name of the configuration table.
+        """
+        with self._lock:
+            self._loaders['database'] = DatabaseConfigLoader(connection_string, table_name)
+            logger.info("Registered database configuration loader")
+    
+    async def load_from_database(
+        self,
+        connection_string: str,
+        table_name: str = "configuration",
+        merge: bool = True,
+        key_prefix: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Load configuration from database and optionally merge with existing config.
+        
+        Args:
+            connection_string: SQLAlchemy database URL.
+            table_name: Name of the configuration table.
+            merge: Whether to merge with existing configuration.
+            key_prefix: Optional dot-notation prefix to load a subset.
+            
+        Returns:
+            Dict of configuration values from database.
+        """
+        loader = DatabaseConfigLoader(connection_string, table_name)
+        query_params = {"key_prefix": key_prefix} if key_prefix else None
+        
+        db_config = await loader.load_async(query_params)
+        
+        if merge and self._config:
+            with self._lock:
+                current_data = self._config.dict()
+                merged_data = self._deep_merge(current_data, db_config)
+                self._config = PRSMConfig(**merged_data)
+                self._last_reload_time = datetime.now(timezone.utc)
+                self._notify_subscribers('config_loaded_from_database')
+                logger.info("Merged database configuration with existing config")
+        
+        return db_config
+    
+    def _deep_merge(self, base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
+        """Deep merge two dictionaries."""
+        result = base.copy()
+        
+        for key, value in overlay.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = self._deep_merge(result[key], value)
+            else:
+                result[key] = value
+        
+        return result
 
 
 # Global configuration manager instance

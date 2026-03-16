@@ -286,24 +286,188 @@ class DatabaseConfigLoader(ConfigLoader):
         self.table_name = table_name
     
     def load(self, query_params: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
-        """Load configuration from database"""
-        
+        """
+        Load configuration from database.
+
+        Reads all rows from the configuration table and reconstructs the
+        nested configuration dictionary. Returns {} gracefully if the table
+        does not yet exist (pre-migration environments).
+
+        Args:
+            query_params: Optional dict with 'key_prefix' to filter rows
+                          (e.g., {'key_prefix': 'nwtn'} loads only nwtn.* keys).
+        """
         try:
-            # This would require a database connection library
-            # For now, we'll raise NotImplementedError
-            raise NotImplementedError("Database configuration loader not yet implemented")
-            
-            # Implementation would look something like:
-            # with get_database_connection(self.connection_string) as conn:
-            #     cursor = conn.cursor()
-            #     cursor.execute(f"SELECT key, value FROM {self.table_name}")
-            #     config = {}
-            #     for key, value in cursor.fetchall():
-            #         config[key] = json.loads(value) if value.startswith(('{', '[')) else value
-            #     return config
-            
+            from sqlalchemy import create_engine, text, inspect as sa_inspect
+
+            engine = create_engine(
+                self.connection_string,
+                pool_pre_ping=True,
+                connect_args={"connect_timeout": 5}
+            )
+
+            with engine.connect() as conn:
+                # Graceful no-op when table doesn't exist (pre-migration)
+                inspector = sa_inspect(engine)
+                if self.table_name not in inspector.get_table_names():
+                    logger.debug(
+                        "Config table '%s' not found — returning empty config. "
+                        "Run 'alembic upgrade head' to create it.",
+                        self.table_name
+                    )
+                    return {}
+
+                # Build query — optionally filter by key prefix
+                key_prefix = (query_params or {}).get("key_prefix", "")
+                if key_prefix:
+                    rows = conn.execute(
+                        text(f"SELECT key, value, value_type "
+                             f"FROM {self.table_name} "
+                             f"WHERE key LIKE :prefix ORDER BY key"),
+                        {"prefix": f"{key_prefix}%"}
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        text(f"SELECT key, value, value_type "
+                             f"FROM {self.table_name} ORDER BY key")
+                    ).fetchall()
+
+            config: Dict[str, Any] = {}
+            for key, value, value_type in rows:
+                parsed = self._parse_typed_value(value, value_type or "string")
+                self._set_nested_key(config, key, parsed)
+
+            logger.info(
+                "Loaded %d configuration entries from database table '%s'",
+                len(rows), self.table_name
+            )
+            return config
+
+        except ImportError:
+            raise RuntimeError(
+                "DatabaseConfigLoader requires SQLAlchemy. "
+                "Install with: pip install sqlalchemy"
+            )
         except Exception as e:
-            raise RuntimeError(f"Failed to load configuration from database: {e}") from e
+            raise RuntimeError(
+                f"Failed to load configuration from database: {e}"
+            ) from e
+
+    def _parse_typed_value(self, value: str, value_type: str) -> Any:
+        """Deserialise a stored value using its declared type."""
+        try:
+            if value_type == "int":
+                return int(value)
+            elif value_type == "float":
+                return float(value)
+            elif value_type == "bool":
+                return value.lower() in ("true", "yes", "1", "on")
+            elif value_type == "json":
+                return json.loads(value)
+            else:  # "string" and unknown types
+                return value
+        except (ValueError, json.JSONDecodeError) as e:
+            logger.warning(
+                "Could not parse config value '%s' as %s — using raw string: %s",
+                value, value_type, e
+            )
+            return value
+
+    def _set_nested_key(self, config: Dict[str, Any], dotted_key: str, value: Any):
+        """Set a value in a nested dict using dot-notation key."""
+        parts = dotted_key.split(".")
+        current = config
+        for part in parts[:-1]:
+            if part not in current or not isinstance(current[part], dict):
+                current[part] = {}
+            current = current[part]
+        current[parts[-1]] = value
+
+    async def load_async(
+        self,
+        query_params: Optional[Dict[str, Any]] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Async variant of load() for use in async contexts.
+
+        Prefers asyncpg for minimal overhead; falls back to running
+        the synchronous SQLAlchemy loader in a thread-pool executor
+        when asyncpg is not available.
+        """
+        import asyncio
+
+        # Prefer asyncpg (already a core PRSM dependency)
+        try:
+            import asyncpg
+            return await self._load_via_asyncpg(query_params)
+        except ImportError:
+            pass
+
+        # Fall back to running sync load() in executor
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: self.load(query_params))
+
+    async def _load_via_asyncpg(
+        self,
+        query_params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Load config using asyncpg (native async PostgreSQL driver)."""
+        import asyncpg
+
+        # Convert SQLAlchemy-style URL to asyncpg format if needed
+        conn_str = self.connection_string
+        if conn_str.startswith("postgresql+asyncpg://"):
+            conn_str = conn_str.replace("postgresql+asyncpg://", "postgresql://")
+        elif conn_str.startswith("postgresql+psycopg2://"):
+            conn_str = conn_str.replace("postgresql+psycopg2://", "postgresql://")
+
+        try:
+            conn = await asyncpg.connect(conn_str, timeout=5)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to connect to database for config loading: {e}"
+            ) from e
+
+        try:
+            # Check if table exists
+            table_exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
+                "WHERE table_name = $1)",
+                self.table_name
+            )
+            if not table_exists:
+                logger.debug(
+                    "Config table '%s' not found — returning empty config.",
+                    self.table_name
+                )
+                return {}
+
+            key_prefix = (query_params or {}).get("key_prefix", "")
+            if key_prefix:
+                rows = await conn.fetch(
+                    f"SELECT key, value, value_type FROM {self.table_name} "
+                    f"WHERE key LIKE $1 ORDER BY key",
+                    f"{key_prefix}%"
+                )
+            else:
+                rows = await conn.fetch(
+                    f"SELECT key, value, value_type FROM {self.table_name} ORDER BY key"
+                )
+
+            config: Dict[str, Any] = {}
+            for row in rows:
+                parsed = self._parse_typed_value(row["value"], row["value_type"] or "string")
+                self._set_nested_key(config, row["key"], parsed)
+
+            logger.info(
+                "Loaded %d configuration entries from database (asyncpg).",
+                len(rows)
+            )
+            return config
+
+        finally:
+            await conn.close()
 
 
 class CompositeConfigLoader(ConfigLoader):
@@ -385,11 +549,46 @@ def load_remote_config(url: str, **kwargs) -> Dict[str, Any]:
     return loader.load(url)
 
 
-def create_composite_loader() -> CompositeConfigLoader:
-    """Create a composite loader with common loaders"""
+def load_database_config(
+    connection_string: str,
+    table_name: str = "configuration",
+    key_prefix: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Load configuration from database (synchronous).
+
+    Args:
+        connection_string: SQLAlchemy database URL.
+        table_name: Name of the configuration table.
+        key_prefix: Optional dot-notation prefix to load a subset
+                    (e.g., 'nwtn' loads only nwtn.* keys).
+
+    Returns:
+        Dict of configuration values.
+    """
+    loader = DatabaseConfigLoader(connection_string, table_name)
+    query_params = {"key_prefix": key_prefix} if key_prefix else None
+    return loader.load(query_params)
+
+
+def create_composite_loader(
+    database_connection_string: Optional[str] = None
+) -> CompositeConfigLoader:
+    """Create a composite loader with common loaders.
+    
+    Args:
+        database_connection_string: Optional SQLAlchemy database URL.
+            If provided, includes a database loader in the composite.
+    
+    Returns:
+        CompositeConfigLoader with file, environment, remote, and optionally
+        database loaders configured.
+    """
     loaders = {
         'file': FileConfigLoader(),
         'environment': EnvironmentConfigLoader(),
         'remote': RemoteConfigLoader()
     }
+    if database_connection_string:
+        loaders['database'] = DatabaseConfigLoader(database_connection_string)
     return CompositeConfigLoader(loaders)
