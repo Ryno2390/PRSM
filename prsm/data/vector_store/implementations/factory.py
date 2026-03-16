@@ -79,19 +79,19 @@ def get_available_store_types() -> list[VectorStoreType]:
     try:
         import pymilvus
         available.append(VectorStoreType.MILVUS)
-    except ImportError:
+    except Exception:
         pass
     
     try:
         import qdrant_client
         available.append(VectorStoreType.QDRANT)
-    except ImportError:
+    except Exception:
         pass
     
     try:
         import pinecone
         available.append(VectorStoreType.PINECONE)
-    except ImportError:
+    except Exception:
         pass
     
     return available

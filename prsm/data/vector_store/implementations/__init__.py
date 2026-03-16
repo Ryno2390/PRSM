@@ -1,38 +1,61 @@
 """
 Vector Store Implementations
 
-Concrete implementations of the PRSM vector store interface for different
-database backends.
+Concrete implementations of the PRSM vector store interface.
+Each backend is lazily imported so missing optional dependencies
+don't break the import of other backends.
 """
 
 from .pgvector_store import PgVectorStore
-from .factory import create_vector_store
+from .factory import create_vector_store, get_available_store_types
 
-# Stub classes for missing implementations (will be implemented in Phase 1B)
-class MilvusVectorStore:
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError("Milvus implementation coming in Phase 1B")
 
-class QdrantVectorStore:
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError("Qdrant implementation coming in Phase 1B")
-
-class PineconeVectorStore:
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError("Pinecone implementation coming in Phase 1A")
-
-# Lazy imports for optional dependencies
-def get_milvus_store():
-    """Lazy import for Milvus (requires pymilvus)"""
+def _get_milvus():
+    from .milvus_store import MilvusVectorStore
     return MilvusVectorStore
 
-def get_qdrant_store():
-    """Lazy import for Qdrant (requires qdrant-client)"""
+
+def _get_qdrant():
+    from .qdrant_store import QdrantVectorStore
     return QdrantVectorStore
 
-def get_pinecone_store():
-    """Lazy import for Pinecone (requires pinecone-client)"""
+
+def _get_pinecone():
+    from .pinecone_store import PineconeVectorStore
     return PineconeVectorStore
+
+
+# Convenience aliases — these trigger the lazy import at access time
+class MilvusVectorStore:
+    """Proxy that loads the real implementation only when instantiated."""
+    def __new__(cls, *args, **kwargs):
+        return _get_milvus()(*args, **kwargs)
+
+
+class QdrantVectorStore:
+    """Proxy that loads the real implementation only when instantiated."""
+    def __new__(cls, *args, **kwargs):
+        return _get_qdrant()(*args, **kwargs)
+
+
+class PineconeVectorStore:
+    """Proxy that loads the real implementation only when instantiated."""
+    def __new__(cls, *args, **kwargs):
+        return _get_pinecone()(*args, **kwargs)
+
+
+# Legacy helper functions (kept for backwards compatibility)
+def get_milvus_store():
+    return _get_milvus()
+
+
+def get_qdrant_store():
+    return _get_qdrant()
+
+
+def get_pinecone_store():
+    return _get_pinecone()
+
 
 __all__ = [
     "PgVectorStore",
@@ -40,7 +63,8 @@ __all__ = [
     "QdrantVectorStore",
     "PineconeVectorStore",
     "create_vector_store",
+    "get_available_store_types",
     "get_milvus_store",
-    "get_qdrant_store", 
-    "get_pinecone_store"
+    "get_qdrant_store",
+    "get_pinecone_store",
 ]
