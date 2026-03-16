@@ -241,7 +241,20 @@ class SecurityConfig(BaseConfigSchema):
     enable_rate_limiting: bool = Field(True, description="Enable API rate limiting")
     rate_limit_per_minute: int = Field(100, ge=10, le=10000, description="Requests per minute limit")
     enable_cors: bool = Field(True, description="Enable CORS")
-    allowed_origins: List[str] = Field(["*"], description="Allowed CORS origins")
+    allowed_origins: List[str] = Field(
+        ["https://prsm.ai", "https://app.prsm.ai"],
+        description="Allowed CORS origins. Never use ['*'] in production."
+    )
+    
+    @validator('allowed_origins')
+    def validate_allowed_origins(cls, v, values):
+        env = os.getenv("PRSM_ENV", "development").lower()
+        if "*" in v and env == "production":
+            raise ValueError(
+                "Wildcard CORS origin ['*'] is not permitted in production. "
+                "Set CORS_ORIGINS to a comma-separated list of specific allowed origins."
+            )
+        return v
     
     # Input validation
     max_request_size_mb: int = Field(10, ge=1, le=100, description="Max request size in MB")
@@ -536,6 +549,37 @@ class PRSMConfig(BaseConfigSchema):
     @property
     def embedding_dimensions(self):
         return 1536
+
+    # === Blockchain configuration properties ===
+    @property
+    def ethereum_rpc_url(self):
+        """Return Ethereum RPC URL for blockchain integration."""
+        return None  # Will use default in FTNSOracle
+
+    @property
+    def polygon_rpc_url(self):
+        """Return Polygon RPC URL for blockchain integration."""
+        return None  # Will use default in FTNSOracle
+
+    @property
+    def bsc_rpc_url(self):
+        """Return BSC RPC URL for blockchain integration."""
+        return None  # Will use default in FTNSOracle
+
+    @property
+    def ftns_ethereum_contract(self):
+        """Return FTNS Ethereum contract address."""
+        return None  # No default contract address
+
+    @property
+    def ftns_polygon_contract(self):
+        """Return FTNS Polygon contract address."""
+        return None  # No default contract address
+
+    @property
+    def ftns_bsc_contract(self):
+        """Return FTNS BSC contract address."""
+        return None  # No default contract address
 
     def validate_required_config(self):
         """Validate required configuration, returns list of missing items."""

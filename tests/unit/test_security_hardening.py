@@ -1072,5 +1072,89 @@ class TestSecurityIntegration:
         del os.environ["ENCRYPTION_KEY"]
 
 
+class TestCORSSecurityValidation:
+    """Tests for CORS security validation"""
+
+    def test_cors_wildcard_blocked_in_production(self):
+        """Test that SecurityConfig with allowed_origins=['*'] raises ValueError in production"""
+        from prsm.core.config.schemas import SecurityConfig
+        
+        # Save original env
+        original_env = os.environ.get("PRSM_ENV")
+        
+        try:
+            # Set production environment
+            os.environ["PRSM_ENV"] = "production"
+            
+            # This should raise ValueError because wildcard is not allowed in production
+            with pytest.raises(ValueError) as exc_info:
+                SecurityConfig(allowed_origins=["*"])
+            
+            assert "Wildcard CORS origin" in str(exc_info.value)
+            assert "not permitted in production" in str(exc_info.value)
+        finally:
+            # Restore original env
+            if original_env is not None:
+                os.environ["PRSM_ENV"] = original_env
+            elif "PRSM_ENV" in os.environ:
+                del os.environ["PRSM_ENV"]
+
+    def test_configure_cors_uses_env_var(self):
+        """Test that configure_cors() uses CORS_ORIGINS environment variable"""
+        from prsm.core.security.middleware import configure_cors
+        
+        # Save original env
+        original_cors = os.environ.get("CORS_ORIGINS")
+        
+        try:
+            # Set CORS_ORIGINS env var
+            os.environ["CORS_ORIGINS"] = "https://test.example.com"
+            
+            # Call configure_cors
+            result = configure_cors()
+            
+            # Assert result contains only the env var origin
+            assert result["allow_origins"] == ["https://test.example.com"]
+            assert result["allow_credentials"] is True
+            assert "GET" in result["allow_methods"]
+            assert "Authorization" in result["allow_headers"]
+        finally:
+            # Restore original env
+            if original_cors is not None:
+                os.environ["CORS_ORIGINS"] = original_cors
+            elif "CORS_ORIGINS" in os.environ:
+                del os.environ["CORS_ORIGINS"]
+
+    def test_configure_cors_no_wildcard_in_production(self):
+        """Test that configure_cors() raises RuntimeError with wildcard in production"""
+        from prsm.core.security.middleware import configure_cors
+        
+        # Save original env vars
+        original_env = os.environ.get("PRSM_ENV")
+        original_cors = os.environ.get("CORS_ORIGINS")
+        
+        try:
+            # Set production environment and wildcard CORS
+            os.environ["PRSM_ENV"] = "production"
+            os.environ["CORS_ORIGINS"] = "*"
+            
+            # This should raise RuntimeError
+            with pytest.raises(RuntimeError) as exc_info:
+                configure_cors()
+            
+            assert "Wildcard CORS origin is not permitted outside development" in str(exc_info.value)
+        finally:
+            # Restore original env vars
+            if original_env is not None:
+                os.environ["PRSM_ENV"] = original_env
+            elif "PRSM_ENV" in os.environ:
+                del os.environ["PRSM_ENV"]
+            
+            if original_cors is not None:
+                os.environ["CORS_ORIGINS"] = original_cors
+            elif "CORS_ORIGINS" in os.environ:
+                del os.environ["CORS_ORIGINS"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
