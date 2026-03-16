@@ -104,6 +104,87 @@ class CacheStats:
         if self.total_requests > 0:
             self.hit_rate = self.cache_hits / self.total_requests
 
+class CacheRateLimiter:
+    """
+    Sliding-window rate limiter backed by the in-memory cache.
+
+    Used by the @api_cache decorator's rate_limit_key parameter to
+    protect expensive operations (e.g. external API calls) from being
+    called too frequently, independent of HTTP-level rate limiting.
+
+    Default: 60 calls per 60-second window per rate_limit_key.
+    """
+
+    def __init__(
+        self,
+        max_calls: int = 60,
+        window_seconds: int = 60
+    ):
+        self.max_calls = max_calls
+        self.window_seconds = window_seconds
+        # Tracks [timestamp, timestamp, ...] per key
+        self._windows: Dict[str, list] = {}
+        self._lock = threading.Lock()
+
+    def is_allowed(self, rate_limit_key: str) -> bool:
+        """
+        Return True if the call is within rate limits, False if throttled.
+        Thread-safe sliding window implementation.
+        """
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+
+        with self._lock:
+            timestamps = self._windows.get(rate_limit_key, [])
+
+            # Drop timestamps outside the window
+            timestamps = [t for t in timestamps if t > cutoff]
+
+            if len(timestamps) >= self.max_calls:
+                logger.debug(
+                    "Cache rate limit exceeded for key '%s': "
+                    "%d/%d calls in last %ds",
+                    rate_limit_key, len(timestamps),
+                    self.max_calls, self.window_seconds
+                )
+                self._windows[rate_limit_key] = timestamps
+                return False
+
+            timestamps.append(now)
+            self._windows[rate_limit_key] = timestamps
+            return True
+
+    def get_remaining(self, rate_limit_key: str) -> int:
+        """Return remaining allowed calls in the current window."""
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+
+        with self._lock:
+            timestamps = self._windows.get(rate_limit_key, [])
+            active = [t for t in timestamps if t > cutoff]
+            return max(0, self.max_calls - len(active))
+
+    def reset(self, rate_limit_key: str) -> None:
+        """Clear rate limit state for a key (for testing or admin use)."""
+        with self._lock:
+            self._windows.pop(rate_limit_key, None)
+
+
+# Module-level singleton — shared across all @api_cache decorated functions
+_cache_rate_limiter: Optional[CacheRateLimiter] = None
+
+
+def get_cache_rate_limiter(
+    max_calls: int = 60,
+    window_seconds: int = 60
+) -> CacheRateLimiter:
+    """Get or create the global CacheRateLimiter."""
+    global _cache_rate_limiter
+    if _cache_rate_limiter is None:
+        _cache_rate_limiter = CacheRateLimiter(max_calls, window_seconds)
+    return _cache_rate_limiter
+
+
 class CacheManager:
     """Multi-tier cache manager with performance monitoring"""
     
@@ -283,27 +364,106 @@ class CacheManager:
                 return False
             
             if key is None:
-                # Clear entire cache
+                # Clear entire cache (existing behaviour)
                 if hasattr(cache, 'clear_async'):
                     await cache.clear_async()
                 else:
                     cache.clear()
-                logger.info(f"Cleared entire cache: {cache_name}")
+                logger.info("Cleared entire cache: %s", cache_name)
+
+            elif any(c in key for c in ('*', '?', '[', ']')):
+                # ── NEW: key looks like a glob pattern — delegate ─────────
+                await self.invalidate_by_pattern(cache_name, key)
+
             else:
-                # Remove specific key
+                # Remove specific exact key (existing behaviour)
                 cache_key = self._generate_key(key)
                 if hasattr(cache, 'delete_async'):
                     await cache.delete_async(cache_key)
                 else:
                     cache.delete(cache_key)
-                logger.debug(f"Invalidated cache key: {cache_name}:{cache_key[:16]}...")
-            
+                logger.debug("Invalidated cache key: %s:%s...", cache_name, cache_key[:16])
+
             self._notify_subscribers('cache_invalidate', cache_name, key)
             return True
-            
+
         except Exception as e:
-            logger.error(f"Cache invalidation error for {cache_name}: {e}")
+            logger.error("Cache invalidation error for %s: %s", cache_name, e)
             return False
+    
+    async def invalidate_by_pattern(
+        self,
+        cache_name: str,
+        pattern: str
+    ) -> int:
+        """
+        Invalidate all cache keys matching a fnmatch-style pattern.
+
+        Args:
+            cache_name: Name of the cache to search.
+            pattern: fnmatch glob pattern, e.g. "user_*", "session_abc?",
+                     "embedding_[0-9]*".
+
+        Returns:
+            Number of keys invalidated.
+
+        Example:
+            # Invalidate all user-related entries when a user record changes
+            await cache_manager.invalidate_by_pattern("database", "user_*")
+        """
+        import fnmatch
+
+        try:
+            cache = self.get_cache(cache_name)
+            if cache is None:
+                logger.warning("Cache '%s' not found for pattern invalidation", cache_name)
+                return 0
+
+            # ── Memory cache: iterate internal dict ──────────────────────────
+            if hasattr(cache, '_cache') and isinstance(cache._cache, dict):
+                matching_keys = [
+                    k for k in list(cache._cache.keys())
+                    if fnmatch.fnmatch(k, pattern)
+                ]
+                for key in matching_keys:
+                    if hasattr(cache, 'delete_async'):
+                        await cache.delete_async(key)
+                    else:
+                        cache.delete(key)
+                logger.debug(
+                    "Pattern invalidation '%s' on '%s': removed %d keys",
+                    pattern, cache_name, len(matching_keys)
+                )
+                self._notify_subscribers('cache_invalidate_pattern', cache_name, pattern)
+                return len(matching_keys)
+
+            # ── Redis cache: use SCAN with pattern ────────────────────────────
+            if hasattr(cache, '_redis') and cache._redis is not None:
+                redis_client = cache._redis
+                deleted = 0
+                # SCAN is non-blocking; preferred over KEYS in production
+                async for key in redis_client.scan_iter(match=pattern, count=100):
+                    await redis_client.delete(key)
+                    deleted += 1
+                logger.debug(
+                    "Redis pattern invalidation '%s' on '%s': removed %d keys",
+                    pattern, cache_name, deleted
+                )
+                self._notify_subscribers('cache_invalidate_pattern', cache_name, pattern)
+                return deleted
+
+            # ── Fallback: exact key removal (treats pattern as literal) ──────
+            logger.warning(
+                "Cache '%s' does not support pattern invalidation; "
+                "treating '%s' as exact key.",
+                cache_name, pattern
+            )
+            await self.invalidate(cache_name, pattern)
+            return 1
+
+        except Exception as e:
+            logger.error("Pattern invalidation error for '%s': %s", cache_name, e)
+            return 0
     
     def _generate_key(self, key: Union[str, Dict, List, tuple]) -> str:
         """Generate normalized cache key"""
