@@ -128,8 +128,17 @@ blockchain = [
     "hexbytes>=0.3.0",
 ]
 
+vectorstore = [
+    # Milvus (self-hosted or Zilliz cloud)
+    "pymilvus>=2.3.0",
+    # Qdrant (self-hosted or cloud)
+    "qdrant-client>=1.7.0",
+    # Pinecone (cloud only)
+    "pinecone-client>=3.0.0",
+]
+
 all = [
-    "prsm[dev,ml,blockchain]",
+    "prsm[dev,ml,blockchain,vectorstore]",
 ]
 
 [project.scripts]
