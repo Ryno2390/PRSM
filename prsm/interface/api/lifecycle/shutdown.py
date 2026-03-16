@@ -48,6 +48,9 @@ async def shutdown_sequence(app: FastAPI) -> None:
     # Step 7: Stop analytics processor
     await _shutdown_analytics()
 
+    # Step 8: Stop Web3 event monitoring
+    await _shutdown_web3()
+
     logger.info("PRSM API server shutdown completed")
 
 
@@ -125,3 +128,15 @@ async def _shutdown_analytics() -> None:
         pass  # Not initialized — nothing to stop
     except Exception as e:
         logger.error("Error stopping analytics processor", error=str(e))
+
+
+async def _shutdown_web3() -> None:
+    """Stop Web3 event monitoring and clean up blockchain connections."""
+    try:
+        from prsm.economy.web3.web3_service import cleanup_web3_services
+        await cleanup_web3_services()
+        logger.info("Web3 event monitoring stopped")
+    except ImportError:
+        pass  # web3 not installed — nothing to stop
+    except Exception as e:
+        logger.error("Error stopping Web3 event monitoring", error=str(e))

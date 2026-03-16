@@ -244,7 +244,11 @@ class Web3EventMonitor:
         try:
             # Get current block if from_block not specified
             if from_block is None:
-                from_block = self.wallet.w3.eth.block_number
+                loop = asyncio.get_event_loop()
+                from_block = await loop.run_in_executor(
+                    None,
+                    lambda: self.wallet.w3.eth.block_number
+                )
             
             # Add event filters for each event
             for event_name in events:
@@ -313,8 +317,12 @@ class Web3EventMonitor:
             
             while self.is_running and event_filter.active:
                 try:
-                    # Get current block
-                    current_block = self.wallet.w3.eth.block_number
+                    # Get current block — run sync RPC call in executor
+                    loop = asyncio.get_event_loop()
+                    current_block = await loop.run_in_executor(
+                        None,
+                        lambda: self.wallet.w3.eth.block_number
+                    )
                     
                     if current_block > last_checked_block:
                         # Get events from last checked block to current
@@ -369,7 +377,7 @@ class Web3EventMonitor:
                              from_block: int,
                              to_block: int,
                              address_filter: Optional[str] = None) -> List:
-        """Get event logs from contract"""
+        """Get event logs from contract — runs sync web3 calls in executor"""
         try:
             # Get event signature
             event = getattr(contract.events, event_name, None)
@@ -387,9 +395,19 @@ class Web3EventMonitor:
                 # Add address filter if specified
                 filter_args["argument_filters"] = {"from": address_filter}
             
-            # Get event logs
-            event_filter = event.create_filter(**filter_args)
-            logs = event_filter.get_all_entries()
+            loop = asyncio.get_event_loop()
+            
+            # create_filter() makes an eth_newFilter RPC call — run in executor
+            event_filter = await loop.run_in_executor(
+                None,
+                lambda: event.create_filter(**filter_args)
+            )
+            
+            # get_all_entries() makes eth_getFilterLogs RPC call — run in executor
+            logs = await loop.run_in_executor(
+                None,
+                event_filter.get_all_entries
+            )
             
             return logs
             
@@ -407,8 +425,12 @@ class Web3EventMonitor:
             if event_id in self.processed_events:
                 return
             
-            # Get block timestamp
-            block = self.wallet.w3.eth.get_block(log['blockNumber'])
+            # Get block timestamp — run sync RPC call in executor
+            loop = asyncio.get_event_loop()
+            block = await loop.run_in_executor(
+                None,
+                lambda: self.wallet.w3.eth.get_block(log['blockNumber'])
+            )
             timestamp = datetime.fromtimestamp(block['timestamp'])
             
             # Create processed event
