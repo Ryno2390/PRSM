@@ -158,7 +158,10 @@ class TestDAGConsensus:
                     description=f'Transfer to {to_user}'
                 )
                 return True
-            except InsufficientBalanceError:
+            except (InsufficientBalanceError, ConcurrentModificationError):
+                # Both represent "transfer failed" — InsufficientBalance when
+                # the second attempt sees the depleted balance, ConcurrentModification
+                # when the atomic version check detects the concurrent commit.
                 return False
         
         # Run both transfers concurrently
