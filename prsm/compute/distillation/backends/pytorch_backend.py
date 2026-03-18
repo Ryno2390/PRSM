@@ -33,11 +33,15 @@ except (ImportError, RuntimeError):
     F = None  # type: ignore[assignment]
     DataLoader = None  # type: ignore[assignment]
     Dataset = None  # type: ignore[assignment]
+
+PYTORCH_AVAILABLE = torch is not None
 from typing import Dict, Any, List, Optional, Tuple, AsyncGenerator
 import asyncio
 import logging
 import json
 import os
+import time
+import math
 from pathlib import Path
 
 from .base_backend import DistillationBackend, TrainingMetrics, ModelArtifacts, BackendRegistry
@@ -287,6 +291,9 @@ class PyTorchDistillationBackend(DistillationBackend):
         # 📊 TRAINING STATE
         self.current_models = {}
         self.training_metrics = []
+        
+        # 📝 TOKENIZER CACHE
+        self.tokenizer_cache = {}
         
         logger.info(f"PyTorch backend initialized with device: {self.device}")
     
@@ -544,6 +551,47 @@ class PyTorchDistillationBackend(DistillationBackend):
         
         return metrics
     
+    def _get_or_create_tokenizer(self) -> Any:
+        """
+        Get or create a default tokenizer for evaluation.
+        
+        Uses a cached tokenizer to avoid repeated downloads.
+        Falls back to a simple whitespace tokenizer if transformers is unavailable.
+        """
+        if "default" not in self.tokenizer_cache:
+            try:
+                from transformers import AutoTokenizer
+                self.tokenizer_cache["default"] = AutoTokenizer.from_pretrained(
+                    "bert-base-uncased",
+                    model_max_length=512
+                )
+                logger.debug("Created default BERT tokenizer for evaluation")
+            except (ImportError, OSError) as e:
+                logger.warning(f"Could not load transformers tokenizer: {e}")
+                # Return None - will use fallback tokenization
+                self.tokenizer_cache["default"] = None
+        return self.tokenizer_cache["default"]
+    
+    def _fallback_metrics(self) -> Dict[str, float]:
+        """
+        Return all-zeros metrics dict when evaluation fails.
+        
+        This signals evaluation failure without falsely inflating scores.
+        """
+        return {
+            "accuracy": 0.0,
+            "f1_score": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "avg_loss": 0.0,
+            "perplexity": 0.0,
+            "inference_latency_ms": 0.0,
+            "throughput_tokens_per_sec": 0.0,
+            "memory_usage_mb": 0.0,
+            "model_size_mb": 0.0,
+            "items_evaluated": 0
+        }
+    
     async def evaluate_model(
         self,
         student_model: Any,
@@ -551,44 +599,206 @@ class PyTorchDistillationBackend(DistillationBackend):
         teacher_model: Optional[Any] = None
     ) -> Dict[str, float]:
         """
-        Evaluate PyTorch student model performance
+        Evaluate PyTorch student model performance with real inference.
         
         📊 EVALUATION METRICS:
-        - Task accuracy and F1 score
-        - Inference speed benchmarking
+        - Loss-based perplexity as primary quality metric
+        - Top-1 token accuracy as secondary metric
+        - Inference latency benchmarking
         - Memory usage assessment
         - Comparison with teacher (if available)
+        
+        # TODO (Priority 3): Replace simulated training with real gradient computation
+        # after teacher_model = None placeholder is resolved in initialize_models()
         """
-        logger.info("Evaluating PyTorch model")
+        logger.info("Evaluating PyTorch model with real inference")
         
-        if hasattr(student_model, 'eval'):
+        # Check for PyTorch availability
+        if torch is None:
+            logger.warning("PyTorch not available, returning fallback metrics")
+            return self._fallback_metrics()
+        
+        # Validate inputs
+        test_data = eval_data.get("test", [])
+        if not test_data:
+            logger.warning("No test data provided, returning fallback metrics")
+            return self._fallback_metrics()
+        
+        # Check if student model is valid
+        if student_model is None or not hasattr(student_model, 'eval'):
+            logger.warning("Invalid student model, returning fallback metrics")
+            return self._fallback_metrics()
+        
+        try:
+            # Set model to evaluation mode
             student_model.eval()
+            
+            # Get tokenizer
+            tokenizer = self._get_or_create_tokenizer()
+            
+            # Collect metrics
+            all_losses: List[float] = []
+            all_preds: List[int] = []
+            all_labels: List[int] = []
+            all_latencies: List[float] = []
+            
+            # Limit evaluation to 200 items for efficiency
+            eval_items = test_data[:min(200, len(test_data))]
+            
+            # Loss function for computing perplexity
+            loss_fn = nn.CrossEntropyLoss(reduction='sum') if nn is not None else None
+            
+            with torch.no_grad():
+                for item in eval_items:
+                    # Extract input and target text
+                    input_text = item.get("content", "") or item.get("input", "")
+                    target_text = item.get("expected_answer", "") or item.get("target", "")
+                    
+                    # Skip if no target
+                    if not target_text or not input_text:
+                        continue
+                    
+                    try:
+                        # Tokenize input and target
+                        if tokenizer is not None:
+                            input_ids = tokenizer.encode(
+                                input_text,
+                                max_length=256,
+                                truncation=True,
+                                return_tensors="pt"
+                            )
+                            target_ids = tokenizer.encode(
+                                target_text,
+                                max_length=64,
+                                truncation=True
+                            )
+                        else:
+                            # Fallback: simple character-level tokenization
+                            input_ids = torch.tensor([[ord(c) % 32000 for c in input_text[:256]]])
+                            target_ids = [ord(c) % 32000 for c in target_text[:64]]
+                        
+                        # Move to device
+                        input_ids = input_ids.to(self.device)
+                        
+                        # Measure inference latency
+                        start_time = time.perf_counter()
+                        
+                        # Forward pass
+                        outputs = student_model(input_ids)
+                        
+                        end_time = time.perf_counter()
+                        latency_ms = (end_time - start_time) * 1000
+                        all_latencies.append(latency_ms)
+                        
+                        # Extract logits (handle different output formats)
+                        if isinstance(outputs, dict):
+                            logits = outputs.get("logits", outputs.get("last_hidden_state", None))
+                        elif isinstance(outputs, tuple):
+                            logits = outputs[0]
+                        else:
+                            logits = outputs
+                        
+                        if logits is None:
+                            continue
+                        
+                        # Get predictions (top-1 token from last position)
+                        last_token_logits = logits[0, -1, :]
+                        pred_token = torch.argmax(last_token_logits).item()
+                        all_preds.append(pred_token)
+                        
+                        # Get label (first token of target)
+                        label_token = target_ids[0] if target_ids else 0
+                        all_labels.append(label_token)
+                        
+                        # Compute loss for perplexity
+                        if loss_fn is not None and len(target_ids) > 0:
+                            # Create target tensor
+                            target_tensor = torch.tensor(target_ids, device=self.device)
+                            # Compute cross-entropy loss
+                            # Expand logits to match target length if needed
+                            if logits.size(1) >= len(target_ids):
+                                logits_for_loss = logits[0, :len(target_ids), :]
+                                loss = loss_fn(logits_for_loss, target_tensor)
+                                all_losses.append(loss.item() / len(target_ids))
+                        
+                    except Exception as item_error:
+                        logger.debug(f"Error processing evaluation item: {item_error}")
+                        continue
+            
+            # Check if we have any valid results
+            if not all_preds:
+                logger.warning("No valid predictions during evaluation")
+                return self._fallback_metrics()
+            
+            # Compute accuracy
+            correct = sum(1 for p, l in zip(all_preds, all_labels) if p == l)
+            accuracy = correct / len(all_preds) if all_preds else 0.0
+            
+            # Compute average loss and perplexity
+            avg_loss = sum(all_losses) / len(all_losses) if all_losses else 0.0
+            # Cap perplexity to avoid overflow
+            perplexity = math.exp(min(avg_loss, 10.0)) if avg_loss > 0 else 0.0
+            
+            # Compute average latency
+            avg_latency = sum(all_latencies) / len(all_latencies) if all_latencies else 0.0
+            
+            # Compute F1, precision, recall using sklearn if available
+            try:
+                from sklearn.metrics import f1_score, precision_score, recall_score
+                # Use macro average for multi-class scenario
+                f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
+                precision = precision_score(all_labels, all_preds, average='macro', zero_division=0)
+                recall = recall_score(all_labels, all_preds, average='macro', zero_division=0)
+            except (ImportError, ValueError):
+                # Fallback: approximate from accuracy
+                f1 = accuracy
+                precision = accuracy
+                recall = accuracy
+            
+            # Compute memory usage
+            memory_mb = 0.0
+            if torch.cuda.is_available() and self.device == "cuda":
+                memory_mb = torch.cuda.max_memory_allocated() / (1024 * 1024)
+            
+            # Compute model size from parameters
+            model_size_mb = 0.0
+            if hasattr(student_model, 'parameters'):
+                total_params = sum(p.numel() for p in student_model.parameters())
+                # Assume float32 (4 bytes per parameter)
+                model_size_mb = (total_params * 4) / (1024 * 1024)
+            
+            # Build metrics dict
+            eval_metrics = {
+                "accuracy": accuracy,
+                "f1_score": f1,
+                "precision": precision,
+                "recall": recall,
+                "avg_loss": avg_loss,
+                "perplexity": perplexity,
+                "inference_latency_ms": avg_latency,
+                "throughput_tokens_per_sec": 1000.0 / max(0.001, avg_latency),
+                "memory_usage_mb": memory_mb,
+                "model_size_mb": model_size_mb,
+                "items_evaluated": len(all_preds)
+            }
+            
+            # 📈 TEACHER COMPARISON (if available)
+            if teacher_model is not None:
+                # Note: Real teacher comparison would require running inference on teacher
+                # For now, we just note that teacher was provided
+                eval_metrics["teacher_provided"] = True
+            
+            logger.info(f"Evaluation complete: {accuracy:.3f} accuracy, {perplexity:.2f} perplexity, {len(all_preds)} items")
+            return eval_metrics
+            
+        except Exception as e:
+            logger.error(f"Evaluation failed with error: {e}")
+            return self._fallback_metrics()
         
-        # 🎯 SIMULATED EVALUATION
-        # In practice, this would run actual evaluation on test data
-        eval_metrics = {
-            "accuracy": 0.85,
-            "f1_score": 0.83,
-            "precision": 0.86,
-            "recall": 0.84,
-            "inference_latency_ms": 15.2,
-            "throughput_tokens_per_sec": 1250.0,
-            "memory_usage_mb": 512,
-            "model_size_mb": 125.5,
-            "energy_efficiency_score": 0.78
-        }
-        
-        # 📈 TEACHER COMPARISON (if available)
-        if teacher_model is not None:
-            eval_metrics.update({
-                "teacher_accuracy": 0.92,
-                "accuracy_retention": 0.85 / 0.92,  # 92.4% retention
-                "speed_improvement": 8.5,  # 8.5x faster than teacher
-                "size_reduction": 0.05    # 20x smaller than teacher
-            })
-        
-        logger.info(f"Evaluation complete: {eval_metrics['accuracy']:.3f} accuracy")
-        return eval_metrics
+        finally:
+            # Always restore training mode
+            if student_model is not None and hasattr(student_model, 'train'):
+                student_model.train()
     
     async def export_model(
         self,
