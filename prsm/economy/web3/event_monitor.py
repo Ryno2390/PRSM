@@ -7,6 +7,7 @@ with real-time processing, logging, and database integration.
 
 import asyncio
 import logging
+from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Set, Callable, Any
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -28,7 +29,8 @@ except ImportError:
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prsm.core.database_service import DatabaseService
-from prsm.core.models import FTNSTransaction, FTNSWallet, Session as PRSMSession
+from prsm.core.models import FTNSTransaction, Session as PRSMSession
+from prsm.economy.tokenomics.models import FTNSWallet
 from .wallet_connector import Web3WalletConnector
 from .contract_interface import FTNSContractInterface
 
@@ -55,23 +57,51 @@ class ProcessedEvent:
     timestamp: datetime
     processed_at: datetime
 
-class EventProcessor:
+class EventProcessor(ABC):
     """Base class for processing specific event types"""
     
     def __init__(self, db_service: DatabaseService):
         self.db_service = db_service
-        
+
+    @abstractmethod
     async def process(self, event: ProcessedEvent) -> bool:
+        """Process a specific contract event. Returns True on success."""
+
+    async def _update_wallet_balance(
+        self,
+        address: str,
+        balance_delta: Decimal = Decimal('0'),
+        staked_delta: Decimal = Decimal('0'),
+        locked_delta: Decimal = Decimal('0')
+    ):
         """
-        Process a specific event
-        
+        Update wallet balance fields atomically.
+
         Args:
-            event: Event to process
-            
-        Returns:
-            bool: True if processing successful
+            address:       Checksummed or lowercased wallet address
+            balance_delta: Change to liquid balance (positive = add, negative = subtract)
+            staked_delta:  Change to staked_balance
+            locked_delta:  Change to locked_balance (governance)
         """
-        raise NotImplementedError
+        try:
+            wallet = await self.db_service.get_ftns_wallet_by_address(address)
+            if not wallet:
+                wallet = FTNSWallet(
+                    user_id=address,  # Use address as user_id for blockchain-created wallets
+                    blockchain_address=address,
+                    balance=Decimal('0'),
+                    locked_balance=Decimal('0'),
+                    staked_balance=Decimal('0')
+                )
+                await self.db_service.create_ftns_wallet(wallet)
+
+            wallet.balance = max(Decimal('0'), wallet.balance + balance_delta)
+            wallet.staked_balance = max(Decimal('0'), wallet.staked_balance + staked_delta)
+            wallet.locked_balance = max(Decimal('0'), wallet.locked_balance + locked_delta)
+
+            await self.db_service.update_ftns_wallet(wallet)
+        except Exception as e:
+            logger.error(f"Failed to update wallet balance for {address}: {e}")
 
 class TransferEventProcessor(EventProcessor):
     """Processes FTNS token transfer events"""
@@ -109,9 +139,9 @@ class TransferEventProcessor(EventProcessor):
             # Save to database
             await self.db_service.create_ftns_transaction(transaction)
             
-            # Update wallet balances
-            await self._update_wallet_balance(from_address, -amount)
-            await self._update_wallet_balance(to_address, amount)
+            # Update wallet balances using inherited method
+            await self._update_wallet_balance(from_address, balance_delta=-amount)
+            await self._update_wallet_balance(to_address, balance_delta=amount)
             
             logger.info(f"Processed transfer: {amount} FTNS from {from_address} to {to_address}")
             return True
@@ -119,30 +149,6 @@ class TransferEventProcessor(EventProcessor):
         except Exception as e:
             logger.error(f"Failed to process transfer event: {e}")
             return False
-    
-    async def _update_wallet_balance(self, address: str, amount_change: Decimal):
-        """Update wallet balance in database"""
-        try:
-            # Get or create wallet
-            wallet = await self.db_service.get_ftns_wallet_by_address(address)
-            if not wallet:
-                wallet = FTNSWallet(
-                    address=address,
-                    balance=Decimal('0'),
-                    locked_balance=Decimal('0'),
-                    staked_balance=Decimal('0')
-                )
-                await self.db_service.create_ftns_wallet(wallet)
-            
-            # Update balance
-            wallet.balance += amount_change
-            if wallet.balance < 0:
-                wallet.balance = Decimal('0')
-                
-            await self.db_service.update_ftns_wallet(wallet)
-            
-        except Exception as e:
-            logger.error(f"Failed to update wallet balance for {address}: {e}")
 
 class ApprovalEventProcessor(EventProcessor):
     """Processes FTNS token approval events"""
@@ -184,6 +190,504 @@ class ApprovalEventProcessor(EventProcessor):
             logger.error(f"Failed to process approval event: {e}")
             return False
 
+
+class MintEventProcessor(EventProcessor):
+    """Processes FTNS token mint events"""
+
+    async def process(self, event: ProcessedEvent) -> bool:
+        try:
+            args = event.args
+
+            to_address = args.get("to", "").lower()
+            value = args.get("value", 0)
+
+            # Convert value to FTNS (18 decimals)
+            amount = Decimal(value) / (10 ** 18)
+
+            # Create transaction record
+            transaction = FTNSTransaction(
+                transaction_hash=event.transaction_hash,
+                to_address=to_address,
+                amount=amount,
+                transaction_type="mint",
+                status="confirmed",
+                block_number=event.block_number,
+                timestamp=event.timestamp,
+                gas_used=0,
+                gas_price=0,
+                transaction_metadata={
+                    "event_log_index": event.log_index,
+                    "contract_address": event.contract_address
+                }
+            )
+
+            await self.db_service.create_ftns_transaction(transaction)
+
+            # Update wallet balance
+            await self._update_wallet_balance(to_address, balance_delta=amount)
+
+            logger.info(f"Minted {amount} FTNS to {to_address}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to process mint event: {e}")
+            return False
+
+
+class BurnEventProcessor(EventProcessor):
+    """Processes FTNS token burn events"""
+
+    async def process(self, event: ProcessedEvent) -> bool:
+        try:
+            args = event.args
+
+            from_address = args.get("from", "").lower()
+            value = args.get("value", 0)
+
+            # Convert value to FTNS (18 decimals)
+            amount = Decimal(value) / (10 ** 18)
+
+            # Create transaction record
+            transaction = FTNSTransaction(
+                transaction_hash=event.transaction_hash,
+                from_address=from_address,
+                amount=amount,
+                transaction_type="burn",
+                status="confirmed",
+                block_number=event.block_number,
+                timestamp=event.timestamp,
+                gas_used=0,
+                gas_price=0,
+                transaction_metadata={
+                    "event_log_index": event.log_index,
+                    "contract_address": event.contract_address
+                }
+            )
+
+            await self.db_service.create_ftns_transaction(transaction)
+
+            # Update wallet balance
+            await self._update_wallet_balance(from_address, balance_delta=-amount)
+
+            logger.info(f"Burned {amount} FTNS from {from_address}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to process burn event: {e}")
+            return False
+
+
+class StakedEventProcessor(EventProcessor):
+    """Processes FTNS staking events"""
+
+    async def process(self, event: ProcessedEvent) -> bool:
+        try:
+            args = event.args
+
+            user = args.get("user", "").lower()
+            pool_id = args.get("poolId", 0)
+            stake_id = args.get("stakeId", 0)
+            value = args.get("amount", 0)
+
+            # Convert value to FTNS (18 decimals)
+            amount = Decimal(value) / (10 ** 18)
+
+            # Create transaction record
+            transaction = FTNSTransaction(
+                transaction_hash=event.transaction_hash,
+                from_address=user,
+                amount=amount,
+                transaction_type="staking",
+                status="confirmed",
+                block_number=event.block_number,
+                timestamp=event.timestamp,
+                gas_used=0,
+                gas_price=0,
+                transaction_metadata={
+                    "event_log_index": event.log_index,
+                    "contract_address": event.contract_address,
+                    "pool_id": str(pool_id),
+                    "stake_id": str(stake_id),
+                    "action": "stake"
+                }
+            )
+
+            await self.db_service.create_ftns_transaction(transaction)
+
+            # Update wallet balance: tokens leave liquid balance, enter staked balance
+            await self._update_wallet_balance(user, balance_delta=-amount, staked_delta=amount)
+
+            logger.info(f"Staked {amount} FTNS from {user} in pool {pool_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to process staked event: {e}")
+            return False
+
+
+class UnstakedEventProcessor(EventProcessor):
+    """Processes FTNS unstaking events"""
+
+    async def process(self, event: ProcessedEvent) -> bool:
+        try:
+            args = event.args
+
+            user = args.get("user", "").lower()
+            pool_id = args.get("poolId", 0)
+            stake_id = args.get("stakeId", 0)
+            principal_value = args.get("amount", 0)
+            rewards_value = args.get("rewards", 0)
+
+            # Convert values to FTNS (18 decimals)
+            principal = Decimal(principal_value) / (10 ** 18)
+            rewards = Decimal(rewards_value) / (10 ** 18)
+            total = principal + rewards
+
+            # Create transaction record for principal return
+            transaction_principal = FTNSTransaction(
+                transaction_hash=event.transaction_hash,
+                from_address=user,
+                amount=principal,
+                transaction_type="unstaking",
+                status="confirmed",
+                block_number=event.block_number,
+                timestamp=event.timestamp,
+                gas_used=0,
+                gas_price=0,
+                transaction_metadata={
+                    "event_log_index": event.log_index,
+                    "contract_address": event.contract_address,
+                    "pool_id": str(pool_id),
+                    "stake_id": str(stake_id),
+                    "action": "unstake",
+                    "principal": str(principal),
+                    "rewards": str(rewards)
+                }
+            )
+
+            await self.db_service.create_ftns_transaction(transaction_principal)
+
+            # Create separate transaction for rewards if > 0
+            if rewards > 0:
+                transaction_rewards = FTNSTransaction(
+                    transaction_hash=f"{event.transaction_hash}_rewards",
+                    to_address=user,
+                    amount=rewards,
+                    transaction_type="staking_reward",
+                    status="confirmed",
+                    block_number=event.block_number,
+                    timestamp=event.timestamp,
+                    gas_used=0,
+                    gas_price=0,
+                    transaction_metadata={
+                        "event_log_index": event.log_index,
+                        "contract_address": event.contract_address,
+                        "pool_id": str(pool_id),
+                        "stake_id": str(stake_id),
+                        "action": "reward"
+                    }
+                )
+
+                await self.db_service.create_ftns_transaction(transaction_rewards)
+
+            # Update wallet balance: principal returns to liquid, rewards are net new liquid tokens
+            # staked_delta is -principal (not -total) because rewards were never staked
+            await self._update_wallet_balance(user, balance_delta=total, staked_delta=-principal)
+
+            logger.info(f"Unstaked {principal} FTNS + {rewards} rewards for {user}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to process unstaked event: {e}")
+            return False
+
+
+class RewardsClaimedEventProcessor(EventProcessor):
+    """Processes FTNS rewards claimed events"""
+
+    async def process(self, event: ProcessedEvent) -> bool:
+        try:
+            args = event.args
+
+            user = args.get("user", "").lower()
+            pool_id = args.get("poolId", 0)
+            stake_id = args.get("stakeId", 0)
+            rewards_value = args.get("rewards", 0)
+
+            # Convert value to FTNS (18 decimals)
+            rewards = Decimal(rewards_value) / (10 ** 18)
+
+            # Create transaction record
+            transaction = FTNSTransaction(
+                transaction_hash=event.transaction_hash,
+                to_address=user,
+                amount=rewards,
+                transaction_type="staking_reward",
+                status="confirmed",
+                block_number=event.block_number,
+                timestamp=event.timestamp,
+                gas_used=0,
+                gas_price=0,
+                transaction_metadata={
+                    "event_log_index": event.log_index,
+                    "contract_address": event.contract_address,
+                    "pool_id": str(pool_id),
+                    "stake_id": str(stake_id)
+                }
+            )
+
+            await self.db_service.create_ftns_transaction(transaction)
+
+            # Update wallet balance: rewards are net new liquid tokens; staked_delta=0 (stake continues)
+            await self._update_wallet_balance(user, balance_delta=rewards)
+
+            logger.info(f"Claimed {rewards} FTNS rewards for {user}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to process rewards claimed event: {e}")
+            return False
+
+
+class PurchaseEventProcessor(EventProcessor):
+    """Processes FTNS marketplace purchase events"""
+
+    async def process(self, event: ProcessedEvent) -> bool:
+        try:
+            args = event.args
+
+            purchase_id = args.get("purchaseId", "")
+            listing_id = args.get("listingId", 0)
+            buyer = args.get("buyer", "").lower()
+            seller = args.get("seller", "").lower()
+            quantity = args.get("quantity", 0)
+            total_price = args.get("totalPrice", 0)
+
+            # Convert value to FTNS (18 decimals)
+            total = Decimal(total_price) / (10 ** 18)
+
+            # Create transaction record for buyer debit
+            transaction_buyer = FTNSTransaction(
+                transaction_hash=event.transaction_hash,
+                from_address=buyer,
+                to_address=seller,
+                amount=total,
+                transaction_type="marketplace_purchase",
+                status="confirmed",
+                block_number=event.block_number,
+                timestamp=event.timestamp,
+                gas_used=0,
+                gas_price=0,
+                transaction_metadata={
+                    "event_log_index": event.log_index,
+                    "contract_address": event.contract_address,
+                    "purchase_id": str(purchase_id),
+                    "listing_id": str(listing_id),
+                    "quantity": str(quantity),
+                    "role": "buyer"
+                }
+            )
+
+            await self.db_service.create_ftns_transaction(transaction_buyer)
+
+            # Create transaction record for seller credit
+            transaction_seller = FTNSTransaction(
+                transaction_hash=f"{event.transaction_hash}_seller",
+                from_address=buyer,
+                to_address=seller,
+                amount=total,
+                transaction_type="marketplace_sale",
+                status="confirmed",
+                block_number=event.block_number,
+                timestamp=event.timestamp,
+                gas_used=0,
+                gas_price=0,
+                transaction_metadata={
+                    "event_log_index": event.log_index,
+                    "contract_address": event.contract_address,
+                    "purchase_id": str(purchase_id),
+                    "listing_id": str(listing_id),
+                    "quantity": str(quantity),
+                    "role": "seller"
+                }
+            )
+
+            await self.db_service.create_ftns_transaction(transaction_seller)
+
+            # Update wallet balances (gross amounts; fee already deducted by contract)
+            await self._update_wallet_balance(buyer, balance_delta=-total)
+            await self._update_wallet_balance(seller, balance_delta=total)
+
+            # Store royalty trigger
+            await self.db_service.store_royalty_distribution_record({
+                "session_id": str(purchase_id),
+                "listing_id": str(listing_id),
+                "buyer": buyer,
+                "seller": seller,
+                "amount": float(total),
+                "block_number": event.block_number,
+                "timestamp": event.timestamp.isoformat()
+            })
+
+            logger.info(f"Marketplace purchase {purchase_id}: {total} FTNS from {buyer} to {seller}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to process purchase event: {e}")
+            return False
+
+
+class ListingCreatedEventProcessor(EventProcessor):
+    """Processes FTNS marketplace listing created events"""
+
+    async def process(self, event: ProcessedEvent) -> bool:
+        try:
+            args = event.args
+
+            listing_id = args.get("listingId", 0)
+            seller = args.get("seller", "").lower()
+            asset_type = args.get("assetType", 0)
+            price_value = args.get("price", 0)
+            quantity = args.get("quantity", 0)
+
+            # Convert value to FTNS (18 decimals)
+            price = Decimal(price_value) / (10 ** 18)
+
+            # Create transaction record (no balance change - listing is a reservation intent)
+            transaction = FTNSTransaction(
+                transaction_hash=event.transaction_hash,
+                from_address=seller,
+                amount=Decimal('0'),
+                transaction_type="marketplace_listing",
+                status="confirmed",
+                block_number=event.block_number,
+                timestamp=event.timestamp,
+                gas_used=0,
+                gas_price=0,
+                transaction_metadata={
+                    "event_log_index": event.log_index,
+                    "contract_address": event.contract_address,
+                    "listing_id": str(listing_id),
+                    "asset_type": str(asset_type),
+                    "price_ftns": str(price),
+                    "quantity": str(quantity)
+                }
+            )
+
+            await self.db_service.create_ftns_transaction(transaction)
+
+            # No balance change - listing is a reservation intent, not a transfer
+            logger.info(f"Marketplace listing {listing_id} created by {seller}: {quantity} @ {price} FTNS")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to process listing created event: {e}")
+            return False
+
+
+class BridgeOutEventProcessor(EventProcessor):
+    """Processes FTNS bridge out events"""
+
+    async def process(self, event: ProcessedEvent) -> bool:
+        try:
+            args = event.args
+
+            sender = args.get("sender", "").lower()
+            amount_value = args.get("amount", 0)
+            fee_value = args.get("fee", 0)
+            destination_chain = args.get("destinationChain", 0)
+            nonce = args.get("nonce", 0)
+            transaction_id = args.get("transactionId", "")
+
+            # Convert values to FTNS (18 decimals)
+            amount_ftns = Decimal(amount_value) / (10 ** 18)
+            fee_ftns = Decimal(fee_value) / (10 ** 18)
+            total_debit = amount_ftns + fee_ftns
+
+            # Create transaction record
+            transaction = FTNSTransaction(
+                transaction_hash=event.transaction_hash,
+                from_address=sender,
+                amount=total_debit,
+                transaction_type="bridge_out",
+                status="confirmed",
+                block_number=event.block_number,
+                timestamp=event.timestamp,
+                gas_used=0,
+                gas_price=0,
+                transaction_metadata={
+                    "event_log_index": event.log_index,
+                    "contract_address": event.contract_address,
+                    "bridge_amount": str(amount_ftns),
+                    "bridge_fee": str(fee_ftns),
+                    "destination_chain": str(destination_chain),
+                    "nonce": str(nonce),
+                    "transaction_id": str(transaction_id)
+                }
+            )
+
+            await self.db_service.create_ftns_transaction(transaction)
+
+            # Update wallet balance
+            await self._update_wallet_balance(sender, balance_delta=-total_debit)
+
+            logger.info(f"Bridge out: {amount_ftns} FTNS (+ {fee_ftns} fee) from {sender} to chain {destination_chain}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to process bridge out event: {e}")
+            return False
+
+
+class BridgeInEventProcessor(EventProcessor):
+    """Processes FTNS bridge in events"""
+
+    async def process(self, event: ProcessedEvent) -> bool:
+        try:
+            args = event.args
+
+            user = args.get("user", "").lower()
+            amount_value = args.get("amount", 0)
+            source_chain = args.get("sourceChain", 0)
+            source_transaction_id = args.get("sourceTransactionId", "")
+            transaction_id = args.get("transactionId", "")
+
+            # Convert value to FTNS (18 decimals)
+            amount_ftns = Decimal(amount_value) / (10 ** 18)
+
+            # Create transaction record
+            transaction = FTNSTransaction(
+                transaction_hash=event.transaction_hash,
+                to_address=user,
+                amount=amount_ftns,
+                transaction_type="bridge_in",
+                status="confirmed",
+                block_number=event.block_number,
+                timestamp=event.timestamp,
+                gas_used=0,
+                gas_price=0,
+                transaction_metadata={
+                    "event_log_index": event.log_index,
+                    "contract_address": event.contract_address,
+                    "source_chain": str(source_chain),
+                    "source_transaction_id": str(source_transaction_id),
+                    "transaction_id": str(transaction_id)
+                }
+            )
+
+            await self.db_service.create_ftns_transaction(transaction)
+
+            # Update wallet balance
+            await self._update_wallet_balance(user, balance_delta=amount_ftns)
+
+            logger.info(f"Bridge in: {amount_ftns} FTNS to {user} from chain {source_chain}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to process bridge in event: {e}")
+            return False
+
+
 class Web3EventMonitor:
     """
     Comprehensive Web3 event monitoring system
@@ -222,9 +726,23 @@ class Web3EventMonitor:
         self._setup_default_processors()
     
     def _setup_default_processors(self):
-        """Setup default event processors"""
+        """Setup default event processors for all known contract events"""
+        # ERC-20 base events
         self.event_processors["Transfer"] = TransferEventProcessor(self.db_service)
         self.event_processors["Approval"] = ApprovalEventProcessor(self.db_service)
+        # Token supply events
+        self.event_processors["Mint"] = MintEventProcessor(self.db_service)
+        self.event_processors["Burn"] = BurnEventProcessor(self.db_service)
+        # Staking events
+        self.event_processors["Staked"] = StakedEventProcessor(self.db_service)
+        self.event_processors["Unstaked"] = UnstakedEventProcessor(self.db_service)
+        self.event_processors["RewardsClaimed"] = RewardsClaimedEventProcessor(self.db_service)
+        # Marketplace events
+        self.event_processors["Purchase"] = PurchaseEventProcessor(self.db_service)
+        self.event_processors["ListingCreated"] = ListingCreatedEventProcessor(self.db_service)
+        # Bridge events
+        self.event_processors["BridgeOut"] = BridgeOutEventProcessor(self.db_service)
+        self.event_processors["BridgeIn"] = BridgeInEventProcessor(self.db_service)
     
     async def add_contract_monitor(self, 
                                   contract_name: str,

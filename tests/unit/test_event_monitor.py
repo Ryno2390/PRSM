@@ -13,6 +13,15 @@ from prsm.economy.web3.event_monitor import (
     EventProcessor,
     TransferEventProcessor,
     ApprovalEventProcessor,
+    MintEventProcessor,
+    BurnEventProcessor,
+    StakedEventProcessor,
+    UnstakedEventProcessor,
+    RewardsClaimedEventProcessor,
+    PurchaseEventProcessor,
+    ListingCreatedEventProcessor,
+    BridgeOutEventProcessor,
+    BridgeInEventProcessor,
     Web3EventMonitor,
     EventFilter,
     ProcessedEvent,
@@ -32,6 +41,16 @@ def mock_db_service():
     db_service.create_ftns_wallet = AsyncMock()
     db_service.update_ftns_wallet = AsyncMock()
     return db_service
+
+
+def make_mock_wallet(address: str, balance: Decimal, locked_balance: Decimal = Decimal('0'), staked_balance: Decimal = Decimal('0')):
+    """Create a mock wallet object with the necessary attributes for testing."""
+    wallet = MagicMock()
+    wallet.blockchain_address = address
+    wallet.balance = balance
+    wallet.locked_balance = locked_balance
+    wallet.staked_balance = staked_balance
+    return wallet
 
 
 @pytest.fixture
@@ -174,12 +193,10 @@ async def test_approval_processor_records_approval(mock_db_service, approval_pro
 # =============================================================================
 
 @pytest.mark.asyncio
-async def test_event_processor_base_raises(mock_db_service, processed_event):
-    """Test that base EventProcessor.process() raises NotImplementedError (abstract class)."""
-    processor = EventProcessor(mock_db_service)
-    
-    with pytest.raises(NotImplementedError):
-        await processor.process(processed_event)
+async def test_event_processor_base_raises(mock_db_service):
+    """Test that EventProcessor cannot be instantiated directly (raises TypeError for abstract class)."""
+    with pytest.raises(TypeError, match="Can't instantiate abstract class"):
+        EventProcessor(mock_db_service)
 
 
 # =============================================================================
@@ -383,3 +400,859 @@ async def test_get_event_logs_uses_executor(mock_wallet_connector, mock_contract
     assert mock_event.create_filter.called
     assert mock_filter.get_all_entries.called
     assert logs == []
+
+
+# =============================================================================
+# Base Class Tests
+# =============================================================================
+
+def test_base_processor_is_abstract(mock_db_service):
+    """Test that EventProcessor cannot be instantiated directly (raises TypeError)."""
+    with pytest.raises(TypeError):
+        EventProcessor(mock_db_service)
+
+
+@pytest.mark.asyncio
+async def test_update_wallet_balance_creates_wallet_if_missing(mock_db_service):
+    """Test that _update_wallet_balance creates a wallet if it doesn't exist."""
+    # Create a concrete processor to test the base class method
+    processor = MintEventProcessor(mock_db_service)
+    
+    # Mock wallet retrieval to return None (wallet doesn't exist)
+    mock_db_service.get_ftns_wallet_by_address.return_value = None
+    
+    await processor._update_wallet_balance("0xnewwallet", balance_delta=Decimal('100'))
+    
+    # Verify wallet was created
+    mock_db_service.create_ftns_wallet.assert_called_once()
+    created_wallet = mock_db_service.create_ftns_wallet.call_args[0][0]
+    assert created_wallet.blockchain_address == "0xnewwallet"
+    assert created_wallet.balance == Decimal('100')
+
+
+@pytest.mark.asyncio
+async def test_update_wallet_balance_clamps_to_zero(mock_db_service):
+    """Test that negative delta that would produce negative balance is clamped to 0."""
+    processor = BurnEventProcessor(mock_db_service)
+    
+    # Create existing wallet with small balance
+    existing_wallet = make_mock_wallet("0xtestwallet", Decimal('10'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    # Try to subtract more than balance
+    await processor._update_wallet_balance("0xtestwallet", balance_delta=-Decimal('100'))
+    
+    # Verify balance was clamped to 0
+    updated_wallet = mock_db_service.update_ftns_wallet.call_args[0][0]
+    assert updated_wallet.balance == Decimal('0')
+
+
+@pytest.mark.asyncio
+async def test_update_wallet_balance_updates_staked_balance(mock_db_service):
+    """Test that staked_delta is applied independently."""
+    processor = StakedEventProcessor(mock_db_service)
+    
+    existing_wallet = make_mock_wallet("0xstaker", Decimal('100'), staked_balance=Decimal('50'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    await processor._update_wallet_balance("0xstaker", balance_delta=-Decimal('30'), staked_delta=Decimal('30'))
+    
+    updated_wallet = mock_db_service.update_ftns_wallet.call_args[0][0]
+    assert updated_wallet.balance == Decimal('70')
+    assert updated_wallet.staked_balance == Decimal('80')
+
+
+# =============================================================================
+# MintEventProcessor Tests
+# =============================================================================
+
+@pytest.fixture
+def mint_processed_event():
+    """Create a sample mint processed event for testing."""
+    return ProcessedEvent(
+        contract_address="0x1234567890abcdef1234567890abcdef12345678",
+        contract_name="FTNSToken",
+        event_name="Mint",
+        block_number=100,
+        transaction_hash="0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        log_index=0,
+        args={
+            "to": "0xRecipient0000000000000000000000000000",
+            "value": 2000000000000000000,  # 2 FTNS
+        },
+        timestamp=datetime(2024, 1, 1, 0, 0, 0),
+        processed_at=datetime(2024, 1, 1, 0, 0, 1),
+    )
+
+
+@pytest.mark.asyncio
+async def test_mint_processor_process_success(mock_db_service, mint_processed_event):
+    """Test that MintEventProcessor processes successfully."""
+    processor = MintEventProcessor(mock_db_service)
+    mock_db_service.get_ftns_wallet_by_address.return_value = None
+    
+    result = await processor.process(mint_processed_event)
+    
+    assert result is True
+    mock_db_service.create_ftns_transaction.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_mint_processor_balance_change_correct(mock_db_service, mint_processed_event):
+    """Test that MintEventProcessor applies correct balance deltas."""
+    processor = MintEventProcessor(mock_db_service)
+    mock_db_service.get_ftns_wallet_by_address.return_value = None
+    
+    await processor.process(mint_processed_event)
+    
+    # Verify wallet was created with correct balance
+    created_wallet = mock_db_service.create_ftns_wallet.call_args[0][0]
+    assert created_wallet.balance == Decimal('2')
+
+
+@pytest.mark.asyncio
+async def test_mint_processor_transaction_type_correct(mock_db_service, mint_processed_event):
+    """Test that MintEventProcessor creates transaction with correct transaction_type."""
+    processor = MintEventProcessor(mock_db_service)
+    
+    await processor.process(mint_processed_event)
+    
+    transaction = mock_db_service.create_ftns_transaction.call_args[0][0]
+    assert transaction.transaction_type == "mint"
+
+
+@pytest.mark.asyncio
+async def test_mint_processor_process_exception_returns_false(mock_db_service, mint_processed_event):
+    """Test that MintEventProcessor returns False on exception."""
+    processor = MintEventProcessor(mock_db_service)
+    mock_db_service.create_ftns_transaction.side_effect = Exception("DB error")
+    
+    result = await processor.process(mint_processed_event)
+    
+    assert result is False
+
+
+# =============================================================================
+# BurnEventProcessor Tests
+# =============================================================================
+
+@pytest.fixture
+def burn_processed_event():
+    """Create a sample burn processed event for testing."""
+    return ProcessedEvent(
+        contract_address="0x1234567890abcdef1234567890abcdef12345678",
+        contract_name="FTNSToken",
+        event_name="Burn",
+        block_number=100,
+        transaction_hash="0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        log_index=0,
+        args={
+            "from": "0xBurner0000000000000000000000000000000",
+            "value": 500000000000000000,  # 0.5 FTNS
+        },
+        timestamp=datetime(2024, 1, 1, 0, 0, 0),
+        processed_at=datetime(2024, 1, 1, 0, 0, 1),
+    )
+
+
+@pytest.mark.asyncio
+async def test_burn_processor_process_success(mock_db_service, burn_processed_event):
+    """Test that BurnEventProcessor processes successfully."""
+    processor = BurnEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xburner0000000000000000000000000000000", Decimal('10'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    result = await processor.process(burn_processed_event)
+    
+    assert result is True
+    mock_db_service.create_ftns_transaction.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_burn_processor_balance_change_correct(mock_db_service, burn_processed_event):
+    """Test that BurnEventProcessor applies correct balance deltas."""
+    processor = BurnEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xburner0000000000000000000000000000000", Decimal('10'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    await processor.process(burn_processed_event)
+    
+    updated_wallet = mock_db_service.update_ftns_wallet.call_args[0][0]
+    assert updated_wallet.balance == Decimal('9.5')
+
+
+@pytest.mark.asyncio
+async def test_burn_processor_transaction_type_correct(mock_db_service, burn_processed_event):
+    """Test that BurnEventProcessor creates transaction with correct transaction_type."""
+    processor = BurnEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xburner0000000000000000000000000000000", Decimal('10'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    await processor.process(burn_processed_event)
+    
+    transaction = mock_db_service.create_ftns_transaction.call_args[0][0]
+    assert transaction.transaction_type == "burn"
+
+
+@pytest.mark.asyncio
+async def test_burn_processor_process_exception_returns_false(mock_db_service, burn_processed_event):
+    """Test that BurnEventProcessor returns False on exception."""
+    processor = BurnEventProcessor(mock_db_service)
+    mock_db_service.create_ftns_transaction.side_effect = Exception("DB error")
+    
+    result = await processor.process(burn_processed_event)
+    
+    assert result is False
+
+
+# =============================================================================
+# StakedEventProcessor Tests
+# =============================================================================
+
+@pytest.fixture
+def staked_processed_event():
+    """Create a sample staked processed event for testing."""
+    return ProcessedEvent(
+        contract_address="0x1234567890abcdef1234567890abcdef12345678",
+        contract_name="FTNSStaking",
+        event_name="Staked",
+        block_number=100,
+        transaction_hash="0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        log_index=0,
+        args={
+            "user": "0xStaker0000000000000000000000000000000",
+            "poolId": 1,
+            "stakeId": 42,
+            "amount": 3000000000000000000,  # 3 FTNS
+        },
+        timestamp=datetime(2024, 1, 1, 0, 0, 0),
+        processed_at=datetime(2024, 1, 1, 0, 0, 1),
+    )
+
+
+@pytest.mark.asyncio
+async def test_staked_processor_process_success(mock_db_service, staked_processed_event):
+    """Test that StakedEventProcessor processes successfully."""
+    processor = StakedEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xstaker0000000000000000000000000000000", Decimal('10'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    result = await processor.process(staked_processed_event)
+    
+    assert result is True
+    mock_db_service.create_ftns_transaction.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_staked_processor_balance_change_correct(mock_db_service, staked_processed_event):
+    """Test that StakedEventProcessor applies correct balance deltas."""
+    processor = StakedEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xstaker0000000000000000000000000000000", Decimal('10'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    await processor.process(staked_processed_event)
+    
+    updated_wallet = mock_db_service.update_ftns_wallet.call_args[0][0]
+    assert updated_wallet.balance == Decimal('7')  # 10 - 3
+    assert updated_wallet.staked_balance == Decimal('3')
+
+
+@pytest.mark.asyncio
+async def test_staked_processor_transaction_type_correct(mock_db_service, staked_processed_event):
+    """Test that StakedEventProcessor creates transaction with correct transaction_type."""
+    processor = StakedEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xstaker0000000000000000000000000000000", Decimal('10'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    await processor.process(staked_processed_event)
+    
+    transaction = mock_db_service.create_ftns_transaction.call_args[0][0]
+    assert transaction.transaction_type == "staking"
+
+
+@pytest.mark.asyncio
+async def test_staked_processor_process_exception_returns_false(mock_db_service, staked_processed_event):
+    """Test that StakedEventProcessor returns False on exception."""
+    processor = StakedEventProcessor(mock_db_service)
+    mock_db_service.create_ftns_transaction.side_effect = Exception("DB error")
+    
+    result = await processor.process(staked_processed_event)
+    
+    assert result is False
+
+
+# =============================================================================
+# UnstakedEventProcessor Tests
+# =============================================================================
+
+@pytest.fixture
+def unstaked_processed_event():
+    """Create a sample unstaked processed event for testing."""
+    return ProcessedEvent(
+        contract_address="0x1234567890abcdef1234567890abcdef12345678",
+        contract_name="FTNSStaking",
+        event_name="Unstaked",
+        block_number=100,
+        transaction_hash="0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        log_index=0,
+        args={
+            "user": "0xUnstaker0000000000000000000000000000",
+            "poolId": 1,
+            "stakeId": 42,
+            "amount": 2000000000000000000,  # 2 FTNS principal
+            "rewards": 500000000000000000,  # 0.5 FTNS rewards
+        },
+        timestamp=datetime(2024, 1, 1, 0, 0, 0),
+        processed_at=datetime(2024, 1, 1, 0, 0, 1),
+    )
+
+
+@pytest.mark.asyncio
+async def test_unstaked_processor_process_success(mock_db_service, unstaked_processed_event):
+    """Test that UnstakedEventProcessor processes successfully."""
+    processor = UnstakedEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xunstaker0000000000000000000000000000", Decimal('5'), staked_balance=Decimal('2'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    result = await processor.process(unstaked_processed_event)
+    
+    assert result is True
+    # Should create 2 transactions: one for principal, one for rewards
+    assert mock_db_service.create_ftns_transaction.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_unstaked_processor_balance_change_correct(mock_db_service, unstaked_processed_event):
+    """Test that UnstakedEventProcessor applies correct balance deltas."""
+    processor = UnstakedEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xunstaker0000000000000000000000000000", Decimal('5'), staked_balance=Decimal('2'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    await processor.process(unstaked_processed_event)
+    
+    updated_wallet = mock_db_service.update_ftns_wallet.call_args[0][0]
+    # balance = 5 + 2 (principal) + 0.5 (rewards) = 7.5
+    assert updated_wallet.balance == Decimal('7.5')
+    # staked_balance = 2 - 2 (principal only, not rewards) = 0
+    assert updated_wallet.staked_balance == Decimal('0')
+
+
+@pytest.mark.asyncio
+async def test_unstaked_processor_transaction_type_correct(mock_db_service, unstaked_processed_event):
+    """Test that UnstakedEventProcessor creates transactions with correct transaction_types."""
+    processor = UnstakedEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xunstaker0000000000000000000000000000", Decimal('5'), staked_balance=Decimal('2'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    await processor.process(unstaked_processed_event)
+    
+    calls = mock_db_service.create_ftns_transaction.call_args_list
+    transaction_types = [call[0][0].transaction_type for call in calls]
+    assert "unstaking" in transaction_types
+    assert "staking_reward" in transaction_types
+
+
+@pytest.mark.asyncio
+async def test_unstaked_processor_process_exception_returns_false(mock_db_service, unstaked_processed_event):
+    """Test that UnstakedEventProcessor returns False on exception."""
+    processor = UnstakedEventProcessor(mock_db_service)
+    mock_db_service.create_ftns_transaction.side_effect = Exception("DB error")
+    
+    result = await processor.process(unstaked_processed_event)
+    
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_unstaked_records_both_principal_and_rewards(mock_db_service, unstaked_processed_event):
+    """Test that UnstakedEventProcessor creates two FTNSTransaction records."""
+    processor = UnstakedEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xunstaker0000000000000000000000000000", Decimal('5'), staked_balance=Decimal('2'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    await processor.process(unstaked_processed_event)
+    
+    assert mock_db_service.create_ftns_transaction.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_staked_balance_decrements_on_unstake(mock_db_service, unstaked_processed_event):
+    """Test that staked_delta is -principal, not -total."""
+    processor = UnstakedEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xunstaker0000000000000000000000000000", Decimal('5'), staked_balance=Decimal('2'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    await processor.process(unstaked_processed_event)
+    
+    updated_wallet = mock_db_service.update_ftns_wallet.call_args[0][0]
+    # staked_delta should be -2 (principal), not -2.5 (total)
+    assert updated_wallet.staked_balance == Decimal('0')
+
+
+# =============================================================================
+# RewardsClaimedEventProcessor Tests
+# =============================================================================
+
+@pytest.fixture
+def rewards_claimed_processed_event():
+    """Create a sample rewards claimed processed event for testing."""
+    return ProcessedEvent(
+        contract_address="0x1234567890abcdef1234567890abcdef12345678",
+        contract_name="FTNSStaking",
+        event_name="RewardsClaimed",
+        block_number=100,
+        transaction_hash="0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        log_index=0,
+        args={
+            "user": "0xClaimer00000000000000000000000000000",
+            "poolId": 1,
+            "stakeId": 42,
+            "rewards": 1500000000000000000,  # 1.5 FTNS
+        },
+        timestamp=datetime(2024, 1, 1, 0, 0, 0),
+        processed_at=datetime(2024, 1, 1, 0, 0, 1),
+    )
+
+
+@pytest.mark.asyncio
+async def test_rewards_claimed_processor_process_success(mock_db_service, rewards_claimed_processed_event):
+    """Test that RewardsClaimedEventProcessor processes successfully."""
+    processor = RewardsClaimedEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xclaimer00000000000000000000000000000", Decimal('5'), staked_balance=Decimal('10'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    result = await processor.process(rewards_claimed_processed_event)
+    
+    assert result is True
+    mock_db_service.create_ftns_transaction.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_rewards_claimed_processor_balance_change_correct(mock_db_service, rewards_claimed_processed_event):
+    """Test that RewardsClaimedEventProcessor applies correct balance deltas."""
+    processor = RewardsClaimedEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xclaimer00000000000000000000000000000", Decimal('5'), staked_balance=Decimal('10'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    await processor.process(rewards_claimed_processed_event)
+    
+    updated_wallet = mock_db_service.update_ftns_wallet.call_args[0][0]
+    assert updated_wallet.balance == Decimal('6.5')  # 5 + 1.5
+
+
+@pytest.mark.asyncio
+async def test_rewards_claimed_processor_transaction_type_correct(mock_db_service, rewards_claimed_processed_event):
+    """Test that RewardsClaimedEventProcessor creates transaction with correct transaction_type."""
+    processor = RewardsClaimedEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xclaimer00000000000000000000000000000", Decimal('5'), staked_balance=Decimal('10'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    await processor.process(rewards_claimed_processed_event)
+    
+    transaction = mock_db_service.create_ftns_transaction.call_args[0][0]
+    assert transaction.transaction_type == "staking_reward"
+
+
+@pytest.mark.asyncio
+async def test_rewards_claimed_processor_process_exception_returns_false(mock_db_service, rewards_claimed_processed_event):
+    """Test that RewardsClaimedEventProcessor returns False on exception."""
+    processor = RewardsClaimedEventProcessor(mock_db_service)
+    mock_db_service.create_ftns_transaction.side_effect = Exception("DB error")
+    
+    result = await processor.process(rewards_claimed_processed_event)
+    
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_rewards_claimed_does_not_change_staked_balance(mock_db_service, rewards_claimed_processed_event):
+    """Test that staked_delta=0 (stake continues)."""
+    processor = RewardsClaimedEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xclaimer00000000000000000000000000000", Decimal('5'), staked_balance=Decimal('10'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    await processor.process(rewards_claimed_processed_event)
+    
+    updated_wallet = mock_db_service.update_ftns_wallet.call_args[0][0]
+    assert updated_wallet.staked_balance == Decimal('10')  # unchanged
+
+
+# =============================================================================
+# PurchaseEventProcessor Tests
+# =============================================================================
+
+@pytest.fixture
+def purchase_processed_event():
+    """Create a sample purchase processed event for testing."""
+    return ProcessedEvent(
+        contract_address="0x1234567890abcdef1234567890abcdef12345678",
+        contract_name="FTNSMarketplace",
+        event_name="Purchase",
+        block_number=100,
+        transaction_hash="0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        log_index=0,
+        args={
+            "purchaseId": "0xpurchase1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+            "listingId": 5,
+            "buyer": "0xBuyer0000000000000000000000000000000",
+            "seller": "0xSeller000000000000000000000000000000",
+            "quantity": 1,
+            "totalPrice": 4000000000000000000,  # 4 FTNS
+        },
+        timestamp=datetime(2024, 1, 1, 0, 0, 0),
+        processed_at=datetime(2024, 1, 1, 0, 0, 1),
+    )
+
+
+@pytest.mark.asyncio
+async def test_purchase_processor_process_success(mock_db_service, purchase_processed_event):
+    """Test that PurchaseEventProcessor processes successfully."""
+    processor = PurchaseEventProcessor(mock_db_service)
+    mock_db_service.store_royalty_distribution_record = AsyncMock()
+    
+    result = await processor.process(purchase_processed_event)
+    
+    assert result is True
+    # Should create 2 transactions: buyer debit and seller credit
+    assert mock_db_service.create_ftns_transaction.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_purchase_processor_balance_change_correct(mock_db_service, purchase_processed_event):
+    """Test that PurchaseEventProcessor applies correct balance deltas."""
+    processor = PurchaseEventProcessor(mock_db_service)
+    mock_db_service.store_royalty_distribution_record = AsyncMock()
+    
+    buyer_wallet = make_mock_wallet("0xbuyer0000000000000000000000000000000", Decimal('10'))
+    seller_wallet = make_mock_wallet("0xseller000000000000000000000000000000", Decimal('5'))
+    
+    def get_wallet(address):
+        if "buyer" in address.lower():
+            return buyer_wallet
+        elif "seller" in address.lower():
+            return seller_wallet
+        return None
+    
+    mock_db_service.get_ftns_wallet_by_address.side_effect = get_wallet
+    
+    await processor.process(purchase_processed_event)
+    
+    # Verify both wallets were updated
+    assert mock_db_service.update_ftns_wallet.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_purchase_processor_transaction_type_correct(mock_db_service, purchase_processed_event):
+    """Test that PurchaseEventProcessor creates transactions with correct transaction_types."""
+    processor = PurchaseEventProcessor(mock_db_service)
+    mock_db_service.store_royalty_distribution_record = AsyncMock()
+    
+    await processor.process(purchase_processed_event)
+    
+    calls = mock_db_service.create_ftns_transaction.call_args_list
+    transaction_types = [call[0][0].transaction_type for call in calls]
+    assert "marketplace_purchase" in transaction_types
+    assert "marketplace_sale" in transaction_types
+
+
+@pytest.mark.asyncio
+async def test_purchase_processor_process_exception_returns_false(mock_db_service, purchase_processed_event):
+    """Test that PurchaseEventProcessor returns False on exception."""
+    processor = PurchaseEventProcessor(mock_db_service)
+    mock_db_service.create_ftns_transaction.side_effect = Exception("DB error")
+    
+    result = await processor.process(purchase_processed_event)
+    
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_purchase_triggers_royalty_record(mock_db_service, purchase_processed_event):
+    """Test that store_royalty_distribution_record is called."""
+    processor = PurchaseEventProcessor(mock_db_service)
+    mock_db_service.store_royalty_distribution_record = AsyncMock()
+    
+    await processor.process(purchase_processed_event)
+    
+    mock_db_service.store_royalty_distribution_record.assert_called_once()
+    royalty_record = mock_db_service.store_royalty_distribution_record.call_args[0][0]
+    assert royalty_record["buyer"] == "0xbuyer0000000000000000000000000000000"
+    assert royalty_record["seller"] == "0xseller000000000000000000000000000000"
+    assert royalty_record["amount"] == 4.0
+
+
+# =============================================================================
+# ListingCreatedEventProcessor Tests
+# =============================================================================
+
+@pytest.fixture
+def listing_created_processed_event():
+    """Create a sample listing created processed event for testing."""
+    return ProcessedEvent(
+        contract_address="0x1234567890abcdef1234567890abcdef12345678",
+        contract_name="FTNSMarketplace",
+        event_name="ListingCreated",
+        block_number=100,
+        transaction_hash="0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        log_index=0,
+        args={
+            "listingId": 10,
+            "seller": "0xLister000000000000000000000000000000",
+            "assetType": 1,
+            "price": 2500000000000000000,  # 2.5 FTNS
+            "quantity": 3,
+        },
+        timestamp=datetime(2024, 1, 1, 0, 0, 0),
+        processed_at=datetime(2024, 1, 1, 0, 0, 1),
+    )
+
+
+@pytest.mark.asyncio
+async def test_listing_created_processor_process_success(mock_db_service, listing_created_processed_event):
+    """Test that ListingCreatedEventProcessor processes successfully."""
+    processor = ListingCreatedEventProcessor(mock_db_service)
+    
+    result = await processor.process(listing_created_processed_event)
+    
+    assert result is True
+    mock_db_service.create_ftns_transaction.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_listing_created_processor_transaction_type_correct(mock_db_service, listing_created_processed_event):
+    """Test that ListingCreatedEventProcessor creates transaction with correct transaction_type."""
+    processor = ListingCreatedEventProcessor(mock_db_service)
+    
+    await processor.process(listing_created_processed_event)
+    
+    transaction = mock_db_service.create_ftns_transaction.call_args[0][0]
+    assert transaction.transaction_type == "marketplace_listing"
+
+
+@pytest.mark.asyncio
+async def test_listing_created_processor_process_exception_returns_false(mock_db_service, listing_created_processed_event):
+    """Test that ListingCreatedEventProcessor returns False on exception."""
+    processor = ListingCreatedEventProcessor(mock_db_service)
+    mock_db_service.create_ftns_transaction.side_effect = Exception("DB error")
+    
+    result = await processor.process(listing_created_processed_event)
+    
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_listing_created_no_balance_change(mock_db_service, listing_created_processed_event):
+    """Test that _update_wallet_balance is not called for listing creation."""
+    processor = ListingCreatedEventProcessor(mock_db_service)
+    
+    await processor.process(listing_created_processed_event)
+    
+    # Wallet balance should not be updated
+    mock_db_service.update_ftns_wallet.assert_not_called()
+
+
+# =============================================================================
+# BridgeOutEventProcessor Tests
+# =============================================================================
+
+@pytest.fixture
+def bridge_out_processed_event():
+    """Create a sample bridge out processed event for testing."""
+    return ProcessedEvent(
+        contract_address="0x1234567890abcdef1234567890abcdef12345678",
+        contract_name="FTNSBridge",
+        event_name="BridgeOut",
+        block_number=100,
+        transaction_hash="0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        log_index=0,
+        args={
+            "sender": "0xBridger00000000000000000000000000000",
+            "amount": 10000000000000000000,  # 10 FTNS
+            "fee": 100000000000000000,  # 0.1 FTNS
+            "destinationChain": 5,
+            "nonce": 12345,
+            "transactionId": "0xbridge1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        },
+        timestamp=datetime(2024, 1, 1, 0, 0, 0),
+        processed_at=datetime(2024, 1, 1, 0, 0, 1),
+    )
+
+
+@pytest.mark.asyncio
+async def test_bridge_out_processor_process_success(mock_db_service, bridge_out_processed_event):
+    """Test that BridgeOutEventProcessor processes successfully."""
+    processor = BridgeOutEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xbridger00000000000000000000000000000", Decimal('20'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    result = await processor.process(bridge_out_processed_event)
+    
+    assert result is True
+    mock_db_service.create_ftns_transaction.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_bridge_out_processor_balance_change_correct(mock_db_service, bridge_out_processed_event):
+    """Test that BridgeOutEventProcessor applies correct balance deltas (amount + fee)."""
+    processor = BridgeOutEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xbridger00000000000000000000000000000", Decimal('20'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    await processor.process(bridge_out_processed_event)
+    
+    updated_wallet = mock_db_service.update_ftns_wallet.call_args[0][0]
+    # 20 - 10 (amount) - 0.1 (fee) = 9.9
+    assert updated_wallet.balance == Decimal('9.9')
+
+
+@pytest.mark.asyncio
+async def test_bridge_out_processor_transaction_type_correct(mock_db_service, bridge_out_processed_event):
+    """Test that BridgeOutEventProcessor creates transaction with correct transaction_type."""
+    processor = BridgeOutEventProcessor(mock_db_service)
+    existing_wallet = make_mock_wallet("0xbridger00000000000000000000000000000", Decimal('20'))
+    mock_db_service.get_ftns_wallet_by_address.return_value = existing_wallet
+    
+    await processor.process(bridge_out_processed_event)
+    
+    transaction = mock_db_service.create_ftns_transaction.call_args[0][0]
+    assert transaction.transaction_type == "bridge_out"
+
+
+@pytest.mark.asyncio
+async def test_bridge_out_processor_process_exception_returns_false(mock_db_service, bridge_out_processed_event):
+    """Test that BridgeOutEventProcessor returns False on exception."""
+    processor = BridgeOutEventProcessor(mock_db_service)
+    mock_db_service.create_ftns_transaction.side_effect = Exception("DB error")
+    
+    result = await processor.process(bridge_out_processed_event)
+    
+    assert result is False
+
+
+# =============================================================================
+# BridgeInEventProcessor Tests
+# =============================================================================
+
+@pytest.fixture
+def bridge_in_processed_event():
+    """Create a sample bridge in processed event for testing."""
+    return ProcessedEvent(
+        contract_address="0x1234567890abcdef1234567890abcdef12345678",
+        contract_name="FTNSBridge",
+        event_name="BridgeIn",
+        block_number=100,
+        transaction_hash="0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        log_index=0,
+        args={
+            "user": "0xReceiver0000000000000000000000000000",
+            "amount": 5000000000000000000,  # 5 FTNS
+            "sourceChain": 1,
+            "sourceTransactionId": "0xsource1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+            "transactionId": "0xbridgein1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        },
+        timestamp=datetime(2024, 1, 1, 0, 0, 0),
+        processed_at=datetime(2024, 1, 1, 0, 0, 1),
+    )
+
+
+@pytest.mark.asyncio
+async def test_bridge_in_processor_process_success(mock_db_service, bridge_in_processed_event):
+    """Test that BridgeInEventProcessor processes successfully."""
+    processor = BridgeInEventProcessor(mock_db_service)
+    mock_db_service.get_ftns_wallet_by_address.return_value = None
+    
+    result = await processor.process(bridge_in_processed_event)
+    
+    assert result is True
+    mock_db_service.create_ftns_transaction.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_bridge_in_processor_balance_change_correct(mock_db_service, bridge_in_processed_event):
+    """Test that BridgeInEventProcessor applies correct balance deltas."""
+    processor = BridgeInEventProcessor(mock_db_service)
+    mock_db_service.get_ftns_wallet_by_address.return_value = None
+    
+    await processor.process(bridge_in_processed_event)
+    
+    created_wallet = mock_db_service.create_ftns_wallet.call_args[0][0]
+    assert created_wallet.balance == Decimal('5')
+
+
+@pytest.mark.asyncio
+async def test_bridge_in_processor_transaction_type_correct(mock_db_service, bridge_in_processed_event):
+    """Test that BridgeInEventProcessor creates transaction with correct transaction_type."""
+    processor = BridgeInEventProcessor(mock_db_service)
+    mock_db_service.get_ftns_wallet_by_address.return_value = None
+    
+    await processor.process(bridge_in_processed_event)
+    
+    transaction = mock_db_service.create_ftns_transaction.call_args[0][0]
+    assert transaction.transaction_type == "bridge_in"
+
+
+@pytest.mark.asyncio
+async def test_bridge_in_processor_process_exception_returns_false(mock_db_service, bridge_in_processed_event):
+    """Test that BridgeInEventProcessor returns False on exception."""
+    processor = BridgeInEventProcessor(mock_db_service)
+    mock_db_service.create_ftns_transaction.side_effect = Exception("DB error")
+    
+    result = await processor.process(bridge_in_processed_event)
+    
+    assert result is False
+
+
+# =============================================================================
+# Monitor Registration Tests
+# =============================================================================
+
+def test_setup_default_processors_registers_all_11_events(mock_wallet_connector, mock_contract_interface, mock_db_service):
+    """Test that _setup_default_processors registers all 11 event processors."""
+    monitor = Web3EventMonitor(
+        wallet_connector=mock_wallet_connector,
+        contract_interface=mock_contract_interface,
+        db_service=mock_db_service
+    )
+    
+    assert len(monitor.event_processors) == 11
+    expected_events = [
+        "Transfer", "Approval", "Mint", "Burn",
+        "Staked", "Unstaked", "RewardsClaimed",
+        "Purchase", "ListingCreated",
+        "BridgeOut", "BridgeIn"
+    ]
+    for event in expected_events:
+        assert event in monitor.event_processors
+
+
+@pytest.mark.asyncio
+async def test_unknown_event_logs_debug_not_error(mock_wallet_connector, mock_contract_interface, mock_db_service):
+    """Test that no processor for event logs debug, not error, and no crash."""
+    monitor = Web3EventMonitor(
+        wallet_connector=mock_wallet_connector,
+        contract_interface=mock_contract_interface,
+        db_service=mock_db_service
+    )
+    
+    # Create a mock log entry for an unknown event
+    mock_log = {
+        'transactionHash': MagicMock(hex=lambda: '0xabcdef123456'),
+        'logIndex': 0,
+        'blockNumber': 100,
+        'address': '0x1234567890abcdef',
+        'event': 'UnknownEvent',
+        'args': {}
+    }
+    
+    with patch('asyncio.get_event_loop') as mock_loop:
+        mock_loop.return_value.run_in_executor = AsyncMock(
+            return_value={'timestamp': 1700000000}
+        )
+        
+        # Should not raise an exception
+        await monitor._process_event_log(mock_log, "FTNSToken")
+    
+    # Event should not be added to processed_events
+    assert len(monitor.processed_events) == 0
+    # errors_encountered should still be 0 (debug log, not error)
+    assert monitor.errors_encountered == 0
