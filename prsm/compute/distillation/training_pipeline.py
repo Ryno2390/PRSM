@@ -618,7 +618,11 @@ class TrainingPipeline:
             architecture = await self.backend.generate_student_architecture(request, teacher_analysis, student_arch)
             
             # Initialize models using backend
-            teacher_config = {"model_id": "teacher"}
+            teacher_config = {
+                "model_id": request.teacher_model,  # Use actual teacher model from request
+                "device": "auto",                   # Let backends choose best device
+                "executor": self._get_executor()    # Pass executor for API teachers
+            }
             teacher_model, student_model = await self.backend.initialize_models(teacher_config, architecture, config)
             
             # Store models and architecture info
@@ -675,8 +679,16 @@ class TrainingPipeline:
             job["training_metrics"] = []
             
             for step in range(0, num_steps, max(1, num_steps // 20)):
-                # Simulate batch data
-                batch_data = {"input_ids": [], "labels": []}
+                # Sample from the job's prepared training data
+                train_data = job.get("data_info", {}).get("train", [])
+                batch_start = (step * config.batch_size) % max(1, len(train_data))
+                batch_end = min(batch_start + config.batch_size, len(train_data))
+                batch_items = train_data[batch_start:batch_end] if train_data else []
+
+                batch_data = {
+                    "inputs":  [item.get("content", "") for item in batch_items],
+                    "targets": [item.get("expected_answer", "") for item in batch_items]
+                }
                 
                 # Execute backend training step
                 metrics = await self.backend.train_step(
@@ -925,6 +937,13 @@ class TrainingPipeline:
         if training_id in self.current_training_jobs:
             logger.info("Cleaning up training job", training_id=training_id)
             del self.current_training_jobs[training_id]
+    
+    def _get_executor(self):
+        """Lazily initialize ModelExecutor for API teacher queries."""
+        if not hasattr(self, '_model_executor') or self._model_executor is None:
+            from prsm.compute.agents.executors.model_executor import ModelExecutor
+            self._model_executor = ModelExecutor()
+        return self._model_executor
     
     # === Configuration Helper Methods ===
     
