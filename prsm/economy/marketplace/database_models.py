@@ -630,6 +630,28 @@ class ReputationEventModel(Base):
     )
 
 
+class MarketplaceActivityModel(Base):
+    """Persisted user activity records for analytics"""
+    __tablename__ = 'marketplace_activities'
+
+    id            = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    activity_id   = Column(String(255), nullable=False, unique=True, index=True)
+    user_id       = Column(String(255), nullable=False, index=True)
+    activity_type = Column(String(50), nullable=False, index=True)
+    resource_id   = Column(String(255), nullable=True, index=True)
+    session_id    = Column(String(255), nullable=False, index=True)
+    value             = Column(Float, nullable=True)
+    activity_metadata = Column(JSON, nullable=True)   # 'metadata' is reserved by SQLAlchemy DeclarativeBase
+    timestamp         = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index('idx_marketplace_activities_user_ts', 'user_id', 'timestamp'),
+        Index('idx_marketplace_activities_type_ts', 'activity_type', 'timestamp'),
+        Index('idx_marketplace_activities_resource', 'resource_id', 'timestamp'),
+    )
+
+
 # ============================================================================
 # ADDITIONAL CONSTRAINTS AND INDEXES
 # ============================================================================
