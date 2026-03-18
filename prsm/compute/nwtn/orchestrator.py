@@ -762,6 +762,14 @@ Be thorough but concise. Focus on actionable insights."""
             return [s for s in self.sessions.values() if s.user_id == user_id]
         return list(self.sessions.values())
 
+    async def get_session_history(self, session_id: str) -> List[Dict]:
+        """Return session history for a given session ID."""
+        # Sessions are tracked in the sessions dict; return from session if available
+        session = self.sessions.get(session_id)
+        if session and hasattr(session, 'history'):
+            return session.history
+        return []
+
 
 def create_nwtn_orchestrator(
     context_manager: Any,

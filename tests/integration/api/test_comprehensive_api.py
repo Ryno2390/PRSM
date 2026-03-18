@@ -37,10 +37,17 @@ class TestAuthenticationAPI:
             password="securepassword123"
         )
         
-        response = await async_test_client.post(
-            "/api/v1/auth/register",
-            json=registration_data
-        )
+        with patch('prsm.core.auth.auth_manager.AuthManager.register_user') as mock_create:
+            mock_create.return_value = {
+                "user_id": "user_123",
+                "username": "newuser",
+                "email": "newuser@test.com"
+            }
+            
+            response = await async_test_client.post(
+                "/api/v1/auth/register",
+                json=registration_data
+            )
         
         assert response.status_code == status.HTTP_201_CREATED
         response_data = response.json()
@@ -57,10 +64,17 @@ class TestAuthenticationAPI:
             "password": "testpassword123"
         }
         
-        response = await async_test_client.post(
-            "/api/v1/auth/login",
-            json=login_data
-        )
+        with patch('prsm.core.auth.auth_manager.AuthManager.authenticate_user') as mock_auth:
+            mock_auth.return_value = {
+                "access_token": "test_token_123",
+                "token_type": "bearer",
+                "expires_in": 3600
+            }
+            
+            response = await async_test_client.post(
+                "/api/v1/auth/login",
+                json=login_data
+            )
         
         assert response.status_code == status.HTTP_200_OK
         response_data = response.json()
@@ -72,10 +86,16 @@ class TestAuthenticationAPI:
     
     async def test_token_refresh(self, async_test_client, user_headers):
         """Test token refresh endpoint"""
-        response = await async_test_client.post(
-            "/api/v1/auth/refresh",
-            headers=user_headers
-        )
+        with patch('prsm.core.auth.auth_manager.AuthManager.refresh_token') as mock_refresh:
+            mock_refresh.return_value = {
+                "access_token": "new_test_token_456",
+                "expires_in": 3600
+            }
+            
+            response = await async_test_client.post(
+                "/api/v1/auth/refresh",
+                headers=user_headers
+            )
         
         assert response.status_code == status.HTTP_200_OK
         response_data = response.json()
@@ -86,7 +106,7 @@ class TestAuthenticationAPI:
     async def test_user_profile(self, async_test_client, user_headers):
         """Test user profile endpoint"""
         response = await async_test_client.get(
-            "/api/v1/auth/profile",
+            "/api/v1/auth/me",
             headers=user_headers
         )
         
@@ -100,7 +120,7 @@ class TestAuthenticationAPI:
     
     async def test_unauthorized_access(self, async_test_client):
         """Test unauthorized access to protected endpoints"""
-        response = await async_test_client.get("/api/v1/auth/profile")
+        response = await async_test_client.get("/api/v1/auth/me")
         
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
         
@@ -111,7 +131,7 @@ class TestAuthenticationAPI:
     async def test_expired_token(self, async_test_client, expired_token_headers):
         """Test access with expired token"""
         response = await async_test_client.get(
-            "/api/v1/auth/profile",
+            "/api/v1/auth/me",
             headers=expired_token_headers
         )
         
@@ -135,7 +155,7 @@ class TestNWTNAPI:
             max_depth=2
         )
         
-        with patch('prsm.nwtn.meta_reasoning_engine.NWTNEngine.process_query') as mock_process:
+        with patch('prsm.compute.nwtn.orchestrator.NWTNOrchestrator.process_query') as mock_process:
             mock_process.return_value = {
                 "response": "Artificial intelligence is...",
                 "reasoning_depth": 2,
@@ -171,7 +191,7 @@ class TestNWTNAPI:
             }
         )
         
-        with patch('prsm.nwtn.meta_reasoning_engine.NWTNEngine.process_query') as mock_process:
+        with patch('prsm.compute.nwtn.orchestrator.NWTNOrchestrator.process_query') as mock_process:
             mock_process.return_value = {
                 "response": "Continuing our discussion about AI...",
                 "reasoning_depth": 3,
@@ -202,7 +222,7 @@ class TestNWTNAPI:
                 mode=mode
             )
             
-            with patch('prsm.nwtn.meta_reasoning_engine.NWTNEngine.process_query') as mock_process:
+            with patch('prsm.compute.nwtn.orchestrator.NWTNOrchestrator.process_query') as mock_process:
                 mock_process.return_value = {
                     "response": f"Response in {mode} mode",
                     "reasoning_depth": 2,
@@ -224,7 +244,7 @@ class TestNWTNAPI:
         """Test NWTN session history retrieval"""
         session_id = "test_session_123"
         
-        with patch('prsm.nwtn.meta_reasoning_engine.NWTNEngine.get_session_history') as mock_history:
+        with patch('prsm.compute.nwtn.orchestrator.NWTNOrchestrator.get_session_history') as mock_history:
             mock_history.return_value = [
                 {
                     "query": "What is AI?",
@@ -257,7 +277,7 @@ class TestNWTNAPI:
             query="Performance test query"
         )
         
-        with patch('prsm.nwtn.meta_reasoning_engine.NWTNEngine.process_query') as mock_process:
+        with patch('prsm.compute.nwtn.orchestrator.NWTNOrchestrator.process_query') as mock_process:
             mock_process.return_value = {
                 "response": "Performance test response",
                 "reasoning_depth": 2,
@@ -289,7 +309,7 @@ class TestFTNSAPI:
     
     async def test_get_balance(self, async_test_client, user_headers):
         """Test get user balance"""
-        with patch('prsm.tokenomics.ftns_service.FTNSService.get_balance') as mock_balance:
+        with patch('prsm.economy.tokenomics.ftns_service.FTNSService.get_user_balance') as mock_balance:
             mock_balance.return_value = {
                 "total_balance": Decimal("150.00"),
                 "available_balance": Decimal("120.00"),
@@ -319,7 +339,7 @@ class TestFTNSAPI:
             description="Test transfer"
         )
         
-        with patch('prsm.tokenomics.ftns_service.FTNSService.transfer') as mock_transfer:
+        with patch('prsm.economy.tokenomics.ftns_service.FTNSService.deduct_tokens') as mock_transfer:
             mock_transfer.return_value = {
                 "success": True,
                 "transaction_id": "tx_transfer_123",
@@ -344,7 +364,7 @@ class TestFTNSAPI:
     
     async def test_transaction_history(self, async_test_client, user_headers):
         """Test transaction history retrieval"""
-        with patch('prsm.tokenomics.ftns_service.FTNSService.get_transaction_history') as mock_history:
+        with patch('prsm.economy.tokenomics.ftns_service.FTNSService.get_user_transaction_history') as mock_history:
             mock_history.return_value = [
                 {
                     "transaction_id": "tx_1",
@@ -384,7 +404,7 @@ class TestFTNSAPI:
             description="Insufficient balance test"
         )
         
-        with patch('prsm.tokenomics.ftns_service.FTNSService.transfer') as mock_transfer:
+        with patch('prsm.economy.tokenomics.ftns_service.FTNSService.deduct_tokens') as mock_transfer:
             mock_transfer.side_effect = Exception("Insufficient balance")
             
             response = await async_test_client.post(
@@ -407,7 +427,7 @@ class TestMarketplaceAPI:
     
     async def test_list_marketplace_items(self, async_test_client, user_headers):
         """Test listing marketplace items"""
-        with patch('prsm.marketplace.service.MarketplaceService.get_items') as mock_items:
+        with patch('prsm.economy.marketplace.real_marketplace_service.RealMarketplaceService.search_resources') as mock_items:
             mock_items.return_value = [
                 {
                     "item_id": "item_1",
@@ -450,7 +470,7 @@ class TestMarketplaceAPI:
             category="tools"
         )
         
-        with patch('prsm.marketplace.service.MarketplaceService.create_item') as mock_create:
+        with patch('prsm.economy.marketplace.real_marketplace_service.RealMarketplaceService.create_resource_listing') as mock_create:
             mock_create.return_value = {
                 "item_id": "new_item_123",
                 "title": "New Analysis Tool",
@@ -479,7 +499,7 @@ class TestMarketplaceAPI:
             "payment_method": "ftns_balance"
         }
         
-        with patch('prsm.marketplace.service.MarketplaceService.purchase_item') as mock_purchase:
+        with patch('prsm.economy.marketplace.real_marketplace_service.RealMarketplaceService.create_purchase_order') as mock_purchase:
             mock_purchase.return_value = {
                 "purchase_id": "purchase_456",
                 "item_id": item_id,
@@ -606,7 +626,7 @@ class TestAPIPerformanceAndLoad:
         
         # Create multiple concurrent requests
         async def make_request():
-            with patch('prsm.nwtn.meta_reasoning_engine.NWTNEngine.process_query') as mock_process:
+            with patch('prsm.compute.nwtn.orchestrator.NWTNOrchestrator.process_query') as mock_process:
                 mock_process.return_value = {
                     "response": "Concurrent response",
                     "reasoning_depth": 1,
@@ -633,7 +653,7 @@ class TestAPIPerformanceAndLoad:
         """Test API rate limiting"""
         responses = await rate_limit_tester.test_rate_limit(
             client=async_test_client,
-            endpoint="/api/v1/auth/profile",
+            endpoint="/api/v1/auth/me",
             method="GET",
             limit=10,
             window_seconds=60,
@@ -654,7 +674,7 @@ class TestAPIPerformanceAndLoad:
         """Test API under load"""
         async def api_request():
             return await async_test_client.get(
-                "/api/v1/auth/profile",
+                "/api/v1/auth/me",
                 headers=user_headers
             )
         
@@ -678,7 +698,7 @@ class TestAPIErrorHandling:
     
     async def test_internal_server_error_handling(self, async_test_client, user_headers):
         """Test internal server error handling"""
-        with patch('prsm.nwtn.meta_reasoning_engine.NWTNEngine.process_query') as mock_process:
+        with patch('prsm.compute.nwtn.orchestrator.NWTNOrchestrator.process_query') as mock_process:
             mock_process.side_effect = Exception("Internal processing error")
             
             query_data = {
@@ -702,7 +722,7 @@ class TestAPIErrorHandling:
     
     async def test_timeout_handling(self, async_test_client, user_headers):
         """Test request timeout handling"""
-        with patch('prsm.nwtn.meta_reasoning_engine.NWTNEngine.process_query') as mock_process:
+        with patch('prsm.compute.nwtn.orchestrator.NWTNOrchestrator.process_query') as mock_process:
             # Simulate long processing time
             async def slow_process(*args, **kwargs):
                 await asyncio.sleep(10)  # 10 second delay
@@ -757,7 +777,7 @@ class TestAPIResponseSchemas:
         """Test NWTN response matches expected schema"""
         query_data = api_data_factory.create_nwtn_query_request()
         
-        with patch('prsm.nwtn.meta_reasoning_engine.NWTNEngine.process_query') as mock_process:
+        with patch('prsm.compute.nwtn.orchestrator.NWTNOrchestrator.process_query') as mock_process:
             mock_process.return_value = {
                 "response": "Test response",
                 "reasoning_depth": 2,
@@ -788,7 +808,7 @@ class TestAPIResponseSchemas:
     
     async def test_error_response_schema(self, async_test_client, api_response_schemas):
         """Test error response matches expected schema"""
-        response = await async_test_client.get("/api/v1/auth/profile")  # Unauthorized
+        response = await async_test_client.get("/api/v1/auth/me")  # Unauthorized
         
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
         response_data = response.json()

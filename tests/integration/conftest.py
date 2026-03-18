@@ -469,6 +469,22 @@ class _SecurityTestHelper:
     def get_malformed_json_payloads(self):
         return ["{invalid}", "{'bad': }", "{\"unterminated\": "]
 
+    # Aliases for test compatibility
+    def create_sql_injection_payloads(self):
+        return self.get_sql_injection_payloads()
+
+    def create_xss_payloads(self):
+        return self.get_xss_payloads()
+
+    def create_malformed_requests(self):
+        """Return dicts with invalid/unexpected values for request body testing."""
+        return [
+            {"query": None, "mode": "adaptive"},        # null required field
+            {"query": 12345, "mode": "adaptive"},        # wrong type
+            {"invalid_field": "test"},                   # missing required fields
+            {"query": "", "mode": "invalid_mode"},       # empty string + invalid enum
+        ]
+
 
 @pytest.fixture
 def security_test_helper():
@@ -482,6 +498,29 @@ class _RateLimitTester:
         for _ in range(count):
             resp = await client.get(url, headers=headers)
             results.append(resp.status_code)
+        return results
+
+    async def test_rate_limit(
+        self,
+        client,
+        endpoint: str,
+        method: str = "GET",
+        limit: int = 10,
+        window_seconds: int = 60,
+        headers: dict = None
+    ) -> list:
+        """
+        Send limit + 5 requests and return list of dicts with status_code.
+        The extra 5 beyond the limit allow the test to verify 429 responses.
+        """
+        results = []
+        total = limit + 5
+        for _ in range(total):
+            if method.upper() == "GET":
+                resp = await client.get(endpoint, headers=headers or {})
+            else:
+                resp = await client.post(endpoint, headers=headers or {})
+            results.append({"status_code": resp.status_code})
         return results
 
 
