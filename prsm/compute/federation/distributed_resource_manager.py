@@ -17,6 +17,9 @@ import asyncio
 import time
 import hashlib
 import json
+import random
+import socket
+import statistics
 from decimal import Decimal
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any, Union, Tuple
@@ -24,6 +27,8 @@ from uuid import UUID, uuid4
 from enum import Enum
 from dataclasses import dataclass, field
 from pydantic import BaseModel, Field
+
+import aiohttp
 
 import structlog
 logger = structlog.get_logger(__name__)
@@ -133,12 +138,83 @@ class ResourceContributionSettings(BaseModel):
     redundancy_factor: float = Field(default=1.2)
 
 
+# NVIDIA GPU Memory Bandwidth Lookup Table (GB/s)
+# Source: NVIDIA published specifications per SKU
+NVIDIA_MEMORY_BANDWIDTH = {
+    # RTX 40 Series
+    "RTX 4090": 1008,
+    "RTX 4080": 717,
+    "RTX 4080 SUPER": 768,
+    "RTX 4070 Ti SUPER": 552,
+    "RTX 4070 Ti": 504,
+    "RTX 4070 SUPER": 480,
+    "RTX 4070": 360,
+    "RTX 4060 Ti": 288,
+    "RTX 4060": 272,
+    # RTX 30 Series
+    "RTX 3090 Ti": 1008,
+    "RTX 3090": 936,
+    "RTX 3080 Ti": 912,
+    "RTX 3080": 760,
+    "RTX 3070 Ti": 608,
+    "RTX 3070": 448,
+    "RTX 3060 Ti": 448,
+    "RTX 3060": 360,
+    # RTX 20 Series
+    "RTX 2080 Ti": 616,
+    "RTX 2080 SUPER": 516,
+    "RTX 2080": 448,
+    "RTX 2070 SUPER": 448,
+    "RTX 2070": 448,
+    "RTX 2060 SUPER": 448,
+    "RTX 2060": 336,
+    # Data Center / Professional
+    "A100": 2039,
+    "A100-SXM4": 2039,
+    "A100-PCIE": 1555,
+    "A10": 600,
+    "A10G": 600,
+    "A30": 933,
+    "A40": 696,
+    "A2": 200,
+    "V100": 900,
+    "V100-SXM2": 900,
+    "V100-PCIE": 897,
+    "T4": 320,
+    "L4": 300,
+    "L40": 864,
+    "H100": 3352,
+    "H100-SXM5": 3352,
+    "H100-PCIE": 2000,
+    # Workstation
+    "RTX 6000 Ada": 960,
+    "RTX A6000": 768,
+    "RTX A5000": 768,
+    "RTX A4000": 448,
+    "RTX A3000": 448,
+    "Quadro RTX 8000": 624,
+    "Quadro RTX 6000": 576,
+}
+
+
 class ResourceCapabilityDetector:
     """Automatically detect and benchmark node capabilities"""
     
     def __init__(self):
         self.benchmarks = {}
         self.detection_cache = {}
+        # Disk benchmark cache with timestamps
+        self._disk_read_cache: Optional[float] = None
+        self._disk_read_cache_time: Optional[float] = None
+        self._disk_write_cache: Optional[float] = None
+        self._disk_write_cache_time: Optional[float] = None
+        self._disk_cache_ttl: float = 3600.0  # Cache TTL in seconds
+        # Network measurement cache with timestamps
+        self._network_latency_cache: Optional[float] = None
+        self._network_latency_cache_time: Optional[float] = None
+        self._bandwidth_cache: Optional[Tuple[float, float]] = None
+        self._bandwidth_cache_time: Optional[float] = None
+        self._network_cache_ttl: float = 300.0  # Cache TTL in seconds (network changes more frequently)
         
     async def detect_system_resources(self) -> Dict[ResourceType, ResourceSpec]:
         """Automatically detect available system resources"""
@@ -199,27 +275,43 @@ class ResourceCapabilityDetector:
             return None
     
     async def _detect_gpu_capabilities(self) -> Optional[ResourceSpec]:
-        """Detect GPU capabilities"""
-        try:
-            # Would use appropriate GPU detection libraries
-            # For now, return placeholder if GPU available
-            gpu_memory = await self._detect_gpu_memory()
-            if gpu_memory > 0:
-                return ResourceSpec(
-                    resource_type=ResourceType.COMPUTE_GPU,
-                    measurement_unit=ResourceMeasurement.GPU_MEMORY_GB,
-                    total_capacity=gpu_memory,
-                    allocated_capacity=0.0,
-                    reserved_capacity=1.0,  # Reserve 1GB for system
-                    quality_metrics={
-                        "cuda_cores": 2048,  # Would detect actual count
-                        "memory_bandwidth": 448.0,  # GB/s
-                        "compute_capability": "8.6"
-                    }
-                )
-        except Exception as e:
-            logger.debug("GPU detection failed", error=str(e))
+        """
+        Detect GPU capabilities using multiple fallback methods.
+        
+        Priority order:
+        1. pynvml (NVIDIA Management Library) - most accurate
+        2. torch.cuda (PyTorch) - good for ML workloads
+        3. Return None if no GPU detected
+        
+        Returns:
+            ResourceSpec with GPU details, or None if no GPU available
+        """
+        # TODO: ROCm/AMD support via amdsmi
+        
+        # Try pynvml first (most detailed)
+        gpu_info = self._get_gpu_info_via_pynvml()
+        
+        # Fall back to torch.cuda if pynvml failed
+        if gpu_info is None:
+            gpu_info = self._get_gpu_info_via_torch()
+        
+        if gpu_info is None:
+            # No GPU detected
             return None
+        
+        return ResourceSpec(
+            resource_type=ResourceType.COMPUTE_GPU,
+            measurement_unit=ResourceMeasurement.GPU_MEMORY_GB,
+            total_capacity=gpu_info["memory_gb"],
+            allocated_capacity=0.0,
+            reserved_capacity=1.0,  # Reserve 1GB for system
+            quality_metrics={
+                "cuda_cores": gpu_info["cuda_cores"],
+                "memory_bandwidth": gpu_info["memory_bandwidth"],
+                "compute_capability": gpu_info["compute_capability"],
+                "device_name": gpu_info.get("device_name", "Unknown")
+            }
+        )
     
     async def _detect_storage_capabilities(self) -> Dict[ResourceType, ResourceSpec]:
         """Detect storage capabilities"""
@@ -331,29 +423,464 @@ class ResourceCapabilityDetector:
         return 1.0 / execution_time  # Higher score for faster execution
     
     async def _detect_gpu_memory(self) -> float:
-        """Detect GPU memory capacity"""
+        """
+        Detect GPU memory capacity using multiple fallback methods.
+        
+        Priority order:
+        1. pynvml (NVIDIA Management Library) - most accurate
+        2. torch.cuda (PyTorch) - good for ML workloads
+        3. GPUtil - cross-platform fallback
+        4. Return 0.0 if no GPU detected
+        
+        Returns:
+            float: GPU memory in GB, or 0.0 if no GPU available
+        """
+        # TODO: ROCm/AMD support via amdsmi
+        
+        # Priority 1: Try pynvml (NVIDIA Management Library)
         try:
-            # Would use nvidia-ml-py, pycuda, or similar
-            return 8.0  # Placeholder: 8GB GPU memory
-        except Exception:
-            return 0.0  # GPU detection not available
+            import pynvml
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            total_gb = mem_info.total / (1024**3)
+            pynvml.nvmlShutdown()
+            logger.debug("GPU memory detected via pynvml", total_gb=total_gb)
+            return total_gb
+        except ImportError:
+            logger.debug("pynvml not available, trying next method")
+        except Exception as e:
+            logger.debug("pynvml detection failed", error=str(e))
+        
+        # Priority 2: Try torch.cuda (PyTorch)
+        try:
+            import torch
+            if torch.cuda.is_available():
+                props = torch.cuda.get_device_properties(0)
+                total_gb = props.total_memory / (1024**3)
+                logger.debug("GPU memory detected via torch.cuda", total_gb=total_gb)
+                return total_gb
+        except ImportError:
+            logger.debug("torch not available, trying next method")
+        except Exception as e:
+            logger.debug("torch.cuda detection failed", error=str(e))
+        
+        # Priority 3: Try GPUtil
+        try:
+            import GPUtil
+            gpus = GPUtil.getGPUs()
+            if gpus:
+                # GPUtil returns memory in MB, convert to GB
+                total_gb = gpus[0].memoryTotal / 1024
+                logger.debug("GPU memory detected via GPUtil", total_gb=total_gb)
+                return total_gb
+        except ImportError:
+            logger.debug("GPUtil not available")
+        except Exception as e:
+            logger.debug("GPUtil detection failed", error=str(e))
+        
+        # No GPU detected or all methods failed
+        logger.debug("No GPU detected or all detection methods failed")
+        return 0.0
+    
+    def _get_gpu_info_via_pynvml(self) -> Optional[Dict[str, Any]]:
+        """
+        Get detailed GPU information via pynvml.
+        
+        Returns:
+            Dict with keys: memory_gb, cuda_cores, compute_capability,
+                           memory_bandwidth, device_name
+            or None if detection fails
+        """
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            
+            # Memory info
+            mem_info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            memory_gb = mem_info.total / (1024**3)
+            
+            # Device name
+            device_name = pynvml.nvmlDeviceGetName(handle)
+            if isinstance(device_name, bytes):
+                device_name = device_name.decode('utf-8')
+            
+            # CUDA cores - try direct API first, then lookup
+            try:
+                cuda_cores = pynvml.nvmlDeviceGetNumGpuCores(handle)
+            except (AttributeError, pynvml.NVMLError):
+                # Fallback: estimate from device name or use default
+                cuda_cores = self._estimate_cuda_cores(device_name)
+            
+            # Compute capability
+            try:
+                major, minor = pynvml.nvmlDeviceGetCudaComputeCapability(handle)
+                compute_capability = f"{major}.{minor}"
+            except (AttributeError, pynvml.NVMLError):
+                compute_capability = "8.6"  # Default fallback
+            
+            # Memory bandwidth from lookup table
+            memory_bandwidth = self._get_memory_bandwidth(device_name)
+            
+            pynvml.nvmlShutdown()
+            
+            return {
+                "memory_gb": memory_gb,
+                "cuda_cores": cuda_cores,
+                "compute_capability": compute_capability,
+                "memory_bandwidth": memory_bandwidth,
+                "device_name": device_name
+            }
+        except Exception as e:
+            logger.debug("pynvml GPU info detection failed", error=str(e))
+            return None
+    
+    def _get_gpu_info_via_torch(self) -> Optional[Dict[str, Any]]:
+        """
+        Get detailed GPU information via PyTorch.
+        
+        Returns:
+            Dict with keys: memory_gb, cuda_cores, compute_capability,
+                           memory_bandwidth, device_name
+            or None if detection fails
+        """
+        try:
+            import torch
+            if not torch.cuda.is_available():
+                return None
+            
+            props = torch.cuda.get_device_properties(0)
+            memory_gb = props.total_memory / (1024**3)
+            
+            # Compute capability
+            compute_capability = f"{props.major}.{props.minor}"
+            
+            # Device name
+            device_name = props.name
+            
+            # CUDA cores - approximate based on architecture
+            # Modern NVIDIA GPUs: ~128 cores per SM (varies by architecture)
+            # Ampere (8.x): 128 cores/SM, Ada (8.9): 128 cores/SM
+            cuda_cores = props.multi_processor_count * 128
+            
+            # Memory bandwidth from lookup table
+            memory_bandwidth = self._get_memory_bandwidth(device_name)
+            
+            return {
+                "memory_gb": memory_gb,
+                "cuda_cores": cuda_cores,
+                "compute_capability": compute_capability,
+                "memory_bandwidth": memory_bandwidth,
+                "device_name": device_name
+            }
+        except Exception as e:
+            logger.debug("torch GPU info detection failed", error=str(e))
+            return None
+    
+    def _get_memory_bandwidth(self, device_name: str) -> float:
+        """
+        Get memory bandwidth for a GPU device from lookup table.
+        
+        Args:
+            device_name: GPU device name (e.g., "NVIDIA GeForce RTX 4090")
+            
+        Returns:
+            float: Memory bandwidth in GB/s, or 448.0 as default
+        """
+        # Clean up device name for matching
+        clean_name = device_name.upper().replace("NVIDIA", "").replace("GEFORCE", "").strip()
+        
+        # Priority 1: Try exact match (case-insensitive)
+        for key, bandwidth in NVIDIA_MEMORY_BANDWIDTH.items():
+            if key.upper() == clean_name:
+                return float(bandwidth)
+        
+        # Priority 2: Try to find the most specific match
+        # Sort by key length descending to match more specific names first
+        # (e.g., "RTX 3080 Ti" before "RTX 3080")
+        sorted_items = sorted(NVIDIA_MEMORY_BANDWIDTH.items(), key=lambda x: len(x[0]), reverse=True)
+        
+        for key, bandwidth in sorted_items:
+            key_upper = key.upper()
+            # Check if the lookup key is contained in the device name
+            if key_upper in clean_name:
+                return float(bandwidth)
+        
+        # Priority 3: Try partial matching for common patterns
+        for key, bandwidth in sorted_items:
+            key_parts = key.upper().split()
+            if any(part in clean_name for part in key_parts if len(part) > 3):
+                return float(bandwidth)
+        
+        # Default fallback
+        logger.debug("GPU memory bandwidth not found in lookup table, using default",
+                    device_name=device_name)
+        return 448.0
+    
+    def _estimate_cuda_cores(self, device_name: str) -> int:
+        """
+        Estimate CUDA cores based on device name.
+        
+        This is a fallback when nvmlDeviceGetNumGpuCores is not available.
+        
+        Args:
+            device_name: GPU device name
+            
+        Returns:
+            int: Estimated CUDA cores, or 2048 as default
+        """
+        # Known CUDA core counts for common GPUs
+        cuda_cores_lookup = {
+            "RTX 4090": 16384,
+            "RTX 4080": 9728,
+            "RTX 4080 SUPER": 10240,
+            "RTX 4070 Ti SUPER": 8448,
+            "RTX 4070 Ti": 7680,
+            "RTX 4070 SUPER": 7168,
+            "RTX 4070": 5888,
+            "RTX 4060 Ti": 4352,
+            "RTX 4060": 3072,
+            "RTX 3090 Ti": 10752,
+            "RTX 3090": 10496,
+            "RTX 3080 Ti": 10240,
+            "RTX 3080": 8704,
+            "RTX 3070 Ti": 6144,
+            "RTX 3070": 5888,
+            "RTX 3060 Ti": 4864,
+            "RTX 3060": 3584,
+            "A100": 6912,
+            "A10": 9216,
+            "V100": 5120,
+            "H100": 16896,
+        }
+        
+        clean_name = device_name.upper().replace("NVIDIA", "").replace("GEFORCE", "").strip()
+        
+        for key, cores in cuda_cores_lookup.items():
+            if key.upper() in clean_name:
+                return cores
+        
+        return 2048  # Default fallback
+    
+    def _sync_benchmark_disk_write(self) -> float:
+        """Synchronous disk write benchmark - runs in executor"""
+        import tempfile
+        import os
+        
+        test_size_bytes = 64 * 1024 * 1024  # 64 MB test file
+        data = os.urandom(test_size_bytes)
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.prsm_bench') as f:
+            tmppath = f.name
+            start = time.perf_counter()
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())  # force to physical disk
+            elapsed = time.perf_counter() - start
+        os.unlink(tmppath)
+        
+        return (test_size_bytes / (1024**2)) / elapsed  # MB/s
+    
+    def _sync_benchmark_disk_read(self) -> float:
+        """Synchronous disk read benchmark - runs in executor"""
+        import tempfile
+        import os
+        
+        test_size_bytes = 64 * 1024 * 1024  # 64 MB test file
+        data = os.urandom(test_size_bytes)
+        
+        # Write the test file first (without timing)
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.prsm_bench') as f:
+            tmppath = f.name
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        
+        try:
+            # Time the read operation
+            start = time.perf_counter()
+            with open(tmppath, 'rb') as f:
+                while f.read(1024 * 1024):  # Read in 1MB chunks
+                    pass
+            elapsed = time.perf_counter() - start
+            return (test_size_bytes / (1024**2)) / elapsed  # MB/s
+        finally:
+            os.unlink(tmppath)
     
     async def _benchmark_disk_read(self) -> float:
-        """Benchmark disk read speed"""
-        return 500.0  # Placeholder: 500 MB/s read speed
+        """Benchmark disk read speed with caching"""
+        current_time = time.time()
+        
+        # Check cache validity
+        if (self._disk_read_cache is not None and
+            self._disk_read_cache_time is not None and
+            (current_time - self._disk_read_cache_time) < self._disk_cache_ttl):
+            return self._disk_read_cache
+        
+        try:
+            # Run blocking benchmark in executor to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, self._sync_benchmark_disk_read)
+            
+            # Cache the result
+            self._disk_read_cache = result
+            self._disk_read_cache_time = current_time
+            
+            return result
+        except Exception as e:
+            logger.warning("Disk read benchmark failed, using fallback", error=str(e))
+            return 100.0  # Conservative fallback
     
     async def _benchmark_disk_write(self) -> float:
-        """Benchmark disk write speed"""
-        return 400.0  # Placeholder: 400 MB/s write speed
+        """Benchmark disk write speed with caching"""
+        current_time = time.time()
+        
+        # Check cache validity
+        if (self._disk_write_cache is not None and
+            self._disk_write_cache_time is not None and
+            (current_time - self._disk_write_cache_time) < self._disk_cache_ttl):
+            return self._disk_write_cache
+        
+        try:
+            # Run blocking benchmark in executor to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, self._sync_benchmark_disk_write)
+            
+            # Cache the result
+            self._disk_write_cache = result
+            self._disk_write_cache_time = current_time
+            
+            return result
+        except Exception as e:
+            logger.warning("Disk write benchmark failed, using fallback", error=str(e))
+            return 100.0  # Conservative fallback
     
     async def _run_bandwidth_test(self) -> Tuple[float, float]:
-        """Test network bandwidth"""
-        # Would implement actual bandwidth testing
-        return 100.0, 50.0  # Placeholder: 100 Mbps down, 50 Mbps up
+        """
+        Test network bandwidth using psutil.net_io_counters() differential.
+        
+        Measures current network activity over a 3-second window.
+        Note: This measures current throughput, not peak capacity.
+        A proper speedtest (iperf3 to a PRSM bootstrap node) would be needed
+        for accurate capacity measurement.
+        
+        TODO: Implement iperf3-based speedtest to PRSM bootstrap nodes for
+        accurate peak bandwidth measurement.
+        
+        Returns:
+            Tuple of (download_mbps, upload_mbps)
+        """
+        current_time = time.time()
+        
+        # Check cache validity
+        if (self._bandwidth_cache is not None and
+            self._bandwidth_cache_time is not None and
+            (current_time - self._bandwidth_cache_time) < self._network_cache_ttl):
+            return self._bandwidth_cache
+        
+        try:
+            import psutil
+            
+            # Get initial counters
+            counters_before = psutil.net_io_counters()
+            
+            # Wait 3 seconds to measure throughput
+            await asyncio.sleep(3)
+            
+            # Get final counters
+            counters_after = psutil.net_io_counters()
+            
+            # Calculate bytes transferred
+            bytes_recv = counters_after.bytes_recv - counters_before.bytes_recv
+            bytes_sent = counters_after.bytes_sent - counters_before.bytes_sent
+            
+            # Convert to Mbps (bits per second / 1,000,000)
+            # Formula: (bytes * 8 bits) / (3 seconds * 1,000,000) = Mbps
+            download_mbps = (bytes_recv * 8) / (3 * 1_000_000)
+            upload_mbps = (bytes_sent * 8) / (3 * 1_000_000)
+            
+            # Apply minimum floor - if download is too low, return minimum viable
+            if download_mbps < 0.1:
+                result = (1.0, 0.5)
+            else:
+                result = (download_mbps, upload_mbps)
+            
+            # Cache the result
+            self._bandwidth_cache = result
+            self._bandwidth_cache_time = current_time
+            
+            return result
+            
+        except Exception as e:
+            logger.warning("Bandwidth test failed, using fallback", error=str(e))
+            return (10.0, 5.0)  # Conservative fallback
+    
+    def _sync_measure_latency(self) -> float:
+        """
+        Synchronous network latency measurement to well-known DNS endpoints.
+        Runs in executor to avoid blocking the event loop.
+        
+        Returns:
+            Median latency in milliseconds, or 999.0 if all targets fail.
+        """
+        targets = [
+            ("8.8.8.8", 53),           # Google DNS
+            ("1.1.1.1", 53),           # Cloudflare DNS
+            ("208.67.222.222", 53),    # OpenDNS
+        ]
+        
+        latencies = []
+        
+        for host, port in targets:
+            try:
+                start = time.perf_counter()
+                sock = socket.create_connection((host, port), timeout=2)
+                sock.close()
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                latencies.append(elapsed_ms)
+            except (socket.timeout, socket.error, OSError) as e:
+                logger.debug("Latency measurement failed for target",
+                           target=f"{host}:{port}", error=str(e))
+                continue
+        
+        if latencies:
+            return statistics.median(latencies)
+        else:
+            return 999.0  # High latency / offline signal
     
     async def _measure_network_latency(self) -> float:
-        """Measure network latency to key nodes"""
-        return 15.0  # Placeholder: 15ms average latency
+        """
+        Measure network latency to key nodes using connect-time measurement.
+        
+        Tests connectivity to 3 well-known stable DNS endpoints and returns
+        the median latency. Uses executor for blocking socket operations.
+        
+        Returns:
+            Median latency in milliseconds, or 999.0 if all targets fail.
+        """
+        current_time = time.time()
+        
+        # Check cache validity
+        if (self._network_latency_cache is not None and
+            self._network_latency_cache_time is not None and
+            (current_time - self._network_latency_cache_time) < self._network_cache_ttl):
+            return self._network_latency_cache
+        
+        try:
+            # Run blocking latency measurement in executor
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, self._sync_measure_latency)
+            
+            # Cache the result
+            self._network_latency_cache = result
+            self._network_latency_cache_time = current_time
+            
+            return result
+            
+        except Exception as e:
+            logger.warning("Network latency measurement failed, using fallback", error=str(e))
+            return 999.0  # High latency / offline signal
 
 
 # ============================================================================
@@ -448,7 +975,7 @@ class ResourceVerificationEngine:
     async def _verify_peer_consensus(self, node_id: str, resource_spec: ResourceSpec) -> Dict[str, Any]:
         """Verify resource claims through peer node consensus"""
         # Select random peer nodes for verification
-        verifier_peers = await self._select_verification_peers(node_id, count=5)
+        verifier_peers = self._select_verification_peers(node_id, count=5)
         
         verification_results = []
         for peer_id in verifier_peers:
@@ -545,20 +1072,81 @@ class ResourceVerificationEngine:
         }
     
     # Helper methods for verification
-    async def _select_verification_peers(self, node_id: str, count: int) -> List[str]:
-        """Select random peers for verification, excluding the node being verified"""
-        # Would select from connected peers, excluding node_id
-        return [f"peer_{i}" for i in range(count)]
+    def _select_verification_peers(self, node_id: str, count: int) -> List[str]:
+        """Select peers for verification, excluding the node being verified.
+        
+        Selects from the actual node registry, preferring peers with high
+        reputation scores and using random sampling to avoid always picking
+        the same peers.
+        
+        Args:
+            node_id: The ID of the node being verified (to exclude)
+            count: Number of peers to select
+            
+        Returns:
+            List of peer node IDs to use for verification
+        """
+        # Pull from the actual node registry, exclude the target node
+        candidates = [
+            peer_id for peer_id in self.node_registry.keys()
+            if peer_id != node_id
+        ]
+        
+        if len(candidates) <= count:
+            return candidates
+        
+        # Prefer peers with high reputation scores
+        sorted_peers = sorted(
+            candidates,
+            key=lambda pid: self.node_registry[pid].reputation_score,
+            reverse=True
+        )
+        
+        # Take top 2x candidates and randomly sample from them
+        # This avoids always picking the same peers
+        pool = sorted_peers[:count * 2]
+        return random.sample(pool, min(count, len(pool)))
     
     async def _request_peer_verification(self, peer_id: str, target_node: str, resource_spec: ResourceSpec) -> Dict[str, Any]:
-        """Request a peer to verify another node's resources"""
-        # Would send verification request to peer
-        return {
-            "peer_id": peer_id,
-            "verified": True,  # Placeholder
-            "verification_score": 0.8,
-            "test_results": {"latency_test": "passed", "capacity_test": "passed"}
+        """Request a peer to verify another node's resources.
+        
+        Sends an HTTP POST request to the peer's verification endpoint
+        with the resource specification and a verification nonce.
+        
+        Args:
+            peer_id: The ID of the peer to request verification from
+            target_node: The ID of the node being verified
+            resource_spec: The resource specification to verify
+            
+        Returns:
+            Dict with verification results or error information
+        """
+        peer_profile = self.node_registry.get(peer_id)
+        if not peer_profile:
+            return {"peer_id": peer_id, "verified": False, "error": "peer_not_found"}
+
+        peer_address = f"http://{peer_profile.contribution_settings.get('host', 'localhost')}:{peer_profile.contribution_settings.get('port', 8080)}"
+
+        payload = {
+            "action": "verify_resource",
+            "target_node": target_node,
+            "resource_type": resource_spec.resource_type.value,
+            "claimed_capacity": resource_spec.total_capacity,
+            "nonce": self._generate_verification_nonce()
         }
+
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(
+                    f"{peer_address}/v1/verify",
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+                    return {"peer_id": peer_id, "verified": False, "error": f"HTTP {resp.status}"}
+            except aiohttp.ClientError as e:
+                return {"peer_id": peer_id, "verified": False, "error": str(e)}
     
     async def _request_benchmark_execution(self, node_id: str, benchmark_request: Dict[str, Any]) -> Dict[str, Any]:
         """Request a node to execute a standardized benchmark"""
@@ -606,9 +1194,36 @@ class ResourceVerificationEngine:
         return benchmark_result.get("benchmark_completed", False)
     
     def _calculate_performance_score(self, benchmark_result: Dict[str, Any], resource_spec: ResourceSpec) -> float:
-        """Calculate performance score based on benchmark results"""
-        # Would implement resource-specific performance calculation
-        return 0.85  # Placeholder score
+        """Calculate performance score based on benchmark results.
+        
+        Compares benchmark metrics against reference baselines per resource type,
+        returning a normalized score in [0.0, 1.0] range.
+        """
+        # Define reference baselines per resource type
+        BASELINES = {
+            ResourceType.COMPUTE_CPU:        {"ops_per_second": 50_000},
+            ResourceType.COMPUTE_GPU:        {"ops_per_second": 1_000_000},
+            ResourceType.STORAGE_PERSISTENT: {"throughput_mbps": 500},
+            ResourceType.STORAGE_MEMORY:     {"throughput_mbps": 20_000},
+            ResourceType.BANDWIDTH_INGRESS:  {"throughput_mbps": 100},
+            ResourceType.BANDWIDTH_EGRESS:   {"throughput_mbps": 100},
+        }
+
+        baseline = BASELINES.get(resource_spec.resource_type)
+        if not baseline:
+            return 0.5  # neutral for unknown types
+
+        metrics = benchmark_result.get("performance_metrics", {})
+
+        # Find the most relevant metric in the result
+        for key, baseline_val in baseline.items():
+            if key in metrics:
+                raw_score = metrics[key] / baseline_val
+                # Clamp to [0.0, 1.0] using sigmoid-like compression
+                score = min(1.0, raw_score ** 0.5)   # sqrt dampens outliers
+                return round(score, 4)
+
+        return 0.5  # fallback if no matching metric key
     
     async def _validate_hardware_attestation(self, attestation_result: Dict[str, Any]) -> bool:
         """Validate hardware attestation signature and contents"""
@@ -859,18 +1474,82 @@ class ResourceAllocationEngine:
         return reservation_results
     
     async def _send_reservation_request(self, node_id: str, resource_contribution: Dict[ResourceType, float]) -> bool:
-        """Send resource reservation request to a node"""
-        # Would send actual network request to node
-        logger.info("Resource reservation requested", 
-                   node_id=node_id, 
-                   resources=resource_contribution)
-        return True  # Placeholder success
+        """Send resource reservation request to a node.
+        
+        Sends an HTTP POST request to the node's reservation endpoint
+        with the resource amounts and a reservation ID.
+        
+        Args:
+            node_id: The ID of the node to send the reservation to
+            resource_contribution: Dict mapping ResourceType to amount to reserve
+            
+        Returns:
+            True if reservation was successful, False otherwise
+        """
+        node_profile = self.node_registry.get(node_id)
+        if not node_profile:
+            logger.warning("Cannot reserve: node not in registry", node_id=node_id)
+            return False
+
+        node_address = f"http://{node_profile.contribution_settings.get('host', 'localhost')}:{node_profile.contribution_settings.get('port', 8080)}"
+
+        payload = {
+            "action": "reserve_resources",
+            "resources": {rt.value: amt for rt, amt in resource_contribution.items()},
+            "reservation_id": str(uuid4()),
+            "ttl_seconds": 3600
+        }
+
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(
+                    f"{node_address}/v1/reserve",
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    return resp.status == 200
+            except aiohttp.ClientError as e:
+                logger.error("Reservation request failed", node_id=node_id, error=str(e))
+                return False
     
     # Helper calculation methods
     def _calculate_node_cost_per_unit(self, node: NodeResourceProfile) -> float:
-        """Calculate cost per resource unit for a node"""
-        # Would implement sophisticated cost calculation
-        return 0.1  # Placeholder: 0.1 FTNS per unit
+        """Calculate cost per resource unit for a node.
+        
+        Computes a weighted average cost across all contributed resources,
+        adjusted by the node's reputation score. High-reputation nodes can
+        charge a premium, while low-reputation nodes are discounted.
+        """
+        # Base rate per resource type (FTNS per normalized unit)
+        BASE_RATES = {
+            ResourceType.COMPUTE_CPU:        0.05,
+            ResourceType.COMPUTE_GPU:        0.50,
+            ResourceType.COMPUTE_TPU:        1.00,
+            ResourceType.STORAGE_PERSISTENT: 0.01,
+            ResourceType.STORAGE_MEMORY:     0.08,
+            ResourceType.BANDWIDTH_INGRESS:  0.02,
+            ResourceType.BANDWIDTH_EGRESS:   0.03,
+        }
+
+        if not node.resources:
+            return 0.1  # default
+
+        # Weighted average across contributed resources, adjusted by reputation
+        total_cost = 0.0
+        total_weight = 0.0
+
+        for resource_type, resource_spec in node.resources.items():
+            base = BASE_RATES.get(resource_type, 0.1)
+            capacity_weight = resource_spec.total_capacity
+
+            # Reputation adjustment: high-reputation nodes can charge a premium
+            # Low-reputation nodes are discounted to incentivize proper behavior
+            reputation_multiplier = 0.5 + node.reputation_score  # range: [0.5, 1.5]
+
+            total_cost   += base * reputation_multiplier * capacity_weight
+            total_weight += capacity_weight
+
+        return total_cost / total_weight if total_weight > 0 else 0.1
     
     def _calculate_node_performance_score(self, node: NodeResourceProfile) -> float:
         """Calculate overall performance score for a node"""
@@ -910,6 +1589,10 @@ class DistributedResourceManager:
         self.allocation_engine = ResourceAllocationEngine()
         self.node_registry = {}  # Would be distributed database
         self.active_allocations = {}
+        # Geographic region cache with timestamp
+        self._geographic_region_cache: Optional[str] = None
+        self._geographic_region_cache_time: Optional[float] = None
+        self._geographic_region_cache_ttl: float = 86400.0  # Cache TTL in seconds (24 hours)
         
     async def initialize_node(self, user_id: str, contribution_settings: ResourceContributionSettings) -> str:
         """Initialize a new node in the network"""
@@ -1165,9 +1848,106 @@ class DistributedResourceManager:
         return multipliers.get(resource_type, 1.0)
     
     async def _detect_geographic_region(self) -> str:
-        """Detect node's geographic region"""
-        # Would implement IP geolocation or GPS detection
-        return "us-west"  # Placeholder
+        """
+        Detect node's geographic region using multiple strategies.
+        
+        Priority order:
+        1. PRSM_REGION environment variable (operator override)
+        2. Cached result (if within TTL)
+        3. IP geolocation via ip-api.com (free, no API key)
+        
+        Returns:
+            Region string (e.g., "us-west", "europe", "asia-pacific")
+        """
+        import os
+        
+        # Strategy 1: Environment variable override (highest priority)
+        env_region = os.environ.get("PRSM_REGION")
+        if env_region:
+            logger.debug("Using PRSM_REGION environment variable", region=env_region)
+            return env_region
+        
+        # Strategy 2: Check cache
+        current_time = time.time()
+        if (self._geographic_region_cache is not None and
+            self._geographic_region_cache_time is not None and
+            (current_time - self._geographic_region_cache_time) < self._geographic_region_cache_ttl):
+            logger.debug("Using cached geographic region", region=self._geographic_region_cache)
+            return self._geographic_region_cache
+        
+        # Strategy 3: IP geolocation via ip-api.com
+        try:
+            import aiohttp
+            
+            async with aiohttp.ClientSession() as session:
+                resp = await session.get(
+                    "http://ip-api.com/json/?fields=regionName,countryCode,lat,lon",
+                    timeout=aiohttp.ClientTimeout(total=5)
+                )
+                data = await resp.json()
+                
+                country = data.get("countryCode", "")
+                lat = data.get("lat", 0)
+                lon = data.get("lon", 0)
+                
+                region = self._map_coords_to_region(lat, lon, country)
+                
+                # Cache the result
+                self._geographic_region_cache = region
+                self._geographic_region_cache_time = current_time
+                
+                logger.info("Detected geographic region via IP geolocation",
+                           region=region, country=country, lat=lat, lon=lon)
+                
+                return region
+                
+        except Exception as e:
+            logger.warning("IP geolocation failed, returning 'unknown'", error=str(e))
+            return "unknown"
+    
+    def _map_coords_to_region(self, lat: float, lon: float, country: str) -> str:
+        """
+        Map geographic coordinates and country code to PRSM region string.
+        
+        Args:
+            lat: Latitude coordinate
+            lon: Longitude coordinate
+            country: ISO 3166-1 alpha-2 country code
+            
+        Returns:
+            PRSM region string
+        """
+        # United States: split by longitude (roughly -100th meridian)
+        if country == "US":
+            return "us-west" if lon < -100 else "us-east"
+        
+        # Europe
+        elif country in ["GB", "DE", "FR", "NL", "SE", "NO", "FI", "ES", "IT", "PT", "CH", "AT", "BE", "DK", "PL"]:
+            return "europe"
+        
+        # Asia-Pacific
+        elif country in ["JP", "KR", "CN", "TW", "HK", "SG", "AU", "NZ", "IN", "TH", "ID", "MY", "PH", "VN"]:
+            return "asia-pacific"
+        
+        # South America
+        elif country in ["BR", "AR", "CL", "CO", "PE", "MX"]:
+            return "south-america"
+        
+        # Africa
+        elif country in ["ZA", "NG", "KE", "EG", "MA"]:
+            return "africa"
+        
+        # Middle East
+        elif country in ["AE", "SA", "IL", "TR", "IR", "IQ"]:
+            return "middle-east"
+        
+        # Fallback: lat/lon bounding boxes for unknown countries
+        else:
+            if -170 <= lon <= -50:
+                return "americas"
+            if -30 <= lon <= 60:
+                return "europe-africa"
+            return "asia-pacific"
     
     def _choose_verification_level(self, node_profile: NodeResourceProfile, resource_spec: ResourceSpec) -> ResourceVerificationLevel:
         """Choose appropriate verification level based on risk factors"""

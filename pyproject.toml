@@ -137,8 +137,14 @@ vectorstore = [
     "pinecone-client>=3.0.0",
 ]
 
+gpu = [
+    # GPU monitoring and detection (optional - for GPU-equipped systems)
+    "nvidia-ml-py3>=12.0.0",
+    "GPUtil>=1.4.0",
+]
+
 all = [
-    "prsm[dev,ml,blockchain,vectorstore]",
+    "prsm[dev,ml,blockchain,vectorstore,gpu]",
 ]
 
 [project.scripts]
