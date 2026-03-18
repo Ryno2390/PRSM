@@ -44,6 +44,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 from prsm.core.config import get_settings
+from prsm.core.database import get_async_session
 
 # Set precision for financial calculations
 getcontext().prec = 28
@@ -131,22 +132,17 @@ class AtomicFTNSService:
         self.retry_delay_ms = 100
 
     async def initialize(self):
-        """Initialize the service and database connection."""
+        """Initialize the service."""
         if self._initialized:
             return
-
-        if self._db_service is None:
-            from prsm.core.database_service import get_database_service
-            self._db_service = get_database_service()
-
         self._initialized = True
         logger.info("AtomicFTNSService initialized")
 
-    async def _get_session(self) -> AsyncSession:
-        """Get database session."""
+    async def _get_session(self):
+        """Get database session context manager."""
         if not self._initialized:
             await self.initialize()
-        return self._db_service.get_session()
+        return get_async_session()
 
     # =========================================================================
     # Core Atomic Operations
