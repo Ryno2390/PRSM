@@ -27,9 +27,11 @@ from collections import defaultdict, Counter
 import math
 
 from prsm.core.database_service import get_database_service
+from prsm.core.database import get_async_session
 from prsm.core.config import get_settings
 from prsm.core.models import UserRole
-from prsm.economy.marketplace.database_models import MarketplaceResource
+from sqlalchemy import select, func as sql_func, and_
+from prsm.economy.marketplace.database_models import MarketplaceResource, UserReputationModel, ReputationEventModel
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -637,18 +639,81 @@ class ReputationCalculator:
     
     # Helper methods (database operations would be implemented based on actual schema)
     async def _get_existing_reputation(self, user_id: str) -> Optional[UserReputation]:
-        """Get existing reputation from database"""
-        # Placeholder - would query database
-        return None
+        """Retrieve stored reputation from database, or None if not found."""
+        try:
+            async with get_async_session() as db:
+                stmt = select(UserReputationModel).where(UserReputationModel.user_id == user_id)
+                result = await db.execute(stmt)
+                row = result.scalar_one_or_none()
+
+            if row is None:
+                return None
+
+            # Deserialize dimension_scores from JSON
+            dimension_scores = {}
+            for dim_value, score_dict in (row.dimension_scores or {}).items():
+                try:
+                    dimension = ReputationDimension(dim_value)
+                    dimension_scores[dimension] = ReputationScore(
+                        dimension=dimension,
+                        score=score_dict["score"],
+                        confidence=score_dict["confidence"],
+                        last_updated=datetime.fromisoformat(score_dict["last_updated"]),
+                        trend=score_dict["trend"],
+                        evidence_count=score_dict["evidence_count"]
+                    )
+                except (KeyError, ValueError):
+                    continue  # Skip malformed entries
+
+            return UserReputation(
+                user_id=row.user_id,
+                overall_score=row.overall_score,
+                trust_level=TrustLevel[row.trust_level],
+                dimension_scores=dimension_scores,
+                badges=row.badges or [],
+                verification_status=row.verification_status or {},
+                reputation_history=row.reputation_history or [],
+                last_calculated=row.last_calculated,
+                next_review=row.next_review
+            )
+        except Exception as e:
+            logger.warning("Failed to retrieve existing reputation", user_id=user_id, error=str(e))
+            return None
     
     def _is_reputation_current(self, reputation: UserReputation) -> bool:
         """Check if reputation calculation is still current"""
         return (datetime.now(timezone.utc) - reputation.last_calculated).days < 1
     
     async def _get_user_reputation_events(self, user_id: str) -> List[Dict[str, Any]]:
-        """Get all reputation events for a user"""
-        # Placeholder - would query database for reputation events
-        return []
+        """Retrieve all reputation events for a user from database."""
+        try:
+            async with get_async_session() as db:
+                stmt = (
+                    select(ReputationEventModel)
+                    .where(ReputationEventModel.user_id == user_id)
+                    .order_by(ReputationEventModel.timestamp.asc())
+                )
+                result = await db.execute(stmt)
+                rows = result.scalars().all()
+
+            return [
+                {
+                    "transaction_id": row.transaction_id,
+                    "event_type": row.event_type,
+                    "dimension": row.dimension,
+                    "score_change": row.score_change,
+                    "evidence": row.evidence or {},
+                    "timestamp": row.timestamp.isoformat(),
+                    "validated": row.validated,
+                    "quality_score": (row.evidence or {}).get("quality_score", 1.0),
+                    "source_verified": (row.evidence or {}).get("source_verified", False),
+                    "source_trusted": (row.evidence or {}).get("source_trusted", False),
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.warning("Failed to retrieve reputation events", user_id=user_id, error=str(e))
+            return []
     
     def _event_affects_dimension(self, event: Dict[str, Any], dimension: ReputationDimension) -> bool:
         """Check if an event affects a specific reputation dimension"""
@@ -656,29 +721,168 @@ class ReputationCalculator:
         return dimension in self.event_impacts.get(event_type, {})
     
     async def _get_verification_status(self, user_id: str) -> Dict[str, bool]:
-        """Get user verification status"""
-        # Placeholder - would check various verification sources
+        """Get verification status for a user.
+        
+        NOTE: Verification status is updated externally via a separate API
+        (e.g., KYC webhook, expert panel decision). The reputation system reads
+        it; it doesn't own the write path.
+        """
+        try:
+            # Check if we have a cached verification status in the stored reputation
+            existing = await self._get_existing_reputation(user_id)
+            if existing and existing.verification_status:
+                return existing.verification_status
+        except Exception:
+            pass
+
+        # Default structure for new users — only email defaults to True
+        # (representing the assumption that users register with valid emails)
         return {
-            "email_verified": True,
-            "identity_verified": False,
-            "expert_verified": False,
-            "organization_verified": False
+            "email_verified": True,        # Assumed verified on registration
+            "identity_verified": False,    # Requires explicit KYC step
+            "expert_verified": False,      # Requires expert panel review
+            "organization_verified": False, # Requires org domain verification
         }
     
     async def _get_reputation_history(self, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get user's reputation history"""
-        # Placeholder - would query reputation change history
-        return []
+        """Retrieve recent reputation history for a user."""
+        try:
+            async with get_async_session() as db:
+                stmt = (
+                    select(ReputationEventModel)
+                    .where(ReputationEventModel.user_id == user_id)
+                    .order_by(ReputationEventModel.timestamp.desc())
+                    .limit(limit)
+                )
+                result = await db.execute(stmt)
+                rows = result.scalars().all()
+
+            return [
+                {
+                    "transaction_id": row.transaction_id,
+                    "event_type": row.event_type,
+                    "dimension": row.dimension,
+                    "score_change": row.score_change,
+                    "timestamp": row.timestamp.isoformat(),
+                    "validated": row.validated,
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.warning("Failed to retrieve reputation history", user_id=user_id, error=str(e))
+            return []
     
     async def _analyze_fraud_patterns(self, user_id: str, events: List[Dict[str, Any]]):
-        """Analyze for suspicious patterns that might indicate fraud"""
-        # Placeholder - would implement fraud detection algorithms
-        pass
+        """Analyze events for fraud patterns and log warnings."""
+        if not events:
+            return
+
+        try:
+            # Pattern 1 — Velocity attack (too many events in short window)
+            VELOCITY_WINDOW_HOURS = 1
+            VELOCITY_LIMIT = 20  # >20 events per hour = suspicious
+
+            recent_cutoff = datetime.now(timezone.utc) - timedelta(hours=VELOCITY_WINDOW_HOURS)
+            recent_events = [
+                e for e in events
+                if datetime.fromisoformat(e["timestamp"]) > recent_cutoff
+            ]
+            
+            if len(recent_events) > VELOCITY_LIMIT:
+                logger.warning("Velocity attack pattern detected",
+                               user_id=user_id, events_per_hour=len(recent_events))
+                await self.record_reputation_event(
+                    user_id, ReputationEvent.FRAUD_DETECTED,
+                    evidence={"pattern": "velocity_attack",
+                              "events_per_hour": len(recent_events),
+                              "threshold": VELOCITY_LIMIT}
+                )
+                return  # Stop further analysis once fraud flagged
+
+            # Pattern 2 — Concentrated source (>60% events from single source user)
+            source_counts = Counter(
+                e.get("evidence", {}).get("source_user_id")
+                for e in events
+                if e.get("evidence", {}).get("source_user_id")
+            )
+            if source_counts:
+                top_source, top_count = source_counts.most_common(1)[0]
+                concentration = top_count / len(events)
+                if concentration > 0.6 and top_count >= 5:
+                    logger.warning("Concentrated source pattern detected",
+                                   user_id=user_id, source=top_source,
+                                   concentration=concentration)
+                    # Don't auto-flag as fraud — could be legitimate power user
+                    # Just log for manual review
+
+            # Pattern 3 — Bot-like regularity (events too evenly spaced)
+            if len(events) >= 10:
+                timestamps = sorted(
+                    datetime.fromisoformat(e["timestamp"]) for e in events[-20:]
+                )
+                intervals_seconds = [
+                    (timestamps[i+1] - timestamps[i]).total_seconds()
+                    for i in range(len(timestamps)-1)
+                ]
+                if intervals_seconds:
+                    mean_interval = np.mean(intervals_seconds)
+                    std_interval = np.std(intervals_seconds)
+                    # Coefficient of variation < 0.05 means extremely regular = bot-like
+                    cv = std_interval / mean_interval if mean_interval > 0 else 0
+                    if cv < 0.05 and mean_interval < 3600:  # Regular intervals under 1 hour
+                        logger.warning("Bot-like regularity pattern detected",
+                                       user_id=user_id, cv=cv, mean_interval=mean_interval)
+        except Exception as e:
+            logger.error("Fraud pattern analysis failed", user_id=user_id, error=str(e))
     
     async def _store_reputation(self, reputation: UserReputation):
-        """Store reputation in database"""
-        # Placeholder - would store in database
-        pass
+        """Persist computed reputation to database (upsert pattern)."""
+        try:
+            # Serialize dimension_scores to JSON-safe dict
+            dim_scores_json = {
+                dim.value: {
+                    "score": score.score,
+                    "confidence": score.confidence,
+                    "last_updated": score.last_updated.isoformat(),
+                    "trend": score.trend,
+                    "evidence_count": score.evidence_count,
+                }
+                for dim, score in reputation.dimension_scores.items()
+            }
+
+            async with get_async_session() as db:
+                # Upsert pattern: try update first, then insert
+                stmt = select(UserReputationModel).where(
+                    UserReputationModel.user_id == reputation.user_id
+                )
+                result = await db.execute(stmt)
+                existing_row = result.scalar_one_or_none()
+
+                if existing_row:
+                    existing_row.overall_score = reputation.overall_score
+                    existing_row.trust_level = reputation.trust_level.name
+                    existing_row.dimension_scores = dim_scores_json
+                    existing_row.badges = reputation.badges
+                    existing_row.verification_status = reputation.verification_status
+                    existing_row.reputation_history = reputation.reputation_history
+                    existing_row.last_calculated = reputation.last_calculated
+                    existing_row.next_review = reputation.next_review
+                else:
+                    db.add(UserReputationModel(
+                        user_id=reputation.user_id,
+                        overall_score=reputation.overall_score,
+                        trust_level=reputation.trust_level.name,
+                        dimension_scores=dim_scores_json,
+                        badges=reputation.badges,
+                        verification_status=reputation.verification_status,
+                        reputation_history=reputation.reputation_history,
+                        last_calculated=reputation.last_calculated,
+                        next_review=reputation.next_review,
+                    ))
+
+                await db.commit()
+        except Exception as e:
+            logger.error("Failed to store reputation", user_id=reputation.user_id, error=str(e))
     
     async def _create_default_reputation(self, user_id: str) -> UserReputation:
         """Create default reputation for new users"""
@@ -728,25 +932,162 @@ class ReputationCalculator:
         }
         return impact_map.get(event_type, 0.0)
     
+    def _score_to_trust_level(self, score: float) -> str:
+        """Convert numeric score to trust level name."""
+        if score >= 90:
+            return TrustLevel.EXPERT.name
+        elif score >= 75:
+            return TrustLevel.TRUSTED.name
+        elif score >= 60:
+            return TrustLevel.MEMBER.name
+        elif score >= 40:
+            return TrustLevel.NEWCOMER.name
+        else:
+            return TrustLevel.UNTRUSTED.name
+    
     async def _store_reputation_transaction(self, transaction: ReputationTransaction):
-        """Store reputation transaction in database"""
-        # Placeholder - would store transaction record
-        pass
+        """Persist a reputation event to the database."""
+        try:
+            async with get_async_session() as db:
+                db.add(ReputationEventModel(
+                    transaction_id=transaction.transaction_id,
+                    user_id=transaction.user_id,
+                    event_type=transaction.event_type.value,
+                    dimension=transaction.dimension.value,
+                    score_change=transaction.score_change,
+                    evidence=transaction.evidence,
+                    source_user_id=transaction.evidence.get("source_user_id") if transaction.evidence else None,
+                    validated=transaction.validated,
+                    timestamp=transaction.timestamp,
+                ))
+                await db.commit()
+        except Exception as e:
+            logger.error("Failed to store reputation transaction",
+                         transaction_id=transaction.transaction_id, error=str(e))
     
     async def _update_reputation_incremental(self, user_id: str, transaction: ReputationTransaction):
-        """Update reputation incrementally without full recalculation"""
-        # Placeholder - would update reputation incrementally
-        pass
+        """Apply incremental update to stored reputation without full recalculation."""
+        try:
+            async with get_async_session() as db:
+                stmt = select(UserReputationModel).where(
+                    UserReputationModel.user_id == user_id
+                )
+                result = await db.execute(stmt)
+                row = result.scalar_one_or_none()
+
+                if row is None:
+                    # No stored reputation yet — skip incremental, full recalc will run next time
+                    logger.debug("No stored reputation for incremental update", user_id=user_id)
+                    return
+
+                # Update the affected dimension score in the JSON blob
+                dim_scores = dict(row.dimension_scores or {})
+                dim_key = transaction.dimension.value
+
+                if dim_key in dim_scores:
+                    current = dim_scores[dim_key]
+                    new_score = max(0.0, min(100.0, current["score"] + transaction.score_change))
+                    current["score"] = new_score
+                    current["evidence_count"] = current.get("evidence_count", 0) + 1
+                    current["last_updated"] = transaction.timestamp.isoformat()
+                    dim_scores[dim_key] = current
+
+                # Recalculate overall score from updated dimension scores
+                dimension_weights = {
+                    "quality": 0.25, "reliability": 0.20, "trustworthiness": 0.20,
+                    "expertise": 0.15, "responsiveness": 0.10, "community_contribution": 0.10
+                }
+                
+                total_weighted_score = 0.0
+                total_weight = 0.0
+                for dim_value, weight in dimension_weights.items():
+                    if dim_value in dim_scores:
+                        score_data = dim_scores[dim_value]
+                        effective_weight = weight * score_data.get("confidence", 0.1)
+                        total_weighted_score += score_data["score"] * effective_weight
+                        total_weight += effective_weight
+
+                new_overall = total_weighted_score / total_weight if total_weight > 0 else 50.0
+                new_overall = max(0.0, min(100.0, new_overall))
+
+                # Append to reputation_history (rolling 50 entries)
+                history = list(row.reputation_history or [])
+                history.append({
+                    "transaction_id": transaction.transaction_id,
+                    "event_type": transaction.event_type.value,
+                    "dimension": transaction.dimension.value,
+                    "score_change": transaction.score_change,
+                    "timestamp": transaction.timestamp.isoformat(),
+                })
+                history = history[-50:]  # Keep only last 50 entries
+
+                row.dimension_scores = dim_scores
+                row.overall_score = new_overall
+                row.trust_level = self._score_to_trust_level(new_overall)
+                row.reputation_history = history
+                row.last_calculated = transaction.timestamp
+
+                await db.commit()
+        except Exception as e:
+            logger.error("Failed incremental reputation update", user_id=user_id, error=str(e))
     
     async def _get_user_statistics(self, user_id: str) -> Dict[str, Any]:
-        """Get user activity statistics"""
-        # Placeholder - would aggregate user statistics
-        return {
+        """Retrieve user statistics for badge calculation."""
+        stats = {
             "resources_published": 0,
             "community_reports": 0,
             "expert_endorsements": 0,
-            "account_age_days": 30
+            "account_age_days": 0,
         }
+
+        try:
+            async with get_async_session() as db:
+                # resources_published: count MarketplaceResource rows owned by user
+                resource_stmt = (
+                    select(sql_func.count())
+                    .select_from(MarketplaceResource)
+                    .where(MarketplaceResource.owner_user_id == user_id)
+                )
+                result = await db.execute(resource_stmt)
+                stats["resources_published"] = result.scalar() or 0
+
+                # community_reports: count reputation_events by event_type
+                reports_stmt = (
+                    select(sql_func.count())
+                    .select_from(ReputationEventModel)
+                    .where(and_(
+                        ReputationEventModel.user_id == user_id,
+                        ReputationEventModel.event_type == ReputationEvent.COMMUNITY_REPORT.value
+                    ))
+                )
+                result = await db.execute(reports_stmt)
+                stats["community_reports"] = result.scalar() or 0
+
+                # expert_endorsements: same pattern
+                endorsements_stmt = (
+                    select(sql_func.count())
+                    .select_from(ReputationEventModel)
+                    .where(and_(
+                        ReputationEventModel.user_id == user_id,
+                        ReputationEventModel.event_type == ReputationEvent.EXPERT_ENDORSEMENT.value
+                    ))
+                )
+                result = await db.execute(endorsements_stmt)
+                stats["expert_endorsements"] = result.scalar() or 0
+
+                # account_age_days: from UserReputationModel.created_at
+                age_stmt = (
+                    select(UserReputationModel.created_at)
+                    .where(UserReputationModel.user_id == user_id)
+                )
+                result = await db.execute(age_stmt)
+                created_at = result.scalar_one_or_none()
+                if created_at:
+                    stats["account_age_days"] = (datetime.now(timezone.utc) - created_at).days
+        except Exception as e:
+            logger.warning("Failed to get user statistics", user_id=user_id, error=str(e))
+
+        return stats
 
 
 # Factory function
