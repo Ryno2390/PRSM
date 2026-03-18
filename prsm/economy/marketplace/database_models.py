@@ -13,8 +13,8 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Any
 
 from sqlalchemy import (
-    Column, String, Integer, BigInteger, Text, Boolean, DateTime, 
-    DECIMAL, JSON, ForeignKey, Table, Index, UniqueConstraint
+    Column, String, Integer, BigInteger, Text, Boolean, DateTime,
+    DECIMAL, JSON, ForeignKey, Table, Index, UniqueConstraint, Float
 )
 from sqlalchemy.dialects.postgresql import UUID as PGUUID, ARRAY
 from sqlalchemy.ext.declarative import declarative_base
@@ -154,7 +154,11 @@ class AIModelListing(MarketplaceResource):
     }
     
     # Self-referential relationship for base model
-    fine_tuned_variants = relationship("AIModelListing", backref=backref('base_model', remote_side=[id]))
+    fine_tuned_variants = relationship(
+        "AIModelListing",
+        foreign_keys=[base_model_id],
+        backref=backref('base_model', remote_side=[id])
+    )
 
 
 class DatasetListing(MarketplaceResource):
@@ -574,6 +578,55 @@ class MarketplaceAnalytics(Base):
         UniqueConstraint('resource_id', 'date', 'period_type', name='unique_analytics_per_period'),
         Index('idx_marketplace_analytics_date', 'date'),
         Index('idx_marketplace_analytics_resource_date', 'resource_id', 'date'),
+    )
+
+
+class UserReputationModel(Base):
+    """Persisted reputation profile for a user"""
+    __tablename__ = 'user_reputations'
+
+    id            = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id       = Column(String(255), nullable=False, unique=True, index=True)
+    overall_score = Column(Float, nullable=False, default=50.0)
+    trust_level   = Column(String(50), nullable=False, default='NEWCOMER')
+
+    # JSON fields — store serialized dimension scores, badges, verification, history
+    dimension_scores    = Column(JSON, nullable=True)   # Dict[str, Dict] keyed by dimension.value
+    badges              = Column(JSON, nullable=True)   # List[str]
+    verification_status = Column(JSON, nullable=True)   # Dict[str, bool]
+    reputation_history  = Column(JSON, nullable=True)   # List[Dict] (rolling 50 entries)
+
+    last_calculated = Column(DateTime(timezone=True), nullable=True)
+    next_review     = Column(DateTime(timezone=True), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at      = Column(DateTime(timezone=True), server_default=func.now(),
+                             onupdate=func.now())
+
+    __table_args__ = (
+        Index('idx_user_reputations_trust_level', 'trust_level'),
+        Index('idx_user_reputations_overall_score', 'overall_score'),
+    )
+
+
+class ReputationEventModel(Base):
+    """Persisted record of reputation-affecting events"""
+    __tablename__ = 'reputation_events'
+
+    id             = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    transaction_id = Column(String(255), nullable=False, unique=True, index=True)
+    user_id        = Column(String(255), nullable=False, index=True)
+    event_type     = Column(String(100), nullable=False, index=True)
+    dimension      = Column(String(100), nullable=False)
+    score_change   = Column(Float, nullable=False, default=0.0)
+    evidence       = Column(JSON, nullable=True)   # Dict[str, Any]
+    source_user_id = Column(String(255), nullable=True, index=True)
+    validated      = Column(Boolean, default=True)
+    timestamp      = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at     = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index('idx_reputation_events_user_type', 'user_id', 'event_type'),
+        Index('idx_reputation_events_user_timestamp', 'user_id', 'timestamp'),
     )
 
 
