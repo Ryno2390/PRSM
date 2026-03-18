@@ -16,6 +16,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Any, Callable
+import aiohttp
 
 try:
     import websockets
@@ -766,9 +767,47 @@ class BootstrapServer:
         """Periodic federation sync loop."""
         while self.running:
             try:
-                for fed_peer in self.config.federation_peers:
-                    # TODO: Implement federation sync
-                    logger.debug(f"Would sync with federation peer: {fed_peer}")
+                # Use aiohttp to fetch peers from federation peers
+                async with aiohttp.ClientSession() as session:
+                    for fed_peer in self.config.federation_peers:
+                        try:
+                            # Construct API URL
+                            peer_url = f"{fed_peer.rstrip('/')}/peers"
+                            async with session.get(peer_url, timeout=10) as response:
+                                if response.status == 200:
+                                    data = await response.json()
+                                    peers_data = data.get("peers", [])
+                                    new_peers_count = 0
+                                    
+                                    for p_data in peers_data:
+                                        peer_id = p_data.get("peer_id")
+                                        if not peer_id:
+                                            continue
+                                            
+                                        if peer_id not in self.peers:
+                                            # Add newly discovered peer as idle
+                                            peer = PeerInfo(
+                                                peer_id=peer_id,
+                                                address=p_data.get("address", ""),
+                                                port=p_data.get("port", 8000),
+                                                status=PeerStatus.IDLE,
+                                                capabilities=p_data.get("capabilities", []),
+                                                region=p_data.get("region"),
+                                                version=p_data.get("version"),
+                                            )
+                                            self.peers[peer_id] = peer
+                                            if self.db:
+                                                self.db.add_peer(peer)
+                                            new_peers_count += 1
+                                            
+                                    if new_peers_count > 0:
+                                        logger.info(f"Federation sync: Added {new_peers_count} new peers from {fed_peer}")
+                                    else:
+                                        logger.debug(f"Federation sync: No new peers from {fed_peer}")
+                                else:
+                                    logger.warning(f"Federation sync failed with {fed_peer}: HTTP {response.status}")
+                        except Exception as peer_err:
+                            logger.error(f"Failed to sync with federation peer {fed_peer}: {peer_err}")
             except Exception as e:
                 logger.error(f"Federation sync error: {e}")
             

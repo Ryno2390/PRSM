@@ -2250,11 +2250,38 @@ class HierarchicalCompiler(BaseAgent):
         language: ProgrammingLanguage, 
         reasoning_mode: CodeReasoningMode
     ) -> str:
-        """Generate initial solution using solver pattern"""
+        """Generate initial solution using solver pattern via LLM Backend"""
         
-        # Language-specific solution templates
-        if language == ProgrammingLanguage.PYTHON:
-            solution_template = '''def solve_challenge():
+        system_prompt = (
+            f"You are an expert software engineer specializing in {language.value}. "
+            f"Solve the following challenge using {reasoning_mode.value} reasoning. "
+            f"Return ONLY valid code. Do not wrap the response in markdown blocks."
+        )
+        
+        prompt = (
+            f"Challenge Description:\n{description}\n\n"
+            f"Please provide the complete implementation in {language.value} to solve this challenge."
+        )
+        
+        try:
+            result = await self._call_backend(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                temperature=0.2  # Low temperature for code reliability
+            )
+            content = result.content.strip()
+            if content.startswith("```"):
+                lines = content.split('\n')
+                if len(lines) > 2 and lines[-1].strip() == "```":
+                    content = '\n'.join(lines[1:-1])
+            return content
+        except Exception as e:
+            logger.error("LLM backend failed for initial solution, falling back to template",
+                        error=str(e), language=language.value)
+            
+            # Fallback Templates
+            if language == ProgrammingLanguage.PYTHON:
+                solution_template = '''def solve_challenge():
     """
     {description}
     Reasoning mode: {reasoning_mode}
@@ -2265,14 +2292,12 @@ class HierarchicalCompiler(BaseAgent):
     # TODO: Implement solution logic
     
     return result
-
 # Example usage
 if __name__ == "__main__":
     result = solve_challenge()
     print(f"Result: {{result}}")'''
-        
-        elif language == ProgrammingLanguage.JAVASCRIPT:
-            solution_template = '''function solveChallenge() {{
+            elif language == ProgrammingLanguage.JAVASCRIPT:
+                solution_template = '''function solveChallenge() {{
     /**
      * {description}
      * Reasoning mode: {reasoning_mode}
@@ -2283,25 +2308,21 @@ if __name__ == "__main__":
     
     return result;
 }}
-
 // Example usage
 const result = solveChallenge();
 console.log(`Result: ${{result}}`);'''
-        
-        else:
-            # Generic template
-            solution_template = '''// {description}
+            else:
+                solution_template = '''// {description}
 // Reasoning mode: {reasoning_mode}
-
 function solve() {{
     // TODO: Implement solution logic
     return null;
 }}'''
-        
-        return solution_template.format(
-            description=description,
-            reasoning_mode=reasoning_mode.value
-        )
+            
+            return solution_template.format(
+                description=description,
+                reasoning_mode=reasoning_mode.value
+            )
     
     async def _generate_verification_code(
         self, 
@@ -2719,26 +2740,54 @@ describe('Solution Tests', function() {{
         improvement_proposal: Dict[str, Any], 
         language: ProgrammingLanguage
     ) -> str:
-        """Apply code improvement based on proposal"""
+        """Apply code improvement based on proposal via LLM Backend"""
         
-        improvement_type = improvement_proposal["type"]
+        system_prompt = (
+            f"You are an expert software engineer specializing in {language.value}. "
+            f"Improve the provided code according to the given proposed improvement.\n"
+            f"Return ONLY valid code. Do not wrap the response in markdown blocks."
+        )
         
-        # Simple improvement application (in production, use advanced code transformation)
-        if improvement_type == "performance_optimization":
-            if language == ProgrammingLanguage.PYTHON:
-                return current_solution.replace("# TODO: Implement solution logic", 
-                    "# Optimized implementation\n    # Using efficient algorithms")
+        prompt = (
+            f"Current Code:\n{current_solution}\n\n"
+            f"Improvement Requested: {improvement_proposal.get('type')} - {improvement_proposal.get('reasoning')}\n\n"
+            f"Please provide the complete, improved implementation in {language.value} based on this proposal."
+        )
+        
+        try:
+            result = await self._call_backend(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                temperature=0.3
+            )
+            content = result.content.strip()
+            if content.startswith("```"):
+                lines = content.split('\n')
+                if len(lines) > 2 and lines[-1].strip() == "```":
+                    content = '\n'.join(lines[1:-1])
+            return content
+        except Exception as e:
+            logger.error("LLM backend failed for code improvement, falling back to basic replace",
+                        error=str(e), language=language.value)
             
-        elif improvement_type == "readability_enhancement":
-            return current_solution.replace("result = None", "result = None  # Initialize result variable")
-        
-        elif improvement_type == "documentation_improvement":
-            if '"""' not in current_solution:
-                return current_solution.replace("def solve_challenge():", 
-                    'def solve_challenge():\n    """Enhanced solution with comprehensive documentation."""')
-        
-        # Default: return slightly modified solution
-        return current_solution.replace("# TODO", "# Enhanced TODO")
+            improvement_type = improvement_proposal["type"]
+            
+            # Simple improvement application (in production, use advanced code transformation)
+            if improvement_type == "performance_optimization":
+                if language == ProgrammingLanguage.PYTHON:
+                    return current_solution.replace("# TODO: Implement solution logic", 
+                        "# Optimized implementation\n    # Using efficient algorithms")
+                
+            elif improvement_type == "readability_enhancement":
+                return current_solution.replace("result = None", "result = None  # Initialize result variable")
+            
+            elif improvement_type == "documentation_improvement":
+                if '"""' not in current_solution:
+                    return current_solution.replace("def solve_challenge():", 
+                        'def solve_challenge():\n    """Enhanced solution with comprehensive documentation."""')
+            
+            # Default: return slightly modified solution
+            return current_solution.replace("# TODO", "# Enhanced TODO")
     
     async def _calculate_self_play_confidence(
         self, 

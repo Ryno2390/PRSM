@@ -48,7 +48,7 @@ from pydantic import BaseModel, Field
 from ..models.integration_models import SecurityRisk, LicenseType, SecurityScanResult
 from prsm.core.config import settings
 from prsm.core.models import TimestampMixin
-# from ...safety.circuit_breaker import CircuitBreakerNetwork  # TODO: Integrate when needed
+from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
 
 logger = structlog.get_logger(__name__)
 
@@ -578,6 +578,9 @@ class SandboxManager:
         # Enhanced security state
         self.emergency_mode = False
         self.blocked_patterns = set()
+        
+        # Initialize Circuit Breaker
+        self.circuit_breaker = CircuitBreakerNetwork(node_id="sandbox_manager_node")
         
         # Initialize sandbox environment
         self._setup_sandbox()
@@ -1173,6 +1176,12 @@ class SandboxManager:
             # Activate emergency mode
             self.emergency_mode = True
             
+            # Trigger circuit breaker network
+            await self.circuit_breaker.trigger_emergency_halt(
+                threat_level=ThreatLevel.CRITICAL,
+                reason=f"Sandbox Critical Threat: {scan_result.vulnerabilities_found[0] if scan_result.vulnerabilities_found else 'unknown vulnerability'}"
+            )
+            
             # Immediately terminate all active tool sandboxes
             for sandbox_id, context in list(self.active_tool_sandboxes.items()):
                 logger.warning("Terminating sandbox due to critical security threat",
@@ -1397,6 +1406,22 @@ class SandboxManager:
         if not self.enable_tool_sandboxing:
             logger.warning("Tool sandboxing is disabled - executing without sandbox")
             return await self._execute_tool_without_sandbox(tool_execution_request)
+            
+        # Check circuit breaker status
+        if self.circuit_breaker.emergency_halt_active or self.circuit_breaker.is_open(tool_execution_request.tool_id):
+            logger.warning("Circuit breaker is OPEN or emergency halt is active, blocking execution")
+            return ToolSandboxResult(
+                sandbox_id="circuit_breaker_blocked",
+                tool_execution_result=ToolExecutionResult(
+                    execution_id=tool_execution_request.execution_id,
+                    tool_id=tool_execution_request.tool_id,
+                    success=False,
+                    execution_time=0.0,
+                    error_message="Circuit breaker is OPEN. Execution blocked.",
+                    error_code="CIRCUIT_BREAKER_OPEN"
+                ),
+                security_violations=["Execution blocked by Circuit Breaker"]
+            )
         
         # Check concurrent execution limits
         if len(self.active_tool_sandboxes) >= self.max_concurrent_tool_sandboxes:

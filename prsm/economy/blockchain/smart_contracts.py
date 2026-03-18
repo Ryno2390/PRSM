@@ -567,11 +567,13 @@ contract FTNSStaking is AccessControl, ReentrancyGuard, Pausable {
     mapping(address => mapping(uint256 => UserStake)) public userStakes;
     mapping(address => uint256[]) public userStakeIds;
     mapping(uint256 => address[]) public poolStakers;
+    mapping(address => uint256) public userActiveStakesCount;
     
     uint256 public nextPoolId = 1;
     uint256 public nextStakeId = 1;
     uint256 public totalStaked;
     uint256 public totalRewardsPaid;
+    uint256 public activeStakers;
     
     // Events
     event PoolCreated(
@@ -717,6 +719,11 @@ contract FTNSStaking is AccessControl, ReentrancyGuard, Pausable {
         pool.totalStaked += amount;
         totalStaked += amount;
         
+        if (userActiveStakesCount[msg.sender] == 0) {
+            activeStakers++;
+        }
+        userActiveStakesCount[msg.sender]++;
+        
         emit Staked(msg.sender, poolId, stakeId, amount);
     }
     
@@ -745,6 +752,11 @@ contract FTNSStaking is AccessControl, ReentrancyGuard, Pausable {
         pool.totalStaked -= amount;
         totalStaked -= amount;
         totalRewardsPaid += rewards;
+        
+        userActiveStakesCount[msg.sender]--;
+        if (userActiveStakesCount[msg.sender] == 0) {
+            activeStakers--;
+        }
         
         // Transfer tokens back to user
         ftnsToken.transfer(msg.sender, amount);
@@ -846,7 +858,7 @@ contract FTNSStaking is AccessControl, ReentrancyGuard, Pausable {
             }
         }
         
-        return (totalStaked, totalRewardsPaid, 0, activePools); // TODO: Calculate active stakers
+        return (totalStaked, totalRewardsPaid, activeStakers, activePools);
     }
 }
 '''
