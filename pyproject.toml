@@ -143,8 +143,15 @@ gpu = [
     "GPUtil>=1.4.0",
 ]
 
+distillation = [
+    # 8-bit quantization for large teacher models
+    "bitsandbytes>=0.41.0",
+    # device_map="auto" for model loading
+    "accelerate>=0.24.0",
+]
+
 all = [
-    "prsm[dev,ml,blockchain,vectorstore,gpu]",
+    "prsm[dev,ml,blockchain,vectorstore,gpu,distillation]",
 ]
 
 [project.scripts]

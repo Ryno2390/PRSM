@@ -276,9 +276,17 @@ class TransformersDistillationBackend(DistillationBackend):
         """
         logger.info("Initializing Transformers models")
         
-        # 👨‍🏫 TEACHER MODEL
-        # In practice, load from Hugging Face Hub or API
-        teacher_model = None  # Placeholder
+        # 👨‍🏫 TEACHER MODEL — load from config
+        from .teacher_loader import load_teacher_model
+        teacher_model = await load_teacher_model(
+            model_id  = teacher_config.get("model_id", ""),
+            device    = self.device,
+            executor  = teacher_config.get("executor")
+        )
+        logger.info("Teacher model loaded",
+                    model_id=teacher_config.get("model_id"),
+                    source=teacher_model.source.value,
+                    supports_soft_labels=teacher_model.supports_soft_labels)
         
         # 🎓 STUDENT MODEL
         model_type = student_architecture["model_type"]
@@ -321,30 +329,136 @@ class TransformersDistillationBackend(DistillationBackend):
         Execute Transformers training step with distillation
         
         🔄 TRAINING PROCESS:
-        - Use Transformers Trainer for optimization
-        - Implement custom distillation loss
-        - Automatic mixed precision if available
-        - Gradient accumulation and clipping
+        1. Validate inputs - return zero metrics if no inputs
+        2. Create optimizer (AdamW, instance variable, created once)
+        3. Tokenize batch using tokenizer
+        4. Forward pass through student model
+        5. Teacher soft labels if available (use KnowledgeDistillationLoss)
+        6. Backward pass with gradient clipping
+        7. Return real TrainingMetrics with actual loss values
+        8. Wrap in try/except for graceful fallback
+        
+        🔑 KEY DIFFERENCES FROM PYTORCH BACKEND:
+        - HF models (e.g., BertForSequenceClassification) compute loss internally
+          when labels are passed: model(input_ids, labels=labels) returns loss
+        - No custom loss function needed unless teacher soft labels are available
+        - HF models compute cross-entropy internally when labels passed
         """
-        # 📊 SIMULATE TRAINING METRICS
-        progress = step / (config.num_epochs * 100)
-        
-        metrics = TrainingMetrics(
-            step=step,
-            epoch=step // 100,
-            loss=2.0 * (1.0 - progress) + 0.4,
-            accuracy=0.3 + 0.5 * progress,
-            distillation_loss=1.5 * (1.0 - progress) + 0.3,
-            student_loss=0.5 * (1.0 - progress) + 0.1,
-            learning_rate=config.learning_rate,
-            temperature=config.distillation_temperature,
-            additional_metrics={
-                "perplexity": 5.0 * (1.0 - progress) + 1.1,
-                "gradient_norm": 0.8
-            }
-        )
-        
-        return metrics
+        try:
+            # 1️⃣ VALIDATE INPUTS - return zero metrics if no inputs
+            if not TRANSFORMERS_AVAILABLE or torch is None:
+                return TrainingMetrics(
+                    step=step, epoch=step // 100, loss=0.0, accuracy=0.0,
+                    distillation_loss=0.0, student_loss=0.0, learning_rate=0.0,
+                    temperature=config.distillation_temperature
+                )
+            
+            inputs = batch_data.get("inputs", [])
+            targets = batch_data.get("targets", [])
+            if not inputs:
+                return TrainingMetrics(
+                    step=step, epoch=step // 100, loss=0.0, accuracy=0.0,
+                    distillation_loss=0.0, student_loss=0.0, learning_rate=0.0,
+                    temperature=config.distillation_temperature
+                )
+            
+            # 2️⃣ CREATE OPTIMIZER (AdamW, instance variable, created once)
+            if not hasattr(self, "_optimizer") or self._optimizer is None:
+                self._optimizer = torch.optim.AdamW(
+                    student_model.parameters(),
+                    lr=config.learning_rate,
+                    weight_decay=config.weight_decay
+                )
+            
+            # 3️⃣ TOKENIZE BATCH using tokenizer
+            tokenizer = self._get_or_create_tokenizer()
+            if tokenizer is None:
+                return TrainingMetrics(
+                    step=step, epoch=step // 100, loss=0.0, accuracy=0.0,
+                    distillation_loss=0.0, student_loss=0.0, learning_rate=0.0,
+                    temperature=config.distillation_temperature
+                )
+            
+            input_enc = tokenizer(inputs, return_tensors="pt", padding=True, truncation=True, max_length=256)
+            target_enc = tokenizer(targets, return_tensors="pt", padding=True, truncation=True, max_length=64)
+            
+            input_ids = input_enc["input_ids"].to(self.device)
+            attn_mask = input_enc["attention_mask"].to(self.device)
+            labels = target_enc["input_ids"].to(self.device)
+            
+            # 4️⃣ TRAINING MODE AND ZERO GRAD
+            student_model.train()
+            self._optimizer.zero_grad()
+            
+            # 5️⃣ FORWARD PASS through student model
+            # HF models compute loss internally when labels are passed
+            student_outputs = student_model(input_ids, attention_mask=attn_mask, labels=labels)
+            
+            # Extract student loss (HF models return loss when labels provided)
+            student_loss = getattr(student_outputs, "loss", None)
+            if student_loss is None:
+                student_loss = torch.tensor(0.0, requires_grad=True, device=self.device)
+            
+            # Extract student logits for potential distillation
+            student_logits = getattr(student_outputs, "logits", None)
+            
+            # 6️⃣ TEACHER SOFT LABELS if available (use KnowledgeDistillationLoss)
+            distillation_loss = torch.tensor(0.0, device=self.device)
+            total_loss = student_loss
+            
+            if (teacher_model is not None
+                and hasattr(teacher_model, "supports_soft_labels")
+                and teacher_model.supports_soft_labels
+                and student_logits is not None):
+                
+                # Get soft labels from teacher
+                teacher_logits = await teacher_model.get_soft_labels(input_ids, attn_mask)
+                
+                if teacher_logits is not None:
+                    # Import KD loss from pytorch_backend
+                    from .pytorch_backend import KnowledgeDistillationLoss
+                    
+                    distill_fn = KnowledgeDistillationLoss(
+                        temperature=config.distillation_temperature,
+                        alpha=config.alpha_knowledge_distillation
+                    )
+                    total_loss, _ = distill_fn(student_logits, teacher_logits, labels)
+                    distillation_loss = total_loss - (1.0 - config.alpha_knowledge_distillation) * student_loss
+            
+            # 7️⃣ BACKWARD PASS with gradient clipping
+            total_loss.backward()
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                student_model.parameters(),
+                config.gradient_clipping
+            )
+            self._optimizer.step()
+            
+            # 8️⃣ RETURN REAL TrainingMetrics with actual loss values
+            metrics = TrainingMetrics(
+                step=step,
+                epoch=step // 100,
+                loss=total_loss.item(),
+                accuracy=0.0,  # Accuracy computed during evaluation, not training
+                distillation_loss=distillation_loss.item(),
+                student_loss=student_loss.item(),
+                learning_rate=config.learning_rate,
+                temperature=config.distillation_temperature,
+                additional_metrics={
+                    "perplexity": math.exp(min(total_loss.item(), 10.0)) if total_loss.item() > 0 else 0.0,
+                    "gradient_norm": grad_norm.item() if hasattr(grad_norm, "item") else float(grad_norm)
+                }
+            )
+            
+            return metrics
+            
+        except Exception as e:
+            logger.error(f"train_step failed: {e}")
+            # Return zero metrics on failure (no crash)
+            return TrainingMetrics(
+                step=step, epoch=step // 100, loss=0.0, accuracy=0.0,
+                distillation_loss=0.0, student_loss=0.0, learning_rate=0.0,
+                temperature=config.distillation_temperature
+            )
     
     async def evaluate_model(
         self,
