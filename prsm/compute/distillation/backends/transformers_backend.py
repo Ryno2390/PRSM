@@ -23,7 +23,12 @@ import logging
 from typing import Dict, Any, List, Optional, Tuple
 import json
 import os
+import time
+import math
+import tempfile
 from pathlib import Path
+
+import numpy as np
 
 try:
     from transformers import (
@@ -348,28 +353,345 @@ class TransformersDistillationBackend(DistillationBackend):
         teacher_model: Optional[Any] = None
     ) -> Dict[str, float]:
         """
-        Evaluate model using Transformers evaluation utilities
+        Evaluate model using Transformers evaluation utilities.
         
         📊 EVALUATION FEATURES:
         - Task-specific metrics (accuracy, F1, BLEU, etc.)
-        - Automatic metric computation
+        - Automatic metric computation via HuggingFace Trainer
         - Comparison with teacher model
         - Inference speed benchmarking
-        """
-        logger.info("Evaluating Transformers model")
         
+        Strategy: Use HuggingFace Trainer.evaluate() if available;
+        fall back to manual inference loop for non-HF models.
+        
+        # TODO (Priority 3): Replace simulated training with real gradient computation
+        # after teacher_model = None placeholder is resolved in initialize_models()
+        """
+        logger.info("Evaluating Transformers model with real inference")
+        
+        # Check for transformers availability
+        if not TRANSFORMERS_AVAILABLE:
+            logger.warning("Transformers not available, returning fallback metrics")
+            return self._fallback_metrics()
+        
+        # Validate test data exists
+        test_data = eval_data.get("test", [])
+        if not test_data:
+            logger.warning("No test data provided, returning fallback metrics")
+            return self._fallback_metrics()
+        
+        # Validate student model
+        if student_model is None:
+            logger.warning("Invalid student model (None), returning fallback metrics")
+            return self._fallback_metrics()
+        
+        try:
+            # Check if student_model is a HuggingFace model (has .config attribute)
+            is_hf_model = hasattr(student_model, 'config') and hasattr(student_model, 'eval')
+            
+            if is_hf_model:
+                # Try HuggingFace Trainer evaluation (best path)
+                return await self._evaluate_with_trainer(student_model, test_data, teacher_model)
+            else:
+                # Fallback: manual inference loop for non-HF models
+                return await self._evaluate_with_manual_loop(student_model, test_data, teacher_model)
+                
+        except Exception as e:
+            logger.error(f"Evaluation failed: {e}")
+            return self._fallback_metrics()
+    
+    async def _evaluate_with_trainer(
+        self,
+        student_model: Any,
+        test_data: List[Dict[str, Any]],
+        teacher_model: Optional[Any] = None
+    ) -> Dict[str, float]:
+        """
+        Evaluate using HuggingFace Trainer.evaluate() for native HF models.
+        
+        This is the preferred evaluation path for models that are full HuggingFace models.
+        """
+        logger.info("Using HuggingFace Trainer for evaluation")
+        
+        # Get tokenizer
+        tokenizer = self._get_or_create_tokenizer()
+        
+        # Create evaluation dataset
+        eval_dataset = _EvalDataset(test_data, tokenizer)
+        
+        # Create temporary output directory
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create TrainingArguments for evaluation
+            training_args = TrainingArguments(
+                output_dir=temp_dir,
+                per_device_eval_batch_size=8,
+                dataloader_drop_last=False,
+                report_to="none",  # Disable wandb/mlflow reporting
+                fp16=torch.cuda.is_available() if torch is not None else False
+            )
+            
+            # Create Trainer
+            trainer = Trainer(
+                model=student_model,
+                args=training_args,
+                eval_dataset=eval_dataset,
+                compute_metrics=self._compute_metrics,
+                tokenizer=tokenizer
+            )
+            
+            # Run evaluation
+            eval_results = trainer.evaluate()
+            
+            # Measure inference latency with a small benchmark
+            student_model.eval()
+            latencies = []
+            
+            with torch.no_grad():
+                for i, item in enumerate(test_data[:20]):  # Benchmark on 20 items
+                    input_text = item.get("content", "") or item.get("input", "")
+                    if not input_text:
+                        continue
+                    
+                    if tokenizer is not None:
+                        inputs = tokenizer(
+                            input_text,
+                            return_tensors="pt",
+                            truncation=True,
+                            max_length=256
+                        )
+                        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                    else:
+                        # Fallback encoding
+                        input_ids = torch.tensor([[ord(c) % 30522 for c in input_text[:256]]]).to(self.device)
+                        inputs = {"input_ids": input_ids}
+                    
+                    start_time = time.perf_counter()
+                    _ = student_model(**inputs)
+                    end_time = time.perf_counter()
+                    latencies.append((end_time - start_time) * 1000)
+            
+            # Restore training mode
+            student_model.train()
+            
+            # Compute metrics
+            avg_latency = sum(latencies) / len(latencies) if latencies else 0.0
+            
+            # Compute memory usage
+            memory_mb = 0.0
+            if torch is not None and torch.cuda.is_available() and self.device == "cuda":
+                memory_mb = torch.cuda.max_memory_allocated() / (1024 * 1024)
+            
+            # Compute model size from parameters
+            model_size_mb = 0.0
+            if hasattr(student_model, 'parameters'):
+                total_params = sum(p.numel() for p in student_model.parameters())
+                model_size_mb = (total_params * 4) / (1024 * 1024)
+            
+            # Map HF output keys to PRSM schema
+            accuracy = eval_results.get("eval_accuracy", eval_results.get("eval_f1", 0.0))
+            
+            # Compute F1, precision, recall if not in eval_results
+            f1 = eval_results.get("eval_f1", accuracy)
+            precision = eval_results.get("eval_precision", accuracy)
+            recall = eval_results.get("eval_recall", accuracy)
+            
+            # Compute perplexity from eval_loss if available
+            eval_loss = eval_results.get("eval_loss", 0.0)
+            perplexity = math.exp(min(eval_loss, 10.0)) if eval_loss > 0 else 0.0
+            
+            eval_metrics = {
+                "accuracy": accuracy,
+                "f1_score": f1,
+                "precision": precision,
+                "recall": recall,
+                "avg_loss": eval_loss,
+                "perplexity": perplexity,
+                "inference_latency_ms": avg_latency,
+                "throughput_tokens_per_sec": 1000.0 / max(0.001, avg_latency),
+                "memory_usage_mb": memory_mb,
+                "model_size_mb": model_size_mb,
+                "items_evaluated": len(test_data)
+            }
+            
+            # Teacher comparison flag
+            if teacher_model is not None:
+                eval_metrics["teacher_provided"] = True
+            
+            logger.info(f"Trainer evaluation complete: {accuracy:.3f} accuracy, {perplexity:.2f} perplexity")
+            return eval_metrics
+    
+    async def _evaluate_with_manual_loop(
+        self,
+        student_model: Any,
+        test_data: List[Dict[str, Any]],
+        teacher_model: Optional[Any] = None
+    ) -> Dict[str, float]:
+        """
+        Fallback: Manual inference loop for non-HuggingFace models.
+        
+        Uses the same algorithm as pytorch_backend.evaluate_model().
+        """
+        logger.info("Using manual inference loop for evaluation")
+        
+        # Set model to evaluation mode
+        if hasattr(student_model, 'eval'):
+            student_model.eval()
+        
+        # Get tokenizer
+        tokenizer = self._get_or_create_tokenizer()
+        
+        # Collect metrics
+        all_losses: List[float] = []
+        all_preds: List[int] = []
+        all_labels: List[int] = []
+        all_latencies: List[float] = []
+        
+        # Limit evaluation to 200 items for efficiency
+        eval_items = test_data[:min(200, len(test_data))]
+        
+        # Loss function for computing perplexity
+        loss_fn = torch.nn.CrossEntropyLoss(reduction='sum') if torch is not None else None
+        
+        with torch.no_grad():
+            for item in eval_items:
+                # Extract input and target text
+                input_text = item.get("content", "") or item.get("input", "")
+                target_text = item.get("expected_answer", "") or item.get("target", "")
+                
+                # Skip if no target
+                if not target_text or not input_text:
+                    continue
+                
+                try:
+                    # Tokenize input and target
+                    if tokenizer is not None:
+                        input_ids = tokenizer.encode(
+                            input_text,
+                            max_length=256,
+                            truncation=True,
+                            return_tensors="pt"
+                        )
+                        target_ids = tokenizer.encode(
+                            target_text,
+                            max_length=64,
+                            truncation=True
+                        )
+                    else:
+                        # Fallback: simple character-level tokenization
+                        input_ids = torch.tensor([[ord(c) % 30522 for c in input_text[:256]]])
+                        target_ids = [ord(c) % 30522 for c in target_text[:64]]
+                    
+                    # Move to device
+                    input_ids = input_ids.to(self.device)
+                    
+                    # Measure inference latency
+                    start_time = time.perf_counter()
+                    
+                    # Forward pass
+                    outputs = student_model(input_ids)
+                    
+                    end_time = time.perf_counter()
+                    latency_ms = (end_time - start_time) * 1000
+                    all_latencies.append(latency_ms)
+                    
+                    # Extract logits (handle different output formats)
+                    if isinstance(outputs, dict):
+                        logits = outputs.get("logits", outputs.get("last_hidden_state", None))
+                    elif isinstance(outputs, tuple):
+                        logits = outputs[0]
+                    else:
+                        logits = outputs
+                    
+                    if logits is None:
+                        continue
+                    
+                    # Get predictions (top-1 token from last position)
+                    last_token_logits = logits[0, -1, :]
+                    pred_token = torch.argmax(last_token_logits).item()
+                    all_preds.append(pred_token)
+                    
+                    # Get label (first token of target)
+                    label_token = target_ids[0] if target_ids else 0
+                    all_labels.append(label_token)
+                    
+                    # Compute loss for perplexity
+                    if loss_fn is not None and len(target_ids) > 0:
+                        # Create target tensor
+                        target_tensor = torch.tensor(target_ids, device=self.device)
+                        # Compute cross-entropy loss
+                        if logits.size(1) >= len(target_ids):
+                            logits_for_loss = logits[0, :len(target_ids), :]
+                            loss = loss_fn(logits_for_loss, target_tensor)
+                            all_losses.append(loss.item() / len(target_ids))
+                    
+                except Exception as item_error:
+                    logger.debug(f"Error processing evaluation item: {item_error}")
+                    continue
+        
+        # Restore training mode
+        if hasattr(student_model, 'train'):
+            student_model.train()
+        
+        # Check if we have any valid results
+        if not all_preds:
+            logger.warning("No valid predictions during evaluation")
+            return self._fallback_metrics()
+        
+        # Compute accuracy
+        correct = sum(1 for p, l in zip(all_preds, all_labels) if p == l)
+        accuracy = correct / len(all_preds) if all_preds else 0.0
+        
+        # Compute average loss and perplexity
+        avg_loss = sum(all_losses) / len(all_losses) if all_losses else 0.0
+        # Cap perplexity to avoid overflow
+        perplexity = math.exp(min(avg_loss, 10.0)) if avg_loss > 0 else 0.0
+        
+        # Compute average latency
+        avg_latency = sum(all_latencies) / len(all_latencies) if all_latencies else 0.0
+        
+        # Compute F1, precision, recall using sklearn if available
+        try:
+            from sklearn.metrics import f1_score, precision_score, recall_score
+            f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
+            precision = precision_score(all_labels, all_preds, average='macro', zero_division=0)
+            recall = recall_score(all_labels, all_preds, average='macro', zero_division=0)
+        except (ImportError, ValueError):
+            # Fallback: approximate from accuracy
+            f1 = accuracy
+            precision = accuracy
+            recall = accuracy
+        
+        # Compute memory usage
+        memory_mb = 0.0
+        if torch is not None and torch.cuda.is_available() and self.device == "cuda":
+            memory_mb = torch.cuda.max_memory_allocated() / (1024 * 1024)
+        
+        # Compute model size from parameters
+        model_size_mb = 0.0
+        if hasattr(student_model, 'parameters'):
+            total_params = sum(p.numel() for p in student_model.parameters())
+            model_size_mb = (total_params * 4) / (1024 * 1024)
+        
+        # Build metrics dict
         eval_metrics = {
-            "accuracy": 0.87,
-            "f1_score": 0.85,
-            "precision": 0.88,
-            "recall": 0.86,
-            "perplexity": 1.8,
-            "inference_latency_ms": 12.5,
-            "throughput_tokens_per_sec": 1500.0,
-            "memory_usage_mb": 450,
-            "model_size_mb": 95.2
+            "accuracy": accuracy,
+            "f1_score": f1,
+            "precision": precision,
+            "recall": recall,
+            "avg_loss": avg_loss,
+            "perplexity": perplexity,
+            "inference_latency_ms": avg_latency,
+            "throughput_tokens_per_sec": 1000.0 / max(0.001, avg_latency),
+            "memory_usage_mb": memory_mb,
+            "model_size_mb": model_size_mb,
+            "items_evaluated": len(all_preds)
         }
         
+        # Teacher comparison flag
+        if teacher_model is not None:
+            eval_metrics["teacher_provided"] = True
+        
+        logger.info(f"Manual evaluation complete: {accuracy:.3f} accuracy, {perplexity:.2f} perplexity, {len(all_preds)} items")
         return eval_metrics
     
     async def export_model(
@@ -521,6 +843,117 @@ class TransformersDistillationBackend(DistillationBackend):
             "data_analysis": "classification"
         }
         return task_mapping.get(domain, "classification")
+    
+    def _get_or_create_tokenizer(self) -> Any:
+        """
+        Get or create a default tokenizer for evaluation.
+        
+        Uses distilbert-base-uncased as the default tokenizer (matches distillation use case).
+        Falls back to None if transformers is unavailable.
+        """
+        if "default" not in self.tokenizer_cache:
+            try:
+                self.tokenizer_cache["default"] = AutoTokenizer.from_pretrained(
+                    "distilbert-base-uncased",
+                    model_max_length=512
+                )
+                logger.debug("Created default DistilBERT tokenizer for evaluation")
+            except (ImportError, OSError) as e:
+                logger.warning(f"Could not load transformers tokenizer: {e}")
+                self.tokenizer_cache["default"] = None
+        return self.tokenizer_cache["default"]
+    
+    def _fallback_metrics(self) -> Dict[str, float]:
+        """
+        Return all-zeros metrics dict when evaluation fails.
+        
+        This signals evaluation failure without falsely inflating scores.
+        """
+        return {
+            "accuracy": 0.0,
+            "f1_score": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "avg_loss": 0.0,
+            "perplexity": 0.0,
+            "inference_latency_ms": 0.0,
+            "throughput_tokens_per_sec": 0.0,
+            "memory_usage_mb": 0.0,
+            "model_size_mb": 0.0,
+            "items_evaluated": 0
+        }
+    
+    @staticmethod
+    def _compute_metrics(eval_pred) -> Dict[str, float]:
+        """
+        Compute metrics for HuggingFace Trainer.evaluate().
+        
+        Args:
+            eval_pred: EvalPrediction object with predictions and label_ids
+            
+        Returns:
+            Dict with accuracy metric
+        """
+        logits, labels = eval_pred
+        predictions = np.argmax(logits, axis=-1)
+        
+        try:
+            import evaluate
+            metric = evaluate.load("accuracy")
+            return metric.compute(predictions=predictions, references=labels)
+        except ImportError:
+            # Fallback: compute accuracy manually
+            acc = (predictions == labels).mean()
+            return {"accuracy": float(acc)}
+
+
+class _EvalDataset(torch.utils.data.Dataset):
+    """
+    Simple dataset class for HuggingFace Trainer evaluation.
+    
+    Wraps test data items into tokenized format suitable for model evaluation.
+    """
+    
+    def __init__(self, items: List[Dict[str, Any]], tokenizer: Any,
+                 max_input_length: int = 256, max_target_length: int = 64):
+        self.items = items
+        self.tokenizer = tokenizer
+        self.max_input_length = max_input_length
+        self.max_target_length = max_target_length
+    
+    def __len__(self) -> int:
+        return len(self.items)
+    
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        item = self.items[idx]
+        input_text = item.get("content", "") or item.get("input", "")
+        target_text = item.get("expected_answer", "") or item.get("target", "")
+        
+        if self.tokenizer is not None:
+            input_enc = self.tokenizer(
+                input_text, truncation=True, max_length=self.max_input_length,
+                padding="max_length", return_tensors="pt"
+            )
+            target_enc = self.tokenizer(
+                target_text, truncation=True, max_length=self.max_target_length,
+                padding="max_length", return_tensors="pt"
+            )
+            
+            return {
+                "input_ids": input_enc["input_ids"].squeeze(0),
+                "attention_mask": input_enc["attention_mask"].squeeze(0),
+                "labels": target_enc["input_ids"].squeeze(0)
+            }
+        else:
+            # Fallback: simple character-level encoding
+            input_ids = torch.tensor([[ord(c) % 30522 for c in input_text[:self.max_input_length]]])
+            target_ids = torch.tensor([[ord(c) % 30522 for c in target_text[:self.max_target_length]]])
+            
+            return {
+                "input_ids": input_ids.squeeze(0),
+                "attention_mask": torch.ones_like(input_ids.squeeze(0)),
+                "labels": target_ids.squeeze(0)
+            }
 
 
 # Register Transformers backend if available

@@ -23,6 +23,7 @@ simulations with real ML training, evaluation, and knowledge transfer capabiliti
 
 import asyncio
 import json
+import math
 import tempfile
 import time
 import numpy as np
@@ -196,7 +197,9 @@ class RealTeacherCapabilities:
         response: Any,
         domain: str
     ) -> Dict[str, Any]:
-        """Evaluate the quality of a model response"""
+        """
+        Evaluate response quality with semantic similarity and structural heuristics.
+        """
         try:
             # Extract response content
             if isinstance(response, dict):
@@ -209,29 +212,46 @@ class RealTeacherCapabilities:
                 "correct": False,
                 "creativity_score": 0.0,
                 "problem_solving": 0.0,
+                "similarity_score": 0.0,
                 domain: 0.0
             }
             
-            # Check against expected answer if available
+            if not content or not content.strip():
+                return quality_metrics
+            
+            content = content.strip()
+            
+            # Determine correctness
             expected = task.get("expected_answer", "")
-            if expected:
-                # Simple similarity check (in production, use more sophisticated methods)
+            if expected and expected.strip():
+                # Use semantic similarity (upgraded from Jaccard)
                 similarity = self._calculate_text_similarity(content, expected)
-                quality_metrics["correct"] = similarity > 0.7
+                quality_metrics["similarity_score"] = similarity
+                quality_metrics["correct"] = similarity > 0.6  # Lowered from 0.7
             else:
-                # Heuristic evaluation for open-ended tasks
-                quality_metrics["correct"] = len(content.strip()) > 10  # Basic response check
+                # Open-ended task: check structural quality signals
+                has_structure = len(content.split("\n")) > 1 or len(content.split(".")) > 2
+                min_length = len(content.split()) >= 20
+                unique_words = len(set(content.split()))
+                total_words = max(1, len(content.split()))
+                not_repetitive = (unique_words / total_words) > 0.4
+                quality_metrics["correct"] = has_structure and min_length and not_repetitive
             
-            # Creativity assessment (response uniqueness and elaboration)
-            quality_metrics["creativity_score"] = min(1.0, len(content.split()) / 50.0)
+            # Creativity score: vocabulary diversity (not length)
+            words = content.split()
+            if words:
+                type_token_ratio = len(set(words)) / len(words)
+                quality_metrics["creativity_score"] = min(1.0, type_token_ratio * 1.5)
             
-            # Problem-solving assessment (structured reasoning)
-            if any(keyword in content.lower() for keyword in ["because", "therefore", "step", "first", "then"]):
-                quality_metrics["problem_solving"] = 0.8
-            elif any(keyword in content.lower() for keyword in ["answer", "solution", "result"]):
-                quality_metrics["problem_solving"] = 0.6
-            else:
-                quality_metrics["problem_solving"] = 0.3
+            # Problem-solving score: reasoning keyword presence
+            reasoning_keywords = [
+                "because", "therefore", "step", "first", "then", "since", "thus", "hence",
+                "if", "given that", "it follows", "we can conclude", "so", "consequently",
+                "as a result", "this means", "which implies", "leading to"
+            ]
+            content_lower = content.lower()
+            keyword_count = sum(1 for kw in reasoning_keywords if kw in content_lower)
+            quality_metrics["problem_solving"] = min(1.0, keyword_count / 3.0)
             
             # Domain-specific assessment
             domain_keywords = self._get_domain_keywords(domain)
@@ -246,24 +266,50 @@ class RealTeacherCapabilities:
                 "correct": False,
                 "creativity_score": 0.0,
                 "problem_solving": 0.0,
+                "similarity_score": 0.0,
                 domain: 0.0
             }
     
+    def _get_sentence_model(self):
+        """
+        Get or create cached sentence-transformers model.
+        Uses all-MiniLM-L6-v2 (80MB, fast, already in requirements).
+        """
+        if not hasattr(self, "_sentence_model") or self._sentence_model is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+                self._sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
+            except ImportError:
+                self._sentence_model = None
+        return self._sentence_model
+    
     def _calculate_text_similarity(self, text1: str, text2: str) -> float:
-        """Calculate basic text similarity"""
-        # Simple token-based similarity (in production, use embeddings)
-        tokens1 = set(text1.lower().split())
-        tokens2 = set(text2.lower().split())
-        
-        if not tokens1 and not tokens2:
-            return 1.0
-        if not tokens1 or not tokens2:
+        """
+        Calculate semantic similarity between two texts.
+        Uses sentence-transformers if available, falls back to Jaccard.
+        """
+        if not text1 or not text2:
             return 0.0
         
-        intersection = tokens1.intersection(tokens2)
-        union = tokens1.union(tokens2)
+        # Priority 1: sentence-transformers (semantic similarity)
+        try:
+            model = self._get_sentence_model()
+            if model is not None:
+                emb1 = model.encode([text1])[0]
+                emb2 = model.encode([text2])[0]
+                cos_sim = np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2))
+                return float(cos_sim)
+        except Exception:
+            pass  # Fall back to Jaccard
         
-        return len(intersection) / len(union)
+        # Priority 2: Jaccard token overlap (existing fallback)
+        tokens1 = set(text1.lower().split())
+        tokens2 = set(text2.lower().split())
+        if not tokens1 or not tokens2:
+            return 0.0
+        intersection = len(tokens1 & tokens2)
+        union = len(tokens1 | tokens2)
+        return intersection / union if union > 0 else 0.0
     
     def _get_domain_keywords(self, domain: str) -> List[str]:
         """Get domain-specific keywords for assessment"""
@@ -796,6 +842,10 @@ class RealTeacherTrainer:
     - Integration with distributed training infrastructure
     """
     
+    # Perplexity threshold for validation accuracy
+    # Lower perplexity = model better predicts expected answers
+    VALIDATION_PERPLEXITY_THRESHOLD = 5.0
+    
     def __init__(self):
         self.distillation_backends = {}
         self.training_history = {}
@@ -1027,25 +1077,101 @@ class RealTeacherTrainer:
         }
     
     async def _validate_model(self, backend, model, validation_data: List[Dict[str, Any]]) -> float:
-        """Validate model performance"""
+        """
+        Validate model on validation data using perplexity-based accuracy.
+        
+        Uses cross-entropy loss to compute perplexity. Items with perplexity
+        below the threshold are considered "correct" predictions.
+        
+        Args:
+            backend: PyTorchDistillationBackend or TransformersDistillationBackend
+            model: PRSMStudentModel PyTorch model
+            validation_data: List of dicts with "content" and "expected_answer" keys
+            
+        Returns:
+            Accuracy as fraction of items with perplexity < threshold
+        """
         if not validation_data:
             return 0.0
         
+        # Check PyTorch availability
         try:
-            # Simple accuracy calculation
-            correct = 0
-            total = len(validation_data)
+            import torch
+        except ImportError:
+            return 0.0
+        
+        # Sample size (same as original code)
+        sample_size = min(50, len(validation_data))
+        
+        # Acquire tokenizer from backend
+        tokenizer = backend._get_or_create_tokenizer()
+        if tokenizer is None:
+            return 0.0
+        
+        correct = 0
+        evaluated_count = 0
+        
+        try:
+            model.eval()
             
-            for item in validation_data[:min(50, total)]:  # Sample for speed
-                # Simplified evaluation
-                correct += 1 if np.random.random() > 0.3 else 0  # Placeholder
+            for item in validation_data[:sample_size]:
+                input_text = item.get("content", "")
+                target_text = item.get("expected_answer", "")
+                
+                # Skip items without ground truth
+                if not target_text or not target_text.strip():
+                    continue
+                
+                # Tokenize
+                input_enc = tokenizer(
+                    input_text, return_tensors="pt",
+                    truncation=True, max_length=256, padding=True
+                )
+                target_enc = tokenizer(
+                    target_text, return_tensors="pt",
+                    truncation=True, max_length=64, padding=True
+                )
+                
+                # Forward pass
+                with torch.no_grad():
+                    input_ids = input_enc["input_ids"].to(backend.device)
+                    attn_mask = input_enc["attention_mask"].to(backend.device)
+                    labels = target_enc["input_ids"].to(backend.device)
+                    
+                    output = model(input_ids, attention_mask=attn_mask, labels=labels)
+                    
+                    # Handle loss-based evaluation
+                    if output.loss is not None:
+                        # Lower loss = model better predicts expected answer
+                        # Use perplexity threshold calibrated at ~5.0
+                        item_perplexity = math.exp(min(output.loss.item(), 10.0))
+                        if item_perplexity < self.VALIDATION_PERPLEXITY_THRESHOLD:
+                            correct += 1
+                    else:
+                        # Fallback: logit-based top-1 accuracy if no loss
+                        if output.logits is not None:
+                            pred_token = output.logits[:, -1, :].argmax(dim=-1)
+                            target_first_token = labels[:, 0]
+                            if pred_token.item() == target_first_token.item():
+                                correct += 1
+                    
+                    evaluated_count += 1
             
-            accuracy = correct / min(50, total)
-            return accuracy
+            # Handle case where all items were skipped
+            if evaluated_count == 0:
+                return 0.5  # Neutral - can't evaluate without labels
+            
+            return correct / evaluated_count
             
         except Exception as e:
+            # Log error but don't crash training
+            # Return 0.0 (conservative - won't falsely checkpoint)
             logger.warning("Model validation failed", error=str(e))
             return 0.0
+            
+        finally:
+            # Always restore training mode
+            model.train()
     
     async def _evaluate_trained_model(self, backend, model, test_data: List[Dict[str, Any]]) -> Dict[str, float]:
         """Comprehensive evaluation of trained model"""
