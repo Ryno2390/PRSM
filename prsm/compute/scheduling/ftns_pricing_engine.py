@@ -356,7 +356,7 @@ class FTNSPricingEngine(TimestampMixin):
                 multiplier = 0.5 + (competition_factor * 0.5)
                 
             elif pricing_model == PricingModel.ML_PREDICTED:
-                # Placeholder for ML-based pricing
+                # Pattern-matching price prediction using historical demand/supply data
                 multiplier = await self._ml_predict_price_multiplier(
                     resource_type, demand_level, supply_level
                 )
@@ -383,29 +383,36 @@ class FTNSPricingEngine(TimestampMixin):
         demand_level: float,
         supply_level: float
     ) -> float:
-        """ML-based price prediction (placeholder implementation)"""
-        # In production, this would use trained ML models
-        # For now, use a hybrid approach
+        """
+        Historical pattern-matching price prediction.
+
+        Uses k-nearest-neighbor approach on stored PricingDataPoints:
+        finds historical records with similar demand/supply conditions
+        and returns the median observed price multiplier. Falls back to
+        exponential model when no similar conditions are found.
+        """
         
         # Analyze historical patterns
         history = self.price_history[resource_type]
         if len(history) < 10:
             return 1.0  # Not enough data
         
-        # Find similar conditions in history
+        # Start with tight tolerance, relax if no matches found
         similar_conditions = []
-        for dp in history[-100:]:  # Last 100 data points
-            demand_diff = abs(dp.demand_level - demand_level)
-            supply_diff = abs(dp.supply_level - supply_level)
-            
-            if demand_diff < 0.1 and supply_diff < 0.1:
-                similar_conditions.append(dp.demand_multiplier)
+        for tolerance in [0.05, 0.10, 0.15, 0.20]:
+            similar_conditions = [
+                dp.demand_multiplier
+                for dp in history[-100:]
+                if abs(dp.demand_level - demand_level) <= tolerance
+                and abs(dp.supply_level - supply_level) <= tolerance
+            ]
+            if len(similar_conditions) >= 3:  # Minimum for reliable median
+                break
         
         if similar_conditions:
-            # Use median of similar conditions
             return statistics.median(similar_conditions)
         else:
-            # Fallback to exponential model
+            # Fallback: exponential model
             return math.pow(2.0, demand_level * 2 - 1)
     
     def _get_time_based_multiplier(self) -> float:
@@ -546,48 +553,106 @@ class FTNSPricingEngine(TimestampMixin):
         resource_type: ResourceType,
         target_time: datetime
     ) -> float:
-        """Predict demand level at specific time"""
-        # Simple pattern-based prediction
+        """
+        Predict demand level at specific time using historical calibration.
+        
+        Uses a blend of time-pattern baseline and historical data when available.
+        Returns deterministic output for same inputs (no random factors).
+        """
+        # Step 1: Establish time-of-day baseline
         hour = target_time.hour
         day_of_week = target_time.weekday()
         
-        # Base demand patterns
         if day_of_week < 5:  # Weekday
             if 9 <= hour <= 17:  # Business hours
                 base_demand = 0.8
             elif 18 <= hour <= 22:  # Evening
                 base_demand = 0.6
-            else:  # Night/early morning
+            elif hour >= 23 or hour <= 6:  # Night
                 base_demand = 0.3
+            else:
+                base_demand = 0.5
         else:  # Weekend
-            if 10 <= hour <= 18:  # Casual hours
+            if 10 <= hour <= 18:
                 base_demand = 0.5
             else:
                 base_demand = 0.2
         
-        # Add randomness and trends
-        import random
-        random_factor = random.uniform(0.8, 1.2)
+        # Step 2: Query historical demand for this (hour, day_of_week) bucket
+        history = self.price_history.get(resource_type, [])
         
-        return min(1.0, base_demand * random_factor)
+        same_period_demands = [
+            dp.demand_level
+            for dp in history[-720:]  # Last 720 data points (30 days × 24h)
+            if dp.timestamp.hour == hour
+            and dp.timestamp.weekday() == day_of_week
+        ]
+        
+        # Step 3: If sufficient history (≥ 3 matching points)
+        if len(same_period_demands) >= 3:
+            hist_mean = statistics.mean(same_period_demands)
+            hist_std = statistics.stdev(same_period_demands) if len(same_period_demands) > 1 else 0.1
+            
+            # Blend: weight historical evidence over generic time-pattern
+            blended = 0.35 * base_demand + 0.65 * hist_mean
+            
+            # Clamp uncertainty to realistic range
+            uncertainty = min(hist_std, 0.15)  # Never more than ±15% uncertainty
+            
+            # Return upper bound for conservative (safety-margin) forecasting
+            return max(0.0, min(1.0, blended + uncertainty * 0.5))
+        
+        # Step 4: If insufficient history (< 3 matching points)
+        # Fall back to time-pattern baseline, slight positive bias for uncertainty
+        return min(1.0, base_demand * 1.05)  # 5% conservative upward bias
+        # NOTE: do NOT use random — ensures deterministic output for same inputs
     
     async def _predict_supply_at_time(
         self,
         resource_type: ResourceType,
         target_time: datetime
     ) -> float:
-        """Predict supply level at specific time"""
-        # Assume relatively stable supply with slight variations
-        import random
+        """
+        Predict supply level at specific time using historical calibration.
+        
+        Uses a blend of time-pattern baseline and historical data when available.
+        Returns deterministic output for same inputs (no random factors).
+        """
+        # Step 1: Establish time baseline
+        hour = target_time.hour
         base_supply = 0.7  # 70% baseline availability
         
-        # Lower supply during peak maintenance windows
-        hour = target_time.hour
-        if 2 <= hour <= 5:  # Maintenance window
-            base_supply *= 0.8
+        # Maintenance window (2-5h UTC)
+        if 2 <= hour <= 5:
+            base_supply *= 0.8  # 20% reduction for maintenance
         
-        random_factor = random.uniform(0.9, 1.1)
-        return min(1.0, base_supply * random_factor)
+        # Step 2: Query historical supply for same hour
+        history = self.price_history.get(resource_type, [])
+        
+        same_hour_supplies = [
+            dp.supply_level
+            for dp in history[-720:]
+            if dp.timestamp.hour == hour
+        ]
+        # Note: supply varies less by day-of-week, so we aggregate all days
+        # for better statistical coverage
+        
+        # Step 3: If sufficient history (≥ 3 points)
+        if len(same_hour_supplies) >= 3:
+            hist_mean = statistics.mean(same_hour_supplies)
+            hist_std = statistics.stdev(same_hour_supplies) if len(same_hour_supplies) > 1 else 0.05
+            
+            # For supply: blend strongly toward historical mean (supply is more stable than demand)
+            blended = 0.25 * base_supply + 0.75 * hist_mean
+            
+            # For conservative planning: use lower bound of supply (pessimistic)
+            uncertainty = min(hist_std, 0.10)
+            return max(0.0, min(1.0, blended - uncertainty * 0.5))
+        
+        # Step 4: If insufficient history
+        # Use time-pattern baseline, slightly pessimistic for safety
+        return max(0.0, base_supply * 0.95)  # 5% downward bias for uncertainty
+        # No random — deterministic output
     
     def _find_optimal_windows(
         self,
