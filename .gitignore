@@ -184,6 +184,10 @@ tests/*/test_*_cache/
 tests/**/embeddings.db
 tests/fixtures/prsm_test.db
 tests/fixtures/test_embedding_cache/
+test_investor_cache/
+
+# Local working files
+Start_Prompt.txt
 tests/fixtures/test_investor_cache/
 results/
 

@@ -442,17 +442,51 @@ def dashboard(port: int, api_port: int):
 @click.argument("query", required=True)
 @click.option("--context", "-c", default=100, help="FTNS context allocation")
 @click.option("--user-id", default="cli-user", help="User ID for the query")
-def query(query: str, context: int, user_id: str):
+@click.option("--api-url", default="http://127.0.0.1:8000", help="PRSM API URL")
+def query(query: str, context: int, user_id: str, api_url: str):
     """Submit a query to NWTN (requires running server)"""
+    import httpx
+    from rich.panel import Panel
+    
     console.print(f"🧠 Submitting query to NWTN...", style="bold blue")
     console.print(f"Query: {query}")
     console.print(f"Context allocation: {context} FTNS")
     
-    # This would connect to the running PRSM server
-    console.print("🚧 Coming Soon - Full NWTN orchestration will be available in v0.2.0", style="yellow")
-    console.print("💡 For now, you can:", style="blue")
-    console.print("   • Start the API server: prsm server start", style="blue")
-    console.print("   • Test endpoints: curl http://localhost:8000/health", style="blue")
+    payload = {
+        "prompt": query,
+        "context_allocation": str(context),
+        "user_id": user_id
+    }
+    
+    try:
+        with console.status("[bold green]NWTN Orchestrator is reasoning..."):
+            with httpx.Client(timeout=120.0) as client:
+                response = client.post(f"{api_url}/query", json=payload)
+                
+        if response.status_code == 200:
+            data = response.json()
+            answer = data.get("final_answer", "No answer provided.")
+            
+            console.print("\n")
+            console.print(Panel(answer, title="[bold green]NWTN Synthesis[/bold green]", border_style="green"))
+            
+            trace = data.get("reasoning_trace", [])
+            if trace:
+                console.print("\n[bold cyan]Reasoning Trace:[/bold cyan]")
+                for i, step in enumerate(trace, 1):
+                    action = step.get("input_data", {}).get("action", str(step.get("agent_type", "Process")))
+                    console.print(f"  [dim]{i}.[/dim] {action}")
+                    
+            conf = data.get('confidence_score', 0)
+            ctx = data.get('context_used', 0)
+            console.print(f"\n[dim]Confidence Score: {conf:.2f} | Context Used: {ctx} tokens[/dim]")
+        else:
+            console.print(f"\n[bold red]Error ({response.status_code}):[/bold red] {response.text}")
+            
+    except httpx.RequestError as e:
+        console.print(f"\n[bold red]Connection Error:[/bold red] Could not connect to {api_url}.")
+        console.print("Make sure the PRSM API server is running (`prsm serve`).")
+        console.print(f"[dim]Details: {e}[/dim]")
 
 
 @main.command()
