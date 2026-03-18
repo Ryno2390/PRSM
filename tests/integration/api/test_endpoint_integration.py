@@ -57,9 +57,9 @@ class TestAPIEndpointIntegration:
             }
         }
         
-        with patch('prsm.auth.auth_manager.AuthManager.validate_token') as mock_validate, \
-             patch('prsm.nwtn.orchestrator.NWTNOrchestrator.process_query') as mock_process, \
-             patch('prsm.tokenomics.ftns_service.FTNSService.charge_user') as mock_charge:
+        with patch('prsm.core.auth.auth_manager.AuthManager.get_current_user') as mock_validate, \
+             patch('prsm.compute.nwtn.orchestrator.NWTNOrchestrator.process_query') as mock_process, \
+             patch('prsm.economy.tokenomics.ftns_service.FTNSService.deduct_tokens') as mock_charge:
             
             # Mock authentication
             mock_validate.return_value = {
@@ -132,8 +132,8 @@ class TestAPIEndpointIntegration:
         headers = {"Authorization": f"Bearer {auth_token}"}
         user_id = "balance_user"
         
-        with patch('prsm.auth.auth_manager.AuthManager.validate_token') as mock_validate, \
-             patch('prsm.tokenomics.ftns_service.FTNSService.get_balance') as mock_balance:
+        with patch('prsm.core.auth.auth_manager.AuthManager.get_current_user') as mock_validate, \
+             patch('prsm.economy.tokenomics.ftns_service.FTNSService.get_user_balance') as mock_balance:
             
             # Mock authentication
             mock_validate.return_value = {
@@ -186,7 +186,7 @@ class TestAPIEndpointIntegration:
             "terms_accepted": True
         }
         
-        with patch('prsm.auth.auth_manager.AuthManager.register_user') as mock_register:
+        with patch('prsm.core.auth.auth_manager.AuthManager.register_user') as mock_register:
             mock_register.return_value = {
                 "success": True,
                 "user_id": "reg_user_123",
@@ -213,7 +213,7 @@ class TestAPIEndpointIntegration:
             "password": "SecurePass123!"
         }
         
-        with patch('prsm.auth.auth_manager.AuthManager.authenticate_user') as mock_auth:
+        with patch('prsm.core.auth.auth_manager.AuthManager.authenticate_user') as mock_auth:
             mock_auth.return_value = {
                 "success": True,
                 "access_token": "jwt_token_abc123",
@@ -237,8 +237,8 @@ class TestAPIEndpointIntegration:
         # Test 3: Profile Access with Token
         headers = {"Authorization": "Bearer jwt_token_abc123"}
         
-        with patch('prsm.auth.auth_manager.AuthManager.validate_token') as mock_validate, \
-             patch('prsm.auth.auth_manager.AuthManager.get_user_profile') as mock_profile:
+        with patch('prsm.core.auth.auth_manager.AuthManager.get_current_user') as mock_validate, \
+             patch('prsm.core.auth.auth_manager.AuthManager.get_current_user') as mock_profile:
             
             mock_validate.return_value = {
                 "valid": True,
@@ -255,7 +255,7 @@ class TestAPIEndpointIntegration:
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
             
-            response = await async_test_client.get("/api/v1/auth/profile", headers=headers)
+            response = await async_test_client.get("/api/v1/auth/me", headers=headers)
             
             assert response.status_code == 200
             profile_data = response.json()
@@ -278,7 +278,7 @@ class TestAPIEndpointIntegration:
         auth_token = "marketplace_token"
         headers = {"Authorization": f"Bearer {auth_token}"}
         
-        with patch('prsm.auth.auth_manager.AuthManager.validate_token') as mock_validate:
+        with patch('prsm.core.auth.auth_manager.AuthManager.get_current_user') as mock_validate:
             mock_validate.return_value = {
                 "valid": True,
                 "user_id": "marketplace_user",
@@ -292,7 +292,7 @@ class TestAPIEndpointIntegration:
                 "max_price": 100.0
             }
             
-            with patch('prsm.marketplace.real_marketplace_service.MarketplaceService.search_models') as mock_search:
+            with patch('prsm.economy.marketplace.real_marketplace_service.RealMarketplaceService.search_resources') as mock_search:
                 mock_search.return_value = [
                     {
                         "model_id": "nlp_model_v1",
@@ -324,8 +324,8 @@ class TestAPIEndpointIntegration:
                 "rental_type": "exclusive"
             }
             
-            with patch('prsm.marketplace.real_marketplace_service.MarketplaceService.rent_model') as mock_rent, \
-                 patch('prsm.tokenomics.ftns_service.FTNSService.charge_user') as mock_charge:
+            with patch('prsm.economy.marketplace.real_marketplace_service.RealMarketplaceService.rent_model') as mock_rent, \
+                 patch('prsm.economy.tokenomics.ftns_service.FTNSService.deduct_tokens') as mock_charge:
                 
                 mock_rent.return_value = {
                     "success": True,
@@ -387,7 +387,7 @@ class TestAPIErrorHandling:
         # Test 2: Invalid Token
         invalid_headers = {"Authorization": "Bearer invalid_token_xyz"}
         
-        with patch('prsm.auth.auth_manager.AuthManager.validate_token') as mock_validate:
+        with patch('prsm.core.auth.auth_manager.AuthManager.get_current_user') as mock_validate:
             mock_validate.return_value = {
                 "valid": False,
                 "error": "Token expired or invalid"
@@ -407,7 +407,7 @@ class TestAPIErrorHandling:
         # Test 3: Insufficient Permissions
         limited_headers = {"Authorization": "Bearer limited_token"}
         
-        with patch('prsm.auth.auth_manager.AuthManager.validate_token') as mock_validate:
+        with patch('prsm.core.auth.auth_manager.AuthManager.get_current_user') as mock_validate:
             mock_validate.return_value = {
                 "valid": True,
                 "user_id": "limited_user",
@@ -437,7 +437,7 @@ class TestAPIErrorHandling:
         auth_token = "service_test_token"
         headers = {"Authorization": f"Bearer {auth_token}"}
         
-        with patch('prsm.auth.auth_manager.AuthManager.validate_token') as mock_validate:
+        with patch('prsm.core.auth.auth_manager.AuthManager.get_current_user') as mock_validate:
             mock_validate.return_value = {
                 "valid": True,
                 "user_id": "service_test_user",
@@ -447,7 +447,7 @@ class TestAPIErrorHandling:
             # Test 1: NWTN Service Failure
             query_data = {"query": "Test query during service failure", "mode": "adaptive"}
             
-            with patch('prsm.nwtn.orchestrator.NWTNOrchestrator.process_query') as mock_nwtn:
+            with patch('prsm.compute.nwtn.orchestrator.NWTNOrchestrator.process_query') as mock_nwtn:
                 mock_nwtn.side_effect = Exception("NWTN service temporarily unavailable")
                 
                 response = await async_test_client.post("/api/v1/nwtn/query", 
@@ -464,7 +464,7 @@ class TestAPIErrorHandling:
                 }
             
             # Test 2: FTNS Service Failure
-            with patch('prsm.tokenomics.ftns_service.FTNSService.get_balance') as mock_ftns:
+            with patch('prsm.economy.tokenomics.ftns_service.FTNSService.get_user_balance') as mock_ftns:
                 mock_ftns.side_effect = Exception("Database connection timeout")
                 
                 response = await async_test_client.get("/api/v1/ftns/balance", headers=headers)
@@ -489,7 +489,7 @@ class TestAPIErrorHandling:
         auth_token = "validation_test_token"
         headers = {"Authorization": f"Bearer {auth_token}"}
         
-        with patch('prsm.auth.auth_manager.AuthManager.validate_token') as mock_validate:
+        with patch('prsm.core.auth.auth_manager.AuthManager.get_current_user') as mock_validate:
             mock_validate.return_value = {
                 "valid": True,
                 "user_id": "validation_user",
@@ -562,8 +562,8 @@ class TestAPIPerformance:
         auth_token = "performance_test_token"
         headers = {"Authorization": f"Bearer {auth_token}"}
         
-        with patch('prsm.auth.auth_manager.AuthManager.validate_token') as mock_validate, \
-             patch('prsm.tokenomics.ftns_service.FTNSService.get_balance') as mock_balance:
+        with patch('prsm.core.auth.auth_manager.AuthManager.get_current_user') as mock_validate, \
+             patch('prsm.economy.tokenomics.ftns_service.FTNSService.get_user_balance') as mock_balance:
             
             mock_validate.return_value = {
                 "valid": True,

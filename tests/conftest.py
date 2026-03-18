@@ -1035,12 +1035,14 @@ def load_test_runner():
 
             total = successful_requests + failed_requests
             avg_rt = _stats.mean(response_times) if response_times else 0
+            elapsed = _time.time() - start_time
             return LoadTestResults(
                 total_requests=total,
                 successful_requests=successful_requests,
                 failed_requests=failed_requests,
                 average_response_time=avg_rt,
                 error_rate=failed_requests / total if total > 0 else 0,
+                requests_per_second=total / elapsed if elapsed > 0 else 0.0,
             )
 
     return LoadTestRunner()
