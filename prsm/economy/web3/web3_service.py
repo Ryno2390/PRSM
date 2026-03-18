@@ -84,7 +84,16 @@ class Web3ServiceManager:
             },
             "monitoring": {
                 "enabled": os.getenv("WEB3_MONITORING_ENABLED", "true").lower() == "true",
-                "events": ["Transfer", "Approval", "Mint", "Burn"],
+                "events": [
+                    # ERC-20 token events
+                    "Transfer", "Approval", "Mint", "Burn",
+                    # Staking contract events
+                    "Staked", "Unstaked", "RewardsClaimed",
+                    # Marketplace contract events
+                    "Purchase", "ListingCreated",
+                    # Bridge contract events
+                    "BridgeOut", "BridgeIn",
+                ],
                 "poll_interval": int(os.getenv("WEB3_POLL_INTERVAL", "5"))
             },
             "faucet": {
