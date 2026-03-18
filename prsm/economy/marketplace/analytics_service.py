@@ -23,8 +23,14 @@ import statistics
 from collections import defaultdict, deque
 
 from prsm.core.database_service import get_database_service
+from prsm.core.database import get_async_session
 from prsm.core.config import get_settings
-from prsm.core.monitoring.enterprise_monitoring import get_monitoring, MonitoringComponent
+from prsm.core.monitoring.enterprise_monitoring import get_monitoring, MonitoringComponent, MetricType
+from prsm.economy.marketplace.database_models import (
+    MarketplaceActivityModel, MarketplaceOrder, MarketplaceResource
+)
+from prsm.economy.marketplace.database_models import UserReputationModel
+from sqlalchemy import select, and_, func as sql_func
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -197,7 +203,7 @@ class MarketplaceAnalyticsService:
             self.monitoring.record_metric(
                 name=f"marketplace_activity.{activity_type.value}",
                 value=1,
-                metric_type=self.monitoring.MetricType.COUNTER,
+                metric_type=MetricType.COUNTER,
                 component=MonitoringComponent.MARKETPLACE,
                 tags={
                     "activity_type": activity_type.value,
@@ -512,13 +518,68 @@ class MarketplaceAnalyticsService:
     # Helper methods for analytics calculations
     async def _store_activity(self, activity: UserActivity):
         """Store activity in database"""
-        # Placeholder for database storage
-        pass
+        async with get_async_session() as session:
+            try:
+                activity_model = MarketplaceActivityModel(
+                    activity_id=activity.activity_id,
+                    user_id=activity.user_id,
+                    activity_type=activity.activity_type.value,
+                    resource_id=activity.resource_id,
+                    session_id=activity.session_id,
+                    value=activity.value,
+                    activity_metadata=activity.metadata,
+                    timestamp=activity.timestamp
+                )
+                session.add(activity_model)
+                await session.commit()
+            except Exception as e:
+                await session.rollback()
+                # Log error on exception, don't raise
+                logger.error("Failed to store activity",
+                            activity_id=activity.activity_id,
+                            error=str(e))
     
     async def _update_realtime_metrics(self, activity: UserActivity):
         """Update real-time analytics metrics"""
-        # Update real-time counters and metrics
-        pass
+        try:
+            # No-op for None resource_id
+            if not activity.resource_id:
+                return
+            
+            # Try UUID conversion, no-op on invalid
+            try:
+                from uuid import UUID
+                resource_uuid = UUID(activity.resource_id)
+            except (ValueError, TypeError):
+                return
+            
+            async with get_async_session() as session:
+                # Increment download_count for DOWNLOAD activity
+                if activity.activity_type == ActivityType.DOWNLOAD:
+                    stmt = select(MarketplaceResource).where(
+                        MarketplaceResource.id == resource_uuid
+                    )
+                    result = await session.execute(stmt)
+                    resource = result.scalar_one_or_none()
+                    if resource:
+                        resource.download_count = (resource.download_count or 0) + 1
+                        await session.commit()
+                
+                # Increment usage_count for API_CALL, RESOURCE_VIEW
+                elif activity.activity_type in [ActivityType.API_CALL, ActivityType.RESOURCE_VIEW]:
+                    stmt = select(MarketplaceResource).where(
+                        MarketplaceResource.id == resource_uuid
+                    )
+                    result = await session.execute(stmt)
+                    resource = result.scalar_one_or_none()
+                    if resource:
+                        resource.usage_count = (resource.usage_count or 0) + 1
+                        await session.commit()
+                        
+        except Exception as e:
+            logger.error("Failed to update realtime metrics",
+                        activity_id=activity.activity_id,
+                        error=str(e))
     
     async def _calculate_period_revenue(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
         """Calculate revenue metrics for a specific period"""
@@ -555,17 +616,38 @@ class MarketplaceAnalyticsService:
         return durations
     
     async def _categorize_users(self, user_ids: set, period_start: datetime) -> Tuple[set, set]:
-        """Categorize users as new or returning"""
-        # Simplified implementation - would check user registration dates
+        """Categorize users as new or returning based on registration dates"""
         new_users = set()
         returning_users = set()
         
-        for user_id in user_ids:
-            # Placeholder logic - would check actual user creation dates
-            if hash(user_id) % 3 == 0:  # Simulate ~33% new users
-                new_users.add(user_id)
-            else:
-                returning_users.add(user_id)
+        try:
+            async with get_async_session() as session:
+                for user_id in user_ids:
+                    # Query UserReputationModel.created_at for each user
+                    stmt = select(UserReputationModel.created_at).where(
+                        UserReputationModel.user_id == user_id
+                    )
+                    result = await session.execute(stmt)
+                    row = result.scalar_one_or_none()
+                    
+                    if row is None:
+                        # No record means new user
+                        new_users.add(user_id)
+                    elif row >= period_start:
+                        # created_at >= period_start means new user
+                        new_users.add(user_id)
+                    else:
+                        # created_at < period_start means returning user
+                        returning_users.add(user_id)
+                        
+        except Exception as e:
+            logger.error("Failed to categorize users, falling back to hash-based split", error=str(e))
+            # Fall back to hash-based split on exception
+            for user_id in user_ids:
+                if hash(user_id) % 3 == 0:
+                    new_users.add(user_id)
+                else:
+                    returning_users.add(user_id)
         
         return new_users, returning_users
     
@@ -586,14 +668,74 @@ class MarketplaceAnalyticsService:
         return activity_score + user_score + session_score + diversity_score
     
     async def _calculate_retention_rate(self, period: MetricPeriod) -> float:
-        """Calculate user retention rate"""
-        # Simplified calculation - would use cohort analysis
-        return 75.0  # Placeholder
+        """Calculate user retention rate using activity buffer"""
+        try:
+            # Use activity_buffer (already exists)
+            current_time = datetime.now(timezone.utc)
+            
+            # Determine period length
+            period_length = self.aggregation_intervals.get(period, timedelta(days=30))
+            
+            # Previous period: current_time - 2*period_length to current_time - period_length
+            previous_period_start = current_time - (period_length * 2)
+            previous_period_end = current_time - period_length
+            
+            # Current period: current_time - period_length to current_time
+            current_period_start = current_time - period_length
+            current_period_end = current_time
+            
+            # Get users in previous period
+            previous_users = set()
+            for activity in self.activity_buffer:
+                if previous_period_start <= activity.timestamp <= previous_period_end:
+                    previous_users.add(activity.user_id)
+            
+            # Get users in current period
+            current_users = set()
+            for activity in self.activity_buffer:
+                if current_period_start <= activity.timestamp <= current_period_end:
+                    current_users.add(activity.user_id)
+            
+            # Calculate retained users (users in both periods)
+            if not previous_users:
+                return 0.0
+            
+            retained_users = previous_users & current_users
+            retention_rate = (len(retained_users) / len(previous_users)) * 100
+            
+            return retention_rate
+            
+        except Exception as e:
+            logger.error("Failed to calculate retention rate", error=str(e))
+            return 0.0
     
     async def _calculate_customer_lifetime_value(self) -> float:
-        """Calculate average customer lifetime value"""
-        # Simplified calculation - would use historical revenue data
-        return 250.0  # Placeholder
+        """Calculate average customer lifetime value from completed orders"""
+        try:
+            async with get_async_session() as session:
+                # SELECT buyer_user_id, SUM(total_price) FROM completed orders
+                stmt = select(
+                    MarketplaceOrder.buyer_user_id,
+                    sql_func.sum(MarketplaceOrder.total_price).label('total_spent')
+                ).where(
+                    MarketplaceOrder.status == 'completed'
+                ).group_by(
+                    MarketplaceOrder.buyer_user_id
+                )
+                
+                result = await session.execute(stmt)
+                rows = result.fetchall()
+                
+                if not rows:
+                    return 0.0
+                
+                # Return average total per buyer
+                total_values = [float(row[1] or 0) for row in rows]
+                return sum(total_values) / len(total_values)
+                
+        except Exception as e:
+            logger.error("Failed to calculate customer lifetime value", error=str(e))
+            return 0.0
     
     async def _calculate_search_success_rate(self, activities: List[UserActivity]) -> float:
         """Calculate search success rate"""
@@ -603,13 +745,62 @@ class MarketplaceAnalyticsService:
     
     async def _calculate_recommendation_click_rate(self, activities: List[UserActivity]) -> float:
         """Calculate recommendation click-through rate"""
-        # Simplified calculation
-        return 12.5  # Placeholder
+        try:
+            # Count impressions (metadata.recommendation_impression == True)
+            impressions = sum(
+                1 for a in activities
+                if a.metadata and a.metadata.get("recommendation_impression") == True
+            )
+            
+            # Count clicks (metadata.from_recommendation == True AND activity_type in view/download/purchase)
+            click_types = {ActivityType.RESOURCE_VIEW, ActivityType.DOWNLOAD, ActivityType.PURCHASE}
+            clicks = sum(
+                1 for a in activities
+                if a.metadata
+                and a.metadata.get("from_recommendation") == True
+                and a.activity_type in click_types
+            )
+            
+            if impressions == 0:
+                return 0.0
+            
+            return (clicks / impressions) * 100
+            
+        except Exception as e:
+            logger.error("Failed to calculate recommendation click rate", error=str(e))
+            return 0.0
     
     async def _calculate_dispute_rate(self) -> float:
-        """Calculate dispute rate"""
-        # Simplified calculation
-        return 0.02  # 2% placeholder
+        """Calculate dispute rate from orders"""
+        try:
+            async with get_async_session() as session:
+                # Count total orders with status in ['completed','disputed','refunded']
+                stmt = select(
+                    MarketplaceOrder.status,
+                    sql_func.count(MarketplaceOrder.id).label('count')
+                ).where(
+                    MarketplaceOrder.status.in_(['completed', 'disputed', 'refunded'])
+                ).group_by(
+                    MarketplaceOrder.status
+                )
+                
+                result = await session.execute(stmt)
+                rows = result.fetchall()
+                
+                status_counts = {row[0]: row[1] for row in rows}
+                
+                total = sum(status_counts.values())
+                if total == 0:
+                    return 0.0
+                
+                # Count disputed/refunded orders
+                disputed = status_counts.get('disputed', 0) + status_counts.get('refunded', 0)
+                
+                return (disputed / total) * 100
+                
+        except Exception as e:
+            logger.error("Failed to calculate dispute rate", error=str(e))
+            return 0.0
     
     def _predict_next_period_revenue(self, revenues: List[float], growth_rates: List[float]) -> float:
         """Predict next period revenue using simple trend analysis"""

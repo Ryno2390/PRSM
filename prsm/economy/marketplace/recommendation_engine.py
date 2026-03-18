@@ -18,8 +18,14 @@ Key Features:
 
 import asyncio
 import numpy as np
-import pandas as pd
 from datetime import datetime, timezone, timedelta
+
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    pd = None  # type: ignore[assignment]
+    PANDAS_AVAILABLE = False
 from typing import Dict, Any, List, Optional, Tuple, Set
 from uuid import UUID
 import json
@@ -30,9 +36,13 @@ import math
 from collections import defaultdict, Counter
 
 from prsm.core.database_service import get_database_service
+from prsm.core.database import get_async_session
 from prsm.core.config import get_settings
-from prsm.economy.marketplace.database_models import MarketplaceResource
+from prsm.economy.marketplace.database_models import (
+    MarketplaceResource, MarketplaceOrder, MarketplaceReview, MarketplaceActivityModel
+)
 from prsm.core.models import UserRole
+from sqlalchemy import select, and_, or_, func as sql_func
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -885,51 +895,458 @@ class MarketplaceRecommendationEngine:
         except Exception as e:
             logger.error("Failed to log recommendation event", error=str(e))
     
-    # Placeholder methods for database operations (would be implemented based on actual schema)
-    async def _find_similar_resources_by_type(self, resource_type: str, user_profile: UserProfile, limit: int):
+    def _resource_to_dict(self, resource: MarketplaceResource) -> Optional[Dict[str, Any]]:
+        """Converts ORM MarketplaceResource row to dict expected by callers"""
+        if resource is None:
+            return None
+        return {
+            "id": str(resource.id),
+            "resource_type": resource.resource_type,
+            "name": resource.name,
+            "description": resource.description or "",
+            "quality_grade": resource.quality_grade or "community",
+            "base_price": float(resource.base_price or 0),
+            "rating_average": float(resource.rating_average or 0),
+            "rating_count": resource.rating_count or 0,
+            "download_count": resource.download_count or 0,
+            "usage_count": resource.usage_count or 0,
+            "tags": [],
+            "status": resource.status,
+            "license_type": getattr(resource, "license_type", None),
+            "created_at": resource.created_at.isoformat() if resource.created_at else None,
+        }
+
+    async def _get_resource_details(self, resource_id: str) -> Optional[Dict[str, Any]]:
+        """Get detailed resource information from database"""
+        try:
+            # Try UUID conversion, return None on invalid
+            try:
+                uuid_id = UUID(resource_id)
+            except (ValueError, TypeError):
+                return None
+            
+            async with get_async_session() as session:
+                stmt = select(MarketplaceResource).where(MarketplaceResource.id == uuid_id)
+                result = await session.execute(stmt)
+                resource = result.scalar_one_or_none()
+                
+                if resource:
+                    return self._resource_to_dict(resource)
+                return None
+                
+        except Exception as e:
+            logger.error("Failed to get resource details", resource_id=resource_id, error=str(e))
+            return None
+    
+    async def _find_similar_resources_by_type(
+        self,
+        resource_type: str,
+        user_profile: UserProfile,
+        limit: int
+    ) -> List[Dict[str, Any]]:
         """Find resources similar to user's preferences in a specific type"""
-        # Placeholder - would query database for similar resources
-        return []
+        try:
+            # Map quality_preference to acceptable grades
+            quality_preference = user_profile.quality_preference
+            quality_grade_map = {
+                "enterprise": ["enterprise", "premium", "verified", "community"],
+                "premium": ["premium", "verified", "community"],
+                "verified": ["verified", "community"],
+                "community": ["community"]
+            }
+            acceptable_grades = quality_grade_map.get(quality_preference, ["community"])
+            
+            # Calculate price ceiling based on price_sensitivity
+            price_sensitivity = user_profile.price_sensitivity
+            price_ceiling = None
+            if price_sensitivity > 0.7:  # Price sensitive
+                price_ceiling = 50.0
+            elif price_sensitivity > 0.4:
+                price_ceiling = 200.0
+            # No ceiling for price insensitive users
+            
+            async with get_async_session() as session:
+                stmt = select(MarketplaceResource).where(
+                    and_(
+                        MarketplaceResource.resource_type == resource_type,
+                        MarketplaceResource.status == 'published',
+                        MarketplaceResource.quality_grade.in_(acceptable_grades)
+                    )
+                )
+                
+                if price_ceiling is not None:
+                    stmt = stmt.where(MarketplaceResource.base_price <= price_ceiling)
+                
+                stmt = stmt.order_by(
+                    MarketplaceResource.rating_average.desc(),
+                    MarketplaceResource.download_count.desc()
+                ).limit(limit)
+                
+                result = await session.execute(stmt)
+                resources = result.scalars().all()
+                
+                return [self._resource_to_dict(r) for r in resources]
+                
+        except Exception as e:
+            logger.error("Failed to find similar resources by type",
+                        resource_type=resource_type, error=str(e))
+            return []
     
-    async def _get_resource_details(self, resource_id: str):
-        """Get detailed resource information"""
-        # Placeholder - would fetch from database
-        return None
+    async def _find_content_similar_resources(
+        self,
+        resource: Dict,
+        limit: int
+    ) -> List[Dict[str, Any]]:
+        """Find resources with similar content/metadata using tag-overlap Jaccard similarity"""
+        try:
+            resource_type = resource.get("resource_type")
+            resource_tags = set(resource.get("tags", []))
+            
+            if not resource_tags:
+                return []
+            
+            async with get_async_session() as session:
+                # Get same-type published resources
+                stmt = select(MarketplaceResource).where(
+                    and_(
+                        MarketplaceResource.resource_type == resource_type,
+                        MarketplaceResource.status == 'published',
+                        MarketplaceResource.id != UUID(resource["id"])
+                    )
+                ).limit(limit * 3)  # Get more candidates for scoring
+                
+                result = await session.execute(stmt)
+                candidates = result.scalars().all()
+                
+                # Score by Jaccard similarity (intersection/union of tags)
+                scored_resources = []
+                for candidate in candidates:
+                    # For now, use empty tags since tags relationship requires eager loading
+                    candidate_tags = set()  # Would need to load tags relationship
+                    if not candidate_tags:
+                        continue
+                    
+                    intersection = len(resource_tags & candidate_tags)
+                    union = len(resource_tags | candidate_tags)
+                    
+                    if union > 0:
+                        similarity = intersection / union
+                        
+                        # Add quality boost based on grade
+                        quality_boost = self.quality_weights.get(candidate.quality_grade, 0.5)
+                        final_score = similarity * 0.7 + quality_boost * 0.3
+                        
+                        scored_resources.append((final_score, candidate))
+                
+                # Sort by similarity score
+                scored_resources.sort(key=lambda x: x[0], reverse=True)
+                
+                return [self._resource_to_dict(r) for _, r in scored_resources[:limit]]
+                
+        except Exception as e:
+            logger.error("Failed to find content similar resources", error=str(e))
+            return []
     
-    async def _find_content_similar_resources(self, resource: Dict, limit: int):
-        """Find resources with similar content/metadata"""
-        # Placeholder - would use content similarity algorithms
-        return []
+    async def _find_search_similar_resources(
+        self,
+        query: str,
+        limit: int
+    ) -> List[Dict[str, Any]]:
+        """Find resources matching search query using ILIKE search"""
+        try:
+            if not query or len(query.strip()) < 2:
+                return []
+            
+            search_term = f"%{query.strip()}%"
+            query_lower = query.strip().lower()
+            query_words = set(query_lower.split())
+            
+            async with get_async_session() as session:
+                # ILIKE search on name and description
+                stmt = select(MarketplaceResource).where(
+                    and_(
+                        MarketplaceResource.status == 'published',
+                        or_(
+                            MarketplaceResource.name.ilike(search_term),
+                            MarketplaceResource.description.ilike(search_term)
+                        )
+                    )
+                ).limit(limit * 2)
+                
+                result = await session.execute(stmt)
+                candidates = result.scalars().all()
+                
+                # Score by keyword overlap (70% name, 30% description weight)
+                scored_resources = []
+                for candidate in candidates:
+                    name_lower = (candidate.name or "").lower()
+                    desc_lower = (candidate.description or "").lower()
+                    
+                    name_words = set(name_lower.split())
+                    desc_words = set(desc_lower.split())
+                    
+                    name_overlap = len(query_words & name_words) / max(len(query_words), 1)
+                    desc_overlap = len(query_words & desc_words) / max(len(query_words), 1)
+                    
+                    relevance_score = name_overlap * 0.7 + desc_overlap * 0.3
+                    
+                    if relevance_score > 0:
+                        scored_resources.append((relevance_score, candidate))
+                
+                # Sort by relevance
+                scored_resources.sort(key=lambda x: x[0], reverse=True)
+                
+                return [self._resource_to_dict(r) for _, r in scored_resources[:limit]]
+                
+        except Exception as e:
+            logger.error("Failed to find search similar resources", query=query, error=str(e))
+            return []
     
-    async def _find_search_similar_resources(self, query: str, limit: int):
-        """Find resources matching search query"""
-        # Placeholder - would use text search/embedding similarity
-        return []
+    async def _find_similar_users(
+        self,
+        user_profile: UserProfile,
+        top_k: int = 50
+    ) -> List[Tuple[str, float]]:
+        """Find users with similar behavior patterns based on purchase history"""
+        try:
+            user_id = user_profile.user_id
+            
+            async with get_async_session() as session:
+                # Get user's completed order resource_ids
+                stmt = select(MarketplaceOrder.resource_id).where(
+                    and_(
+                        MarketplaceOrder.buyer_user_id == user_id,
+                        MarketplaceOrder.status == 'completed'
+                    )
+                )
+                result = await session.execute(stmt)
+                user_resources = set(row[0] for row in result.fetchall())
+                
+                if not user_resources:
+                    return []
+                
+                # Find other buyers of same resources
+                stmt = select(
+                    MarketplaceOrder.buyer_user_id,
+                    MarketplaceOrder.resource_id
+                ).where(
+                    and_(
+                        MarketplaceOrder.resource_id.in_(user_resources),
+                        MarketplaceOrder.buyer_user_id != user_id,
+                        MarketplaceOrder.status == 'completed'
+                    )
+                )
+                result = await session.execute(stmt)
+                
+                # Count overlap per user
+                user_overlap_counts = defaultdict(int)
+                for row in result.fetchall():
+                    other_user_id, resource_id = row
+                    user_overlap_counts[other_user_id] += 1
+                
+                # Calculate similarity scores (Jaccard-like)
+                similar_users = []
+                for other_user_id, overlap_count in user_overlap_counts.items():
+                    # Similarity = overlap / sqrt(user_resources * other_user_resources)
+                    # Approximate other_user_resources as overlap_count (lower bound)
+                    similarity = overlap_count / max(len(user_resources), 1)
+                    similar_users.append((str(other_user_id), similarity))
+                
+                # Sort by similarity and return top_k
+                similar_users.sort(key=lambda x: x[1], reverse=True)
+                return similar_users[:top_k]
+                
+        except Exception as e:
+            logger.error("Failed to find similar users", user_id=user_profile.user_id, error=str(e))
+            return []
     
-    async def _find_similar_users(self, user_profile: UserProfile, top_k: int):
-        """Find users with similar behavior patterns"""
-        # Placeholder - would use collaborative filtering algorithms
-        return []
+    async def _get_trending_resources(
+        self,
+        resource_type: Optional[str] = None,
+        limit: int = 20
+    ) -> List[Tuple[Dict[str, Any], Dict[str, Any]]]:
+        """Get currently trending resources based on recent orders"""
+        try:
+            seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+            
+            async with get_async_session() as session:
+                # Build base query
+                base_conditions = [MarketplaceResource.status == 'published']
+                if resource_type:
+                    base_conditions.append(MarketplaceResource.resource_type == resource_type)
+                
+                # OUTER JOIN with orders from last 7 days
+                stmt = select(
+                    MarketplaceResource,
+                    sql_func.count(MarketplaceOrder.id).label('recent_orders')
+                ).outerjoin(
+                    MarketplaceOrder,
+                    and_(
+                        MarketplaceOrder.resource_id == MarketplaceResource.id,
+                        MarketplaceOrder.created_at >= seven_days_ago,
+                        MarketplaceOrder.status.in_(['completed', 'processing'])
+                    )
+                ).where(
+                    and_(*base_conditions)
+                ).group_by(
+                    MarketplaceResource.id
+                ).order_by(
+                    sql_func.desc('recent_orders'),
+                    MarketplaceResource.download_count.desc()
+                ).limit(limit)
+                
+                result = await session.execute(stmt)
+                rows = result.fetchall()
+                
+                trending = []
+                for row in rows:
+                    resource = row[0]
+                    recent_orders = row[1] or 0
+                    
+                    resource_dict = self._resource_to_dict(resource)
+                    trend_metadata = {
+                        "recent_orders": recent_orders,
+                        "trend_score": recent_orders * 0.5 + (resource.download_count or 0) * 0.001
+                    }
+                    trending.append((resource_dict, trend_metadata))
+                
+                return trending
+                
+        except Exception as e:
+            logger.error("Failed to get trending resources", resource_type=resource_type, error=str(e))
+            return []
     
-    async def _get_trending_resources(self, resource_type: Optional[str], limit: int):
-        """Get currently trending resources"""
-        # Placeholder - would calculate trending based on recent activity
-        return []
-    
-    async def _get_high_quality_resources(self, resource_type: Optional[str], limit: int):
+    async def _get_high_quality_resources(
+        self,
+        resource_type: Optional[str] = None,
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
         """Get high-quality resources for business rules"""
-        # Placeholder - would filter by quality grades
-        return []
+        try:
+            high_quality_grades = ['enterprise', 'premium', 'verified']
+            
+            async with get_async_session() as session:
+                conditions = [
+                    MarketplaceResource.status == 'published',
+                    MarketplaceResource.quality_grade.in_(high_quality_grades),
+                    MarketplaceResource.rating_average >= 4.0
+                ]
+                
+                if resource_type:
+                    conditions.append(MarketplaceResource.resource_type == resource_type)
+                
+                stmt = select(MarketplaceResource).where(
+                    and_(*conditions)
+                ).order_by(
+                    MarketplaceResource.rating_average.desc(),
+                    MarketplaceResource.rating_count.desc()
+                ).limit(limit)
+                
+                result = await session.execute(stmt)
+                resources = result.scalars().all()
+                
+                return [self._resource_to_dict(r) for r in resources]
+                
+        except Exception as e:
+            logger.error("Failed to get high quality resources", resource_type=resource_type, error=str(e))
+            return []
     
-    async def _get_popular_resources(self, resource_type: Optional[str], limit: int):
+    async def _get_popular_resources(
+        self,
+        resource_type: Optional[str] = None,
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
         """Get generally popular resources for cold start"""
-        # Placeholder - would get most downloaded/used resources
-        return []
+        try:
+            async with get_async_session() as session:
+                conditions = [MarketplaceResource.status == 'published']
+                
+                if resource_type:
+                    conditions.append(MarketplaceResource.resource_type == resource_type)
+                
+                stmt = select(MarketplaceResource).where(
+                    and_(*conditions)
+                ).order_by(
+                    (MarketplaceResource.download_count + MarketplaceResource.usage_count).desc(),
+                    MarketplaceResource.rating_average.desc()
+                ).limit(limit)
+                
+                result = await session.execute(stmt)
+                resources = result.scalars().all()
+                
+                return [self._resource_to_dict(r) for r in resources]
+                
+        except Exception as e:
+            logger.error("Failed to get popular resources", resource_type=resource_type, error=str(e))
+            return []
     
-    async def _apply_business_filters(self, recommendations: List[RecommendationScore], context: RecommendationContext):
+    async def _apply_business_filters(
+        self,
+        recommendations: List,
+        context: Optional[RecommendationContext] = None
+    ) -> List:
         """Apply final business logic filters"""
-        # Placeholder - would apply business rules like licensing, availability, etc.
-        return recommendations
+        try:
+            if not recommendations:
+                return []
+
+            # If no context, pass through as-is (no filtering possible)
+            if context is None:
+                return recommendations
+
+            # Extract resource IDs for batch query — handle both RecommendationScore objects
+            # (with .resource_id attribute) and plain dicts (with "resource_id" key)
+            resource_ids = []
+            for rec in recommendations:
+                try:
+                    rid = rec.resource_id if hasattr(rec, "resource_id") else rec.get("resource_id", "")
+                    resource_ids.append(UUID(str(rid)))
+                except (ValueError, TypeError):
+                    continue
+
+            if not resource_ids:
+                return recommendations
+
+            async with get_async_session() as session:
+                # Batch query to verify IDs are still published
+                stmt = select(MarketplaceResource.id, MarketplaceResource.resource_type, MarketplaceResource.base_price).where(
+                    and_(
+                        MarketplaceResource.id.in_(resource_ids),
+                        MarketplaceResource.status == 'published'
+                    )
+                )
+                result = await session.execute(stmt)
+                valid_resources = {str(row[0]): {"resource_type": row[1], "base_price": float(row[2] or 0)} for row in result.fetchall()}
+
+            filtered = []
+            for rec in recommendations:
+                rid = rec.resource_id if hasattr(rec, "resource_id") else rec.get("resource_id", "")
+
+                # Check if resource is still published
+                if str(rid) not in valid_resources:
+                    continue
+
+                resource_info = valid_resources[str(rid)]
+
+                # Filter by resource_type if in context.filters
+                if context.filters.get("resource_type"):
+                    if resource_info["resource_type"] != context.filters["resource_type"]:
+                        continue
+
+                # Filter by max_price if in business_constraints
+                max_price = context.business_constraints.get("max_price")
+                if max_price is not None:
+                    if resource_info["base_price"] > max_price:
+                        continue
+
+                filtered.append(rec)
+
+            return filtered
+
+        except Exception as e:
+            logger.error("Failed to apply business filters", error=str(e))
+            # Fail open on exception
+            return recommendations
     
     async def _generate_fallback_recommendations(self, resource_type: Optional[str], limit: int):
         """Generate simple fallback recommendations when main engine fails"""
