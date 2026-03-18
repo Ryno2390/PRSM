@@ -135,6 +135,7 @@ class TransactionType(str, Enum):
     CONTENT_ROYALTY = "content_royalty"
     TRANSFER = "transfer"
     APPROVAL = "approval"
+    SYSTEM = "system"
 
 
 @dataclass
@@ -214,6 +215,13 @@ class DAGLedger:
         self._db: Optional[aiosqlite.Connection] = None
         
         self._state = DAGState()
+        
+        # In-memory version cache for TOCTOU detection.
+        # Tracks the last version this service committed per wallet.
+        # Only updated by successful commits through _commit_balance_deduction
+        # and seeded by _commit_balance_credit.
+        # External DB modifications will cause version mismatch at commit time.
+        self._balance_version_cache: Dict[str, int] = {}
         
         self.max_parents = 4
         self.alpha = 0.5
@@ -519,28 +527,37 @@ class DAGLedger:
         Returns:
             Tuple of (balance, version)
         """
-        # Try to get existing cache
         cursor = await self._db.execute(
             "SELECT balance, version FROM wallet_balances WHERE wallet_id = ?",
             (wallet_id,)
         )
         row = await cursor.fetchone()
-        
+
         if row:
-            return (row[0], row[1])
-        
-        # Compute balance from transactions
-        balance = await self.get_balance(wallet_id)
-        
-        # Insert new cache entry
-        await self._db.execute(
-            """INSERT INTO wallet_balances (wallet_id, balance, version, last_updated)
-               VALUES (?, ?, 1, ?)
-               ON CONFLICT(wallet_id) DO UPDATE SET balance = excluded.balance""",
-            (wallet_id, balance, time.time())
-        )
-        
-        return (balance, 1)
+            balance, db_version = row[0], row[1]
+
+            # Use service-level version cache when available.
+            # This detects external DB modifications: if something outside this
+            # service changed the DB version, the cache holds the old value,
+            # which will cause a mismatch in _commit_balance_deduction.
+            if wallet_id in self._balance_version_cache:
+                version = self._balance_version_cache[wallet_id]
+            else:
+                # First access for this wallet — seed the cache
+                version = db_version
+                self._balance_version_cache[wallet_id] = version
+
+            return (balance, version)
+
+        else:
+            # New wallet — create with version 1
+            await self._db.execute(
+                """INSERT INTO wallet_balances (wallet_id, balance, version, last_updated)
+                   VALUES (?, 0.0, 1, ?)""",
+                (wallet_id, time.time())
+            )
+            self._balance_version_cache[wallet_id] = 1
+            return (0.0, 1)
     
     async def _check_balance_atomic(
         self,
@@ -667,12 +684,15 @@ class DAGLedger:
         
         # Release the savepoint - the main transaction will commit later
         await self._db.execute("RELEASE SAVEPOINT balance_check")
-        
+
+        # After successful deduction, update version cache
+        self._balance_version_cache[wallet_id] = expected_version + 1
+
         logger.info(
             f"Atomic balance deduction completed for {wallet_id[:8]}... "
             f"(deducted {amount:.6f}, new version {expected_version + 1})"
         )
-        
+
         return True
     
     async def _commit_balance_credit(
@@ -703,12 +723,17 @@ class DAGLedger:
                    last_updated = excluded.last_updated""",
             (wallet_id, amount, time.time())
         )
-        
+
+        # For new wallet inserts, seed the version cache.
+        # For existing wallets, credit doesn't change version — don't update cache.
+        if wallet_id not in self._balance_version_cache:
+            self._balance_version_cache[wallet_id] = 1
+
         logger.debug(
             f"Atomic balance credit completed for {wallet_id[:8]}... "
             f"(credited {amount:.6f})"
         )
-        
+
         return True
     
     async def _rollback_balance_check(self) -> None:
@@ -887,12 +912,17 @@ class DAGLedger:
         if from_wallet is None:
             logger.debug(f"No signature required: system transaction (tx_type={tx_type.value})")
             return False
-        
+
         # Genesis transactions are system-initiated
         if tx_type == TransactionType.GENESIS:
             logger.debug(f"No signature required: genesis transaction")
             return False
-        
+
+        # System transactions are service-initiated, no signature required
+        if tx_type == TransactionType.SYSTEM:
+            logger.debug(f"No signature required: system transaction type")
+            return False
+
         # All other transactions require signatures
         logger.debug(f"Signature required for tx_type={tx_type.value} from {from_wallet[:8]}...")
         return True
@@ -1027,6 +1057,7 @@ class DAGLedger:
             # Edge cases handled:
             # - Genesis transactions: No signature required (system-initiated)
             # - System transactions (from_wallet=None): No signature required
+            # - SYSTEM transaction type: Service-initiated, no signature required
             # - WELCOME_GRANT: System-initiated, no signature required
             # - First transaction from new wallet: Must provide public_key with signature
             #
@@ -1199,7 +1230,39 @@ class DAGLedger:
             self._state.transactions[tx_id] = tx
             return tx
         return None
-    
+
+    async def get_all_transactions(self) -> List[DAGTransaction]:
+        """Return all transactions in the ledger, ordered by timestamp ascending."""
+
+        cursor = await self._db.execute(
+            """SELECT tx_id, tx_type, amount, from_wallet, to_wallet, timestamp,
+                      signature, public_key, description, parent_ids,
+                      cumulative_weight, confirmation_level
+               FROM dag_transactions
+               ORDER BY timestamp ASC"""
+        )
+        rows = await cursor.fetchall()
+
+        transactions = []
+        for row in rows:
+            tx = DAGTransaction(
+                tx_id=row[0],
+                tx_type=TransactionType(row[1]),
+                amount=row[2],
+                from_wallet=row[3],
+                to_wallet=row[4],
+                timestamp=row[5],
+                signature=row[6],
+                public_key=row[7],
+                description=row[8] or "",
+                parent_ids=json.loads(row[9]) if row[9] else [],
+                cumulative_weight=row[10],
+                confirmation_level=row[11],
+            )
+            transactions.append(tx)
+
+        return transactions
+
     async def get_transaction_history(self, wallet_id: str, limit: int = 50) -> List[DAGTransaction]:
         cursor = await self._db.execute(
             """SELECT tx_id, tx_type, amount, from_wallet, to_wallet, timestamp, 
