@@ -468,12 +468,15 @@ def get_sync_session():
 async def get_db_session():
     """
     Get database session (alias for get_async_session for compatibility)
-    
+
     Returns:
         AsyncSession: SQLAlchemy async session
     """
     async for session in get_async_session():
         yield session
+
+# Alias expected by prsm.interface.api.dependencies
+get_db = get_db_session
 
 # === Database Operations ===
 
@@ -871,6 +874,68 @@ class FTNSQueries:
             )
             row = result.fetchone()
             return row.transaction_id if row else None
+
+    @staticmethod
+    async def get_user_transactions(
+        user_id: str,
+        limit: int = 50,
+        search: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Get transaction history for a user (sent and received).
+
+        Args:
+            user_id: User to look up
+            limit: Max rows to return (1–100)
+            search: Optional substring filter on description or transaction_id
+
+        Returns:
+            List of transaction dicts, ordered newest-first
+        """
+        async with get_async_session() as db_session:
+            query = text("""
+                SELECT
+                    transaction_id, from_user, to_user, amount,
+                    transaction_type, description, status,
+                    balance_after_sender, balance_after_receiver,
+                    created_at
+                FROM ftns_transactions
+                WHERE to_user = :user_id OR from_user = :user_id
+                ORDER BY created_at DESC
+                LIMIT :limit
+            """)
+            result = await db_session.execute(query, {"user_id": user_id, "limit": limit})
+            rows = result.fetchall()
+
+            transactions = []
+            for row in rows:
+                # Use receiver balance if user is recipient; sender balance otherwise
+                balance_after = (
+                    float(row.balance_after_receiver)
+                    if row.to_user == user_id and row.balance_after_receiver is not None
+                    else float(row.balance_after_sender)
+                    if row.balance_after_sender is not None
+                    else None
+                )
+                tx = {
+                    "transaction_id": str(row.transaction_id),
+                    "from_user": row.from_user,
+                    "to_user": row.to_user,
+                    "amount": float(row.amount),
+                    "transaction_type": row.transaction_type,
+                    "description": row.description,
+                    "status": row.status,
+                    "balance_after": balance_after,
+                    "timestamp": row.created_at.isoformat() if row.created_at else None,
+                }
+                if search:
+                    search_lower = search.lower()
+                    if (search_lower in (row.description or "").lower()
+                            or search_lower in str(row.transaction_id).lower()):
+                        transactions.append(tx)
+                else:
+                    transactions.append(tx)
+
+            return transactions
 
 
 class ModelQueries:
