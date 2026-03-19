@@ -57,6 +57,8 @@ class AuthManager:
     
     def __init__(self):
         self.db_service = None
+        # Store jwt_handler as instance attribute so it can be updated for testing
+        self.jwt_handler = jwt_handler
         self.max_login_attempts = 5
         self.lockout_duration_minutes = 15
         self.password_min_length = 8
@@ -65,7 +67,7 @@ class AuthManager:
         """Initialize auth manager"""
         try:
             self.db_service = get_database_service()
-            await jwt_handler.initialize()
+            await self.jwt_handler.initialize()
             logger.info("Auth manager initialized")
         except Exception as e:
             logger.error("Failed to initialize auth manager", error=str(e))
@@ -124,7 +126,7 @@ class AuthManager:
                 )
             
             # Hash password
-            hashed_password = jwt_handler.hash_password(request.password)
+            hashed_password = self.jwt_handler.hash_password(request.password)
             
             # Create user object with unique UUID
             user = User(
@@ -235,7 +237,7 @@ class AuthManager:
                 raise AuthenticationError("Account is inactive")
             
             # Verify password
-            if not jwt_handler.verify_password(request.password, user.hashed_password):
+            if not self.jwt_handler.verify_password(request.password, user.hashed_password):
                 await self._record_failed_login(user)
                 await audit_logger.log_auth_event(
                     "login_failed",
@@ -262,8 +264,8 @@ class AuthManager:
             }
             
             # Create tokens
-            access_token, access_token_data = await jwt_handler.create_access_token(user_data)
-            refresh_token, refresh_token_data = await jwt_handler.create_refresh_token(user_data)
+            access_token, access_token_data = await self.jwt_handler.create_access_token(user_data)
+            refresh_token, refresh_token_data = await self.jwt_handler.create_refresh_token(user_data)
             
             # Calculate expires_in for access token
             expires_in = int((access_token_data.expires_at - datetime.now(timezone.utc)).total_seconds())
@@ -320,7 +322,7 @@ class AuthManager:
         """
         try:
             # Verify token
-            token_data = await jwt_handler.verify_token(token)
+            token_data = await self.jwt_handler.verify_token(token)
             
             if not token_data or token_data.token_type != "access":
                 raise AuthenticationError()
@@ -355,7 +357,7 @@ class AuthManager:
             AuthenticationError: If refresh fails
         """
         try:
-            result = await jwt_handler.refresh_access_token(refresh_token)
+            result = await self.jwt_handler.refresh_access_token(refresh_token)
             
             if not result:
                 await audit_logger.log_auth_event(
@@ -368,7 +370,7 @@ class AuthManager:
             new_access_token, new_refresh_token = result
             
             # Get token data to calculate expires_in
-            token_data = await jwt_handler.verify_token(new_access_token)
+            token_data = await self.jwt_handler.verify_token(new_access_token)
             expires_in = int((token_data.expires_at - datetime.now(timezone.utc)).total_seconds())
             
             await audit_logger.log_auth_event(
@@ -408,11 +410,11 @@ class AuthManager:
         """
         try:
             # Get user data from token before revoking
-            token_data = await jwt_handler.verify_token(token)
+            token_data = await self.jwt_handler.verify_token(token)
             
             if token_data:
                 # Revoke token
-                await jwt_handler.revoke_token(token)
+                await self.jwt_handler.revoke_token(token)
                 
                 await audit_logger.log_auth_event(
                     "user_logout",

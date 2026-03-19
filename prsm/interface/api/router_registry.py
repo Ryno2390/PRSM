@@ -110,6 +110,13 @@ def _include_core_routers(app: FastAPI) -> None:
     except ImportError as e:
         logger.warning(f"Budget router not available: {e}")
 
+    try:
+        from prsm.interface.api.ftns_api import router as ftns_router
+        app.include_router(ftns_router, tags=["FTNS"])
+        logger.debug("FTNS router registered")
+    except ImportError as e:
+        logger.warning(f"FTNS router not available: {e}")
+
     logger.info("Core API routers registered")
 
 

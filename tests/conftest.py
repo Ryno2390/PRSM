@@ -65,6 +65,11 @@ class FakeRedisPipeline:
         self.commands.append(('expire', key, seconds))
         return self
     
+    def incr(self, key: str):
+        """Increment an integer counter — stores command for execute()"""
+        self.commands.append(('incr', key))
+        return self
+    
     def set(self, key, value, ex=None):
         """Set value"""
         self.commands.append(('set', key, value, ex))
@@ -120,6 +125,11 @@ class FakeRedisPipeline:
             elif cmd[0] == 'get':
                 key = cmd[1]
                 results.append(r._data.get(key))
+            elif cmd[0] == 'incr':
+                key = cmd[1]
+                current = int(r._data.get(key, 0))
+                r._data[key] = current + 1
+                results.append(current + 1)
             else:
                 results.append(True)
         self.commands = []
@@ -694,33 +704,167 @@ def setup_test_logging():
 @pytest.fixture(autouse=True)
 def setup_test_environment():
     """Auto-use fixture to set up test environment"""
+    # The test JWT secret key - must be consistent across all config systems
+    TEST_JWT_SECRET = "test-secret-key-for-testing-only-minimum-32-chars-required-here"
+    
+    # Clear the settings cache before setting environment variables
+    # This is critical because get_config_manager() uses @lru_cache() and may have been
+    # called already at module import time with wrong values
+    try:
+        from prsm.core.config.manager import get_config_manager, ConfigManager
+        # Clear the lru_cache
+        get_config_manager.cache_clear()
+        # Reset the singleton instance so it picks up new environment variables
+        ConfigManager._instance = None
+        # CRITICAL: Also reset the global _config_manager variable in manager.py
+        # This is separate from the class-level _instance and is checked first by get_config_manager()
+        import prsm.core.config.manager as manager_module
+        manager_module._config_manager = None
+        
+        # Note: get_config() is NOT lru_cache decorated, only get_config_manager() is
+        # The get_config function calls get_config_manager() internally, so clearing
+        # get_config_manager's cache is sufficient
+    except ImportError:
+        pass
+    
     # Set environment variables for testing
-    os.environ["PRSM_ENVIRONMENT"] = "test"
-    os.environ["PRSM_LOG_LEVEL"] = "DEBUG"
-    os.environ["PRSM_DATABASE_URL"] = "sqlite:///:memory:"
+    # PRSMSettings (old config in prsm/core/config.py) uses PRSM_SECRET_KEY for secret_key field
+    # This MUST be set before get_settings() is called
+    os.environ["PRSM_SECRET_KEY"] = TEST_JWT_SECRET
+    
+    # Skip flags for integration tests
     os.environ["SKIP_POSTGRES_TESTS"] = "true"
     os.environ["SKIP_INTEGRATION_TESTS"] = "true"
     
-    # JWT/Auth configuration for tests
-    os.environ["PRSM_JWT_SECRET"] = "test-secret-key-for-testing-only-minimum-32-chars-required-here"
-    os.environ["PRSM_JWT_ALGORITHM"] = "HS256"
-    os.environ["PRSM_SECRET_KEY"] = "test-secret-key-for-testing-only-minimum-32-chars-required-here"
+    # Create test configuration directly, bypassing environment variable parsing issues
+    # The environment loader splits on ALL underscores which breaks field names like
+    # jwt_secret_key (becomes jwt.secret.key instead of jwt_secret_key)
+    try:
+        from prsm.core.config.manager import get_config_manager, ConfigManager
+        from prsm.core.config.schemas import PRSMConfig, SecurityConfig, SystemConfig, DatabaseConfig
+        
+        # Create a test configuration with the required settings
+        test_config = PRSMConfig(
+            system=SystemConfig(
+                environment="test",
+                debug=True,
+                testing=True
+            ),
+            database=DatabaseConfig(
+                type="sqlite",
+                host="localhost",
+                port=5432,
+                database=":memory:"
+            ),
+            security=SecurityConfig(
+                jwt_secret_key=TEST_JWT_SECRET
+            )
+        )
+        
+        # Clear the lru_cache and reset singleton
+        get_config_manager.cache_clear()
+        ConfigManager._instance = None
+        
+        # Reset the global _config_manager variable in manager.py
+        import prsm.core.config.manager as manager_module
+        manager_module._config_manager = None
+        
+        # Get the config manager and set our test config directly
+        manager = get_config_manager()
+        manager._config = test_config
+        
+        # Reset the settings variable in prsm.core.config module - it's loaded at import time
+        # Note: prsm.core.config can be either the package (directory) or the module (file)
+        # The package's get_settings() calls get_config() which uses get_config_manager()
+        # We already cleared get_config_manager's cache above, so get_settings() will return fresh data
+        
+        # Create a new PRSMConfig instance with the test secret (PRSMSettings is aliased to PRSMConfig)
+        from prsm.core.config.schemas import PRSMConfig, SecurityConfig, SystemConfig, DatabaseConfig
+        test_settings = PRSMConfig(
+            system=SystemConfig(
+                environment="test",
+                debug=True,
+                testing=True
+            ),
+            database=DatabaseConfig(
+                type="sqlite",
+                host="localhost",
+                port=5432,
+                database=":memory:"
+            ),
+            security=SecurityConfig(
+                jwt_secret_key=TEST_JWT_SECRET
+            )
+        )
+        
+        # Update the module-level settings variable in the config package
+        from prsm.core import config as config_package
+        config_package.settings = test_settings
+        
+        # Also reset the global database engine since it caches the old settings
+        from prsm.core import database
+        database.async_engine = None
+        database.async_session_factory = None
+        database.sync_engine = None
+        database.sync_session_factory = None
+        # Reset the settings variable in database module - it's loaded at import time
+        database.settings = test_config
+        
+        # CRITICAL: Reinitialize the JWTHandler with the new settings
+        # The JWTHandler caches the secret_key at instantiation time
+        # Use importlib to get the actual module, since prsm.core.auth.jwt_handler resolves to the instance
+        # (due to the package's __init__.py importing the instance)
+        import importlib
+        import sys
+        jwt_handler_module = sys.modules.get('prsm.core.auth.jwt_handler')
+        if jwt_handler_module is None:
+            jwt_handler_module = importlib.import_module('prsm.core.auth.jwt_handler')
+        # Update the module-level settings variable in jwt_handler
+        jwt_handler_module.settings = test_settings
+        # Re-instantiate the handler with the new settings
+        new_handler = jwt_handler_module.JWTHandler()
+        jwt_handler_module.jwt_handler = new_handler
+        
+        # Also update the jwt_handler in prsm.core.auth package
+        # The package's __init__.py imports jwt_handler from the module, creating a separate reference
+        import prsm.core.auth as auth_package
+        auth_package.jwt_handler = new_handler
+        
+        # CRITICAL: Also update the jwt_handler in auth_manager module
+        # auth_manager.py imports jwt_handler directly: "from prsm.core.auth.jwt_handler import jwt_handler"
+        # This creates a separate reference that needs to be updated
+        import prsm.core.auth.auth_manager as auth_manager_module
+        auth_manager_module.jwt_handler = new_handler
+        
+        # CRITICAL: Also update the jwt_handler on the auth_manager instance
+        # The AuthManager class now stores jwt_handler as an instance attribute
+        # We need to update it on the global auth_manager instance
+        if hasattr(auth_manager_module, 'auth_manager') and hasattr(auth_manager_module.auth_manager, 'jwt_handler'):
+            auth_manager_module.auth_manager.jwt_handler = new_handler
+    except ImportError:
+        pass
     
     yield
     
     # Cleanup environment
     test_env_vars = [
-        "PRSM_ENVIRONMENT",
-        "PRSM_LOG_LEVEL",
-        "PRSM_DATABASE_URL",
         "SKIP_POSTGRES_TESTS",
         "SKIP_INTEGRATION_TESTS",
-        "PRSM_JWT_SECRET",
-        "PRSM_JWT_ALGORITHM",
-        "PRSM_SECRET_KEY"
+        "PRSM_SECRET_KEY",
     ]
     for var in test_env_vars:
         os.environ.pop(var, None)
+    
+    # Clear settings cache after test to avoid affecting other tests
+    try:
+        from prsm.core.config.manager import get_config_manager, ConfigManager
+        get_config_manager.cache_clear()
+        ConfigManager._instance = None
+        # Also reset the global _config_manager variable
+        import prsm.core.config.manager as manager_module
+        manager_module._config_manager = None
+    except ImportError:
+        pass
 
 
 # Mock fixtures for when imports fail
@@ -846,6 +990,11 @@ async def async_test_client(test_app):
     """
     if _real_httpx_AsyncClient is None:
         pytest.skip("httpx not available")
+    
+    # Clear rate limit state before each test
+    import prsm.interface.api.dependencies as deps
+    deps._rate_limit_storage.clear()
+    
     async with _real_httpx_AsyncClient(
         transport=_real_httpx_ASGITransport(app=test_app),
         base_url="http://test",
@@ -867,6 +1016,31 @@ def mock_audit_logger():
          patch('prsm.core.auth.middleware.audit_logger', mock_logger), \
          patch('prsm.core.integrations.security.audit_logger.audit_logger', mock_logger):
         yield mock_logger
+
+
+@pytest.fixture(autouse=True)
+def disable_rate_limiting():
+    """Auto-use fixture to disable rate limiting during tests"""
+    # Clear the in-memory rate limit storage in dependencies
+    import prsm.interface.api.dependencies as deps
+    deps._rate_limit_storage.clear()
+    
+    # Patch both rate limiting middlewares:
+    # 1. RateLimitMiddleware in prsm/interface/api/middleware.py
+    # 2. RateLimitingMiddleware in prsm/core/security/middleware.py
+    
+    with patch('prsm.interface.api.middleware.RateLimitMiddleware.dispatch') as mock_dispatch1, \
+         patch('prsm.core.security.middleware.RateLimitingMiddleware.dispatch') as mock_dispatch2:
+        
+        async def passthrough(request, call_next):
+            return await call_next(request)
+        
+        mock_dispatch1.side_effect = passthrough
+        mock_dispatch2.side_effect = passthrough
+        
+        # Also mock the dependencies rate limit storage
+        with patch('prsm.interface.api.dependencies._rate_limit_storage', {}):
+            yield
 
 
 @pytest.fixture
