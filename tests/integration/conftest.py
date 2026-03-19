@@ -363,9 +363,21 @@ class APITestDataFactory:
 
     @staticmethod
     def create_nwtn_query_request(query: str = "Test reasoning query", mode: str = "adaptive",
-                                  max_depth: int = 3, **kwargs) -> Dict[str, Any]:
-        return {"query": query, "mode": mode, "max_depth": max_depth,
-                "timestamp": datetime.now(timezone.utc).isoformat(), **kwargs}
+                                  max_depth: int = 3, user_id: str = "test_user_id", **kwargs) -> Dict[str, Any]:
+        """Create NWTN query request matching UserInput model.
+        
+        The UserInput model requires:
+        - user_id: str (required)
+        - prompt: Optional[str] (used instead of 'query')
+        - content: Optional[str] (alias for prompt)
+        """
+        return {
+            "user_id": user_id,
+            "prompt": query,  # UserInput uses 'prompt', not 'query'
+            "content": query,  # content is an alias for prompt
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **kwargs
+        }
 
     @staticmethod
     def create_ftns_transfer_request(recipient: str = "test_recipient", amount: float = 10.0,
@@ -382,7 +394,7 @@ class APITestDataFactory:
     @staticmethod
     def create_user_registration_request(username: str = "testuser", email: str = "test@example.com",
                                           password: str = "testpassword123", **kwargs) -> Dict[str, Any]:
-        return {"username": username, "email": email, "password": password, **kwargs}
+        return {"username": username, "email": email, "password": password, "confirm_password": password, **kwargs}
 
 
 @pytest.fixture
@@ -393,10 +405,24 @@ def api_data_factory():
 
 @pytest.fixture
 def user_headers():
-    """Regular user authorization headers for API testing"""
+    """Regular user authorization headers for API testing
+    
+    Uses the same TEST_JWT_SECRET that setup_test_environment uses to configure
+    the jwt_handler. This ensures the token is signed with the same secret that
+    the API will use for verification.
+    """
     import jwt as pyjwt
+    from uuid import uuid4
+    
+    # CRITICAL: Use the exact same secret that setup_test_environment uses
+    # This is defined in tests/conftest.py and must match exactly
+    JWT_SECRET = "test-secret-key-for-testing-only-minimum-32-chars-required-here"
+    
+    # Use a valid UUID for the sub claim - TokenData expects UUID type
+    test_user_id = str(uuid4())
+    
     payload = {
-        "sub": "test_regular_user",
+        "sub": test_user_id,
         "username": "user",
         "email": "user@test.com",
         "role": "user",
@@ -404,18 +430,67 @@ def user_headers():
         "token_type": "access",
         "exp": (datetime.now(timezone.utc) + timedelta(hours=1)).timestamp(),
         "iat": datetime.now(timezone.utc).timestamp(),
-        "jti": "test_jti_user"
+        "jti": str(uuid4())
     }
-    token = pyjwt.encode(payload, "test-secret-key-for-testing-only-minimum-32-chars-required-here", algorithm="HS256")
+    token = pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
     return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture
+def mock_user_for_auth():
+    """Create a mock user for authentication that can be used with user_headers.
+    
+    This fixture provides a context manager that patches _get_user_by_id to return
+    a mock user, ensuring authenticated endpoints work properly.
+    """
+    from contextlib import contextmanager
+    from unittest.mock import patch, AsyncMock
+    from prsm.core.auth.models import User, UserRole
+    from uuid import uuid4
+    
+    @contextmanager
+    def _mock_user_context(user_id=None, username="user", email="user@test.com"):
+        """Context manager that mocks _get_user_by_id to return a test user."""
+        mock_user = User(
+            id=user_id or uuid4(),
+            email=email,
+            username=username,
+            full_name="Test User",
+            hashed_password="hashed",
+            role=UserRole.USER,
+            is_active=True,
+            is_verified=True,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        
+        with patch('prsm.core.auth.auth_manager.auth_manager._get_user_by_id', new_callable=AsyncMock) as mock_get_user:
+            mock_get_user.return_value = mock_user
+            yield mock_user
+    
+    return _mock_user_context
+
+
+@pytest.fixture
 def expired_token_headers():
-    """Expired token headers for testing authentication failures"""
+    """Expired token headers for testing authentication failures
+    
+    Uses the same TEST_JWT_SECRET that setup_test_environment uses to configure
+    the jwt_handler. This ensures the token is signed with the same secret that
+    the API will use for verification.
+    """
     import jwt as pyjwt
+    from uuid import uuid4
+    
+    # CRITICAL: Use the exact same secret that setup_test_environment uses
+    # This is defined in tests/conftest.py and must match exactly
+    JWT_SECRET = "test-secret-key-for-testing-only-minimum-32-chars-required-here"
+    
+    # Use a valid UUID for the sub claim - TokenData expects UUID type
+    test_user_id = str(uuid4())
+    
     payload = {
-        "sub": "test_regular_user",
+        "sub": test_user_id,
         "username": "user",
         "email": "user@test.com",
         "role": "user",
@@ -423,9 +498,9 @@ def expired_token_headers():
         "token_type": "access",
         "exp": (datetime.now(timezone.utc) - timedelta(hours=1)).timestamp(),
         "iat": (datetime.now(timezone.utc) - timedelta(hours=2)).timestamp(),
-        "jti": "test_jti_expired"
+        "jti": str(uuid4())
     }
-    token = pyjwt.encode(payload, "test-secret-key-for-testing-only-minimum-32-chars-required-here", algorithm="HS256")
+    token = pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -535,9 +610,9 @@ def api_response_schemas():
     """Expected API response schemas for validation"""
     return {
         "nwtn_response": {
-            "required_fields": ["response", "session_id", "timestamp"],
+            "required": ["session_id", "final_answer", "confidence_score"],
         },
         "error_response": {
-            "required_fields": ["detail"],
+            "required": ["detail"],  # API returns "detail" for error responses
         },
     }

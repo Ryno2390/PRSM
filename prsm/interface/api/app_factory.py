@@ -194,6 +194,8 @@ def _configure_exception_handlers(app: FastAPI) -> None:
     """Configure global exception handlers."""
     from fastapi.responses import JSONResponse
     from fastapi import Request
+    from fastapi.exceptions import RequestValidationError
+    from starlette.exceptions import HTTPException as StarletteHTTPException
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
@@ -209,14 +211,30 @@ def _configure_exception_handlers(app: FastAPI) -> None:
         if settings and hasattr(settings, 'is_production') and settings.is_production:
             return JSONResponse(
                 status_code=500,
-                content={"detail": "Internal server error"}
+                content={"error": "internal_error", "detail": "Internal server error"}
             )
         else:
             return JSONResponse(
                 status_code=500,
                 content={
-                    "detail": "Internal server error",
-                    "error": str(exc),
+                    "error": "internal_error",
+                    "detail": str(exc),
                     "type": type(exc).__name__
                 }
             )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+        """Handle HTTP exceptions with standardized error format."""
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": exc.detail, "detail": exc.detail}
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        """Handle validation errors with standardized error format."""
+        return JSONResponse(
+            status_code=422,
+            content={"error": "validation_error", "detail": exc.errors()}
+        )

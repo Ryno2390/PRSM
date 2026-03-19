@@ -27,7 +27,7 @@ from prsm.economy.marketplace.models import (
 )
 from ..auth import get_current_user
 from prsm.core.models import UserRole
-from ..security.enhanced_authorization import (
+from prsm.core.security.enhanced_authorization import (
     require_permission, get_enhanced_auth_manager, sanitize_request_data
 )
 
@@ -819,3 +819,173 @@ async def marketplace_health_check() -> Dict[str, Any]:
             "timestamp": "2025-01-01T00:00:00Z",
             "error": str(e)
         }
+
+
+# ============================================================================
+# BACKWARD COMPATIBILITY ALIASES
+# ============================================================================
+
+@router.get("/items", response_model=List[Dict[str, Any]])
+async def list_items(
+    category: Optional[str] = Query(None, description="Filter by category"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: str = Depends(get_current_user)
+) -> List[Dict[str, Any]]:
+    """
+    List marketplace items (alias for /resources)
+    
+    🔄 BACKWARD COMPATIBILITY:
+    - Alias endpoint for /resources to support legacy clients
+    - Delegates to the universal search_resources endpoint
+    """
+    try:
+        # Delegate to search_resources with minimal filters
+        resources = await marketplace_service.search_resources(
+            resource_type=category if category and category != "all" else None,
+            limit=limit,
+            offset=offset
+        )
+        
+        # Transform to legacy item format
+        items = []
+        for resource in resources:
+            items.append({
+                "item_id": resource.get("id"),
+                "title": resource.get("name"),
+                "description": resource.get("description"),
+                "price": resource.get("base_price", 0.0),
+                "category": resource.get("resource_type"),
+                "creator": resource.get("provider_name", "unknown"),
+                "status": resource.get("status", "active"),
+                "rating": resource.get("rating_average", 0.0),
+                "tags": resource.get("tags", [])
+            })
+        
+        return items
+        
+    except Exception as e:
+        logger.error("Failed to list items",
+                    user_id=current_user,
+                    error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve items"
+        )
+
+
+class CreateItemRequest(BaseModel):
+    """Legacy request model for creating marketplace items"""
+    title: str = Field(..., min_length=1, max_length=255)
+    description: str = Field(..., min_length=10, max_length=5000)
+    price: float = Field(default=0.0, ge=0)
+    category: str = Field(default="tool")
+    resource_type: Optional[str] = Field(None, description="Override resource type")
+
+
+@router.post("/items", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
+async def create_item(
+    request: CreateItemRequest,
+    current_user = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Create marketplace item (alias for /resources)
+    
+    🔄 BACKWARD COMPATIBILITY:
+    - Alias endpoint for /resources to support legacy clients
+    - Maps legacy fields to universal resource model
+    """
+    try:
+        # Map legacy category to resource_type
+        resource_type = request.resource_type or request.category or "tool"
+        
+        # Get user ID - current_user can be User object or string
+        user_id = current_user.id if hasattr(current_user, 'id') else UUID(current_user)
+        
+        # Create resource through universal endpoint
+        resource = await marketplace_service.create_resource_listing(
+            owner_id=user_id,
+            resource_type=resource_type,
+            name=request.title,
+            description=request.description,
+            base_price=request.price,
+            tags=[request.category] if request.category else []
+        )
+        
+        # Return in legacy format
+        return {
+            "item_id": resource.get("id"),
+            "title": request.title,
+            "status": "active",
+            "created_at": resource.get("created_at", "2024-01-01T12:00:00Z")
+        }
+        
+    except Exception as e:
+        logger.error("Failed to create item",
+                    user_id=current_user,
+                    error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create item"
+        )
+
+
+class PurchaseItemRequest(BaseModel):
+    """Legacy request model for purchasing items"""
+    quantity: int = Field(default=1, ge=1)
+    payment_method: str = Field(default="ftns_balance")
+
+
+@router.post("/items/{item_id}/purchase", response_model=Dict[str, Any])
+async def purchase_item(
+    item_id: str,
+    request: PurchaseItemRequest,
+    current_user = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Purchase marketplace item (alias for /orders)
+    
+    🔄 BACKWARD COMPATIBILITY:
+    - Alias endpoint for creating orders to support legacy clients
+    - Delegates to the universal order creation
+    """
+    try:
+        # Get user ID - current_user can be User object or string
+        user_id = current_user.id if hasattr(current_user, 'id') else UUID(current_user)
+        
+        # Verify the item exists
+        resource = await marketplace_service.get_resource_details(UUID(item_id))
+        if not resource:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Item not found"
+            )
+        
+        # Create order through universal service
+        order = await marketplace_service.create_order(
+            user_id=user_id,
+            resource_id=UUID(item_id),
+            order_type="purchase",
+            quantity=request.quantity
+        )
+        
+        # Return in legacy format
+        return {
+            "purchase_id": order.get("id"),
+            "item_id": item_id,
+            "amount_paid": resource.get("base_price", 0.0) * request.quantity,
+            "transaction_id": order.get("id"),
+            "status": "completed"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to purchase item",
+                    item_id=item_id,
+                    user_id=current_user,
+                    error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process purchase"
+        )

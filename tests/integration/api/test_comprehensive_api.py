@@ -696,33 +696,36 @@ class TestAPIPerformanceAndLoad:
         query_data = api_data_factory.create_nwtn_query_request(
             query="Concurrent test query"
         )
-        
-        # Create multiple concurrent requests
-        async def make_request():
-            with mock_user_for_auth(), patch('prsm.compute.nwtn.reasoning.s1_neuro_symbolic.NeuroSymbolicOrchestrator.solve_task') as mock_process:
-                mock_process.return_value = {
-                    "output": "Concurrent response",
-                    "trace": [],
-                    "reward": 0.8,
-                    "verification_hash": "test_hash",
-                    "input_hash": "test_input_hash",
-                    "pq_signature": {},
-                    "mode": "adaptive"
-                }
-                
+
+        # Apply patches once outside the concurrent tasks — applying the same
+        # class-level patch inside 10 concurrent coroutines causes mock leakage
+        # because asyncio.gather interleaves teardown, leaving solve_task mocked.
+        with mock_user_for_auth(), \
+             patch('prsm.compute.nwtn.reasoning.s1_neuro_symbolic.NeuroSymbolicOrchestrator.solve_task') as mock_process:
+            mock_process.return_value = {
+                "output": "Concurrent response",
+                "trace": [],
+                "reward": 0.8,
+                "verification_hash": "test_hash",
+                "input_hash": "test_input_hash",
+                "pq_signature": {},
+                "mode": "adaptive"
+            }
+
+            async def make_request():
                 return await async_test_client.post(
                     "/api/v1/nwtn/query",
                     json=query_data,
                     headers=user_headers
                 )
-        
-        # Execute 10 concurrent requests
-        tasks = [make_request() for _ in range(10)]
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
+            # Execute 10 concurrent requests
+            tasks = [make_request() for _ in range(10)]
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+
         # Count successful responses
         successful = sum(1 for r in responses if hasattr(r, 'status_code') and r.status_code == 200)
-        
+
         # Should handle at least 80% of concurrent requests successfully
         assert successful >= 8
     
