@@ -25,8 +25,33 @@ from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timezone
 
 from prsm.core.utils.dependency_manager import DependencyManager
+from prsm.compute.nwtn.backends import BackendRegistry, BackendConfig
 
 logger = structlog.get_logger(__name__)
+
+# Module-level BackendRegistry singleton for LLM inference
+_backend_registry: Optional[BackendRegistry] = None
+_registry_init_lock = asyncio.Lock()
+
+async def _get_or_init_backend_registry() -> BackendRegistry:
+    """
+    Return the module-level BackendRegistry, initializing it on first call.
+    Uses a lock to prevent duplicate initialization under concurrent requests.
+    Falls back to MockBackend if no API keys are configured.
+    """
+    global _backend_registry
+    if _backend_registry is not None and _backend_registry._initialized:
+        return _backend_registry
+    async with _registry_init_lock:
+        # Double-check after acquiring lock
+        if _backend_registry is None or not _backend_registry._initialized:
+            config = BackendConfig.from_environment()
+            _backend_registry = BackendRegistry(config)
+            await _backend_registry.initialize()
+            logger.info("BackendRegistry initialized",
+                        primary=config.primary_backend.value,
+                        fallback=[b.value for b in config.fallback_chain])
+    return _backend_registry
 
 @dataclass
 class ReasoningStep:
@@ -122,11 +147,12 @@ class NeuroSymbolicOrchestrator:
     Orchestrates System 1 (Neural) and System 2 (Symbolic) reasoning.
     Implements verification and latency optimizations.
     """
-    def __init__(self, node_id: str, seed: int = 42):
+    def __init__(self, node_id: str, seed: int = 42, backend_registry: Optional[BackendRegistry] = None):
         self.node_id = node_id
         self.seed = seed
         self.policy_weights: Dict[str, float] = {"exploration": 0.5, "consistency": 0.5}
         self._initialized = False
+        self._backend_registry = backend_registry  # Injected in production; auto-init if None
         
     def _lazy_init(self):
         """Initializes heavy components after hydration"""
@@ -174,6 +200,10 @@ class NeuroSymbolicOrchestrator:
         DependencyManager.ensure_scientific_stack()
         self._lazy_init()
         
+        # NEW: ensure backend is ready (async, runs once then is cached)
+        if self._backend_registry is None:
+            self._backend_registry = await _get_or_init_backend_registry()
+        
         # Local imports for heavy crypt/utils
         import hashlib
         from prsm.core.utils.deterministic import get_local_generator, generate_verification_hash
@@ -213,12 +243,13 @@ class NeuroSymbolicOrchestrator:
         # 1. LATENCY OPTIMIZATION: Layered Inference
         # System 1: Fast, intuitive proposal (System 1)
         s1_proposal = await self._system1_propose(query, context)
+        s1_tokens = s1_proposal.get("tokens_used", 0)
         
         # Calculate surprise relative to the initial query/context
         s1_surprise = self.gater.calculate_surprise(query, s1_proposal["content"])
         trace.add_step(
-            "S1_PROPOSAL", 
-            s1_proposal["content"], 
+            "S1_PROPOSAL",
+            s1_proposal["content"],
             {"latency": s1_proposal["latency"]},
             surprise_score=s1_surprise
         )
@@ -238,10 +269,11 @@ class NeuroSymbolicOrchestrator:
         if verification_mode == "deep":
             # System 2: Deliberative search/verification
             s2_result = await self._system2_verify(s1_proposal["content"], query)
+            s2_tokens = s2_result.get("tokens_used", 0)
             # Deep verification is almost always high surprise
             trace.add_step(
-                "S2_VERIFICATION", 
-                s2_result["content"], 
+                "S2_VERIFICATION",
+                s2_result["content"],
                 {"reward": s2_result["reward"]},
                 surprise_score=0.9
             )
@@ -251,8 +283,11 @@ class NeuroSymbolicOrchestrator:
             # Light Symbolic Check
             final_content = s1_proposal["content"]
             reward = 0.5 # Default reward for light check
+            s2_tokens = 0
             # Light check surprise depends on how much it changes our confidence
             trace.add_step("S2_LIGHT_CHECK", "Passed basic symbolic constraints", surprise_score=0.2)
+        
+        total_tokens_used = s1_tokens + s2_tokens
 
         # 3. GENERATE PROOF OF USEFUL WORK
         # Generate a hash of the trace using the deterministic quantization
@@ -275,6 +310,8 @@ class NeuroSymbolicOrchestrator:
         return {
             "node_id": self.node_id,
             "output": final_content,
+            "tokens_used": total_tokens_used,      # NEW
+            "inference_source": s1_proposal.get("provider", "unknown"),  # NEW
             "input_hash": input_hash,
             "verification_hash": v_hash,
             "pq_signature": pq_signature,
@@ -290,27 +327,61 @@ class NeuroSymbolicOrchestrator:
         }
 
     async def _system1_propose(self, query: str, context: str) -> Dict[str, Any]:
-        """Fast inference layer (System 1)"""
+        """Fast inference layer (System 1) — real LLM call via BackendRegistry"""
         start = time.time()
-        # Simulated fast SSM inference
-        await asyncio.sleep(0.1) 
+        system_prompt = (
+            "You are a fast scientific reasoning assistant integrated into a distributed AI network. "
+            "Provide a concise, direct initial analysis or hypothesis for the query. "
+            "Be factual, evidence-based, and focus on the most likely explanation."
+        )
+        user_prompt = f"Query: {query}"
+        if context:
+            user_prompt += f"\n\nContext: {context}"
+
+        result = await self._backend_registry.execute_with_fallback(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            max_tokens=600,
+            temperature=0.7,
+        )
         return {
-            "content": f"Neural intuition for {query[:20]}...",
-            "latency": time.time() - start
+            "content": result.content,
+            "latency": time.time() - start,
+            "model_id": result.model_id,
+            "provider": result.provider.value if result.provider else "unknown",
+            "tokens_used": result.token_usage.total_tokens if result.token_usage else 0,
         }
 
     async def _system2_verify(self, proposal: str, query: str) -> Dict[str, Any]:
-        """Deliberative verification layer (System 2)"""
-        # Local imports for heavy components
-        from prsm.compute.nwtn.engines.search_reasoning_engine import SearchReasoningEngine
-        
-        # Mocking MCTS call for the prototype
-        await asyncio.sleep(0.3)
-        reward = self.rng.next_float() * 0.5 + 0.5 # 0.5 to 1.0
-        
+        """Deliberative verification layer (System 2) — real LLM call via BackendRegistry"""
+        system_prompt = (
+            "You are a rigorous scientific verifier integrated into a distributed AI network. "
+            "Given an initial analysis and the original query, critically evaluate the analysis. "
+            "Identify any logical errors, unsupported claims, or missing context. "
+            "Produce an improved, verified response that is accurate and well-reasoned. "
+            "Be thorough but concise."
+        )
+        user_prompt = (
+            f"Original query: {query}\n\n"
+            f"Initial analysis to verify and improve:\n{proposal}"
+        )
+
+        result = await self._backend_registry.execute_with_fallback(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            max_tokens=1000,
+            temperature=0.3,  # Lower temp for verification: more deterministic
+        )
+
+        # Reward signal: normalize by expected length (will be refined with RLHF later)
+        reward = min(1.0, max(0.5, len(result.content) / 800))
+
         return {
-            "content": f"Verified breakthrough: {proposal} is scientifically sound.",
-            "reward": reward
+            "content": result.content,
+            "reward": reward,
+            "model_id": result.model_id,
+            "provider": result.provider.value if result.provider else "unknown",
+            "tokens_used": result.token_usage.total_tokens if result.token_usage else 0,
         }
 
     def _update_policy(self, reward: float):
