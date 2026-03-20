@@ -7,7 +7,7 @@
 
 ## 🎯 Executive Summary
 
-This roadmap outlines the integration of **P2P/torrent-based secure collaboration** and **enterprise-grade collaboration tools** into PRSM's existing collaboration framework. By combining cryptographic file sharding with proven collaboration platforms like ONLYOFFICE, PRSM will offer unprecedented secure collaboration capabilities that eliminate centralized server dependencies while maintaining enterprise-grade functionality.
+This roadmap outlines the integration of **P2P/IPFS-based secure collaboration** and **enterprise-grade collaboration tools** into PRSM's existing collaboration framework. By combining cryptographic file sharding with proven collaboration platforms like ONLYOFFICE, PRSM will offer unprecedented secure collaboration capabilities that eliminate centralized server dependencies while maintaining enterprise-grade functionality.
 
 ### Core Innovation: "Coca Cola Recipe" Security Model
 Files are cryptographically sharded and distributed across multiple nodes, ensuring that no single party (including non-collaborating nodes) has access to complete files. Only authorized collaborators possess the cryptographic keys needed to reassemble and decrypt the distributed pieces.
@@ -771,7 +771,7 @@ graph LR
 
 ---
 
-**This roadmap represents a transformational opportunity to revolutionize secure collaboration by combining the proven P2P/torrent distribution model with enterprise-grade collaboration tools, all enhanced by PRSM's advanced AI capabilities. The "Coca Cola recipe" security model provides unprecedented protection for sensitive intellectual property while maintaining the collaborative workflows essential for modern research and development.**
+**This roadmap represents a transformational opportunity to revolutionize secure collaboration by combining PRSM's IPFS-based P2P content distribution with enterprise-grade collaboration tools, all enhanced by PRSM's advanced AI capabilities. The "Coca Cola recipe" security model provides unprecedented protection for sensitive intellectual property while maintaining the collaborative workflows essential for modern research and development.**
 
 ---
 
