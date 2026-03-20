@@ -27,6 +27,64 @@ PREFLIGHT_FAIL = "FAIL"
 PREFLIGHT_BOOTSTRAP_TIMEOUT_SECONDS = 1.5
 
 
+# ── Credential storage ──────────────────────────────────────────────────────
+# Credentials are stored at ~/.prsm/credentials.json (chmod 600).
+# They contain the JWT access token obtained by `prsm login`.
+
+_CREDENTIALS_FILE = Path.home() / ".prsm" / "credentials.json"
+
+
+def _load_credentials() -> Optional[dict]:
+    """Return stored credentials dict, or None if not logged in."""
+    if _CREDENTIALS_FILE.exists():
+        try:
+            import json
+            return json.loads(_CREDENTIALS_FILE.read_text())
+        except Exception:
+            return None
+    return None
+
+
+def _save_credentials(data: dict) -> None:
+    """Write credentials to disk with restricted permissions (owner-only read)."""
+    import json
+    _CREDENTIALS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _CREDENTIALS_FILE.write_text(json.dumps(data, indent=2))
+    _CREDENTIALS_FILE.chmod(0o600)
+
+
+def _clear_credentials() -> None:
+    """Remove stored credentials file."""
+    if _CREDENTIALS_FILE.exists():
+        _CREDENTIALS_FILE.unlink()
+
+
+def _auth_headers() -> dict:
+    """
+    Return a dict with Authorization header, or empty dict if not logged in.
+
+    Used by all commands that call authenticated API endpoints. Empty dict
+    causes the request to proceed without auth (resulting in a 401 which
+    the command then surfaces as "Session expired. Run: prsm login").
+    """
+    creds = _load_credentials()
+    if creds and creds.get("access_token"):
+        return {"Authorization": f"Bearer {creds['access_token']}"}
+    return {}
+
+
+def _api_url_from_creds(override: Optional[str]) -> str:
+    """
+    Return the API URL to use: explicit override → stored credential → default.
+    """
+    if override:
+        return override.rstrip("/")
+    creds = _load_credentials()
+    if creds and creds.get("api_url"):
+        return creds["api_url"].rstrip("/")
+    return "http://127.0.0.1:8000"
+
+
 @dataclass
 class PreflightCheckResult:
     """Node startup preflight check result."""
@@ -510,6 +568,83 @@ def init():
     console.print("1. Edit .env with your configuration")
     console.print("2. Run: prsm db-upgrade")
     console.print("3. Run: prsm serve")
+
+
+@main.command()
+@click.option("--username", "-u", prompt="Username", help="PRSM account username")
+@click.option(
+    "--password", "-p",
+    prompt="Password", hide_input=True,
+    help="PRSM account password"
+)
+@click.option(
+    "--api-url",
+    default="http://127.0.0.1:8000",
+    show_default=True,
+    help="PRSM API base URL"
+)
+def login(username: str, password: str, api_url: str) -> None:
+    """
+    Log in to PRSM and save credentials for subsequent commands.
+
+    Credentials (JWT access token) are stored at ~/.prsm/credentials.json
+    with owner-only read permissions (chmod 600). Run `prsm logout` to
+    remove them.
+    """
+    import httpx
+
+    api_url = api_url.rstrip("/")
+    console.print(f"🔑 Logging in to {api_url} as '{username}'...", style="bold blue")
+
+    try:
+        response = httpx.post(
+            f"{api_url}/api/v1/auth/login",
+            json={"username": username, "password": password},
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {api_url}", style="red")
+        console.print("💡 Make sure the PRSM server is running: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        _save_credentials({
+            "access_token":  data["access_token"],
+            "refresh_token": data["refresh_token"],
+            "api_url":       api_url,
+            "username":      username,
+        })
+        expires_min = data.get("expires_in", 1800) // 60
+        console.print(f"✅ Logged in as '{username}'", style="bold green")
+        console.print(
+            f"   Credentials saved to {_CREDENTIALS_FILE} "
+            f"(token expires in {expires_min} min)",
+            style="dim"
+        )
+    elif response.status_code == 401:
+        console.print("❌ Invalid username or password", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(
+            f"❌ Login failed: HTTP {response.status_code}",
+            style="red"
+        )
+        console.print(f"   {response.text[:200]}")
+        raise SystemExit(1)
+
+
+@main.command()
+def logout() -> None:
+    """Remove stored PRSM credentials."""
+    creds = _load_credentials()
+    if creds:
+        username = creds.get("username", "unknown")
+        _clear_credentials()
+        console.print(f"✅ Logged out (was: '{username}')", style="green")
+        console.print(f"   Removed {_CREDENTIALS_FILE}", style="dim")
+    else:
+        console.print("Not currently logged in.", style="dim")
 
 
 def _find_alembic_ini() -> Optional[Path]:
@@ -1686,137 +1821,215 @@ def ftns():
 
 
 @ftns.command()
-@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
-def balance(api_url: str):
-    """Show FTNS token balance."""
+@click.option("--api-url", default=None, help="PRSM API URL (default: from stored credentials)")
+def balance(api_url: str) -> None:
+    """Show your FTNS token balance."""
     import httpx
-    
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
     try:
-        response = httpx.get(f"{api_url}/api/v1/ftns/balance", timeout=10.0)
-        
-        if response.status_code == 200:
-            data = response.json()
-            table = Table(title="FTNS Balance")
-            table.add_column("Type", style="cyan")
-            table.add_column("Amount", style="green")
-            table.add_row("Total", f"{data.get('total_balance', 0):.4f}")
-            table.add_row("Available", f"{data.get('available_balance', 0):.4f}")
-            table.add_row("Reserved", f"{data.get('reserved_balance', 0):.4f}")
-            if 'staked_balance' in data:
-                table.add_row("Staked", f"{data.get('staked_balance', 0):.4f}")
-            console.print(table)
-        else:
-            console.print(f"❌ Failed to get balance: {response.status_code}", style="red")
+        response = httpx.get(
+            f"{url}/api/v1/ftns/balance",
+            headers=headers,
+            timeout=10.0,
+        )
     except httpx.ConnectError:
-        console.print("❌ Cannot connect to PRSM server", style="red")
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        table = Table(title="FTNS Balance")
+        table.add_column("Type", style="cyan")
+        table.add_column("Amount (FTNS)", style="green", justify="right")
+        table.add_row("Total",     f"{data.get('balance', 0):.6f}")
+        table.add_row("Available", f"{data.get('available_balance', 0):.6f}")
+        table.add_row("Locked",    f"{data.get('locked_balance', 0):.6f}")
+        console.print(table)
+        console.print(f"\n[dim]User ID: {data.get('user_id', '?')}[/dim]")
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
 
 
 @ftns.command()
-@click.option('--to', required=True, help='Recipient address')
-@click.option('--amount', required=True, type=float, help='Amount to transfer')
-@click.option('--memo', help='Transaction memo')
-@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
-def transfer(to: str, amount: float, memo: str, api_url: str):
-    """Transfer FTNS tokens to another address."""
+@click.option("--to",          required=True,             help="Recipient user ID")
+@click.option("--amount",      required=True, type=float, help="Amount in FTNS")
+@click.option("--description", default="",                help="Optional transfer note")
+@click.option("--api-url",     default=None,              help="PRSM API URL (default: from stored credentials)")
+def transfer(to: str, amount: float, description: str, api_url: str) -> None:
+    """Transfer FTNS tokens to another user."""
     import httpx
-    
-    console.print(f"💸 Transferring {amount} FTNS to {to}...", style="bold blue")
-    
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    if amount <= 0:
+        console.print("❌ Amount must be positive", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+    console.print(f"💸 Transferring {amount:.6f} FTNS → {to}...", style="bold blue")
+
     try:
         response = httpx.post(
-            f"{api_url}/api/v1/ftns/transfer",
-            json={"to_address": to, "amount": amount, "memo": memo},
-            timeout=10.0
+            f"{url}/api/v1/ftns/transfer",
+            # Correct request body: 'recipient' and 'description', not 'to_address'/'memo'
+            json={"recipient": to, "amount": amount, "description": description},
+            headers=headers,
+            timeout=10.0,
         )
-        
-        if response.status_code == 200:
-            data = response.json()
-            console.print(f"✅ Transfer successful!", style="bold green")
-            console.print(f"   Transaction ID: {data.get('transaction_id')}")
-            console.print(f"   Amount: {data.get('amount')} FTNS")
-            console.print(f"   Fee: {data.get('fee', 0):.4f} FTNS")
-        else:
-            console.print(f"❌ Transfer failed: {response.status_code}", style="red")
-            console.print(f"   {response.text}")
     except httpx.ConnectError:
-        console.print("❌ Cannot connect to PRSM server", style="red")
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        console.print("✅ Transfer successful!", style="bold green")
+        # Correct response fields: 'status', 'amount', 'recipient' (no 'transaction_id'/'fee')
+        console.print(f"   Recipient : {data.get('recipient')}")
+        console.print(f"   Amount    : {data.get('amount', 0):.6f} FTNS")
+        console.print(f"   Status    : {data.get('status')}")
+    elif response.status_code == 402:
+        console.print("❌ Insufficient FTNS balance", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Transfer failed: HTTP {response.status_code}", style="red")
+        console.print(f"   {response.text[:200]}")
+        raise SystemExit(1)
 
 
 @ftns.command()
-@click.option('--amount', required=True, type=float, help='Amount to stake')
-@click.option('--lock-period', default=30, type=int, help='Lock period in days')
-@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
-def stake(amount: float, lock_period: int, api_url: str):
-    """Stake FTNS tokens for network participation."""
+@click.option("--amount",      required=True, type=float, help="FTNS to stake")
+@click.option("--lock-days",   default=30,    type=int,   help="Lock duration in days (default: 30)")
+@click.option("--api-url",     default=None,              help="PRSM API URL (default: from stored credentials)")
+def stake(amount: float, lock_days: int, api_url: str) -> None:
+    """
+    Stake FTNS tokens for governance voting power.
+
+    Staked tokens are locked for the specified duration and grant
+    proportional voting power on governance proposals.
+    """
     import httpx
-    
-    console.print(f"🔒 Staking {amount} FTNS for {lock_period} days...", style="bold blue")
-    
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+    console.print(f"🔒 Staking {amount:.6f} FTNS for {lock_days} days...", style="bold blue")
+
     try:
+        # Correct endpoint: /api/v1/governance/stake (not /api/v1/ftns/stake)
+        # Correct param name: lock_duration_days (not lock_period)
         response = httpx.post(
-            f"{api_url}/api/v1/ftns/stake",
-            json={"amount": amount, "lock_period": lock_period},
-            timeout=10.0
+            f"{url}/api/v1/governance/stake",
+            json={"amount": amount, "lock_duration_days": lock_days},
+            headers=headers,
+            timeout=10.0,
         )
-        
-        if response.status_code == 200:
-            data = response.json()
-            console.print(f"✅ Staking successful!", style="bold green")
-            console.print(f"   Staked: {data.get('staked_amount')} FTNS")
-            console.print(f"   APY: {data.get('apy', 0) * 100:.1f}%")
-            console.print(f"   Rewards earned: {data.get('rewards_earned', 0):.4f} FTNS")
-        else:
-            console.print(f"❌ Staking failed: {response.status_code}", style="red")
     except httpx.ConnectError:
-        console.print("❌ Cannot connect to PRSM server", style="red")
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        staking = data.get("data", {}).get("staking", {})
+        console.print("✅ Staking successful!", style="bold green")
+        console.print(f"   Staked        : {staking.get('staked_amount', amount)} FTNS")
+        console.print(f"   Voting power  : {staking.get('voting_power', '?')}")
+        console.print(f"   Unlock date   : {staking.get('unlock_date', '?')[:10]}")
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 400:
+        detail = response.json().get("detail", response.text)
+        console.print(f"❌ Staking failed: {detail}", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Staking failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
 
 
 @ftns.command()
-@click.option('--limit', default=20, type=int, help='Maximum transactions to show')
-@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
-def history(limit: int, api_url: str):
-    """Show FTNS transaction history."""
+@click.option("--limit",   default=20, type=int, help="Transactions to show (max 100)")
+@click.option("--search",  default=None,          help="Filter by description or transaction ID")
+@click.option("--api-url", default=None,           help="PRSM API URL (default: from stored credentials)")
+def history(limit: int, search: Optional[str], api_url: str) -> None:
+    """Show your FTNS transaction history."""
     import httpx
-    
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+    params: dict = {"limit": min(limit, 100)}
+    if search:
+        params["search"] = search
+
     try:
-        response = httpx.get(f"{api_url}/api/v1/ftns/history?limit={limit}", timeout=10.0)
-        
-        if response.status_code == 200:
-            data = response.json()
-            transactions = data.get('transactions', [])
-            
-            if not transactions:
-                console.print("No transactions found.", style="dim")
-                return
-            
-            table = Table(title="FTNS Transaction History")
-            table.add_column("ID", style="dim")
-            table.add_column("Type", style="cyan")
-            table.add_column("Amount", style="green")
-            table.add_column("Status", style="magenta")
-            table.add_column("Time", style="blue")
-            
-            for tx in transactions:
-                table.add_row(
-                    tx.get('transaction_id', 'N/A')[:12] + "...",
-                    tx.get('transaction_type', 'N/A'),
-                    f"{tx.get('amount', 0):.4f}",
-                    tx.get('status', 'N/A'),
-                    tx.get('timestamp', 'N/A')[:19]
-                )
-            console.print(table)
-        else:
-            console.print(f"❌ Failed to get history: {response.status_code}", style="red")
+        # Correct endpoint: /transactions, not /history
+        response = httpx.get(
+            f"{url}/api/v1/ftns/transactions",
+            params=params,
+            headers=headers,
+            timeout=10.0,
+        )
     except httpx.ConnectError:
-        console.print("❌ Cannot connect to PRSM server", style="red")
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        raise SystemExit(1)
+
+    if response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    if response.status_code != 200:
+        console.print(f"❌ Failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+    data = response.json()
+    transactions = data.get("transactions", [])
+
+    if not transactions:
+        console.print("No transactions found.", style="dim")
+        return
+
+    table = Table(title=f"FTNS History — {data.get('user_id', '?')}")
+    table.add_column("ID",          style="dim",     max_width=14)
+    table.add_column("Type",        style="cyan")
+    table.add_column("Amount",      style="green",   justify="right")
+    table.add_column("Description", style="white",   max_width=36)
+    table.add_column("Status",      style="magenta")
+    table.add_column("Time",        style="blue")
+
+    for tx in transactions:
+        amount = float(tx.get("amount", 0))
+        table.add_row(
+            str(tx.get("transaction_id", ""))[:12] + "…",
+            tx.get("transaction_type", "?"),
+            f"{amount:.6f}",
+            (tx.get("description") or "")[:36],
+            tx.get("status", "?"),
+            str(tx.get("timestamp", ""))[:19],
+        )
+    console.print(table)
 
 
 # ============================================================================
