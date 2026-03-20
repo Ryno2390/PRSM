@@ -1193,6 +1193,44 @@ class ProvenanceQueries:
                 logger.error(f"ProvenanceQueries.load_all_for_node failed: {e}")
                 return []
 
+    @staticmethod
+    async def get_provenance(cid: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a single provenance record by CID.
+
+        Returns a serializable dict or None if not found. Used by the
+        GET /api/v1/content/{cid}/provenance endpoint.
+        """
+        async with get_async_session() as session:
+            try:
+                row = await session.get(ContentProvenanceModel, cid)
+                if row is None:
+                    return None
+                return {
+                    "cid":                      row.cid,
+                    "filename":                 row.filename,
+                    "size_bytes":               row.size_bytes,
+                    "content_hash":             row.content_hash,
+                    "creator_id":               row.creator_id,
+                    "royalty_rate":             float(row.royalty_rate),
+                    "parent_cids":              row.parent_cids or [],
+                    "access_count":             row.access_count,
+                    "total_royalties":          float(row.total_royalties),
+                    "is_sharded":               bool(row.is_sharded),
+                    "manifest_cid":             row.manifest_cid,
+                    "total_shards":             row.total_shards or 0,
+                    "embedding_id":             row.embedding_id,
+                    "near_duplicate_of":        row.near_duplicate_of,
+                    "near_duplicate_similarity": row.near_duplicate_similarity,
+                    "created_at":               row.created_at.isoformat()
+                                                if row.created_at else None,
+                    "updated_at":               row.updated_at.isoformat()
+                                                if row.updated_at else None,
+                }
+            except Exception as e:
+                logger.error(f"ProvenanceQueries.get_provenance failed: {e}")
+                return None
+
 
 class GovernanceQueries:
     """Query helpers for governance proposal operations.
