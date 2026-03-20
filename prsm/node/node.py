@@ -535,6 +535,12 @@ class PRSMNode:
         # Load persisted training run records from disk
         self._load_training_runs()
 
+        # Hydrate content uploader from DB (restores provenance across restarts)
+        if self.content_uploader:
+            hydrated = await self.content_uploader._hydrate_from_db()
+            if hydrated > 0:
+                logger.info(f"Restored {hydrated} provenance record(s) from DB")
+
         logger.info("Node initialized — all subsystems ready")
 
     async def start(self) -> None:
