@@ -230,51 +230,52 @@ async def get_conversation(conversation_id: str) -> Dict[str, Any]:
 
 @router.get("/conversations")
 async def list_conversations(user_id: str = None) -> Dict[str, Any]:
-    """
-    List conversations for conversation history sidebar
-    
-    📋 CONVERSATION HISTORY:
-    Returns list of recent conversations for the history sidebar
-    with titles, timestamps, and status information
-    """
+    """List user's real NWTN sessions for the conversation history sidebar."""
     try:
-        # Mock conversation history (in production, query from database)
+        from prsm.core.database import get_async_session, PRSMSessionModel, ReasoningStepModel
+        from sqlalchemy import select, func, desc
+
+        async with get_async_session() as db:
+            stmt = (
+                select(
+                    PRSMSessionModel,
+                    func.count(ReasoningStepModel.step_id).label("message_count"),
+                )
+                .outerjoin(
+                    ReasoningStepModel,
+                    ReasoningStepModel.session_id == PRSMSessionModel.session_id,
+                )
+                .group_by(PRSMSessionModel.session_id)
+                .order_by(desc(PRSMSessionModel.updated_at))
+                .limit(50)
+            )
+            if user_id:
+                stmt = stmt.where(PRSMSessionModel.user_id == user_id)
+            result = await db.execute(stmt)
+            rows = result.all()
+
         conversations = [
             {
-                "conversation_id": "conv-1",
-                "title": "Research on Atomically Precise Manufacturing",
-                "last_message_at": "2024-01-15T10:30:00Z",
-                "message_count": 12,
-                "status": "active"
-            },
-            {
-                "conversation_id": "conv-2", 
-                "title": "AI Safety Framework Analysis",
-                "last_message_at": "2024-01-14T16:45:00Z",
-                "message_count": 8,
-                "status": "completed"
-            },
-            {
-                "conversation_id": "conv-3",
-                "title": "FTNS Tokenomics Deep Dive",
-                "last_message_at": "2024-01-13T09:15:00Z",
-                "message_count": 23,
-                "status": "active"
+                "conversation_id": str(row.PRSMSessionModel.session_id),
+                "title": (row.PRSMSessionModel.model_metadata or {}).get(
+                    "title",
+                    f"Session {row.PRSMSessionModel.created_at.strftime('%b %d, %Y')}"
+                    if row.PRSMSessionModel.created_at else "Session",
+                ),
+                "last_message_at": (
+                    row.PRSMSessionModel.updated_at or row.PRSMSessionModel.created_at
+                ).isoformat() if (row.PRSMSessionModel.updated_at or row.PRSMSessionModel.created_at) else None,
+                "message_count": row.message_count,
+                "status": row.PRSMSessionModel.status or "active",
             }
+            for row in rows
         ]
-        
-        return {
-            "success": True,
-            "conversations": conversations,
-            "total": len(conversations)
-        }
-        
+
+        return {"success": True, "conversations": conversations, "total": len(conversations)}
+
     except Exception as e:
         logger.error("Failed to list conversations", error=str(e))
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to list conversations"
-        )
+        raise HTTPException(status_code=500, detail="Failed to list conversations")
 
 
 # === File Management ===
@@ -290,7 +291,11 @@ async def upload_file_ui(file_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         import base64
+        import hashlib
+        import json
         from pathlib import Path
+        from datetime import timezone as tz
+        from prsm.core.ipfs_client import get_ipfs_client, IPFSConnectionError
         
         # Validate required fields
         required_fields = ["filename", "content", "content_type"]
@@ -305,22 +310,60 @@ async def upload_file_ui(file_data: Dict[str, Any]) -> Dict[str, Any]:
         file_content = base64.b64decode(file_data["content"])
         file_size = len(file_content)
         
-        # Generate file metadata
-        file_id = str(uuid4())
+        # ── Upload to IPFS ──────────────────────────────────────────────────────
+        ipfs_client = get_ipfs_client()
+        try:
+            ipfs_result = await ipfs_client.add_content(
+                file_content,
+                filename=file_data["filename"],
+            )
+        except IPFSConnectionError as exc:
+            logger.error("IPFS unavailable for file upload", error=str(exc))
+            raise HTTPException(
+                status_code=503,
+                detail="File storage unavailable — IPFS daemon not reachable",
+            )
+
+        if not ipfs_result.success or not ipfs_result.cid:
+            raise HTTPException(status_code=502, detail="File upload to IPFS failed")
+
+        real_cid = ipfs_result.cid
+
+        # ── Persist metadata to ContentProvenanceModel ──────────────────────────
+        from prsm.core.database import get_async_session, ContentProvenanceModel
+        content_hash = hashlib.sha256(file_content).hexdigest()
+        user_id_val = file_data.get("user_id", "anonymous")
+
+        async with get_async_session() as db:
+            db.add(ContentProvenanceModel(
+                cid=real_cid,
+                filename=file_data["filename"],
+                size_bytes=file_size,
+                content_hash=content_hash,
+                creator_id=user_id_val,
+                provenance_signature=json.dumps({
+                    "uploaded_via": "ui_api",
+                    "content_type": file_data["content_type"],
+                }),
+                royalty_rate=0.01,
+                created_at=datetime.now(tz.utc),
+            ))
+            await db.commit()
+
         file_metadata = {
-            "file_id": file_id,
-            "filename": file_data["filename"],
+            "file_id":      real_cid,
+            "filename":     file_data["filename"],
             "content_type": file_data["content_type"],
-            "size": file_size,
-            "uploaded_at": datetime.now().isoformat(),
-            "user_id": file_data.get("user_id", "anonymous"),
-            "privacy": file_data.get("privacy", "private"),
-            "ai_access": file_data.get("ai_access", "core_only"),
-            "ipfs_cid": f"Qm{file_id[:32]}"  # Mock IPFS CID
+            "size":         file_size,
+            "uploaded_at":  datetime.now().isoformat(),
+            "user_id":      user_id_val,
+            "privacy":      file_data.get("privacy", "private"),
+            "ai_access":    file_data.get("ai_access", "core_only"),
+            "ipfs_cid":     real_cid,
         }
         
         logger.info("File uploaded via UI",
-                   file_id=file_id,
+                   file_id=real_cid,
                    filename=file_data["filename"],
                    size=file_size)
         
@@ -329,6 +372,8 @@ async def upload_file_ui(file_data: Dict[str, Any]) -> Dict[str, Any]:
             "file": file_metadata
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("File upload failed", error=str(e))
         raise HTTPException(
@@ -339,186 +384,187 @@ async def upload_file_ui(file_data: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.get("/files")
 async def list_user_files(user_id: str = None) -> Dict[str, Any]:
-    """
-    List user files for My Files tab
-    
-    📂 FILE MANAGEMENT:
-    Returns user's uploaded files with privacy settings,
-    sharing options, and AI access permissions
-    """
+    """List files the user has uploaded to IPFS (from ContentProvenanceModel)."""
     try:
-        # Mock file list (in production, query from database)
+        from prsm.core.database import get_async_session, ContentProvenanceModel
+        from sqlalchemy import select, desc
+
+        async with get_async_session() as db:
+            stmt = (
+                select(ContentProvenanceModel)
+                .order_by(desc(ContentProvenanceModel.created_at))
+                .limit(100)
+            )
+            if user_id:
+                stmt = stmt.where(ContentProvenanceModel.creator_id == user_id)
+            result = await db.execute(stmt)
+            rows = result.scalars().all()
+
         files = [
             {
-                "file_id": "QmXXX1",
-                "filename": "analysis.ipynb",
-                "content_type": "application/x-ipynb+json",
-                "size": 245760,
-                "uploaded_at": "2024-01-15T08:30:00Z",
-                "privacy": "private",
-                "ai_access": "core_only",
+                "file_id":      row.cid,
+                "filename":     row.filename,
+                "content_type": "application/octet-stream",
+                "size":         row.size_bytes,
+                "uploaded_at":  row.created_at.isoformat(),
+                "privacy":      "private",
+                "ai_access":    "core_only",
                 "sharing": {
                     "public_link": False,
                     "shared_with": [],
-                    "ai_training": False
-                }
-            },
-            {
-                "file_id": "QmXXX2",
-                "filename": "research_data.csv",
-                "content_type": "text/csv",
-                "size": 1024000,
-                "uploaded_at": "2024-01-14T14:20:00Z",
-                "privacy": "public",
-                "ai_access": "full",
-                "sharing": {
-                    "public_link": True,
-                    "shared_with": ["alice@university.edu"],
-                    "ai_training": True
-                }
+                    "ai_training": False,
+                },
             }
+            for row in rows
         ]
-        
+        storage_used = sum(f["size"] for f in files)
         return {
-            "success": True,
-            "files": files,
-            "total": len(files),
-            "storage_used": sum(f["size"] for f in files),
-            "storage_limit": 10 * 1024 * 1024 * 1024  # 10GB
+            "success":       True,
+            "files":         files,
+            "total":         len(files),
+            "storage_used":  storage_used,
+            "storage_limit": 10 * 1024 * 1024 * 1024,
         }
-        
+
     except Exception as e:
         logger.error("Failed to list files", error=str(e))
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to list files"
-        )
+        raise HTTPException(status_code=500, detail="Failed to list files")
 
 
 # === Tokenomics Dashboard ===
 
 @router.get("/tokenomics/{user_id}")
 async def get_tokenomics_ui(user_id: str) -> Dict[str, Any]:
-    """
-    Get user tokenomics data for UI display
-    
-    💰 TOKENOMICS DASHBOARD:
-    Returns comprehensive FTNS token information including
-    balance, staking, earnings, and transaction history
-    """
+    """Return real FTNS tokenomics data for the dashboard."""
     try:
-        # Get balance from existing endpoint
+        from prsm.core.database import get_async_session, StakeModel, FTNSTransactionModel
+        from prsm.economy.tokenomics.staking_manager import StakingConfig
+        from sqlalchemy import select, func, desc, and_, or_
+        from datetime import timedelta, timezone as tz
+
         balance_data = await FTNSQueries.get_user_balance(user_id)
-        
-        # Mock additional tokenomics data
-        tokenomics_data = {
-            "balance": {
-                "total": balance_data["balance"],
-                "available": balance_data["balance"] - balance_data["locked_balance"],
-                "locked": balance_data["locked_balance"],
-                "currency": "FTNS"
-            },
-            "staking": {
-                "staked_amount": 1500.0,
-                "staking_rewards": 45.23,
-                "apy": 12.5,
-                "lock_period_days": 90,
-                "next_reward_date": "2024-01-20T00:00:00Z"
-            },
-            "earnings": {
-                "daily": 5.67,
-                "weekly": 38.45,
-                "monthly": 156.78,
-                "total_lifetime": 2345.67
-            },
-            "recent_transactions": [
-                {
-                    "tx_id": "tx_001",
-                    "type": "reward",
-                    "amount": 15.50,
-                    "timestamp": "2024-01-15T12:00:00Z",
-                    "description": "Staking rewards"
-                },
-                {
-                    "tx_id": "tx_002",
-                    "type": "spent",
-                    "amount": -5.25,
-                    "timestamp": "2024-01-15T09:30:00Z",
-                    "description": "Model inference cost"
-                }
+        config = StakingConfig()
+        now = datetime.now(tz.utc)
+
+        async with get_async_session() as db:
+            # ── Staking totals ────────────────────────────────────────────────
+            stake_row = (await db.execute(
+                select(
+                    func.coalesce(func.sum(StakeModel.amount), 0.0).label("staked"),
+                    func.coalesce(func.sum(StakeModel.rewards_earned), 0.0).label("rewards"),
+                )
+                .where(and_(StakeModel.user_id == user_id, StakeModel.status == "active"))
+            )).one()
+            staked_amount   = float(stake_row.staked)
+            rewards_earned  = float(stake_row.rewards)
+
+            # ── Earnings by period ────────────────────────────────────────────
+            _EARNING_TYPES = [
+                "royalty_distribution", "content_ingestion_reward", "staking_rewards"
             ]
-        }
-        
+            def _earn_stmt(since):
+                return select(func.coalesce(func.sum(FTNSTransactionModel.amount), 0.0)).where(
+                    and_(
+                        FTNSTransactionModel.to_user == user_id,
+                        FTNSTransactionModel.transaction_type.in_(_EARNING_TYPES),
+                        FTNSTransactionModel.created_at >= since,
+                    )
+                )
+
+            daily   = float((await db.execute(_earn_stmt(now - timedelta(days=1)))).scalar())
+            weekly  = float((await db.execute(_earn_stmt(now - timedelta(days=7)))).scalar())
+            monthly = float((await db.execute(_earn_stmt(now - timedelta(days=30)))).scalar())
+            lifetime = float((await db.execute(
+                select(func.coalesce(func.sum(FTNSTransactionModel.amount), 0.0)).where(
+                    and_(
+                        FTNSTransactionModel.to_user == user_id,
+                        FTNSTransactionModel.transaction_type.in_(_EARNING_TYPES),
+                    )
+                )
+            )).scalar())
+
+            # ── Recent transactions ───────────────────────────────────────────
+            recent_rows = (await db.execute(
+                select(FTNSTransactionModel)
+                .where(or_(
+                    FTNSTransactionModel.to_user == user_id,
+                    FTNSTransactionModel.from_user == user_id,
+                ))
+                .order_by(desc(FTNSTransactionModel.created_at))
+                .limit(10)
+            )).scalars().all()
+
+        recent_transactions = [
+            {
+                "tx_id":       str(tx.transaction_id),
+                "type":        tx.transaction_type,
+                "amount":      tx.amount if tx.to_user == user_id else -tx.amount,
+                "timestamp":   tx.created_at.isoformat(),
+                "description": tx.description,
+            }
+            for tx in recent_rows
+        ]
+
+        next_reward = (now + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).isoformat()
+
         return {
             "success": True,
-            "tokenomics": tokenomics_data
+            "tokenomics": {
+                "balance": {
+                    "total":     balance_data["balance"],
+                    "available": balance_data["balance"] - balance_data["locked_balance"],
+                    "locked":    balance_data["locked_balance"],
+                    "currency":  "FTNS",
+                },
+                "staking": {
+                    "staked_amount":    staked_amount,
+                    "staking_rewards":  rewards_earned,
+                    "apy":              config.reward_rate_annual * 100,
+                    "lock_period_days": config.unstaking_period_seconds / 86400,
+                    "next_reward_date": next_reward,
+                },
+                "earnings": {
+                    "daily":          daily,
+                    "weekly":         weekly,
+                    "monthly":        monthly,
+                    "total_lifetime": lifetime,
+                },
+                "recent_transactions": recent_transactions,
+            },
         }
-        
+
     except Exception as e:
         logger.error("Failed to retrieve tokenomics data", error=str(e))
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to retrieve tokenomics data"
-        )
+        raise HTTPException(status_code=500, detail="Failed to retrieve tokenomics data")
 
 
 # === Task Management ===
 
 @router.get("/tasks/{user_id}")
 async def get_user_tasks(user_id: str) -> Dict[str, Any]:
-    """
-    Get user tasks for Tasks tab
-    
-    📋 TASK MANAGEMENT:
-    Returns user's assigned tasks with status, priorities,
-    and interactive management capabilities
-    """
+    """Return the user's real task list from the session cache."""
     try:
-        # Mock task data (in production, query from database)
-        tasks = [
-            {
-                "task_id": "task-1",
-                "title": "Review research paper draft",
-                "description": "Review the quantum computing research paper and provide feedback",
-                "status": "pending",
-                "priority": "high",
-                "assigned_by": "ai_system",
-                "created_at": "2024-01-15T08:00:00Z",
-                "due_date": "2024-01-17T17:00:00Z",
-                "progress": 0,
-                "actions": ["mark_done", "request_extension", "delegate"]
-            },
-            {
-                "task_id": "task-2",
-                "title": "Validate tokenomics model",
-                "description": "Review and validate the proposed FTNS tokenomics improvements",
-                "status": "in_progress",
-                "priority": "medium",
-                "assigned_by": "governance_system",
-                "created_at": "2024-01-14T10:30:00Z",
-                "due_date": "2024-01-20T12:00:00Z",
-                "progress": 60,
-                "actions": ["update_progress", "mark_done", "add_comment"]
-            }
-        ]
-        
+        session_cache = get_session_cache()
+        tasks = []
+        if session_cache:
+            tasks = await session_cache.get_session(f"user:tasks:{user_id}") or []
+
         return {
             "success": True,
-            "tasks": tasks,
+            "tasks":   tasks,
             "summary": {
-                "total": len(tasks),
-                "pending": len([t for t in tasks if t["status"] == "pending"]),
-                "in_progress": len([t for t in tasks if t["status"] == "in_progress"]),
-                "completed": len([t for t in tasks if t["status"] == "completed"])
-            }
+                "total":       len(tasks),
+                "pending":     sum(1 for t in tasks if t.get("status") == "pending"),
+                "in_progress": sum(1 for t in tasks if t.get("status") == "in_progress"),
+                "completed":   sum(1 for t in tasks if t.get("status") == "completed"),
+            },
         }
-        
+
     except Exception as e:
         logger.error("Failed to retrieve tasks", error=str(e))
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to retrieve tasks"
-        )
+        raise HTTPException(status_code=500, detail="Failed to retrieve tasks")
 
 
 @router.post("/tasks")
@@ -537,6 +583,16 @@ async def create_task(task_data: Dict[str, Any]) -> Dict[str, Any]:
             "due_date": task_data.get("due_date"),
             "actions": task_data.get("actions", ["mark_done"])
         }
+        
+        # Persist to session cache
+        user_id = task_data.get("user_id", "anonymous")
+        session_cache = get_session_cache()
+        if session_cache and user_id != "anonymous":
+            existing = await session_cache.get_session(f"user:tasks:{user_id}") or []
+            existing.append(task)
+            await session_cache.store_session(
+                f"user:tasks:{user_id}", existing, ttl=604800  # 7 days
+            )
         
         logger.info("New task created via UI",
                    task_id=task_id,
