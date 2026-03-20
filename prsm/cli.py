@@ -512,20 +512,132 @@ def init():
     console.print("3. Run: prsm serve")
 
 
-@main.command()
-def db_upgrade():
-    """Upgrade database to latest schema"""
-    console.print("🗄️  Upgrading database schema...", style="bold blue")
-    console.print("🚧 Database migrations coming in v0.2.0", style="yellow")
-    console.print("💡 Current setup uses automatic table creation", style="blue")
+def _find_alembic_ini() -> Optional[Path]:
+    """
+    Locate alembic.ini, checking two locations in priority order:
+    1. Parent of the directory containing cli.py (works for editable installs
+       and direct invocation from the source tree)
+    2. Current working directory (works when running `prsm` from the project root
+       after a standard `pip install`)
+    Returns the Path if found, None otherwise.
+    """
+    candidates = [
+        Path(__file__).parent.parent / "alembic.ini",  # source tree
+        Path.cwd() / "alembic.ini",                    # cwd fallback
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
 
 
 @main.command()
-def db_downgrade():
-    """Downgrade database schema by one version"""
-    console.print("🗄️  Downgrading database schema...", style="bold blue")
-    console.print("🚧 Database migrations coming in v0.2.0", style="yellow")
-    console.print("💡 Current setup uses automatic table creation", style="blue")
+@click.option(
+    "--revision",
+    default="head",
+    show_default=True,
+    help="Target revision label or ID. Use 'head' for latest, '+1'/'-1' for relative steps.",
+)
+def db_upgrade(revision: str) -> None:
+    """Upgrade database schema to the target revision (default: head)."""
+    console.print(f"🗄️   Upgrading database schema → '{revision}'...", style="bold blue")
+
+    alembic_ini = _find_alembic_ini()
+    if alembic_ini is None:
+        console.print(
+            "❌ alembic.ini not found. Run this command from the PRSM project root.",
+            style="red",
+        )
+        raise SystemExit(1)
+
+    try:
+        from alembic.config import Config
+        from alembic import command as alembic_command
+
+        cfg = Config(str(alembic_ini))
+        alembic_command.upgrade(cfg, revision)
+        console.print(f"✅ Schema upgraded to '{revision}' successfully.", style="green")
+    except Exception as exc:
+        console.print(f"❌ Migration failed: {exc}", style="red")
+        console.print(
+            "💡 Verify PRSM_DATABASE_URL is set and the database is reachable.",
+            style="yellow",
+        )
+        raise SystemExit(1)
+
+
+@main.command()
+@click.option(
+    "--revision",
+    default="-1",
+    show_default=True,
+    help="Target revision. Use '-1' for one step back, 'base' to revert everything.",
+)
+def db_downgrade(revision: str) -> None:
+    """Downgrade database schema (default: one step back).
+
+    \b
+    WARNING: downgrading drops columns and tables. Back up your data first.
+    Common values:
+      -1              one revision back (default)
+      -2              two revisions back
+      base            revert all migrations
+      <revision-id>   specific revision ID from `prsm db-status`
+    """
+    console.print(f"🗄️   Downgrading database schema → '{revision}'...", style="bold blue")
+    console.print("⚠️   This will drop columns/tables. Ensure you have a backup.", style="yellow")
+
+    alembic_ini = _find_alembic_ini()
+    if alembic_ini is None:
+        console.print(
+            "❌ alembic.ini not found. Run this command from the PRSM project root.",
+            style="red",
+        )
+        raise SystemExit(1)
+
+    try:
+        from alembic.config import Config
+        from alembic import command as alembic_command
+
+        cfg = Config(str(alembic_ini))
+        alembic_command.downgrade(cfg, revision)
+        console.print(f"✅ Schema downgraded to '{revision}' successfully.", style="green")
+    except Exception as exc:
+        console.print(f"❌ Migration failed: {exc}", style="red")
+        console.print(
+            "💡 Verify PRSM_DATABASE_URL is set and the database is reachable.",
+            style="yellow",
+        )
+        raise SystemExit(1)
+
+
+@main.command()
+def db_status() -> None:
+    """Show current database migration revision and pending migrations."""
+    alembic_ini = _find_alembic_ini()
+    if alembic_ini is None:
+        console.print(
+            "❌ alembic.ini not found. Run this command from the PRSM project root.",
+            style="red",
+        )
+        raise SystemExit(1)
+
+    try:
+        from alembic.config import Config
+        from alembic import command as alembic_command
+
+        cfg = Config(str(alembic_ini))
+        console.print("🗄️   Current database revision:", style="bold blue")
+        alembic_command.current(cfg, verbose=True)
+        console.print("\n📋 Migration history (latest first):", style="bold blue")
+        alembic_command.history(cfg, indicate_current=True)
+    except Exception as exc:
+        console.print(f"❌ Could not check migration status: {exc}", style="red")
+        console.print(
+            "💡 Verify PRSM_DATABASE_URL is set and the database is reachable.",
+            style="yellow",
+        )
+        raise SystemExit(1)
 
 
 @main.group()
