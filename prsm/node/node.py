@@ -627,7 +627,7 @@ class PRSMNode:
         # Create FTNS adapter for staking operations
         staking_ftns_adapter = _StakingFTNSAdapter(self.ledger, self.identity.node_id)
         self.staking_manager = StakingManager(
-            db_session=None,  # StakingManager uses in-memory storage for now
+            db_session=None,  # session unused; StakingManager calls get_async_session() internally
             ftns_service=staking_ftns_adapter,
             config=StakingConfig(),
         )

@@ -552,6 +552,97 @@ class UserAPIConfigModel(Base):
     )
 
 
+class StakeModel(Base):
+    """
+    Database model for FTNS stakes
+
+    🪙 STAKING INTEGRATION:
+    Persists stake records for the FTNS staking system including
+    active stakes, unstaking requests, and reward tracking
+    """
+    __tablename__ = "ftns_stakes"
+
+    stake_id   = Column(UUID(as_uuid=True), primary_key=True)
+    user_id    = Column(String(255), nullable=False, index=True)
+    amount     = Column(Float, nullable=False)
+    stake_type = Column(String(50),  nullable=False, default="general")
+    status     = Column(String(50),  nullable=False, default="active", index=True)
+
+    rewards_earned          = Column(Float, nullable=False, default=0.0)
+    rewards_claimed         = Column(Float, nullable=False, default=0.0)
+    last_reward_calculation = Column(DateTime(timezone=True), nullable=False)
+
+    staked_at              = Column(DateTime(timezone=True), nullable=False)
+    unstake_requested_at   = Column(DateTime(timezone=True), nullable=True)
+    withdrawn_at           = Column(DateTime(timezone=True), nullable=True)
+
+    lock_reason  = Column(Text, nullable=True)
+    stake_metadata = Column(JSON, nullable=True)  # "metadata" is reserved in SA
+
+    __table_args__ = (
+        Index('idx_stake_user_status', 'user_id', 'status'),
+        Index('idx_stake_staked_at', 'staked_at'),
+    )
+
+
+class UnstakeRequestModel(Base):
+    """
+    Database model for unstake requests
+
+    🪙 UNSTAKING INTEGRATION:
+    Tracks unstake requests through the unbonding period
+    """
+    __tablename__ = "ftns_unstake_requests"
+
+    request_id   = Column(UUID(as_uuid=True), primary_key=True)
+    stake_id     = Column(UUID(as_uuid=True), nullable=False, index=True)
+    user_id      = Column(String(255), nullable=False, index=True)
+    amount       = Column(Float, nullable=False)
+    status       = Column(String(50), nullable=False, default="pending", index=True)
+
+    requested_at        = Column(DateTime(timezone=True), nullable=False)
+    available_at        = Column(DateTime(timezone=True), nullable=False)
+    completed_at        = Column(DateTime(timezone=True), nullable=True)
+    cancellation_reason = Column(Text, nullable=True)
+    request_metadata    = Column(JSON, nullable=True)
+
+    __table_args__ = (
+        Index('idx_unstake_user_status',    'user_id', 'status'),
+        Index('idx_unstake_available_at',   'available_at'),
+    )
+
+
+class SlashEventModel(Base):
+    """
+    Database model for slash events
+
+    🛡️ SLASHING INTEGRATION:
+    Records slashing events for stake penalties including
+    appeal tracking and evidence storage
+    """
+    __tablename__ = "ftns_slash_events"
+
+    slash_id       = Column(UUID(as_uuid=True), primary_key=True)
+    stake_id       = Column(UUID(as_uuid=True), nullable=False, index=True)
+    user_id        = Column(String(255), nullable=False, index=True)
+    amount_slashed = Column(Float, nullable=False)
+    reason         = Column(String(50), nullable=False)
+    slash_rate     = Column(Float, nullable=False)
+    slashed_by     = Column(String(255), nullable=False)
+    evidence       = Column(JSON, nullable=True)
+    slashed_at     = Column(DateTime(timezone=True), nullable=False)
+
+    appeal_deadline = Column(DateTime(timezone=True), nullable=True)
+    appeal_status   = Column(String(50), nullable=True)
+    appeal_evidence = Column(JSON, nullable=True)
+    slash_metadata  = Column(JSON, nullable=True)
+
+    __table_args__ = (
+        Index('idx_slash_user_slashed_at', 'user_id', 'slashed_at'),
+        Index('idx_slash_stake',           'stake_id'),
+    )
+
+
 # === Database Session Management ===
 
 @asynccontextmanager
