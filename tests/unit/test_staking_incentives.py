@@ -10,11 +10,50 @@ This module tests the staking system including:
 """
 
 import pytest
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy import text as sa_text, TypeDecorator, DateTime
+
+from prsm.core.database import Base
+
+
+class TZDateTime(TypeDecorator):
+    """SQLite-compatible timezone-aware datetime type.
+    
+    Stores datetime as ISO format strings and parses them back as timezone-aware.
+    """
+    impl = DateTime
+    cache_ok = True
+    
+    def process_bind_param(self, value, dialect):
+        if value is not None:
+            # Convert to UTC and format as ISO string
+            if value.tzinfo is not None:
+                value = value.astimezone(timezone.utc)
+            return value.isoformat()
+        return value
+    
+    def process_result_value(self, value, dialect):
+        if value is not None:
+            # Parse ISO string back to timezone-aware datetime
+            if isinstance(value, str):
+                # Handle both with and without timezone
+                if '+' in value or value.endswith('Z'):
+                    value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                else:
+                    # Naive datetime - assume UTC
+                    value = datetime.fromisoformat(value)
+                    value = value.replace(tzinfo=timezone.utc)
+            elif value.tzinfo is None:
+                # Naive datetime from SQLite - assume UTC
+                value = value.replace(tzinfo=timezone.utc)
+            return value
+        return value
 from prsm.economy.tokenomics.staking_manager import (
     StakingManager,
     StakingConfig,
@@ -68,8 +107,139 @@ def mock_ftns_service():
 
 
 @pytest.fixture
+async def async_db_session():
+    """Create an in-memory SQLite database for testing staking operations."""
+    from sqlalchemy import event
+    from sqlalchemy.pool import StaticPool
+    from sqlalchemy.orm import Session
+    
+    # Use StaticPool with a single connection so all sessions see the same data
+    # This is critical for tests where one session updates data that another session reads
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool
+    )
+    
+    # Helper to convert naive datetime to timezone-aware
+    def make_tz_aware(dt):
+        if dt is None:
+            return None
+        if isinstance(dt, datetime):
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc)
+            return dt
+        # Handle ISO format strings from SQLite
+        if isinstance(dt, str):
+            try:
+                # Try parsing ISO format with timezone
+                parsed = datetime.fromisoformat(dt)
+                if parsed.tzinfo is None:
+                    return parsed.replace(tzinfo=timezone.utc)
+                return parsed
+            except ValueError:
+                pass
+        return dt
+    
+    # Helper to process datetime fields in loaded objects
+    def process_datetime_fields(obj):
+        """Convert naive datetime fields to timezone-aware for SQLite compatibility."""
+        datetime_fields = [
+            'last_reward_calculation', 'staked_at', 'unstake_requested_at', 'withdrawn_at',
+            'requested_at', 'available_at', 'completed_at',
+            'slashed_at', 'appeal_deadline'
+        ]
+        for field in datetime_fields:
+            if hasattr(obj, field):
+                val = getattr(obj, field)
+                if val is not None:
+                    setattr(obj, field, make_tz_aware(val))
+    
+    # Use the loaded_as_persistent event on the Session class
+    # This event fires when an object is loaded from the database
+    @event.listens_for(Session, "loaded_as_persistent")
+    def receive_loaded_as_persistent(session, instance):
+        process_datetime_fields(instance)
+    
+    # Only create the staking-related tables (not all Base tables, some use PostgreSQL-specific types)
+    from prsm.core.database import StakeModel, UnstakeRequestModel, SlashEventModel
+    async with engine.begin() as conn:
+        await conn.run_sync(lambda sync_conn: None)  # Placeholder
+        # Create tables individually using raw SQL for SQLite compatibility
+        await conn.execute(sa_text("""
+            CREATE TABLE IF NOT EXISTS ftns_stakes (
+                stake_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                amount REAL NOT NULL,
+                stake_type TEXT NOT NULL DEFAULT 'general',
+                status TEXT NOT NULL DEFAULT 'active',
+                rewards_earned REAL NOT NULL DEFAULT 0.0,
+                rewards_claimed REAL NOT NULL DEFAULT 0.0,
+                last_reward_calculation TEXT NOT NULL,
+                staked_at TEXT NOT NULL,
+                unstake_requested_at TEXT,
+                withdrawn_at TEXT,
+                lock_reason TEXT,
+                stake_metadata TEXT
+            )
+        """))
+        await conn.execute(sa_text("""
+            CREATE TABLE IF NOT EXISTS ftns_unstake_requests (
+                request_id TEXT PRIMARY KEY,
+                stake_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                amount REAL NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                requested_at TEXT NOT NULL,
+                available_at TEXT NOT NULL,
+                completed_at TEXT,
+                cancellation_reason TEXT,
+                request_metadata TEXT
+            )
+        """))
+        await conn.execute(sa_text("""
+            CREATE TABLE IF NOT EXISTS ftns_slash_events (
+                slash_id TEXT PRIMARY KEY,
+                stake_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                amount_slashed REAL NOT NULL,
+                reason TEXT NOT NULL,
+                slash_rate REAL NOT NULL,
+                slashed_by TEXT NOT NULL,
+                evidence TEXT,
+                slashed_at TEXT NOT NULL,
+                appeal_deadline TEXT,
+                appeal_status TEXT,
+                appeal_evidence TEXT,
+                slash_metadata TEXT
+            )
+        """))
+        await conn.commit()
+    
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    @asynccontextmanager
+    async def _fake_session():
+        async with factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
+    # Patch both the staking_manager import and the core database import
+    with patch("prsm.economy.tokenomics.staking_manager.get_async_session", _fake_session), \
+         patch("prsm.core.database.get_async_session", _fake_session):
+        yield _fake_session  # Yield the session factory for tests to use directly
+    
+    # Cleanup: remove the event listener
+    event.remove(Session, "loaded_as_persistent", receive_loaded_as_persistent)
+
+
+@pytest.fixture
 def mock_db_session():
-    """Create a mock database session"""
+    """Create a mock database session - kept for backward compatibility with some tests."""
     session = AsyncMock()
     session.execute = AsyncMock()
     session.commit = AsyncMock()
@@ -78,10 +248,10 @@ def mock_db_session():
 
 
 @pytest.fixture
-async def staking_manager(mock_db_session, mock_ftns_service, staking_config):
-    """Create a staking manager instance"""
+async def staking_manager(async_db_session, mock_db_session, mock_ftns_service, staking_config):
+    """Create a staking manager instance with real SQLite database."""
     return StakingManager(
-        db_session=mock_db_session,
+        db_session=mock_db_session,  # Required by constructor but not used (get_async_session is patched)
         ftns_service=mock_ftns_service,
         config=staking_config
     )
@@ -320,7 +490,9 @@ class TestStakingManager:
         assert request.user_id == "user-123"
         assert request.amount == Decimal('5000')
         assert request.status == UnstakeRequestStatus.PENDING
-        assert stake.status == StakeStatus.UNSTAKING
+        # Re-fetch stake to get updated status from database
+        updated_stake = await staking_manager.get_stake(stake.stake_id)
+        assert updated_stake.status == StakeStatus.UNSTAKING
     
     @pytest.mark.asyncio
     async def test_partial_unstake(self, staking_manager, mock_ftns_service):
@@ -339,16 +511,20 @@ class TestStakingManager:
         )
         
         assert request.amount == Decimal('2000')
-        assert stake.status == StakeStatus.ACTIVE  # Still active
-        assert stake.amount == Decimal('3000')  # Reduced
+        # Re-fetch stake to get updated status from database
+        updated_stake = await staking_manager.get_stake(stake.stake_id)
+        assert updated_stake.status == StakeStatus.ACTIVE  # Still active
+        assert updated_stake.amount == Decimal('3000')  # Reduced
     
     @pytest.mark.asyncio
     async def test_unstake_nonexistent_stake(self, staking_manager):
         """Test unstaking a non-existent stake"""
+        # Use a valid UUID format that doesn't exist in the database
+        nonexistent_uuid = str(uuid4())
         with pytest.raises(ValueError, match="not found"):
             await staking_manager.unstake(
                 user_id="user-123",
-                stake_id="nonexistent"
+                stake_id=nonexistent_uuid
             )
     
     @pytest.mark.asyncio
@@ -380,9 +556,18 @@ class TestStakingManager:
             stake_id=stake.stake_id
         )
         
-        # Make it available
-        request.available_at = datetime.now(timezone.utc) - timedelta(minutes=1)
-        request.status = UnstakeRequestStatus.AVAILABLE
+        # Make it available by updating database using ORM update
+        from prsm.core.database import get_async_session, UnstakeRequestModel
+        from sqlalchemy import update
+        from uuid import UUID
+        async with get_async_session() as session:
+            past_time = datetime.now(timezone.utc) - timedelta(minutes=1)
+            await session.execute(
+                update(UnstakeRequestModel)
+                .where(UnstakeRequestModel.request_id == UUID(request.request_id))
+                .values(available_at=past_time, status=UnstakeRequestStatus.AVAILABLE.value)
+            )
+            await session.commit()
         
         # Withdraw
         success, amount = await staking_manager.withdraw(
@@ -392,7 +577,9 @@ class TestStakingManager:
         
         assert success is True
         assert amount == Decimal('5000')
-        assert request.status == UnstakeRequestStatus.COMPLETED
+        # Re-fetch to get updated status from database
+        updated_request = await staking_manager.get_unstake_request(request.request_id)
+        assert updated_request.status == UnstakeRequestStatus.COMPLETED
         mock_ftns_service.unlock_tokens.assert_called_once()
     
     @pytest.mark.asyncio
@@ -436,8 +623,11 @@ class TestStakingManager:
         )
         
         assert result is True
-        assert request.status == UnstakeRequestStatus.CANCELLED
-        assert stake.status == StakeStatus.ACTIVE  # Restored
+        # Re-fetch to get updated status from database
+        updated_request = await staking_manager.get_unstake_request(request.request_id)
+        updated_stake = await staking_manager.get_stake(stake.stake_id)
+        assert updated_request.status == UnstakeRequestStatus.CANCELLED
+        assert updated_stake.status == StakeStatus.ACTIVE  # Restored
 
 
 # === Slashing Tests ===
@@ -465,9 +655,11 @@ class TestSlashing:
         
         assert slash is not None
         assert slash.reason == SlashReason.MISCONDUCT
-        assert slash.slash_rate == 0.1  # Default 10%
+        assert slash.slash_rate == Decimal('0.1')  # Default 10%
         assert slash.amount_slashed == Decimal('500')  # 10% of 5000
-        assert stake.amount == Decimal('4500')  # Reduced
+        # Re-fetch stake to get updated amount from database
+        updated_stake = await staking_manager.get_stake(stake.stake_id)
+        assert updated_stake.amount == Decimal('4500')  # Reduced
         
         mock_ftns_service.burn_tokens.assert_called_once()
     
@@ -484,13 +676,15 @@ class TestSlashing:
             stake_id=stake.stake_id,
             reason=SlashReason.FRAUD,
             evidence={"description": "Fraud detected"},
-            slash_rate=0.3,  # 30%
+            slash_rate=Decimal('0.3'),  # 30%
             slashed_by="system"
         )
         
-        assert slash.slash_rate == 0.3
+        assert slash.slash_rate == Decimal('0.3')
         assert slash.amount_slashed == Decimal('1500')  # 30% of 5000
-        assert stake.amount == Decimal('3500')
+        # Re-fetch stake to get updated amount from database
+        updated_stake = await staking_manager.get_stake(stake.stake_id)
+        assert updated_stake.amount == Decimal('3500')
     
     @pytest.mark.asyncio
     async def test_slash_max_cap(self, staking_manager, mock_ftns_service):
@@ -532,8 +726,10 @@ class TestSlashing:
             slashed_by="governance"
         )
         
-        assert stake.amount == Decimal('500')
-        assert stake.status == StakeStatus.ACTIVE  # Still active
+        # Re-fetch stake to get updated amount from database
+        updated_stake = await staking_manager.get_stake(stake.stake_id)
+        assert updated_stake.amount == Decimal('500')
+        assert updated_stake.status == StakeStatus.ACTIVE  # Still active
         
         # Slash again to deplete
         slash2 = await staking_manager.slash(
@@ -545,7 +741,8 @@ class TestSlashing:
             slashed_by="governance"
         )
         
-        assert stake.amount == Decimal('250')
+        updated_stake = await staking_manager.get_stake(stake.stake_id)
+        assert updated_stake.amount == Decimal('250')
         
         # Slash to depletion
         slash3 = await staking_manager.slash(
@@ -558,7 +755,8 @@ class TestSlashing:
         )
         
         # Should be slashed but not fully depleted due to cap
-        assert stake.status == StakeStatus.ACTIVE
+        updated_stake = await staking_manager.get_stake(stake.stake_id)
+        assert updated_stake.status == StakeStatus.ACTIVE
     
     @pytest.mark.asyncio
     async def test_appeal_slash(self, staking_manager, mock_ftns_service):
@@ -584,7 +782,10 @@ class TestSlashing:
         )
         
         assert result is True
-        assert slash.appeal_status == "pending"
+        # Re-fetch slash to get updated appeal_status from database
+        updated_slash = await staking_manager.get_slash_history("user-123")
+        assert len(updated_slash) > 0
+        assert updated_slash[0].appeal_status == "pending"
     
     @pytest.mark.asyncio
     async def test_resolve_appeal_approved(self, staking_manager, mock_ftns_service):
@@ -617,8 +818,11 @@ class TestSlashing:
         )
         
         assert result is True
-        assert slash.appeal_status == "approved"
-        assert stake.amount == Decimal('5000')  # Refunded
+        # Re-fetch to get updated status from database
+        updated_slash = await staking_manager.get_slash_history("user-123")
+        assert updated_slash[0].appeal_status == "approved"
+        updated_stake = await staking_manager.get_stake(stake.stake_id)
+        assert updated_stake.amount == Decimal('5000')  # Refunded
         mock_ftns_service.mint_tokens.assert_called_once()
     
     @pytest.mark.asyncio
@@ -651,8 +855,11 @@ class TestSlashing:
         )
         
         assert result is True
-        assert slash.appeal_status == "rejected"
-        assert stake.amount == Decimal('4500')  # Not refunded
+        # Re-fetch to get updated status from database
+        updated_slash = await staking_manager.get_slash_history("user-123")
+        assert updated_slash[0].appeal_status == "rejected"
+        updated_stake = await staking_manager.get_stake(stake.stake_id)
+        assert updated_stake.amount == Decimal('4500')  # Not refunded
 
 
 # === Reward Tests ===
@@ -669,9 +876,19 @@ class TestRewards:
             amount=Decimal('10000')
         )
         
-        # Set stake age to be past minimum
-        stake.staked_at = datetime.now(timezone.utc) - timedelta(hours=2)
-        stake.last_reward_calculation = datetime.now(timezone.utc) - timedelta(hours=1)
+        # Update stake timestamps in database to be past minimum
+        from prsm.core.database import get_async_session, StakeModel
+        from sqlalchemy import update
+        from uuid import UUID
+        async with get_async_session() as session:
+            past_staked = datetime.now(timezone.utc) - timedelta(hours=2)
+            past_reward = datetime.now(timezone.utc) - timedelta(hours=1)
+            await session.execute(
+                update(StakeModel)
+                .where(StakeModel.stake_id == UUID(stake.stake_id))
+                .values(staked_at=past_staked, last_reward_calculation=past_reward)
+            )
+            await session.commit()
         
         # Calculate rewards
         calculations = await staking_manager.calculate_rewards("user-123")
@@ -707,9 +924,19 @@ class TestRewards:
             amount=Decimal('10000')
         )
         
-        # Set stake age
-        stake.staked_at = datetime.now(timezone.utc) - timedelta(hours=2)
-        stake.last_reward_calculation = datetime.now(timezone.utc) - timedelta(hours=1)
+        # Update stake timestamps in database
+        from prsm.core.database import get_async_session, StakeModel
+        from sqlalchemy import update
+        from uuid import UUID
+        async with get_async_session() as session:
+            past_staked = datetime.now(timezone.utc) - timedelta(hours=2)
+            past_reward = datetime.now(timezone.utc) - timedelta(hours=1)
+            await session.execute(
+                update(StakeModel)
+                .where(StakeModel.stake_id == UUID(stake.stake_id))
+                .values(staked_at=past_staked, last_reward_calculation=past_reward)
+            )
+            await session.commit()
         
         # Claim rewards
         total_rewards = await staking_manager.claim_rewards("user-123")
@@ -718,7 +945,7 @@ class TestRewards:
         mock_ftns_service.mint_tokens.assert_called_once()
     
     @pytest.mark.asyncio
-    async def test_reward_compounding(self, mock_db_session, mock_ftns_service):
+    async def test_reward_compounding(self, async_db_session, mock_db_session, mock_ftns_service):
         """Test reward compounding"""
         config = StakingConfig(
             minimum_stake=1000,
@@ -726,7 +953,7 @@ class TestRewards:
             min_stake_age_for_rewards_seconds=60  # 1 minute for testing
         )
         manager = StakingManager(
-            db_session=mock_db_session,
+            db_session=mock_db_session,  # Required by constructor but not used (get_async_session is patched)
             ftns_service=mock_ftns_service,
             config=config
         )
@@ -737,16 +964,28 @@ class TestRewards:
             amount=Decimal('10000')
         )
         
-        # Set stake age to be past minimum for rewards
-        stake.staked_at = datetime.now(timezone.utc) - timedelta(hours=2)
-        stake.last_reward_calculation = datetime.now(timezone.utc) - timedelta(hours=1)
+        # Update stake timestamps in database
+        from prsm.core.database import get_async_session, StakeModel
+        from sqlalchemy import update
+        from uuid import UUID
+        async with get_async_session() as session:
+            past_staked = datetime.now(timezone.utc) - timedelta(hours=2)
+            past_reward = datetime.now(timezone.utc) - timedelta(hours=1)
+            await session.execute(
+                update(StakeModel)
+                .where(StakeModel.stake_id == UUID(stake.stake_id))
+                .values(staked_at=past_staked, last_reward_calculation=past_reward)
+            )
+            await session.commit()
         
         # Claim rewards
         total_rewards = await manager.claim_rewards("user-123")
         
+        # Re-fetch stake to get updated amount from database
+        updated_stake = await manager.get_stake(stake.stake_id)
         # With compounding, stake amount should increase by the claimed rewards
-        assert stake.amount == Decimal('10000') + total_rewards
-        assert stake.amount > Decimal('10000')
+        assert updated_stake.amount == Decimal('10000') + total_rewards
+        assert updated_stake.amount > Decimal('10000')
 
 
 # === Query Tests ===
@@ -908,8 +1147,18 @@ class TestMaintenance:
             stake_id=stake.stake_id
         )
         
-        # Make it available
-        request.available_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        # Update request in database to be available
+        from prsm.core.database import get_async_session, UnstakeRequestModel
+        from sqlalchemy import update
+        from uuid import UUID
+        async with get_async_session() as session:
+            past_time = datetime.now(timezone.utc) - timedelta(minutes=1)
+            await session.execute(
+                update(UnstakeRequestModel)
+                .where(UnstakeRequestModel.request_id == UUID(request.request_id))
+                .values(available_at=past_time)
+            )
+            await session.commit()
         
         # Process matured
         matured = await staking_manager.process_matured_unstakes()
@@ -940,14 +1189,12 @@ class TestFactoryFunction:
     """Tests for get_staking_manager factory"""
     
     @pytest.mark.asyncio
-    async def test_get_staking_manager_singleton(self, mock_db_session, mock_ftns_service):
+    async def test_get_staking_manager_singleton(self, async_db_session, mock_ftns_service):
         """Test that get_staking_manager returns singleton"""
         manager1 = await get_staking_manager(
-            db_session=mock_db_session,
             ftns_service=mock_ftns_service
         )
         manager2 = await get_staking_manager(
-            db_session=mock_db_session,
             ftns_service=mock_ftns_service
         )
         
@@ -981,6 +1228,8 @@ class TestIntegration:
             amount=Decimal('5000')
         )
         assert request.status == UnstakeRequestStatus.PENDING
+        # Re-fetch stake to get updated amount
+        stake = await staking_manager.get_stake(stake.stake_id)
         assert stake.amount == Decimal('5000')  # Partial unstake
         
         # 4. Cancel unstake
@@ -988,6 +1237,7 @@ class TestIntegration:
             user_id="user-123",
             request_id=request.request_id
         )
+        stake = await staking_manager.get_stake(stake.stake_id)
         assert stake.amount == Decimal('10000')  # Restored
         
         # 5. Full unstake
@@ -995,11 +1245,21 @@ class TestIntegration:
             user_id="user-123",
             stake_id=stake.stake_id
         )
+        stake = await staking_manager.get_stake(stake.stake_id)
         assert stake.status == StakeStatus.UNSTAKING
         
         # 6. Make available and withdraw
-        request2.available_at = datetime.now(timezone.utc) - timedelta(minutes=1)
-        request2.status = UnstakeRequestStatus.AVAILABLE
+        from prsm.core.database import get_async_session, UnstakeRequestModel
+        from sqlalchemy import update
+        from uuid import UUID
+        async with get_async_session() as session:
+            past_time = datetime.now(timezone.utc) - timedelta(minutes=1)
+            await session.execute(
+                update(UnstakeRequestModel)
+                .where(UnstakeRequestModel.request_id == UUID(request2.request_id))
+                .values(available_at=past_time, status=UnstakeRequestStatus.AVAILABLE.value)
+            )
+            await session.commit()
         
         success, amount = await staking_manager.withdraw(
             user_id="user-123",
@@ -1025,6 +1285,8 @@ class TestIntegration:
             evidence={"description": "Failed validation"},
             slashed_by="validator"
         )
+        # Re-fetch stake to get updated amount
+        stake = await staking_manager.get_stake(stake.stake_id)
         assert stake.amount == Decimal('9000')  # 10% slashed
         
         # 3. Appeal
@@ -1041,5 +1303,6 @@ class TestIntegration:
             resolution_note="Appeal approved"
         )
         
-        # Stake should be restored
+        # Re-fetch stake to get restored amount
+        stake = await staking_manager.get_stake(stake.stake_id)
         assert stake.amount == Decimal('10000')

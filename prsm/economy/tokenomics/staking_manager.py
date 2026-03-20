@@ -37,6 +37,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, and_, or_, func, desc
 from sqlalchemy.orm import selectinload
 
+from prsm.core.database import get_async_session, StakeModel, UnstakeRequestModel, SlashEventModel
+
 logger = structlog.get_logger(__name__)
 
 
@@ -201,81 +203,6 @@ class RewardCalculation:
     next_calculation: datetime
 
 
-# === Database Models ===
-# These would typically be in models.py, but included here for reference
-
-"""
-class FTNSStake(Base):
-    '''Database model for stakes'''
-    __tablename__ = "ftns_stakes"
-    
-    stake_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    user_id = Column(String(255), nullable=False, index=True)
-    wallet_id = Column(PG_UUID(as_uuid=True), ForeignKey('ftns_wallets.wallet_id'), nullable=False)
-    
-    amount = Column(DECIMAL(20, 8), nullable=False)
-    stake_type = Column(String(50), nullable=False, default=StakeType.GENERAL.value)
-    status = Column(String(50), nullable=False, default=StakeStatus.ACTIVE.value)
-    
-    rewards_earned = Column(DECIMAL(20, 8), nullable=False, default=Decimal('0'))
-    rewards_claimed = Column(DECIMAL(20, 8), nullable=False, default=Decimal('0'))
-    last_reward_calculation = Column(DateTime(timezone=True), nullable=False)
-    
-    staked_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
-    unstake_requested_at = Column(DateTime(timezone=True), nullable=True)
-    withdrawn_at = Column(DateTime(timezone=True), nullable=True)
-    
-    lock_reason = Column(Text, nullable=True)
-    metadata = Column(JSONB, nullable=True)
-    
-    # Relationships
-    wallet = relationship("FTNSWallet", backref="stakes")
-    unstake_requests = relationship("FTNSUnstakeRequest", backref="stake")
-    slash_events = relationship("FTNSSlashEvent", backref="stake")
-
-
-class FTNSUnstakeRequest(Base):
-    '''Database model for unstake requests'''
-    __tablename__ = "ftns_unstake_requests"
-    
-    request_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    stake_id = Column(PG_UUID(as_uuid=True), ForeignKey('ftns_stakes.stake_id'), nullable=False)
-    user_id = Column(String(255), nullable=False, index=True)
-    
-    amount = Column(DECIMAL(20, 8), nullable=False)
-    status = Column(String(50), nullable=False, default=UnstakeRequestStatus.PENDING.value)
-    
-    requested_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
-    available_at = Column(DateTime(timezone=True), nullable=False)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
-    
-    cancellation_reason = Column(Text, nullable=True)
-    metadata = Column(JSONB, nullable=True)
-
-
-class FTNSSlashEvent(Base):
-    '''Database model for slash events'''
-    __tablename__ = "ftns_slash_events"
-    
-    slash_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    stake_id = Column(PG_UUID(as_uuid=True), ForeignKey('ftns_stakes.stake_id'), nullable=False)
-    user_id = Column(String(255), nullable=False, index=True)
-    
-    amount_slashed = Column(DECIMAL(20, 8), nullable=False)
-    reason = Column(String(50), nullable=False)
-    slash_rate = Column(Float, nullable=False)
-    
-    evidence = Column(JSONB, nullable=True)
-    slashed_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
-    slashed_by = Column(String(255), nullable=False)  # Governance proposal or system
-    
-    appeal_deadline = Column(DateTime(timezone=True), nullable=True)
-    appeal_status = Column(String(50), nullable=True)
-    appeal_evidence = Column(JSONB, nullable=True)
-    
-    metadata = Column(JSONB, nullable=True)
-"""
-
 
 class StakingManager:
     """
@@ -302,7 +229,7 @@ class StakingManager:
         Initialize the staking manager
         
         Args:
-            db_session: Database session for persistence
+            db_session: Database session for persistence (deprecated - not used, sessions are created per-operation)
             ftns_service: FTNS service for balance operations
             config: Staking configuration (uses defaults if not provided)
         """
@@ -310,13 +237,7 @@ class StakingManager:
         self.ftns = ftns_service
         self.config = config or StakingConfig()
         
-        # In-memory caches (would use database in production)
-        self._stakes: Dict[str, StakeRecord] = {}
-        self._unstake_requests: Dict[str, UnstakeRequest] = {}
-        self._slash_records: Dict[str, SlashRecord] = {}
-        self._user_stakes: Dict[str, List[str]] = {}  # user_id -> [stake_ids]
-        
-        # Rate limiting
+        # Rate limiting (stays in-memory for performance)
         self._daily_operations: Dict[str, List[datetime]] = {}  # user_id -> [timestamps]
         
         logger.info(
@@ -324,6 +245,57 @@ class StakingManager:
             minimum_stake=self.config.minimum_stake,
             unstaking_period_days=self.config.unstaking_period_seconds / 86400,
             reward_rate=self.config.reward_rate_annual
+        )
+    
+    # === Conversion Helper Methods ===
+    
+    def _stake_row_to_record(self, row: StakeModel) -> StakeRecord:
+        """Convert StakeModel database row to StakeRecord dataclass."""
+        return StakeRecord(
+            stake_id=str(row.stake_id),
+            user_id=row.user_id,
+            amount=Decimal(str(row.amount)),
+            stake_type=StakeType(row.stake_type),
+            staked_at=row.staked_at,
+            rewards_earned=Decimal(str(row.rewards_earned)),
+            rewards_claimed=Decimal(str(row.rewards_claimed)),
+            last_reward_calculation=row.last_reward_calculation,
+            status=StakeStatus(row.status),
+            lock_reason=row.lock_reason,
+            metadata=row.stake_metadata or {},
+        )
+    
+    def _unstake_row_to_record(self, row: UnstakeRequestModel) -> UnstakeRequest:
+        """Convert UnstakeRequestModel database row to UnstakeRequest dataclass."""
+        return UnstakeRequest(
+            request_id=str(row.request_id),
+            stake_id=str(row.stake_id),
+            user_id=row.user_id,
+            amount=Decimal(str(row.amount)),
+            requested_at=row.requested_at,
+            available_at=row.available_at,
+            status=UnstakeRequestStatus(row.status),
+            completed_at=row.completed_at,
+            cancellation_reason=row.cancellation_reason,
+            metadata=row.request_metadata or {},
+        )
+    
+    def _slash_row_to_record(self, row: SlashEventModel) -> SlashRecord:
+        """Convert SlashEventModel database row to SlashRecord dataclass."""
+        return SlashRecord(
+            slash_id=str(row.slash_id),
+            stake_id=str(row.stake_id),
+            user_id=row.user_id,
+            amount_slashed=Decimal(str(row.amount_slashed)),
+            reason=SlashReason(row.reason),
+            slash_rate=Decimal(str(row.slash_rate)),
+            slashed_by=row.slashed_by,
+            evidence=row.evidence or {},
+            slashed_at=row.slashed_at,
+            appeal_deadline=row.appeal_deadline,
+            appeal_status=row.appeal_status,
+            appeal_evidence=row.appeal_evidence,
+            metadata=row.slash_metadata or {},
         )
     
     # === Staking Operations ===
@@ -385,39 +357,38 @@ class StakingManager:
         await self.ftns.lock_tokens(user_id, amount, reason="staking")
         
         # Create stake record
-        stake_id = str(uuid4())
+        stake_id = uuid4()
         now = datetime.now(timezone.utc)
         
-        stake = StakeRecord(
-            stake_id=stake_id,
-            user_id=user_id,
-            amount=amount,
-            stake_type=stake_type,
-            staked_at=now,
-            status=StakeStatus.ACTIVE,
-            metadata=metadata or {}
-        )
-        
-        # Store stake
-        self._stakes[stake_id] = stake
-        
-        # Update user's stake list
-        if user_id not in self._user_stakes:
-            self._user_stakes[user_id] = []
-        self._user_stakes[user_id].append(stake_id)
-        
-        # Record operation for rate limiting
-        self._record_operation(user_id, "stake")
-        
-        await logger.ainfo(
-            "Stake created",
-            stake_id=stake_id,
-            user_id=user_id,
-            amount=float(amount),
-            stake_type=stake_type.value
-        )
-        
-        return stake
+        async with get_async_session() as db:
+            model = StakeModel(
+                stake_id=stake_id,
+                user_id=user_id,
+                amount=float(amount),
+                stake_type=stake_type.value,
+                status=StakeStatus.ACTIVE.value,
+                rewards_earned=0.0,
+                rewards_claimed=0.0,
+                last_reward_calculation=now,
+                staked_at=now,
+                stake_metadata=metadata or {},
+            )
+            db.add(model)
+            await db.commit()
+            await db.refresh(model)
+            
+            # Record operation for rate limiting
+            self._record_operation(user_id, "stake")
+            
+            await logger.ainfo(
+                "Stake created",
+                stake_id=str(stake_id),
+                user_id=user_id,
+                amount=float(amount),
+                stake_type=stake_type.value
+            )
+            
+            return self._stake_row_to_record(model)
     
     async def unstake(
         self,
@@ -440,66 +411,74 @@ class StakingManager:
             ValueError: If unstake validation fails
         """
         
-        # Get stake
-        stake = self._stakes.get(stake_id)
-        if not stake:
-            raise ValueError(f"Stake {stake_id} not found")
-        
-        if stake.user_id != user_id:
-            raise ValueError("Stake does not belong to user")
-        
-        if stake.status != StakeStatus.ACTIVE:
-            raise ValueError(f"Stake is not active: {stake.status}")
-        
-        # Determine amount
-        unstake_amount = amount if amount else stake.amount
-        if unstake_amount > stake.amount:
-            raise ValueError(f"Cannot unstake more than staked amount")
-        
-        if unstake_amount <= 0:
-            raise ValueError("Unstake amount must be positive")
-        
-        # Check rate limit
-        await self._check_rate_limit(user_id, "unstake")
-        
-        # Create unstake request
-        request_id = str(uuid4())
-        now = datetime.now(timezone.utc)
-        available_at = now + timedelta(seconds=self.config.unstaking_period_seconds)
-        
-        request = UnstakeRequest(
-            request_id=request_id,
-            stake_id=stake_id,
-            user_id=user_id,
-            amount=unstake_amount,
-            requested_at=now,
-            available_at=available_at,
-            status=UnstakeRequestStatus.PENDING
-        )
-        
-        # Update stake status
-        if unstake_amount == stake.amount:
-            stake.status = StakeStatus.UNSTAKING
-        else:
-            # Partial unstake - reduce stake amount
-            stake.amount -= unstake_amount
-        
-        # Store request
-        self._unstake_requests[request_id] = request
-        
-        # Record operation
-        self._record_operation(user_id, "unstake")
-        
-        await logger.ainfo(
-            "Unstake request created",
-            request_id=request_id,
-            stake_id=stake_id,
-            user_id=user_id,
-            amount=float(unstake_amount),
-            available_at=available_at.isoformat()
-        )
-        
-        return request
+        # Get stake from database
+        async with get_async_session() as db:
+            query = select(StakeModel).where(StakeModel.stake_id == UUID(stake_id))
+            result = await db.execute(query)
+            stake_row = result.scalar_one_or_none()
+            
+            if not stake_row:
+                raise ValueError(f"Stake {stake_id} not found")
+            
+            if stake_row.user_id != user_id:
+                raise ValueError("Stake does not belong to user")
+            
+            if stake_row.status != StakeStatus.ACTIVE.value:
+                raise ValueError(f"Stake is not active: {stake_row.status}")
+            
+            stake = self._stake_row_to_record(stake_row)
+            
+            # Determine amount
+            unstake_amount = amount if amount else stake.amount
+            if unstake_amount > stake.amount:
+                raise ValueError(f"Cannot unstake more than staked amount")
+            
+            if unstake_amount <= 0:
+                raise ValueError("Unstake amount must be positive")
+            
+            # Check rate limit
+            await self._check_rate_limit(user_id, "unstake")
+            
+            # Create unstake request
+            request_id = uuid4()
+            now = datetime.now(timezone.utc)
+            available_at = now + timedelta(seconds=self.config.unstaking_period_seconds)
+            
+            # Create unstake request model
+            request_model = UnstakeRequestModel(
+                request_id=request_id,
+                stake_id=UUID(stake_id),
+                user_id=user_id,
+                amount=float(unstake_amount),
+                status=UnstakeRequestStatus.PENDING.value,
+                requested_at=now,
+                available_at=available_at,
+            )
+            db.add(request_model)
+            
+            # Update stake status
+            if unstake_amount == stake.amount:
+                stake_row.status = StakeStatus.UNSTAKING.value
+            else:
+                # Partial unstake - reduce stake amount
+                stake_row.amount = float(stake.amount - unstake_amount)
+            
+            await db.commit()
+            await db.refresh(request_model)
+            
+            # Record operation
+            self._record_operation(user_id, "unstake")
+            
+            await logger.ainfo(
+                "Unstake request created",
+                request_id=str(request_id),
+                stake_id=stake_id,
+                user_id=user_id,
+                amount=float(unstake_amount),
+                available_at=available_at.isoformat()
+            )
+            
+            return self._unstake_row_to_record(request_model)
     
     async def withdraw(
         self,
@@ -520,45 +499,57 @@ class StakingManager:
             ValueError: If withdrawal validation fails
         """
         
-        # Get request
-        request = self._unstake_requests.get(request_id)
-        if not request:
-            raise ValueError(f"Unstake request {request_id} not found")
-        
-        if request.user_id != user_id:
-            raise ValueError("Request does not belong to user")
-        
-        if request.status not in (UnstakeRequestStatus.PENDING, UnstakeRequestStatus.AVAILABLE):
-            raise ValueError(f"Request status invalid: {request.status}")
-        
-        # Check if available
-        now = datetime.now(timezone.utc)
-        if now < request.available_at:
-            wait_seconds = (request.available_at - now).total_seconds()
-            raise ValueError(
-                f"Unstaking period not complete. Wait {wait_seconds:.0f} more seconds"
+        async with get_async_session() as db:
+            # Get unstake request from database
+            query = select(UnstakeRequestModel).where(UnstakeRequestModel.request_id == UUID(request_id))
+            result = await db.execute(query)
+            request_row = result.scalar_one_or_none()
+            
+            if not request_row:
+                raise ValueError(f"Unstake request {request_id} not found")
+            
+            if request_row.user_id != user_id:
+                raise ValueError("Request does not belong to user")
+            
+            if request_row.status not in (UnstakeRequestStatus.PENDING.value, UnstakeRequestStatus.AVAILABLE.value):
+                raise ValueError(f"Request status invalid: {request_row.status}")
+            
+            # Check if available
+            now = datetime.now(timezone.utc)
+            if now < request_row.available_at:
+                wait_seconds = (request_row.available_at - now).total_seconds()
+                raise ValueError(
+                    f"Unstaking period not complete. Wait {wait_seconds:.0f} more seconds"
+                )
+            
+            # Convert to dataclass for amount access
+            request = self._unstake_row_to_record(request_row)
+            
+            # Update request status
+            request_row.status = UnstakeRequestStatus.COMPLETED.value
+            request_row.completed_at = now
+            
+            # Get stake and update if full unstake
+            stake_query = select(StakeModel).where(StakeModel.stake_id == request_row.stake_id)
+            stake_result = await db.execute(stake_query)
+            stake_row = stake_result.scalar_one_or_none()
+            
+            if stake_row and stake_row.status == StakeStatus.UNSTAKING.value:
+                stake_row.status = StakeStatus.WITHDRAWN.value
+            
+            await db.commit()
+            
+            # Unlock tokens back to user
+            await self.ftns.unlock_tokens(user_id, request.amount, reason="unstake_withdrawal")
+            
+            await logger.ainfo(
+                "Withdrawal completed",
+                request_id=request_id,
+                user_id=user_id,
+                amount=float(request.amount)
             )
-        
-        # Update status
-        request.status = UnstakeRequestStatus.COMPLETED
-        request.completed_at = now
-        
-        # Get stake and update
-        stake = self._stakes.get(request.stake_id)
-        if stake and stake.status == StakeStatus.UNSTAKING:
-            stake.status = StakeStatus.WITHDRAWN
-        
-        # Unlock tokens back to user
-        await self.ftns.unlock_tokens(user_id, request.amount, reason="unstake_withdrawal")
-        
-        await logger.ainfo(
-            "Withdrawal completed",
-            request_id=request_id,
-            user_id=user_id,
-            amount=float(request.amount)
-        )
-        
-        return True, request.amount
+            
+            return True, request.amount
     
     async def cancel_unstake(
         self,
@@ -581,37 +572,50 @@ class StakingManager:
             ValueError: If cancellation validation fails
         """
         
-        request = self._unstake_requests.get(request_id)
-        if not request:
-            raise ValueError(f"Unstake request {request_id} not found")
-        
-        if request.user_id != user_id:
-            raise ValueError("Request does not belong to user")
-        
-        if request.status != UnstakeRequestStatus.PENDING:
-            raise ValueError(f"Cannot cancel request in status: {request.status}")
-        
-        # Cancel request
-        request.status = UnstakeRequestStatus.CANCELLED
-        request.cancellation_reason = reason or "User cancelled"
-        
-        # Restore stake
-        stake = self._stakes.get(request.stake_id)
-        if stake:
-            if stake.status == StakeStatus.UNSTAKING:
-                stake.status = StakeStatus.ACTIVE
-            else:
-                # Partial unstake - restore amount
-                stake.amount += request.amount
-        
-        await logger.ainfo(
-            "Unstake request cancelled",
-            request_id=request_id,
-            user_id=user_id,
-            reason=reason
-        )
-        
-        return True
+        async with get_async_session() as db:
+            # Get unstake request from database
+            query = select(UnstakeRequestModel).where(UnstakeRequestModel.request_id == UUID(request_id))
+            result = await db.execute(query)
+            request_row = result.scalar_one_or_none()
+            
+            if not request_row:
+                raise ValueError(f"Unstake request {request_id} not found")
+            
+            if request_row.user_id != user_id:
+                raise ValueError("Request does not belong to user")
+            
+            if request_row.status != UnstakeRequestStatus.PENDING.value:
+                raise ValueError(f"Cannot cancel request in status: {request_row.status}")
+            
+            # Convert to dataclass for amount access
+            request = self._unstake_row_to_record(request_row)
+            
+            # Cancel request
+            request_row.status = UnstakeRequestStatus.CANCELLED.value
+            request_row.cancellation_reason = reason or "User cancelled"
+            
+            # Restore stake
+            stake_query = select(StakeModel).where(StakeModel.stake_id == request_row.stake_id)
+            stake_result = await db.execute(stake_query)
+            stake_row = stake_result.scalar_one_or_none()
+            
+            if stake_row:
+                if stake_row.status == StakeStatus.UNSTAKING.value:
+                    stake_row.status = StakeStatus.ACTIVE.value
+                else:
+                    # Partial unstake - restore amount
+                    stake_row.amount = float(Decimal(str(stake_row.amount)) + request.amount)
+            
+            await db.commit()
+            
+            await logger.ainfo(
+                "Unstake request cancelled",
+                request_id=request_id,
+                user_id=user_id,
+                reason=reason
+            )
+            
+            return True
     
     # === Slashing Operations ===
     
@@ -642,70 +646,79 @@ class StakingManager:
             ValueError: If slash validation fails
         """
         
-        # Get stake
-        stake = self._stakes.get(stake_id)
-        if not stake:
-            raise ValueError(f"Stake {stake_id} not found")
-        
-        if stake.user_id != user_id:
-            raise ValueError("Stake does not belong to user")
-        
-        if stake.status not in (StakeStatus.ACTIVE, StakeStatus.UNSTAKING):
-            raise ValueError(f"Cannot slash stake in status: {stake.status}")
-        
-        # Calculate slash rate
-        effective_rate = slash_rate if slash_rate else self.config.slashing_rate_base
-        
-        # Cap at maximum
-        effective_rate = min(effective_rate, self.config.max_slash_per_event)
-        
-        # Calculate slash amount
-        slash_amount = stake.amount * Decimal(str(effective_rate))
-        slash_amount = slash_amount.quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
-        
-        # Create slash record
-        slash_id = str(uuid4())
-        now = datetime.now(timezone.utc)
-        appeal_deadline = now + timedelta(seconds=self.config.appeal_period_seconds)
-        
-        slash_record = SlashRecord(
-            slash_id=slash_id,
-            stake_id=stake_id,
-            user_id=user_id,
-            amount_slashed=slash_amount,
-            reason=reason,
-            slash_rate=effective_rate,
-            evidence=evidence,
-            slashed_at=now,
-            slashed_by=slashed_by,
-            appeal_deadline=appeal_deadline
-        )
-        
-        # Apply slash to stake
-        stake.amount -= slash_amount
-        stake.rewards_earned = max(Decimal('0'), stake.rewards_earned - slash_amount)
-        
-        # If stake is depleted, mark as slashed
-        if stake.amount <= 0:
-            stake.status = StakeStatus.SLASHED
-        
-        # Store slash record
-        self._slash_records[slash_id] = slash_record
-        
-        # Burn slashed tokens (or send to treasury)
-        await self.ftns.burn_tokens(user_id, slash_amount, reason=f"slash:{reason.value}")
-        
-        await logger.awarning(
-            "Stake slashed",
-            slash_id=slash_id,
-            stake_id=stake_id,
-            user_id=user_id,
-            amount=float(slash_amount),
-            reason=reason.value,
-            slashed_by=slashed_by
-        )
-        
-        return slash_record
+        async with get_async_session() as db:
+            # Get stake from database
+            query = select(StakeModel).where(StakeModel.stake_id == UUID(stake_id))
+            result = await db.execute(query)
+            stake_row = result.scalar_one_or_none()
+            
+            if not stake_row:
+                raise ValueError(f"Stake {stake_id} not found")
+            
+            if stake_row.user_id != user_id:
+                raise ValueError("Stake does not belong to user")
+            
+            if stake_row.status not in (StakeStatus.ACTIVE.value, StakeStatus.UNSTAKING.value):
+                raise ValueError(f"Cannot slash stake in status: {stake_row.status}")
+            
+            stake = self._stake_row_to_record(stake_row)
+            
+            # Calculate slash rate
+            effective_rate = slash_rate if slash_rate else self.config.slashing_rate_base
+            
+            # Cap at maximum
+            effective_rate = min(effective_rate, self.config.max_slash_per_event)
+            
+            # Calculate slash amount
+            slash_amount = stake.amount * Decimal(str(effective_rate))
+            slash_amount = slash_amount.quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+            
+            # Create slash record
+            slash_id = uuid4()
+            now = datetime.now(timezone.utc)
+            appeal_deadline = now + timedelta(seconds=self.config.appeal_period_seconds)
+            
+            # Create slash model
+            slash_model = SlashEventModel(
+                slash_id=slash_id,
+                stake_id=UUID(stake_id),
+                user_id=user_id,
+                amount_slashed=float(slash_amount),
+                reason=reason.value,
+                slash_rate=effective_rate,
+                evidence=evidence,
+                slashed_at=now,
+                slashed_by=slashed_by,
+                appeal_deadline=appeal_deadline,
+            )
+            db.add(slash_model)
+            
+            # Apply slash to stake
+            new_amount = float(stake.amount - slash_amount)
+            stake_row.amount = new_amount
+            stake_row.rewards_earned = max(0.0, float(stake.rewards_earned - slash_amount))
+            
+            # If stake is depleted, mark as slashed
+            if new_amount <= 0:
+                stake_row.status = StakeStatus.SLASHED.value
+            
+            await db.commit()
+            await db.refresh(slash_model)
+            
+            # Burn slashed tokens (or send to treasury)
+            await self.ftns.burn_tokens(user_id, slash_amount, reason=f"slash:{reason.value}")
+            
+            await logger.awarning(
+                "Stake slashed",
+                slash_id=str(slash_id),
+                stake_id=stake_id,
+                user_id=user_id,
+                amount=float(slash_amount),
+                reason=reason.value,
+                slashed_by=slashed_by
+            )
+            
+            return self._slash_row_to_record(slash_model)
     
     async def appeal_slash(
         self,
@@ -728,31 +741,38 @@ class StakingManager:
             ValueError: If appeal validation fails
         """
         
-        slash_record = self._slash_records.get(slash_id)
-        if not slash_record:
-            raise ValueError(f"Slash record {slash_id} not found")
-        
-        if slash_record.user_id != user_id:
-            raise ValueError("Slash does not belong to user")
-        
-        if slash_record.appeal_status:
-            raise ValueError(f"Slash already has appeal status: {slash_record.appeal_status}")
-        
-        now = datetime.now(timezone.utc)
-        if now > slash_record.appeal_deadline:
-            raise ValueError("Appeal deadline has passed")
-        
-        # Set appeal status
-        slash_record.appeal_status = "pending"
-        slash_record.appeal_evidence = appeal_evidence
-        
-        await logger.ainfo(
-            "Slash appeal submitted",
-            slash_id=slash_id,
-            user_id=user_id
-        )
-        
-        return True
+        async with get_async_session() as db:
+            # Get slash record from database
+            query = select(SlashEventModel).where(SlashEventModel.slash_id == UUID(slash_id))
+            result = await db.execute(query)
+            slash_row = result.scalar_one_or_none()
+            
+            if not slash_row:
+                raise ValueError(f"Slash record {slash_id} not found")
+            
+            if slash_row.user_id != user_id:
+                raise ValueError("Slash does not belong to user")
+            
+            if slash_row.appeal_status:
+                raise ValueError(f"Slash already has appeal status: {slash_row.appeal_status}")
+            
+            now = datetime.now(timezone.utc)
+            if now > slash_row.appeal_deadline:
+                raise ValueError("Appeal deadline has passed")
+            
+            # Set appeal status
+            slash_row.appeal_status = "pending"
+            slash_row.appeal_evidence = appeal_evidence
+            
+            await db.commit()
+            
+            await logger.ainfo(
+                "Slash appeal submitted",
+                slash_id=slash_id,
+                user_id=user_id
+            )
+            
+            return True
     
     async def resolve_appeal(
         self,
@@ -772,45 +792,60 @@ class StakingManager:
             bool: True if resolved successfully
         """
         
-        slash_record = self._slash_records.get(slash_id)
-        if not slash_record:
-            raise ValueError(f"Slash record {slash_id} not found")
-        
-        if slash_record.appeal_status != "pending":
-            raise ValueError(f"Slash appeal not pending: {slash_record.appeal_status}")
-        
-        slash_record.appeal_status = "approved" if approved else "rejected"
-        
-        if approved:
-            # Refund the slashed amount
-            stake = self._stakes.get(slash_record.stake_id)
-            if stake:
-                stake.amount += slash_record.amount_slashed
-                if stake.status == StakeStatus.SLASHED:
-                    stake.status = StakeStatus.ACTIVE
+        async with get_async_session() as db:
+            # Get slash record from database
+            query = select(SlashEventModel).where(SlashEventModel.slash_id == UUID(slash_id))
+            result = await db.execute(query)
+            slash_row = result.scalar_one_or_none()
             
-            # Credit tokens back
-            await self.ftns.mint_tokens(
-                slash_record.user_id,
-                slash_record.amount_slashed,
-                reason=f"appeal_refund:{slash_id}"
-            )
+            if not slash_row:
+                raise ValueError(f"Slash record {slash_id} not found")
             
-            await logger.ainfo(
-                "Slash appeal approved - refunding",
-                slash_id=slash_id,
-                user_id=slash_record.user_id,
-                amount=float(slash_record.amount_slashed)
-            )
-        else:
-            await logger.ainfo(
-                "Slash appeal rejected",
-                slash_id=slash_id,
-                user_id=slash_record.user_id,
-                resolution_note=resolution_note
-            )
-        
-        return True
+            if slash_row.appeal_status != "pending":
+                raise ValueError(f"Slash appeal not pending: {slash_row.appeal_status}")
+            
+            slash_row.appeal_status = "approved" if approved else "rejected"
+            
+            if approved:
+                # Convert to dataclass for amount access
+                slash_record = self._slash_row_to_record(slash_row)
+                
+                # Refund the slashed amount
+                stake_query = select(StakeModel).where(StakeModel.stake_id == slash_row.stake_id)
+                stake_result = await db.execute(stake_query)
+                stake_row = stake_result.scalar_one_or_none()
+                
+                if stake_row:
+                    stake_row.amount = float(Decimal(str(stake_row.amount)) + slash_record.amount_slashed)
+                    if stake_row.status == StakeStatus.SLASHED.value:
+                        stake_row.status = StakeStatus.ACTIVE.value
+                
+                await db.commit()
+                
+                # Credit tokens back
+                await self.ftns.mint_tokens(
+                    slash_record.user_id,
+                    slash_record.amount_slashed,
+                    reason=f"appeal_refund:{slash_id}"
+                )
+                
+                await logger.ainfo(
+                    "Slash appeal approved - refunding",
+                    slash_id=slash_id,
+                    user_id=slash_record.user_id,
+                    amount=float(slash_record.amount_slashed)
+                )
+            else:
+                await db.commit()
+                
+                await logger.ainfo(
+                    "Slash appeal rejected",
+                    slash_id=slash_id,
+                    user_id=slash_row.user_id,
+                    resolution_note=resolution_note
+                )
+            
+            return True
     
     # === Reward Operations ===
     
@@ -833,41 +868,52 @@ class StakingManager:
         calculations = []
         now = datetime.now(timezone.utc)
         
-        # Get stakes to calculate
-        stake_ids = [stake_id] if stake_id else self._user_stakes.get(user_id, [])
-        
-        for sid in stake_ids:
-            stake = self._stakes.get(sid)
-            if not stake or stake.status != StakeStatus.ACTIVE:
-                continue
+        async with get_async_session() as db:
+            # Build query for stakes
+            if stake_id:
+                query = select(StakeModel).where(
+                    StakeModel.stake_id == UUID(stake_id),
+                    StakeModel.user_id == user_id
+                )
+            else:
+                query = select(StakeModel).where(StakeModel.user_id == user_id)
             
-            # Check minimum stake age
-            stake_age = (now - stake.staked_at).total_seconds()
-            if stake_age < self.config.min_stake_age_for_rewards_seconds:
-                continue
+            result = await db.execute(query)
+            stake_rows = result.scalars().all()
             
-            # Calculate time since last calculation
-            time_staked = (now - stake.last_reward_calculation).total_seconds()
-            days_staked = time_staked / 86400
-            
-            # Calculate reward using annual rate
-            # reward = principal * rate * (days / 365)
-            annual_rate = Decimal(str(self.config.reward_rate_annual))
-            reward_amount = stake.amount * annual_rate * Decimal(str(days_staked / 365))
-            reward_amount = reward_amount.quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
-            
-            calculation = RewardCalculation(
-                stake_id=sid,
-                user_id=user_id,
-                principal=stake.amount,
-                reward_amount=reward_amount,
-                annual_rate=self.config.reward_rate_annual,
-                days_staked=days_staked,
-                calculation_timestamp=now,
-                next_calculation=now + timedelta(seconds=self.config.reward_calculation_interval_seconds)
-            )
-            
-            calculations.append(calculation)
+            for stake_row in stake_rows:
+                if stake_row.status != StakeStatus.ACTIVE.value:
+                    continue
+                
+                stake = self._stake_row_to_record(stake_row)
+                
+                # Check minimum stake age
+                stake_age = (now - stake.staked_at).total_seconds()
+                if stake_age < self.config.min_stake_age_for_rewards_seconds:
+                    continue
+                
+                # Calculate time since last calculation
+                time_staked = (now - stake.last_reward_calculation).total_seconds()
+                days_staked = time_staked / 86400
+                
+                # Calculate reward using annual rate
+                # reward = principal * rate * (days / 365)
+                annual_rate = Decimal(str(self.config.reward_rate_annual))
+                reward_amount = stake.amount * annual_rate * Decimal(str(days_staked / 365))
+                reward_amount = reward_amount.quantize(Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+                
+                calculation = RewardCalculation(
+                    stake_id=str(stake_row.stake_id),
+                    user_id=user_id,
+                    principal=stake.amount,
+                    reward_amount=reward_amount,
+                    annual_rate=self.config.reward_rate_annual,
+                    days_staked=days_staked,
+                    calculation_timestamp=now,
+                    next_calculation=now + timedelta(seconds=self.config.reward_calculation_interval_seconds)
+                )
+                
+                calculations.append(calculation)
         
         return calculations
     
@@ -890,21 +936,28 @@ class StakingManager:
         calculations = await self.calculate_rewards(user_id, stake_id)
         total_rewards = Decimal('0')
         
-        for calc in calculations:
-            stake = self._stakes.get(calc.stake_id)
-            if not stake:
-                continue
+        async with get_async_session() as db:
+            for calc in calculations:
+                query = select(StakeModel).where(StakeModel.stake_id == UUID(calc.stake_id))
+                result = await db.execute(query)
+                stake_row = result.scalar_one_or_none()
+                
+                if not stake_row:
+                    continue
+                
+                # Update stake
+                stake_row.rewards_earned = float(Decimal(str(stake_row.rewards_earned)) + calc.reward_amount)
+                stake_row.last_reward_calculation = calc.calculation_timestamp
+                
+                # Add to total
+                total_rewards += calc.reward_amount
+                
+                # If compounding, add to stake
+                if self.config.reward_compounding:
+                    stake_row.amount = float(Decimal(str(stake_row.amount)) + calc.reward_amount)
             
-            # Update stake
-            stake.rewards_earned += calc.reward_amount
-            stake.last_reward_calculation = calc.calculation_timestamp
-            
-            # Add to total
-            total_rewards += calc.reward_amount
-            
-            # If compounding, add to stake
-            if self.config.reward_compounding:
-                stake.amount += calc.reward_amount
+            if total_rewards > 0:
+                await db.commit()
         
         # Mint reward tokens to user
         if total_rewards > 0:
@@ -927,7 +980,13 @@ class StakingManager:
     
     async def get_stake(self, stake_id: str) -> Optional[StakeRecord]:
         """Get a specific stake by ID"""
-        return self._stakes.get(stake_id)
+        async with get_async_session() as db:
+            query = select(StakeModel).where(StakeModel.stake_id == UUID(stake_id))
+            result = await db.execute(query)
+            row = result.scalar_one_or_none()
+            if row:
+                return self._stake_row_to_record(row)
+            return None
     
     async def get_user_stakes(
         self,
@@ -945,31 +1004,48 @@ class StakingManager:
             List[StakeRecord]: User's stakes
         """
         
-        stake_ids = self._user_stakes.get(user_id, [])
-        stakes = [self._stakes[sid] for sid in stake_ids if sid in self._stakes]
-        
-        if status:
-            stakes = [s for s in stakes if s.status == status]
-        
-        return stakes
+        async with get_async_session() as db:
+            query = select(StakeModel).where(StakeModel.user_id == user_id)
+            if status:
+                query = query.where(StakeModel.status == status.value)
+            
+            result = await db.execute(query)
+            rows = result.scalars().all()
+            
+            return [self._stake_row_to_record(row) for row in rows]
     
     async def get_user_total_stake(self, user_id: str) -> Decimal:
         """Get total staked amount for a user"""
         
-        stakes = await self.get_user_stakes(user_id, status=StakeStatus.ACTIVE)
-        return sum(s.amount for s in stakes)
+        async with get_async_session() as db:
+            query = select(StakeModel).where(
+                StakeModel.user_id == user_id,
+                StakeModel.status == StakeStatus.ACTIVE.value
+            )
+            result = await db.execute(query)
+            rows = result.scalars().all()
+            
+            return sum(Decimal(str(row.amount)) for row in rows)
     
     async def get_network_total_stake(self) -> Decimal:
         """Get total staked amount across all users"""
         
-        return sum(
-            s.amount for s in self._stakes.values()
-            if s.status == StakeStatus.ACTIVE
-        )
+        async with get_async_session() as db:
+            query = select(StakeModel).where(StakeModel.status == StakeStatus.ACTIVE.value)
+            result = await db.execute(query)
+            rows = result.scalars().all()
+            
+            return sum(Decimal(str(row.amount)) for row in rows)
     
     async def get_unstake_request(self, request_id: str) -> Optional[UnstakeRequest]:
         """Get a specific unstake request by ID"""
-        return self._unstake_requests.get(request_id)
+        async with get_async_session() as db:
+            query = select(UnstakeRequestModel).where(UnstakeRequestModel.request_id == UUID(request_id))
+            result = await db.execute(query)
+            row = result.scalar_one_or_none()
+            if row:
+                return self._unstake_row_to_record(row)
+            return None
     
     async def get_pending_unstake_requests(
         self,
@@ -985,26 +1061,36 @@ class StakingManager:
             List[UnstakeRequest]: Pending requests
         """
         
-        requests = [
-            r for r in self._unstake_requests.values()
-            if r.status in (UnstakeRequestStatus.PENDING, UnstakeRequestStatus.AVAILABLE)
-        ]
-        
-        if user_id:
-            requests = [r for r in requests if r.user_id == user_id]
-        
-        return requests
+        async with get_async_session() as db:
+            query = select(UnstakeRequestModel).where(
+                UnstakeRequestModel.status.in_([
+                    UnstakeRequestStatus.PENDING.value,
+                    UnstakeRequestStatus.AVAILABLE.value
+                ])
+            )
+            if user_id:
+                query = query.where(UnstakeRequestModel.user_id == user_id)
+            
+            result = await db.execute(query)
+            rows = result.scalars().all()
+            
+            return [self._unstake_row_to_record(row) for row in rows]
     
     async def get_available_withdrawals(self, user_id: str) -> List[UnstakeRequest]:
         """Get unstake requests ready for withdrawal"""
         
         now = datetime.now(timezone.utc)
-        requests = await self.get_pending_unstake_requests(user_id)
         
-        return [
-            r for r in requests
-            if r.available_at <= now and r.status == UnstakeRequestStatus.AVAILABLE
-        ]
+        async with get_async_session() as db:
+            query = select(UnstakeRequestModel).where(
+                UnstakeRequestModel.user_id == user_id,
+                UnstakeRequestModel.status == UnstakeRequestStatus.AVAILABLE.value,
+                UnstakeRequestModel.available_at <= now
+            )
+            result = await db.execute(query)
+            rows = result.scalars().all()
+            
+            return [self._unstake_row_to_record(row) for row in rows]
     
     async def get_slash_history(
         self,
@@ -1022,15 +1108,19 @@ class StakingManager:
             List[SlashRecord]: Slash records
         """
         
-        records = list(self._slash_records.values())
-        
-        if user_id:
-            records = [r for r in records if r.user_id == user_id]
-        
-        if stake_id:
-            records = [r for r in records if r.stake_id == stake_id]
-        
-        return sorted(records, key=lambda r: r.slashed_at, reverse=True)
+        async with get_async_session() as db:
+            query = select(SlashEventModel)
+            
+            if user_id:
+                query = query.where(SlashEventModel.user_id == user_id)
+            if stake_id:
+                query = query.where(SlashEventModel.stake_id == UUID(stake_id))
+            
+            query = query.order_by(SlashEventModel.slashed_at.desc())
+            result = await db.execute(query)
+            rows = result.scalars().all()
+            
+            return [self._slash_row_to_record(row) for row in rows]
     
     # === Internal Methods ===
     
@@ -1082,23 +1172,31 @@ class StakingManager:
         Returns:
             List[UnstakeRequest]: Requests that are now available
         """
-        
-        now = datetime.now(timezone.utc)
-        matured = []
-        
-        for request in self._unstake_requests.values():
-            if request.status == UnstakeRequestStatus.PENDING:
-                if request.available_at <= now:
-                    request.status = UnstakeRequestStatus.AVAILABLE
-                    matured.append(request)
-                    
-                    await logger.ainfo(
-                        "Unstake request matured",
-                        request_id=request.request_id,
-                        user_id=request.user_id
-                    )
-        
-        return matured
+        async with get_async_session() as db:
+            now = datetime.now(timezone.utc)
+            matured = []
+            
+            # Query pending unstake requests that have matured
+            query = select(UnstakeRequestModel).where(
+                UnstakeRequestModel.status == UnstakeRequestStatus.PENDING.value,
+                UnstakeRequestModel.available_at <= now
+            )
+            result = await db.execute(query)
+            matured_rows = result.scalars().all()
+            
+            # Update each matured request
+            for row in matured_rows:
+                row.status = UnstakeRequestStatus.AVAILABLE.value
+                matured.append(self._unstake_row_to_record(row))
+                
+                await logger.ainfo(
+                    "Unstake request matured",
+                    request_id=str(row.request_id),
+                    user_id=row.user_id
+                )
+            
+            await db.commit()
+            return matured
     
     async def get_staking_stats(self) -> Dict[str, Any]:
         """
@@ -1107,33 +1205,61 @@ class StakingManager:
         Returns:
             Dict with staking statistics
         """
-        
-        active_stakes = [s for s in self._stakes.values() if s.status == StakeStatus.ACTIVE]
-        total_staked = sum(s.amount for s in active_stakes)
-        
-        unstaking_stakes = [s for s in self._stakes.values() if s.status == StakeStatus.UNSTAKING]
-        total_unstaking = sum(s.amount for s in unstaking_stakes)
-        
-        pending_requests = [
-            r for r in self._unstake_requests.values()
-            if r.status == UnstakeRequestStatus.PENDING
-        ]
-        
-        return {
-            "total_stakes": len(self._stakes),
-            "active_stakes": len(active_stakes),
-            "total_staked": float(total_staked),
-            "total_unstaking": float(total_unstaking),
-            "pending_unstake_requests": len(pending_requests),
-            "total_slashes": len(self._slash_records),
-            "unique_stakers": len(self._user_stakes),
-            "config": {
-                "minimum_stake": self.config.minimum_stake,
-                "unstaking_period_days": self.config.unstaking_period_seconds / 86400,
-                "reward_rate_annual": self.config.reward_rate_annual,
-                "slashing_rate_base": self.config.slashing_rate_base
+        async with get_async_session() as db:
+            # Get total stakes count
+            total_stakes_query = select(func.count(StakeModel.stake_id))
+            total_stakes_result = await db.execute(total_stakes_query)
+            total_stakes = total_stakes_result.scalar() or 0
+            
+            # Get active stakes count and total
+            active_stakes_query = select(StakeModel).where(
+                StakeModel.status == StakeStatus.ACTIVE.value
+            )
+            active_result = await db.execute(active_stakes_query)
+            active_rows = active_result.scalars().all()
+            active_stakes_count = len(active_rows)
+            total_staked = sum(Decimal(str(s.amount)) for s in active_rows)
+            
+            # Get unstaking stakes total
+            unstaking_query = select(StakeModel).where(
+                StakeModel.status == StakeStatus.UNSTAKING.value
+            )
+            unstaking_result = await db.execute(unstaking_query)
+            unstaking_rows = unstaking_result.scalars().all()
+            total_unstaking = sum(Decimal(str(s.amount)) for s in unstaking_rows)
+            
+            # Get pending unstake requests count
+            pending_query = select(func.count(UnstakeRequestModel.request_id)).where(
+                UnstakeRequestModel.status == UnstakeRequestStatus.PENDING.value
+            )
+            pending_result = await db.execute(pending_query)
+            pending_count = pending_result.scalar() or 0
+            
+            # Get total slashes count
+            slashes_query = select(func.count(SlashEventModel.slash_id))
+            slashes_result = await db.execute(slashes_query)
+            total_slashes = slashes_result.scalar() or 0
+            
+            # Get unique stakers count
+            unique_stakers_query = select(func.count(func.distinct(StakeModel.user_id)))
+            unique_stakers_result = await db.execute(unique_stakers_query)
+            unique_stakers = unique_stakers_result.scalar() or 0
+            
+            return {
+                "total_stakes": total_stakes,
+                "active_stakes": active_stakes_count,
+                "total_staked": float(total_staked),
+                "total_unstaking": float(total_unstaking),
+                "pending_unstake_requests": pending_count,
+                "total_slashes": total_slashes,
+                "unique_stakers": unique_stakers,
+                "config": {
+                    "minimum_stake": self.config.minimum_stake,
+                    "unstaking_period_days": self.config.unstaking_period_seconds / 86400,
+                    "reward_rate_annual": self.config.reward_rate_annual,
+                    "slashing_rate_base": self.config.slashing_rate_base
+                }
             }
-        }
 
 
 # === Factory Function ===
@@ -1142,28 +1268,20 @@ _staking_manager_instance: Optional[StakingManager] = None
 
 
 async def get_staking_manager(
-    db_session: AsyncSession,
-    ftns_service,
+    db_session: AsyncSession = None,   # kept for API compat, ignored
+    ftns_service=None,
     config: Optional[StakingConfig] = None
 ) -> StakingManager:
-    """
-    Get or create the staking manager instance
+    """Get or create the global StakingManager singleton.
     
-    Args:
-        db_session: Database session
-        ftns_service: FTNS service instance
-        config: Optional staking configuration
-        
-    Returns:
-        StakingManager: The staking manager instance
+    Note: db_session is kept for API compatibility but is no longer used.
+    StakingManager manages its own database sessions internally via get_async_session().
     """
     global _staking_manager_instance
-    
     if _staking_manager_instance is None:
         _staking_manager_instance = StakingManager(
-            db_session=db_session,
+            db_session=None,
             ftns_service=ftns_service,
-            config=config
+            config=config,
         )
-    
     return _staking_manager_instance
