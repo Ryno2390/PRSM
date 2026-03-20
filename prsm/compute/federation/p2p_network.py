@@ -67,8 +67,8 @@ PEER_REPUTATION_THRESHOLD = float(getattr(settings, "PRSM_MIN_PEER_REPUTATION", 
 
 class P2PModelNetwork:
     """
-    P2P model network with torrent-like distribution and safety oversight
-    Coordinates distributed model execution with safety monitoring
+    P2P model network with IPFS-based content-addressed distribution and safety oversight.
+    Coordinates distributed model execution using sharded content delivery and safety monitoring.
     """
     
     def __init__(self):

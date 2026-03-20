@@ -41,9 +41,9 @@ This makes it nearly impossible for a single malicious subtask to produce large-
 
 ---
 
-## 📡 Torrent-Like Federation with Circuit Breakers
+## 📡 P2P Federation with Circuit Breakers
 
-All AI components in PRSM are distributed across user devices using a torrent-inspired protocol. Each participant:
+All AI components in PRSM are distributed across user devices using a content-addressed P2P protocol built on IPFS. Each participant:
 
 - Hosts small shards of models or data
 - Can cut off connections ("trip a circuit breaker") if a safety concern is detected
