@@ -47,7 +47,6 @@ class PRSMIPFSClient:
         self.connected = False
         self.provenance_cache: Dict[str, ProvenanceRecord] = {}
         self.access_log: Dict[str, List[Dict[str, Any]]] = {}
-        self.simulation_storage: Dict[str, bytes] = {}  # For simulation mode
         self.ftns_service = get_ftns_service()
         
         # Initialize IPFS connection (will be done lazily to avoid event loop issues)
@@ -63,7 +62,10 @@ class PRSMIPFSClient:
     async def _initialize_connection(self) -> bool:
         """Initialize connection to IPFS node"""
         if not IPFS_AVAILABLE:
-            print("IPFS client running in simulation mode (ipfshttpclient not available)")
+            print(
+                "Warning: ipfshttpclient not available — IPFS operations will raise "
+                "ConnectionError until the package is installed and a daemon is reachable."
+            )
             self.connected = False
             return False
         
@@ -73,7 +75,7 @@ class PRSMIPFSClient:
             self.client = await loop.run_in_executor(
                 None,
                 lambda: ipfshttpclient.connect(
-                    addr=IPFS_API_ADDR, 
+                    addr=IPFS_API_ADDR,
                     timeout=DEFAULT_IPFS_TIMEOUT
                 )
             )
@@ -86,7 +88,7 @@ class PRSMIPFSClient:
             
         except Exception as e:
             print(f"❌ Error connecting to IPFS node at {IPFS_API_ADDR}: {e}")
-            print("IPFS functionality will run in simulation mode.")
+            print("IPFS operations will raise ConnectionError until a daemon is reachable.")
             self.connected = False
             return False
     
@@ -252,12 +254,12 @@ class PRSMIPFSClient:
         )
     
     async def _store_content(self, content: bytes) -> Optional[str]:
-        """Store content in IPFS (or simulate if not connected)"""
+        """Store content in IPFS. Raises ConnectionError if not connected."""
         if not self.connected:
-            content_hash = hashlib.sha256(content).hexdigest()
-            fake_cid = f"bafybeig{content_hash[:50]}"
-            self.simulation_storage[fake_cid] = content
-            return fake_cid
+            raise ConnectionError(
+                f"IPFS client is not connected to {IPFS_API_ADDR}. "
+                "Ensure the IPFS daemon is running before storing content."
+            )
         
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
@@ -266,9 +268,12 @@ class PRSMIPFSClient:
         return result if isinstance(result, str) else result.get('Hash')
     
     async def _retrieve_content(self, cid: str) -> Optional[bytes]:
-        """Retrieve content from IPFS (or simulate if not connected)"""
+        """Retrieve content from IPFS. Raises ConnectionError if not connected."""
         if not self.connected:
-            return self.simulation_storage.get(cid, f"SIMULATED_{cid}".encode('utf-8'))
+            raise ConnectionError(
+                f"IPFS client is not connected to {IPFS_API_ADDR}. "
+                f"Cannot retrieve CID {cid} — ensure the IPFS daemon is running."
+            )
         
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: self.client.cat(cid))

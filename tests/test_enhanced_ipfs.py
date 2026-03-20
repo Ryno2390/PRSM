@@ -27,18 +27,37 @@ async def test_enhanced_ipfs_client():
         # Create client instance
         client = PRSMIPFSClient()
         
-        # Wait for connection initialization
-        await asyncio.sleep(1)
+        # Ensure initialization
+        await client._ensure_initialized()
+        
+        # === Test that disconnected operations raise explicitly ===
+        if not client.connected:
+            print("📡 IPFS not connected — testing explicit failure mode...")
+            
+            try:
+                await client.store_model(b"test", {"uploader_id": "u1"})
+                assert False, "store_model should raise when disconnected"
+            except ConnectionError as e:
+                print(f"✅ store_model raises ConnectionError when disconnected: {e}")
+            
+            try:
+                await client._retrieve_content("bafybeig" + "x" * 50)
+                assert False, "_retrieve_content should raise when disconnected"
+            except ConnectionError as e:
+                print(f"✅ _retrieve_content raises ConnectionError when disconnected: {e}")
+            
+            print("✅ Disconnected-mode error surfacing verified.")
+            return  # Skip live IPFS tests
         
         # === Test Client Status ===
         
         status = await client.get_status()
         print(f"✅ IPFS client status retrieved")
         print(f"   - Connected: {status['connected']}")
-        print(f"   - API Address: {status['api_address']}")
-        print(f"   - Provenance Tracking: {status['provenance_tracking']}")
-        print(f"   - Access Rewards: {status['access_rewards']}")
-        print(f"   - Max Model Size: {status['max_model_size_mb']}MB")
+        print(f"   - API Address: {status.get('api_address', 'N/A')}")
+        print(f"   - Provenance Tracking: {status.get('provenance_tracking', 'N/A')}")
+        print(f"   - Access Rewards: {status.get('access_rewards', 'N/A')}")
+        print(f"   - Max Model Size: {status.get('max_model_size_mb', 'N/A')}MB")
         
         # === Test Model Storage ===
         
@@ -220,8 +239,9 @@ async def test_enhanced_ipfs_client():
         try:
             fake_cid = "bafybeig" + "x" * 50
             content, metadata = await client.retrieve_with_provenance(fake_cid)
-            # In simulation mode, this might succeed with fake content
-            print(f"ℹ️  Non-existent CID handled (simulation mode)")
+            print(f"ℹ️  Non-existent CID retrieval returned content (unexpected)")
+        except ConnectionError as e:
+            print(f"✅ Disconnected retrieval correctly raises ConnectionError: {e}")
         except Exception as e:
             print(f"✅ Non-existent CID properly handled: {type(e).__name__}")
         
