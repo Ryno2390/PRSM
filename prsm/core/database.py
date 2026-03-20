@@ -30,8 +30,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, AsyncGenerator
 from sqlalchemy import (
-    create_engine, MetaData, Table, Column, Integer, String, DateTime, 
-    Float, Boolean, JSON, Text, ForeignKey, Index, UniqueConstraint,
+    create_engine, MetaData, Table, Column, Integer, BigInteger, String, DateTime,
+    Float, Boolean, JSON, Text, ForeignKey, Index, UniqueConstraint, text,
     UUID as SQLAlchemyUUID
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
@@ -396,6 +396,56 @@ class PeerNodeModel(Base):
     __table_args__ = (
         Index('idx_peer_active_last_seen', 'active', 'last_seen'),
         Index('idx_peer_reputation', 'reputation_score'),
+    )
+
+
+class ContentProvenanceModel(Base):
+    """
+    Database model for IPFS content provenance records.
+
+    Persists ContentUploader.uploaded_content across node restarts so
+    royalty collection continues after a node is restarted. Also enables
+    cross-node provenance queries through the platform API.
+
+    Each row corresponds to one UploadedContent dataclass instance.
+    The in-memory dict remains authoritative during the process lifetime;
+    this table is the backing store for hydration on restart.
+    """
+    __tablename__ = "content_provenance"
+
+    # Primary identifier — IPFS CID (or manifest CID for sharded content)
+    cid = Column(String(255), primary_key=True)
+
+    filename = Column(String(500), nullable=False)
+    size_bytes = Column(BigInteger, nullable=False)          # BigInteger: model weights can exceed 2GB
+    content_hash = Column(String(64), nullable=False)        # SHA-256 hex digest
+
+    creator_id = Column(String(255), nullable=False, index=True)
+    provenance_signature = Column(Text, nullable=False)
+    royalty_rate = Column(Float, nullable=False, default=0.01)
+    parent_cids = Column(JSON, default=list)                 # List[str] — derivative lineage
+
+    # Updated on each content access via update_access_stats()
+    access_count = Column(Integer, nullable=False, default=0)
+    total_royalties = Column(Float, nullable=False, default=0.0)
+
+    # Sharding metadata
+    is_sharded = Column(Boolean, nullable=False, default=False)
+    manifest_cid = Column(String(255), nullable=True, index=True)
+    total_shards = Column(Integer, nullable=False, default=0)
+
+    # Semantic deduplication metadata
+    embedding_id = Column(String(255), nullable=True)
+    near_duplicate_of = Column(String(255), nullable=True)
+    near_duplicate_similarity = Column(Float, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index('idx_provenance_creator', 'creator_id'),
+        Index('idx_provenance_hash', 'content_hash'),
+        Index('idx_provenance_created', 'created_at'),
     )
 
 
@@ -936,6 +986,168 @@ class FTNSQueries:
                     transactions.append(tx)
 
             return transactions
+
+
+class ProvenanceQueries:
+    """Query helpers for content provenance operations.
+
+    All methods accept plain dicts (not UploadedContent) to avoid circular
+    imports with prsm.node.content_uploader.
+    """
+
+    @staticmethod
+    async def upsert_provenance(record: Dict[str, Any]) -> bool:
+        """
+        Insert or update a provenance record.
+
+        Uses INSERT ... ON CONFLICT UPDATE so re-uploading the same CID
+        (e.g., after a node restart) refreshes metadata rather than erroring.
+
+        Args:
+            record: Dict with all UploadedContent fields plus 'created_at'
+                    as a Unix timestamp float.
+
+        Returns:
+            True on success, False on failure.
+        """
+        async with get_async_session() as session:
+            try:
+                from datetime import datetime, timezone
+                created_at = datetime.fromtimestamp(
+                    record.get("created_at", 0), tz=timezone.utc
+                )
+                existing = await session.get(ContentProvenanceModel, record["cid"])
+                if existing:
+                    # Update mutable fields only — don't overwrite creator/signature
+                    existing.access_count = record.get("access_count", existing.access_count)
+                    existing.total_royalties = record.get("total_royalties", existing.total_royalties)
+                    existing.parent_cids = record.get("parent_cids", existing.parent_cids)
+                else:
+                    row = ContentProvenanceModel(
+                        cid=record["cid"],
+                        filename=record["filename"],
+                        size_bytes=record["size_bytes"],
+                        content_hash=record["content_hash"],
+                        creator_id=record["creator_id"],
+                        provenance_signature=record.get("provenance_signature", ""),
+                        royalty_rate=record.get("royalty_rate", 0.01),
+                        parent_cids=record.get("parent_cids", []),
+                        access_count=record.get("access_count", 0),
+                        total_royalties=record.get("total_royalties", 0.0),
+                        is_sharded=record.get("is_sharded", False),
+                        manifest_cid=record.get("manifest_cid"),
+                        total_shards=record.get("total_shards", 0),
+                        embedding_id=record.get("embedding_id"),
+                        near_duplicate_of=record.get("near_duplicate_of"),
+                        near_duplicate_similarity=record.get("near_duplicate_similarity"),
+                        created_at=created_at,
+                    )
+                    session.add(row)
+                await session.commit()
+                return True
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"ProvenanceQueries.upsert_provenance failed: {e}")
+                return False
+
+    @staticmethod
+    async def update_access_stats(
+        cid: str,
+        access_count_delta: int,
+        royalty_delta: float,
+    ) -> bool:
+        """
+        Atomically increment access_count and total_royalties for a CID.
+
+        Uses a SQL UPDATE rather than read-modify-write to avoid race
+        conditions when multiple access events arrive concurrently.
+
+        Returns:
+            True if the row existed and was updated, False otherwise.
+        """
+        async with get_async_session() as session:
+            try:
+                result = await session.execute(
+                    text("""
+                        UPDATE content_provenance
+                        SET access_count   = access_count   + :delta_count,
+                            total_royalties = total_royalties + :delta_royalty,
+                            updated_at      = NOW()
+                        WHERE cid = :cid
+                    """),
+                    {
+                        "cid": cid,
+                        "delta_count": access_count_delta,
+                        "delta_royalty": royalty_delta,
+                    },
+                )
+                await session.commit()
+                return result.rowcount > 0
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"ProvenanceQueries.update_access_stats failed for {cid[:12]}...: {e}")
+                return False
+
+    @staticmethod
+    async def load_all_for_node(creator_id: str) -> List[Dict[str, Any]]:
+        """
+        Load all provenance records for a given creator node ID.
+
+        Called during node startup to hydrate the in-memory uploaded_content
+        dict. Returns all records owned by this node regardless of age.
+
+        Args:
+            creator_id: The node ID to load records for.
+
+        Returns:
+            List of dicts, each representing one UploadedContent record.
+        """
+        async with get_async_session() as session:
+            try:
+                result = await session.execute(
+                    text("""
+                        SELECT
+                            cid, filename, size_bytes, content_hash, creator_id,
+                            provenance_signature, royalty_rate, parent_cids,
+                            access_count, total_royalties, is_sharded, manifest_cid,
+                            total_shards, embedding_id, near_duplicate_of,
+                            near_duplicate_similarity, created_at
+                        FROM content_provenance
+                        WHERE creator_id = :creator_id
+                        ORDER BY created_at ASC
+                    """),
+                    {"creator_id": creator_id},
+                )
+                rows = result.fetchall()
+                return [
+                    {
+                        "cid": row.cid,
+                        "filename": row.filename,
+                        "size_bytes": row.size_bytes,
+                        "content_hash": row.content_hash,
+                        "creator_id": row.creator_id,
+                        "provenance_signature": row.provenance_signature,
+                        "royalty_rate": float(row.royalty_rate),
+                        "parent_cids": row.parent_cids or [],
+                        "access_count": row.access_count,
+                        "total_royalties": float(row.total_royalties),
+                        "is_sharded": bool(row.is_sharded),
+                        "manifest_cid": row.manifest_cid,
+                        "total_shards": row.total_shards or 0,
+                        "embedding_id": row.embedding_id,
+                        "near_duplicate_of": row.near_duplicate_of,
+                        "near_duplicate_similarity": (
+                            float(row.near_duplicate_similarity)
+                            if row.near_duplicate_similarity is not None
+                            else None
+                        ),
+                        "created_at": row.created_at.timestamp() if row.created_at else 0.0,
+                    }
+                    for row in rows
+                ]
+            except Exception as e:
+                logger.error(f"ProvenanceQueries.load_all_for_node failed: {e}")
+                return []
 
 
 class ModelQueries:

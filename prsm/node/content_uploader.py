@@ -388,6 +388,7 @@ class ContentUploader:
             near_duplicate_similarity=near_dup_sim,
         )
         self.uploaded_content[cid] = uploaded
+        await self._persist_provenance(uploaded)  # Persist to DB
 
         # Register embedding so future uploads can be checked against this one
         if embedding is not None:
@@ -520,6 +521,7 @@ class ContentUploader:
                 near_duplicate_similarity=near_dup_sim,
             )
             self.uploaded_content[manifest_cid] = uploaded
+            await self._persist_provenance(uploaded)  # Persist to DB
 
             # Register embedding for future deduplication checks
             if embedding is not None:
@@ -613,6 +615,7 @@ class ContentUploader:
                 is_sharded=False,
             )
             self.uploaded_content[cid] = uploaded
+            await self._persist_provenance(uploaded)  # Persist to DB
 
             # Still advertise and request replication for fallback
             await self.gossip.publish(GOSSIP_PROVENANCE_REGISTER, {
@@ -705,6 +708,9 @@ class ContentUploader:
                 await self._maybe_broadcast(tx)
             except Exception as e:
                 logger.error(f"Royalty credit failed: {e}")
+
+        # Persist updated access stats to DB (non-blocking)
+        await self._update_provenance_access(cid, content.royalty_rate)
 
     async def _distribute_multilevel_royalty(
         self, content: UploadedContent, total_royalty: float, accessor_id: str
@@ -1135,6 +1141,112 @@ class ContentUploader:
         except Exception as e:
             logger.error(f"IPFS cat failed for {cid}: {e}")
         return None
+
+    async def _persist_provenance(self, uploaded: "UploadedContent") -> None:
+        """
+        Persist a provenance record to the platform database.
+
+        Non-blocking: if the DB write fails (no connection, schema missing,
+        etc.) the in-memory uploaded_content dict remains authoritative and
+        the upload is still considered successful.
+        """
+        try:
+            from prsm.core.database import ProvenanceQueries
+            record = {
+                "cid": uploaded.cid,
+                "filename": uploaded.filename,
+                "size_bytes": uploaded.size_bytes,
+                "content_hash": uploaded.content_hash,
+                "creator_id": uploaded.creator_id,
+                "provenance_signature": uploaded.provenance_signature,
+                "royalty_rate": uploaded.royalty_rate,
+                "parent_cids": uploaded.parent_cids,
+                "access_count": uploaded.access_count,
+                "total_royalties": uploaded.total_royalties,
+                "is_sharded": uploaded.is_sharded,
+                "manifest_cid": uploaded.manifest_cid,
+                "total_shards": uploaded.total_shards,
+                "embedding_id": uploaded.embedding_id,
+                "near_duplicate_of": uploaded.near_duplicate_of,
+                "near_duplicate_similarity": uploaded.near_duplicate_similarity,
+                "created_at": uploaded.created_at,
+            }
+            success = await ProvenanceQueries.upsert_provenance(record)
+            if success:
+                logger.debug(f"Provenance persisted to DB: {uploaded.cid[:12]}...")
+        except Exception as e:
+            logger.warning(
+                f"Provenance DB persist failed for {uploaded.cid[:12]}... "
+                f"(in-memory record intact): {e}"
+            )
+
+    async def _update_provenance_access(self, cid: str, royalty_earned: float) -> None:
+        """
+        Atomically update access_count (+1) and total_royalties in the DB.
+
+        Called after every successful royalty credit in record_access().
+        Non-blocking: failure is logged but does not affect the in-memory
+        access_count / total_royalties that were already updated.
+        """
+        try:
+            from prsm.core.database import ProvenanceQueries
+            await ProvenanceQueries.update_access_stats(
+                cid=cid,
+                access_count_delta=1,
+                royalty_delta=royalty_earned,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Provenance access-stats update failed for {cid[:12]}...: {e}"
+            )
+
+    async def _hydrate_from_db(self) -> int:
+        """
+        Load provenance records from the platform database into uploaded_content.
+
+        Called during node initialization to restore state after a restart.
+        Only loads records where creator_id matches this node's identity,
+        and skips CIDs already present in uploaded_content (in-memory wins).
+
+        Returns:
+            Number of records loaded from DB.
+        """
+        try:
+            from prsm.core.database import ProvenanceQueries
+            records = await ProvenanceQueries.load_all_for_node(self.identity.node_id)
+            loaded = 0
+            for rec in records:
+                if rec["cid"] in self.uploaded_content:
+                    continue  # In-memory record takes precedence
+                self.uploaded_content[rec["cid"]] = UploadedContent(
+                    cid=rec["cid"],
+                    filename=rec["filename"],
+                    size_bytes=rec["size_bytes"],
+                    content_hash=rec["content_hash"],
+                    creator_id=rec["creator_id"],
+                    created_at=rec["created_at"],
+                    provenance_signature=rec["provenance_signature"],
+                    royalty_rate=rec["royalty_rate"],
+                    parent_cids=rec["parent_cids"],
+                    access_count=rec["access_count"],
+                    total_royalties=rec["total_royalties"],
+                    is_sharded=rec["is_sharded"],
+                    manifest_cid=rec["manifest_cid"],
+                    total_shards=rec["total_shards"],
+                    embedding_id=rec["embedding_id"],
+                    near_duplicate_of=rec["near_duplicate_of"],
+                    near_duplicate_similarity=rec["near_duplicate_similarity"],
+                )
+                loaded += 1
+            if loaded > 0:
+                logger.info(
+                    f"Hydrated {loaded} provenance record(s) from DB "
+                    f"for node {self.identity.node_id[:12]}..."
+                )
+            return loaded
+        except Exception as e:
+            logger.warning(f"Provenance DB hydration failed: {e}")
+            return 0
 
     def get_stats(self) -> Dict[str, Any]:
         """Return uploader statistics."""
