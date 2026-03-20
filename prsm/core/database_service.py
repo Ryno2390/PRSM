@@ -19,13 +19,16 @@ from sqlalchemy import select, update, delete, and_, or_, desc, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
+import json
+
 from .database import (
     get_async_session, Base,
     PRSMSessionModel, ReasoningStepModel, SafetyFlagModel,
     ArchitectTaskModel, FTNSTransactionModel, FTNSBalanceModel,
     TeacherModelModel, CircuitBreakerEventModel, PeerNodeModel,
     ModelRegistryModel, TeamModel, TeamMemberModel, TeamWalletModel,
-    TeamTaskModel, TeamGovernanceModel
+    TeamTaskModel, TeamGovernanceModel,
+    ContentProvenanceModel, UserAPIConfigModel,
 )
 from .models import (
     PRSMSession, ReasoningStep, SafetyFlag, ArchitectTask,
@@ -555,162 +558,295 @@ class DatabaseService:
         """Create a new provenance record in the database"""
         async with get_async_session() as db:
             try:
-                from .models import ProvenanceRecord
-                
-                # Create record entry for the provenance system
-                provenance_record = {
-                    'content_id': record_data['content_id'],
-                    'fingerprint_data': record_data['fingerprint_data'],
-                    'attribution_data': record_data['attribution_data'],
-                    'usage_data': record_data.get('usage_data', {}),
-                    'created_at': datetime.now(timezone.utc),
-                    'updated_at': datetime.now(timezone.utc)
-                }
-                
-                # For now, store in a simple in-memory registry
-                # In production, this would be a proper database table
-                if not hasattr(self, '_provenance_records'):
-                    self._provenance_records = {}
-                
-                self._provenance_records[record_data['content_id']] = provenance_record
-                
-                self.logger.info(f"Created provenance record for content {record_data['content_id']}")
+                fingerprint = record_data.get('fingerprint_data', {})
+                attribution = record_data.get('attribution_data', {})
+                usage = record_data.get('usage_data', {})
+                content_id = record_data['content_id']
+
+                row = ContentProvenanceModel(
+                    cid=content_id,
+                    filename=fingerprint.get('filename', content_id),
+                    size_bytes=int(fingerprint.get('size_bytes', 0)),
+                    content_hash=fingerprint.get('content_hash', fingerprint.get('hash', '')),
+                    creator_id=attribution.get('creator_id', 'unknown'),
+                    provenance_signature=attribution.get(
+                        'provenance_signature', json.dumps(attribution)
+                    ),
+                    royalty_rate=float(attribution.get('royalty_rate', 0.01)),
+                    parent_cids=attribution.get('parent_cids', []),
+                    access_count=int(usage.get('access_count', 0)),
+                    total_royalties=float(usage.get('total_royalties', 0.0)),
+                    created_at=datetime.now(timezone.utc),
+                )
+                db.add(row)
+                await db.commit()
+
+                self.logger.info(f"Created provenance record for content {content_id}")
                 return True
-                
+
             except Exception as e:
+                await db.rollback()
                 self.logger.error(f"Failed to create provenance record: {e}")
                 return False
-    
+
     async def get_provenance_record(self, content_id: str) -> Optional[Dict[str, Any]]:
         """Get provenance record by content ID"""
-        try:
-            # Check in-memory registry first
-            if hasattr(self, '_provenance_records') and content_id in self._provenance_records:
-                return self._provenance_records[content_id]
-            
-            # In production, this would query a proper database table
-            # For now, return None if not found in memory
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Failed to get provenance record for {content_id}: {e}")
-            return None
-    
+        async with get_async_session() as db:
+            try:
+                stmt = select(ContentProvenanceModel).where(
+                    ContentProvenanceModel.cid == content_id
+                )
+                result = await db.execute(stmt)
+                row = result.scalar_one_or_none()
+                if row is None:
+                    return None
+
+                return {
+                    'content_id': row.cid,
+                    'fingerprint_data': {
+                        'filename': row.filename,
+                        'size_bytes': row.size_bytes,
+                        'content_hash': row.content_hash,
+                    },
+                    'attribution_data': {
+                        'creator_id': row.creator_id,
+                        'provenance_signature': row.provenance_signature,
+                        'royalty_rate': row.royalty_rate,
+                        'parent_cids': row.parent_cids or [],
+                    },
+                    'usage_data': {
+                        'access_count': row.access_count,
+                        'total_royalties': row.total_royalties,
+                    },
+                    'created_at': row.created_at,
+                    'updated_at': row.updated_at,
+                }
+
+            except Exception as e:
+                self.logger.error(f"Failed to get provenance record for {content_id}: {e}")
+                return None
+
     async def update_provenance_record(self, content_id: str, update_data: Dict[str, Any]) -> bool:
         """Update an existing provenance record"""
-        try:
-            if hasattr(self, '_provenance_records') and content_id in self._provenance_records:
-                self._provenance_records[content_id].update(update_data)
-                self._provenance_records[content_id]['updated_at'] = datetime.now(timezone.utc)
-                return True
-            return False
-            
-        except Exception as e:
-            self.logger.error(f"Failed to update provenance record for {content_id}: {e}")
-            return False
-    
+        async with get_async_session() as db:
+            try:
+                # Map nested keys to flat DB columns
+                db_updates: Dict[str, Any] = {}
+                fingerprint = update_data.get('fingerprint_data', {})
+                attribution = update_data.get('attribution_data', {})
+                usage = update_data.get('usage_data', {})
+
+                if fingerprint.get('filename'):
+                    db_updates['filename'] = fingerprint['filename']
+                if 'size_bytes' in fingerprint:
+                    db_updates['size_bytes'] = int(fingerprint['size_bytes'])
+                if fingerprint.get('content_hash'):
+                    db_updates['content_hash'] = fingerprint['content_hash']
+                if attribution.get('creator_id'):
+                    db_updates['creator_id'] = attribution['creator_id']
+                if attribution.get('provenance_signature'):
+                    db_updates['provenance_signature'] = attribution['provenance_signature']
+                if 'royalty_rate' in attribution:
+                    db_updates['royalty_rate'] = float(attribution['royalty_rate'])
+                if 'parent_cids' in attribution:
+                    db_updates['parent_cids'] = attribution['parent_cids']
+                if 'access_count' in usage:
+                    db_updates['access_count'] = int(usage['access_count'])
+                if 'total_royalties' in usage:
+                    db_updates['total_royalties'] = float(usage['total_royalties'])
+
+                # Also accept flat column names directly
+                for col in ('filename', 'size_bytes', 'content_hash', 'creator_id',
+                            'provenance_signature', 'royalty_rate', 'parent_cids',
+                            'access_count', 'total_royalties'):
+                    if col in update_data:
+                        db_updates[col] = update_data[col]
+
+                if not db_updates:
+                    return False
+
+                stmt = (
+                    update(ContentProvenanceModel)
+                    .where(ContentProvenanceModel.cid == content_id)
+                    .values(**db_updates)
+                )
+                result = await db.execute(stmt)
+                await db.commit()
+                return result.rowcount > 0
+
+            except Exception as e:
+                await db.rollback()
+                self.logger.error(f"Failed to update provenance record for {content_id}: {e}")
+                return False
+
     async def store_royalty_distribution_record(self, record: Dict[str, Any]) -> bool:
-        """Store royalty distribution record for audit trail"""
-        try:
-            # For now, store in a simple in-memory registry
-            # In production, this would be a proper database table
-            if not hasattr(self, '_royalty_distribution_records'):
-                self._royalty_distribution_records = []
-            
-            self._royalty_distribution_records.append(record)
-            
-            self.logger.info(f"Stored royalty distribution record for session {record['session_id']}")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Failed to store royalty distribution record: {e}")
-            return False
-    
-    async def get_creator_earnings(self, creator_id: str, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
-        """Get creator earnings for a specific time period"""
-        try:
-            # For now, return empty list as this is a placeholder
-            # In production, this would query earnings from royalty distribution records
-            return []
-            
-        except Exception as e:
-            self.logger.error(f"Failed to get creator earnings for {creator_id}: {e}")
-            return []
-    
-    async def record_content_ingestion(self, content_id: str, user_id: str, quality_assessment: Any, reward_amount: float) -> bool:
-        """Record successful content ingestion for audit trail"""
-        try:
-            # For now, store in a simple in-memory registry
-            # In production, this would be a proper database table
-            if not hasattr(self, '_content_ingestion_records'):
-                self._content_ingestion_records = []
-            
-            ingestion_record = {
-                'content_id': content_id,
-                'user_id': user_id,
-                'quality_level': quality_assessment.quality_level.value if hasattr(quality_assessment, 'quality_level') else 'standard',
-                'reward_amount': reward_amount,
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-            
-            self._content_ingestion_records.append(ingestion_record)
-            
-            self.logger.info(f"Recorded content ingestion for {content_id} by {user_id}")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Failed to record content ingestion: {e}")
-            return False
+        """Store royalty distribution record as a FTNSTransactionModel row"""
+        async with get_async_session() as db:
+            try:
+                listing_id = record.get('listing_id', 'unknown')
+                tx = FTNSTransactionModel(
+                    transaction_id=uuid4(),
+                    from_user=record.get('buyer', 'unknown'),
+                    to_user=record.get('seller', 'system'),
+                    amount=float(record.get('amount', 0.0)),
+                    transaction_type='royalty_distribution',
+                    description=f"Royalty distribution for listing {listing_id}",
+                    status='completed',
+                    ipfs_cid=str(listing_id),
+                )
+                db.add(tx)
+                await db.commit()
+
+                self.logger.info(
+                    f"Stored royalty distribution record for session {record.get('session_id')}"
+                )
+                return True
+
+            except Exception as e:
+                await db.rollback()
+                self.logger.error(f"Failed to store royalty distribution record: {e}")
+                return False
+
+    async def get_creator_earnings(
+        self, creator_id: str, start_time: datetime, end_time: datetime
+    ) -> List[Dict[str, Any]]:
+        """Get creator earnings for a specific time period from FTNSTransactionModel"""
+        async with get_async_session() as db:
+            try:
+                stmt = (
+                    select(FTNSTransactionModel)
+                    .where(
+                        and_(
+                            FTNSTransactionModel.to_user == creator_id,
+                            FTNSTransactionModel.transaction_type.in_(
+                                ['royalty_distribution', 'content_ingestion_reward', 'royalty']
+                            ),
+                            FTNSTransactionModel.created_at >= start_time,
+                            FTNSTransactionModel.created_at <= end_time,
+                        )
+                    )
+                    .order_by(desc(FTNSTransactionModel.created_at))
+                )
+                result = await db.execute(stmt)
+                rows = result.scalars().all()
+                return [
+                    {
+                        'transaction_id': str(row.transaction_id),
+                        'amount': row.amount,
+                        'transaction_type': row.transaction_type,
+                        'description': row.description,
+                        'created_at': row.created_at,
+                        'ipfs_cid': row.ipfs_cid,
+                    }
+                    for row in rows
+                ]
+
+            except Exception as e:
+                self.logger.error(f"Failed to get creator earnings for {creator_id}: {e}")
+                return []
+
+    async def record_content_ingestion(
+        self, content_id: str, user_id: str, quality_assessment: Any, reward_amount: float
+    ) -> bool:
+        """Record successful content ingestion as a FTNSTransactionModel reward row"""
+        async with get_async_session() as db:
+            try:
+                quality_level = (
+                    quality_assessment.quality_level.value
+                    if hasattr(quality_assessment, 'quality_level')
+                    else 'standard'
+                )
+                tx = FTNSTransactionModel(
+                    transaction_id=uuid4(),
+                    from_user='system',
+                    to_user=user_id,
+                    amount=float(reward_amount),
+                    transaction_type='content_ingestion_reward',
+                    description=f"Content ingestion reward ({quality_level}) for {content_id}",
+                    status='completed',
+                    ipfs_cid=content_id,
+                )
+                db.add(tx)
+                await db.commit()
+
+                self.logger.info(f"Recorded content ingestion for {content_id} by {user_id}")
+                return True
+
+            except Exception as e:
+                await db.rollback()
+                self.logger.error(f"Failed to record content ingestion: {e}")
+                return False
     
     # === Health Check ===
-    
-    async def store_user_api_config(self, user_id: str, provider: str, config: Dict[str, Any]) -> bool:
+
+    async def store_user_api_config(self, user_id: str, provider: str, config_data: Dict[str, Any]) -> bool:
         """
-        Store user API configuration for LLM providers
-        
+        Store user API configuration for LLM providers (upsert).
+
         Args:
             user_id: User identifier
             provider: LLM provider name (e.g., 'claude', 'openai')
-            config: Configuration data
-            
+            config_data: Configuration data dict
+
         Returns:
             True if successful, False otherwise
         """
-        try:
-            # For testing purposes, store in memory
-            if not hasattr(self, '_user_api_configs'):
-                self._user_api_configs = {}
-            
-            if user_id not in self._user_api_configs:
-                self._user_api_configs[user_id] = {}
-                
-            self._user_api_configs[user_id][provider] = config
-            self.logger.info(f"Stored API config for user {user_id}, provider {provider}")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Failed to store user API config: {e}")
-            return False
-    
+        async with get_async_session() as db:
+            try:
+                stmt = select(UserAPIConfigModel).where(
+                    and_(
+                        UserAPIConfigModel.user_id == user_id,
+                        UserAPIConfigModel.provider == provider,
+                    )
+                )
+                result = await db.execute(stmt)
+                existing = result.scalar_one_or_none()
+
+                if existing:
+                    existing.config_data = config_data
+                else:
+                    db.add(UserAPIConfigModel(
+                        id=uuid4(),
+                        user_id=user_id,
+                        provider=provider,
+                        config_data=config_data,
+                    ))
+
+                await db.commit()
+                self.logger.info(f"Stored API config for user {user_id}, provider {provider}")
+                return True
+
+            except Exception as e:
+                await db.rollback()
+                self.logger.error(f"Failed to store user API config: {e}")
+                return False
+
     async def get_user_api_config(self, user_id: str, provider: str) -> Optional[Dict[str, Any]]:
         """
-        Retrieve user API configuration for a specific provider
-        
+        Retrieve user API configuration for a specific provider.
+
         Args:
             user_id: User identifier
             provider: LLM provider name
-            
+
         Returns:
             Configuration data or None if not found
         """
-        try:
-            if hasattr(self, '_user_api_configs'):
-                return self._user_api_configs.get(user_id, {}).get(provider)
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Failed to get user API config: {e}")
-            return None
+        async with get_async_session() as db:
+            try:
+                stmt = select(UserAPIConfigModel).where(
+                    and_(
+                        UserAPIConfigModel.user_id == user_id,
+                        UserAPIConfigModel.provider == provider,
+                    )
+                )
+                result = await db.execute(stmt)
+                row = result.scalar_one_or_none()
+                return row.config_data if row else None
+
+            except Exception as e:
+                self.logger.error(f"Failed to get user API config: {e}")
+                return None
 
     # === Voicebox Integration Methods ===
     
@@ -737,27 +873,6 @@ class DatabaseService:
             
         except Exception as e:
             self.logger.error(f"Failed to store voicebox interaction: {e}")
-            return False
-    
-    async def store_user_api_config(self, user_id: str, provider: str, config_data: Dict[str, Any]) -> bool:
-        """Store user API configuration"""
-        try:
-            # For now, we'll store in a simple dict structure
-            # In production, this would use a proper database table with encryption
-            if not hasattr(self, '_user_api_configs'):
-                self._user_api_configs = {}
-            
-            if user_id not in self._user_api_configs:
-                self._user_api_configs[user_id] = {}
-            
-            config_data['stored_at'] = datetime.now(timezone.utc).isoformat()
-            self._user_api_configs[user_id][provider] = config_data
-            
-            self.logger.info(f"Stored API config for user {user_id}, provider {provider}")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Failed to store user API config: {e}")
             return False
     
     async def get_user_voicebox_history(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:

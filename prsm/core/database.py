@@ -529,6 +529,29 @@ class ModelRegistryModel(Base):
     )
 
 
+class UserAPIConfigModel(Base):
+    """
+    Database model for user LLM provider API configurations.
+
+    Persists per-user, per-provider API keys and settings across restarts.
+    Config data is stored as JSON; encryption at rest is a future enhancement
+    (see known technical debt in project plan).
+    """
+    __tablename__ = "user_api_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    user_id = Column(String(255), nullable=False, index=True)
+    provider = Column(String(100), nullable=False)
+    config_data = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint('user_id', 'provider', name='uq_user_api_config_provider'),
+        Index('idx_user_api_config_user', 'user_id'),
+    )
+
+
 # === Database Session Management ===
 
 @asynccontextmanager
