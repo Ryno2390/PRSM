@@ -1002,12 +1002,11 @@ class TestErrorHandling:
             mock_fetch.return_value = None
             
             result = await content_provider._request_from_provider(
-                "QmCID", "provider", 30.0, None
+                "QmCID", "provider", 0.1, None  # 0.1s: future never resolves in tests
             )
-            
-            # Should return None for gateway failure
-            # (This tests the response handling path)
-            assert result is None or True  # Depends on setup
+
+            # No transport is active so the future times out immediately → None
+            assert result is None
 
 
 # =============================================================================

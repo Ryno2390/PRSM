@@ -48,6 +48,7 @@ JOB_TYPE_PREFERRED_BACKENDS = {
     JobType.INFERENCE: ["anthropic", "openai", "local"],
     JobType.EMBEDDING: ["openai", "local"],
     JobType.BENCHMARK: ["local", "anthropic", "openai"],
+    JobType.TRAINING: ["local", "anthropic", "openai"],  # Training: local first for large workloads
 }
 
 

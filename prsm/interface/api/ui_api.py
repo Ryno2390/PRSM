@@ -71,67 +71,132 @@ async def create_conversation(conversation_data: Dict[str, Any]) -> Dict[str, An
 
 
 @router.post("/conversations/{conversation_id}/messages")
-async def send_message(conversation_id: str, message_data: Dict[str, Any]) -> Dict[str, Any]:
+async def send_message(
+    conversation_id: str,
+    message_data: Dict[str, Any],
+) -> Dict[str, Any]:
     """
-    Send a message in a conversation
-    
-    📤 MESSAGE PROCESSING:
-    Processes user messages through NWTN orchestrator with
-    real-time streaming response for the UI
+    Send a message in a conversation and get a real NWTN response.
+
+    Routes the user's message through NeuroSymbolicOrchestrator (System 1 +
+    optional System 2 verification), deducts FTNS from the user's account
+    for tokens consumed, and returns the AI response in the UI format.
+
+    FTNS deduction is non-blocking: if the database is unavailable the
+    response still succeeds with ftns_charged=0 in the metadata.
+    Anonymous users (user_id="anonymous") are not charged.
     """
-    try:
-        # Validate message
-        if "content" not in message_data:
-            raise HTTPException(
-                status_code=400,
-                detail="Missing message content"
-            )
-        
-        message_id = str(uuid4())
-        message = {
-            "message_id": message_id,
-            "conversation_id": conversation_id,
-            "user_id": message_data.get("user_id", "anonymous"),
-            "content": message_data["content"],
-            "timestamp": datetime.now().isoformat(),
-            "type": "user_message",
-            "metadata": {
-                "ui_source": True,
-                "processing_mode": message_data.get("mode", "adaptive")
-            }
-        }
-        
-        # Process through NWTN (simplified for UI)
-        ai_response = {
-            "message_id": str(uuid4()),
-            "conversation_id": conversation_id,
-            "content": f"AI response to: {message_data['content'][:50]}...",
-            "timestamp": datetime.now().isoformat(),
-            "type": "ai_response",
-            "model": "nwtn-v1",
-            "metadata": {
-                "processing_time": 1.23,
-                "tokens_used": 150,
-                "confidence": 0.92
-            }
-        }
-        
-        logger.info("Message processed via UI",
-                   conversation_id=conversation_id,
-                   message_id=message_id)
-        
-        return {
-            "success": True,
-            "user_message": message,
-            "ai_response": ai_response
-        }
-        
-    except Exception as e:
-        logger.error("Failed to process message", error=str(e))
+    import os
+    import time
+    from prsm.compute.nwtn.reasoning.s1_neuro_symbolic import NeuroSymbolicOrchestrator
+    from prsm.core.database import FTNSQueries
+
+    # ── Validate input ───────────────────────────────────────────────────────
+    if "content" not in message_data:
         raise HTTPException(
-            status_code=500,
-            detail="Failed to process message"
+            status_code=400,
+            detail="Missing required field: content",
         )
+
+    user_id     = message_data.get("user_id", "anonymous")
+    prompt      = message_data["content"]
+    context     = message_data.get("context", "")  # optional prior context
+    message_id  = str(uuid4())
+    session_id  = str(uuid4())  # unique per request — used for FTNS idempotency
+
+    # ── Build user message record ────────────────────────────────────────────
+    user_message = {
+        "message_id":      message_id,
+        "conversation_id": conversation_id,
+        "user_id":         user_id,
+        "content":         prompt,
+        "timestamp":       datetime.now().isoformat(),
+        "type":            "user_message",
+        "metadata": {
+            "ui_source":       True,
+            "processing_mode": message_data.get("mode", "adaptive"),
+        },
+    }
+
+    # ── NWTN inference ───────────────────────────────────────────────────────
+    start_time = time.time()
+    try:
+        orchestrator = NeuroSymbolicOrchestrator(node_id="ui_api")
+        result = await orchestrator.solve_task(prompt, context)
+    except Exception as exc:
+        logger.error("NWTN inference failed in UI chat",
+                     conversation_id=conversation_id,
+                     error=str(exc))
+        raise HTTPException(
+            status_code=502,
+            detail="AI inference temporarily unavailable — please retry",
+        )
+    processing_time = round(time.time() - start_time, 3)
+
+    # ── FTNS deduction (non-blocking, skipped for anonymous) ─────────────────
+    tokens_used = result.get("tokens_used", 0)
+    ftns_per_token = float(os.getenv("PRSM_FTNS_PER_TOKEN", "0.01"))
+    ftns_amount = round(tokens_used * ftns_per_token, 6)
+    ftns_charged = 0.0
+
+    if ftns_amount > 0 and user_id != "anonymous":
+        try:
+            deduct_result = await FTNSQueries.execute_atomic_deduct(
+                user_id=user_id,
+                amount=ftns_amount,
+                idempotency_key=f"ui-query:{user_id}:{session_id}",
+                description=f"UI chat: {prompt[:80]}",
+                transaction_type="query_usage",
+            )
+            if deduct_result["success"]:
+                ftns_charged = ftns_amount
+            else:
+                logger.info(
+                    "UI FTNS deduction rejected",
+                    user_id=user_id,
+                    reason=deduct_result.get("error_message"),
+                )
+        except Exception as exc:
+            logger.warning(
+                "UI FTNS deduction unavailable (response still delivered)",
+                user_id=user_id,
+                error=str(exc),
+            )
+
+    # ── Build AI response record ─────────────────────────────────────────────
+    ai_response = {
+        "message_id":      str(uuid4()),
+        "conversation_id": conversation_id,
+        "content":         result["output"],          # real LLM content
+        "timestamp":       datetime.now().isoformat(),
+        "type":            "ai_response",
+        "model":           "nwtn-v1",
+        "metadata": {
+            "processing_time":   processing_time,     # real wall-clock seconds
+            "tokens_used":       tokens_used,          # real token count
+            "confidence":        result.get("reward", 0.0),  # S2 reward signal
+            "verification_hash": result.get("verification_hash"),
+            "inference_source":  result.get("inference_source", "unknown"),
+            "mode":              result.get("mode"),   # "light" or "deep"
+            "ftns_charged":      ftns_charged,
+        },
+    }
+
+    logger.info(
+        "UI message processed via NWTN",
+        conversation_id=conversation_id,
+        message_id=message_id,
+        tokens_used=tokens_used,
+        inference_source=result.get("inference_source"),
+        processing_time=processing_time,
+        ftns_charged=ftns_charged,
+    )
+
+    return {
+        "success":      True,
+        "user_message": user_message,
+        "ai_response":  ai_response,
+    }
 
 
 @router.get("/conversations/{conversation_id}")
