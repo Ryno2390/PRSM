@@ -50,7 +50,6 @@ from ..agents.routers.tool_router import ToolRouter, ToolRequest, MCPToolSpec, T
 from prsm.economy.marketplace.real_marketplace_service import RealMarketplaceService
 from prsm.economy.marketplace.database_models import MCPToolListing
 from ..integrations.security.sandbox_manager import SandboxManager, ToolExecutionRequest
-from prsm.economy.tokenomics.ftns_service import FTNSService
 from .production_training_pipeline import ProductionTrainingPipeline, TeacherModelConnector, TrainingConfig
 
 logger = structlog.get_logger(__name__)
@@ -527,7 +526,6 @@ class ToolAwareTrainingPipeline(ProductionTrainingPipeline):
         # Tool-specific components
         self.tool_router = ToolRouter()
         self.sandbox_manager = SandboxManager()
-        self.ftns_service = FTNSService()
         
         # Tool training configuration
         self.tool_training_enabled = getattr(settings, "PRSM_ENABLE_TOOL_TRAINING", True)
