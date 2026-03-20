@@ -449,6 +449,50 @@ class ContentProvenanceModel(Base):
     )
 
 
+class GovernanceProposalModel(Base):
+    """
+    Database model for governance proposals.
+
+    Persists TokenWeightedVoting.proposals dict across restarts. Stores
+    aggregate vote counts rather than individual vote records (sufficient
+    for MVP — individual votes are reconstructible from event logs later).
+
+    Note: required_quorum stored as Float for cross-proposal comparison;
+    total_voting_power stored as Float to avoid Decimal serialization issues.
+    """
+    __tablename__ = "governance_proposals"
+
+    proposal_id  = Column(UUID(as_uuid=True), primary_key=True)
+    proposer_id  = Column(String(255), nullable=False, index=True)
+    title        = Column(String(500), nullable=False)
+    description  = Column(Text, nullable=False)
+    proposal_type = Column(String(100), nullable=False, index=True)
+    status        = Column(String(50),  nullable=False, default="active", index=True)
+
+    # Aggregate vote state — updated on each cast_vote() call
+    votes_for          = Column(Integer, nullable=False, default=0)
+    votes_against      = Column(Integer, nullable=False, default=0)
+    total_voting_power = Column(Float,   nullable=False, default=0.0)
+    required_quorum    = Column(Float,   nullable=True)
+
+    # Voting window
+    voting_starts = Column(DateTime(timezone=True), nullable=True)
+    voting_ends   = Column(DateTime(timezone=True), nullable=True)
+
+    # Flexible metadata (implementation_details, budget_impact, etc.)
+    proposal_metadata = Column(JSON, default=dict)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
+                        onupdate=func.now())
+
+    __table_args__ = (
+        Index('idx_governance_status',   'status'),
+        Index('idx_governance_proposer', 'proposer_id'),
+        Index('idx_governance_created',  'created_at'),
+    )
+
+
 class ModelRegistryModel(Base):
     """
     Database model for the global model registry
@@ -1147,6 +1191,165 @@ class ProvenanceQueries:
                 ]
             except Exception as e:
                 logger.error(f"ProvenanceQueries.load_all_for_node failed: {e}")
+                return []
+
+
+class GovernanceQueries:
+    """Query helpers for governance proposal operations.
+
+    Accepts GovernanceProposal Pydantic objects directly (no circular
+    import issues since GovernanceProposal is from prsm.core.models,
+    not from prsm.economy.governance).
+    """
+
+    @staticmethod
+    async def upsert_proposal(proposal: "GovernanceProposal") -> bool:
+        """
+        Insert or update a governance proposal record.
+
+        Uses ORM session.get() + conditional insert for PostgreSQL/SQLite
+        compatibility (avoids dialect-specific ON CONFLICT syntax).
+
+        Returns True on success, False on failure.
+        """
+        async with get_async_session() as session:
+            try:
+                existing = await session.get(
+                    GovernanceProposalModel, proposal.proposal_id
+                )
+                if existing:
+                    existing.status             = proposal.status
+                    existing.votes_for          = proposal.votes_for
+                    existing.votes_against      = proposal.votes_against
+                    existing.total_voting_power = float(proposal.total_voting_power)
+                    existing.voting_starts      = proposal.voting_starts
+                    existing.voting_ends        = proposal.voting_ends
+                    existing.proposal_metadata  = proposal.metadata or {}
+                else:
+                    row = GovernanceProposalModel(
+                        proposal_id        = proposal.proposal_id,
+                        proposer_id        = proposal.proposer_id,
+                        title              = proposal.title,
+                        description        = proposal.description,
+                        proposal_type      = proposal.proposal_type,
+                        status             = proposal.status,
+                        votes_for          = proposal.votes_for,
+                        votes_against      = proposal.votes_against,
+                        total_voting_power = float(proposal.total_voting_power),
+                        required_quorum    = float(proposal.required_quorum)
+                                            if proposal.required_quorum else None,
+                        voting_starts      = proposal.voting_starts,
+                        voting_ends        = proposal.voting_ends,
+                        proposal_metadata  = proposal.metadata or {},
+                    )
+                    session.add(row)
+                await session.commit()
+                return True
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"GovernanceQueries.upsert_proposal failed: {e}")
+                return False
+
+    @staticmethod
+    async def get_proposal(proposal_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a single proposal by ID (UUID string).
+
+        Returns a serializable dict or None if not found. Used by the
+        GET /api/v1/governance/proposals/{id} endpoint when the proposal
+        isn't in the active in-memory set.
+        """
+        async with get_async_session() as session:
+            try:
+                from uuid import UUID
+                row = await session.get(
+                    GovernanceProposalModel, UUID(proposal_id)
+                )
+                if not row:
+                    return None
+                return {
+                    "proposal_id":        str(row.proposal_id),
+                    "proposer_id":        row.proposer_id,
+                    "title":              row.title,
+                    "description":        row.description,
+                    "proposal_type":      row.proposal_type,
+                    "status":             row.status,
+                    "votes_for":          row.votes_for,
+                    "votes_against":      row.votes_against,
+                    "total_voting_power": row.total_voting_power,
+                    "required_quorum":    row.required_quorum,
+                    "voting_starts":      row.voting_starts.isoformat()
+                                         if row.voting_starts else None,
+                    "voting_ends":        row.voting_ends.isoformat()
+                                         if row.voting_ends else None,
+                    "proposal_metadata":  row.proposal_metadata or {},
+                    "created_at":         row.created_at.isoformat()
+                                         if row.created_at else None,
+                }
+            except Exception as e:
+                logger.error(f"GovernanceQueries.get_proposal failed: {e}")
+                return None
+
+    @staticmethod
+    async def load_all_proposals(
+        status_filter: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Load all proposals, optionally filtered by status.
+
+        Called during system startup to hydrate the in-memory proposals
+        dict, and by list endpoints when in-memory state is empty.
+
+        Returns list of dicts suitable for GovernanceProposal reconstruction.
+        """
+        async with get_async_session() as session:
+            try:
+                if status_filter:
+                    query = text("""
+                        SELECT proposal_id, proposer_id, title, description,
+                               proposal_type, status, votes_for, votes_against,
+                               total_voting_power, required_quorum,
+                               voting_starts, voting_ends, proposal_metadata,
+                               created_at
+                        FROM governance_proposals
+                        WHERE status = :status
+                        ORDER BY created_at DESC
+                    """)
+                    result = await session.execute(query, {"status": status_filter})
+                else:
+                    query = text("""
+                        SELECT proposal_id, proposer_id, title, description,
+                               proposal_type, status, votes_for, votes_against,
+                               total_voting_power, required_quorum,
+                               voting_starts, voting_ends, proposal_metadata,
+                               created_at
+                        FROM governance_proposals
+                        ORDER BY created_at DESC
+                    """)
+                    result = await session.execute(query)
+
+                rows = result.fetchall()
+                return [
+                    {
+                        "proposal_id":        str(row.proposal_id),
+                        "proposer_id":        row.proposer_id,
+                        "title":              row.title,
+                        "description":        row.description,
+                        "proposal_type":      row.proposal_type,
+                        "status":             row.status,
+                        "votes_for":          row.votes_for,
+                        "votes_against":      row.votes_against,
+                        "total_voting_power": float(row.total_voting_power or 0),
+                        "required_quorum":    row.required_quorum,
+                        "voting_starts":      row.voting_starts,
+                        "voting_ends":        row.voting_ends,
+                        "metadata":           row.proposal_metadata or {},
+                        "created_at":         row.created_at,
+                    }
+                    for row in rows
+                ]
+            except Exception as e:
+                logger.error(f"GovernanceQueries.load_all_proposals failed: {e}")
                 return []
 
 
