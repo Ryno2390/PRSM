@@ -709,6 +709,14 @@ class ContentUploader:
             except Exception as e:
                 logger.error(f"Royalty credit failed: {e}")
 
+            # Wire to platform FTNS (non-blocking, own error handling)
+            await self._platform_royalty_transfer(
+                from_user=accessor_id,
+                to_user=self.identity.node_id,
+                amount=total_royalty,
+                cid=cid,
+            )
+
         # Persist updated access stats to DB (non-blocking)
         await self._update_provenance_access(cid, content.royalty_rate)
 
@@ -734,6 +742,15 @@ class ContentUploader:
         except Exception as e:
             logger.error(f"Derivative royalty credit failed: {e}")
 
+        # Wire derivative share to platform FTNS
+        await self._platform_royalty_transfer(
+            from_user=accessor_id,
+            to_user=self.identity.node_id,
+            amount=derivative_share,
+            cid=cid,
+            description=f"Derivative royalty 70%: {cid[:12]}...",
+        )
+
         # Credit source material creators (split evenly among parents)
         parent_creators = self._resolve_parent_creators(content.parent_cids)
         if parent_creators:
@@ -751,6 +768,15 @@ class ContentUploader:
                         content.total_royalties += per_parent
                     except Exception as e:
                         logger.error(f"Source royalty credit failed: {e}")
+
+                    # Wire source share to platform FTNS
+                    await self._platform_royalty_transfer(
+                        from_user=accessor_id,
+                        to_user=self.identity.node_id,
+                        amount=per_parent,
+                        cid=cid,
+                        description=f"Source royalty 25%/{len(parent_creators)}: {cid[:12]}...",
+                    )
                 # Remote source creators get credited when they receive the
                 # GOSSIP_CONTENT_ACCESS message on their own node
         else:
@@ -765,6 +791,15 @@ class ContentUploader:
                 content.total_royalties += source_pool
             except Exception as e:
                 logger.error(f"Unclaimed source royalty credit failed: {e}")
+
+            # Wire unclaimed source pool to platform FTNS
+            await self._platform_royalty_transfer(
+                from_user=accessor_id,
+                to_user=self.identity.node_id,
+                amount=source_pool,
+                cid=cid,
+                description=f"Unclaimed source royalty 25%: {cid[:12]}...",
+            )
 
         # Network fee
         try:
@@ -1086,6 +1121,15 @@ class ContentUploader:
                 except Exception as e:
                     logger.error(f"Source royalty credit failed: {e}")
 
+                # Wire gossip source royalty to platform FTNS
+                await self._platform_royalty_transfer(
+                    from_user=accessor_id,
+                    to_user=self.identity.node_id,
+                    amount=source_royalty,
+                    cid=cid,
+                    description=f"Source royalty (gossip) for derivative {cid[:12]}...",
+                )
+
     async def _send_direct(self, peer_id: str, payload: Dict[str, Any]) -> None:
         """Send a direct P2P message to a specific peer."""
         if not self.transport:
@@ -1198,6 +1242,75 @@ class ContentUploader:
         except Exception as e:
             logger.warning(
                 f"Provenance access-stats update failed for {cid[:12]}...: {e}"
+            )
+
+    async def _platform_royalty_transfer(
+        self,
+        from_user: str,
+        to_user: str,
+        amount: float,
+        cid: str,
+        description: str = "",
+    ) -> None:
+        """
+        Transfer royalty payment via platform FTNS alongside the local ledger credit.
+
+        The local ledger credit is authoritative for the node's own accounting and
+        has already been applied before this method is called. This method keeps the
+        platform FTNS balances (visible via the API) in sync.
+
+        Both from_user and to_user are node IDs, used directly as platform FTNS
+        account identifiers. AtomicFTNSService.transfer_tokens_atomic() auto-creates
+        accounts for first-time nodes via ensure_account_exists().
+
+        Non-blocking: any exception — DB unavailable, insufficient balance,
+        same-account transfer — is logged but does not affect the already-applied
+        local ledger credit or the served content request.
+
+        The 5% network fee is NOT wired here; it requires a pre-configured system
+        account and is deferred to Phase 3.
+
+        Args:
+            from_user: Node ID of the content accessor (pays the royalty)
+            to_user:   Node ID of the content creator (earns the royalty)
+            amount:    FTNS to transfer (positive float, truncated to 6 decimal places)
+            cid:       Content identifier — used in description and idempotency key
+            description: Human-readable label for the transaction record
+        """
+        if amount <= 0 or from_user == to_user:
+            return  # Guards already checked by caller, but defence-in-depth
+
+        try:
+            from decimal import Decimal
+            from prsm.economy.tokenomics.atomic_ftns_service import AtomicFTNSService
+            import uuid as _uuid
+
+            service = AtomicFTNSService()
+            idempotency_key = f"royalty:{cid}:{from_user}:{_uuid.uuid4().hex[:16]}"
+
+            result = await service.transfer_tokens_atomic(
+                from_user_id=from_user,
+                to_user_id=to_user,
+                amount=Decimal(str(round(amount, 6))),
+                idempotency_key=idempotency_key,
+                description=description or f"Content royalty: {cid[:12]}...",
+            )
+
+            if result.success:
+                logger.debug(
+                    f"Platform royalty: {from_user[:8]}→{to_user[:8]} "
+                    f"{amount:.4f} FTNS for {cid[:12]}..."
+                )
+            else:
+                # Most common cause: accessor has zero FTNS balance.
+                # Local ledger credit is already applied — content was served.
+                logger.info(
+                    f"Platform royalty deferred for {cid[:12]}...: "
+                    f"{result.error_message} (local ledger credit intact)"
+                )
+        except Exception as e:
+            logger.warning(
+                f"Platform royalty transfer unavailable for {cid[:12]}...: {e}",
             )
 
     async def _hydrate_from_db(self) -> int:
