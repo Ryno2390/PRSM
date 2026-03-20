@@ -1375,8 +1375,10 @@ class GovernanceExecutor:
                 verification_steps.append(f"Treasury spend executed: {amount} FTNS to {recipient}")
                 affected_resources.append(f"treasury:{recipient}")
             else:
-                # Simulate if no service available
-                verification_steps.append("Treasury spend simulated (no service)")
+                raise RuntimeError(
+                    "Treasury spend requires a real FTNS service. "
+                    "Wire GovernanceExecutor._ftns_service before executing treasury proposals."
+                )
             
             execution_time = datetime.now(timezone.utc)
             duration_ms = int((execution_time - start_time).total_seconds() * 1000)
@@ -1506,7 +1508,10 @@ class GovernanceExecutor:
                 await self._network_manager.eject_member(member_id, reason)
                 verification_steps.append(f"Member {member_id} ejected from network")
             else:
-                verification_steps.append("Member ejection simulated (no network manager)")
+                raise RuntimeError(
+                    "Member ejection requires a network manager with eject_member(). "
+                    "Wire GovernanceExecutor._network_manager before executing ejection proposals."
+                )
             
             # Slash stake if applicable
             slash_percentage = action.metadata.get("slash_percentage", 0)
@@ -1583,7 +1588,10 @@ class GovernanceExecutor:
                 await self._network_manager.upgrade_protocol(new_version, upgrade_data)
                 verification_steps.append(f"Protocol upgraded to {new_version}")
             else:
-                verification_steps.append("Protocol upgrade simulated (no network manager)")
+                raise RuntimeError(
+                    "Protocol upgrade requires a network manager with upgrade_protocol(). "
+                    "Wire GovernanceExecutor._network_manager before executing upgrade proposals."
+                )
             
             affected_resources.append("network:protocol")
             

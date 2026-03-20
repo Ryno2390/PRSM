@@ -598,8 +598,9 @@ class TestGovernanceExecutor:
         
         result = await governance_executor._execute_treasury_spend(action)
         
-        # Should succeed even without FTNS service (simulated)
-        assert result.success is True
+        # Must fail without FTNS service — silent simulation is a lie
+        assert result.success is False
+        assert "FTNS service" in result.error_details
     
     @pytest.mark.asyncio
     async def test_execute_treasury_spend_missing_params(self, governance_executor):
@@ -1047,6 +1048,119 @@ class TestGovernanceIntegration:
         
         assert result is not None
         assert result.action_id == action.action_id
+
+    @pytest.mark.asyncio
+    async def test_execute_treasury_spend_with_service(self, governance_executor):
+        """Treasury spend succeeds when FTNS service is present and supports transfer."""
+        from unittest.mock import AsyncMock, MagicMock
+        # Use spec to ensure only 'transfer' method exists (not treasury_spend)
+        mock_ftns = MagicMock()
+        mock_ftns.transfer = AsyncMock(return_value=True)
+        # Ensure treasury_spend does NOT exist so code uses transfer
+        del mock_ftns.treasury_spend
+        governance_executor.set_ftns_service(mock_ftns)
+
+        action = GovernanceAction(
+            action_id=str(uuid4()),
+            action_type=ProposalType.TREASURY_SPEND,
+            target_module="treasury",
+            target_parameter="spend",
+            current_value=0,
+            proposed_value=500,
+            execution_delay=0,
+            requires_timelock=False,
+            metadata={"recipient": "user_abc", "amount": 500, "reason": "Test"}
+        )
+
+        result = await governance_executor._execute_treasury_spend(action)
+        assert result.success is True
+        mock_ftns.transfer.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_execute_member_ejection_no_network_manager(self, governance_executor):
+        """Member ejection fails explicitly when no network manager is configured."""
+        action = GovernanceAction(
+            action_id=str(uuid4()),
+            action_type=ProposalType.MEMBER_EJECTION,
+            target_module="network",
+            target_parameter="member",
+            current_value=None,
+            proposed_value=None,
+            execution_delay=0,
+            requires_timelock=False,
+            metadata={"member_id": "bad_actor_node", "reason": "Governance vote"}
+        )
+
+        result = await governance_executor._execute_member_ejection(action)
+        assert result.success is False
+        assert "network manager" in result.error_details
+
+    @pytest.mark.asyncio
+    async def test_execute_member_ejection_with_network_manager(self, governance_executor):
+        """Member ejection succeeds when network manager is present."""
+        from unittest.mock import AsyncMock
+        mock_network = AsyncMock()
+        mock_network.eject_member = AsyncMock(return_value=True)
+        governance_executor.set_network_manager(mock_network)
+
+        action = GovernanceAction(
+            action_id=str(uuid4()),
+            action_type=ProposalType.MEMBER_EJECTION,
+            target_module="network",
+            target_parameter="member",
+            current_value=None,
+            proposed_value=None,
+            execution_delay=0,
+            requires_timelock=False,
+            metadata={"member_id": "bad_actor_node", "reason": "Governance vote"}
+        )
+
+        result = await governance_executor._execute_member_ejection(action)
+        assert result.success is True
+        mock_network.eject_member.assert_awaited_once_with("bad_actor_node", "Governance vote")
+
+    @pytest.mark.asyncio
+    async def test_execute_protocol_upgrade_no_network_manager(self, governance_executor):
+        """Protocol upgrade fails explicitly when no network manager is configured."""
+        action = GovernanceAction(
+            action_id=str(uuid4()),
+            action_type=ProposalType.PROTOCOL_UPGRADE,
+            target_module="network",
+            target_parameter="version",
+            current_value="1.0.0",
+            proposed_value="1.1.0",
+            execution_delay=0,
+            requires_timelock=False,
+            metadata={"version": "1.1.0", "upgrade_data": {}}
+        )
+
+        result = await governance_executor._execute_protocol_upgrade(action)
+        assert result.success is False
+        assert "network manager" in result.error_details
+
+    @pytest.mark.asyncio
+    async def test_execute_protocol_upgrade_with_network_manager(self, governance_executor):
+        """Protocol upgrade succeeds when network manager is present."""
+        from unittest.mock import AsyncMock
+        mock_network = AsyncMock()
+        mock_network.upgrade_protocol = AsyncMock(return_value=True)
+        governance_executor.set_network_manager(mock_network)
+
+        action = GovernanceAction(
+            action_id=str(uuid4()),
+            action_type=ProposalType.PROTOCOL_UPGRADE,
+            target_module="network",
+            target_parameter="version",
+            current_value="1.0.0",
+            proposed_value="1.1.0",
+            execution_delay=0,
+            requires_timelock=False,
+            metadata={"version": "1.1.0", "upgrade_data": {}}
+        )
+
+        result = await governance_executor._execute_protocol_upgrade(action)
+        assert result.success is True
+        mock_network.upgrade_protocol.assert_awaited_once_with("1.1.0", {})
 
 
 # === Global Instance Tests ===
