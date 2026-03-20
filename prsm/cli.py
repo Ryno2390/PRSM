@@ -2582,21 +2582,29 @@ def governance():
 @governance.command()
 @click.option('--limit', default=10, type=int, help='Maximum proposals to show')
 @click.option('--status', type=click.Choice(['draft', 'active', 'voting', 'passed', 'rejected', 'executed']), help='Filter by status')
-@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+@click.option('--api-url', default=None, help='PRSM API URL')
 def proposals(limit: int, status: str, api_url: str):
     """List governance proposals."""
     import httpx
     
-    params = f"limit={limit}"
+    api_url = _api_url_from_creds(api_url)
+    headers = _auth_headers()
+    
+    params = {"limit": limit}
     if status:
-        params += f"&status={status}"
+        params["status_filter"] = status
     
     try:
-        response = httpx.get(f"{api_url}/api/v1/governance/proposals?{params}", timeout=10.0)
+        response = httpx.get(
+            f"{api_url}/api/v1/governance/proposals",
+            params=params,
+            headers=headers,
+            timeout=10.0
+        )
         
         if response.status_code == 200:
-            data = response.json()
-            proposals = data.get('proposals', [])
+            outer = response.json()
+            proposals = outer.get("data", {}).get("proposals", [])
             
             if not proposals:
                 console.print("No proposals found.", style="dim")
@@ -2610,7 +2618,7 @@ def proposals(limit: int, status: str, api_url: str):
             table.add_column("Votes", style="green")
             
             for prop in proposals:
-                votes = f"✓{prop.get('votes_yes', 0):.0f} ✗{prop.get('votes_no', 0):.0f}"
+                votes = f"✓{prop.get('votes_for', 0):.0f} ✗{prop.get('votes_against', 0):.0f}"
                 table.add_row(
                     prop.get('proposal_id', 'N/A')[:12] + "...",
                     prop.get('title', 'N/A')[:30],
@@ -2619,6 +2627,8 @@ def proposals(limit: int, status: str, api_url: str):
                     votes
                 )
             console.print(table)
+        elif response.status_code == 401:
+            console.print("❌ Session expired. Run: prsm login", style="red")
         else:
             console.print(f"❌ Failed to list proposals: {response.status_code}", style="red")
     except httpx.ConnectError:
@@ -2629,21 +2639,31 @@ def proposals(limit: int, status: str, api_url: str):
 
 @governance.command()
 @click.argument('proposal-id')
-@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+@click.option('--api-url', default=None, help='PRSM API URL')
 def proposal(proposal_id: str, api_url: str):
     """Get details of a specific proposal."""
     import httpx
     
+    api_url = _api_url_from_creds(api_url)
+    headers = _auth_headers()
+    
     try:
-        response = httpx.get(f"{api_url}/api/v1/governance/proposals/{proposal_id}", timeout=10.0)
+        response = httpx.get(
+            f"{api_url}/api/v1/governance/proposals/{proposal_id}",
+            headers=headers,
+            timeout=10.0
+        )
         
         if response.status_code == 200:
-            data = response.json()
+            outer = response.json()
+            data = outer.get("data", {}).get("proposal", {})
+            results = outer.get("data", {}).get("results")
+            
             console.print(f"\n📋 {data.get('title')}", style="bold cyan")
             console.print(f"   ID: {data.get('proposal_id')}")
             console.print(f"   Status: {data.get('status')}")
             console.print(f"   Type: {data.get('proposal_type')}")
-            console.print(f"   Proposer: {data.get('proposer', 'N/A')[:16]}...")
+            console.print(f"   Proposer: {data.get('proposer_id', 'N/A')[:16]}...")
             console.print()
             console.print("Description:", style="bold")
             console.print(data.get('description', 'N/A'))
@@ -2652,14 +2672,20 @@ def proposal(proposal_id: str, api_url: str):
             table = Table(title="Voting Results")
             table.add_column("Choice", style="cyan")
             table.add_column("Votes (FTNS)", style="green")
-            table.add_row("Yes", f"{data.get('votes_yes', 0):.2f}")
-            table.add_row("No", f"{data.get('votes_no', 0):.2f}")
-            table.add_row("Abstain", f"{data.get('votes_abstain', 0):.2f}")
+            table.add_row("For", f"{data.get('votes_for', 0):.2f}")
+            table.add_row("Against", f"{data.get('votes_against', 0):.2f}")
             console.print(table)
+            
+            if results:
+                console.print(f"\n   Results:", style="bold")
+                console.print(f"   - Passed: {results.get('passed', False)}")
+                console.print(f"   - Quorum met: {results.get('quorum_met', False)}")
             
             console.print(f"\n   Quorum required: {data.get('quorum', 0) * 100:.1f}%")
             console.print(f"   Threshold: {data.get('threshold', 0) * 100:.1f}%")
             console.print(f"   Voting ends: {data.get('voting_ends', 'N/A')}")
+        elif response.status_code == 401:
+            console.print("❌ Session expired. Run: prsm login", style="red")
         elif response.status_code == 404:
             console.print(f"❌ Proposal not found: {proposal_id}", style="red")
         else:
@@ -2672,27 +2698,42 @@ def proposal(proposal_id: str, api_url: str):
 
 @governance.command()
 @click.argument('proposal-id')
-@click.option('--choice', required=True, type=click.Choice(['yes', 'no', 'abstain']), help='Vote choice')
-@click.option('--reason', help='Reason for your vote')
-@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
-def vote(proposal_id: str, choice: str, reason: str, api_url: str):
+@click.option('--choice', required=True, type=click.Choice(['for', 'against']), help='Vote choice')
+@click.option('--rationale', help='Rationale for your vote')
+@click.option('--api-url', default=None, help='PRSM API URL')
+def vote(proposal_id: str, choice: str, rationale: str, api_url: str):
     """Cast a vote on a proposal."""
     import httpx
+    
+    api_url = _api_url_from_creds(api_url)
+    headers = _auth_headers()
+    
+    # Convert choice to boolean vote_choice
+    vote_choice = (choice == "for")
     
     console.print(f"🗳️  Casting vote '{choice}' on proposal {proposal_id}...", style="bold blue")
     
     try:
         response = httpx.post(
-            f"{api_url}/api/v1/governance/proposals/{proposal_id}/vote",
-            json={"choice": choice, "reason": reason},
+            f"{api_url}/api/v1/governance/vote",
+            json={
+                "proposal_id": proposal_id,
+                "vote_choice": vote_choice,
+                "rationale": rationale
+            },
+            headers=headers,
             timeout=10.0
         )
         
         if response.status_code == 200:
-            data = response.json()
+            outer = response.json()
+            data = outer.get("data", {}).get("vote", {})
             console.print(f"✅ Vote cast successfully!", style="bold green")
-            console.print(f"   Vote ID: {data.get('vote_id')}")
-            console.print(f"   Voting power: {data.get('voting_power', 0):.2f} FTNS")
+            console.print(f"   Proposal ID: {data.get('proposal_id')}")
+            console.print(f"   Vote choice: {'For' if data.get('vote_choice') else 'Against'}")
+            console.print(f"   Cast at: {data.get('cast_at', 'N/A')}")
+        elif response.status_code == 401:
+            console.print("❌ Session expired. Run: prsm login", style="red")
         else:
             console.print(f"❌ Failed to cast vote: {response.status_code}", style="red")
             console.print(f"   {response.text}")
@@ -2703,18 +2744,29 @@ def vote(proposal_id: str, choice: str, reason: str, api_url: str):
 
 
 @governance.command()
-@click.option('--title', required=True, help='Proposal title')
-@click.option('--description', required=True, help='Proposal description')
+@click.option('--title', required=True, help='Proposal title (min 10 characters)')
+@click.option('--description', required=True, help='Proposal description (min 100 characters)')
 @click.option('--type', 'proposal_type', required=True,
-              type=click.Choice(['parameter_change', 'protocol_upgrade', 'treasury_spend',
-                                'model_addition', 'model_removal', 'fee_adjustment',
-                                'governance_change', 'other']),
+              type=click.Choice(['safety', 'economic', 'technical', 'governance',
+                                'parameter_change', 'constitutional', 'emergency',
+                                'operational', 'community']),
               help='Type of proposal')
-@click.option('--duration', default=7, type=int, help='Voting duration in days')
-@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
-def create_proposal(title: str, description: str, proposal_type: str, duration: int, api_url: str):
+@click.option('--api-url', default=None, help='PRSM API URL')
+def create_proposal(title: str, description: str, proposal_type: str, api_url: str):
     """Create a new governance proposal."""
     import httpx
+    
+    # Client-side validation
+    if len(title) < 10:
+        console.print("❌ Title must be at least 10 characters", style="red")
+        return
+    
+    if len(description) < 100:
+        console.print("❌ Description must be at least 100 characters", style="red")
+        return
+    
+    api_url = _api_url_from_creds(api_url)
+    headers = _auth_headers()
     
     console.print(f"📝 Creating proposal: {title}...", style="bold blue")
     
@@ -2724,19 +2776,27 @@ def create_proposal(title: str, description: str, proposal_type: str, duration: 
             json={
                 "title": title,
                 "description": description,
-                "proposal_type": proposal_type,
-                "duration_days": duration
+                "proposal_type": proposal_type
             },
+            headers=headers,
             timeout=10.0
         )
         
         if response.status_code == 200:
-            data = response.json()
+            outer = response.json()
+            data = outer.get("data", {}).get("proposal", {})
             console.print(f"✅ Proposal created!", style="bold green")
             console.print(f"   Proposal ID: {data.get('proposal_id')}")
+            console.print(f"   Title: {data.get('title')}")
             console.print(f"   Status: {data.get('status')}")
-            console.print(f"   Voting starts: {data.get('voting_starts')}")
             console.print(f"   Voting ends: {data.get('voting_ends')}")
+            console.print(f"   Created at: {data.get('created_at')}")
+        elif response.status_code == 401:
+            console.print("❌ Session expired. Run: prsm login", style="red")
+        elif response.status_code == 422:
+            console.print("❌ Validation error:", style="red")
+            error_data = response.json()
+            console.print(f"   {error_data.get('detail', 'Unknown validation error')}")
         else:
             console.print(f"❌ Failed to create proposal: {response.status_code}", style="red")
             console.print(f"   {response.text}")
@@ -2747,19 +2807,80 @@ def create_proposal(title: str, description: str, proposal_type: str, duration: 
 
 
 @governance.command()
-@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
+@click.option('--api-url', default=None, help='PRSM API URL')
 def voting_power(api_url: str):
-    """Show your voting power."""
+    """Show your voting power and governance status."""
     import httpx
     
+    api_url = _api_url_from_creds(api_url)
+    headers = _auth_headers()
+    
     try:
-        response = httpx.get(f"{api_url}/api/v1/governance/voting-power", timeout=10.0)
+        response = httpx.get(
+            f"{api_url}/api/v1/governance/status",
+            headers=headers,
+            timeout=10.0
+        )
         
         if response.status_code == 200:
-            data = response.json()
-            console.print(f"🗳️  Your voting power: {data.get('voting_power', 0):.2f} FTNS", style="bold green")
+            outer = response.json()
+            data = outer.get("data", {}).get("governance_status", {})
+            
+            if not data:
+                console.print("❌ Governance not activated. Run: prsm governance activate", style="yellow")
+                return
+            
+            console.print(f"🗳️  Your governance status:", style="bold green")
+            console.print(f"   Voting power: {data.get('voting_power', 0):.2f} FTNS")
+            console.print(f"   Participant tier: {data.get('participant_tier', 'N/A')}")
+            console.print(f"   Active: {data.get('is_active', False)}")
+        elif response.status_code == 401:
+            console.print("❌ Session expired. Run: prsm login", style="red")
         else:
-            console.print(f"❌ Failed to get voting power: {response.status_code}", style="red")
+            console.print(f"❌ Failed to get governance status: {response.status_code}", style="red")
+    except httpx.ConnectError:
+        console.print("❌ Cannot connect to PRSM server", style="red")
+    except Exception as e:
+        console.print(f"❌ Error: {e}", style="red")
+
+
+@governance.command()
+@click.option('--tier', required=True,
+              type=click.Choice(['community', 'contributor', 'expert', 'delegate', 'council_member', 'core_team']),
+              help='Participant tier for governance')
+@click.option('--api-url', default=None, help='PRSM API URL')
+def activate(tier: str, api_url: str):
+    """Activate governance participation."""
+    import httpx
+    
+    api_url = _api_url_from_creds(api_url)
+    headers = _auth_headers()
+    
+    console.print(f"🗳️  Activating governance participation as {tier}...", style="bold blue")
+    
+    try:
+        response = httpx.post(
+            f"{api_url}/api/v1/governance/activate",
+            json={
+                "participant_tier": tier,
+                "auto_stake_percentage": 0.5
+            },
+            headers=headers,
+            timeout=10.0
+        )
+        
+        if response.status_code == 200:
+            outer = response.json()
+            data = outer.get("data", {}).get("activation", {})
+            console.print(f"✅ Governance activated!", style="bold green")
+            console.print(f"   Participant tier: {data.get('participant_tier')}")
+            console.print(f"   Voting power: {data.get('voting_power', 0):.2f} FTNS")
+            console.print(f"   Auto-stake: {data.get('auto_stake_percentage', 0) * 100:.0f}%")
+        elif response.status_code == 401:
+            console.print("❌ Session expired. Run: prsm login", style="red")
+        else:
+            console.print(f"❌ Failed to activate governance: {response.status_code}", style="red")
+            console.print(f"   {response.text}")
     except httpx.ConnectError:
         console.print("❌ Cannot connect to PRSM server", style="red")
     except Exception as e:
