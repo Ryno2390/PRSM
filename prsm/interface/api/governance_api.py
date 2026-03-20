@@ -469,6 +469,66 @@ async def create_governance_proposal(
         )
 
 
+@router.get("/proposals", response_model=GovernanceResponse)
+async def list_governance_proposals(
+    status_filter: Optional[str] = Query(
+        None,
+        description="Filter by status: active, draft, approved, rejected, executed"
+    ),
+    current_user: str = Depends(get_current_user),
+) -> GovernanceResponse:
+    """
+    List governance proposals, optionally filtered by status.
+
+    Returns proposals from the active voting system. Proposals are
+    currently in-memory (DB persistence is Phase 2). The list is
+    accurate for the lifetime of the current process.
+    """
+    try:
+        voting_system = get_token_weighted_voting()
+
+        proposals = list(voting_system.proposals.values())
+        if status_filter:
+            proposals = [p for p in proposals if p.status == status_filter]
+
+        proposal_list = [
+            {
+                "proposal_id": str(p.proposal_id),
+                "title": p.title,
+                "description": (
+                    p.description[:200] + "..."
+                    if len(p.description) > 200
+                    else p.description
+                ),
+                "proposal_type": p.proposal_type,
+                "status": p.status,
+                "proposer_id": p.proposer_id,
+                "votes_for": p.votes_for,
+                "votes_against": p.votes_against,
+                "voting_starts": p.voting_starts.isoformat() if p.voting_starts else None,
+                "voting_ends": p.voting_ends.isoformat() if p.voting_ends else None,
+            }
+            for p in proposals
+        ]
+
+        return GovernanceResponse(
+            success=True,
+            message=f"Found {len(proposal_list)} proposal(s)",
+            data={
+                "proposals": proposal_list,
+                "total_count": len(proposal_list),
+                "filter": status_filter or "all",
+            },
+        )
+
+    except Exception as e:
+        logger.error("Failed to list governance proposals", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Governance system temporarily unavailable",
+        )
+
+
 # === Statistics and Information ===
 
 @router.get("/statistics", response_model=GovernanceResponse)

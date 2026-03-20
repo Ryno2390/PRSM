@@ -483,6 +483,64 @@ class TestFTNSAPI:
 
 @pytest.mark.api
 @pytest.mark.integration
+class TestNetworkAndGovernance:
+    """Test network status and governance API endpoints"""
+
+    async def test_network_status_no_placeholder(self, async_test_client):
+        """Test /network/status returns real fields, not a version-gate message."""
+        response = await async_test_client.get("/network/status")
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+
+        # Must have real structural fields, not the old hardcoded placeholder
+        assert "connected_peers" in data
+        assert "status" in data
+        assert isinstance(data["connected_peers"], int)
+        # The old fake message must be gone
+        assert data.get("status") != "P2P networking coming in v0.3.0"
+        # In tests (no node running), status is 'node_not_running'
+        assert data["status"] in ("running", "node_not_running")
+
+    async def test_governance_proposals_no_placeholder(self, async_test_client):
+        """Test /governance/proposals returns real empty state, not a version-gate message."""
+        response = await async_test_client.get("/governance/proposals")
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+
+        # Must have real structural fields
+        assert "active_proposals" in data
+        assert "total_count" in data
+        assert isinstance(data["active_proposals"], list)
+        assert isinstance(data["total_count"], int)
+        # The old fake status message must be gone
+        assert "Governance system coming in" not in str(data)
+
+    async def test_governance_proposals_api_list(
+        self, async_test_client, user_headers, mock_user_for_auth
+    ):
+        """Test GET /api/v1/governance/proposals returns correct structure."""
+        with mock_user_for_auth():
+            response = await async_test_client.get(
+                "/api/v1/governance/proposals",
+                headers=user_headers,
+            )
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+
+        # GovernanceResponse shape
+        assert "success" in data
+        assert data["success"] is True
+        assert "data" in data
+        assert "proposals" in data["data"]
+        assert "total_count" in data["data"]
+        assert isinstance(data["data"]["proposals"], list)
+
+
+@pytest.mark.api
+@pytest.mark.integration
 class TestMarketplaceAPI:
     """Test Marketplace API endpoints"""
     
