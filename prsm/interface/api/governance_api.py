@@ -26,6 +26,7 @@ from prsm.economy.governance.token_distribution import (
 )
 from prsm.economy.governance.voting import get_token_weighted_voting
 from prsm.economy.governance.quadratic_voting import quadratic_voting
+from prsm.core.database import GovernanceQueries
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/v1/governance", tags=["governance"])
@@ -448,7 +449,7 @@ async def create_governance_proposal(
                     "proposal_id": str(proposal_id),
                     "title": request.title,
                     "proposal_type": request.proposal_type,
-                    "status": "draft",
+                    "status": "active",
                     "created_at": datetime.now(timezone.utc).isoformat()
                 }
             }
@@ -526,6 +527,89 @@ async def list_governance_proposals(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Governance system temporarily unavailable",
+        )
+
+
+@router.get("/proposals/{proposal_id}", response_model=GovernanceResponse)
+async def get_governance_proposal(
+    proposal_id: str,
+    current_user: str = Depends(get_current_user),
+) -> GovernanceResponse:
+    """
+    Get a specific governance proposal by ID.
+
+    First checks in-memory proposals, then falls back to database lookup.
+    Returns full proposal details including voting status and metadata.
+    """
+    try:
+        voting_system = get_token_weighted_voting()
+        
+        # Try to find in memory first
+        proposal_uuid = UUID(proposal_id)
+        proposal = voting_system.proposals.get(proposal_uuid)
+        
+        # If not in memory, try database
+        if proposal is None:
+            proposal_data = await GovernanceQueries.get_proposal(proposal_id)
+            if proposal_data is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Proposal {proposal_id} not found"
+                )
+            
+            # Return database record directly
+            return GovernanceResponse(
+                success=True,
+                message="Proposal retrieved from database",
+                data={
+                    "proposal_id": proposal_data["proposal_id"],
+                    "title": proposal_data["title"],
+                    "description": proposal_data["description"],
+                    "proposal_type": proposal_data["proposal_type"],
+                    "status": proposal_data["status"],
+                    "proposer_id": proposal_data["proposer_id"],
+                    "votes_for": proposal_data.get("votes_for", 0),
+                    "votes_against": proposal_data.get("votes_against", 0),
+                    "total_voting_power": proposal_data.get("total_voting_power", 0.0),
+                    "voting_starts": proposal_data.get("voting_starts"),
+                    "voting_ends": proposal_data.get("voting_ends"),
+                    "created_at": proposal_data.get("created_at"),
+                    "updated_at": proposal_data.get("updated_at"),
+                },
+            )
+        
+        # Return in-memory proposal
+        return GovernanceResponse(
+            success=True,
+            message="Proposal retrieved successfully",
+            data={
+                "proposal_id": str(proposal.proposal_id),
+                "title": proposal.title,
+                "description": proposal.description,
+                "proposal_type": proposal.proposal_type,
+                "status": proposal.status,
+                "proposer_id": proposal.proposer_id,
+                "votes_for": proposal.votes_for,
+                "votes_against": proposal.votes_against,
+                "total_voting_power": proposal.total_voting_power,
+                "voting_starts": proposal.voting_starts.isoformat() if proposal.voting_starts else None,
+                "voting_ends": proposal.voting_ends.isoformat() if proposal.voting_ends else None,
+                "created_at": proposal.created_at.isoformat() if proposal.created_at else None,
+            },
+        )
+
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid proposal ID format"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get governance proposal", error=str(e), proposal_id=proposal_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve proposal"
         )
 
 

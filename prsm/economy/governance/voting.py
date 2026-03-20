@@ -23,7 +23,8 @@ getcontext().prec = 18
 
 from prsm.core.config import settings
 from prsm.core.models import GovernanceProposal, Vote, PRSMBaseModel
-from prsm.economy.tokenomics.ftns_service import get_ftns_service
+from prsm.economy.tokenomics.atomic_ftns_service import get_atomic_ftns_service
+from prsm.core.database import FTNSQueries, GovernanceQueries
 from prsm.core.safety.monitor import SafetyMonitor
 
 logger = structlog.get_logger()
@@ -153,7 +154,7 @@ class TokenWeightedVoting:
     def __init__(self):
         self.voting_id = str(uuid4())
         self.logger = logger.bind(component="token_weighted_voting", voting_id=self.voting_id)
-        self.ftns_service = get_ftns_service()
+        self.ftns_service = get_atomic_ftns_service()
         
         # Voting state
         self.proposals: Dict[UUID, GovernanceProposal] = {}
@@ -214,7 +215,12 @@ class TokenWeightedVoting:
                     raise ValueError("Proposer not eligible to create proposals")
                 
                 # Charge proposal submission fee
-                proposal_fee_paid = self.ftns_service.deduct_tokens(proposer_id, Decimal(str(PROPOSAL_SUBMISSION_FEE)), description="Proposal submission fee")
+                proposal_fee_paid = await self.ftns_service.atomic_deduct(
+                    user_id=proposer_id,
+                    amount=Decimal(str(PROPOSAL_SUBMISSION_FEE)),
+                    description="Proposal submission fee",
+                    idempotency_key=f"proposal_fee_{proposal.proposal_id}"
+                )
                 if not proposal_fee_paid:
                     raise ValueError("Insufficient FTNS balance for proposal submission fee")
                 
@@ -240,6 +246,9 @@ class TokenWeightedVoting:
                 # Store proposal
                 self.proposals[proposal.proposal_id] = proposal
                 self.votes[proposal.proposal_id] = []
+                
+                # Persist to database
+                await self._persist_proposal(proposal)
                 
                 # Update statistics
                 self.governance_stats["total_proposals_created"] += 1
@@ -314,7 +323,11 @@ class TokenWeightedVoting:
                 else:
                     proposal.votes_against += 1
                 
-                proposal.total_voting_power += voting_power_calc.total_voting_power
+                # Convert float to Decimal for type compatibility
+                proposal.total_voting_power += Decimal(str(voting_power_calc.total_voting_power))
+                
+                # Sync vote counts to database
+                await self._sync_votes_to_db(proposal_id)
                 
                 # Check if voting should conclude early
                 if await self._should_conclude_voting_early(proposal_id):
@@ -357,7 +370,8 @@ class TokenWeightedVoting:
                 return self.voting_power_cache[voter_id]
             
             # Get user's FTNS balance
-            token_balance = float(self.ftns_service.get_user_balance(voter_id))
+            balance_data = await FTNSQueries.get_user_balance(voter_id)
+            token_balance = balance_data.get("balance", 0.0)
             
             # Base voting power calculation
             if token_balance < MIN_VOTING_BALANCE:
@@ -694,7 +708,8 @@ class TokenWeightedVoting:
     async def _validate_proposer_eligibility(self, proposer_id: str) -> bool:
         """Validate if user is eligible to create proposals"""
         # Check minimum FTNS balance
-        balance = float(self.ftns_service.get_user_balance(proposer_id))
+        balance_data = await FTNSQueries.get_user_balance(proposer_id)
+        balance = balance_data.get("balance", 0.0)
         if balance < PROPOSAL_SUBMISSION_FEE:
             return False
         
@@ -837,6 +852,9 @@ class TokenWeightedVoting:
             
             self.voting_results[proposal_id] = results
             
+            # Persist final status to database
+            await self._persist_proposal(proposal)
+            
             self.logger.info(
                 "Voting concluded",
                 proposal_id=str(proposal_id),
@@ -861,6 +879,107 @@ class TokenWeightedVoting:
             return APPROVAL_THRESHOLD
         else:
             return APPROVAL_THRESHOLD
+    
+    
+    # === Database Persistence Methods ===
+    
+    async def _persist_proposal(self, proposal: GovernanceProposal) -> bool:
+        """
+        Persist a governance proposal to the database.
+        
+        Args:
+            proposal: The governance proposal to persist
+            
+        Returns:
+            True if persistence succeeded, False otherwise
+        """
+        try:
+            success = await GovernanceQueries.upsert_proposal(proposal)
+            if success:
+                self.logger.info(
+                    "Proposal persisted to database",
+                    proposal_id=str(proposal.proposal_id)
+                )
+            return success
+        except Exception as e:
+            self.logger.error("Failed to persist proposal", error=str(e))
+            return False
+    
+    
+    async def _sync_votes_to_db(self, proposal_id: UUID) -> bool:
+        """
+        Sync vote counts from memory to the database.
+        
+        Args:
+            proposal_id: The ID of the proposal to sync
+            
+        Returns:
+            True if sync succeeded, False otherwise
+        """
+        try:
+            if proposal_id not in self.proposals:
+                return False
+            
+            proposal = self.proposals[proposal_id]
+            success = await GovernanceQueries.upsert_proposal(proposal)
+            
+            if success:
+                self.logger.debug(
+                    "Votes synced to database",
+                    proposal_id=str(proposal_id),
+                    votes_for=proposal.votes_for,
+                    votes_against=proposal.votes_against
+                )
+            return success
+        except Exception as e:
+            self.logger.error("Failed to sync votes to database", error=str(e))
+            return False
+    
+    
+    @classmethod
+    async def hydrate_from_db(cls, status_filter: Optional[str] = None) -> "TokenWeightedVoting":
+        """
+        Hydrate a TokenWeightedVoting instance from the database.
+        
+        Args:
+            status_filter: Optional status to filter proposals by
+            
+        Returns:
+            TokenWeightedVoting instance with proposals loaded from database
+        """
+        instance = cls()
+        
+        try:
+            proposals_data = await GovernanceQueries.load_all_proposals(status_filter)
+            
+            for proposal_dict in proposals_data:
+                proposal = GovernanceProposal(
+                    proposal_id=UUID(proposal_dict["proposal_id"]),
+                    proposer_id=proposal_dict["proposer_id"],
+                    title=proposal_dict["title"],
+                    description=proposal_dict["description"],
+                    proposal_type=proposal_dict["proposal_type"],
+                    status=proposal_dict["status"],
+                    votes_for=proposal_dict.get("votes_for", 0),
+                    votes_against=proposal_dict.get("votes_against", 0),
+                    total_voting_power=proposal_dict.get("total_voting_power", 0.0),
+                    voting_starts=proposal_dict.get("voting_starts"),
+                    voting_ends=proposal_dict.get("voting_ends"),
+                    created_at=proposal_dict.get("created_at"),
+                    updated_at=proposal_dict.get("updated_at")
+                )
+                instance.proposals[proposal.proposal_id] = proposal
+                instance.votes[proposal.proposal_id] = []
+            
+            instance.logger.info(
+                "Hydrated proposals from database",
+                count=len(proposals_data),
+                status_filter=status_filter
+            )
+        except Exception as e:
+            instance.logger.error("Failed to hydrate from database", error=str(e))
+        
+        return instance
 
 
 # === Global Token-Weighted Voting Instance ===
@@ -872,4 +991,20 @@ def get_token_weighted_voting() -> TokenWeightedVoting:
     global _voting_instance
     if _voting_instance is None:
         _voting_instance = TokenWeightedVoting()
+    return _voting_instance
+
+
+async def get_token_weighted_voting_hydrated() -> TokenWeightedVoting:
+    """
+    Get or create the global token-weighted voting instance with database hydration.
+    
+    This async function ensures proposals are loaded from the database on startup.
+    Use this for production deployments where persistence is required.
+    
+    Returns:
+        TokenWeightedVoting instance hydrated with proposals from database
+    """
+    global _voting_instance
+    if _voting_instance is None:
+        _voting_instance = await TokenWeightedVoting.hydrate_from_db(status_filter="active")
     return _voting_instance
