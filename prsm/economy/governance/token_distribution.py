@@ -27,7 +27,7 @@ getcontext().prec = 18
 from prsm.core.config import settings
 from prsm.core.models import PRSMBaseModel
 from prsm.economy.tokenomics.database_ftns_service import DatabaseFTNSService
-from ..auth.auth_manager import auth_manager
+from prsm.core.auth.auth_manager import auth_manager
 from prsm.core.integrations.security.audit_logger import audit_logger
 from .voting import get_token_weighted_voting
 from .quadratic_voting import quadratic_voting

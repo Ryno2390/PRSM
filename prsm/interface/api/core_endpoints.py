@@ -11,7 +11,7 @@ import json
 import os
 import structlog
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect
@@ -489,22 +489,92 @@ def _register_network_endpoints(app: FastAPI) -> None:
 
     @app.get("/network/status")
     async def network_status() -> Dict[str, Any]:
-        """Get P2P network status"""
+        """
+        Get P2P network status.
+
+        Queries the local node API if it is running. Returns an honest
+        'node_not_running' state when no node process is active, rather
+        than a misleading version-gate placeholder.
+        """
+        import os
+        import httpx
+
+        node_port = int(os.getenv("PRSM_NODE_API_PORT", "8000"))
+        node_url = f"http://127.0.0.1:{node_port}"
+
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.get(f"{node_url}/status")
+
+            if resp.status_code == 200:
+                data = resp.json()
+                peers = data.get("peers", {})
+                connected = int(peers.get("connected", 0))
+                return {
+                    "status": "running",
+                    "node_id": data.get("node_id"),
+                    "connected_peers": connected,
+                    "known_peers": int(peers.get("known", 0)),
+                    "uptime_seconds": data.get("uptime_seconds", 0),
+                    "network_health": "healthy" if connected > 0 else "isolated",
+                    "p2p_address": data.get("p2p_address"),
+                    "roles": data.get("roles", []),
+                }
+        except Exception:
+            pass  # Node not running or unreachable
+
         return {
+            "status": "node_not_running",
             "connected_peers": 0,
-            "total_models": 0,
-            "network_health": "single_node_mode",
-            "status": "P2P networking coming in v0.3.0"
+            "known_peers": 0,
+            "network_health": "offline",
+            "message": "Start a node with: prsm node start",
         }
 
     @app.get("/governance/proposals")
-    async def list_proposals() -> Dict[str, Any]:
-        """List active governance proposals"""
-        return {
-            "active_proposals": [],
-            "total_count": 0,
-            "status": "Governance system coming in v0.4.0"
-        }
+    async def list_proposals(
+        status_filter: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        List governance proposals.
+
+        Surfaces proposals from the TokenWeightedVotingSystem singleton.
+        Returns an empty list (not a version-gate placeholder) when no
+        proposals have been submitted yet.
+        """
+        try:
+            from prsm.economy.governance.voting import get_token_weighted_voting
+            voting = get_token_weighted_voting()
+
+            all_proposals = list(voting.proposals.values())
+            if status_filter:
+                all_proposals = [p for p in all_proposals if p.status == status_filter]
+
+            proposal_list = [
+                {
+                    "proposal_id": str(p.proposal_id),
+                    "title": p.title,
+                    "description": p.description[:200],
+                    "proposal_type": p.proposal_type,
+                    "status": p.status,
+                    "proposer_id": p.proposer_id,
+                    "votes_for": p.votes_for,
+                    "votes_against": p.votes_against,
+                    "voting_starts": p.voting_starts.isoformat() if p.voting_starts else None,
+                    "voting_ends": p.voting_ends.isoformat() if p.voting_ends else None,
+                }
+                for p in all_proposals
+            ]
+            return {
+                "active_proposals": proposal_list,
+                "total_count": len(proposal_list),
+            }
+        except Exception as e:
+            logger.warning("Governance system unavailable", error=str(e))
+            return {
+                "active_proposals": [],
+                "total_count": 0,
+            }
 
 
 def _register_websocket_endpoints(app: FastAPI) -> None:
