@@ -221,17 +221,158 @@ class _StakingFTNSAdapter:
 
 
 class _NodeIPFSAdapter:
-    """Stub IPFS client — nodes use StorageProvider for actual IPFS ops."""
+    """
+    Real IPFS client adapter for the PRSM node.
+
+    Wraps the production IPFSClient to provide the store_model/retrieve_model
+    interface expected by NWTNOrchestrator. Connection is lazy — the IPFS daemon
+    is not required at node startup and is only contacted on the first actual call.
+
+    Fallback behaviour when IPFS is unreachable:
+    - store_model: returns a deterministic placeholder CID (same format as a real
+      CIDv0) so callers can identify the data, but logs clearly that no bytes
+      were persisted on the network.
+    - retrieve_model: returns None (same as before, but now logged explicitly).
+    """
 
     def __init__(self, ipfs_api_url: str) -> None:
         self._url = ipfs_api_url
+        self._client: Optional[Any] = None
+        # Prevent repeated connection attempts after the first failure
+        self._connect_attempted: bool = False
+
+    async def _get_client(self) -> Optional[Any]:
+        """
+        Return the connected IPFSClient, initializing it on first call.
+
+        Returns None if the IPFS daemon is unreachable. Subsequent calls
+        return None immediately without retrying (avoids repeated timeouts
+        on every store/retrieve call when IPFS is offline).
+        """
+        if self._client is not None:
+            return self._client
+        if self._connect_attempted:
+            return None  # Already failed once; don't retry on every call
+
+        self._connect_attempted = True
+        try:
+            from prsm.core.ipfs_client import IPFSClient, IPFSConfig
+            config = IPFSConfig(api_url=self._url)
+            client = IPFSClient(config)
+            await client.initialize()
+            if client.connected:
+                self._client = client
+                logger.info("NodeIPFSAdapter connected to IPFS at %s", self._url)
+            else:
+                logger.warning(
+                    "NodeIPFSAdapter: IPFS daemon not reachable at %s — "
+                    "model storage will use placeholder CIDs until IPFS is available",
+                    self._url,
+                )
+        except Exception as exc:
+            logger.warning(
+                "NodeIPFSAdapter: IPFS connection failed (%s) — "
+                "model storage will use placeholder CIDs",
+                exc,
+            )
+        return self._client
 
     async def store_model(self, model_data: bytes, metadata: Dict[str, Any]) -> str:
-        cid = f"Qm{hashlib.sha256(model_data).hexdigest()[:44]}"
-        return cid
+        """
+        Upload model bytes to IPFS and return the real content CID.
+
+        On success: pins the model bytes and uploads metadata JSON alongside;
+        returns the real CIDv0 assigned by the IPFS daemon.
+
+        On IPFS unavailable or upload failure: returns a deterministic
+        SHA-256-based placeholder CID so callers can identify the data,
+        but logs a clear WARNING that no bytes were persisted on the network.
+        The placeholder has the same format as a real CIDv0 but is guaranteed
+        not to exist on the IPFS network.
+        """
+        client = await self._get_client()
+
+        def _placeholder() -> str:
+            return f"Qm{hashlib.sha256(model_data).hexdigest()[:44]}"
+
+        if client is None:
+            cid = _placeholder()
+            logger.warning(
+                "NodeIPFSAdapter: IPFS unavailable — model NOT stored on network. "
+                "Returning placeholder CID %s",
+                cid[:20],
+            )
+            return cid
+
+        # Upload model bytes
+        result = await client.upload_content(
+            model_data, filename="model.bin", pin=True
+        )
+        if not result.success:
+            cid = _placeholder()
+            logger.error(
+                "NodeIPFSAdapter: upload failed (%s) — returning placeholder CID %s",
+                result.error,
+                cid[:20],
+            )
+            return cid
+
+        # Upload metadata JSON alongside the model (best-effort; non-fatal)
+        if metadata:
+            import json as _json
+            try:
+                meta_bytes = _json.dumps(metadata, default=str).encode()
+                await client.upload_content(
+                    meta_bytes,
+                    filename=f"{result.cid}_metadata.json",
+                    pin=True,
+                )
+            except Exception as exc:
+                logger.debug(
+                    "NodeIPFSAdapter: metadata upload failed for %s: %s",
+                    result.cid[:20],
+                    exc,
+                )  # Non-fatal
+
+        logger.info(
+            "NodeIPFSAdapter: model stored → CID %s (%d bytes)",
+            result.cid,
+            len(model_data),
+        )
+        return result.cid
 
     async def retrieve_model(self, cid: str) -> Optional[bytes]:
-        return None  # Not implemented at node level
+        """
+        Fetch model bytes from IPFS by CID.
+
+        Returns the raw bytes on success, or None when IPFS is unavailable
+        or the CID is not found on the network.
+        """
+        client = await self._get_client()
+
+        if client is None:
+            logger.warning(
+                "NodeIPFSAdapter: IPFS unavailable — cannot retrieve CID %s", cid[:20]
+            )
+            return None
+
+        result = await client.download_content(cid)
+
+        if result.success and result.metadata and "content" in result.metadata:
+            content: bytes = result.metadata["content"]
+            logger.info(
+                "NodeIPFSAdapter: retrieved %d bytes for CID %s",
+                len(content),
+                cid[:20],
+            )
+            return content
+
+        logger.warning(
+            "NodeIPFSAdapter: content not found or download failed for CID %s — %s",
+            cid[:20],
+            result.error if result else "unknown error",
+        )
+        return None
 
 
 class _NodeModelRegistryAdapter:
