@@ -2766,5 +2766,455 @@ def voting_power(api_url: str):
         console.print(f"❌ Error: {e}", style="red")
 
 
+# ============================================================================
+# MARKETPLACE COMMANDS
+# ============================================================================
+
+@main.group()
+def marketplace() -> None:
+    """Browse, purchase, and publish resources on the PRSM marketplace.
+
+    \b
+    Supported resource types:
+      ai_model         AI/ML models (language, vision, multimodal)
+      dataset          Training and evaluation datasets
+      agent_workflow   AI agent configurations and pipelines
+      tool             AI utilities and integrations
+      compute_resource GPU instances and cloud compute
+      knowledge_base   Documentation and embeddings
+      evaluation_metric  Model benchmarks and evaluators
+      training_dataset Specialized training data
+      safety_dataset   AI safety and alignment datasets
+    """
+    pass
+
+
+@marketplace.command("list")
+@click.option("--type", "resource_type", default=None, help="Filter by resource type (ai_model, dataset, etc.)")
+@click.option("--query", default=None, help="Search query for name/description")
+@click.option("--quality", default=None, type=float, help="Minimum quality score (0.0-1.0)")
+@click.option("--pricing", default=None, type=click.Choice(["free", "paid", "freemium"]), help="Filter by pricing model")
+@click.option("--tags", default=None, help="Comma-separated tags to filter by")
+@click.option("--sort", default="relevance", type=click.Choice(["relevance", "quality", "price_low", "price_high", "downloads", "rating"]), help="Sort order")
+@click.option("--page", default=1, type=int, help="Page number for pagination")
+@click.option("--limit", default=20, type=int, help="Results per page (max 100)")
+@click.option("--api-url", default=None, help="PRSM API URL (default: from stored credentials)")
+def marketplace_list(resource_type: Optional[str], query: Optional[str], quality: Optional[float],
+                     pricing: Optional[str], tags: Optional[str], sort: str, page: int, limit: int,
+                     api_url: Optional[str]) -> None:
+    """List and search marketplace resources.
+
+    \b
+    Examples:
+        prsm marketplace list
+        prsm marketplace list --type ai_model --sort quality
+        prsm marketplace list --query "gpt" --pricing free
+        prsm marketplace list --tags nlp,transformers --limit 50
+    """
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    # Build query parameters
+    params: dict = {"page": page, "limit": min(limit, 100)}
+    if resource_type:
+        params["resource_type"] = resource_type
+    if query:
+        params["query"] = query
+    if quality is not None:
+        params["min_quality"] = quality
+    if pricing:
+        params["pricing_model"] = pricing
+    if tags:
+        params["tags"] = tags
+    if sort:
+        params["sort"] = sort
+
+    console.print("🛒 Searching marketplace...", style="bold blue")
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/marketplace/resources",
+            params=params,
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    elif response.status_code != 200:
+        console.print(f"❌ Failed: HTTP {response.status_code}", style="red")
+        console.print(f"   {response.text[:200]}")
+        raise SystemExit(1)
+
+    data = response.json()
+    resources = data.get("resources", [])
+    total = data.get("total", 0)
+
+    if not resources:
+        console.print("No resources found.", style="dim")
+        console.print("💡 Try adjusting your filters or search query", style="yellow")
+        return
+
+    table = Table(title=f"Marketplace Resources ({total} total)")
+    table.add_column("ID", style="dim", max_width=12)
+    table.add_column("Name", style="cyan", max_width=28)
+    table.add_column("Type", style="blue", max_width=14)
+    table.add_column("Quality", style="green", justify="right")
+    table.add_column("Price", style="yellow", justify="right")
+    table.add_column("Rating", style="magenta", justify="right")
+    table.add_column("Tags", style="white", max_width=20)
+
+    for r in resources:
+        # Format price
+        price = r.get("price", 0)
+        pricing_model = r.get("pricing_model", "free")
+        if pricing_model == "free":
+            price_str = "Free"
+        elif pricing_model == "freemium":
+            price_str = f"Free+{price:.2f}"
+        else:
+            price_str = f"{price:.2f} FTNS"
+
+        # Format tags
+        resource_tags = r.get("tags", [])
+        tags_str = ", ".join(resource_tags[:3])
+        if len(resource_tags) > 3:
+            tags_str += "..."
+
+        # Format rating
+        rating = r.get("average_rating", 0)
+        rating_str = f"⭐ {rating:.1f}" if rating > 0 else "-"
+
+        # Format quality
+        quality_score = r.get("quality_score", 0)
+        quality_str = f"{quality_score:.2f}" if quality_score else "-"
+
+        table.add_row(
+            str(r.get("resource_id", ""))[:10] + "...",
+            r.get("name", "")[:28],
+            r.get("resource_type", "")[:14],
+            quality_str,
+            price_str,
+            rating_str,
+            tags_str,
+        )
+
+    console.print(table)
+
+    # Show pagination info
+    current_page = data.get("page", page)
+    total_pages = data.get("total_pages", 1)
+    if total_pages > 1:
+        console.print(f"\n[dim]Page {current_page} of {total_pages}. Use --page to navigate.[/dim]")
+
+
+@marketplace.command()
+@click.argument("resource-id")
+@click.option("--api-url", default=None, help="PRSM API URL (default: from stored credentials)")
+def show(resource_id: str, api_url: Optional[str]) -> None:
+    """Show detailed information about a marketplace resource.
+
+    \b
+    Example:
+        prsm marketplace show abc123-def456
+    """
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/marketplace/resources/{resource_id}",
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 404:
+        console.print(f"❌ Resource not found: {resource_id}", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    elif response.status_code != 200:
+        console.print(f"❌ Failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+    r = response.json()
+
+    table = Table(title=f"Resource: {r.get('name', 'Unknown')}")
+    table.add_column("Property", style="cyan")
+    table.add_column("Value", style="green")
+
+    # Format price
+    price = r.get("price", 0)
+    pricing_model = r.get("pricing_model", "free")
+    if pricing_model == "free":
+        price_str = "Free"
+    elif pricing_model == "freemium":
+        price_str = f"Freemium (Premium: {price:.2f} FTNS)"
+    else:
+        price_str = f"{price:.2f} FTNS"
+
+    # Format rating
+    rating = r.get("average_rating", 0)
+    rating_str = f"⭐ {rating:.2f}/5.0" if rating > 0 else "No ratings"
+
+    # Format tags
+    resource_tags = r.get("tags", [])
+    tags_str = ", ".join(resource_tags) if resource_tags else "None"
+
+    # Format dates
+    created = r.get("created_at", "")
+    created_str = created[:19] if created else "N/A"
+
+    table.add_row("ID", str(r.get("resource_id", "N/A")))
+    table.add_row("Name", r.get("name", "N/A"))
+    table.add_row("Type", r.get("resource_type", "N/A"))
+    table.add_row("Quality Score", f"{r.get('quality_score', 0):.2f}")
+    table.add_row("Status", r.get("status", "N/A"))
+    table.add_row("Provider", str(r.get("provider_id", "N/A"))[:20] + "...")
+    table.add_row("Price", price_str)
+    table.add_row("Pricing Model", pricing_model.title())
+    table.add_row("License", r.get("license", "N/A"))
+    table.add_row("Rating", rating_str)
+    table.add_row("Downloads", str(r.get("download_count", 0)))
+    table.add_row("Tags", tags_str)
+    table.add_row("Description", (r.get("description") or "No description")[:60] + "...")
+    table.add_row("Docs URL", r.get("documentation_url") or "N/A")
+    table.add_row("Source URL", r.get("source_url") or "N/A")
+    table.add_row("Created", created_str)
+
+    console.print(table)
+
+    # Print full description below
+    description = r.get("description")
+    if description and len(description) > 60:
+        console.print(f"\n[bold]Full Description:[/bold]")
+        console.print(description)
+
+
+@marketplace.command()
+@click.argument("resource-id")
+@click.option("--order-type", default="purchase", type=click.Choice(["purchase", "rent", "subscription"]), help="Order type")
+@click.option("--quantity", default=1, type=int, help="Quantity to purchase")
+@click.option("--yes", is_flag=True, help="Skip confirmation prompt")
+@click.option("--api-url", default=None, help="PRSM API URL (default: from stored credentials)")
+def buy(resource_id: str, order_type: str, quantity: int, yes: bool, api_url: Optional[str]) -> None:
+    """Purchase a marketplace resource.
+
+    \b
+    Examples:
+        prsm marketplace buy abc123-def456
+        prsm marketplace buy abc123-def456 --order-type subscription --yes
+        prsm marketplace buy abc123-def456 --quantity 5
+    """
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    # First, fetch resource details for confirmation
+    try:
+        detail_response = httpx.get(
+            f"{url}/api/v1/marketplace/resources/{resource_id}",
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if detail_response.status_code == 404:
+        console.print(f"❌ Resource not found: {resource_id}", style="red")
+        raise SystemExit(1)
+    elif detail_response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    elif detail_response.status_code != 200:
+        console.print(f"❌ Failed to fetch resource: HTTP {detail_response.status_code}", style="red")
+        raise SystemExit(1)
+
+    resource = detail_response.json()
+    resource_name = resource.get("name", "Unknown")
+    resource_type = resource.get("resource_type", "Unknown")
+    price = resource.get("price", 0)
+    pricing_model = resource.get("pricing_model", "paid")
+
+    # Calculate total cost
+    if pricing_model == "free":
+        total_cost = 0
+    else:
+        total_cost = price * quantity
+
+    # Show confirmation prompt
+    if not yes:
+        console.print(f"\n📦 Purchase Confirmation:", style="bold cyan")
+        console.print(f"   Resource : {resource_name}")
+        console.print(f"   Type     : {resource_type}")
+        console.print(f"   Order    : {order_type}")
+        console.print(f"   Quantity : {quantity}")
+        console.print(f"   Cost     : {total_cost:.2f} FTNS" if total_cost > 0 else "   Cost     : Free")
+        console.print()
+
+        if not click.confirm("Proceed with purchase?", default=True):
+            console.print("Purchase cancelled.", style="yellow")
+            raise SystemExit(0)
+
+    # Place the order
+    console.print(f"🛒 Placing order...", style="bold blue")
+
+    try:
+        response = httpx.post(
+            f"{url}/api/v1/marketplace/orders",
+            json={
+                "resource_id": resource_id,
+                "order_type": order_type,
+                "quantity": quantity,
+            },
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        console.print("✅ Purchase successful!", style="bold green")
+        console.print(f"   Order ID: {data.get('order_id', 'N/A')}")
+        console.print(f"   Status  : {data.get('status', 'N/A')}")
+        console.print(f"   Total   : {data.get('total_cost', 0):.2f} FTNS")
+        if data.get("access_url"):
+            console.print(f"   Access  : {data.get('access_url')}")
+    elif response.status_code == 402:
+        console.print("❌ Insufficient FTNS balance", style="red")
+        console.print("💡 Check your balance: prsm ftns balance", style="yellow")
+        raise SystemExit(1)
+    elif response.status_code == 404:
+        console.print(f"❌ Resource not found: {resource_id}", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Purchase failed: HTTP {response.status_code}", style="red")
+        console.print(f"   {response.text[:200]}")
+        raise SystemExit(1)
+
+
+@marketplace.command()
+@click.option("--name", required=True, help="Resource name")
+@click.option("--description", required=True, help="Resource description")
+@click.option("--type", "resource_type", required=True, help="Resource type (ai_model, dataset, etc.)")
+@click.option("--price", default=0.0, type=float, help="Price in FTNS (default: 0 for free)")
+@click.option("--quality", default=None, type=float, help="Quality score (0.0-1.0)")
+@click.option("--pricing-model", default="free", type=click.Choice(["free", "paid", "freemium"]), help="Pricing model")
+@click.option("--tags", default=None, help="Comma-separated tags")
+@click.option("--license", default="MIT", help="License identifier (default: MIT)")
+@click.option("--docs-url", default=None, help="Documentation URL")
+@click.option("--source-url", default=None, help="Source code/repository URL")
+@click.option("--api-url", default=None, help="PRSM API URL (default: from stored credentials)")
+def publish(name: str, description: str, resource_type: str, price: float, quality: Optional[float],
+            pricing_model: str, tags: Optional[str], license: str, docs_url: Optional[str],
+            source_url: Optional[str], api_url: Optional[str]) -> None:
+    """Publish a new resource to the marketplace.
+
+    \b
+    Examples:
+        prsm marketplace publish --name "My Model" --description "A great model" --type ai_model
+        prsm marketplace publish --name "Dataset" --description "Training data" --type dataset --price 10.0
+        prsm marketplace publish --name "Tool" --description "AI utility" --type tool --tags nlp,python
+    """
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    # Build request body
+    body: dict = {
+        "name": name,
+        "description": description,
+        "resource_type": resource_type,
+        "price": price,
+        "pricing_model": pricing_model,
+        "license": license,
+    }
+
+    if quality is not None:
+        body["quality_score"] = quality
+    if tags:
+        body["tags"] = [t.strip() for t in tags.split(",")]
+    if docs_url:
+        body["documentation_url"] = docs_url
+    if source_url:
+        body["source_url"] = source_url
+
+    console.print(f"📤 Publishing '{name}' to marketplace...", style="bold blue")
+
+    try:
+        response = httpx.post(
+            f"{url}/api/v1/marketplace/resources",
+            json=body,
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        console.print("✅ Resource published successfully!", style="bold green")
+        console.print(f"   Resource ID: {data.get('resource_id', 'N/A')}")
+        console.print(f"   Name       : {data.get('name', name)}")
+        console.print(f"   Type       : {data.get('resource_type', resource_type)}")
+        console.print(f"   Status     : {data.get('status', 'pending')}")
+        console.print(f"   Price      : {price:.2f} FTNS" if price > 0 else "   Price      : Free")
+    elif response.status_code == 403:
+        console.print("❌ Permission denied. You need enhanced create permissions.", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 400:
+        detail = response.json().get("detail", response.text)
+        console.print(f"❌ Validation error: {detail}", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Publish failed: HTTP {response.status_code}", style="red")
+        console.print(f"   {response.text[:200]}")
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
     main()
