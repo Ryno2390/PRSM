@@ -238,6 +238,13 @@ def _include_service_routers(app: FastAPI) -> None:
         logger.warning(f"IPFS router not available: {e}")
 
     try:
+        from prsm.interface.api.content_api import router as content_router
+        app.include_router(content_router, tags=["Content"])
+        registered.append("/api/v1/content")
+    except Exception as e:
+        logger.warning(f"Content router not loaded: {e}")
+
+    try:
         from prsm.interface.api.analytics_api import router as analytics_router
         app.include_router(analytics_router, tags=["Analytics"])
         logger.debug("Analytics router registered")

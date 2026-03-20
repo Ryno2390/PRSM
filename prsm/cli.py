@@ -2319,48 +2319,118 @@ def storage():
 
 
 @storage.command()
-@click.argument('file-path', type=click.Path(exists=True))
-@click.option('--description', help='Content description')
-@click.option('--tags', help='Comma-separated tags')
-@click.option('--public', is_flag=True, help='Make content public')
-@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
-def upload(file_path: str, description: str, tags: str, public: bool, api_url: str):
-    """Upload a file to IPFS storage."""
+@click.argument("file-path", type=click.Path(exists=True, readable=True))
+@click.option("--description",   default="",    help="Content description")
+@click.option(
+    "--royalty-rate",
+    default=0.01, type=float,
+    help="FTNS earned per access (0.001–0.1, default: 0.01)"
+)
+@click.option(
+    "--parent-cids",
+    default="",
+    help="Comma-separated CIDs of content this file derives from"
+)
+@click.option("--replicas",   default=3, type=int, help="Replication factor (1–10)")
+@click.option("--api-url",    default=None,         help="PRSM API URL (default: from stored credentials)")
+def upload(
+    file_path: str,
+    description: str,
+    royalty_rate: float,
+    parent_cids: str,
+    replicas: int,
+    api_url: str,
+) -> None:
+    """
+    Upload a file to IPFS and register provenance for royalty collection.
+
+    The file is stored on IPFS and a provenance record is created in the
+    platform database. When other users access this content, they pay the
+    configured royalty rate to your FTNS balance.
+
+    \b
+    Examples:
+        prsm storage upload model_weights.pt --royalty-rate 0.05
+        prsm storage upload dataset.csv --description "Training data Q1 2026"
+        prsm storage upload paper.pdf --parent-cids QmAbc...,QmDef...
+    """
     import httpx
-    
-    console.print(f"📤 Uploading {file_path}...", style="bold blue")
-    
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+    file_path_obj = Path(file_path)
+    file_size = file_path_obj.stat().st_size
+
+    console.print(
+        f"📤 Uploading {file_path_obj.name} ({file_size:,} bytes)...",
+        style="bold blue"
+    )
+    if parent_cids:
+        console.print(f"   Derivative of: {parent_cids}", style="dim")
+
     try:
-        with open(file_path, 'rb') as f:
-            files = {'file': (Path(file_path).name, f)}
-            data = {}
-            if description:
-                data['description'] = description
-            if tags:
-                data['tags'] = tags
-            if public:
-                data['is_public'] = 'true'
-            
-            response = httpx.post(
-                f"{api_url}/api/v1/storage/upload",
-                files=files,
-                data=data,
-                timeout=60.0
-            )
-        
-        if response.status_code == 200:
-            data = response.json()
-            console.print(f"✅ Upload successful!", style="bold green")
-            console.print(f"   CID: {data.get('cid')}")
-            console.print(f"   Size: {data.get('size')} bytes")
-            console.print(f"   Cost: {data.get('ftns_cost', 0):.4f} FTNS")
-            console.print(f"   Gateway: {data.get('gateway_url')}")
-        else:
-            console.print(f"❌ Upload failed: {response.status_code}", style="red")
+        with open(file_path, "rb") as fh:
+            files = {"file": (file_path_obj.name, fh, "application/octet-stream")}
+            data = {
+                "description": description,
+                "royalty_rate": str(royalty_rate),
+                "parent_cids": parent_cids,
+                "replicas": str(replicas),
+            }
+            with console.status("[bold green]Uploading to IPFS..."):
+                response = httpx.post(
+                    f"{url}/api/v1/content/upload",
+                    files=files,
+                    data=data,
+                    headers=headers,
+                    timeout=120.0,
+                )
     except httpx.ConnectError:
-        console.print("❌ Cannot connect to PRSM server", style="red")
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        result = response.json()
+
+        table = Table(title="Upload Result")
+        table.add_column("Property",  style="cyan")
+        table.add_column("Value",     style="green")
+        table.add_row("CID",          result.get("cid", "?"))
+        table.add_row("Filename",     result.get("filename", "?"))
+        table.add_row("Size",         f"{result.get('size_bytes', 0):,} bytes")
+        table.add_row("Royalty Rate", f"{result.get('royalty_rate', 0):.4f} FTNS/access")
+        table.add_row(
+            "Provenance",
+            "✅ Registered" if result.get("provenance_registered") else "⚠️  Not persisted"
+        )
+        table.add_row("Access URL",   result.get("access_url", "?"))
+        console.print(table)
+
+        if result.get("parent_cids"):
+            console.print(
+                f"\n[dim]Derivative of: {', '.join(result['parent_cids'])}[/dim]"
+            )
+
+        # Emit CID on its own line — easy to capture in scripts
+        console.print(f"\n[bold]CID: {result.get('cid')}[/bold]")
+
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 503:
+        console.print("❌ IPFS service unavailable", style="red")
+        console.print("💡 Ensure an IPFS daemon is running at http://127.0.0.1:5001",
+                      style="yellow")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Upload failed: HTTP {response.status_code}", style="red")
+        console.print(f"   {response.text[:200]}")
+        raise SystemExit(1)
 
 
 @storage.command()
