@@ -22,14 +22,16 @@ import asyncio
 import json
 import secrets
 import hashlib
+import uuid as _uuid
+from decimal import Decimal
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import structlog
 
-from prsm.core.database import db_manager
-from prsm.economy.tokenomics.ftns_service import FTNSService
+from prsm.core.database import db_manager, FTNSQueries
+from prsm.economy.tokenomics.atomic_ftns_service import AtomicFTNSService
 from prsm.core.models import UserInput, PRSMResponse
 
 logger = structlog.get_logger(__name__)
@@ -117,8 +119,8 @@ class FeedbackEntry:
 class AlphaUserManager:
     """Manages alpha user registration, onboarding, and engagement"""
     
-    def __init__(self, ftns_service: Optional[FTNSService] = None):
-        self.ftns_service = ftns_service or FTNSService()
+    def __init__(self):
+        # FTNS operations delegated to AtomicFTNSService and FTNSQueries
         self.alpha_users: Dict[str, AlphaUser] = {}
         self.usage_metrics: Dict[str, UsageMetrics] = {}
         self.feedback_entries: Dict[str, FeedbackEntry] = {}
@@ -187,8 +189,12 @@ class AlphaUserManager:
             marketing_consent=marketing_consent
         )
         
-        # Initialize FTNS balance
-        await self.ftns_service.create_user_account(user_id, self.initial_ftns_grant)
+        # Create platform FTNS account with initial grant for new alpha user
+        await AtomicFTNSService().ensure_account_exists(
+            user_id=user_id,
+            initial_balance=Decimal(str(self.initial_ftns_grant)),
+            account_type="user",
+        )
         
         # Store user
         self.alpha_users[user_id] = alpha_user
@@ -563,7 +569,18 @@ class AlphaUserManager:
         if (metrics.total_queries == self.bonus_ftns_threshold and 
             user_id in self.alpha_users):
             
-            await self.ftns_service.add_tokens(user_id, self.bonus_ftns_amount)
+            try:
+                result = await FTNSQueries.execute_atomic_transfer(
+                    from_user_id="system_rewards",
+                    to_user_id=user_id,
+                    amount=float(self.bonus_ftns_amount),
+                    idempotency_key=f"alpha-bonus:{user_id}:{_uuid.uuid4().hex[:12]}",
+                    description="Alpha program milestone bonus",
+                )
+                if not result["success"]:
+                    logger.warning("Alpha bonus transfer failed: %s", result.get("error_message"))
+            except Exception as exc:
+                logger.warning("Alpha bonus unavailable: %s", exc)
             
             logger.info("Milestone bonus awarded",
                        user_id=user_id,
@@ -579,7 +596,18 @@ class AlphaUserManager:
         
         for milestone, reward in milestone_rewards.items():
             if metrics.total_queries == milestone:
-                await self.ftns_service.add_tokens(user_id, reward)
+                try:
+                    result = await FTNSQueries.execute_atomic_transfer(
+                        from_user_id="system_rewards",
+                        to_user_id=user_id,
+                        amount=float(reward),
+                        idempotency_key=f"alpha-bonus:{user_id}:{_uuid.uuid4().hex[:12]}",
+                        description="Alpha program milestone bonus",
+                    )
+                    if not result["success"]:
+                        logger.warning("Alpha bonus transfer failed: %s", result.get("error_message"))
+                except Exception as exc:
+                    logger.warning("Alpha bonus unavailable: %s", exc)
                 logger.info("Major milestone achieved",
                            user_id=user_id,
                            milestone=f"{milestone}_queries",

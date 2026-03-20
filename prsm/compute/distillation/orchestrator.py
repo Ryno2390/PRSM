@@ -38,7 +38,7 @@ import structlog
 
 from prsm.core.models import PRSMBaseModel
 from prsm.core.config import get_settings
-from prsm.economy.tokenomics.ftns_service import FTNSService
+from prsm.core.database import FTNSQueries
 from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork
 from ..federation.model_registry import ModelRegistry
 from prsm.core.ipfs_client import PRSMIPFSOperations, PRSMIPFSClient
@@ -107,14 +107,12 @@ class DistillationOrchestrator:
     
     def __init__(
         self,
-        ftns_service: Optional[FTNSService] = None,
         circuit_breaker: Optional[CircuitBreakerNetwork] = None,
         model_registry: Optional[ModelRegistry] = None,
         ipfs_client: Optional[PRSMIPFSClient] = None,
         proposal_manager: Optional[ProposalManager] = None
     ):
         # Core services
-        self.ftns_service = ftns_service or FTNSService()
         self.circuit_breaker = circuit_breaker or CircuitBreakerNetwork()
         self.model_registry = model_registry or ModelRegistry()
         self.ipfs_client = ipfs_client or PRSMIPFSClient()
@@ -207,9 +205,12 @@ class DistillationOrchestrator:
             # 🏦 STEP 3: VERIFY USER HAS SUFFICIENT FTNS BALANCE
             # Check user's actual FTNS balance to prevent failed payments later
             # Integrates with PRSM's tokenomics system
-            user_balance = await self.ftns_service.get_user_balance(request.user_id)
-            if user_balance.balance < estimated_cost:
-                raise ValueError(f"Insufficient FTNS balance: {user_balance.balance} < {estimated_cost}")
+            balance_data = await FTNSQueries.get_user_balance(request.user_id)
+            user_balance_ftns = balance_data["balance"]
+            if user_balance_ftns < estimated_cost:
+                raise ValueError(
+                    f"Insufficient FTNS balance: {user_balance_ftns:.2f} < {estimated_cost} required"
+                )
             
             # 📋 STEP 4: CREATE JOB RECORD
             # Generate unique job with metadata for tracking and management
@@ -654,116 +655,101 @@ class DistillationOrchestrator:
     # === Resource Management ===
     
     async def _reserve_ftns(self, user_id: str, amount: int, job_id: UUID):
-        """Reserve FTNS for job processing"""
+        """
+        Atomically deduct FTNS upfront for job processing.
+
+        Replaces the former reservation pattern (create_reservation → finalize_charge)
+        with a single atomic deduction at job start. If the job completes for less
+        than the estimated cost, the difference is refunded via _refund_unused_ftns().
+
+        Returns the transaction_id (serves as "reservation ID" for tracking).
+        """
         try:
-            # Create reservation record in FTNS service
-            reservation = await self.ftns_service.create_reservation(
+            result = await FTNSQueries.execute_atomic_deduct(
                 user_id=user_id,
-                amount=amount,
-                purpose="distillation_job",
-                reference_id=str(job_id),
-                expiry_hours=48  # Reservation expires in 48 hours
+                amount=float(amount),
+                idempotency_key=f"distillation-reserve:{job_id}",
+                description="Distillation job — upfront reservation",
+                transaction_type="distillation_reservation",
             )
-            
-            logger.info("FTNS reservation created",
-                       user_id=user_id,
-                       amount=amount,
-                       job_id=str(job_id),
-                       reservation_id=reservation.reservation_id)
-            
-            return reservation.reservation_id
-            
-        except Exception as e:
-            logger.error("FTNS reservation failed",
-                        user_id=user_id,
-                        amount=amount,
-                        error=str(e))
-            raise RuntimeError(f"Failed to reserve FTNS: {str(e)}")
+            if not result["success"]:
+                raise RuntimeError(
+                    f"FTNS deduction failed: {result.get('error_message', 'insufficient balance')}"
+                )
+            logger.info(
+                "FTNS deducted for distillation job",
+                user_id=user_id, amount=amount, job_id=str(job_id),
+                transaction_id=result.get("transaction_id"),
+            )
+            return result.get("transaction_id")
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            logger.error(
+                "FTNS reservation failed", user_id=user_id, amount=amount, error=str(exc)
+            )
+            raise RuntimeError(f"Failed to reserve FTNS: {exc}")
     
     async def _refund_unused_ftns(self, job: DistillationJob):
-        """Refund unused FTNS to user"""
+        """
+        Award unused FTNS back to the user after job completion.
+
+        Uses execute_atomic_transfer from "system_rewards" to the user. Non-blocking:
+        if the system_rewards account has insufficient balance (e.g., not bootstrapped),
+        the refund is logged but does not block job completion.
+        """
         try:
-            # Calculate actual costs vs reserved amount
             estimated_cost = await self._estimate_cost_by_job(job)
             actual_cost = job.ftns_spent
-            
+
             if actual_cost < estimated_cost:
                 refund_amount = estimated_cost - actual_cost
-                
-                # Process refund through FTNS service
-                refund = await self.ftns_service.process_refund(
-                    user_id=job.user_id,
-                    amount=refund_amount,
-                    reason="distillation_job_completion",
-                    reference_id=str(job.job_id)
+                result = await FTNSQueries.execute_atomic_transfer(
+                    from_user_id="system_rewards",
+                    to_user_id=job.user_id,
+                    amount=float(refund_amount),
+                    idempotency_key=f"distillation-refund:{job.job_id}",
+                    description=f"Distillation refund: {refund_amount} FTNS unused",
                 )
-                
-                logger.info("FTNS refund processed",
-                           user_id=job.user_id,
-                           refund_amount=refund_amount,
-                           job_id=str(job.job_id))
-                
-                # Update job record
-                job.progress_updates.append({
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "status": "ftns_refund",
-                    "message": f"Refunded {refund_amount} FTNS",
-                    "refund_amount": refund_amount
-                })
-                
-                return refund.transaction_id
-            
-        except Exception as e:
-            logger.error("FTNS refund failed",
-                        job_id=str(job.job_id),
-                        error=str(e))
-            # Don't raise - refund failures shouldn't block job completion
+                if result["success"]:
+                    logger.info(
+                        "FTNS refund processed",
+                        user_id=job.user_id, refund_amount=refund_amount, job_id=str(job.job_id),
+                    )
+                    job.progress_updates.append({
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "status": "ftns_refund",
+                        "message": f"Refunded {refund_amount} FTNS",
+                        "refund_amount": refund_amount,
+                    })
+                    return result.get("transaction_id")
+                else:
+                    logger.warning(
+                        "FTNS refund could not be processed — system_rewards account "
+                        "may need bootstrapping. Error: %s",
+                        result.get("error_message"),
+                    )
+        except Exception as exc:
+            logger.error("FTNS refund failed", job_id=str(job.job_id), error=str(exc))
+            # Non-fatal — refund failure must not block job completion
     
     async def _finalize_ftns_charges(self, job: DistillationJob):
-        """Finalize FTNS charges for completed job"""
-        try:
-            # Calculate final costs
-            final_cost = job.ftns_spent
-            
-            # Get the original request to check revenue sharing
-            request = await self._get_request_for_job(job.job_id)
-            
-            # Process final charge
-            charge = await self.ftns_service.finalize_charge(
-                user_id=job.user_id,
-                amount=final_cost,
-                description="Automated model distillation",
-                reference_id=str(job.job_id),
-                metadata={
-                    "domain": request.domain,
-                    "teacher_model": request.teacher_model,
-                    "target_size": request.target_size.value,
-                    "optimization_target": request.optimization_target.value
-                }
-            )
-            
-            # Handle revenue sharing if applicable
-            if request.revenue_sharing > 0 and hasattr(request, 'teacher_models'):
-                await self._distribute_revenue_sharing(
-                    job, request, final_cost * request.revenue_sharing
-                )
-            
-            # Update marketplace earnings if model is listed
-            if job.marketplace_listing_id:
-                await self._initialize_marketplace_earnings(job, request)
-            
-            logger.info("FTNS charges finalized",
-                       user_id=job.user_id,
-                       final_cost=final_cost,
-                       job_id=str(job.job_id))
-            
-            return charge.transaction_id
-            
-        except Exception as e:
-            logger.error("FTNS charge finalization failed",
-                        job_id=str(job.job_id),
-                        error=str(e))
-            raise
+        """
+        Record final FTNS charge for audit purposes.
+
+        Tokens were already deducted atomically at job reservation time
+        (_reserve_ftns). This method logs the final amount spent and
+        returns without making any further financial transactions.
+        """
+        final_cost = job.ftns_spent
+        logger.info(
+            "FTNS charges finalized (deducted at reservation)",
+            user_id=job.user_id, final_cost=final_cost, job_id=str(job.job_id),
+        )
+        # No further transaction: upfront deduction model means tokens are
+        # already settled. Remove the "raise" that previously caused every
+        # completed job to crash via finalize_charge AttributeError.
+        return None
     
     async def _distribute_revenue_sharing(self, job: DistillationJob, request: DistillationRequest, share_amount: int):
         """Distribute revenue sharing to teacher model owners"""
@@ -784,18 +770,23 @@ class DistillationOrchestrator:
                     
                     if teacher_owner:
                         # Transfer FTNS to teacher owner
-                        await self.ftns_service.transfer_tokens(
-                            from_user=request.user_id,
-                            to_user=teacher_owner,
-                            amount=teacher_share,
-                            reason="teacher_model_revenue_share",
-                            reference_id=str(job.job_id)
+                        result = await FTNSQueries.execute_atomic_transfer(
+                            from_user_id=request.user_id,
+                            to_user_id=teacher_owner,
+                            amount=float(teacher_share),
+                            idempotency_key=f"revenue-share:{job.job_id}:{teacher_owner}",
+                            description=f"Teacher model revenue share: {teacher.get('model', 'unknown')}",
                         )
-                        
-                        logger.info("Revenue share distributed",
-                                   teacher_model=teacher["model"],
-                                   teacher_owner=teacher_owner,
-                                   share_amount=teacher_share)
+                        if not result["success"]:
+                            logger.warning(
+                                "Revenue share transfer failed for %s: %s",
+                                teacher_owner, result.get("error_message"),
+                            )
+                        else:
+                            logger.info("Revenue share distributed",
+                                       teacher_model=teacher["model"],
+                                       teacher_owner=teacher_owner,
+                                       share_amount=teacher_share)
                         
         except Exception as e:
             logger.error("Revenue sharing distribution failed", error=str(e))
