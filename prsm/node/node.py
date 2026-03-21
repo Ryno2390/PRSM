@@ -102,7 +102,7 @@ class TrainingJob:
 
 
 class _NodeContextAdapter:
-    """Minimal context manager for NWTN: tracks nothing, returns defaults."""
+    """Deprecated: use get_context_manager() instead. Retained for reference only."""
 
     async def get_session_usage(self, session_id: Any) -> Optional[Dict[str, Any]]:
         return None
@@ -716,13 +716,14 @@ class PRSMNode:
                 from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
                 from prsm.compute.nwtn.backends import BackendRegistry
                 from prsm.compute.nwtn.backends.config import BackendConfig
+                from prsm.compute.nwtn.context_manager import get_context_manager
                 
                 # Create backend registry from environment for real LLM inference
                 backend_config = BackendConfig.from_environment()
                 backend_registry = BackendRegistry(backend_config)
                 
                 orchestrator = NWTNOrchestrator(
-                    context_manager=_NodeContextAdapter(),
+                    context_manager=get_context_manager(),
                     ftns_service=_NodeFTNSAdapter(self.ledger, self.identity.node_id),
                     ipfs_client=_NodeIPFSAdapter(self.config.ipfs_api_url),
                     model_registry=_NodeModelRegistryAdapter(),
