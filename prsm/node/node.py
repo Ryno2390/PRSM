@@ -376,19 +376,80 @@ class _NodeIPFSAdapter:
 
 
 class _NodeModelRegistryAdapter:
-    """Stub model registry returning default specialists."""
+    """DB-backed model registry adapter for PRSMNode.
+
+    Persists teacher models to TeacherModelModel and discovers specialists
+    via specialization-matched queries ordered by performance score.
+    Falls back to empty list when the database is unavailable.
+    """
 
     async def register_teacher_model(self, model: Any, cid: str) -> bool:
-        return True
+        """Persist a teacher model to TeacherModelModel. Idempotent on name+version collision."""
+        from prsm.core.database import get_async_session, TeacherModelModel
+        from sqlalchemy.exc import IntegrityError
+        from uuid import uuid4
+
+        async with get_async_session() as db:
+            try:
+                row = TeacherModelModel(
+                    teacher_id=uuid4(),
+                    name=getattr(model, 'name', str(model)),
+                    specialization=getattr(model, 'specialization', 'general'),
+                    performance_score=float(getattr(model, 'performance_score', 0.0)),
+                    ipfs_cid=cid,
+                    version=getattr(model, 'version', '1.0.0'),
+                    active=True,
+                )
+                db.add(row)
+                await db.commit()
+                logger.info(f"Registered teacher model: {row.name} ({row.specialization})")
+                return True
+            except IntegrityError:
+                # Model already registered (name+version UNIQUE constraint) — treat as success
+                await db.rollback()
+                return True
+            except Exception as e:
+                await db.rollback()
+                logger.warning(f"Failed to register teacher model '{getattr(model, 'name', model)}': {e}")
+                return False
 
     async def discover_specialists(self, domain: str) -> list:
-        try:
-            from prsm.core.models import TeacherModel
-            return [
-                TeacherModel(name="General Helper", specialization="general", performance_score=0.85),
-            ]
-        except Exception:
-            return []
+        """Query TeacherModelModel for active specialists matching domain, ordered by performance."""
+        from prsm.core.database import get_async_session, TeacherModelModel
+        from prsm.core.models import TeacherModel
+        from sqlalchemy import select, or_
+
+        async with get_async_session() as db:
+            try:
+                stmt = (
+                    select(TeacherModelModel)
+                    .where(TeacherModelModel.active == True)
+                    .where(
+                        or_(
+                            TeacherModelModel.specialization.ilike(f"%{domain}%"),
+                            TeacherModelModel.specialization == "general",
+                        )
+                    )
+                    .order_by(TeacherModelModel.performance_score.desc())
+                    .limit(10)
+                )
+                result = await db.execute(stmt)
+                rows = result.scalars().all()
+
+                return [
+                    TeacherModel(
+                        teacher_id=row.teacher_id,
+                        name=row.name,
+                        specialization=row.specialization,
+                        performance_score=row.performance_score or 0.0,
+                        ipfs_cid=row.ipfs_cid,
+                        version=row.version or "1.0.0",
+                    )
+                    for row in rows
+                ]
+            except Exception as e:
+                logger.warning(f"discover_specialists query failed for domain '{domain}': {e}")
+                return []
 
 
 class PRSMNode:
