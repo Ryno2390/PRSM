@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from prsm.core.auth.models import User, Permission
 from prsm.core.database import get_db
+from prsm.core.redis_client import get_redis_client
 from .exceptions import (
     raise_unauthorized,
     raise_forbidden,
@@ -26,7 +27,8 @@ from .standards import APIConfig
 logger = logging.getLogger(__name__)
 security = HTTPBearer()
 
-# In-memory rate limiting storage (in production, use Redis)
+# In-memory rate limiting storage — fallback when Redis is unavailable.
+# Primary path uses Redis sorted sets (sliding window) via check_rate_limit().
 _rate_limit_storage: Dict[str, Dict[str, Any]] = {}
 
 
@@ -140,44 +142,83 @@ async def check_rate_limit(
     request: Request,
     user: User = Depends(get_current_user)
 ) -> User:
-    """Check rate limits for user"""
-    
-    # Get user's rate limit configuration
+    """
+    Check rate limits for user via Redis-backed sliding window.
+
+    Falls back to in-memory counting if Redis is unavailable so the API
+    stays up even if Redis goes down, at the cost of per-process isolation.
+    """
     user_tier = user.role.value if user.role else "user"
     rate_config = APIConfig.RATE_LIMITS.get(user_tier, APIConfig.RATE_LIMITS["user"])
-    
-    # Create rate limit key
+
     rate_key = f"{user.id}:{request.url.path}:{user_tier}"
     current_time = datetime.now(timezone.utc)
-    
-    # Get or create rate limit record
+
+    # ── Redis sliding-window check ────────────────────────────────────────────
+    redis = get_redis_client()
+    if redis.connected and redis.redis_client:
+        try:
+            now_ts = current_time.timestamp()
+            window_start = now_ts - rate_config["window"]
+            redis_key = f"prsm:rate_limit:{rate_key}"
+
+            pipe = redis.redis_client.pipeline()
+            pipe.zremrangebyscore(redis_key, 0, window_start)   # evict stale entries
+            pipe.zcard(redis_key)                                # count in-window entries
+            results = await pipe.execute()
+            current_count = results[1]
+
+            if current_count >= rate_config["requests"]:
+                oldest = await redis.redis_client.zrange(
+                    redis_key, 0, 0, withscores=True
+                )
+                if oldest:
+                    retry_after = int(oldest[0][1] + rate_config["window"] - now_ts) + 1
+                else:
+                    retry_after = rate_config["window"]
+                raise_rate_limit(
+                    retry_after=max(1, retry_after),
+                    limit=rate_config["requests"],
+                    window=rate_config["window"],
+                )
+
+            await redis.redis_client.zadd(redis_key, {str(now_ts): now_ts})
+            await redis.redis_client.expire(redis_key, rate_config["window"] + 60)
+            return user
+
+        except RateLimitException:
+            raise  # propagate — don't swallow as a Redis error
+        except Exception as e:
+            logger.warning(
+                f"Redis rate limit check failed, falling back to in-memory: "
+                f"error={str(e)}, user_id={str(user.id)}"
+            )
+            # fall through to in-memory path
+
+    # ── In-memory fallback (per-process, used when Redis is unavailable) ──────
     if rate_key not in _rate_limit_storage:
         _rate_limit_storage[rate_key] = {
             "requests": [],
-            "last_reset": current_time
+            "last_reset": current_time,
         }
-    
+
     rate_data = _rate_limit_storage[rate_key]
-    
-    # Clean old requests outside the window
-    window_start = current_time.timestamp() - rate_config["window"]
+    window_start_ts = current_time.timestamp() - rate_config["window"]
     rate_data["requests"] = [
-        req_time for req_time in rate_data["requests"]
-        if req_time > window_start
+        t for t in rate_data["requests"] if t > window_start_ts
     ]
-    
-    # Check if limit exceeded
+
     if len(rate_data["requests"]) >= rate_config["requests"]:
-        retry_after = rate_config["window"] - (current_time.timestamp() - min(rate_data["requests"]))
+        retry_after = rate_config["window"] - (
+            current_time.timestamp() - min(rate_data["requests"])
+        )
         raise_rate_limit(
             retry_after=int(retry_after) + 1,
             limit=rate_config["requests"],
-            window=rate_config["window"]
+            window=rate_config["window"],
         )
-    
-    # Add current request
+
     rate_data["requests"].append(current_time.timestamp())
-    
     return user
 
 
