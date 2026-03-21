@@ -160,41 +160,62 @@ class DataSpineMetrics:
     unique_content_items: int
 
 class IPFSClient:
-    """Simplified IPFS client interface"""
-    
+    """
+    Adapter wrapping prsm.core.ipfs_client.IPFSClient.
+
+    Provides the local interface PRSMDataSpineProxy expects (add/get/pin returning
+    primitive types) while delegating to the canonical client that raises
+    IPFSConnectionError on failure rather than returning fake data.
+    """
+
     def __init__(self):
-        self.gateway_url = "https://ipfs.io/ipfs/"
-        self.local_node_url = "http://localhost:5001"
+        self._client = None   # lazy-initialized on first use
         self.connected = False
-        
+
+    async def _ensure_initialized(self) -> None:
+        """Initialize the canonical client on first use."""
+        if self._client is None:
+            from prsm.core.ipfs_client import create_ipfs_client
+            self._client = await create_ipfs_client()
+            self.connected = self._client.connected
+
     async def add_content(self, content: bytes) -> str:
-        """Add content to IPFS and return hash"""
-        # Simulate IPFS hash generation
-        content_hash = hashlib.sha256(content).hexdigest()
-        # Simple IPFS-like hash simulation
-        ipfs_hash = f"Qm{content_hash[:44]}"
-        
-        # Simulate network delay
-        await asyncio.sleep(random.uniform(0.1, 0.5))
-        
-        logger.debug("Content added to IPFS", ipfs_hash=ipfs_hash, size=len(content))
-        return ipfs_hash
-    
+        """Upload bytes to IPFS. Returns CID string. Raises IPFSConnectionError on failure."""
+        await self._ensure_initialized()
+        from prsm.core.ipfs_client import IPFSConnectionError
+        result = await self._client.add_content(content)
+        if not result.success or not result.cid:
+            raise IPFSConnectionError(
+                f"IPFS upload failed: {result.error or 'no CID returned'}"
+            )
+        return result.cid
+
     async def get_content(self, ipfs_hash: str) -> bytes:
-        """Retrieve content from IPFS"""
-        # Simulate IPFS retrieval
-        await asyncio.sleep(random.uniform(0.2, 1.0))
-        
-        # Generate mock content based on hash for consistency
-        mock_content = f"IPFS content for hash {ipfs_hash}".encode()
-        logger.debug("Content retrieved from IPFS", ipfs_hash=ipfs_hash, size=len(mock_content))
-        return mock_content
-    
+        """Download content bytes from IPFS by CID. Raises IPFSConnectionError on failure."""
+        await self._ensure_initialized()
+        from prsm.core.ipfs_client import IPFSConnectionError
+        result = await self._client.get_content(ipfs_hash)
+        if not result.success:
+            raise IPFSConnectionError(
+                f"IPFS download failed for {ipfs_hash}: {result.error}"
+            )
+        # IPFSNode stores content bytes in result.metadata["content"]
+        content = (result.metadata or {}).get("content")
+        if content is None:
+            raise IPFSConnectionError(
+                f"No content data in IPFS result for CID: {ipfs_hash}"
+            )
+        return content if isinstance(content, bytes) else content.encode()
+
     async def pin_content(self, ipfs_hash: str) -> bool:
-        """Pin content to prevent garbage collection"""
-        await asyncio.sleep(0.1)
-        logger.debug("Content pinned in IPFS", ipfs_hash=ipfs_hash)
-        return True
+        """Pin content in IPFS. Returns True on success, False on failure (never raises)."""
+        try:
+            await self._ensure_initialized()
+            result = await self._client.pin_content(ipfs_hash)
+            return result.success
+        except Exception as e:
+            logger.warning("IPFS pin failed", cid=ipfs_hash, error=str(e))
+            return False
 
 class ContentCompressor:
     """Content compression utilities"""
@@ -396,15 +417,11 @@ class PRSMDataSpineProxy:
         return phase_result
     
     async def _initialize_ipfs_client(self) -> bool:
-        """Initialize IPFS client connection"""
+        """Initialize the real IPFS client connection."""
         try:
-            # Simulate IPFS node connection
-            await asyncio.sleep(0.2)
-            self.ipfs_client.connected = True
-            
-            logger.debug("IPFS client initialized successfully")
-            return True
-            
+            await self.ipfs_client._ensure_initialized()
+            logger.debug("IPFS client initialized", connected=self.ipfs_client.connected)
+            return self.ipfs_client.connected
         except Exception as e:
             logger.error("Failed to initialize IPFS client", error=str(e))
             return False
@@ -888,36 +905,34 @@ class PRSMDataSpineProxy:
             return False
     
     async def _test_performance_targets(self) -> bool:
-        """Test performance targets"""
+        """Measure actual cache retrieval performance against the sub-100ms target."""
         try:
-            # Simulate performance testing
             test_retrievals = []
-            
-            for _ in range(10):  # Test 10 retrievals
-                start_time = time.perf_counter()
-                await asyncio.sleep(random.uniform(0.01, 0.08))  # 10-80ms
-                end_time = time.perf_counter()
-                
-                retrieval_time = (end_time - start_time) * 1000
-                test_retrievals.append(retrieval_time)
-            
-            avg_retrieval_time = sum(test_retrievals) / len(test_retrievals)
-            p95_retrieval_time = sorted(test_retrievals)[int(len(test_retrievals) * 0.95)]
-            
-            # Update metrics
-            self.metrics.avg_retrieval_time_ms = avg_retrieval_time
-            self.metrics.p95_retrieval_time_ms = p95_retrieval_time
-            
-            # Target: sub-100ms retrieval
-            performance_target_met = avg_retrieval_time < 100.0
-            
-            logger.debug("Performance targets tested",
-                        avg_retrieval_time=avg_retrieval_time,
-                        p95_retrieval_time=p95_retrieval_time,
+
+            for metadata in list(self.content_metadata.values())[:10]:
+                start = time.perf_counter()
+                await self._check_cache(metadata.original_url)
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                test_retrievals.append(elapsed_ms)
+
+            if not test_retrievals:
+                # No content yet to benchmark against — report 0ms (vacuously passes)
+                self.metrics.avg_retrieval_time_ms = 0.0
+                self.metrics.p95_retrieval_time_ms = 0.0
+                return True
+
+            avg = sum(test_retrievals) / len(test_retrievals)
+            p95 = sorted(test_retrievals)[int(len(test_retrievals) * 0.95)]
+            self.metrics.avg_retrieval_time_ms = avg
+            self.metrics.p95_retrieval_time_ms = p95
+
+            performance_target_met = avg < 100.0
+            logger.debug("Performance targets measured",
+                        avg_retrieval_time_ms=avg,
+                        p95_retrieval_time_ms=p95,
                         target_met=performance_target_met)
-            
             return performance_target_met
-            
+
         except Exception as e:
             logger.error("Failed to test performance targets", error=str(e))
             return False
@@ -1074,25 +1089,41 @@ class PRSMDataSpineProxy:
         return None
     
     async def _retrieve_from_https(self, url: str) -> Tuple[bytes, ContentMetadata]:
-        """Retrieve content from HTTPS source"""
+        """Retrieve content from an HTTPS URL using the real HTTP session."""
         self.metrics.https_requests += 1
-        
-        # Simulate HTTPS retrieval
-        await asyncio.sleep(random.uniform(0.1, 0.3))
-        
-        mock_content = f"HTTPS content from {url}".encode()
-        
+
+        if not self.http_session or self.http_session.closed:
+            self.http_session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=30),
+                headers={"User-Agent": "PRSM-DataSpine/1.0"}
+            )
+
+        async with self.http_session.get(url) as response:
+            response.raise_for_status()
+            content_data = await response.read()
+
+        content_type_header = (
+            response.headers.get("Content-Type", "text/plain").split(";")[0].strip()
+        )
+        if "json" in content_type_header:
+            content_type = ContentType.JSON
+        elif content_type_header.startswith("image/"):
+            content_type = ContentType.IMAGE
+        elif "octet-stream" in content_type_header:
+            content_type = ContentType.BINARY
+        else:
+            content_type = ContentType.TEXT
+
         metadata = ContentMetadata(
             content_id=str(uuid4()),
             original_url=url,
             ipfs_hash=None,
-            content_type=ContentType.TEXT,
-            size_bytes=len(mock_content),
+            content_type=content_type,
+            size_bytes=len(content_data),
             compression_type=CompressionType.NONE,
-            sha256_hash=hashlib.sha256(mock_content).hexdigest()
+            sha256_hash=hashlib.sha256(content_data).hexdigest()
         )
-        
-        return mock_content, metadata
+        return content_data, metadata
     
     async def _retrieve_from_ipfs(self, url: str) -> Tuple[bytes, ContentMetadata]:
         """Retrieve content from IPFS"""
@@ -1269,7 +1300,6 @@ async def run_quick_data_spine_test():
 
 if __name__ == "__main__":
     import sys
-    import random
     
     async def run_data_spine_deployment_main():
         """Run data spine deployment"""
