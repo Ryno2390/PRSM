@@ -643,6 +643,31 @@ class SlashEventModel(Base):
     )
 
 
+class PQIdentityModel(Base):
+    """
+    Database model for post-quantum identity records.
+
+    Persists PostQuantumIdentity keypairs across restarts so users can
+    authenticate after a server restart without re-registering.
+
+    Security note: private key is stored as JSON-encoded base64 in keypair_json.
+    KMS-backed encryption at rest is tracked in known technical debt.
+    """
+    __tablename__ = "pq_identities"
+
+    user_id       = Column(UUID(as_uuid=True), primary_key=True)
+    security_level = Column(String(50),  nullable=False)
+    keypair_json  = Column(Text,         nullable=False)  # JSON from PostQuantumKeyPair.to_dict()
+    signature_type = Column(String(50),  nullable=False)
+    created_at    = Column(DateTime(timezone=True), nullable=False)
+    last_used     = Column(DateTime(timezone=True), nullable=True)
+    updated_at    = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index('idx_pq_identity_user', 'user_id'),
+    )
+
+
 # === Database Session Management ===
 
 @asynccontextmanager

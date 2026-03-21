@@ -8,6 +8,7 @@ digital signatures for enhanced security against future quantum attacks.
 
 import json
 import hashlib
+import structlog
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Union, List
 from dataclasses import dataclass, field
@@ -17,6 +18,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Column, String, DateTime, Boolean, Text, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from uuid import UUID, uuid4
+
+logger = structlog.get_logger(__name__)
 
 # Import our post-quantum crypto directly
 import importlib.util
@@ -128,12 +131,37 @@ class PostQuantumAuthManager:
         self.identities: Dict[UUID, PostQuantumIdentity] = {}
         self.challenges: Dict[str, AuthenticationChallenge] = {}
     
-    def create_post_quantum_identity(self, 
+    async def _delete_challenge_from_redis(self, challenge_id: str) -> None:
+        """Remove a challenge from Redis after use or expiry."""
+        try:
+            from prsm.core.redis_client import get_redis_client
+            redis = get_redis_client()
+            if redis.connected and redis.redis_client:
+                await redis.redis_client.delete(f"prsm:auth:challenge:{challenge_id}")
+        except Exception as e:
+            logger.debug("Redis challenge delete failed", challenge_id=challenge_id, error=str(e))
+    
+    async def _update_last_used(self, user_id: UUID, last_used: datetime) -> None:
+        """Update last_used timestamp in DB (non-critical, fire-and-forget)."""
+        try:
+            from prsm.core.database import get_async_session, PQIdentityModel
+            from sqlalchemy import update
+            async with get_async_session() as db:
+                await db.execute(
+                    update(PQIdentityModel)
+                    .where(PQIdentityModel.user_id == user_id)
+                    .values(last_used=last_used)
+                )
+                await db.commit()
+        except Exception as e:
+            logger.debug("Failed to update PQ identity last_used", user_id=str(user_id), error=str(e))
+    
+    async def create_post_quantum_identity(self,
                                    user_id: UUID,
                                    security_level: Optional[SecurityLevel] = None,
                                    signature_type: AuthSignatureType = AuthSignatureType.POST_QUANTUM) -> PostQuantumIdentity:
         """
-        Create a new post-quantum identity for a user
+        Create a post-quantum identity and persist to database.
         
         Args:
             user_id: User ID to create identity for
@@ -145,32 +173,71 @@ class PostQuantumAuthManager:
         """
         if security_level is None:
             security_level = self.default_security_level
-        
-        # Generate post-quantum key pair
+
         pq_keypair = self.pq_crypto.generate_keypair(security_level)
-        
-        # Create identity
         identity = PostQuantumIdentity(
             user_id=user_id,
             security_level=security_level,
             pq_keypair=pq_keypair,
-            signature_type=signature_type
+            signature_type=signature_type,
         )
-        
-        # Store identity
+
+        # Persist to DB (upsert — allow re-registration)
+        from prsm.core.database import get_async_session, PQIdentityModel
+        storage = identity.to_storage_dict()
+
+        async with get_async_session() as db:
+            existing = await db.get(PQIdentityModel, user_id)
+            if existing:
+                existing.security_level = storage["security_level"]
+                existing.keypair_json   = json.dumps(storage["pq_keypair"])
+                existing.signature_type = storage["signature_type"]
+                existing.created_at     = identity.created_at
+                existing.last_used      = None
+            else:
+                db.add(PQIdentityModel(
+                    user_id=user_id,
+                    security_level=storage["security_level"],
+                    keypair_json=json.dumps(storage["pq_keypair"]),
+                    signature_type=storage["signature_type"],
+                    created_at=identity.created_at,
+                    last_used=None,
+                ))
+            await db.commit()
+
         self.identities[user_id] = identity
-        
         return identity
     
-    def get_identity(self, user_id: UUID) -> Optional[PostQuantumIdentity]:
-        """Get post-quantum identity for a user"""
-        return self.identities.get(user_id)
+    async def get_identity(self, user_id: UUID) -> Optional[PostQuantumIdentity]:
+        """Get post-quantum identity: in-memory cache → DB fallback."""
+        if user_id in self.identities:
+            return self.identities[user_id]
+
+        try:
+            from prsm.core.database import get_async_session, PQIdentityModel
+            async with get_async_session() as db:
+                row = await db.get(PQIdentityModel, user_id)
+            if row is None:
+                return None
+            identity = PostQuantumIdentity.from_storage_dict({
+                "user_id":        str(user_id),
+                "security_level": row.security_level,
+                "pq_keypair":     json.loads(row.keypair_json),
+                "signature_type": row.signature_type,
+                "created_at":     row.created_at.isoformat(),
+                "last_used":      row.last_used.isoformat() if row.last_used else None,
+            })
+            self.identities[user_id] = identity  # hydrate in-memory
+            return identity
+        except Exception as e:
+            logger.warning("DB identity lookup failed", user_id=str(user_id), error=str(e))
+            return None
     
-    def create_auth_challenge(self, 
+    async def create_auth_challenge(self,
                             user_id: UUID,
                             challenge_lifetime_minutes: int = 5) -> Optional[AuthenticationChallenge]:
         """
-        Create an authentication challenge for post-quantum signing
+        Create auth challenge persisted to Redis with TTL.
         
         Args:
             user_id: User ID to create challenge for
@@ -179,39 +246,45 @@ class PostQuantumAuthManager:
         Returns:
             AuthenticationChallenge object or None if user has no PQ identity
         """
-        identity = self.get_identity(user_id)
+        identity = await self.get_identity(user_id)
         if not identity:
             return None
-        
-        # Generate unique challenge
-        challenge_id = hashlib.sha256(f"{user_id}_{datetime.now().isoformat()}".encode()).hexdigest()[:16]
-        
-        # Create challenge data (timestamp + nonce)
+
+        challenge_id = hashlib.sha256(
+            f"{user_id}_{datetime.now().isoformat()}".encode()
+        ).hexdigest()[:16]
         challenge_data = f"PRSM_AUTH_{datetime.now(timezone.utc).isoformat()}_{challenge_id}"
-        
-        # Set expiration
         expires_at = datetime.now(timezone.utc).replace(microsecond=0)
         expires_at = expires_at.replace(minute=expires_at.minute + challenge_lifetime_minutes)
-        
+
         challenge = AuthenticationChallenge(
             challenge_id=challenge_id,
             user_id=user_id,
             challenge_data=challenge_data,
             expires_at=expires_at,
             security_level=identity.security_level,
-            signature_type=identity.signature_type
+            signature_type=identity.signature_type,
         )
-        
-        # Store challenge
+
+        # Persist to Redis with TTL (cross-worker/cross-restart)
+        try:
+            from prsm.core.redis_client import get_redis_client
+            redis = get_redis_client()
+            if redis.connected and redis.redis_client:
+                key = f"prsm:auth:challenge:{challenge_id}"
+                ttl = challenge_lifetime_minutes * 60
+                await redis.redis_client.setex(key, ttl, json.dumps(challenge.to_dict()))
+        except Exception as e:
+            logger.debug("Redis challenge persist failed", challenge_id=challenge_id, error=str(e))
+
         self.challenges[challenge_id] = challenge
-        
         return challenge
     
-    def verify_auth_signature(self, 
+    async def verify_auth_signature(self,
                             challenge_id: str,
                             signature_data: Dict[str, Any]) -> tuple[bool, str]:
         """
-        Verify post-quantum authentication signature
+        Verify PQ signature with Redis fallback for challenge lookup.
         
         Args:
             challenge_id: Challenge ID
@@ -220,47 +293,58 @@ class PostQuantumAuthManager:
         Returns:
             Tuple of (is_valid, message)
         """
-        # Get challenge
+        # In-memory fast path
         challenge = self.challenges.get(challenge_id)
+
+        # Redis fallback (cross-worker, cross-restart)
+        if challenge is None:
+            try:
+                from prsm.core.redis_client import get_redis_client
+                redis = get_redis_client()
+                if redis.connected and redis.redis_client:
+                    data = await redis.redis_client.get(f"prsm:auth:challenge:{challenge_id}")
+                    if data:
+                        d = json.loads(data)
+                        challenge = AuthenticationChallenge(
+                            challenge_id=d["challenge_id"],
+                            user_id=UUID(d["user_id"]),
+                            challenge_data=d["challenge_data"],
+                            expires_at=datetime.fromisoformat(d["expires_at"]),
+                            security_level=SecurityLevel(d["security_level"]),
+                            signature_type=AuthSignatureType(d["signature_type"]),
+                        )
+            except Exception as e:
+                logger.debug("Redis challenge lookup failed", challenge_id=challenge_id, error=str(e))
+
         if not challenge:
             return False, "Challenge not found"
-        
-        # Check if challenge expired
+
         if challenge.is_expired():
-            del self.challenges[challenge_id]
+            self.challenges.pop(challenge_id, None)
+            await self._delete_challenge_from_redis(challenge_id)
             return False, "Challenge expired"
-        
-        # Get user identity
-        identity = self.get_identity(challenge.user_id)
+
+        identity = await self.get_identity(challenge.user_id)
         if not identity:
             return False, "User identity not found"
-        
+
         try:
-            # Reconstruct signature object
             signature = PostQuantumSignature.from_dict(signature_data)
-            
-            # Verify signature
             is_valid = self.pq_crypto.verify_signature(
-                challenge.challenge_data,
-                signature,
-                identity.pq_keypair.public_key
+                challenge.challenge_data, signature, identity.pq_keypair.public_key
             )
-            
             if is_valid:
-                # Update last used time
                 identity.last_used = datetime.now(timezone.utc)
-                
-                # Clean up challenge
-                del self.challenges[challenge_id]
-                
+                await self._update_last_used(challenge.user_id, identity.last_used)
+                self.challenges.pop(challenge_id, None)
+                await self._delete_challenge_from_redis(challenge_id)
                 return True, "Authentication successful"
             else:
                 return False, "Invalid signature"
-                
         except Exception as e:
             return False, f"Signature verification error: {str(e)}"
     
-    def sign_authentication_challenge(self, 
+    async def sign_authentication_challenge(self,
                                     user_id: UUID,
                                     challenge_data: str) -> Optional[PostQuantumSignature]:
         """
@@ -273,7 +357,7 @@ class PostQuantumAuthManager:
         Returns:
             PostQuantumSignature or None if user has no identity
         """
-        identity = self.get_identity(user_id)
+        identity = await self.get_identity(user_id)
         if not identity:
             return None
         
@@ -282,16 +366,16 @@ class PostQuantumAuthManager:
         
         return signature
     
-    def get_user_public_key(self, user_id: UUID) -> Optional[bytes]:
+    async def get_user_public_key(self, user_id: UUID) -> Optional[bytes]:
         """Get user's post-quantum public key"""
-        identity = self.get_identity(user_id)
+        identity = await self.get_identity(user_id)
         return identity.pq_keypair.public_key if identity else None
     
-    def upgrade_security_level(self, 
+    async def upgrade_security_level(self,
                              user_id: UUID,
                              new_security_level: SecurityLevel) -> bool:
         """
-        Upgrade user's post-quantum security level
+        Upgrade user's post-quantum security level.
         
         Args:
             user_id: User ID
@@ -300,19 +384,35 @@ class PostQuantumAuthManager:
         Returns:
             True if upgrade successful, False otherwise
         """
-        identity = self.get_identity(user_id)
+        identity = await self.get_identity(user_id)
         if not identity:
             return False
-        
-        # Create new keypair with higher security level
+
         new_keypair = self.pq_crypto.generate_keypair(new_security_level)
-        
-        # Update identity
-        identity.pq_keypair = new_keypair
+        identity.pq_keypair     = new_keypair
         identity.security_level = new_security_level
-        identity.created_at = datetime.now(timezone.utc)
-        identity.last_used = None
-        
+        identity.created_at     = datetime.now(timezone.utc)
+        identity.last_used      = None
+
+        try:
+            from prsm.core.database import get_async_session, PQIdentityModel
+            from sqlalchemy import update
+            async with get_async_session() as db:
+                await db.execute(
+                    update(PQIdentityModel)
+                    .where(PQIdentityModel.user_id == user_id)
+                    .values(
+                        security_level=new_security_level.value,
+                        keypair_json=json.dumps(new_keypair.to_dict()),
+                        created_at=identity.created_at,
+                        last_used=None,
+                    )
+                )
+                await db.commit()
+        except Exception as e:
+            logger.warning("Failed to persist security level upgrade", user_id=str(user_id), error=str(e))
+            return False
+
         return True
     
     def get_authentication_stats(self) -> Dict[str, Any]:
@@ -381,7 +481,7 @@ async def example_auth_flow():
     user_id = uuid4()
     print(f"1. Creating post-quantum identity for user {str(user_id)[:8]}...")
     
-    identity = auth_manager.create_post_quantum_identity(
+    identity = await auth_manager.create_post_quantum_identity(
         user_id=user_id,
         security_level=SecurityLevel.LEVEL_1
     )
@@ -389,7 +489,7 @@ async def example_auth_flow():
     
     # Create authentication challenge
     print("\n2. Creating authentication challenge...")
-    challenge = auth_manager.create_auth_challenge(user_id)
+    challenge = await auth_manager.create_auth_challenge(user_id)
     if challenge:
         print(f"   ✅ Challenge created: {challenge.challenge_id}")
         print(f"   Challenge data: {challenge.challenge_data[:50]}...")
@@ -397,7 +497,7 @@ async def example_auth_flow():
     
     # Sign challenge (simulating client-side signing)
     print("\n3. Signing challenge...")
-    signature = auth_manager.sign_authentication_challenge(user_id, challenge.challenge_data)
+    signature = await auth_manager.sign_authentication_challenge(user_id, challenge.challenge_data)
     if signature:
         print(f"   ✅ Challenge signed")
         print(f"   Signature size: {len(signature.signature)} bytes")
@@ -405,7 +505,7 @@ async def example_auth_flow():
     
     # Verify signature
     print("\n4. Verifying authentication...")
-    is_valid, message = auth_manager.verify_auth_signature(
+    is_valid, message = await auth_manager.verify_auth_signature(
         challenge.challenge_id,
         signature.to_dict()
     )
