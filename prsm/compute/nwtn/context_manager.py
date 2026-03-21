@@ -12,6 +12,8 @@ Provides:
 - Context allocation recommendations
 """
 
+import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -49,6 +51,8 @@ class ContextManager:
     - Optimization recommendations
     """
     
+    _HISTORY_LIMIT = 1000  # cap in-memory history to prevent unbounded growth
+    
     def __init__(self):
         self.session_usage: Dict[str, ContextUsage] = {}
         self.usage_history: List[Dict[str, Any]] = []
@@ -56,6 +60,84 @@ class ContextManager:
         
         logger.info("ContextManager initialized")
     
+    async def _persist_usage(self, session_id: str, usage: ContextUsage) -> None:
+        """Persist a ContextUsage record to Redis and update PRSMSessionModel."""
+        # ── Redis: per-session usage (24h TTL) ───────────────────────────────
+        try:
+            from prsm.core.redis_client import get_redis_client
+            redis = get_redis_client()
+            if redis.connected and redis.redis_client:
+                key = f"prsm:context:usage:{session_id}"
+                payload = json.dumps({
+                    "session_id": usage.session_id,
+                    "context_used": usage.context_used,
+                    "context_allocated": usage.context_allocated,
+                    "timestamp": usage.timestamp,
+                })
+                await redis.redis_client.setex(key, 86400, payload)
+        except Exception as e:
+            logger.debug("Redis context persist failed", session_id=session_id, error=str(e))
+
+        # ── DB: update PRSMSessionModel if the session row exists ─────────────
+        try:
+            from prsm.core.database import get_async_session, PRSMSessionModel
+            from sqlalchemy import update
+            from uuid import UUID
+            async with get_async_session() as db:
+                await db.execute(
+                    update(PRSMSessionModel)
+                    .where(PRSMSessionModel.session_id == UUID(session_id))
+                    .values(
+                        context_used=usage.context_used,
+                        nwtn_context_allocation=usage.context_allocated,
+                    )
+                )
+                await db.commit()
+        except Exception as e:
+            logger.debug("DB context persist failed", session_id=session_id, error=str(e))
+
+    async def _delete_redis_key(self, key: str) -> None:
+        """Delete a Redis key, ignoring errors."""
+        try:
+            from prsm.core.redis_client import get_redis_client
+            redis = get_redis_client()
+            if redis.connected and redis.redis_client:
+                await redis.redis_client.delete(key)
+        except Exception as e:
+            logger.debug("Redis key delete failed", key=key, error=str(e))
+
+    async def _load_history_from_db(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """
+        Load recent context usage records from PRSMSessionModel.
+        Used by optimize_context_allocation() when in-memory history is empty.
+        """
+        try:
+            from prsm.core.database import get_async_session, PRSMSessionModel
+            from sqlalchemy import select, desc
+            async with get_async_session() as db:
+                result = await db.execute(
+                    select(PRSMSessionModel)
+                    .where(PRSMSessionModel.context_used > 0)
+                    .order_by(desc(PRSMSessionModel.created_at))
+                    .limit(limit)
+                )
+                rows = result.scalars().all()
+            return [
+                {
+                    "session_id": str(row.session_id),
+                    "used":       row.context_used,
+                    "allocated":  row.nwtn_context_allocation or row.context_used,
+                    "efficiency": (row.context_used / row.nwtn_context_allocation)
+                                  if row.nwtn_context_allocation else 1.0,
+                    "timestamp":  row.created_at.isoformat() if row.created_at else "",
+                }
+                for row in rows
+                if row.nwtn_context_allocation and row.nwtn_context_allocation > 0
+            ]
+        except Exception as e:
+            logger.debug("DB history load failed", error=str(e))
+            return []
+
     def record_usage(
         self,
         session_id: str,
@@ -76,24 +158,60 @@ class ContextManager:
             "efficiency": usage.efficiency,
             "timestamp": usage.timestamp
         })
-        
+
+        # Cap in-memory history to prevent unbounded growth
+        if len(self.usage_history) > self._HISTORY_LIMIT:
+            self.usage_history = self.usage_history[-self._HISTORY_LIMIT:]
+
         self._optimization_cache = None
-        
+
+        # Fire-and-forget persistence (non-blocking, non-critical)
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._persist_usage(session_id, usage))
+        except RuntimeError:
+            pass  # No event loop running (e.g., synchronous test context)
+
         logger.debug(
             "Context usage recorded",
             session_id=session_id,
             used=context_used,
             allocated=context_allocated
         )
-        
         return usage
     
     async def get_session_usage(
         self,
         session_id: Union[str, UUID]
     ) -> Optional[ContextUsage]:
-        """Get context usage for a specific session."""
-        return self.session_usage.get(str(session_id))
+        """Get context usage for a specific session (in-memory → Redis fallback)."""
+        sid = str(session_id)
+
+        # Fast path: in-memory
+        if sid in self.session_usage:
+            return self.session_usage[sid]
+
+        # Redis fallback: recovers data across restarts
+        try:
+            from prsm.core.redis_client import get_redis_client
+            redis = get_redis_client()
+            if redis.connected and redis.redis_client:
+                key = f"prsm:context:usage:{sid}"
+                data = await redis.redis_client.get(key)
+                if data:
+                    d = json.loads(data)
+                    usage = ContextUsage(
+                        session_id=d["session_id"],
+                        context_used=d["context_used"],
+                        context_allocated=d["context_allocated"],
+                    )
+                    usage.timestamp = d["timestamp"]
+                    self.session_usage[sid] = usage  # hydrate in-memory
+                    return usage
+        except Exception as e:
+            logger.debug("Redis context lookup failed", session_id=sid, error=str(e))
+
+        return None
     
     async def optimize_context_allocation(
         self,
@@ -114,6 +232,10 @@ class ContextManager:
             return self._optimization_cache
         
         data = historical_data or self.usage_history
+
+        # Hydrate from DB if no in-memory history
+        if not data:
+            data = await self._load_history_from_db()
         
         if not data:
             return {
@@ -171,11 +293,21 @@ class ContextManager:
         return result
     
     def clear_session(self, session_id: str) -> bool:
-        """Clear context usage for a session."""
-        if session_id in self.session_usage:
+        """Clear context usage for a session (in-memory + Redis)."""
+        removed = session_id in self.session_usage
+        if removed:
             del self.session_usage[session_id]
-            return True
-        return False
+
+        # Fire-and-forget Redis cleanup
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(
+                self._delete_redis_key(f"prsm:context:usage:{session_id}")
+            )
+        except RuntimeError:
+            pass
+
+        return removed
     
     def get_statistics(self) -> Dict[str, Any]:
         """Get overall context management statistics."""
