@@ -233,23 +233,41 @@ class KnowledgeExtractor:
             logger.error("Architecture analysis failed", error=str(e))
     
     async def _analyze_performance(self, teacher_model: str, analysis: TeacherAnalysis):
-        """Analyze teacher model performance characteristics"""
+        """Analyze teacher model performance characteristics with real benchmarking."""
+        import time as time_module
+
         try:
-            # Simulate performance testing
-            # TODO: Replace with actual performance benchmarking
-            
-            # Estimate inference speed based on model size
+            # Run actual performance benchmark with real timing
+            benchmark_prompt = "Please provide a brief summary of your capabilities and architecture."
+
+            # Measure inference latency with real timing
+            start_time = time_module.perf_counter()
+            try:
+                response = await self._execute_model_query(teacher_model, benchmark_prompt)
+                success = True
+                elapsed = time_module.perf_counter() - start_time
+            except Exception as e:
+                logger.warning(f"Benchmark prediction failed: {e}")
+                success = False
+                elapsed = 0.0
+                response = ""
+
+            # Calculate performance score based on latency
+            if success and elapsed > 0:
+                # Estimate tokens per second based on response length and elapsed time
+                token_count = len(response.split()) if response else 0
+                estimated_speed = token_count / elapsed if elapsed > 0 else 0
+            else:
+                # Fall back to parameter-based estimate if benchmark fails
+                param_count = analysis.estimated_parameters or 100000000000
+                base_speed = 1000  # tokens/second baseline
+                speed_factor = max(0.1, 1.0 - (param_count / 1000000000000) * 0.8)
+                estimated_speed = base_speed * speed_factor
+
+            # Estimate memory usage based on parameter count
             param_count = analysis.estimated_parameters or 100000000000
-            base_speed = 1000  # tokens/second baseline
-            
-            # Larger models are generally slower
-            speed_factor = max(0.1, 1.0 - (param_count / 1000000000000) * 0.8)
-            estimated_speed = base_speed * speed_factor
-            
-            # Estimate memory usage
-            # Rough approximation: 2 bytes per parameter + overhead
             estimated_memory = (param_count * 2) / (1024 * 1024)  # MB
-            
+
             # Estimate computational complexity
             if param_count > 500000000000:
                 complexity = "very_high"
@@ -259,12 +277,12 @@ class KnowledgeExtractor:
                 complexity = "medium"
             else:
                 complexity = "low"
-            
+
             # Update analysis
-            analysis.inference_speed = estimated_speed
+            analysis.inference_speed = int(estimated_speed)
             analysis.memory_usage = int(estimated_memory)
             analysis.computational_complexity = complexity
-            
+
         except Exception as e:
             logger.error("Performance analysis failed", error=str(e))
     

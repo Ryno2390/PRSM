@@ -17,7 +17,6 @@ from typing import Dict, List, Optional, Any, Set, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 import uuid
-import random
 
 # Use simple mock for demo - would import actual implementations in production
 class MockP2PNetwork:
@@ -317,67 +316,103 @@ class DistributedArchiveManager:
             )
     
     async def _request_archive_metadata(self, peer_id: str) -> Dict[str, Any]:
-        """Request archive metadata from a peer."""
-        
-        # This would use the P2P network to request metadata
-        # For now, simulate metadata
+        """Request archive metadata from a peer via HTTP."""
+        try:
+            import httpx
+            from prsm.core.database import get_async_session, FederationPeerModel
+            from sqlalchemy import select
+
+            async with get_async_session() as session:
+                stmt = select(FederationPeerModel).where(
+                    FederationPeerModel.peer_id == peer_id,
+                    FederationPeerModel.is_active == True,
+                )
+                result = await session.execute(stmt)
+                peer = result.scalar_one_or_none()
+
+            if peer:
+                url = f"http://{peer.address}:{peer.port}/api/v1/federation/archive/metadata"
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+                    return resp.json()
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch archive metadata from peer {peer_id}: {e}")
+
+        # Fall back to cached metadata or safe defaults
+        if peer_id in self.peer_archives:
+            return self.peer_archives[peer_id]
+
+        # Minimal safe dict — no random data
         return {
             "node_id": peer_id,
-            "total_solutions": random.randint(50, 500),
-            "component_types": [ComponentType.TASK_ORCHESTRATOR.value, ComponentType.INTELLIGENT_ROUTER.value],
-            "best_performance": random.uniform(0.7, 0.95),
+            "total_solutions": 0,
+            "component_types": [],
+            "best_performance": 0.0,
             "last_updated": datetime.utcnow().isoformat(),
-            "archive_version": "1.0"
+            "archive_version": "1.0",
+            "available": False,
         }
     
     async def _send_sync_request(self, sync_request: SolutionSyncRequest) -> SolutionSyncResponse:
-        """Send synchronization request to peer."""
-        
-        # This would use the P2P network to send the request
-        # For demo purposes, simulate a response
-        peer_solutions = await self._simulate_peer_solutions(sync_request)
-        
+        """Send synchronization request to peer via HTTP."""
+        try:
+            import httpx
+            from prsm.core.database import get_async_session, FederationPeerModel
+            from sqlalchemy import select
+
+            async with get_async_session() as session:
+                stmt = select(FederationPeerModel).where(
+                    FederationPeerModel.peer_id == sync_request.target_node_id,
+                    FederationPeerModel.is_active == True,
+                )
+                result = await session.execute(stmt)
+                peer = result.scalar_one_or_none()
+
+            if peer:
+                url = f"http://{peer.address}:{peer.port}/api/v1/federation/archive/sync"
+                payload = {
+                    "request_id": sync_request.request_id,
+                    "requesting_node_id": sync_request.requesting_node_id,
+                    "sync_strategy": sync_request.sync_strategy.value,
+                    "max_solutions": sync_request.max_solutions,
+                    "newer_than": sync_request.newer_than.isoformat() if sync_request.newer_than else None,
+                    "component_types": [ct.value for ct in (sync_request.component_types or [])],
+                }
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(url, json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    # Deserialize solutions from JSON response
+                    solutions = [
+                        SolutionNode(**s) for s in data.get("solutions", [])
+                        if isinstance(s, dict)
+                    ]
+                    return SolutionSyncResponse(
+                        request_id=sync_request.request_id,
+                        responding_node_id=sync_request.target_node_id,
+                        solutions=solutions,
+                        total_solutions_available=data.get("total_available", len(solutions)),
+                        solutions_sent=len(solutions),
+                        data_size_mb=data.get("data_size_mb", len(solutions) * 0.1),
+                        success=True,
+                    )
+
+        except Exception as e:
+            logger.warning(f"Sync request to {sync_request.target_node_id} failed: {e}")
+
+        # Return unsuccessful response — no fake data
         return SolutionSyncResponse(
             request_id=sync_request.request_id,
             responding_node_id=sync_request.target_node_id,
-            solutions=peer_solutions,
-            total_solutions_available=random.randint(100, 300),
-            solutions_sent=len(peer_solutions),
-            data_size_mb=len(peer_solutions) * 0.1  # Estimate 0.1MB per solution
+            solutions=[],
+            total_solutions_available=0,
+            solutions_sent=0,
+            data_size_mb=0.0,
+            success=False,
+            error_message="Peer unreachable",
         )
-    
-    async def _simulate_peer_solutions(self, sync_request: SolutionSyncRequest) -> List[SolutionNode]:
-        """Simulate solutions received from peer (for demo)."""
-        
-        solutions = []
-        for i in range(min(sync_request.max_solutions, random.randint(5, 20))):
-            solution = SolutionNode(
-                component_type=random.choice(list(ComponentType)),
-                configuration={
-                    "peer_origin": sync_request.target_node_id,
-                    "sync_strategy": sync_request.sync_strategy.value,
-                    "generation": random.randint(0, 10)
-                },
-                generation=random.randint(0, 10)
-            )
-            
-            # Add mock evaluation
-            evaluation = EvaluationResult(
-                solution_id=solution.id,
-                component_type=solution.component_type,
-                performance_score=random.uniform(0.5, 0.9),
-                task_success_rate=random.uniform(0.7, 0.95),
-                tasks_evaluated=random.randint(10, 50),
-                tasks_successful=random.randint(8, 45),
-                evaluation_duration_seconds=random.uniform(30, 180),
-                evaluation_tier="federated",
-                evaluator_version="1.0",
-                benchmark_suite="network_sync"
-            )
-            solution.add_evaluation(evaluation)
-            solutions.append(solution)
-        
-        return solutions
     
     async def _select_solutions_for_sharing(self, sync_request: SolutionSyncRequest) -> List[SolutionNode]:
         """Select solutions to share based on sync request criteria."""
@@ -616,29 +651,37 @@ class FederatedEvolutionCoordinator:
         return task_assignments
     
     async def _collect_task_results(self, task: NetworkEvolutionTask, timeout_seconds: float) -> List[Dict[str, Any]]:
-        """Collect results from distributed evolution tasks."""
-        
-        # Simulate collecting results from nodes
-        results = []
-        
-        for node_id in task.assigned_nodes:
-            # Simulate node computation time
-            await asyncio.sleep(random.uniform(0.1, 1.0))
-            
-            # Generate mock result
-            result = {
-                "node_id": node_id,
-                "subtask_completed": True,
-                "solutions_generated": random.randint(5, 15),
-                "best_performance": random.uniform(0.6, 0.9),
-                "execution_time_seconds": random.uniform(30, 120),
-                "resource_usage": {
-                    "cpu_hours": random.uniform(0.5, 2.0),
-                    "memory_gb_hours": random.uniform(2.0, 8.0)
-                }
-            }
-            results.append(result)
-        
+        """Collect results from distributed evolution tasks via HTTP."""
+        import httpx
+        from prsm.core.database import get_async_session, FederationPeerModel
+        from sqlalchemy import select
+
+        # Fetch peer address map once
+        async with get_async_session() as session:
+            stmt = select(FederationPeerModel).where(
+                FederationPeerModel.peer_id.in_(task.assigned_nodes),
+            )
+            db_result = await session.execute(stmt)
+            peers = {p.peer_id: p for p in db_result.scalars().all()}
+
+        async def _fetch_node_result(node_id: str) -> Optional[Dict[str, Any]]:
+            peer = peers.get(node_id)
+            if not peer:
+                return None
+            url = f"http://{peer.address}:{peer.port}/api/v1/federation/tasks/{task.task_id}/result"
+            try:
+                async with httpx.AsyncClient(timeout=min(timeout_seconds, 30.0)) as client:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+                    return resp.json()
+            except Exception as e:
+                logger.warning(f"Failed to collect result from node {node_id}: {e}")
+                return None
+
+        fetch_coros = [_fetch_node_result(node_id) for node_id in task.assigned_nodes]
+        raw = await asyncio.gather(*fetch_coros, return_exceptions=False)
+        results = [r for r in raw if r is not None]
+
         logger.info(f"Collected {len(results)} task results for task {task.task_id}")
         return results
     
@@ -672,51 +715,86 @@ class FederatedEvolutionCoordinator:
     
     async def _achieve_consensus_on_improvements(self, aggregated_result: Dict[str, Any]) -> bool:
         """Achieve consensus on whether to deploy improvements."""
-        
+
         if not aggregated_result.get("improvement_identified", False):
             return False
-        
-        # Use consensus manager to achieve agreement
-        consensus_proposal = {
-            "type": "evolution_improvement",
-            "best_performance": aggregated_result["best_performance_achieved"],
-            "participating_nodes": aggregated_result["participating_nodes"],
-            "improvement_threshold": 0.8
-        }
-        
-        # Simulate consensus process
-        consensus_achieved = aggregated_result["best_performance_achieved"] > 0.85
-        
-        logger.info(f"Consensus on improvements: {'achieved' if consensus_achieved else 'not achieved'}")
+
+        # Configurable threshold (default 0.85 if not set on the class)
+        threshold = getattr(self, '_consensus_performance_threshold', 0.85)
+        best_performance = aggregated_result.get("best_performance_achieved", 0.0)
+        consensus_achieved = best_performance > threshold
+
+        logger.info(
+            "Consensus evaluation",
+            best_performance=best_performance,
+            threshold=threshold,
+            consensus_achieved=consensus_achieved,
+            participating_nodes=aggregated_result.get("participating_nodes", 0),
+        )
         return consensus_achieved
     
     async def _deploy_network_improvements(self, aggregated_result: Dict[str, Any]) -> bool:
         """Deploy agreed-upon improvements across the network."""
-        
         try:
-            # Simulate deployment process
-            deployment_success_rate = 0.9  # 90% success rate
-            deployment_successful = random.random() < deployment_success_rate
-            
-            if deployment_successful:
-                logger.info("Network improvements deployed successfully")
-            else:
-                logger.warning("Network improvement deployment failed")
-            
-            return deployment_successful
-            
+            top_solutions = aggregated_result.get("top_solutions", [])
+            if not top_solutions:
+                logger.info("No top solutions to deploy")
+                return True  # Nothing to do is not a failure
+
+            deployed_count = 0
+            for solution_data in top_solutions:
+                try:
+                    if isinstance(solution_data, SolutionNode):
+                        solution = solution_data
+                    elif isinstance(solution_data, dict):
+                        # Reconstruct SolutionNode from dict if needed
+                        continue
+                    else:
+                        continue
+                    await self.archive_manager._process_received_solutions([solution])
+                    deployed_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to deploy solution: {e}")
+
+            logger.info(f"Deployed {deployed_count}/{len(top_solutions)} network improvements")
+            return deployed_count > 0 or len(top_solutions) == 0
+
         except Exception as e:
             logger.error(f"Failed to deploy network improvements: {e}")
             return False
     
     async def _measure_network_performance(self) -> float:
-        """Measure current network performance."""
-        
-        # This would interface with actual network monitoring
-        # For demo, simulate network performance measurement
-        base_performance = 0.7
-        variance = random.uniform(-0.1, 0.1)
-        return max(0.1, min(1.0, base_performance + variance))
+        """Measure current network performance from DB peer quality scores."""
+        try:
+            from prsm.core.database import get_async_session, FederationPeerModel
+            from sqlalchemy import select, func
+
+            async with get_async_session() as session:
+                stmt = select(func.avg(FederationPeerModel.quality_score)).where(
+                    FederationPeerModel.is_active == True,
+                )
+                result = await session.execute(stmt)
+                avg_quality = result.scalar_one_or_none()
+
+            if avg_quality is not None:
+                return float(max(0.0, min(1.0, avg_quality)))
+
+        except Exception as e:
+            logger.warning(f"Failed to measure network performance from DB: {e}")
+
+        # Fall back to local archive quality if peers unavailable
+        if self.archive_manager and self.archive_manager.local_archive:
+            solutions = self.archive_manager.local_archive.solutions
+            if solutions:
+                scores = [
+                    s.performance
+                    for s in solutions.values()
+                    if s.performance is not None
+                ]
+                if scores:
+                    return sum(scores) / len(scores)
+
+        return 0.0
 
 
 class FederatedEvolutionSystem:

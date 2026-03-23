@@ -855,9 +855,14 @@ class ContributorOnboardingSystem:
                     badges_awarded += 1
             
             elif contributor.level in [ContributorLevel.EXPERT, ContributorLevel.CORE_CONTRIBUTOR]:
-                potential_badges = ["code_contributor", "mentor", "reviewer"]
-                for badge in potential_badges:
-                    if badge not in contributor.badges_earned and random.random() > 0.5:
+                # Deterministic badge criteria based on actual contribution metrics
+                badge_criteria = {
+                    "code_contributor": contributor.contributions_made > 0,
+                    "mentor": getattr(contributor, 'mentees_count', 0) > 0,
+                    "reviewer": getattr(contributor, 'reviews_completed', 0) > 0,
+                }
+                for badge, earned in badge_criteria.items():
+                    if earned and badge not in contributor.badges_earned:
                         contributor.badges_earned.append(badge)
                         badges_awarded += 1
             
