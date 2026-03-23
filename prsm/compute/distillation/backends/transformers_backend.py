@@ -477,9 +477,10 @@ class TransformersDistillationBackend(DistillationBackend):
         
         Strategy: Use HuggingFace Trainer.evaluate() if available;
         fall back to manual inference loop for non-HF models.
-        
-        # TODO (Priority 3): Replace simulated training with real gradient computation
-        # after teacher_model = None placeholder is resolved in initialize_models()
+
+        Note: Teacher model loading is now fully implemented via teacher_loader.py.
+        The train_step method uses real gradient computation with teacher soft labels
+        when available, falling back to student-only cross-entropy loss otherwise.
         """
         logger.info("Evaluating Transformers model with real inference")
         

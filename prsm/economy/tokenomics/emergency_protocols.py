@@ -33,6 +33,7 @@ Response Actions:
 import asyncio
 import hashlib
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Any, List, Optional, Tuple
@@ -952,17 +953,71 @@ class EmergencyProtocols:
             "affected_users": 0
         }
     
-    async def _record_halt_action(self, halt_types: List[str], 
+    async def _record_halt_action(self, halt_types: List[str],
                                  duration_seconds: Optional[int], authorized_by: str):
-        """Record transaction halt action"""
-        # Would record in database
-        pass
-    
-    async def _record_limit_reduction_action(self, reduction_factor: float, 
+        """Record transaction halt action in database."""
+        try:
+            from prsm.core.database import EmergencyProtocolActionModel
+            import time
+
+            current_time = time.time()
+            action_id = str(uuid4())
+
+            action = EmergencyProtocolActionModel(
+                id=action_id,
+                action_type='halt',
+                triggered_by=authorized_by,
+                reason=f"Transaction halt for types: {', '.join(halt_types)}",
+                original_value={"halt_types": halt_types, "duration_seconds": duration_seconds},
+                new_value={"halt_initiated": True, "duration_seconds": duration_seconds},
+                created_at=current_time
+            )
+
+            self.db.add(action)
+            await self.db.commit()
+
+            logger.info("emergency_halt_recorded",
+                       action_id=action_id,
+                       halt_types=halt_types,
+                       duration_seconds=duration_seconds,
+                       authorized_by=authorized_by)
+
+        except Exception as e:
+            logger.error("record_halt_action_failed", error=str(e))
+            # Don't raise - emergency actions must proceed even if logging fails
+
+    async def _record_limit_reduction_action(self, reduction_factor: float,
                                            duration_seconds: Optional[int], authorized_by: str):
-        """Record limit reduction action"""
-        # Would record in database
-        pass
+        """Record limit reduction action in database."""
+        try:
+            from prsm.core.database import EmergencyProtocolActionModel
+            import time
+
+            current_time = time.time()
+            action_id = str(uuid4())
+
+            action = EmergencyProtocolActionModel(
+                id=action_id,
+                action_type='limit_reduction',
+                triggered_by=authorized_by,
+                reason=f"Transaction limit reduction by factor: {reduction_factor}",
+                original_value={"limit": "original"},
+                new_value={"limit": str(reduction_factor), "duration_seconds": duration_seconds},
+                created_at=current_time
+            )
+
+            self.db.add(action)
+            await self.db.commit()
+
+            logger.info("emergency_limit_reduction_recorded",
+                       action_id=action_id,
+                       reduction_factor=reduction_factor,
+                       duration_seconds=duration_seconds,
+                       authorized_by=authorized_by)
+
+        except Exception as e:
+            logger.error("record_limit_reduction_action_failed", error=str(e))
+            # Don't raise - emergency actions must proceed even if logging fails
     
     async def _generate_emergency_proposal_description(self, detection: EmergencyDetection, 
                                                       actions: List[EmergencyResponse]) -> str:

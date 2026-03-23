@@ -29,6 +29,7 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, AsyncGenerator
+from uuid import uuid4
 from sqlalchemy import (
     create_engine, MetaData, Table, Column, Integer, BigInteger, String, DateTime,
     Float, Boolean, JSON, Text, ForeignKey, Index, UniqueConstraint, text,
@@ -665,6 +666,148 @@ class PQIdentityModel(Base):
 
     __table_args__ = (
         Index('idx_pq_identity_user', 'user_id'),
+    )
+
+
+class FederationPeerModel(Base):
+    """
+    Database model for federation peers.
+
+    Persists peer discovery and tracking for the distributed RLT network.
+    Supports quality scoring, capability tracking, and peer lifecycle management.
+    """
+    __tablename__ = "federation_peers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    peer_id = Column(String(255), nullable=False, unique=True)
+    address = Column(String(255), nullable=False)
+    port = Column(Integer, nullable=False)
+    node_type = Column(String(50), nullable=False, default='standard')
+    last_seen = Column(Float, nullable=False, default=0.0)
+    quality_score = Column(Float, nullable=False, default=0.5)
+    capabilities = Column(JSON, nullable=False, default=dict)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(Float, nullable=False)
+
+    __table_args__ = (
+        Index('ix_federation_peers_last_seen', 'last_seen'),
+    )
+
+
+class FederationMessageModel(Base):
+    """
+    Database model for federation P2P messages.
+
+    Logs all network messages for audit trail and message tracking.
+    Supports broadcast (recipient_id NULL) and direct messages.
+    """
+    __tablename__ = "federation_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    message_id = Column(String(255), nullable=False, unique=True)
+    message_type = Column(String(100), nullable=False)
+    sender_id = Column(String(255), nullable=False)
+    recipient_id = Column(String(255), nullable=True)  # NULL = broadcast
+    payload = Column(JSON, nullable=False, default=dict)
+    sent_at = Column(Float, nullable=False)
+    received_at = Column(Float, nullable=True)
+    processed_at = Column(Float, nullable=True)
+    status = Column(String(50), nullable=False, default='pending')  # pending/processed/failed
+    error = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index('ix_federation_messages_message_type', 'message_type'),
+        Index('ix_federation_messages_sender_id', 'sender_id'),
+        Index('ix_federation_messages_status', 'status'),
+    )
+
+
+class DistillationJobModel(Base):
+    """
+    Database model for distillation jobs.
+
+    Tracks complete lifecycle of distillation jobs from submission
+    through completion, including intermediate states and results.
+    """
+    __tablename__ = "distillation_jobs"
+
+    job_id = Column(String(255), primary_key=True)
+    user_id = Column(String(255), nullable=False)
+    teacher_model_id = Column(String(255), nullable=False)
+    student_model_id = Column(String(255), nullable=False)
+    strategy = Column(String(100), nullable=False)
+    status = Column(String(50), nullable=False, default='pending')
+    priority = Column(Integer, nullable=False, default=5)
+    config = Column(JSON, nullable=False, default=dict)
+    result = Column(JSON, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(Float, nullable=False)
+    started_at = Column(Float, nullable=True)
+    completed_at = Column(Float, nullable=True)
+
+    # Relationship to results
+    results = relationship("DistillationResultModel", back_populates="job", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index('ix_distillation_jobs_user_id', 'user_id'),
+        Index('ix_distillation_jobs_status', 'status'),
+    )
+
+
+class DistillationResultModel(Base):
+    """
+    Database model for distillation results.
+
+    Stores metrics and outcomes from completed distillation jobs.
+    Linked to parent job via foreign key with cascade delete.
+    """
+    __tablename__ = "distillation_results"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    job_id = Column(String(255), ForeignKey('distillation_jobs.job_id', ondelete='CASCADE'), nullable=False)
+    teacher_model_id = Column(String(255), nullable=False)
+    student_model_id = Column(String(255), nullable=False)
+    strategy = Column(String(100), nullable=False)
+    accuracy_score = Column(Float, nullable=False, default=0.0)
+    compression_ratio = Column(Float, nullable=False, default=1.0)
+    training_loss = Column(Float, nullable=False, default=0.0)
+    validation_loss = Column(Float, nullable=False, default=0.0)
+    tokens_used = Column(Integer, nullable=False, default=0)
+    ftns_cost = Column(Float, nullable=False, default=0.0)
+    created_at = Column(Float, nullable=False)
+    extra_metadata = Column(JSON, nullable=False, default=dict)
+
+    # Relationship to parent job
+    job = relationship("DistillationJobModel", back_populates="results")
+
+    __table_args__ = (
+        Index('ix_distillation_results_job_id', 'job_id'),
+        Index('ix_distillation_results_strategy', 'strategy'),
+    )
+
+
+class EmergencyProtocolActionModel(Base):
+    """
+    Database model for emergency protocol actions.
+
+    Audit trail for all emergency protocol activations including
+    transaction halts, limit reductions, and resolution tracking.
+    """
+    __tablename__ = "emergency_protocol_actions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    action_type = Column(String(50), nullable=False)  # 'halt'/'limit_reduction'
+    triggered_by = Column(String(255), nullable=False)
+    reason = Column(Text, nullable=True)
+    original_value = Column(JSON, nullable=True)
+    new_value = Column(JSON, nullable=True)
+    created_at = Column(Float, nullable=False)
+    resolved_at = Column(Float, nullable=True)
+    resolved_by = Column(String(255), nullable=True)
+
+    __table_args__ = (
+        Index('ix_emergency_protocol_actions_action_type', 'action_type'),
+        Index('ix_emergency_protocol_actions_created_at', 'created_at'),
     )
 
 

@@ -221,25 +221,138 @@ class TensorFlowDistillationBackend(DistillationBackend):
     ) -> Tuple[Any, Any]:
         """
         Initialize teacher and student models in TensorFlow
-        
+
         🏗️ MODEL CREATION:
         - Keras functional API for flexibility
         - Custom layers for distillation
         - Optimized for training and inference
         """
         logger.info("Initializing TensorFlow models")
-        
-        # 👨‍🏫 TEACHER MODEL (placeholder)
-        teacher_model = None
-        
+
+        # 👨‍🏫 TEACHER MODEL - Real implementation
+        teacher_model = await self._load_teacher_model(teacher_config)
+
         # 🎓 STUDENT MODEL
         student_model = self._build_student_model(student_architecture)
-        
+
         # 📊 MODEL SUMMARY
-        total_params = student_model.count_params()
-        logger.info(f"Student model: {total_params:,} parameters")
-        
+        if student_model is not None:
+            total_params = student_model.count_params()
+            logger.info(f"Student model: {total_params:,} parameters")
+
+        if teacher_model is not None:
+            logger.info("teacher_model_loaded", model_type=type(teacher_model).__name__)
+        else:
+            logger.warning("teacher_model_not_loaded_soft_labels_disabled")
+            self.soft_labels_available = False
+
         return teacher_model, student_model
+
+    async def _load_teacher_model(self, teacher_config: Dict[str, Any]) -> Any:
+        """Load teacher model from various sources."""
+        teacher_model = None
+        teacher_model_path = teacher_config.get("model_path") or teacher_config.get("teacher_model_id")
+
+        if not teacher_model_path:
+            logger.warning("teacher_model_path_not_specified")
+            return None
+
+        try:
+            # Check if it's a local path that exists
+            if Path(teacher_model_path).exists():
+                teacher_model = tf.saved_model.load(teacher_model_path)
+                logger.info("teacher_model_loaded_from_local_path", path=teacher_model_path)
+                return teacher_model
+
+            # Check if it's an IPFS CID
+            if teacher_model_path.startswith("ipfs://"):
+                cid = teacher_model_path.replace("ipfs://", "")
+                teacher_model = await self._load_teacher_from_ipfs(cid)
+                if teacher_model is not None:
+                    return teacher_model
+
+            # Check if it's a HuggingFace ID (contains /)
+            if "/" in teacher_model_path and not teacher_model_path.startswith("/"):
+                teacher_model = await self._load_teacher_from_huggingface(teacher_model_path)
+                if teacher_model is not None:
+                    return teacher_model
+
+            # Try loading as TensorFlow Hub model
+            try:
+                import tensorflow_hub as hub
+                teacher_model = hub.load(teacher_model_path)
+                logger.info("teacher_model_loaded_from_hub", path=teacher_model_path)
+                return teacher_model
+            except ImportError:
+                logger.warning("tensorflow_hub_not_available")
+            except Exception as hub_error:
+                logger.debug("hub_load_failed", error=str(hub_error))
+
+            logger.warning("teacher_model_load_failed_graceful_degradation")
+            return None
+
+        except Exception as e:
+            logger.error("teacher_model_loading_error", error=str(e))
+            return None
+
+    async def _load_teacher_from_ipfs(self, cid: str) -> Any:
+        """Load teacher model from IPFS."""
+        try:
+            from prsm.core.ipfs_client import get_ipfs_client
+
+            ipfs_client = get_ipfs_client()
+            if ipfs_client is None:
+                logger.warning("ipfs_client_not_available")
+                return None
+
+            # Retrieve model bytes from IPFS
+            model_bytes = await ipfs_client.cat(cid)
+            if model_bytes is None:
+                logger.warning("ipfs_model_retrieval_failed", cid=cid)
+                return None
+
+            # Extract to temp directory
+            import tempfile
+            import zipfile
+            import io
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                # Try as zip file
+                try:
+                    zip_buffer = io.BytesIO(model_bytes)
+                    with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
+                        zip_ref.extractall(tmpdir)
+
+                    teacher_model = tf.saved_model.load(tmpdir)
+                    logger.info("teacher_model_loaded_from_ipfs", cid=cid)
+                    return teacher_model
+                except zipfile.BadZipFile:
+                    # Try as raw saved_model format
+                    model_path = Path(tmpdir) / "saved_model.pb"
+                    model_path.write_bytes(model_bytes)
+                    teacher_model = tf.saved_model.load(tmpdir)
+                    logger.info("teacher_model_loaded_from_ipfs_raw", cid=cid)
+                    return teacher_model
+
+        except Exception as e:
+            logger.error("ipfs_teacher_load_failed", cid=cid, error=str(e))
+            return None
+
+    async def _load_teacher_from_huggingface(self, model_id: str) -> Any:
+        """Load teacher model from HuggingFace."""
+        try:
+            from transformers import TFAutoModel, AutoTokenizer
+
+            teacher_model = TFAutoModel.from_pretrained(model_id)
+            logger.info("teacher_model_loaded_from_huggingface", model_id=model_id)
+            return teacher_model
+
+        except ImportError:
+            logger.warning("transformers_not_available_for_tf")
+            return None
+        except Exception as e:
+            logger.error("huggingface_teacher_load_failed", model_id=model_id, error=str(e))
+            return None
     
     def _build_student_model(self, architecture: Dict[str, Any]):
         """Build student model using Keras functional API"""
