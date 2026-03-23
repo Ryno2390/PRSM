@@ -3337,5 +3337,2195 @@ def publish(name: str, description: str, resource_type: str, price: float, quali
         raise SystemExit(1)
 
 
+# ============================================================================
+# TORRENT COMMANDS (Phase 1)
+# ============================================================================
+
+def _fmt_bytes(n: int) -> str:
+    """Format bytes as human-readable string."""
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if n < 1024:
+            return f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} PB"
+
+
+def _fmt_rate(n: float) -> str:
+    """Format bytes per second as human-readable rate."""
+    return f"{_fmt_bytes(int(n))}/s"
+
+
+@main.group()
+def torrent():
+    """BitTorrent P2P distribution commands"""
+    pass
+
+
+@torrent.command()
+@click.argument("path", type=click.Path(exists=True))
+@click.option("--name", help="Human-readable name (default: filename)")
+@click.option("--piece-length", type=int, default=262144, help="Piece size in bytes")
+@click.option("--provenance-id", help="Link to existing PRSM provenance record")
+@click.option("--no-seed", is_flag=True, help="Create torrent file only, do not start seeding")
+@click.option("--output-torrent", type=click.Path(), help="Save .torrent file to disk")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def create(path: str, name: Optional[str], piece_length: int, provenance_id: Optional[str],
+           no_seed: bool, output_torrent: Optional[str], api_url: str):
+    """Create a new torrent from a local file or directory and begin seeding."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+    path_obj = Path(path)
+
+    console.print(f"🔗 Creating torrent from {path_obj.name}...", style="bold blue")
+
+    payload = {
+        "content_path": str(path_obj.absolute()),
+        "piece_length": piece_length,
+    }
+    if name:
+        payload["name"] = name
+    if provenance_id:
+        payload["provenance_id"] = provenance_id
+
+    try:
+        response = httpx.post(
+            f"{url}/api/v1/torrents/create",
+            json=payload,
+            headers=headers,
+            timeout=60.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        infohash = data.get("infohash", "")
+
+        from rich.panel import Panel
+        content = f"""Infohash: {infohash}
+Name:     {data.get('name', 'N/A')}
+Size:     {_fmt_bytes(data.get('size_bytes', 0))}
+Pieces:   {data.get('num_pieces', 0)} × {_fmt_bytes(data.get('piece_length', piece_length))}
+Magnet:   magnet:?xt=urn:btih:{infohash}&dn={data.get('name', '')}
+Status:   {'Created only' if no_seed else 'Seeding ✅'}"""
+
+        console.print(Panel(content, title="🔗 Torrent Created", border_style="green"))
+
+        if output_torrent:
+            console.print(f"   Torrent file: {output_torrent}", style="dim")
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 503:
+        console.print("⚠️  BitTorrent service unavailable", style="yellow")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Create failed: HTTP {response.status_code}", style="red")
+        console.print(f"   {response.text[:200]}")
+        raise SystemExit(1)
+
+
+@torrent.command()
+@click.argument("source")
+@click.option("--save-path", type=click.Path(), help="Where to save downloaded files")
+@click.option("--seed-mode", is_flag=True, help="Skip downloading — assume data already present")
+@click.option("--download", is_flag=True, help="Begin downloading immediately")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def add(source: str, save_path: Optional[str], seed_mode: bool, download: bool, api_url: str):
+    """Add an existing torrent from magnet URI or .torrent file path."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    console.print("🔗 Adding torrent...", style="bold blue")
+
+    payload = {
+        "source": source,
+        "seed_mode": seed_mode,
+    }
+    if save_path:
+        payload["save_path"] = save_path
+
+    try:
+        response = httpx.post(
+            f"{url}/api/v1/torrents/add",
+            json=payload,
+            headers=headers,
+            timeout=30.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        infohash = data.get("infohash", "")[:16]
+
+        console.print(f"✅ Torrent added: {infohash}...", style="bold green")
+        console.print(f"   Name:   {data.get('name', 'N/A')}")
+        console.print(f"   Status: {data.get('state', 'Added')}")
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 503:
+        console.print("⚠️  BitTorrent service unavailable", style="yellow")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Add failed: HTTP {response.status_code}", style="red")
+        console.print(f"   {response.text[:200]}")
+        raise SystemExit(1)
+
+
+@torrent.command("list")
+@click.option("--seeding", is_flag=True, help="Show only torrents this node is seeding")
+@click.option("--available", is_flag=True, help="Show only network-announced torrents")
+@click.option("--limit", type=int, default=50, help="Max results")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def list_torrents(seeding: bool, available: bool, limit: int, api_url: str):
+    """List all torrents known to this node."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/torrents",
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        torrents = data.get("torrents", [])
+
+        if not torrents:
+            console.print("No torrents found.", style="yellow")
+            return
+
+        table = Table(title="Torrents")
+        table.add_column("Infohash", style="cyan", no_wrap=True)
+        table.add_column("Name", style="green")
+        table.add_column("Size", style="blue")
+        table.add_column("State", style="magenta")
+        table.add_column("Progress", style="yellow")
+        table.add_column("Peers", style="dim")
+        table.add_column("↑ Rate", style="red")
+        table.add_column("↓ Rate", style="blue")
+
+        for t in torrents[:limit]:
+            infohash = t.get("infohash", "")
+            short_hash = infohash[:16] + "..." if len(infohash) > 16 else infohash
+            progress = t.get("progress", 0) * 100
+
+            table.add_row(
+                short_hash,
+                t.get("name", "N/A")[:30],
+                _fmt_bytes(t.get("size_bytes", 0)),
+                t.get("state", "?"),
+                f"{progress:.1f}%",
+                str(t.get("seeders", 0) + t.get("leechers", 0)),
+                _fmt_rate(t.get("upload_rate", 0)),
+                _fmt_rate(t.get("download_rate", 0)),
+            )
+
+        console.print(table)
+        console.print(f"\n📊 Total: {data.get('total', len(torrents))} torrents", style="blue")
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ List failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@torrent.command()
+@click.argument("infohash")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def status(infohash: str, api_url: str):
+    """Show detailed live status for a specific torrent."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/torrents/{infohash}",
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        progress = data.get("progress", 0) * 100
+
+        from rich.panel import Panel
+        from rich.progress import Progress, BarColumn
+
+        # Build progress bar
+        progress_bar = "█" * int(progress / 5) + "░" * (20 - int(progress / 5))
+
+        eta_str = ""
+        eta = data.get("eta_seconds", 0)
+        if eta > 0:
+            mins, secs = divmod(int(eta), 60)
+            eta_str = f"  (ETA: {mins}m {secs}s)" if mins else f"  (ETA: {secs}s)"
+
+        content = f"""Infohash:     {data.get('infohash', 'N/A')}
+Name:         {data.get('name', 'N/A')}
+Size:         {_fmt_bytes(data.get('size_bytes', 0))}
+State:        {data.get('state', 'Unknown')}
+Progress:     [{progress_bar}] {progress:.1f}%{eta_str}
+Download:     {_fmt_rate(data.get('download_rate', 0))}
+Upload:       {_fmt_rate(data.get('upload_rate', 0))}
+Peers:        {data.get('seeders', 0) + data.get('leechers', 0)} connected
+Uploaded:     {_fmt_bytes(data.get('bytes_uploaded', 0))}
+Downloaded:   {_fmt_bytes(data.get('bytes_downloaded', 0))}
+Magnet URI:   magnet:?xt=urn:btih:{data.get('infohash', '')}"""
+
+        if data.get("error"):
+            content += f"\nError:        ⚠️ {data.get('error')}"
+
+        console.print(Panel(content, title="🔗 Torrent Status", border_style="blue"))
+    elif response.status_code == 404:
+        console.print(f"❌ Torrent not found: {infohash}", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Status failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@torrent.command()
+@click.argument("infohash")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def seed(infohash: str, api_url: str):
+    """Start seeding a torrent."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    try:
+        response = httpx.post(
+            f"{url}/api/v1/torrents/{infohash}/seed",
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        console.print(f"✅ Now seeding: {infohash[:16]}...", style="bold green")
+        console.print("   Announced to PRSM network.", style="dim")
+    elif response.status_code == 501:
+        console.print("⚠️  Seeding control not yet implemented", style="yellow")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Seed failed: HTTP {response.status_code}", style="red")
+        console.print(f"   {response.text[:200]}")
+        raise SystemExit(1)
+
+
+@torrent.command()
+@click.argument("infohash")
+@click.option("--delete-files", is_flag=True, help="Also delete local data files")
+@click.option("--yes", is_flag=True, help="Skip confirmation prompt")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def unseed(infohash: str, delete_files: bool, yes: bool, api_url: str):
+    """Stop seeding a torrent."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    if delete_files and not yes:
+        if not click.confirm("This will delete local files. Continue?", default=False):
+            console.print("Cancelled.", style="yellow")
+            raise SystemExit(0)
+
+    try:
+        response = httpx.delete(
+            f"{url}/api/v1/torrents/{infohash}/seed",
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        console.print(f"✅ Stopped seeding: {infohash[:16]}...", style="bold green")
+        if delete_files:
+            console.print("   Files deleted.", style="dim")
+        else:
+            console.print("   ⚠️  Files retained at download location", style="yellow")
+    elif response.status_code == 400:
+        console.print("⚠️  Could not stop seeding (not found or minimum seed time not met)", style="yellow")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Unseed failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@torrent.command()
+@click.argument("infohash")
+@click.option("--save-path", type=click.Path(), help="Destination directory")
+@click.option("--timeout", type=float, default=3600.0, help="Max seconds to wait")
+@click.option("--no-wait", is_flag=True, help="Fire-and-forget (return request_id immediately)")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def download(infohash: str, save_path: Optional[str], timeout: float, no_wait: bool, api_url: str):
+    """Download a torrent's content."""
+    import httpx
+    import time
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    payload = {
+        "infohash": infohash,
+        "save_path": save_path or str(Path.home() / ".prsm" / "torrents"),
+        "timeout": timeout,
+    }
+
+    console.print("🔗 Starting download...", style="bold blue")
+
+    try:
+        response = httpx.post(
+            f"{url}/api/v1/torrents/{infohash}/download",
+            json=payload,
+            headers=headers,
+            timeout=30.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        request_id = data.get("request_id", "")
+
+        if no_wait or data.get("status") == "completed":
+            console.print(f"✅ Download request: {request_id}", style="bold green")
+            if data.get("status") == "completed":
+                console.print(f"   Downloaded: {_fmt_bytes(data.get('bytes_downloaded', 0))}")
+            return
+
+        # Poll for progress
+        console.print(f"   Request ID: {request_id}")
+        console.print("   Polling progress...", style="dim")
+
+        start_time = time.time()
+        with console.status("[bold green]Downloading...") as status:
+            while time.time() - start_time < timeout:
+                poll = httpx.get(
+                    f"{url}/api/v1/torrents/{infohash}/download/{request_id}",
+                    headers=headers,
+                    timeout=10.0,
+                )
+                if poll.status_code == 200:
+                    poll_data = poll.json()
+                    progress = poll_data.get("progress", 0) * 100
+                    status.update(f"[bold green]Downloading... {progress:.1f}%")
+
+                    if poll_data.get("status") == "completed":
+                        console.print(f"\n✅ Download complete!", style="bold green")
+                        console.print(f"   Downloaded: {_fmt_bytes(poll_data.get('bytes_downloaded', 0))}")
+                        return
+                    elif poll_data.get("status") == "failed":
+                        console.print(f"\n❌ Download failed: {poll_data.get('error', 'Unknown error')}", style="red")
+                        raise SystemExit(1)
+
+                time.sleep(2)
+
+        console.print("\n⚠️  Download timed out", style="yellow")
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 503:
+        console.print("⚠️  BitTorrent requester not available", style="yellow")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Download failed: HTTP {response.status_code}", style="red")
+        console.print(f"   {response.text[:200]}")
+        raise SystemExit(1)
+
+
+@torrent.command()
+@click.argument("infohash")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def peers(infohash: str, api_url: str):
+    """List peers currently connected for a torrent."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/torrents/{infohash}/peers",
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        peers_data = response.json()
+
+        if not peers_data:
+            console.print("No peers connected.", style="yellow")
+            return
+
+        table = Table(title="Connected Peers")
+        table.add_column("IP:Port", style="cyan")
+        table.add_column("Client", style="green")
+        table.add_column("Downloaded", style="blue")
+        table.add_column("Uploaded", style="magenta")
+        table.add_column("Seed?", style="yellow")
+
+        for p in peers_data:
+            table.add_row(
+                f"{p.get('ip', '?')}:{p.get('port', '?')}",
+                p.get("client", "?")[:15],
+                _fmt_bytes(p.get("downloaded", 0)),
+                _fmt_bytes(p.get("uploaded", 0)),
+                "✅" if p.get("is_seed") else "",
+            )
+
+        console.print(table)
+        console.print(f"\n📊 Total: {len(peers_data)} peers", style="blue")
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Peers failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@torrent.command()
+@click.option("--api-url", default=None, help="PRSM API URL")
+def stats(api_url: str):
+    """Show aggregate BitTorrent stats for this node."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/torrents/stats",
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+
+        if not data.get("available"):
+            console.print("⚠️  BitTorrent client not available", style="yellow")
+            return
+
+        from rich.panel import Panel
+
+        provider = data.get("provider", {})
+        requester = data.get("requester", {})
+
+        content = f"""Active torrents:   {provider.get('active_torrents', 0)} seeding, {requester.get('active_downloads', 0)} downloading
+Total uploaded:   {_fmt_bytes(provider.get('total_uploaded_bytes', 0))}
+Total downloaded: {_fmt_bytes(requester.get('total_downloaded_bytes', 0))}
+Upload rate:       {_fmt_rate(provider.get('upload_rate', 0))}
+Download rate:     {_fmt_rate(requester.get('download_rate', 0))}
+FTNS earned:       {provider.get('total_rewards', 0):.4f}"""
+
+        console.print(Panel(content, title="🔗 BitTorrent Stats", border_style="green"))
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Stats failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+# ============================================================================
+# REPUTATION COMMANDS (Phase 2)
+# ============================================================================
+
+@main.group()
+def reputation():
+    """Reputation and trust score commands"""
+    pass
+
+
+@reputation.command()
+@click.argument("user-id", required=False)
+@click.option("--api-url", default=None, help="PRSM API URL")
+def score(user_id: Optional[str], api_url: str):
+    """Show reputation score and breakdown for a user."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    # If no user_id provided, get current user's score
+    target = user_id or "me"
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/reputation/{target}",
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+
+        from rich.panel import Panel
+
+        content = f"""User:              {data.get('user_id', 'N/A')}
+Overall Score:     {data.get('overall_score', 0):.1f} / 100
+──────────────────────────────
+Contribution:      {data.get('scores', {}).get('contribution', 0):.1f}   (data/model uploads, citations)
+Reliability:       {data.get('scores', {}).get('reliability', 0):.1f}   (uptime, proof-of-storage pass rate)
+Governance:        {data.get('scores', {}).get('governance', 0):.1f}   (proposal quality, voting participation)
+Marketplace:       {data.get('scores', {}).get('marketplace', 0):.1f}   (buyer/seller ratings)
+──────────────────────────────
+Tier:              {data.get('tier', 'Unknown')}
+Percentile:        Top {data.get('percentile', 100)}%"""
+
+        console.print(Panel(content, title="⭐ Reputation Score", border_style="yellow"))
+    elif response.status_code == 404:
+        console.print(f"❌ User not found: {target}", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Score failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@reputation.command()
+@click.option("--category", help="Filter by: contribution, reliability, governance, marketplace")
+@click.option("--limit", type=int, default=20, help="Number of entries")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def leaderboard(category: Optional[str], limit: int, api_url: str):
+    """Show the top contributors on the network by reputation score."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    params = {"limit": limit}
+    if category:
+        params["category"] = category
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/reputation/leaderboard",
+            params=params,
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        entries = data.get("leaderboard", [])
+
+        if not entries:
+            console.print("No entries found.", style="yellow")
+            return
+
+        table = Table(title="🏆 Reputation Leaderboard")
+        table.add_column("Rank", style="yellow", justify="right")
+        table.add_column("User ID", style="cyan")
+        table.add_column("Score", style="green", justify="right")
+        table.add_column("Tier", style="magenta")
+        table.add_column("Uploads", style="blue", justify="right")
+        table.add_column("Uptime", style="dim")
+        table.add_column("Since", style="dim")
+
+        for i, e in enumerate(entries, 1):
+            user_id = e.get("user_id", "unknown")
+            short_id = user_id[:12] + "..." if len(user_id) > 12 else user_id
+            table.add_row(
+                str(i),
+                short_id,
+                f"{e.get('score', 0):.1f}",
+                e.get("tier", "?"),
+                str(e.get("uploads", 0)),
+                f"{e.get('uptime', 0):.1f}%",
+                e.get("member_since", "?")[:10] if e.get("member_since") else "N/A",
+            )
+
+        console.print(table)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Leaderboard failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@reputation.command()
+@click.argument("user-id", required=False)
+@click.option("--limit", type=int, default=25, help="Number of entries")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def history(user_id: Optional[str], limit: int, api_url: str):
+    """Show reputation change history."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+    target = user_id or "me"
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/reputation/{target}/history",
+            params={"limit": limit},
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        events = data.get("history", [])
+
+        if not events:
+            console.print("No history found.", style="yellow")
+            return
+
+        table = Table(title="📜 Reputation History")
+        table.add_column("Date", style="dim")
+        table.add_column("Event", style="green")
+        table.add_column("Category", style="magenta")
+        table.add_column("Δ Score", style="yellow", justify="right")
+        table.add_column("Running Total", style="blue", justify="right")
+
+        for e in events:
+            delta = e.get("delta", 0)
+            delta_str = f"+{delta:.1f}" if delta >= 0 else f"{delta:.1f}"
+            table.add_row(
+                e.get("date", "?")[:10],
+                e.get("event", "?")[:30],
+                e.get("category", "?"),
+                delta_str,
+                f"{e.get('running_total', 0):.1f}",
+            )
+
+        console.print(table)
+    elif response.status_code == 404:
+        console.print(f"❌ User not found: {target}", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ History failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@reputation.command()
+@click.argument("user-id")
+@click.option("--reason", type=click.Choice(["fake_seeder", "bad_data", "spam", "governance_abuse", "other"]),
+              required=True, help="Reason for report")
+@click.option("--evidence", help="CID or transaction ID supporting the report")
+@click.option("--description", help="Free-form explanation")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def report(user_id: str, reason: str, evidence: Optional[str], description: Optional[str], api_url: str):
+    """File a reputation report against a node."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    payload = {
+        "target_user_id": user_id,
+        "reason": reason,
+    }
+    if evidence:
+        payload["evidence"] = evidence
+    if description:
+        payload["description"] = description
+
+    console.print(f"📝 Filing report against {user_id[:12]}...", style="bold blue")
+
+    if not click.confirm("Submit this report?", default=True):
+        console.print("Cancelled.", style="yellow")
+        raise SystemExit(0)
+
+    try:
+        response = httpx.post(
+            f"{url}/api/v1/reputation/reports",
+            json=payload,
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        console.print(f"✅ Report filed. Report ID: {data.get('report_id', 'N/A')}", style="bold green")
+        console.print("   PRSM governance will review within 72 hours.", style="dim")
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 404:
+        console.print(f"❌ User not found: {user_id}", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Report failed: HTTP {response.status_code}", style="red")
+        console.print(f"   {response.text[:200]}")
+        raise SystemExit(1)
+
+
+@reputation.command()
+@click.option("--filed", is_flag=True, help="Reports I filed (default)")
+@click.option("--received", is_flag=True, help="Reports filed against me")
+@click.option("--status-filter", "status", help="Filter: pending, reviewed, dismissed, upheld")
+@click.option("--limit", type=int, default=20, help="Number of entries")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def reports(filed: bool, received: bool, status: Optional[str], limit: int, api_url: str):
+    """List reputation reports filed by or against the current user."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    params = {"limit": limit}
+    if received:
+        params["type"] = "received"
+    else:
+        params["type"] = "filed"
+    if status:
+        params["status"] = status
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/reputation/reports",
+            params=params,
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        reports_list = data.get("reports", [])
+
+        if not reports_list:
+            console.print("No reports found.", style="yellow")
+            return
+
+        table = Table(title="📋 Reputation Reports")
+        table.add_column("Report ID", style="cyan")
+        table.add_column("Target/Reporter", style="green")
+        table.add_column("Reason", style="magenta")
+        table.add_column("Status", style="yellow")
+        table.add_column("Filed At", style="dim")
+
+        for r in reports_list:
+            report_id = r.get("report_id", "?")[:12]
+            other_party = r.get("target_user_id") if filed else r.get("reporter_user_id")
+            short_other = other_party[:12] + "..." if other_party and len(other_party) > 12 else other_party
+            table.add_row(
+                report_id,
+                short_other or "?",
+                r.get("reason", "?"),
+                r.get("status", "?"),
+                r.get("filed_at", "?")[:10] if r.get("filed_at") else "?",
+            )
+
+        console.print(table)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Reports failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+# ============================================================================
+# NWTN COMMANDS (Phase 3)
+# ============================================================================
+
+@main.group()
+def nwtn():
+    """NWTN reasoning orchestrator commands"""
+    pass
+
+
+@nwtn.command()
+@click.argument("query")
+@click.option("--model", help="Model backend: auto, gpt-4o, claude-3-5-sonnet, ollama/<name>")
+@click.option("--context", help="Additional context JSON or plain text")
+@click.option("--user-id", help="Override user ID")
+@click.option("--trace", is_flag=True, help="Show full reasoning trace after response")
+@click.option("--budget", type=float, help="Max FTNS to spend on this query")
+@click.option("--format", "output_format", type=click.Choice(["text", "json", "markdown"]), default="text",
+               help="Output format")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def query_cmd(query: str, model: Optional[str], context: Optional[str], user_id: Optional[str],
+              trace: bool, budget: Optional[float], output_format: str, api_url: str):
+    """Submit a query to NWTN with enhanced control options."""
+    import httpx
+    import time
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    payload = {"query": query}
+    if model:
+        payload["model"] = model
+    if context:
+        payload["context"] = context
+    if user_id:
+        payload["user_id"] = user_id
+    if budget:
+        payload["max_budget"] = budget
+    payload["output_format"] = output_format
+
+    start_time = time.time()
+
+    try:
+        with console.status("[bold green]Processing query..."):
+            response = httpx.post(
+                f"{url}/api/v1/nwtn/query",
+                json=payload,
+                headers=headers,
+                timeout=120.0,
+            )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    elapsed = time.time() - start_time
+
+    if response.status_code == 200:
+        data = response.json()
+
+        console.print("\n─────────── Response ───────────", style="bold blue")
+        console.print(data.get("response", "No response"))
+        console.print("────────────────────────────────", style="dim")
+        console.print(f"Tokens used: {data.get('tokens_used', 'N/A')}   "
+                     f"Cost: {data.get('cost_ftns', 0):.4f} FTNS   "
+                     f"Time: {elapsed:.1f}s", style="dim")
+
+        if trace and data.get("reasoning_trace"):
+            console.print("\n─────── Reasoning Trace ─────────", style="bold yellow")
+            for i, step in enumerate(data["reasoning_trace"], 1):
+                console.print(f"Step {i}: [{step.get('type', '?')}] {step.get('description', '')}")
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 402:
+        console.print("❌ Insufficient FTNS balance", style="red")
+        console.print("💡 Check your balance: prsm ftns balance", style="yellow")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Query failed: HTTP {response.status_code}", style="red")
+        console.print(f"   {response.text[:200]}")
+        raise SystemExit(1)
+
+
+@nwtn.command()
+@click.option("--available", is_flag=True, help="Show only currently reachable backends")
+@click.option("--detail", is_flag=True, help="Include model metadata")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def models(available: bool, detail: bool, api_url: str):
+    """List available model backends and their status."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    params = {}
+    if available:
+        params["available_only"] = "true"
+    if detail:
+        params["include_metadata"] = "true"
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/nwtn/models",
+            params=params,
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        models_list = data.get("models", [])
+
+        if not models_list:
+            console.print("No models found.", style="yellow")
+            return
+
+        table = Table(title="🤖 Available Models")
+        table.add_column("Backend", style="cyan")
+        table.add_column("Model", style="green")
+        table.add_column("Status", style="magenta")
+        table.add_column("Latency", style="yellow")
+        table.add_column("Cost/1k tokens", style="blue")
+        table.add_column("Context Window", style="dim")
+
+        for m in models_list:
+            status = "✅" if m.get("available") else "❌"
+            table.add_row(
+                m.get("backend", "?"),
+                m.get("model", "?")[:25],
+                status,
+                f"{m.get('latency_ms', 0)}ms" if m.get("latency_ms") else "N/A",
+                f"{m.get('cost_per_1k', 0):.4f}" if m.get("cost_per_1k") else "N/A",
+                str(m.get("context_window", "N/A")),
+            )
+
+        console.print(table)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Models failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@nwtn.command()
+@click.option("--api-url", default=None, help="PRSM API URL")
+def health(api_url: str):
+    """Show NWTN pipeline health — all five reasoning layers."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/nwtn/health",
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+
+        from rich.panel import Panel
+
+        layers = data.get("layers", {})
+        layer_lines = []
+        for i, (name, info) in enumerate(layers.items(), 1):
+            status_icon = "✅" if info.get("healthy") else "⚠️ "
+            status_text = "Healthy" if info.get("healthy") else info.get("status", "Degraded")
+            latency = info.get("avg_latency_ms", 0)
+            layer_lines.append(f"Layer {i} - {name:12s}: {status_icon} {status_text}  (avg {latency}ms)")
+
+        overall_icon = "✅" if data.get("overall_healthy") else "⚠️ "
+        overall_text = "Healthy" if data.get("overall_healthy") else "Degraded"
+
+        content = "\n".join(layer_lines) + f"""
+──────────────────────────────────────
+Pipeline overall:          {overall_icon} {overall_text}"""
+
+        console.print(Panel(content, title="🧠 NWTN Pipeline Health", border_style="blue"))
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Health check failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@nwtn.command()
+@click.option("--limit", type=int, default=20, help="Number of sessions")
+@click.option("--include-cost", is_flag=True, help="Show FTNS cost per session")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def sessions(limit: int, include_cost: bool, api_url: str):
+    """List recent NWTN query sessions."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/sessions",
+            params={"limit": limit},
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        sessions_list = data.get("sessions", [])
+
+        if not sessions_list:
+            console.print("No sessions found.", style="yellow")
+            return
+
+        table = Table(title="📜 NWTN Sessions")
+        table.add_column("Session ID", style="cyan")
+        table.add_column("Query", style="green")
+        table.add_column("Model", style="magenta")
+        table.add_column("Tokens", style="blue", justify="right")
+        if include_cost:
+            table.add_column("Cost", style="yellow", justify="right")
+        table.add_column("Time", style="dim")
+        table.add_column("Date", style="dim")
+
+        for s in sessions_list:
+            session_id = s.get("session_id", "?")[:12]
+            query_text = s.get("query", "?")[:25] + "..." if len(s.get("query", "?")) > 25 else s.get("query", "?")
+            table.add_row(
+                session_id,
+                query_text,
+                s.get("model", "?")[:15],
+                str(s.get("tokens_used", 0)),
+                *([f"{s.get('cost_ftns', 0):.4f}"] if include_cost else []),
+                f"{s.get('duration_seconds', 0):.1f}s",
+                s.get("created_at", "?")[:10] if s.get("created_at") else "?",
+            )
+
+        console.print(table)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Sessions failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+# ============================================================================
+# DISTILLATION COMMANDS (Phase 4)
+# ============================================================================
+
+@main.group()
+def distill():
+    """Model distillation commands"""
+    pass
+
+
+@distill.command("run")
+@click.argument("teacher-id")
+@click.option("--student-arch", help="Target architecture")
+@click.option("--dataset-cid", help="IPFS CID of training dataset")
+@click.option("--epochs", type=int, default=3, help="Training epochs")
+@click.option("--output-name", help="Name for the resulting student model")
+@click.option("--budget", type=float, help="Max FTNS to spend")
+@click.option("--follow", "-f", is_flag=True, help="Stream progress logs until completion")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def distill_run(teacher_id: str, student_arch: Optional[str], dataset_cid: Optional[str],
+                epochs: int, output_name: Optional[str], budget: Optional[float],
+                follow: bool, api_url: str):
+    """Start a distillation job from a teacher model."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    payload = {
+        "teacher_id": teacher_id,
+        "epochs": epochs,
+    }
+    if student_arch:
+        payload["student_architecture"] = student_arch
+    if dataset_cid:
+        payload["dataset_cid"] = dataset_cid
+    if output_name:
+        payload["output_name"] = output_name
+    if budget:
+        payload["max_budget"] = budget
+
+    console.print(f"🔬 Starting distillation from {teacher_id[:12]}...", style="bold blue")
+
+    try:
+        response = httpx.post(
+            f"{url}/api/v1/distillation/jobs",
+            json=payload,
+            headers=headers,
+            timeout=30.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        job_id = data.get("job_id", "")
+
+        console.print(f"✅ Distillation job started: {job_id}", style="bold green")
+        console.print(f"   Teacher:  {teacher_id}")
+        console.print(f"   Student:  {data.get('student_architecture', 'auto')}")
+        console.print(f"   Dataset:  {dataset_cid or 'default'}")
+        console.print(f"   Use: prsm distill status {job_id}  to monitor", style="dim")
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 402:
+        console.print("❌ Insufficient FTNS balance", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Distill failed: HTTP {response.status_code}", style="red")
+        console.print(f"   {response.text[:200]}")
+        raise SystemExit(1)
+
+
+@distill.command()
+@click.argument("job-id")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def status(job_id: str, api_url: str):
+    """Poll distillation job status."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/distillation/jobs/{job_id}",
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+
+        from rich.panel import Panel
+
+        progress = data.get("progress", 0) * 100
+        progress_bar = "█" * int(progress / 5) + "░" * (20 - int(progress / 5))
+        epoch_info = f"Epoch {data.get('current_epoch', 0)}/{data.get('total_epochs', 0)}"
+
+        content = f"""Job ID:       {job_id}
+Status:       {data.get('status', 'Unknown')}
+Progress:     [{progress_bar}] {progress:.1f}%   {epoch_info}
+Teacher:      {data.get('teacher_id', 'N/A')}
+Student:      {data.get('student_architecture', 'N/A')}
+Loss:         {data.get('current_loss', 'N/A')}
+Started:      {data.get('started_at', 'N/A')}
+ETA:          {data.get('eta_minutes', 'calculating...')}"""
+
+        console.print(Panel(content, title="🔬 Distillation Job", border_style="green"))
+    elif response.status_code == 404:
+        console.print(f"❌ Job not found: {job_id}", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Status failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@distill.command("list")
+@click.option("--status-filter", "status", help="Filter: running, completed, failed")
+@click.option("--limit", type=int, default=20, help="Number of entries")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def distill_list(status: Optional[str], limit: int, api_url: str):
+    """List distillation jobs for the current user."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    params = {"limit": limit}
+    if status:
+        params["status"] = status
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/distillation/jobs",
+            params=params,
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        jobs = data.get("jobs", [])
+
+        if not jobs:
+            console.print("No distillation jobs found.", style="yellow")
+            return
+
+        table = Table(title="🔬 Distillation Jobs")
+        table.add_column("Job ID", style="cyan")
+        table.add_column("Teacher", style="green")
+        table.add_column("Student Arch", style="magenta")
+        table.add_column("Status", style="yellow")
+        table.add_column("Progress", style="blue")
+        table.add_column("Cost", style="dim")
+        table.add_column("Date", style="dim")
+
+        for j in jobs:
+            job_id = j.get("job_id", "?")[:12]
+            teacher = j.get("teacher_id", "?")[:12]
+            progress = j.get("progress", 0) * 100
+            table.add_row(
+                job_id,
+                teacher,
+                j.get("student_architecture", "?")[:15],
+                j.get("status", "?"),
+                f"{progress:.0f}%",
+                f"{j.get('cost_ftns', 0):.4f}",
+                j.get("created_at", "?")[:10] if j.get("created_at") else "?",
+            )
+
+        console.print(table)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ List failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@distill.command()
+@click.argument("job-id")
+@click.option("--yes", is_flag=True, help="Skip confirmation")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def cancel(job_id: str, yes: bool, api_url: str):
+    """Cancel a running distillation job."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    if not yes:
+        if not click.confirm(f"Cancel distillation job {job_id[:12]}?", default=False):
+            console.print("Cancelled.", style="yellow")
+            raise SystemExit(0)
+
+    try:
+        response = httpx.delete(
+            f"{url}/api/v1/distillation/jobs/{job_id}",
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        console.print(f"✅ Distillation job cancelled: {job_id[:12]}", style="bold green")
+    elif response.status_code == 404:
+        console.print(f"❌ Job not found: {job_id}", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Cancel failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@distill.command()
+@click.option("--limit", type=int, default=20, help="Number of entries")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def models(limit: int, api_url: str):
+    """List student models produced by completed distillation jobs."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/distillation/models",
+            params={"limit": limit},
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        models_list = data.get("models", [])
+
+        if not models_list:
+            console.print("No distilled models found.", style="yellow")
+            return
+
+        table = Table(title="🎓 Distilled Models")
+        table.add_column("Model ID", style="cyan")
+        table.add_column("Name", style="green")
+        table.add_column("Teacher Source", style="magenta")
+        table.add_column("Architecture", style="blue")
+        table.add_column("Size", style="yellow")
+        table.add_column("Quality", style="dim")
+        table.add_column("Date", style="dim")
+
+        for m in models_list:
+            model_id = m.get("model_id", "?")[:12]
+            teacher = m.get("teacher_source", "?")[:12]
+            table.add_row(
+                model_id,
+                m.get("name", "?")[:20],
+                teacher,
+                m.get("architecture", "?")[:15],
+                _fmt_bytes(m.get("size_bytes", 0)),
+                f"{m.get('quality_score', 0):.1f}",
+                m.get("created_at", "?")[:10] if m.get("created_at") else "?",
+            )
+
+        console.print(table)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Models failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+# ============================================================================
+# TEACHER COMMAND ADDITIONS (Phase 5)
+# ============================================================================
+
+@teacher.command()
+@click.argument("teacher-id")
+@click.option("--yes", is_flag=True, help="Skip confirmation")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def delete(teacher_id: str, yes: bool, api_url: str):
+    """Delete a teacher model."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    if not yes:
+        if not click.confirm(f"Delete teacher model {teacher_id[:12]}?", default=False):
+            console.print("Cancelled.", style="yellow")
+            raise SystemExit(0)
+
+    try:
+        response = httpx.delete(
+            f"{url}/api/v1/teachers/{teacher_id}",
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        console.print(f"✅ Teacher model {teacher_id[:12]} deleted.", style="bold green")
+        console.print("   ⚠️  Note: Active distillation jobs referencing this teacher will be cancelled.", style="yellow")
+    elif response.status_code == 404:
+        console.print(f"❌ Teacher not found: {teacher_id}", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Delete failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@teacher.command("list-runs")
+@click.argument("teacher-id")
+@click.option("--limit", type=int, default=20, help="Number of entries")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def list_runs(teacher_id: str, limit: int, api_url: str):
+    """List all training runs for a teacher model."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/teachers/{teacher_id}/runs",
+            params={"limit": limit},
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        runs = data.get("runs", [])
+
+        if not runs:
+            console.print(f"No training runs found for teacher {teacher_id[:12]}", style="yellow")
+            return
+
+        table = Table(title=f"Training Runs for {teacher_id[:12]}")
+        table.add_column("Run ID", style="cyan")
+        table.add_column("Status", style="green")
+        table.add_column("Epochs", style="magenta")
+        table.add_column("Loss", style="yellow")
+        table.add_column("Duration", style="blue")
+        table.add_column("Date", style="dim")
+
+        for r in runs:
+            run_id = r.get("run_id", "?")[:12]
+            table.add_row(
+                run_id,
+                r.get("status", "?"),
+                f"{r.get('completed_epochs', 0)}/{r.get('total_epochs', 0)}",
+                f"{r.get('final_loss', 0):.4f}" if r.get("final_loss") else "N/A",
+                r.get("duration", "N/A"),
+                r.get("started_at", "?")[:10] if r.get("started_at") else "?",
+            )
+
+        console.print(table)
+    elif response.status_code == 404:
+        console.print(f"❌ Teacher not found: {teacher_id}", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ List-runs failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@teacher.command()
+@click.argument("teacher-id")
+@click.option("--benchmark", type=click.Choice(["default", "math", "code", "science"]), default="default",
+              help="Benchmark suite")
+@click.option("--samples", type=int, default=100, help="Number of eval samples")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def eval(teacher_id: str, benchmark: str, samples: int, api_url: str):
+    """Run a quick benchmark evaluation against a teacher model."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    payload = {
+        "benchmark": benchmark,
+        "samples": samples,
+    }
+
+    console.print(f"📊 Evaluating teacher {teacher_id[:12]}...", style="bold blue")
+
+    try:
+        with console.status("[bold green]Running evaluation..."):
+            response = httpx.post(
+                f"{url}/api/v1/teachers/{teacher_id}/eval",
+                json=payload,
+                headers=headers,
+                timeout=120.0,
+            )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+
+        from rich.panel import Panel
+
+        content = f"""Teacher:     {teacher_id}
+Benchmark:   {benchmark}
+Score:       {data.get('score', 0):.1f} / 100
+Accuracy:    {data.get('accuracy', 0):.1f}%
+Latency:     avg {data.get('latency_ms', 0)}ms
+Cost:        {data.get('cost_ftns', 0):.4f} FTNS
+Rank:        Top {data.get('percentile', 100)}% in domain"""
+
+        console.print(Panel(content, title="📊 Evaluation Results", border_style="green"))
+    elif response.status_code == 404:
+        console.print(f"❌ Teacher not found: {teacher_id}", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Eval failed: HTTP {response.status_code}", style="red")
+        console.print(f"   {response.text[:200]}")
+        raise SystemExit(1)
+
+
+# ============================================================================
+# MONITORING COMMANDS (Phase 6)
+# ============================================================================
+
+@main.group()
+def monitor():
+    """System monitoring commands"""
+    pass
+
+
+@monitor.command()
+@click.option("--watch", is_flag=True, help="Refresh every 5 seconds")
+@click.option("--json", "json_output", is_flag=True, help="Output as JSON for scripting")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def health_cmd(watch: bool, json_output: bool, api_url: str):
+    """Full health check across all PRSM subsystems."""
+    import httpx
+    import time
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    def fetch_health():
+        try:
+            return httpx.get(
+                f"{url}/api/v1/health",
+                headers=headers,
+                timeout=10.0,
+            )
+        except httpx.ConnectError:
+            return None
+
+    def display_health(response):
+        if response is None:
+            console.print("❌ Cannot connect to API", style="red")
+            return
+
+        if response.status_code == 200:
+            data = response.json()
+
+            if json_output:
+                import json
+                console.print(json.dumps(data, indent=2))
+                return
+
+            from rich.panel import Panel
+
+            status_icons = {
+                "healthy": "✅",
+                "degraded": "⚠️ ",
+                "unhealthy": "❌",
+            }
+
+            services = data.get("services", {})
+            lines = []
+            for name, info in services.items():
+                status = info.get("status", "unknown")
+                icon = status_icons.get(status, "?")
+                detail = info.get("detail", "")
+                line = f"{name:15s}: {icon} {status.capitalize()}"
+                if detail:
+                    line += f"  ({detail})"
+                lines.append(line)
+
+            overall = data.get("overall", "unknown")
+            overall_icon = status_icons.get(overall, "?")
+
+            content = "\n".join(lines) + f"""
+──────────────────────────────────────
+Pipeline overall:  {overall_icon} {overall.capitalize()}"""
+
+            console.print(Panel(content, title="🏥 System Health", border_style="green"))
+        elif response.status_code == 401:
+            console.print("❌ Session expired. Run: prsm login", style="red")
+        else:
+            console.print(f"❌ Health check failed: HTTP {response.status_code}", style="red")
+
+    if watch:
+        try:
+            while True:
+                console.clear()
+                display_health(fetch_health())
+                console.print("\n[dim]Press Ctrl+C to exit[/dim]")
+                time.sleep(5)
+        except KeyboardInterrupt:
+            console.print("\n👋 Monitoring stopped", style="yellow")
+    else:
+        display_health(fetch_health())
+
+
+@monitor.command()
+@click.option("--period", type=click.Choice(["1h", "6h", "24h", "7d"]), default="1h", help="Time window")
+@click.option("--watch", is_flag=True, help="Auto-refresh every 10 seconds")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def metrics(period: str, watch: bool, api_url: str):
+    """Show key performance metrics for the local node."""
+    import httpx
+    import time
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    def fetch_metrics():
+        try:
+            return httpx.get(
+                f"{url}/api/v1/monitoring/metrics",
+                params={"period": period},
+                headers=headers,
+                timeout=10.0,
+            )
+        except httpx.ConnectError:
+            return None
+
+    def display_metrics(response):
+        if response is None:
+            console.print("❌ Cannot connect to API", style="red")
+            return
+
+        if response.status_code == 200:
+            data = response.json()
+
+            from rich.panel import Panel
+
+            compute = data.get("compute", {})
+            network = data.get("network", {})
+            economy = data.get("economy", {})
+
+            content = f"""Period: Last {period}
+────────── Compute ──────────
+Queries served:      {compute.get('queries_served', 0)}
+Avg query latency:   {compute.get('avg_latency_ms', 0)}ms
+CPU usage:           {compute.get('cpu_percent', 0):.1f}%
+Memory usage:        {compute.get('memory_used_gb', 0):.1f} GB / {compute.get('memory_total_gb', 0):.1f} GB
+────────── Network ──────────
+P2P bandwidth ↑:     {_fmt_bytes(network.get('p2p_upload_bytes', 0))}
+P2P bandwidth ↓:     {_fmt_bytes(network.get('p2p_download_bytes', 0))}
+BT seeded:           {_fmt_bytes(network.get('bt_seeded_bytes', 0))}
+BT downloaded:       {_fmt_bytes(network.get('bt_downloaded_bytes', 0))}
+────────── Economy ──────────
+FTNS earned:         +{economy.get('ftns_earned', 0):.4f}
+FTNS spent:           -{economy.get('ftns_spent', 0):.4f}"""
+
+            console.print(Panel(content, title="📊 Node Metrics", border_style="blue"))
+        elif response.status_code == 401:
+            console.print("❌ Session expired. Run: prsm login", style="red")
+        else:
+            console.print(f"❌ Metrics failed: HTTP {response.status_code}", style="red")
+
+    if watch:
+        try:
+            while True:
+                console.clear()
+                display_metrics(fetch_metrics())
+                console.print("\n[dim]Press Ctrl+C to exit[/dim]")
+                time.sleep(10)
+        except KeyboardInterrupt:
+            console.print("\n👋 Monitoring stopped", style="yellow")
+    else:
+        display_metrics(fetch_metrics())
+
+
+@monitor.command()
+@click.option("--level", type=click.Choice(["debug", "info", "warning", "error"]), default="info",
+              help="Log level filter")
+@click.option("--service", help="Filter by service: api, nwtn, ipfs, bittorrent, node")
+@click.option("--limit", type=int, default=50, help="Lines to show")
+@click.option("--follow", "-f", is_flag=True, help="Stream new log entries")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def logs(level: str, service: Optional[str], limit: int, follow: bool, api_url: str):
+    """Stream or retrieve recent structured log output."""
+    import httpx
+    import time
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    params = {"level": level, "limit": limit}
+    if service:
+        params["service"] = service
+
+    def fetch_logs():
+        try:
+            return httpx.get(
+                f"{url}/api/v1/monitoring/logs",
+                params=params,
+                headers=headers,
+                timeout=10.0,
+            )
+        except httpx.ConnectError:
+            return None
+
+    def display_logs(response):
+        if response is None:
+            console.print("❌ Cannot connect to API", style="red")
+            return
+
+        if response.status_code == 200:
+            data = response.json()
+            logs_list = data.get("logs", [])
+
+            for log in logs_list:
+                timestamp = log.get("timestamp", "")[:19]
+                log_level = log.get("level", "info").upper()
+                log_service = log.get("service", "?")
+                message = log.get("message", "")
+
+                level_colors = {
+                    "DEBUG": "dim",
+                    "INFO": "blue",
+                    "WARNING": "yellow",
+                    "ERROR": "red",
+                }
+                level_color = level_colors.get(log_level, "white")
+
+                console.print(f"[dim]{timestamp}[/dim] [{level_color}]{log_level:8s}[/{level_color}] [{log_service}] {message}")
+        elif response.status_code == 401:
+            console.print("❌ Session expired. Run: prsm login", style="red")
+        else:
+            console.print(f"❌ Logs failed: HTTP {response.status_code}", style="red")
+
+    if follow:
+        try:
+            while True:
+                console.clear()
+                display_logs(fetch_logs())
+                console.print("\n[dim]Press Ctrl+C to exit[/dim]")
+                time.sleep(2)
+        except KeyboardInterrupt:
+            console.print("\n👋 Log streaming stopped", style="yellow")
+    else:
+        display_logs(fetch_logs())
+
+
+# ============================================================================
+# WORKFLOW COMMANDS (Phase 7)
+# ============================================================================
+
+@main.group()
+def workflow():
+    """Workflow scheduling commands"""
+    pass
+
+
+@workflow.command()
+@click.option("--name", required=True, help="Workflow name")
+@click.option("--description", help="Description")
+@click.option("--trigger", required=True, help="Cron expression or 'manual'")
+@click.option("--steps-file", type=click.Path(exists=True), help="JSON file describing workflow steps")
+@click.option("--budget", type=float, help="Max FTNS per run")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def create_cmd(name: str, description: Optional[str], trigger: str, steps_file: Optional[str],
+               budget: Optional[float], api_url: str):
+    """Create a new automated workflow."""
+    import httpx
+    import json
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    payload = {
+        "name": name,
+        "trigger": trigger,
+    }
+    if description:
+        payload["description"] = description
+    if budget:
+        payload["max_budget"] = budget
+
+    if steps_file:
+        steps_path = Path(steps_file)
+        try:
+            steps = json.loads(steps_path.read_text())
+            payload["steps"] = steps
+        except json.JSONDecodeError:
+            console.print("❌ Invalid JSON in steps file", style="red")
+            raise SystemExit(1)
+
+    console.print(f"📋 Creating workflow '{name}'...", style="bold blue")
+
+    try:
+        response = httpx.post(
+            f"{url}/api/v1/workflows",
+            json=payload,
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        console.print(f"✅ Workflow created: {data.get('workflow_id', 'N/A')}", style="bold green")
+        if trigger != "manual":
+            console.print(f"   Next run: {data.get('next_run', 'N/A')}", style="dim")
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Create failed: HTTP {response.status_code}", style="red")
+        console.print(f"   {response.text[:200]}")
+        raise SystemExit(1)
+
+
+@workflow.command("list")
+@click.option("--status", "status_filter", help="Filter: active, paused, failed")
+@click.option("--limit", type=int, default=20, help="Number of entries")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def list_workflows(status_filter: Optional[str], limit: int, api_url: str):
+    """List all workflows for the current user."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    params = {"limit": limit}
+    if status_filter:
+        params["status"] = status_filter
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/workflows",
+            params=params,
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        workflows = data.get("workflows", [])
+
+        if not workflows:
+            console.print("No workflows found.", style="yellow")
+            return
+
+        table = Table(title="📋 Workflows")
+        table.add_column("ID", style="cyan")
+        table.add_column("Name", style="green")
+        table.add_column("Trigger", style="magenta")
+        table.add_column("Status", style="yellow")
+        table.add_column("Last Run", style="dim")
+        table.add_column("Next Run", style="blue")
+        table.add_column("Runs", style="dim", justify="right")
+
+        for w in workflows:
+            workflow_id = w.get("workflow_id", "?")[:12]
+            table.add_row(
+                workflow_id,
+                w.get("name", "?")[:20],
+                w.get("trigger", "?"),
+                w.get("status", "?"),
+                w.get("last_run", "Never")[:10] if w.get("last_run") else "Never",
+                w.get("next_run", "N/A")[:10] if w.get("next_run") else "N/A",
+                str(w.get("run_count", 0)),
+            )
+
+        console.print(table)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ List failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@workflow.command()
+@click.argument("workflow-id")
+@click.option("--follow", "-f", is_flag=True, help="Stream execution logs until completion")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def run(workflow_id: str, follow: bool, api_url: str):
+    """Manually trigger a workflow run."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    console.print(f"▶️  Starting workflow {workflow_id[:12]}...", style="bold blue")
+
+    try:
+        response = httpx.post(
+            f"{url}/api/v1/workflows/{workflow_id}/run",
+            headers=headers,
+            timeout=30.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        console.print(f"✅ Workflow run started: {data.get('run_id', 'N/A')}", style="bold green")
+        console.print(f"   Status: {data.get('status', 'running')}")
+    elif response.status_code == 404:
+        console.print(f"❌ Workflow not found: {workflow_id}", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Run failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
+@workflow.command()
+@click.argument("workflow-id")
+@click.option("--run-id", help="Specific run (default: most recent)")
+@click.option("--limit", type=int, default=100, help="Log lines")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def logs_cmd(workflow_id: str, run_id: Optional[str], limit: int, api_url: str):
+    """Show execution logs for a workflow."""
+    import httpx
+
+    headers = _auth_headers()
+    if not headers:
+        console.print("❌ Not logged in. Run: prsm login", style="red")
+        raise SystemExit(1)
+
+    url = _api_url_from_creds(api_url)
+
+    # If no run_id, get the most recent run
+    if not run_id:
+        run_id = "latest"
+
+    params = {"limit": limit}
+
+    try:
+        response = httpx.get(
+            f"{url}/api/v1/workflows/{workflow_id}/runs/{run_id}/logs",
+            params=params,
+            headers=headers,
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"❌ Cannot connect to {url}", style="red")
+        console.print("💡 Start the server: prsm serve", style="yellow")
+        raise SystemExit(1)
+
+    if response.status_code == 200:
+        data = response.json()
+        logs_list = data.get("logs", [])
+
+        if not logs_list:
+            console.print("No logs found.", style="yellow")
+            return
+
+        console.print(f"📋 Workflow {workflow_id[:12]} - Run {run_id[:12] if run_id != 'latest' else 'latest'}",
+                     style="bold blue")
+
+        for log in logs_list:
+            timestamp = log.get("timestamp", "")[:19]
+            level = log.get("level", "info").upper()
+            message = log.get("message", "")
+            step = log.get("step", "")
+
+            level_colors = {
+                "DEBUG": "dim",
+                "INFO": "blue",
+                "WARNING": "yellow",
+                "ERROR": "red",
+            }
+            level_color = level_colors.get(level, "white")
+
+            step_str = f"[{step}] " if step else ""
+            console.print(f"[dim]{timestamp}[/dim] [{level_color}]{level:8s}[/{level_color}] {step_str}{message}")
+    elif response.status_code == 404:
+        console.print(f"❌ Workflow or run not found: {workflow_id}/{run_id}", style="red")
+        raise SystemExit(1)
+    elif response.status_code == 401:
+        console.print("❌ Session expired. Run: prsm login", style="red")
+        raise SystemExit(1)
+    else:
+        console.print(f"❌ Logs failed: HTTP {response.status_code}", style="red")
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
     main()
