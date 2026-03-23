@@ -588,11 +588,67 @@ class UserContentManager:
             return False
     
     async def _extract_text_from_binary(self, upload: UserUpload) -> Optional[str]:
-        """Extract text from binary content"""
-        
-        # This would implement text extraction for various file types
-        # For now, return None for binary content
-        upload.processing_messages.append("Binary content detected - text extraction not implemented")
+        """Extract text from binary content."""
+
+        if not upload.file_name:
+            upload.processing_messages.append("Cannot extract text: no filename")
+            return None
+
+        mime_type, _ = mimetypes.guess_type(upload.file_name)
+        content_bytes = upload.content_binary if hasattr(upload, 'content_binary') else None
+
+        if content_bytes is None:
+            upload.processing_messages.append("No raw content available for text extraction")
+            return None
+
+        # PDF extraction
+        if mime_type == 'application/pdf':
+            try:
+                import pypdf
+                import io
+                reader = pypdf.PdfReader(io.BytesIO(content_bytes))
+                text = "\n".join(page.extract_text() or "" for page in reader.pages)
+                upload.processing_messages.append(f"Extracted {len(text)} chars from PDF")
+                return text.strip() or None
+            except ImportError:
+                upload.processing_messages.append("PDF extraction unavailable: pypdf not installed")
+            except Exception as e:
+                upload.processing_messages.append(f"PDF extraction failed: {e}")
+
+        # DOCX extraction
+        elif mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+            try:
+                import docx
+                import io
+                doc = docx.Document(io.BytesIO(content_bytes))
+                text = "\n".join(para.text for para in doc.paragraphs)
+                upload.processing_messages.append(f"Extracted {len(text)} chars from DOCX")
+                return text.strip() or None
+            except ImportError:
+                upload.processing_messages.append("DOCX extraction unavailable: python-docx not installed")
+            except Exception as e:
+                upload.processing_messages.append(f"DOCX extraction failed: {e}")
+
+        # Plain text or CSV — attempt charset detection
+        elif mime_type and (mime_type.startswith('text/') or mime_type == 'application/csv'):
+            try:
+                import chardet
+                detected = chardet.detect(content_bytes)
+                encoding = detected.get('encoding') or 'utf-8'
+                text = content_bytes.decode(encoding, errors='replace')
+                upload.processing_messages.append(f"Decoded {len(text)} chars as {encoding}")
+                return text.strip() or None
+            except ImportError:
+                # Fallback without chardet
+                try:
+                    text = content_bytes.decode('utf-8', errors='replace')
+                    return text.strip() or None
+                except Exception:
+                    pass
+            except Exception as e:
+                upload.processing_messages.append(f"Text decoding failed: {e}")
+
+        upload.processing_messages.append(f"Unsupported binary type for text extraction: {mime_type}")
         return None
     
     async def get_user_uploads(self, user_id: str) -> List[UserUpload]:

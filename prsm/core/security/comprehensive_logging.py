@@ -305,6 +305,14 @@ class ComprehensiveSecurityLogger:
             "errors_encountered": 0,
             "start_time": datetime.now(timezone.utc)
         }
+
+        # Additional counters for detailed metrics
+        self._events_logged: int = 0
+        self._events_by_category: Dict[str, int] = {}
+        self._total_bytes_written: int = 0
+        self._alert_count: int = 0
+        self._retention_days: int = 90
+        self._last_rotation: Optional[datetime] = None
         
         # Initialize default alert rules
         self._setup_default_alert_rules()
@@ -474,21 +482,28 @@ class ComprehensiveSecurityLogger:
                 target_file = self.error_log
             else:
                 target_file = self.security_log
-            
+
             # Write to file
+            json_str = log_entry.to_json() + '\n'
             with open(target_file, 'a', encoding='utf-8') as f:
-                f.write(log_entry.to_json() + '\n')
-            
+                f.write(json_str)
+
+            # Update counters
+            self._events_logged += 1
+            self._total_bytes_written += len(json_str.encode('utf-8'))
+            category_key = log_entry.category.value
+            self._events_by_category[category_key] = self._events_by_category.get(category_key, 0) + 1
+
             # Check for rotation
             await self.rotation_manager.check_rotation(target_file)
-            
+
             # Update statistics
             self.stats["logs_written"] += 1
-            
+
             # Write metrics if enabled
             if self.config["enable_metrics"]:
                 await self._write_metrics(log_entry)
-            
+
         except Exception as e:
             self.logger.error("Failed to write log entry", error=str(e))
             self.stats["errors_encountered"] += 1
@@ -605,7 +620,7 @@ class ComprehensiveSecurityLogger:
     async def get_security_metrics(self, hours: int = 24) -> Dict[str, Any]:
         """Get security metrics for the specified time period"""
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
-        
+
         metrics = {
             "time_period_hours": hours,
             "total_logs": self.stats["logs_written"],
@@ -613,20 +628,16 @@ class ComprehensiveSecurityLogger:
             "errors_encountered": self.stats["errors_encountered"],
             "uptime_hours": (datetime.now(timezone.utc) - self.stats["start_time"]).total_seconds() / 3600,
             "queue_size": self.log_queue.qsize(),
-            "categories": {},
-            "risk_distribution": {"low": 0, "medium": 0, "high": 0, "critical": 0}
+            "categories": dict(self._events_by_category),
+            "risk_distribution": {"low": 0, "medium": 0, "high": 0, "critical": 0},
+            # Additional real metrics
+            "events_logged": self._events_logged,
+            "log_size_mb": self._total_bytes_written / 1024 / 1024,
+            "alert_count": self._alert_count,
+            "retention_days": self._retention_days,
+            "last_rotation": self._last_rotation.isoformat() if self._last_rotation else None,
         }
-        
-        # In production, this would analyze actual log files
-        # For now, return mock metrics
-        metrics["categories"] = {
-            "authentication": 150,
-            "authorization": 89,
-            "web3_operations": 76,
-            "marketplace": 43,
-            "governance": 12
-        }
-        
+
         return metrics
 
 

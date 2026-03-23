@@ -1294,17 +1294,64 @@ class ResourceAllocationEngine:
         }
     
     async def _find_candidate_nodes(
-        self, 
-        task_requirements: Dict[ResourceType, float], 
+        self,
+        task_requirements: Dict[ResourceType, float],
         constraints: Dict[str, Any]
     ) -> List[NodeResourceProfile]:
-        """Find nodes that can satisfy task requirements"""
-        # Would query distributed node registry
-        # For now, return mock candidate nodes
-        return [
-            self._create_mock_node(f"node_{i}", requirements=task_requirements) 
-            for i in range(10)
-        ]
+        """Find nodes that can satisfy task requirements."""
+        try:
+            from prsm.core.database import get_async_session, FederationPeerModel
+            from sqlalchemy import select
+
+            min_quality = constraints.get('min_quality_score', 0.3)
+            limit = constraints.get('max_candidates', 50)
+
+            async with get_async_session() as session:
+                stmt = (
+                    select(FederationPeerModel)
+                    .where(
+                        FederationPeerModel.is_active == True,
+                        FederationPeerModel.quality_score >= min_quality,
+                    )
+                    .order_by(FederationPeerModel.quality_score.desc())
+                    .limit(limit)
+                )
+                result = await session.execute(stmt)
+                peers = result.scalars().all()
+
+            candidates = []
+            for peer in peers:
+                resources = {}
+                for resource_type, required_amount in task_requirements.items():
+                    cap = peer.capabilities.get(resource_type.value, {})
+                    total = cap.get('total_capacity', required_amount * 2)
+                    allocated = cap.get('allocated_capacity', 0.0)
+                    resources[resource_type] = ResourceSpec(
+                        resource_type=resource_type,
+                        measurement_unit=ResourceMeasurement.CPU_CORES,
+                        total_capacity=float(total),
+                        allocated_capacity=float(allocated),
+                        reserved_capacity=float(total) * 0.1,
+                        quality_metrics={
+                            "performance_score": peer.quality_score,
+                            "reliability_score": peer.quality_score,
+                        }
+                    )
+                candidates.append(NodeResourceProfile(
+                    node_id=peer.peer_id,
+                    user_id=peer.peer_id,
+                    node_type=peer.node_type,
+                    geographic_region=getattr(peer, 'geographic_region', 'unknown'),
+                    resources=resources,
+                    last_updated=peer.last_seen,
+                    reputation_score=peer.quality_score,
+                ))
+
+            return candidates
+
+        except Exception as e:
+            logger.warning(f"Node discovery failed, returning empty candidates: {e}")
+            return []
     
     def _create_mock_node(self, node_id: str, requirements: Dict[ResourceType, float]) -> NodeResourceProfile:
         """Create a mock node for testing"""

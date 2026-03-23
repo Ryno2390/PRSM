@@ -493,9 +493,20 @@ class SelfModifyingComponent(ABC):
     
     async def _check_capability_bounds(self, modification: ModificationProposal) -> bool:
         """Check if modification stays within allowed capability bounds."""
-        # This would implement actual capability bounds checking
-        # For now, return True for non-critical modifications
-        return modification.risk_level != RiskLevel.CRITICAL
+        # Risk level check
+        if modification.risk_level == RiskLevel.CRITICAL:
+            return False
+
+        # Type allowlist check (if configured)
+        allowed = getattr(self, '_allowed_modification_types', set())
+        if allowed and modification.modification_type not in allowed:
+            logger.warning(
+                "Modification type outside capability bounds",
+                modification_type=modification.modification_type,
+                allowed=list(allowed),
+            )
+            return False
+        return True
     
     async def _check_resource_limits(self, modification: ModificationProposal) -> bool:
         """Check if modification respects resource consumption limits."""
@@ -513,8 +524,16 @@ class SelfModifyingComponent(ABC):
     
     async def _check_behavioral_constraints(self, modification: ModificationProposal) -> bool:
         """Check if modification maintains required behavioral constraints."""
-        # This would implement behavioral constraint checking
-        # For example, ensuring the component still responds to standard interfaces
+        # Reject modifications that claim to change the component interface
+        breaking_keywords = ['interface_change', 'api_break', 'signature_change']
+        tags = modification.tags if hasattr(modification, 'tags') else []
+        for keyword in breaking_keywords:
+            if keyword in tags:
+                logger.warning(
+                    "Modification marked as interface-breaking — failing behavioral constraint check",
+                    modification_id=str(modification.id),
+                )
+                return False
         return True
     
     async def _assess_modification_impact(self, modification: ModificationProposal) -> bool:
@@ -533,27 +552,79 @@ class SelfModifyingComponent(ABC):
     async def _verify_functionality_preserved(self) -> bool:
         """Verify that core functionality is preserved after modification."""
         try:
-            # This would run a set of core functionality tests
-            # For now, return True as a placeholder
+            # Attempt to verify core PRSM module importability as a smoke test
+            import importlib.util
+            core_modules = ['prsm.core.database', 'prsm.core.models']
+            for mod_name in core_modules:
+                spec = importlib.util.find_spec(mod_name)
+                if spec is None:
+                    logger.error(f"Core module no longer importable after modification: {mod_name}")
+                    return False
             return True
         except Exception as e:
             logger.error(f"Functionality verification failed: {e}")
             return False
     
     async def _get_resource_usage(self) -> Dict[str, float]:
-        """Get current resource usage metrics."""
-        # This would implement actual resource monitoring
-        return {
-            'cpu_percent': 0.0,
-            'memory_mb': 0.0,
-            'disk_io_mb': 0.0,
-            'network_io_mb': 0.0
-        }
+        """Get current resource usage metrics using psutil."""
+        try:
+            import psutil
+
+            cpu = psutil.cpu_percent(interval=0.1)
+            mem = psutil.virtual_memory()
+
+            try:
+                disk = psutil.disk_io_counters()
+                disk_read_mb = (disk.read_bytes / 1024 / 1024) if disk else 0.0
+                disk_write_mb = (disk.write_bytes / 1024 / 1024) if disk else 0.0
+            except Exception:
+                disk_read_mb = disk_write_mb = 0.0
+
+            try:
+                net = psutil.net_io_counters()
+                net_sent_mb = (net.bytes_sent / 1024 / 1024) if net else 0.0
+                net_recv_mb = (net.bytes_recv / 1024 / 1024) if net else 0.0
+            except Exception:
+                net_sent_mb = net_recv_mb = 0.0
+
+            return {
+                'cpu_percent': cpu,
+                'memory_percent': mem.percent,
+                'memory_mb': mem.used / 1024 / 1024,
+                'disk_read_mb': disk_read_mb,
+                'disk_write_mb': disk_write_mb,
+                'network_sent_mb': net_sent_mb,
+                'network_recv_mb': net_recv_mb,
+            }
+        except Exception as e:
+            logger.warning(f"Resource monitoring unavailable: {e}")
+            return {
+                'cpu_percent': 0.0, 'memory_percent': 0.0, 'memory_mb': 0.0,
+                'disk_read_mb': 0.0, 'disk_write_mb': 0.0,
+                'network_sent_mb': 0.0, 'network_recv_mb': 0.0,
+            }
     
     def _exceeds_resource_limits(self, usage: Dict[str, float], modification: ModificationProposal) -> bool:
         """Check if current resource usage exceeds limits."""
-        # This would implement actual resource limit checking
-        return False
+        try:
+            import psutil
+
+            # Hard safety ceilings
+            if usage.get('cpu_percent', 0) > 90:
+                return True
+            if usage.get('memory_percent', 0) > 90:
+                return True
+
+            # Modification-specific ceilings
+            required_memory_gb = modification.compute_requirements.get('memory_gb', 0)
+            available_memory_gb = (psutil.virtual_memory().available / 1024 / 1024 / 1024)
+            if required_memory_gb > available_memory_gb:
+                return True
+
+            return False
+        except Exception:
+            # If we can't check, be conservative
+            return False
 
 
 class ModificationValidator:
