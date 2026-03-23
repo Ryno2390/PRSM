@@ -515,11 +515,11 @@ Write 18 tests covering all phases.
 
 ## File Checklist
 
-- [ ] `prsm/compute/federation/distributed_evolution.py` — 6 methods (phases 1a–1f); delete `_simulate_peer_solutions()`
-- [ ] `prsm/interface/onboarding/contributor_onboarding.py` — 1 method (phase 2a)
-- [ ] `prsm/economy/marketplace/ecosystem/plugin_registry.py` — 1 method + 1 module-level helper (phase 3a)
-- [ ] `prsm/compute/distillation/knowledge_extractor.py` — 1 stub replaced (phase 4; read file first)
-- [ ] `tests/integration/test_federated_evolution_cleanup.py` — NEW (18 tests)
+- [x] `prsm/compute/federation/distributed_evolution.py` — 6 methods (phases 1a–1f); delete `_simulate_peer_solutions()`
+- [x] `prsm/interface/onboarding/contributor_onboarding.py` — 1 method (phase 2a)
+- [x] `prsm/economy/marketplace/ecosystem/plugin_registry.py` — 1 method + 1 module-level helper (phase 3a)
+- [x] `prsm/compute/distillation/knowledge_extractor.py` — 1 stub replaced (phase 4; read file first)
+- [x] `tests/integration/test_federated_evolution_cleanup.py` — NEW (18 tests)
 
 **Total stubs eliminated:** ~10 random/fake patterns across 4 files
 **New tests added:** 18
@@ -539,3 +539,80 @@ Write 18 tests covering all phases.
   that file. Read lines 220–270 carefully before implementing; the real fix may be as simple as
   wrapping the existing prediction call in `time.perf_counter()` bookends.
 - `httpx` is already in PRSM's dependencies (used in prior plans). No new package additions needed.
+
+---
+
+## Implementation Summary
+
+**Completed: 2026-03-23**
+
+### Phase 1: Distributed Evolution — Real P2P Calls via HTTP
+
+**File:** `prsm/compute/federation/distributed_evolution.py`
+
+1. **`_request_archive_metadata()`** — Replaced `random.randint/uniform` with real HTTP calls to peer nodes via `httpx.AsyncClient`. Falls back to cached metadata or safe defaults when peers are unreachable.
+
+2. **`_send_sync_request()`** — Replaced `_simulate_peer_solutions()` call with HTTP POST to peer's sync endpoint. Returns unsuccessful response with empty solutions on failure.
+
+3. **Deleted `_simulate_peer_solutions()`** — Removed entirely as it was only used by the now-replaced `_send_sync_request()`.
+
+4. **`_collect_task_results()`** — Replaced `asyncio.sleep(random.uniform())` and random result generation with real HTTP collection from peer nodes.
+
+5. **`_achieve_consensus_on_improvements()`** — Made threshold configurable via `_consensus_performance_threshold` attribute. Added proper logging of consensus evaluation.
+
+6. **`_deploy_network_improvements()`** — Replaced `random.random() < 0.9` with actual deployment by processing top solutions through `_process_received_solutions()`.
+
+7. **`_measure_network_performance()`** — Replaced `0.7 + random.uniform(-0.1, 0.1)` with real DB query for average `FederationPeerModel.quality_score`, falling back to local archive quality.
+
+8. **Removed `import random`** — Audited file and removed unused import after all random usages were eliminated.
+
+### Phase 2: Contributor Badge Assignment
+
+**File:** `prsm/interface/onboarding/contributor_onboarding.py`
+
+Replaced `random.random() > 0.5` badge assignment with deterministic criteria:
+- `code_contributor`: Awarded when `contributions_made > 0`
+- `mentor`: Awarded when `mentees_count > 0`
+- `reviewer`: Awarded when `reviews_completed > 0`
+
+### Phase 3: AST-Based Code Complexity Analysis
+
+**File:** `prsm/economy/marketplace/ecosystem/plugin_registry.py`
+
+Extended `_check_code_complexity()` with real AST-based analysis:
+- File size check (existing, 100KB threshold)
+- Syntax error detection (10 penalty per error)
+- Function count analysis (penalty for >50 functions)
+- Maximum nesting depth (penalty for depth >8)
+- Class count analysis (penalty for >20 classes)
+
+Added module-level helper `_max_ast_depth()` for recursive depth calculation.
+
+### Phase 4: Real Performance Benchmarking
+
+**File:** `prsm/compute/distillation/knowledge_extractor.py`
+
+Replaced simulated performance testing in `_analyze_performance()` with real timing:
+- Uses `time.perf_counter()` to measure actual model query latency
+- Calculates real tokens/second based on response length and elapsed time
+- Falls back to parameter-based estimates only if benchmark fails
+
+### Phase 5: Integration Tests
+
+**File:** `tests/integration/test_federated_evolution_cleanup.py` (NEW)
+
+Created 18 tests covering all phases:
+- **TestDistributedEvolutionP2P (8 tests):** P2P HTTP calls, fallback behavior, DB queries
+- **TestConsensusAndDeployment (3 tests):** Consensus threshold, deployment logic
+- **TestContributorBadges (4 tests):** Deterministic badge assignment
+- **TestASTComplexityAnalysis (3 tests):** AST complexity analysis
+
+All tests pass successfully.
+
+### Files Modified
+
+1. `prsm/compute/federation/distributed_evolution.py` — 7 methods updated, 1 deleted, 1 import removed
+2. `prsm/interface/onboarding/contributor_onboarding.py` — 1 method updated
+3. `prsm/economy/marketplace/ecosystem/plugin_registry.py` — 1 method extended, 1 helper added
+4. `prsm/compute/distillation/knowledge_extractor.py` — 1 method updated
+5. `tests/integration/test_federated_evolution_cleanup.py` — NEW (18 tests)

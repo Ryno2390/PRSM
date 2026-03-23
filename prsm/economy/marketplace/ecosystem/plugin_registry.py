@@ -626,31 +626,72 @@ class PluginValidator:
         
         return results
     
-    async def _check_code_complexity(self, package_path: Path, 
+    async def _check_code_complexity(self, package_path: Path,
                                    manifest: PluginManifest) -> Dict[str, Any]:
-        """Check code complexity"""
-        
+        """Check code complexity using AST-based analysis."""
+
         results = {"penalty": 0, "issues": [], "warnings": []}
-        
-        # This would integrate with tools like radon or flake8
-        # For now, basic file size check
         python_files = list(package_path.rglob("*.py"))
-        
+
         for python_file in python_files:
             try:
-                file_size = python_file.stat().st_size
-                if file_size > 100000:  # 100KB
-                    results["warnings"].append(f"Large file detected: {python_file} ({file_size} bytes)")
+                source = python_file.read_text(encoding="utf-8", errors="replace")
+
+                # File size check (keep existing threshold)
+                file_size = len(source.encode("utf-8"))
+                if file_size > 100_000:
+                    results["warnings"].append(
+                        f"Large file: {python_file.name} ({file_size} bytes)"
+                    )
                     results["penalty"] += 5
-            
+
+                # AST-based complexity analysis
+                try:
+                    tree = ast.parse(source, filename=str(python_file))
+                except SyntaxError as e:
+                    results["issues"].append(f"Syntax error in {python_file.name}: {e}")
+                    results["penalty"] += 10
+                    continue
+
+                # Count top-level and nested functions
+                func_count = sum(
+                    1 for node in ast.walk(tree)
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                )
+                if func_count > 50:
+                    results["warnings"].append(
+                        f"High function count in {python_file.name}: {func_count} functions"
+                    )
+                    results["penalty"] += min(func_count // 10, 20)
+
+                # Measure maximum nesting depth via recursive walk
+                max_depth = _max_ast_depth(tree)
+                if max_depth > 8:
+                    results["warnings"].append(
+                        f"Deep nesting in {python_file.name}: depth {max_depth}"
+                    )
+                    results["penalty"] += min((max_depth - 8) * 2, 15)
+
+                # Count classes
+                class_count = sum(
+                    1 for node in ast.walk(tree) if isinstance(node, ast.ClassDef)
+                )
+                if class_count > 20:
+                    results["warnings"].append(
+                        f"Many classes in {python_file.name}: {class_count}"
+                    )
+                    results["penalty"] += 5
+
             except Exception as e:
-                results["warnings"].append(f"Failed to check file size for {python_file}: {e}")
-        
+                results["warnings"].append(f"Failed to analyze {python_file.name}: {e}")
+
         return results
-    
-    async def _check_dependencies(self, package_path: Path, 
+
+    async def _check_dependencies(self, package_path: Path,
                                 manifest: PluginManifest) -> Dict[str, Any]:
         """Check dependencies"""
+
+        results = {"penalty": 0, "issues": [], "warnings": []}
         
         results = {"penalty": 0, "issues": [], "warnings": []}
         
@@ -691,6 +732,14 @@ class PluginValidator:
                 results["penalty"] += 25
         
         return results
+
+
+def _max_ast_depth(node: ast.AST, depth: int = 0) -> int:
+    """Recursively compute maximum AST nesting depth."""
+    children = list(ast.iter_child_nodes(node))
+    if not children:
+        return depth
+    return max(_max_ast_depth(child, depth + 1) for child in children)
 
 
 class PluginSandbox:
