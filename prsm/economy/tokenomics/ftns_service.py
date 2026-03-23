@@ -91,6 +91,11 @@ class FTNSTransactionType(Enum):
     KNOWLEDGE_DISTILLATION = "knowledge_distillation"
     PIPELINE_EXECUTION = "pipeline_execution"
     SYSTEM_USAGE = "system_usage"
+    # BitTorrent-related transaction types
+    BITTORRENT_SEEDING_REWARD = "bittorrent_seeding_reward"
+    BITTORRENT_DOWNLOAD_FEE = "bittorrent_download_fee"
+    BITTORRENT_PROOF_REWARD = "bittorrent_proof_reward"
+    BITTORRENT_PROOF_SLASH = "bittorrent_proof_slash"
 
 
 @dataclass

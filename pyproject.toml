@@ -150,8 +150,14 @@ distillation = [
     "accelerate>=0.24.0",
 ]
 
+bittorrent = [
+    # BitTorrent support for P2P file distribution
+    "libtorrent>=2.0.9",
+    "bencodepy>=4.0.0",
+]
+
 all = [
-    "prsm[dev,ml,blockchain,vectorstore,gpu,distillation]",
+    "prsm[dev,ml,blockchain,vectorstore,gpu,distillation,bittorrent]",
 ]
 
 [project.scripts]

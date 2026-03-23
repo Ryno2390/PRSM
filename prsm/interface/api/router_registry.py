@@ -251,6 +251,13 @@ def _include_service_routers(app: FastAPI) -> None:
     except ImportError as e:
         logger.warning(f"Analytics router not available: {e}")
 
+    try:
+        from prsm.interface.api.routers.bittorrent_router import router as bittorrent_router
+        app.include_router(bittorrent_router, tags=["BitTorrent"])
+        logger.debug("BitTorrent router registered")
+    except ImportError as e:
+        logger.warning(f"BitTorrent router not available: {e}")
+
     logger.info("Service routers registered")
 
 
