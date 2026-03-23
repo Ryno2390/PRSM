@@ -14,14 +14,24 @@ import ipaddress
 from collections import defaultdict, deque
 import redis.asyncio as aioredis
 import logging
+import time
 from fastapi import Request, BackgroundTasks
-import geoip2.database
-import geoip2.errors
+try:
+    import geoip2.database
+    import geoip2.errors
+    _GEOIP2_AVAILABLE = True
+except ImportError:
+    _GEOIP2_AVAILABLE = False
 import re
 import statistics
 import math
 
 logger = logging.getLogger(__name__)
+
+# Tor exit node cache
+_TOR_EXIT_CACHE: set = set()
+_TOR_EXIT_CACHE_TTL: float = 0.0
+_TOR_EXIT_CACHE_INTERVAL: float = 3600.0  # refresh every hour
 
 
 class ThreatLevel(Enum):
@@ -438,10 +448,29 @@ class ThreatIntelligence:
         return indicators
     
     async def _is_tor_exit_node(self, ip_address: str) -> bool:
-        """Check if IP is a Tor exit node (mock implementation)"""
-        # In production, this would check against Tor exit node lists
-        # For now, return False
-        return False
+        """Check if IP is a Tor exit node."""
+        global _TOR_EXIT_CACHE, _TOR_EXIT_CACHE_TTL
+        try:
+            import httpx
+        except ImportError:
+            return False
+
+        now = time.time()
+        if now - _TOR_EXIT_CACHE_TTL > _TOR_EXIT_CACHE_INTERVAL or not _TOR_EXIT_CACHE:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get("https://check.torproject.org/torbulkexitlist")
+                    resp.raise_for_status()
+                    _TOR_EXIT_CACHE = {
+                        line.strip() for line in resp.text.splitlines()
+                        if line.strip() and not line.startswith('#')
+                    }
+                    _TOR_EXIT_CACHE_TTL = now
+            except Exception as e:
+                logger.warning(f"Failed to refresh Tor exit node list: {e}")
+                # Do not clear existing cache on transient error
+
+        return ip_address in _TOR_EXIT_CACHE
 
 
 class SecurityMonitor:

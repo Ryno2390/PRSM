@@ -504,14 +504,59 @@ class AntiMonopolyGovernance:
         # Remove empty clusters
         return {k: v for k, v in clusters.items() if v}
     
-    def _analyze_voting_correlations(self,
-                                   recent_votes: List[Dict[str, Any]],
-                                   participants: Dict[UUID, Any]) -> Dict[Tuple[UUID, UUID], float]:
-        """Analyze voting correlations between participants"""
-        
-        # This would implement sophisticated correlation analysis
-        # For now, return empty dict
-        return {}
+    def _analyze_voting_correlations(
+        self,
+        recent_votes: List[Dict[str, Any]],
+        participants: Dict[UUID, Any],
+    ) -> Dict[Tuple[UUID, UUID], float]:
+        """Analyze voting correlations between participants."""
+        if len(recent_votes) < 2 or len(participants) < 2:
+            return {}
+
+        # Build proposal → {participant_id: vote_value} map
+        # vote_value: +1 (yes), -1 (no), 0 (abstain/absent)
+        proposal_votes: Dict[str, Dict[UUID, float]] = {}
+        for vote in recent_votes:
+            proposal_id = str(vote.get('proposal_id', ''))
+            voter_id = vote.get('voter_id')
+            value = 1.0 if vote.get('vote') in ('yes', True, 1) else -1.0
+            if proposal_id not in proposal_votes:
+                proposal_votes[proposal_id] = {}
+            if voter_id:
+                try:
+                    proposal_votes[proposal_id][UUID(str(voter_id))] = value
+                except (ValueError, AttributeError):
+                    pass
+
+        proposals = list(proposal_votes.keys())
+        if len(proposals) < 2:
+            return {}
+
+        participant_ids = list(participants.keys())
+        correlations: Dict[Tuple[UUID, UUID], float] = {}
+
+        for i in range(len(participant_ids)):
+            for j in range(i + 1, len(participant_ids)):
+                pid_a = participant_ids[i]
+                pid_b = participant_ids[j]
+                # Build aligned vote vectors (0 for missing votes)
+                vec_a = [proposal_votes[p].get(pid_a, 0.0) for p in proposals]
+                vec_b = [proposal_votes[p].get(pid_b, 0.0) for p in proposals]
+                # Skip pairs with zero variance (e.g., all abstentions)
+                if all(v == 0 for v in vec_a) or all(v == 0 for v in vec_b):
+                    continue
+                # Pearson correlation via dot product
+                mean_a = sum(vec_a) / len(vec_a)
+                mean_b = sum(vec_b) / len(vec_b)
+                cov = sum((a - mean_a) * (b - mean_b) for a, b in zip(vec_a, vec_b))
+                std_a = (sum((a - mean_a) ** 2 for a in vec_a) ** 0.5)
+                std_b = (sum((b - mean_b) ** 2 for b in vec_b) ** 0.5)
+                if std_a == 0 or std_b == 0:
+                    continue
+                corr = cov / (std_a * std_b)
+                correlations[(pid_a, pid_b)] = max(-1.0, min(1.0, corr))
+
+        return correlations
     
     def _are_competitors(self,
                         participant_a: UUID,

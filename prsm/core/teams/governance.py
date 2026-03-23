@@ -443,10 +443,22 @@ class TeamGovernanceService:
     
     
     async def _count_eligible_voters(self, team_id: UUID) -> int:
-        """Count eligible voters for the team"""
-        # This would integrate with the main team service
-        # For now, return a placeholder count
-        return 10
+        """Count eligible voters for the team."""
+        try:
+            from prsm.core.database import get_async_session
+            from sqlalchemy import text
+
+            async with get_async_session() as session:
+                # Query team member count; fall back to 0 if table doesn't exist yet
+                stmt = text(
+                    "SELECT COUNT(*) FROM team_members WHERE team_id = :team_id AND is_active = TRUE"
+                )
+                result = await session.execute(stmt, {"team_id": str(team_id)})
+                count = result.scalar_one_or_none()
+                return int(count) if count is not None else 0
+        except Exception as e:
+            self.logger.warning(f"Could not count eligible voters for team {team_id}", error=str(e))
+            return 0
     
     
     async def _should_conclude_voting(self, proposal_id: UUID) -> bool:

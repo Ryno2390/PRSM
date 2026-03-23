@@ -271,22 +271,54 @@ class MetricDataProvider:
             return []
     
     async def get_trace_analytics(self, hours: int = 1) -> Dict[str, Any]:
-        """Get trace analytics summary"""
+        """Get trace analytics summary."""
         try:
-            # This would integrate with the tracing system
-            # For now, return basic structure
+            cutoff = time.time() - (hours * 3600)
+
+            # Access tracer spans — attribute name may be self.tracer or self._tracer
+            tracer = getattr(self, 'tracer', None) or getattr(self, '_tracer', None)
+            spans = []
+            if tracer:
+                raw_spans = getattr(tracer, '_completed_spans', []) or getattr(tracer, 'spans', [])
+                spans = [s for s in raw_spans if getattr(s, 'end_time', 0) >= cutoff]
+
+            if not spans:
+                return {
+                    "total_traces": 0,
+                    "avg_duration_ms": 0.0,
+                    "error_rate": 0.0,
+                    "throughput_per_minute": 0.0,
+                    "services": {},
+                    "operations": {},
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+
+            total = len(spans)
+            durations = [getattr(s, 'duration_ms', 0) for s in spans]
+            avg_duration = sum(durations) / total if durations else 0.0
+            error_count = sum(1 for s in spans if getattr(s, 'is_error', False))
+            error_rate = error_count / total if total else 0.0
+            throughput = total / (hours * 60) if hours else 0.0
+
+            services: Dict[str, int] = {}
+            operations: Dict[str, int] = {}
+            for s in spans:
+                svc = getattr(s, 'service_name', 'unknown')
+                op = getattr(s, 'operation_name', 'unknown')
+                services[svc] = services.get(svc, 0) + 1
+                operations[op] = operations.get(op, 0) + 1
+
             return {
-                "total_traces": 0,
-                "avg_duration_ms": 0,
-                "error_rate": 0,
-                "throughput_per_minute": 0,
-                "services": {},
-                "operations": {},
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "total_traces": total,
+                "avg_duration_ms": round(avg_duration, 2),
+                "error_rate": round(error_rate, 4),
+                "throughput_per_minute": round(throughput, 2),
+                "services": services,
+                "operations": operations,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-        
         except Exception as e:
-            logger.error(f"Error getting trace analytics: {e}")
+            logger.error(f"Error computing trace analytics: {e}")
             return {}
     
     async def get_queue_statistics(self) -> Dict[str, Any]:

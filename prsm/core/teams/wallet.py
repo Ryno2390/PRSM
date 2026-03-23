@@ -571,33 +571,57 @@ class TeamWalletService:
     
     
     async def _execute_multisig_transaction(self, tx_id: str):
-        """Execute a multisig transaction with sufficient signatures"""
+        """Execute a multisig transaction with sufficient signatures."""
         try:
             pending_tx = self.pending_transactions[tx_id]
             transaction_data = pending_tx["transaction_data"]
-            
+
             # Mark as executing
             pending_tx["status"] = "executing"
-            
-            # Execute the transaction
-            # This would implement the actual transaction logic
-            # For now, just mark as completed
-            
+
+            tx_type = transaction_data.get("type", "transfer")
+            if tx_type == "transfer":
+                from prsm.core.database import get_async_session, FTNSBalanceModel
+                from sqlalchemy import update
+
+                from_account = transaction_data.get("from_account")
+                to_account = transaction_data.get("to_account")
+                amount = transaction_data.get("amount", 0)
+
+                if from_account and to_account and amount > 0:
+                    async with get_async_session() as session:
+                        async with session.begin():
+                            # Debit sender
+                            await session.execute(
+                                update(FTNSBalanceModel)
+                                .where(FTNSBalanceModel.user_id == from_account)
+                                .values(balance=FTNSBalanceModel.balance - amount)
+                            )
+                            # Credit recipient
+                            await session.execute(
+                                update(FTNSBalanceModel)
+                                .where(FTNSBalanceModel.user_id == to_account)
+                                .values(balance=FTNSBalanceModel.balance + amount)
+                            )
+
             pending_tx["status"] = "completed"
             pending_tx["executed_at"] = datetime.now(timezone.utc)
-            
-            # Update statistics
             self.wallet_stats["multisig_operations_executed"] += 1
-            
+
             self.logger.info(
                 "Multisig transaction executed",
                 tx_id=tx_id,
-                signatures_collected=len(self.signature_cache[tx_id])
+                signatures_collected=len(self.signature_cache.get(tx_id, []))
             )
-            
+
+        except KeyError:
+            self.logger.error("Transaction not found", tx_id=tx_id)
+            raise
         except Exception as e:
-            self.pending_transactions[tx_id]["status"] = "failed"
-            self.logger.error("Failed to execute multisig transaction", tx_id=tx_id, error=str(e))
+            self.logger.error("Multisig execution failed", tx_id=tx_id, error=str(e))
+            if tx_id in self.pending_transactions:
+                self.pending_transactions[tx_id]["status"] = "failed"
+            raise
     
     
     async def _validate_emergency_authority(self, wallet: TeamWallet, user_id: str) -> bool:

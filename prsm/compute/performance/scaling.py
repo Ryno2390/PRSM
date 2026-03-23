@@ -189,31 +189,31 @@ class AutoScaler:
                            service=service_name, error=str(e))
     
     async def _get_service_metrics(self, service_name: str, policy: ScalingPolicy) -> Dict[str, float]:
-        """Get current metrics for a specific service"""
-        # This would integrate with actual monitoring systems (Prometheus, etc.)
-        # For now, return simulated metrics
-        
-        import random
-        
-        base_metrics = {
-            "cpu_usage": random.uniform(0.3, 0.9),
-            "memory_usage": random.uniform(0.4, 0.8),
-            "request_rate": random.uniform(10, 100),
-            "response_time": random.uniform(50, 500),
-            "queue_length": random.uniform(0, 20),
-            "error_rate": random.uniform(0.01, 0.05)
-        }
-        
-        # Add service-specific variations
-        if "api" in service_name.lower():
-            base_metrics["request_rate"] *= 2
-        elif "ml" in service_name.lower():
-            base_metrics["cpu_usage"] *= 1.5
-            base_metrics["memory_usage"] *= 1.3
-        elif "database" in service_name.lower():
-            base_metrics["memory_usage"] *= 1.2
-        
-        return base_metrics
+        """Get current metrics for a specific service."""
+        try:
+            import psutil
+
+            cpu = psutil.cpu_percent(interval=0.1)
+            mem = psutil.virtual_memory()
+            metrics = {
+                "cpu_usage": cpu / 100.0,           # normalize to 0–1
+                "memory_usage": mem.percent / 100.0, # normalize to 0–1
+                # These require a live metrics backend; default to 0 (not random)
+                "request_rate": 0.0,
+                "response_time": 0.0,
+                "queue_length": 0.0,
+                "error_rate": 0.0,
+            }
+            # Apply service-specific request rate multiplier if API service
+            if "api" in service_name.lower():
+                metrics["request_rate"] = metrics.get("request_rate", 0.0) * 2
+            return metrics
+        except Exception as e:
+            logger.error("Failed to collect service metrics", service=service_name, error=str(e))
+            return {
+                "cpu_usage": 0.0, "memory_usage": 0.0, "request_rate": 0.0,
+                "response_time": 0.0, "queue_length": 0.0, "error_rate": 0.0,
+            }
     
     async def _evaluate_scaling_decision(self, service_name: str, policy: ScalingPolicy):
         """Evaluate whether to scale a service based on current metrics"""
