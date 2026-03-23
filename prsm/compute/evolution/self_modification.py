@@ -9,10 +9,14 @@ import asyncio
 import logging
 import json
 import copy
+import pickle
+import gzip
+import hashlib
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass
+from pathlib import Path
 import uuid
 import traceback
 
@@ -35,13 +39,17 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Default checkpoint directory
+DEFAULT_CHECKPOINT_DIR = Path.home() / ".prsm" / "checkpoints"
+MAX_CHECKPOINTS_PER_COMPONENT = 10
+
 
 class SelfModifyingComponent(ABC):
     """
     Abstract base class for components that can modify themselves.
     Implements the core self-modification interface with safety constraints.
     """
-    
+
     def __init__(self, component_id: str, component_type: ComponentType):
         self.component_id = component_id
         self.component_type = component_type
@@ -49,79 +57,252 @@ class SelfModifyingComponent(ABC):
         self.checkpoints: List[Checkpoint] = []
         self.baseline_performance: float = 0.0
         self.safety_monitor = SafetyMonitor() if SafetyMonitor else None
-        
+
         # Self-modification configuration
         self.max_modification_attempts = 3
         self.performance_threshold = 0.05  # 5% improvement required
         self.rollback_timeout_seconds = 300  # 5 minutes
-        
+
+        # Checkpoint storage
+        self._checkpoint_dir = DEFAULT_CHECKPOINT_DIR / component_id
+        self._checkpoint_metadata: List[Dict[str, Any]] = []
+
     @abstractmethod
     async def propose_modification(self, evaluation_logs: List[EvaluationResult]) -> Optional[ModificationProposal]:
         """
         Analyze performance and propose a self-modification.
-        
+
         Args:
             evaluation_logs: Recent evaluation results to analyze
-            
+
         Returns:
             ModificationProposal or None if no improvement needed
         """
         pass
-    
+
     @abstractmethod
     async def apply_modification(self, modification: ModificationProposal) -> ModificationResult:
         """
         Apply a validated modification to this component.
-        
+
         Args:
             modification: The modification to apply
-            
+
         Returns:
             ModificationResult with success status and metrics
         """
         pass
-    
+
     @abstractmethod
     async def validate_modification(self, modification: ModificationProposal) -> bool:
         """
         Validate that a modification preserves core functionality.
-        
+
         Args:
             modification: The modification to validate
-            
+
         Returns:
             True if modification is valid, False otherwise
         """
         pass
-    
-    @abstractmethod
-    async def create_checkpoint(self) -> Checkpoint:
+
+    async def create_checkpoint(self, label: str = "") -> Checkpoint:
         """
         Create a checkpoint of current component state for rollback.
-        
+
+        Serializes component state:
+        - Captures self.__dict__ (shallow copy)
+        - Excludes non-serializable items (locks, sockets, open files)
+        - Uses pickle.dumps() → compress with gzip
+        - Writes to ~/.prsm/checkpoints/{component_id}/{checkpoint_id}.pkl.gz
+        - Stores checkpoint metadata (id, label, timestamp, size) in self._checkpoints list
+
+        Args:
+            label: Optional label for the checkpoint
+
         Returns:
             Checkpoint containing component state snapshot
         """
-        pass
-    
-    @abstractmethod
+        try:
+            checkpoint_id = f"ckpt_{uuid.uuid4().hex[:8]}_{int(datetime.now(timezone.utc).timestamp())}"
+
+            # Capture serializable state
+            state_snapshot = {}
+            non_serializable_keys = []
+
+            for key, value in self.__dict__.items():
+                # Skip non-serializable items
+                if key.startswith('_') and key.endswith('_lock'):
+                    non_serializable_keys.append(key)
+                    continue
+                if key in ('safety_monitor', '_loop', '_executor'):
+                    non_serializable_keys.append(key)
+                    continue
+                if callable(value):
+                    non_serializable_keys.append(key)
+                    continue
+
+                try:
+                    # Test if value is serializable
+                    pickle.dumps(value)
+                    state_snapshot[key] = copy.deepcopy(value)
+                except (pickle.PicklingError, TypeError, AttributeError):
+                    non_serializable_keys.append(key)
+
+            # Capture configuration snapshot
+            config_snapshot = {
+                'component_id': self.component_id,
+                'component_type': self.component_type.value if hasattr(self.component_type, 'value') else str(self.component_type),
+                'max_modification_attempts': self.max_modification_attempts,
+                'performance_threshold': self.performance_threshold,
+                'rollback_timeout_seconds': self.rollback_timeout_seconds,
+            }
+
+            # Serialize and compress
+            serialized = pickle.dumps({
+                'state': state_snapshot,
+                'config': config_snapshot,
+                'label': label,
+            })
+            compressed = gzip.compress(serialized, compresslevel=6)
+
+            # Save to disk
+            self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            checkpoint_path = self._checkpoint_dir / f"{checkpoint_id}.pkl.gz"
+
+            with open(checkpoint_path, 'wb') as f:
+                f.write(compressed)
+
+            # Create checkpoint object
+            checkpoint = Checkpoint(
+                id=checkpoint_id,
+                component_id=self.component_id,
+                component_type=self.component_type,
+                state_snapshot=state_snapshot,
+                configuration_snapshot=config_snapshot,
+                timestamp=datetime.now(timezone.utc),
+                storage_location=str(checkpoint_path),
+            )
+
+            # Store metadata
+            self._checkpoint_metadata.append({
+                'checkpoint_id': checkpoint_id,
+                'label': label,
+                'timestamp': checkpoint.timestamp.isoformat(),
+                'size_bytes': len(compressed),
+                'storage_location': str(checkpoint_path),
+            })
+
+            # Enforce max checkpoints limit (evict oldest)
+            while len(self._checkpoint_metadata) > MAX_CHECKPOINTS_PER_COMPONENT:
+                oldest = self._checkpoint_metadata.pop(0)
+                oldest_path = Path(oldest['storage_location'])
+                if oldest_path.exists():
+                    oldest_path.unlink()
+
+            # Add to checkpoints list
+            self.checkpoints.append(checkpoint)
+
+            logger.info(f"Created checkpoint {checkpoint_id}",
+                       component_id=self.component_id,
+                       label=label,
+                       size_bytes=len(compressed))
+
+            return checkpoint
+
+        except Exception as e:
+            logger.error(f"Failed to create checkpoint: {e}")
+            raise
+
     async def rollback_to_checkpoint(self, checkpoint: Checkpoint) -> bool:
         """
         Rollback component to a previous checkpoint state.
-        
+
+        Steps:
+        1. Find checkpoint file
+        2. Decompress and deserialize with pickle.loads()
+        3. Restore self.__dict__ from checkpoint state
+        4. Validate restored state with validate_modification()
+        5. Log rollback event
+
         Args:
             checkpoint: The checkpoint to rollback to
-            
+
         Returns:
             True if rollback successful, False otherwise
         """
-        pass
-    
+        try:
+            checkpoint_path = Path(checkpoint.storage_location)
+
+            if not checkpoint_path.exists():
+                logger.error(f"Checkpoint file not found: {checkpoint_path}")
+                return False
+
+            # Read and decompress
+            with open(checkpoint_path, 'rb') as f:
+                compressed = f.read()
+
+            decompressed = gzip.decompress(compressed)
+            checkpoint_data = pickle.loads(decompressed)
+
+            # Restore state
+            state_snapshot = checkpoint_data.get('state', {})
+
+            for key, value in state_snapshot.items():
+                if key not in ('checkpoints', '_checkpoint_metadata', '_checkpoint_dir'):
+                    try:
+                        setattr(self, key, copy.deepcopy(value))
+                    except Exception as e:
+                        logger.warning(f"Failed to restore attribute {key}: {e}")
+
+            # Validate restored state
+            try:
+                # Create a dummy modification for validation
+                validation_proposal = ModificationProposal(
+                    id=f"rollback_{checkpoint.id}",
+                    component_id=self.component_id,
+                    component_type=self.component_type,
+                    modification_type="rollback",
+                    description=f"Rollback to checkpoint {checkpoint.id}",
+                    code_changes={},
+                    config_changes=checkpoint.configuration_snapshot,
+                    risk_level=RiskLevel.LOW,
+                    impact_level=ImpactLevel.LOW,
+                )
+
+                validation_passed = await self.validate_modification(validation_proposal)
+
+                if not validation_passed:
+                    logger.warning(f"Rollback validation failed for checkpoint {checkpoint.id}")
+
+            except Exception as e:
+                logger.warning(f"Rollback validation error: {e}")
+
+            # Log rollback event
+            logger.info(f"Rolled back to checkpoint {checkpoint.id}",
+                       component_id=self.component_id,
+                       checkpoint_label=checkpoint_data.get('label', ''))
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to rollback to checkpoint: {e}")
+            return False
+
+    def list_checkpoints(self) -> List[Dict[str, Any]]:
+        """
+        List all available checkpoints for this component.
+
+        Returns:
+            List of checkpoint metadata dicts
+        """
+        return self._checkpoint_metadata.copy()
+
     @abstractmethod
     async def evaluate_performance(self) -> EvaluationResult:
         """
         Evaluate current component performance.
-        
+
         Returns:
             EvaluationResult with current performance metrics
         """

@@ -695,9 +695,693 @@ class PublicSourcePorter:
     
     async def _check_for_duplicates(self, candidate: IngestionCandidate) -> Optional[str]:
         """Check for duplicate content"""
-        
+
         content_hash = hashlib.sha256(candidate.content_text.encode()).hexdigest()
         return self.content_hashes.get(content_hash)
+
+    # === API Connector Methods ===
+
+    async def _fetch_content(self, source: ContentSource) -> Optional[Dict[str, Any]]:
+        """
+        Fetch content from a source using the appropriate API connector.
+
+        Dispatcher method that routes to the correct connector based on SourceType.
+
+        Returns:
+            Dict with content metadata and data, or None on failure
+        """
+        dispatcher = {
+            SourceType.ARXIV: self._fetch_from_arxiv,
+            SourceType.PUBMED: self._fetch_from_pubmed,
+            SourceType.GITHUB: self._fetch_from_github,
+            SourceType.WIKIPEDIA: self._fetch_from_wikipedia,
+            SourceType.RSS_FEED: self._fetch_from_rss,
+            SourceType.USER_UPLOAD: self._fetch_from_user_upload,
+        }
+
+        handler = dispatcher.get(source.source_type)
+        if not handler:
+            logger.warning("No connector for source type", source_type=source.source_type.value)
+            return None
+
+        try:
+            return await handler(source)
+        except Exception as e:
+            logger.error("Failed to fetch content from source",
+                        source_id=source.source_id,
+                        source_type=source.source_type.value,
+                        error=str(e))
+            return None
+
+    async def _fetch_from_arxiv(self, source: ContentSource) -> Optional[Dict[str, Any]]:
+        """
+        Fetch content from arXiv API.
+
+        Uses arXiv API v2 (https://export.arxiv.org/api/query)
+
+        Returns:
+            Dict with papers list and metadata
+        """
+        api_url = source.api_endpoint or "http://export.arxiv.org/api/query"
+
+        # Build search query - default to AI/ML if not specified
+        search_query = source.base_url if source.base_url else "cat:cs.AI OR cat:stat.ML"
+
+        params = {
+            'search_query': search_query,
+            'start': 0,
+            'max_results': min(source.max_items_per_batch, 100),
+            'sortBy': 'submittedDate',
+            'sortOrder': 'descending'
+        }
+
+        try:
+            # Rate limiting: 3 requests/second per arXiv ToS
+            await asyncio.sleep(0.34)
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, params=params) as response:
+                    if response.status != 200:
+                        logger.error("arXiv API error", status=response.status)
+                        return None
+
+                    content = await response.text()
+
+            # Parse Atom XML feed
+            import xml.etree.ElementTree as ET
+
+            # Define namespaces
+            namespaces = {
+                'atom': 'http://www.w3.org/2005/Atom',
+                'arxiv': 'http://arxiv.org/schemas/atom'
+            }
+
+            root = ET.fromstring(content)
+            papers = []
+
+            for entry in root.findall('atom:entry', namespaces):
+                try:
+                    # Extract arXiv ID from the URL
+                    id_url = entry.find('atom:id', namespaces)
+                    arxiv_id = id_url.text.split('/')[-1] if id_url is not None else None
+
+                    # Extract title
+                    title_elem = entry.find('atom:title', namespaces)
+                    title = title_elem.text.strip() if title_elem is not None else ""
+
+                    # Extract authors
+                    authors = []
+                    for author in entry.findall('atom:author', namespaces):
+                        name = author.find('atom:name', namespaces)
+                        if name is not None:
+                            authors.append(name.text)
+
+                    # Extract abstract/summary
+                    summary_elem = entry.find('atom:summary', namespaces)
+                    abstract = summary_elem.text.strip() if summary_elem is not None else ""
+
+                    # Extract categories
+                    categories = []
+                    for cat in entry.findall('atom:category', namespaces):
+                        term = cat.get('term')
+                        if term:
+                            categories.append(term)
+
+                    # Extract dates
+                    published_elem = entry.find('atom:published', namespaces)
+                    published = published_elem.text if published_elem is not None else None
+
+                    updated_elem = entry.find('atom:updated', namespaces)
+                    updated = updated_elem.text if updated_elem is not None else None
+
+                    # Extract DOI if present
+                    doi_elem = entry.find('arxiv:doi', namespaces)
+                    doi = doi_elem.text if doi_elem is not None else None
+
+                    # Build PDF URL
+                    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}" if arxiv_id else None
+
+                    papers.append({
+                        'arxiv_id': arxiv_id,
+                        'title': title,
+                        'authors': authors,
+                        'abstract': abstract,
+                        'categories': categories,
+                        'submitted_date': published,
+                        'updated_date': updated,
+                        'pdf_url': pdf_url,
+                        'doi': doi,
+                        'source_url': f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else None,
+                        'license': 'arXiv-1.0',  # arXiv default license
+                        'license_compatibility': LicenseCompatibility.COMPATIBLE_WITH_ATTRIBUTION
+                    })
+
+                except Exception as e:
+                    logger.debug("Failed to parse arXiv entry", error=str(e))
+                    continue
+
+            logger.info("Fetched arXiv papers", count=len(papers), source_id=source.source_id)
+
+            return {
+                'source_type': 'arxiv',
+                'source_id': source.source_id,
+                'papers': papers,
+                'total_results': len(papers),
+                'fetched_at': datetime.now(timezone.utc).isoformat()
+            }
+
+        except Exception as e:
+            logger.error("arXiv fetch failed", error=str(e))
+            return None
+
+    async def _fetch_from_pubmed(self, source: ContentSource) -> Optional[Dict[str, Any]]:
+        """
+        Fetch content from PubMed via NCBI E-utilities API.
+
+        Two-step process: esearch (get IDs) → efetch (get records)
+
+        Returns:
+            Dict with articles list and metadata
+        """
+        # NCBI E-utilities base URLs
+        esearch_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+        efetch_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+
+        # Build search query
+        search_term = source.base_url if source.base_url else "artificial intelligence[mh] OR machine learning[mh]"
+
+        # API key increases rate limit from 3/sec to 10/sec
+        api_key = source.api_key or None
+
+        try:
+            # Step 1: Search for PMIDs
+            search_params = {
+                'db': 'pubmed',
+                'term': search_term,
+                'retmax': min(source.max_items_per_batch, 100),
+                'retmode': 'json',
+                'sort': 'pub_date'
+            }
+            if api_key:
+                search_params['api_key'] = api_key
+
+            # Rate limiting: 3/sec without key, 10/sec with key
+            await asyncio.sleep(0.34 if not api_key else 0.1)
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(esearch_url, params=search_params) as response:
+                    if response.status != 200:
+                        logger.error("PubMed esearch error", status=response.status)
+                        return None
+
+                    search_data = await response.json()
+
+            pmids = search_data.get('esearchresult', {}).get('idlist', [])
+
+            if not pmids:
+                logger.info("No PubMed results found", source_id=source.source_id)
+                return {'source_type': 'pubmed', 'articles': [], 'total_results': 0}
+
+            # Step 2: Fetch article details
+            await asyncio.sleep(0.34 if not api_key else 0.1)
+
+            fetch_params = {
+                'db': 'pubmed',
+                'id': ','.join(pmids),
+                'retmode': 'xml'
+            }
+            if api_key:
+                fetch_params['api_key'] = api_key
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(efetch_url, params=fetch_params) as response:
+                    if response.status != 200:
+                        logger.error("PubMed efetch error", status=response.status)
+                        return None
+
+                    xml_content = await response.text()
+
+            # Parse XML response
+            import xml.etree.ElementTree as ET
+
+            root = ET.fromstring(xml_content)
+            articles = []
+
+            for article in root.findall('.//PubmedArticle'):
+                try:
+                    medline = article.find('MedlineCitation')
+                    pmid_elem = medline.find('PMID') if medline else None
+                    pmid = pmid_elem.text if pmid_elem is not None else None
+
+                    # Extract article element
+                    article_elem = medline.find('Article') if medline else None
+
+                    # Title
+                    title_elem = article_elem.find('ArticleTitle') if article_elem else None
+                    title = title_elem.text if title_elem is not None else ""
+
+                    # Authors
+                    authors = []
+                    author_list = article_elem.find('AuthorList') if article_elem else None
+                    if author_list is not None:
+                        for author in author_list.findall('Author'):
+                            lastname = author.find('LastName')
+                            forename = author.find('ForeName')
+                            if lastname is not None:
+                                name = lastname.text
+                                if forename is not None:
+                                    name = f"{name} {forename.text}"
+                                authors.append(name)
+
+                    # Journal
+                    journal_elem = article_elem.find('Journal/Title') if article_elem else None
+                    journal = journal_elem.text if journal_elem is not None else ""
+
+                    # Publication date
+                    pub_date = None
+                    date_elem = article_elem.find('ArticleDate') if article_elem else None
+                    if date_elem is not None:
+                        year = date_elem.find('Year')
+                        month = date_elem.find('Month')
+                        day = date_elem.find('Day')
+                        if year is not None:
+                            pub_date = year.text
+                            if month is not None:
+                                pub_date = f"{pub_date}-{month.text}"
+                            if day is not None:
+                                pub_date = f"{pub_date}-{day.text}"
+
+                    # Abstract
+                    abstract_elem = article_elem.find('Abstract/AbstractText') if article_elem else None
+                    abstract = abstract_elem.text if abstract_elem is not None else ""
+
+                    # MeSH terms
+                    mesh_terms = []
+                    mesh_list = medline.findall('MeshHeadingList/MeshHeading') if medline else []
+                    for mesh in mesh_list:
+                        descriptor = mesh.find('DescriptorName')
+                        if descriptor is not None:
+                            mesh_terms.append(descriptor.text)
+
+                    # DOI
+                    doi = None
+                    for eloc in article_elem.findall('ELocationID') if article_elem else []:
+                        if eloc.get('EIdType') == 'doi':
+                            doi = eloc.text
+                            break
+
+                    # PMC ID (for open access)
+                    pmc_id = None
+                    for id_elem in article.findall('.//ArticleId'):
+                        if id_elem.get('IdType') == 'pmc':
+                            pmc_id = id_elem.text
+
+                    articles.append({
+                        'pmid': pmid,
+                        'title': title,
+                        'authors': authors,
+                        'journal': journal,
+                        'pub_date': pub_date,
+                        'abstract': abstract,
+                        'mesh_terms': mesh_terms,
+                        'doi': doi,
+                        'pmc_id': pmc_id,
+                        'is_open_access': pmc_id is not None,
+                        'source_url': f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else None,
+                        'full_text_url': f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmc_id}/" if pmc_id else None,
+                        'license': 'Open Access' if pmc_id else 'Restricted',
+                        'license_compatibility': LicenseCompatibility.FULLY_COMPATIBLE if pmc_id else LicenseCompatibility.RESTRICTED_USE
+                    })
+
+                except Exception as e:
+                    logger.debug("Failed to parse PubMed article", error=str(e))
+                    continue
+
+            logger.info("Fetched PubMed articles", count=len(articles), source_id=source.source_id)
+
+            return {
+                'source_type': 'pubmed',
+                'source_id': source.source_id,
+                'articles': articles,
+                'total_results': len(articles),
+                'fetched_at': datetime.now(timezone.utc).isoformat()
+            }
+
+        except Exception as e:
+            logger.error("PubMed fetch failed", error=str(e))
+            return None
+
+    async def _fetch_from_github(self, source: ContentSource) -> Optional[Dict[str, Any]]:
+        """
+        Fetch content from GitHub REST API.
+
+        Supports searching repositories by topic, language, stars, and license.
+
+        Returns:
+            Dict with repositories list and metadata
+        """
+        api_url = "https://api.github.com/search/repositories"
+
+        # Build search query
+        query_parts = []
+        if source.base_url:
+            query_parts.append(source.base_url)
+        else:
+            query_parts.append("machine learning OR artificial intelligence")
+
+        # Restrict to open-source licenses
+        query_parts.append("license:mit OR license:apache-2.0 OR license:bsd-3-clause OR license:gpl-3.0")
+
+        # Add language filter if specified
+        if hasattr(source, 'language') and source.language:
+            query_parts.append(f"language:{source.language}")
+
+        params = {
+            'q': ' '.join(query_parts),
+            'sort': 'stars',
+            'order': 'desc',
+            'per_page': min(source.max_items_per_batch, 100)
+        }
+
+        headers = {
+            'Accept': 'application/vnd.github.v3+json'
+        }
+
+        # Use API token if available (increases rate limit from 60/hr to 5000/hr)
+        if source.api_key:
+            headers['Authorization'] = f'token {source.api_key}'
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, params=params, headers=headers) as response:
+                    if response.status == 403:
+                        logger.warning("GitHub API rate limit exceeded")
+                        return None
+                    if response.status != 200:
+                        logger.error("GitHub API error", status=response.status)
+                        return None
+
+                    data = await response.json()
+
+                    # Check rate limit headers
+                    remaining = response.headers.get('X-RateLimit-Remaining')
+                    if remaining and int(remaining) < 10:
+                        logger.warning("GitHub API rate limit low", remaining=remaining)
+
+            repositories = []
+
+            for repo in data.get('items', []):
+                try:
+                    # Fetch README content for ML repos
+                    readme_content = None
+                    if repo.get('description') and 'ml' in repo.get('description', '').lower():
+                        try:
+                            readme_url = f"https://api.github.com/repos/{repo['full_name']}/readme"
+                            async with aiohttp.ClientSession() as session:
+                                async with session.get(readme_url, headers=headers) as readme_resp:
+                                    if readme_resp.status == 200:
+                                        readme_data = await readme_resp.json()
+                                        import base64
+                                        readme_content = base64.b64decode(readme_data['content']).decode('utf-8')
+                        except Exception:
+                            pass
+
+                    repositories.append({
+                        'repo_name': repo['name'],
+                        'full_name': repo['full_name'],
+                        'description': repo.get('description', ''),
+                        'topics': repo.get('topics', []),
+                        'language': repo.get('language'),
+                        'stars': repo.get('stargazers_count', 0),
+                        'forks': repo.get('forks_count', 0),
+                        'license': repo.get('license', {}).get('spdx_id') if repo.get('license') else None,
+                        'html_url': repo['html_url'],
+                        'clone_url': repo.get('clone_url'),
+                        'default_branch': repo.get('default_branch', 'main'),
+                        'readme_content': readme_content[:10000] if readme_content else None,  # Truncate
+                        'created_at': repo.get('created_at'),
+                        'updated_at': repo.get('updated_at'),
+                        'pushed_at': repo.get('pushed_at'),
+                        'license_compatibility': LicenseCompatibility.COMPATIBLE_WITH_ATTRIBUTION
+                    })
+
+                except Exception as e:
+                    logger.debug("Failed to parse GitHub repo", error=str(e))
+                    continue
+
+            logger.info("Fetched GitHub repositories", count=len(repositories), source_id=source.source_id)
+
+            return {
+                'source_type': 'github',
+                'source_id': source.source_id,
+                'repositories': repositories,
+                'total_count': data.get('total_count', len(repositories)),
+                'fetched_at': datetime.now(timezone.utc).isoformat()
+            }
+
+        except Exception as e:
+            logger.error("GitHub fetch failed", error=str(e))
+            return None
+
+    async def _fetch_from_wikipedia(self, source: ContentSource) -> Optional[Dict[str, Any]]:
+        """
+        Fetch content from Wikipedia REST API.
+
+        Only CC-BY-SA licensed content.
+
+        Returns:
+            Dict with pages list and metadata
+        """
+        base_url = source.base_url or "https://en.wikipedia.org"
+        api_url = f"{base_url}/api/rest_v1"
+
+        pages = []
+
+        try:
+            # Fetch random pages or specific category
+            if source.base_url and source.base_url.startswith('Category:'):
+                # Category-based fetching
+                category = source.base_url.replace('Category:', '')
+                list_url = f"{base_url}/w/api.php"
+                params = {
+                    'action': 'query',
+                    'list': 'categorymembers',
+                    'cmtitle': f'Category:{category}',
+                    'cmlimit': min(source.max_items_per_batch, 50),
+                    'format': 'json'
+                }
+
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(list_url, params=params) as response:
+                        if response.status != 200:
+                            logger.error("Wikipedia category API error", status=response.status)
+                            return None
+                        data = await response.json()
+
+                page_titles = [item['title'] for item in data.get('query', {}).get('categorymembers', [])]
+            else:
+                # Fetch random pages
+                random_url = f"{api_url}/page/random/summary"
+                page_titles = None  # Will fetch random pages
+
+            async with aiohttp.ClientSession() as session:
+                if page_titles:
+                    # Fetch specified pages
+                    for title in page_titles[:source.max_items_per_batch]:
+                        await asyncio.sleep(0.1)  # Rate limiting
+
+                        summary_url = f"{api_url}/page/summary/{title}"
+                        async with session.get(summary_url) as response:
+                            if response.status == 200:
+                                page_data = await response.json()
+                                pages.append(self._parse_wikipedia_page(page_data))
+                else:
+                    # Fetch random pages
+                    for _ in range(min(source.max_items_per_batch, 20)):
+                        await asyncio.sleep(0.1)  # Rate limiting
+
+                        random_url = f"{api_url}/page/random/summary"
+                        async with session.get(random_url) as response:
+                            if response.status == 200:
+                                page_data = await response.json()
+                                pages.append(self._parse_wikipedia_page(page_data))
+
+            logger.info("Fetched Wikipedia pages", count=len(pages), source_id=source.source_id)
+
+            return {
+                'source_type': 'wikipedia',
+                'source_id': source.source_id,
+                'pages': pages,
+                'total_results': len(pages),
+                'fetched_at': datetime.now(timezone.utc).isoformat()
+            }
+
+        except Exception as e:
+            logger.error("Wikipedia fetch failed", error=str(e))
+            return None
+
+    def _parse_wikipedia_page(self, page_data: Dict) -> Dict[str, Any]:
+        """Parse Wikipedia page summary data."""
+        return {
+            'title': page_data.get('title', ''),
+            'extract': page_data.get('extract', ''),
+            'full_url': page_data.get('content_urls', {}).get('desktop', {}).get('page', ''),
+            'api_url': page_data.get('content_urls', {}).get('desktop', {}).get('api', ''),
+            'last_modified': page_data.get('timestamp'),
+            'language': page_data.get('lang', 'en'),
+            'thumbnail': page_data.get('thumbnail', {}).get('source') if page_data.get('thumbnail') else None,
+            'coordinates': page_data.get('coordinates'),
+            'license': 'CC-BY-SA-4.0',
+            'license_compatibility': LicenseCompatibility.FULLY_COMPATIBLE
+        }
+
+    async def _fetch_from_rss(self, source: ContentSource) -> Optional[Dict[str, Any]]:
+        """
+        Fetch content from RSS/Atom feed.
+
+        Returns:
+            Dict with feed items and metadata
+        """
+        try:
+            feed = feedparser.parse(source.base_url)
+
+            items = []
+            for entry in feed.entries[:source.max_items_per_batch]:
+                items.append({
+                    'title': entry.get('title', ''),
+                    'description': entry.get('summary', ''),
+                    'link': entry.get('link', ''),
+                    'published': entry.get('published'),
+                    'updated': entry.get('updated'),
+                    'author': entry.get('author', ''),
+                    'tags': [tag.term for tag in entry.get('tags', [])] if entry.get('tags') else [],
+                    'license_compatibility': LicenseCompatibility.UNKNOWN
+                })
+
+            logger.info("Fetched RSS feed items", count=len(items), source_id=source.source_id)
+
+            return {
+                'source_type': 'rss_feed',
+                'source_id': source.source_id,
+                'feed_title': feed.feed.get('title', ''),
+                'feed_link': feed.feed.get('link', ''),
+                'items': items,
+                'total_results': len(items),
+                'fetched_at': datetime.now(timezone.utc).isoformat()
+            }
+
+        except Exception as e:
+            logger.error("RSS fetch failed", error=str(e))
+            return None
+
+    async def _fetch_from_user_upload(self, source: ContentSource) -> Optional[Dict[str, Any]]:
+        """Handle user-uploaded content (placeholder for direct uploads)."""
+        logger.warning("User upload source type requires direct content, not fetching")
+        return None
+
+    # === Content Storage Methods ===
+
+    async def _store_content(self, content: Dict[str, Any], source: ContentSource) -> Optional[str]:
+        """
+        Store content to IPFS with provenance tracking.
+
+        Serializes content to JSON, stores via DataSpineProxy/IPFS,
+        and creates a ProvenanceRecord.
+
+        Args:
+            content: Content dict from _fetch_content()
+            source: Source configuration
+
+        Returns:
+            CID string or None on failure
+        """
+        try:
+            # Import DataSpineProxy for IPFS storage
+            from prsm.compute.spine.data_spine_proxy import PRSMDataSpineProxy
+
+            # Serialize content to JSON
+            content_json = json.dumps(content, default=str, ensure_ascii=False)
+            content_bytes = content_json.encode('utf-8')
+
+            # Calculate content hash
+            content_hash = hashlib.sha256(content_bytes).hexdigest()
+
+            # Create filename based on source type and ID
+            filename = f"{source.source_type.value}_{source.source_id}_{content_hash[:8]}.json"
+
+            # Initialize data spine proxy
+            data_spine = PRSMDataSpineProxy()
+            await data_spine._phase1_initialize_infrastructure()
+
+            # Store to IPFS via the IPFS client
+            cid = await data_spine.ipfs_client.add_content(content_bytes)
+
+            if cid:
+                # Pin the content for persistence
+                await data_spine.ipfs_client.pin_content(cid)
+
+                # Create provenance record
+                provenance = await self._create_storage_provenance(
+                    cid=cid,
+                    content_hash=content_hash,
+                    source=source,
+                    size_bytes=len(content_bytes)
+                )
+
+                logger.info("Content stored to IPFS",
+                           cid=cid,
+                           source_id=source.source_id,
+                           size_bytes=len(content_bytes))
+
+                return cid
+            else:
+                logger.error("Failed to store content to IPFS", source_id=source.source_id)
+                return None
+
+        except Exception as e:
+            logger.error("Content storage failed", error=str(e), source_id=source.source_id)
+            return None
+
+    async def _create_storage_provenance(
+        self,
+        cid: str,
+        content_hash: str,
+        source: ContentSource,
+        size_bytes: int
+    ) -> Optional[str]:
+        """Create a provenance record for stored content."""
+        try:
+            # Import provenance system
+            from prsm.data.provenance.enhanced_provenance_system import (
+                EnhancedProvenanceSystem,
+                ProvenanceType,
+                TrustLevel
+            )
+
+            provenance_system = EnhancedProvenanceSystem()
+
+            record = provenance_system.create_provenance_record(
+                provenance_type=ProvenanceType.DATA_SOURCE,
+                source_entity=f"ingestion:{source.source_id}",
+                target_entity=f"ipfs:{cid}",
+                operation="ingest_and_store",
+                inputs=[],
+                outputs=[cid],
+                metadata={
+                    'source_type': source.source_type.value,
+                    'source_name': source.name,
+                    'content_hash': content_hash,
+                    'size_bytes': size_bytes,
+                    'license_compatibility': source.required_license_compatibility.value
+                },
+                trust_level=TrustLevel.CREDIBLE
+            )
+
+            return record.record_id
+
+        except Exception as e:
+            logger.warning("Failed to create storage provenance", error=str(e))
+            return None
     
     async def _create_provenance(self, candidate: IngestionCandidate) -> ContentProvenance:
         """Create provenance information"""

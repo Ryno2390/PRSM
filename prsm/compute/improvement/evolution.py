@@ -725,17 +725,215 @@ class EvolutionOrchestrator:
         try:
             # Simulate rollback execution
             await asyncio.sleep(0.3)  # Simulate rollback time
-            
+
             print(f"🔄 Rolling back proposal {proposal.proposal_id} at {rollout_percentage}% rollout")
-            
-            # Update proposal status
+
+            # Step 1: Route all traffic back to control (0% to variant)
+            test_id = str(proposal.proposal_id)
+            await self._route_traffic_to_variant(test_id, "variant", 0.0)
+
+            # Step 2: Update proposal status
             proposal.status = ProposalStatus.REJECTED
-            
+
+            # Step 3: Record rollback event
+            async with self._tests_lock:
+                if test_id in self.active_tests:
+                    self.active_tests[test_id]["status"] = "rolled_back"
+                    self.active_tests[test_id]["rolled_back_at"] = datetime.now(timezone.utc).isoformat()
+                    self.active_tests[test_id]["rollback_percentage"] = rollout_percentage
+
+            # Step 4: Publish rollback notification (optional - for network awareness)
+            # await self._publish_rollback_notification(test_id, proposal)
+
+            # Update stats
+            self.evolution_stats["improvements_rolled_back"] += 1
+
             return True
-            
+
         except Exception as e:
             print(f"❌ Failed to rollback proposal {proposal.proposal_id}: {str(e)}")
             return False
+
+    async def _route_traffic_to_variant(
+        self,
+        test_id: str,
+        variant_id: str,
+        percentage: float,
+    ) -> bool:
+        """
+        Route a percentage of traffic to a variant for A/B testing.
+
+        Uses consistent hashing to deterministically assign requests to variants.
+        Percentage controls the hash range boundary:
+        - e.g. 25% → requests where hash(request_id) % 100 < 25 → variant
+        - remaining → control
+
+        Args:
+            test_id: The A/B test identifier
+            variant_id: The variant identifier
+            percentage: Percentage of traffic to route to variant (0-100)
+
+        Returns:
+            True if routing table updated successfully
+        """
+        try:
+            # Initialize routing table if needed
+            if not hasattr(self, '_routing_table'):
+                self._routing_table: Dict[str, Dict[str, Any]] = {}
+
+            # Calculate hash boundary
+            hash_boundary = int(percentage)
+
+            # Update routing configuration
+            self._routing_table[test_id] = {
+                "variant_id": variant_id,
+                "percentage": percentage,
+                "hash_boundary": hash_boundary,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+            # Persist to Redis if available (for distributed systems)
+            if hasattr(self, '_redis_client') and self._redis_client:
+                import json
+                await self._redis_client.set(
+                    f"ab_routing:{test_id}",
+                    json.dumps(self._routing_table[test_id]),
+                    ex=86400 * 7  # 7 days TTL
+                )
+
+            print(f"🔀 Routing {percentage}% of traffic to variant {variant_id} for test {test_id}")
+
+            return True
+
+        except Exception as e:
+            print(f"❌ Failed to route traffic: {str(e)}")
+            return False
+
+    async def _collect_variant_metrics(
+        self,
+        test_id: str,
+        variant_id: str,
+        duration_secs: float,
+    ) -> Dict[str, float]:
+        """
+        Collect performance metrics for a specific variant.
+
+        Queries the PerformanceMonitor to get metrics filtered by variant_id tag.
+
+        Args:
+            test_id: The A/B test identifier
+            variant_id: The variant identifier to collect metrics for
+            duration_secs: Time window for metrics collection
+
+        Returns:
+            Dict with collected metrics: latency_p50, latency_p95, latency_p99,
+            error_rate, throughput_rps, cost_per_request
+        """
+        try:
+            # Try to use actual PerformanceMonitor if available
+            try:
+                from prsm.compute.monitoring.performance_monitor import get_performance_monitor
+                monitor = get_performance_monitor()
+
+                # Query metrics for the variant
+                metrics = await monitor.get_variant_metrics(
+                    test_id=test_id,
+                    variant_id=variant_id,
+                    duration_secs=duration_secs
+                )
+
+                return metrics
+
+            except ImportError:
+                # PerformanceMonitor not available, use simulated metrics
+                pass
+
+            # Simulated metrics collection
+            import random
+
+            # Base metrics (simulated)
+            base_latency = random.uniform(50, 150)  # ms
+            error_rate = random.uniform(0.001, 0.05)  # 0.1% to 5%
+            throughput = random.uniform(100, 500)  # requests per second
+            cost = random.uniform(0.001, 0.01)  # FTNS per request
+
+            return {
+                "latency_p50": base_latency * 0.8,
+                "latency_p95": base_latency * 1.5,
+                "latency_p99": base_latency * 2.0,
+                "error_rate": error_rate,
+                "throughput_rps": throughput,
+                "cost_per_request": cost,
+                "variant_id": variant_id,
+                "test_id": test_id,
+                "collection_window_secs": duration_secs,
+                "collected_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+        except Exception as e:
+            print(f"❌ Failed to collect variant metrics: {str(e)}")
+            return {
+                "error": str(e),
+                "variant_id": variant_id,
+                "test_id": test_id,
+            }
+
+    def get_routing_assignment(self, test_id: str, request_id: str) -> str:
+        """
+        Get the variant assignment for a specific request.
+
+        Uses consistent hashing to determine which variant a request should be routed to.
+
+        Args:
+            test_id: The A/B test identifier
+            request_id: The unique request identifier
+
+        Returns:
+            "variant" or "control" based on the routing configuration
+        """
+        if not hasattr(self, '_routing_table') or test_id not in self._routing_table:
+            return "control"
+
+        routing = self._routing_table[test_id]
+        hash_boundary = routing.get("hash_boundary", 0)
+
+        # Use consistent hashing on request_id
+        import hashlib
+        hash_value = int(hashlib.md5(request_id.encode()).hexdigest()[:8], 16)
+        bucket = hash_value % 100
+
+        if bucket < hash_boundary:
+            return routing.get("variant_id", "variant")
+        else:
+            return "control"
+
+    async def _execute_rollout_stage(self, proposal: ImprovementProposal, percentage: int) -> Dict[str, Any]:
+        """Execute a single rollout stage with traffic routing"""
+        try:
+            test_id = str(proposal.proposal_id)
+
+            # Route traffic to variant based on rollout percentage
+            await self._route_traffic_to_variant(test_id, "variant", float(percentage))
+
+            # Simulate rollout execution
+            await asyncio.sleep(0.5)
+
+            print(f"📤 Rollout stage: {percentage}% - {proposal.proposal_id}")
+
+            return {
+                "percentage": percentage,
+                "success": True,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "proposal_id": str(proposal.proposal_id)
+            }
+
+        except Exception as e:
+            return {
+                "percentage": percentage,
+                "success": False,
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
     
     
     async def _validate_update_package(self, update_package: UpdatePackage) -> Dict[str, Any]:

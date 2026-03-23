@@ -212,7 +212,7 @@ class TorrentManifestIndex:
 
         # Check if we need to evict
         if len(self._by_infohash) >= self._max_size:
-            self.evict_lru(self._max_size // 10)  # Evict 10%
+            self.evict_lru(max(1, self._max_size // 10))  # Evict at least 1
 
         self._by_infohash[infohash] = manifest
         self._access_times[infohash] = time.time()
