@@ -6,7 +6,7 @@ Routes trades through optimal exchange combinations for best execution.
 
 import asyncio
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from decimal import Decimal
 from datetime import datetime, timedelta
 import aiohttp
