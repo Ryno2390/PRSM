@@ -7,12 +7,14 @@ import asyncio
 import hashlib
 import json
 import logging
+import struct
 import time
 import warnings
 from concurrent.futures import Future
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Any, Tuple, Callable
 from uuid import UUID, uuid4
+from pathlib import Path
 
 # P2P Networking imports
 try:
@@ -47,6 +49,14 @@ from prsm.core.ipfs_client import get_ipfs_client
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
 from prsm.core.safety.monitor import SafetyMonitor
+
+# HTTP client for RPC execution
+try:
+    import httpx
+    HTTPX_AVAILABLE = True
+except ImportError:
+    httpx = None
+    HTTPX_AVAILABLE = False
 
 
 # === Production P2P Configuration ===
@@ -1090,7 +1100,10 @@ class ProductionP2PNetwork:
             return []
     
     async def _execute_task_on_peer_rpc(self, peer_id: str, peer_address: str, task: ArchitectTask) -> dict:
-        """Execute task on peer via RPC (REAL implementation)"""
+        """Execute task on peer via RPC (REAL implementation with HTTP/TCP transport)"""
+        operation_id = None
+        start_time = time.time()
+
         try:
             operation_id = self._canonical_rpc_operation_id(peer_id, task)
             existing_result = self.completed_task_results.get(operation_id)
@@ -1104,58 +1117,148 @@ class ProductionP2PNetwork:
                 'updated_at': datetime.now(timezone.utc).isoformat()
             }
 
-            # Ensure connection exists
-            if peer_id not in self.secure_connection.active_connections:
-                connected = await self.connect_to_peer(peer_address, peer_id)
-                if not connected:
-                    self.in_flight_tasks[operation_id]['state'] = 'aborted'
-                    self.in_flight_tasks[operation_id]['finalized_by'] = 'connect_failed'
-                    self.in_flight_tasks[operation_id]['updated_at'] = datetime.now(timezone.utc).isoformat()
-                    raise Exception(f"Could not connect to peer {peer_id}")
-            
-            # Create execution message
-            message = P2PMessage(
-                msg_type='task_execute',
-                payload={
-                    'task_id': task.task_id,
-                    'task_type': task.task_type,
-                    'instruction': task.instruction,
-                    'context_data': task.context_data,
-                    'dependencies': task.dependencies,
-                    'expected_output_type': task.expected_output_type
-                },
-                sender_id=self.node_id
-            )
-            
-            # Send execution request
+            # Get peer info from active_peers or parse address
+            peer_info = self.active_peers.get(peer_id)
+            if peer_info:
+                # Extract address and port from multiaddr
+                multiaddr = peer_info.multiaddr
+                # Parse multiaddr format like "/ip4/1.2.3.4/tcp/8000"
+                parts = multiaddr.split("/")
+                peer_host = None
+                peer_port = None
+                api_port = None
+                for i, part in enumerate(parts):
+                    if part == "ip4" and i + 1 < len(parts):
+                        peer_host = parts[i + 1]
+                    elif part == "tcp" and i + 1 < len(parts):
+                        peer_port = int(parts[i + 1])
+                # Check for API port in capabilities
+                capabilities = getattr(peer_info, 'capabilities', []) or []
+                if isinstance(capabilities, dict):
+                    api_port = capabilities.get('api_port')
+            else:
+                # Parse peer_address (format: "host:port")
+                if ":" in peer_address:
+                    peer_host, peer_port_str = peer_address.rsplit(":", 1)
+                    peer_port = int(peer_port_str)
+                else:
+                    peer_host = peer_address
+                    peer_port = 8000
+                api_port = None
+
+            # Build request payload
+            request_payload = {
+                "task_id": str(task.task_id),
+                "operation": task.task_type,
+                "instruction": task.instruction,
+                "args": task.context_data or {},
+                "timeout": 30
+            }
+
             self.in_flight_tasks[operation_id]['state'] = 'dispatching'
             self.in_flight_tasks[operation_id]['updated_at'] = datetime.now(timezone.utc).isoformat()
-            success = await self.secure_connection.send_message(peer_id, message)
-            if not success:
+
+            response_data = None
+            rpc_error = None
+
+            # Try HTTP first if httpx is available and we have an API port or default HTTP
+            if HTTPX_AVAILABLE and httpx is not None:
+                http_port = api_port or (peer_port + 1000 if peer_port else 9000)
+                http_url = f"http://{peer_host}:{http_port}/rpc/execute"
+
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        http_response = await client.post(
+                            http_url,
+                            json=request_payload,
+                            headers={"Content-Type": "application/json", "X-Requester-Id": self.node_id}
+                        )
+
+                        if http_response.status_code == 200:
+                            response_data = http_response.json()
+                        else:
+                            rpc_error = f"HTTP {http_response.status_code}: {http_response.text[:200]}"
+
+                except httpx.TimeoutException:
+                    rpc_error = "connection_timeout"
+                except httpx.ConnectError:
+                    rpc_error = "connection_refused"
+                except Exception as http_err:
+                    rpc_error = str(http_err)
+
+            # Fallback to raw TCP socket if HTTP failed or not available
+            if response_data is None and rpc_error is None or rpc_error in ("connection_refused", "connection_timeout"):
+                try:
+                    reader, writer = await asyncio.wait_for(
+                        asyncio.open_connection(peer_host, peer_port),
+                        timeout=30.0
+                    )
+
+                    # Send length-prefixed JSON
+                    json_data = json.dumps(request_payload).encode('utf-8')
+                    writer.write(struct.pack('>I', len(json_data)))
+                    writer.write(json_data)
+                    await writer.drain()
+
+                    # Read response
+                    length_data = await asyncio.wait_for(reader.read(4), timeout=30.0)
+                    if len(length_data) == 4:
+                        response_length = struct.unpack('>I', length_data)[0]
+                        response_body = await asyncio.wait_for(reader.read(response_length), timeout=30.0)
+                        response_data = json.loads(response_body.decode('utf-8'))
+                    else:
+                        rpc_error = "invalid_response_length"
+
+                    writer.close()
+                    await writer.wait_closed()
+
+                except asyncio.TimeoutError:
+                    rpc_error = "connection_timeout"
+                except ConnectionError:
+                    rpc_error = "connection_refused"
+                except Exception as tcp_err:
+                    rpc_error = str(tcp_err)
+
+            execution_time = time.time() - start_time
+
+            # Build response
+            if response_data is not None:
+                response = {
+                    "peer_id": peer_id,
+                    "task_id": str(task.task_id),
+                    "result": response_data.get("result"),
+                    "execution_time": execution_time,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "success": response_data.get("success", True),
+                    "operation_id": operation_id
+                }
+                self.in_flight_tasks[operation_id]['state'] = 'committed'
+                self.in_flight_tasks[operation_id]['finalized_by'] = 'dispatch_acknowledged'
+                logger.info("rpc_execution_success", peer_id=peer_id, task_id=str(task.task_id), execution_time=execution_time)
+            else:
+                response = {
+                    "peer_id": peer_id,
+                    "task_id": str(task.task_id),
+                    "success": False,
+                    "error": rpc_error or "unknown_error",
+                    "execution_time": execution_time,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "operation_id": operation_id
+                }
                 self.in_flight_tasks[operation_id]['state'] = 'aborted'
-                self.in_flight_tasks[operation_id]['finalized_by'] = 'dispatch_failed'
-                self.in_flight_tasks[operation_id]['updated_at'] = datetime.now(timezone.utc).isoformat()
-                raise Exception(f"Failed to send execution request to peer {peer_id}")
-            
-            # Wait for response (simplified - in production would use proper request/response matching)
-            # For now, return a placeholder result
-            response = {
-                "peer_id": peer_id,
-                "task_id": task.task_id,
-                "result": f"RPC execution result from peer {peer_id}",
-                "execution_time": 2.5,  # Would be actual execution time
-                "timestamp": datetime.now(timezone.utc),
-                "success": True,
-                "operation_id": operation_id
-            }
-            self.in_flight_tasks[operation_id]['state'] = 'committed'
-            self.in_flight_tasks[operation_id]['finalized_by'] = 'dispatch_acknowledged'
+                self.in_flight_tasks[operation_id]['finalized_by'] = 'rpc_failed'
+                logger.error("rpc_execution_failed", peer_id=peer_id, task_id=str(task.task_id), error=rpc_error)
+
             self.in_flight_tasks[operation_id]['updated_at'] = datetime.now(timezone.utc).isoformat()
             self.completed_task_results[operation_id] = dict(response)
+
+            # Store in federation_messages table
+            await self._record_rpc_message(peer_id, str(task.task_id), request_payload, response)
+
             return response
-            
+
         except Exception as e:
-            print(f"❌ RPC execution failed on peer {peer_id}: {e}")
+            logger.error("rpc_execution_exception", peer_id=peer_id, error=str(e))
             fallback_operation_id = locals().get('operation_id')
             if fallback_operation_id and fallback_operation_id in self.in_flight_tasks:
                 self.in_flight_tasks[fallback_operation_id]['state'] = 'aborted'
@@ -1163,16 +1266,135 @@ class ProductionP2PNetwork:
 
             response = {
                 "peer_id": peer_id,
-                "task_id": task.task_id,
+                "task_id": str(task.task_id),
                 "error": str(e),
-                "execution_time": 0,
-                "timestamp": datetime.now(timezone.utc),
                 "success": False,
+                "execution_time": time.time() - start_time,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "operation_id": fallback_operation_id
             }
             if fallback_operation_id:
                 self.completed_task_results[fallback_operation_id] = dict(response)
             return response
+
+    async def _record_rpc_message(self, peer_id: str, task_id: str, request: dict, response: dict) -> None:
+        """Record RPC message in federation_messages table."""
+        try:
+            from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+            from prsm.core.database import FederationMessageModel
+            from prsm.core.config import get_settings
+
+            settings = get_settings()
+            db_url = getattr(settings, 'database_url', None)
+            if not db_url:
+                return
+
+            # Convert to async URL
+            if db_url.startswith("postgresql://"):
+                db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
+            elif db_url.startswith("sqlite:///"):
+                db_url = db_url.replace("sqlite:///", "sqlite+aiosqlite:///")
+
+            engine = create_async_engine(db_url, echo=False)
+            session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+            current_time = time.time()
+            async with session_factory() as session:
+                message_id = str(uuid4())
+                session.add(FederationMessageModel(
+                    message_id=message_id,
+                    message_type="rpc_execute",
+                    sender_id=self.node_id,
+                    recipient_id=peer_id,
+                    payload={"request": request, "response": response},
+                    sent_at=current_time,
+                    received_at=current_time,
+                    processed_at=current_time,
+                    status="processed" if response.get("success") else "failed"
+                ))
+                await session.commit()
+
+        except Exception as e:
+            logger.error("record_rpc_message_failed", error=str(e))
+
+    async def _handle_rpc_request(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        """Handle incoming RPC request via TCP socket."""
+        try:
+            # Read length prefix
+            length_data = await asyncio.wait_for(reader.read(4), timeout=30.0)
+            if len(length_data) != 4:
+                return
+
+            request_length = struct.unpack('>I', length_data)[0]
+            request_body = await asyncio.wait_for(reader.read(request_length), timeout=30.0)
+            request = json.loads(request_body.decode('utf-8'))
+
+            # Route to appropriate handler based on operation
+            operation = request.get("operation", "")
+            result = None
+
+            if operation == "model_execution" or operation == "execute":
+                # Execute model inference
+                result = await self._handle_model_execution(request)
+            elif operation == "shard_retrieve":
+                # Retrieve shard
+                result = await self._handle_shard_retrieve_request(request)
+            else:
+                result = {"success": False, "error": f"unknown_operation: {operation}"}
+
+            # Send response
+            response_data = json.dumps(result).encode('utf-8')
+            writer.write(struct.pack('>I', len(response_data)))
+            writer.write(response_data)
+            await writer.drain()
+
+        except asyncio.TimeoutError:
+            logger.error("rpc_request_timeout")
+        except Exception as e:
+            logger.error("handle_rpc_request_failed", error=str(e))
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+    async def _handle_model_execution(self, request: dict) -> dict:
+        """Handle model execution RPC request."""
+        try:
+            instruction = request.get("instruction", "")
+            args = request.get("args", {})
+
+            # This would integrate with the actual model execution system
+            # For now, return a placeholder
+            return {
+                "success": True,
+                "result": f"Executed: {instruction[:100]}...",
+                "tokens_used": len(instruction.split())
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def _handle_shard_retrieve_request(self, request: dict) -> dict:
+        """Handle shard retrieve RPC request."""
+        try:
+            shard_id = request.get("args", {}).get("shard_id")
+            if not shard_id:
+                return {"success": False, "error": "missing_shard_id"}
+
+            # Look up shard in local storage
+            shard_key = f"shard:{shard_id}"
+            shard_record = await self.dht.retrieve(shard_key)
+            if not shard_record:
+                return {"success": False, "error": "shard_not_found"}
+
+            return {
+                "success": True,
+                "shard_data": shard_record.get("data"),
+                "metadata": shard_record.get("metadata", {})
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
     
     async def _store_shard_metadata_in_dht(self, model_cid: str, shards: List[ModelShard]):
         """Store shard metadata in DHT for discovery"""

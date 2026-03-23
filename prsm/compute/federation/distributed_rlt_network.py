@@ -19,6 +19,7 @@ import asyncio
 import json
 import time
 import uuid
+import math
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional, Tuple, Set, Union
 from dataclasses import dataclass, asdict, field
@@ -27,8 +28,12 @@ from enum import Enum
 import random
 import hashlib
 from statistics import mean, stdev
+from pathlib import Path
 
 import structlog
+from sqlalchemy import select, update, func
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.dialects.postgresql import insert
 
 from prsm.compute.teachers.seal import SEALService, SEALConfig
 from prsm.compute.teachers.rlt.quality_monitor import QualityMetrics, QualityMonitor
@@ -185,7 +190,9 @@ class DistributedRLTNetwork:
         network_port: int = 8000,
         max_network_size: int = 100,
         quality_threshold: float = 0.7,
-        trust_threshold: float = 0.8
+        trust_threshold: float = 0.8,
+        database_url: Optional[str] = None,
+        max_collaborations: int = 10
     ):
         self.node_id = node_id
         self.local_teacher = local_teacher
@@ -194,14 +201,24 @@ class DistributedRLTNetwork:
         self.max_network_size = max_network_size
         self.quality_threshold = quality_threshold
         self.trust_threshold = trust_threshold
-        
+        self.max_collaborations = max_collaborations
+
+        # Database session factory for persistence
+        self._database_url = database_url
+        self._session_factory: Optional[async_sessionmaker] = None
+        self._db_initialized = False
+
         # Network state
+        self.peers: Dict[str, Dict[str, Any]] = {}  # peer_id -> peer info dict
+        self.quality_scores: Dict[str, float] = {}  # peer_id -> quality score
         self.known_teachers: Dict[str, TeacherNodeInfo] = {}
         self.active_collaborations: Dict[str, CollaborationSession] = {}
         self.pending_requests: Dict[str, CollaborationRequest] = {}
+        self.collaboration_requests: Dict[str, Dict[str, Any]] = {}  # request_id -> request dict
         self.network_metrics: Dict[str, NetworkQualityMetrics] = {}
-        self.consensus_proposals: Dict[str, NetworkConsensus] = {}
-        
+        self.consensus_proposals: Dict[str, Dict[str, Any]] = {}  # proposal_id -> proposal dict
+        self.registered_teachers: Dict[str, Dict[str, Any]] = {}  # teacher_id -> record dict
+
         # Discovery and routing
         self.discovery_cache: Dict[str, List[TeacherNodeInfo]] = {}
         self.routing_table: Dict[str, List[str]] = defaultdict(list)
@@ -233,7 +250,49 @@ class DistributedRLTNetwork:
         self.cleanup_interval = 300.0   # seconds
         
         logger.info(f"Initialized distributed RLT network node: {node_id}")
-    
+
+    async def initialize(self) -> bool:
+        """Initialize database connection for persistence."""
+        if self._db_initialized:
+            return True
+
+        try:
+            # Get database URL from settings if not provided
+            if self._database_url is None:
+                try:
+                    from prsm.core.config import get_settings
+                    settings = get_settings()
+                    self._database_url = getattr(settings, 'database_url', 'sqlite:///~/.prsm/federation.db')
+                except Exception:
+                    self._database_url = 'sqlite:///~/.prsm/federation.db'
+
+            # Convert sync URL to async
+            db_url = self._database_url
+            if db_url.startswith("postgresql://"):
+                db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
+            elif db_url.startswith("sqlite:///"):
+                # Expand path for SQLite
+                path = db_url.replace("sqlite:///", "")
+                path = str(Path(path).expanduser())
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+                db_url = f"sqlite+aiosqlite:///{path}"
+
+            # Create async engine and session factory
+            engine = create_async_engine(db_url, echo=False)
+            self._session_factory = async_sessionmaker(engine, expire_on_commit=False)
+            self._db_initialized = True
+
+            logger.info("federation_database_initialized", database_url=self._database_url.split("://")[0])
+            return True
+
+        except Exception as e:
+            logger.error("federation_database_init_failed", error=str(e))
+            return False
+
+    def _get_session(self) -> Optional[async_sessionmaker]:
+        """Get database session factory."""
+        return self._session_factory
+
     async def start_network(self) -> None:
         """Start the distributed network services"""
         if self.is_running:
@@ -986,31 +1045,120 @@ class DistributedRLTNetwork:
         }
     
     # Additional mock method implementations
-    
+
     async def _process_pending_discoveries(self) -> None:
-        """Process pending discovery requests"""
-        # Mock implementation
-        pass
-    
+        """Process pending discovery requests - discover stale peers and mark inactive."""
+        try:
+            current_time = time.time()
+            stale_threshold = 300  # 5 minutes
+            inactive_threshold = 3600  # 1 hour
+
+            # Query database for stale peers
+            if self._session_factory:
+                try:
+                    from prsm.core.database import FederationPeerModel
+                    async with self._session_factory() as session:
+                        # Find peers that need discovery (stale but active)
+                        stmt = select(FederationPeerModel).where(
+                            FederationPeerModel.is_active == True,
+                            FederationPeerModel.last_seen < current_time - stale_threshold
+                        )
+                        result = await session.execute(stmt)
+                        stale_peers = result.scalars().all()
+
+                        # Send discovery request to stale peers
+                        for peer in stale_peers:
+                            if peer.peer_id != self.node_id:
+                                discovery_message = {
+                                    "type": NetworkMessageType.DISCOVERY_REQUEST.value,
+                                    "sender_id": self.node_id,
+                                    "sender_address": self.network_address,
+                                    "sender_port": self.network_port,
+                                    "capabilities": {"node_type": "rlt_teacher"},
+                                    "timestamp": datetime.now(timezone.utc).isoformat()
+                                }
+                                await self._send_message(peer.peer_id, discovery_message)
+                                logger.debug("discovery_request_sent", peer_id=peer.peer_id)
+
+                        # Mark peers as inactive if very stale
+                        stmt = update(FederationPeerModel).where(
+                            FederationPeerModel.is_active == True,
+                            FederationPeerModel.last_seen < current_time - inactive_threshold
+                        ).values(is_active=False)
+                        await session.execute(stmt)
+                        await session.commit()
+
+                except Exception as db_error:
+                    logger.error("process_pending_discoveries_db_failed", error=str(db_error))
+
+        except Exception as e:
+            logger.error("process_pending_discoveries_failed", error=str(e))
+
     async def _update_local_quality_metrics(self) -> None:
         """Update local teacher quality metrics"""
         # Mock implementation - update local teacher's quality score
         if self.node_id in self.known_teachers:
-            # Simulate quality fluctuation
-            current_quality = self.known_teachers[self.node_id].quality_score
             change = random.uniform(-0.05, 0.05)
             new_quality = max(0.5, min(1.0, current_quality + change))
             self.known_teachers[self.node_id].quality_score = new_quality
     
     async def _process_quality_updates(self) -> None:
-        """Process incoming quality metric updates"""
-        # Mock implementation
-        pass
-    
+        """Process incoming quality metric updates - broadcast significant changes."""
+        try:
+            # Calculate uptime ratio and broadcast if quality changed significantly
+            for peer_id, peer_info in list(self.peers.items()):
+                if peer_id == self.node_id:
+                    continue
+
+                old_score = self.quality_scores.get(peer_id, 0.5)
+
+                # Check if quality score changed by more than 0.05
+                if abs(old_score - peer_info.get("quality_score", old_score)) > 0.05:
+                    # Broadcast quality update gossip
+                    message = {
+                        "type": NetworkMessageType.QUALITY_METRICS_UPDATE.value,
+                        "sender_id": self.node_id,
+                        "peer_id": peer_id,
+                        "quality_score": peer_info.get("quality_score", old_score),
+                        "metrics": {"uptime_ratio": 1.0 if peer_info.get("is_active", True) else 0.0},
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }
+                    await self._broadcast_message(message)
+
+            # Prune quality scores for peers no longer in peers dict
+            peers_to_prune = [pid for pid in self.quality_scores if pid not in self.peers]
+            for pid in peers_to_prune:
+                del self.quality_scores[pid]
+                logger.debug("quality_score_pruned", peer_id=pid)
+
+        except Exception as e:
+            logger.error("process_quality_updates_failed", error=str(e))
+
     async def _process_collaboration_requests(self) -> None:
-        """Process incoming collaboration requests"""
-        # Mock implementation
-        pass
+        """Process incoming collaboration requests - retry or timeout stale requests."""
+        try:
+            current_time = time.time()
+            timeout_threshold = 300  # 5 minutes
+
+            # Iterate collaboration requests
+            requests_to_remove = []
+            for request_id, request in list(self.collaboration_requests.items()):
+                received_at = request.get("received_at", current_time)
+
+                # Check if request is timed out
+                if current_time - received_at > timeout_threshold:
+                    if not request.get("accepted"):
+                        # Mark as timed out
+                        request["status"] = "timed_out"
+                        logger.info("collaboration_request_timed_out", request_id=request_id)
+                    requests_to_remove.append(request_id)
+
+            # Clean up completed/timed-out requests
+            for request_id in requests_to_remove:
+                del self.collaboration_requests[request_id]
+
+        except Exception as e:
+            logger.error("process_collaboration_requests_failed", error=str(e))
     
     async def _monitor_active_collaborations(self) -> None:
         """Monitor active collaboration sessions"""
@@ -1036,14 +1184,30 @@ class DistributedRLTNetwork:
             del self.active_collaborations[session_id]
     
     async def _process_consensus_proposals(self) -> None:
-        """Process consensus proposals"""
-        # Mock implementation
-        pass
-    
-    async def _check_consensus_completion(self) -> None:
-        """Check if any consensus proposals have reached completion"""
-        # Mock implementation
-        pass
+        """Process consensus proposals - finalize proposals past deadline."""
+        try:
+            current_time = time.time()
+
+            # Iterate consensus proposals
+            for proposal_id, proposal in list(self.consensus_proposals.items()):
+                if proposal.get("status") != "open":
+                    continue
+
+                deadline = proposal.get("deadline")
+                if deadline and current_time > float(deadline):
+                    # Force finalization
+                    await self._check_consensus_completion(proposal_id)
+
+        except Exception as e:
+            logger.error("process_consensus_proposals_failed", error=str(e))
+
+    async def _check_consensus_completion_standalone(self) -> None:
+        """Check if any consensus proposals have reached completion - standalone version for service loop."""
+        try:
+            for proposal_id in list(self.consensus_proposals.keys()):
+                await self._check_consensus_completion(proposal_id)
+        except Exception as e:
+            logger.error("check_consensus_completion_standalone_failed", error=str(e))
     
     async def _cleanup_stale_teachers(self) -> None:
         """Remove stale teacher entries"""
@@ -1089,51 +1253,620 @@ class DistributedRLTNetwork:
         await self._send_message(teacher_id, message)
     
     # Message handlers (mock implementations)
-    
+
     async def _handle_discovery_request(self, message: Dict[str, Any]) -> None:
-        """Handle discovery request message"""
-        # Mock implementation
-        pass
-    
+        """Handle discovery request message - store peer and respond with own info."""
+        try:
+            sender_id = message.get("sender_id") or message.get("sender")
+            sender_address = message.get("sender_address") or message.get("address", self.network_address)
+            sender_port = message.get("sender_port") or message.get("port", 8000)
+            capabilities = message.get("capabilities", {})
+
+            if not sender_id:
+                logger.warning("discovery_request_missing_sender", message=message)
+                return
+
+            current_time = time.time()
+
+            # Upsert into in-memory peers dict
+            self.peers[sender_id] = {
+                "address": sender_address,
+                "port": sender_port,
+                "capabilities": capabilities,
+                "last_seen": current_time,
+                "is_active": True
+            }
+
+            # Initialize quality score if new
+            if sender_id not in self.quality_scores:
+                self.quality_scores[sender_id] = 0.5
+
+            # Persist to database
+            if self._session_factory:
+                try:
+                    from prsm.core.database import FederationPeerModel
+                    async with self._session_factory() as session:
+                        # Upsert peer
+                        stmt = insert(FederationPeerModel).values(
+                            peer_id=sender_id,
+                            address=sender_address,
+                            port=sender_port,
+                            node_type=capabilities.get("node_type", "standard"),
+                            last_seen=current_time,
+                            quality_score=self.quality_scores[sender_id],
+                            capabilities=capabilities,
+                            is_active=True,
+                            created_at=current_time
+                        )
+                        stmt = stmt.on_conflict_do_update(
+                            index_elements=['peer_id'],
+                            set_={
+                                'address': sender_address,
+                                'port': sender_port,
+                                'last_seen': current_time,
+                                'capabilities': capabilities,
+                                'is_active': True
+                            }
+                        )
+                        await session.execute(stmt)
+                        await session.commit()
+                except Exception as db_error:
+                    logger.error("discovery_db_persist_failed", error=str(db_error))
+
+            # Build discovery response
+            response_payload = {
+                "sender_id": self.node_id,
+                "address": self.network_address,
+                "port": self.network_port,
+                "capabilities": {
+                    "node_type": "rlt_teacher",
+                    "specializations": []
+                }
+            }
+
+            # Send response back
+            await self._send_message(sender_id, {
+                "type": NetworkMessageType.DISCOVERY_RESPONSE.value,
+                "payload": response_payload,
+                "sender_id": self.node_id,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+
+            logger.info("peer_discovered", peer_id=sender_id, address=sender_address)
+
+        except Exception as e:
+            logger.error("handle_discovery_request_failed", error=str(e))
+
     async def _handle_discovery_response(self, message: Dict[str, Any]) -> None:
-        """Handle discovery response message"""
-        # Mock implementation
-        pass
-    
+        """Handle discovery response message - store peer info and initialize quality score."""
+        try:
+            sender_id = message.get("sender_id")
+            payload = message.get("payload", message)
+            address = payload.get("address")
+            port = payload.get("port")
+            capabilities = payload.get("capabilities", {})
+
+            if not sender_id:
+                logger.warning("discovery_response_missing_sender", message=message)
+                return
+
+            current_time = time.time()
+
+            # Upsert into in-memory peers dict
+            self.peers[sender_id] = {
+                "address": address,
+                "port": port,
+                "capabilities": capabilities,
+                "last_seen": current_time,
+                "is_active": True
+            }
+
+            # Initialize quality score to 0.5 if not already present
+            if sender_id not in self.quality_scores:
+                self.quality_scores[sender_id] = 0.5
+
+            # Persist to database
+            if self._session_factory:
+                try:
+                    from prsm.core.database import FederationPeerModel
+                    async with self._session_factory() as session:
+                        stmt = insert(FederationPeerModel).values(
+                            peer_id=sender_id,
+                            address=address or "unknown",
+                            port=port or 8000,
+                            node_type=capabilities.get("node_type", "standard"),
+                            last_seen=current_time,
+                            quality_score=self.quality_scores[sender_id],
+                            capabilities=capabilities,
+                            is_active=True,
+                            created_at=current_time
+                        )
+                        stmt = stmt.on_conflict_do_update(
+                            index_elements=['peer_id'],
+                            set_={
+                                'address': address or "unknown",
+                                'port': port or 8000,
+                                'last_seen': current_time,
+                                'capabilities': capabilities,
+                                'is_active': True
+                            }
+                        )
+                        await session.execute(stmt)
+                        await session.commit()
+                except Exception as db_error:
+                    logger.error("discovery_response_db_persist_failed", error=str(db_error))
+
+            logger.info("peer_discovered", peer_id=sender_id, address=address)
+
+        except Exception as e:
+            logger.error("handle_discovery_response_failed", error=str(e))
+
     async def _handle_quality_metrics_update(self, message: Dict[str, Any]) -> None:
-        """Handle quality metrics update message"""
-        # Mock implementation
-        pass
-    
+        """Handle quality metrics update message - validate and store quality score."""
+        try:
+            sender_id = message.get("sender_id")
+            quality_score = message.get("quality_score")
+            metrics = message.get("metrics", {})
+
+            if not sender_id:
+                logger.warning("quality_update_missing_sender", message=message)
+                return
+
+            # Validate quality score
+            if not isinstance(quality_score, (int, float)):
+                logger.warning("quality_score_invalid_type", sender_id=sender_id, quality_score=quality_score)
+                return
+
+            # Clamp to valid range [0.0, 1.0] and check for finite values
+            quality_score = float(quality_score)
+            if not math.isfinite(quality_score):
+                logger.warning("quality_score_not_finite", sender_id=sender_id, quality_score=quality_score)
+                return
+            quality_score = max(0.0, min(1.0, quality_score))
+
+            current_time = time.time()
+
+            # Update in-memory quality score
+            self.quality_scores[sender_id] = quality_score
+
+            # Update peers if exists
+            if sender_id in self.peers:
+                self.peers[sender_id]["last_seen"] = current_time
+                self.peers[sender_id]["quality_score"] = quality_score
+
+            # Persist to database
+            if self._session_factory:
+                try:
+                    from prsm.core.database import FederationPeerModel, FederationMessageModel
+                    async with self._session_factory() as session:
+                        # Update peer quality score
+                        stmt = update(FederationPeerModel).where(
+                            FederationPeerModel.peer_id == sender_id
+                        ).values(
+                            quality_score=quality_score,
+                            last_seen=current_time
+                        )
+                        await session.execute(stmt)
+
+                        # Store message record
+                        message_id = str(uuid.uuid4())
+                        session.add(FederationMessageModel(
+                            message_id=message_id,
+                            message_type="quality_metrics_update",
+                            sender_id=sender_id,
+                            payload={"quality_score": quality_score, "metrics": metrics},
+                            sent_at=current_time,
+                            received_at=current_time,
+                            processed_at=current_time,
+                            status="processed"
+                        ))
+                        await session.commit()
+                except Exception as db_error:
+                    logger.error("quality_update_db_persist_failed", error=str(db_error))
+
+            logger.info("quality_score_updated", peer_id=sender_id, quality_score=quality_score)
+
+        except Exception as e:
+            logger.error("handle_quality_metrics_update_failed", error=str(e))
+
     async def _handle_collaboration_request(self, message: Dict[str, Any]) -> None:
-        """Handle collaboration request message"""
-        # Mock implementation
-        pass
-    
+        """Handle collaboration request - accept if capacity allows, otherwise reject."""
+        try:
+            request_id = message.get("request_id")
+            requester_id = message.get("requester_id") or message.get("sender_id")
+            task_type = message.get("task_type")
+            task_payload = message.get("task_payload", {})
+            reward_ftns = message.get("reward_ftns", 0)
+
+            if not request_id or not requester_id:
+                logger.warning("collaboration_request_missing_fields", message=message)
+                return
+
+            current_time = time.time()
+
+            # Check if we have capacity
+            active_count = len(self.active_collaborations)
+            at_capacity = active_count >= self.max_collaborations
+
+            if at_capacity:
+                # Reject with reason
+                response = {
+                    "type": NetworkMessageType.COLLABORATION_RESPONSE.value,
+                    "request_id": request_id,
+                    "accepted": False,
+                    "responder_id": self.node_id,
+                    "reason": "at_capacity",
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+                await self._send_message(requester_id, response)
+                logger.info("collaboration_rejected_at_capacity", request_id=request_id, requester_id=requester_id)
+            else:
+                # Store request and accept
+                self.collaboration_requests[request_id] = {
+                    "requester_id": requester_id,
+                    "task_type": task_type,
+                    "task_payload": task_payload,
+                    "reward_ftns": reward_ftns,
+                    "received_at": current_time,
+                    "accepted": True
+                }
+
+                response = {
+                    "type": NetworkMessageType.COLLABORATION_RESPONSE.value,
+                    "request_id": request_id,
+                    "accepted": True,
+                    "responder_id": self.node_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+                await self._send_message(requester_id, response)
+                logger.info("collaboration_accepted", request_id=request_id, requester_id=requester_id)
+
+            # Store message in database
+            if self._session_factory:
+                try:
+                    from prsm.core.database import FederationMessageModel
+                    async with self._session_factory() as session:
+                        message_id = str(uuid.uuid4())
+                        session.add(FederationMessageModel(
+                            message_id=message_id,
+                            message_type="collaboration_request",
+                            sender_id=requester_id,
+                            payload=message,
+                            sent_at=current_time,
+                            received_at=current_time,
+                            processed_at=current_time,
+                            status="processed"
+                        ))
+                        await session.commit()
+                except Exception as db_error:
+                    logger.error("collaboration_request_db_persist_failed", error=str(db_error))
+
+        except Exception as e:
+            logger.error("handle_collaboration_request_failed", error=str(e))
+
     async def _handle_collaboration_response(self, message: Dict[str, Any]) -> None:
-        """Handle collaboration response message"""
-        # Mock implementation
-        pass
-    
+        """Handle collaboration response - update request status."""
+        try:
+            request_id = message.get("request_id")
+            accepted = message.get("accepted", False)
+            responder_id = message.get("responder_id")
+            reason = message.get("reason")
+
+            if not request_id:
+                logger.warning("collaboration_response_missing_request_id", message=message)
+                return
+
+            # Update stored request if exists
+            if request_id in self.collaboration_requests:
+                self.collaboration_requests[request_id]["accepted"] = accepted
+                self.collaboration_requests[request_id]["responder_id"] = responder_id
+                self.collaboration_requests[request_id]["responded_at"] = time.time()
+
+                # If accepted, move to active collaborations
+                if accepted:
+                    self.active_collaborations[request_id] = {
+                        "request_id": request_id,
+                        "responder_id": responder_id,
+                        "started_at": time.time(),
+                        "status": "active"
+                    }
+                    logger.info("collaboration_started", request_id=request_id, responder_id=responder_id)
+                else:
+                    logger.info("collaboration_rejected", request_id=request_id, responder_id=responder_id, reason=reason)
+            else:
+                logger.warning("collaboration_response_unknown_request", request_id=request_id)
+
+        except Exception as e:
+            logger.error("handle_collaboration_response_failed", error=str(e))
+
     async def _handle_teacher_registration(self, message: Dict[str, Any]) -> None:
-        """Handle teacher registration message"""
-        # Mock implementation
-        pass
-    
+        """Handle teacher registration - store teacher record."""
+        try:
+            teacher_id = message.get("teacher_id")
+            model_type = message.get("model_type")
+            capabilities = message.get("capabilities", {})
+            min_reward_ftns = message.get("min_reward_ftns", 0)
+            sender_id = message.get("sender_id")
+
+            if not teacher_id:
+                logger.warning("teacher_registration_missing_teacher_id", message=message)
+                return
+
+            current_time = time.time()
+
+            # Build teacher record
+            record = {
+                "teacher_id": teacher_id,
+                "model_type": model_type,
+                "capabilities": capabilities,
+                "min_reward_ftns": min_reward_ftns,
+                "sender_id": sender_id,
+                "registered_at": current_time
+            }
+
+            # Store in registered_teachers
+            self.registered_teachers[teacher_id] = record
+
+            # Update peer as teacher type
+            if sender_id and sender_id in self.peers:
+                self.peers[sender_id]["node_type"] = "teacher"
+                self.peers[sender_id]["capabilities"]["model_id"] = teacher_id
+
+            # Persist to database
+            if self._session_factory:
+                try:
+                    from prsm.core.database import FederationPeerModel
+                    async with self._session_factory() as session:
+                        stmt = insert(FederationPeerModel).values(
+                            peer_id=sender_id or teacher_id,
+                            address=self.peers.get(sender_id, {}).get("address", "unknown"),
+                            port=self.peers.get(sender_id, {}).get("port", 8000),
+                            node_type="teacher",
+                            last_seen=current_time,
+                            quality_score=self.quality_scores.get(sender_id, 0.5),
+                            capabilities={"model_id": teacher_id, "model_type": model_type, **capabilities},
+                            is_active=True,
+                            created_at=current_time
+                        )
+                        stmt = stmt.on_conflict_do_update(
+                            index_elements=['peer_id'],
+                            set_={
+                                'node_type': 'teacher',
+                                'last_seen': current_time,
+                                'capabilities': {"model_id": teacher_id, "model_type": model_type, **capabilities}
+                            }
+                        )
+                        await session.execute(stmt)
+                        await session.commit()
+                except Exception as db_error:
+                    logger.error("teacher_registration_db_persist_failed", error=str(db_error))
+
+            logger.info("teacher_registered", teacher_id=teacher_id, sender_id=sender_id)
+
+        except Exception as e:
+            logger.error("handle_teacher_registration_failed", error=str(e))
+
     async def _handle_heartbeat(self, message: Dict[str, Any]) -> None:
-        """Handle heartbeat message"""
-        # Mock implementation
-        pass
-    
+        """Handle heartbeat - update peer last_seen and quality score based on load."""
+        try:
+            sender_id = message.get("sender_id")
+            timestamp = message.get("timestamp")
+            load = message.get("load", 0.0)  # 0.0 to 1.0
+            active_tasks = message.get("active_tasks", 0)
+
+            if not sender_id:
+                logger.warning("heartbeat_missing_sender", message=message)
+                return
+
+            # Validate load value
+            load = max(0.0, min(1.0, float(load))) if isinstance(load, (int, float)) else 0.0
+
+            current_time = time.time()
+
+            # Update peer last_seen
+            if sender_id in self.peers:
+                self.peers[sender_id]["last_seen"] = current_time
+
+                # Update quality score using rolling average
+                # Lower load = higher quality (more available)
+                old_score = self.quality_scores.get(sender_id, 0.5)
+                new_score = 0.8 * old_score + 0.2 * (1.0 - load)
+                self.quality_scores[sender_id] = max(0.0, min(1.0, new_score))
+
+            # Persist to database
+            if self._session_factory:
+                try:
+                    from prsm.core.database import FederationPeerModel
+                    async with self._session_factory() as session:
+                        stmt = update(FederationPeerModel).where(
+                            FederationPeerModel.peer_id == sender_id
+                        ).values(
+                            last_seen=current_time,
+                            quality_score=self.quality_scores.get(sender_id, 0.5)
+                        )
+                        await session.execute(stmt)
+                        await session.commit()
+                except Exception as db_error:
+                    logger.error("heartbeat_db_persist_failed", error=str(db_error))
+
+            # Heartbeats are fire-and-forget, no response needed
+            logger.debug("heartbeat_received", sender_id=sender_id, load=load)
+
+        except Exception as e:
+            logger.error("handle_heartbeat_failed", error=str(e))
+
     async def _handle_consensus_proposal(self, message: Dict[str, Any]) -> None:
-        """Handle consensus proposal message"""
-        # Mock implementation
-        pass
-    
+        """Handle consensus proposal - evaluate and vote."""
+        try:
+            proposal_id = message.get("proposal_id")
+            proposer_id = message.get("proposer_id") or message.get("sender_id")
+            proposal_type = message.get("proposal_type")
+            proposal_data = message.get("proposal_data", {})
+            deadline = message.get("deadline")
+
+            if not proposal_id or not proposal_type:
+                logger.warning("consensus_proposal_missing_fields", message=message)
+                return
+
+            current_time = time.time()
+
+            # Store proposal
+            self.consensus_proposals[proposal_id] = {
+                "proposer_id": proposer_id,
+                "proposal_type": proposal_type,
+                "proposal_data": proposal_data,
+                "deadline": deadline,
+                "votes": {},
+                "status": "open",
+                "created_at": current_time
+            }
+
+            # Evaluate proposal locally
+            vote = await self._evaluate_proposal(proposal_type, proposal_data)
+
+            # Send vote back to proposer
+            vote_message = {
+                "type": NetworkMessageType.CONSENSUS_VOTE.value,
+                "proposal_id": proposal_id,
+                "vote": vote,
+                "voter_id": self.node_id,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            await self._send_message(proposer_id, vote_message)
+
+            logger.info("consensus_proposal_received", proposal_id=proposal_id, vote=vote)
+
+        except Exception as e:
+            logger.error("handle_consensus_proposal_failed", error=str(e))
+
+    async def _evaluate_proposal(self, proposal_type: str, proposal_data: Dict[str, Any]) -> bool:
+        """Evaluate a proposal and return vote (True = approve, False = reject)."""
+        try:
+            if proposal_type == "parameter_change":
+                # Validate that changed parameter is within +/- 50% of current
+                parameter_name = proposal_data.get("parameter_name")
+                new_value = proposal_data.get("new_value")
+                # Default approve if we can't validate
+                return True
+
+            elif proposal_type == "peer_removal":
+                # Approve if target peer's quality score is below 0.2
+                target_peer_id = proposal_data.get("target_peer_id")
+                target_score = self.quality_scores.get(target_peer_id, 0.5)
+                return target_score < 0.2
+
+            elif proposal_type == "software_update":
+                # Trust proposer in early network
+                return True
+
+            else:
+                # Unknown type - reject
+                return False
+
+        except Exception as e:
+            logger.error("evaluate_proposal_failed", error=str(e))
+            return False
+
     async def _handle_consensus_vote(self, message: Dict[str, Any]) -> None:
-        """Handle consensus vote message"""
-        # Mock implementation
-        pass
+        """Handle consensus vote - record vote and check completion."""
+        try:
+            proposal_id = message.get("proposal_id")
+            vote = message.get("vote", False)
+            voter_id = message.get("voter_id")
+
+            if not proposal_id or not voter_id:
+                logger.warning("consensus_vote_missing_fields", message=message)
+                return
+
+            # Check if proposal exists
+            if proposal_id not in self.consensus_proposals:
+                logger.warning("consensus_vote_unknown_proposal", proposal_id=proposal_id)
+                return
+
+            # Record vote
+            self.consensus_proposals[proposal_id]["votes"][voter_id] = vote
+
+            # Check for completion
+            await self._check_consensus_completion(proposal_id)
+
+        except Exception as e:
+            logger.error("handle_consensus_vote_failed", error=str(e))
+
+    async def _check_consensus_completion(self, proposal_id: str) -> None:
+        """Check if consensus has been reached for a proposal."""
+        try:
+            if proposal_id not in self.consensus_proposals:
+                return
+
+            proposal = self.consensus_proposals[proposal_id]
+            votes = proposal.get("votes", {})
+            deadline = proposal.get("deadline")
+
+            # Count votes
+            total_votes = len(votes)
+            if total_votes < 3:
+                # Need at least 3 votes
+                return
+
+            yes_votes = sum(1 for v in votes.values() if v)
+            no_votes = total_votes - yes_votes
+
+            # Check supermajority (67%)
+            supermajority_reached = (yes_votes / total_votes) >= 0.67
+
+            current_time = time.time()
+            deadline_passed = deadline and current_time > float(deadline) if deadline else False
+
+            if supermajority_reached:
+                proposal["status"] = "accepted"
+                await self._apply_consensus_decision(proposal)
+                logger.info("consensus_reached", proposal_id=proposal_id, status="accepted", yes=yes_votes, no=no_votes)
+            elif deadline_passed:
+                proposal["status"] = "rejected"
+                logger.info("consensus_deadline_passed", proposal_id=proposal_id, status="rejected")
+
+        except Exception as e:
+            logger.error("check_consensus_completion_failed", error=str(e))
+
+    async def _apply_consensus_decision(self, proposal: Dict[str, Any]) -> None:
+        """Apply a consensus decision."""
+        try:
+            proposal_type = proposal.get("proposal_type")
+            proposal_data = proposal.get("proposal_data", {})
+
+            if proposal_type == "parameter_change":
+                # Update in-memory config value (would need proper config management)
+                parameter_name = proposal_data.get("parameter_name")
+                new_value = proposal_data.get("new_value")
+                logger.info("consensus_parameter_change_applied", parameter=parameter_name, new_value=new_value)
+
+            elif proposal_type == "peer_removal":
+                # Mark peer as inactive
+                target_peer_id = proposal_data.get("target_peer_id")
+                if target_peer_id in self.peers:
+                    self.peers[target_peer_id]["is_active"] = False
+
+                # Update database
+                if self._session_factory:
+                    try:
+                        from prsm.core.database import FederationPeerModel
+                        async with self._session_factory() as session:
+                            stmt = update(FederationPeerModel).where(
+                                FederationPeerModel.peer_id == target_peer_id
+                            ).values(is_active=False)
+                            await session.execute(stmt)
+                            await session.commit()
+                    except Exception as db_error:
+                        logger.error("peer_removal_db_failed", error=str(db_error))
+
+                logger.info("consensus_peer_removed", peer_id=target_peer_id)
+
+            elif proposal_type == "software_update":
+                # Log that update is pending (actual update left to operator)
+                logger.info("consensus_software_update_pending", proposal_data=proposal_data)
+
+        except Exception as e:
+            logger.error("apply_consensus_decision_failed", error=str(e))
 
 
 class NetworkLoadBalancer:

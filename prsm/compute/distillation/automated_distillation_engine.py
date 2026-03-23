@@ -27,6 +27,8 @@ from pathlib import Path
 import hashlib
 import math
 
+from sqlalchemy import select, update, func
+
 from prsm.core.database_service import get_database_service
 from prsm.core.config import get_settings
 from prsm.economy.marketplace.database_models import MarketplaceResource
@@ -143,7 +145,7 @@ class DistillationResult:
 class AutomatedDistillationEngine:
     """
     Advanced automated knowledge distillation system
-    
+
     Features:
     - Multi-strategy distillation with automatic optimization
     - Intelligent dataset generation and curation
@@ -152,10 +154,13 @@ class AutomatedDistillationEngine:
     - Cost-optimized training with budget constraints
     - Quality assurance with automated validation
     """
-    
-    def __init__(self):
+
+    def __init__(self, database_url: Optional[str] = None):
         self.database_service = get_database_service()
-        
+        self._database_url = database_url
+        self._session_factory = None
+        self._db_initialized = False
+
         # Distillation configuration
         self.supported_strategies = {
             DistillationStrategy.RESPONSE_BASED: self._response_based_distillation,
@@ -165,7 +170,7 @@ class AutomatedDistillationEngine:
             DistillationStrategy.MULTI_TEACHER: self._multi_teacher_distillation,
             DistillationStrategy.SELF_DISTILLATION: self._self_distillation
         }
-        
+
         # Quality thresholds for different metrics
         self.quality_thresholds = {
             "accuracy": 0.85,
@@ -175,7 +180,7 @@ class AutomatedDistillationEngine:
             "inference_speed": 100.0,  # ms
             "model_size": 1000.0  # MB
         }
-        
+
         # Cost optimization parameters
         self.cost_optimization = {
             "max_training_cost": 1000.0,  # USD
@@ -183,14 +188,54 @@ class AutomatedDistillationEngine:
             "efficiency_weight": 0.3,
             "quality_weight": 0.7
         }
-        
+
         # Active distillation jobs
         self.active_jobs = {}
         self.job_queue = []
-        
+
         logger.info("Automated distillation engine initialized",
                    strategies=len(self.supported_strategies),
                    quality_thresholds=self.quality_thresholds)
+
+    async def initialize(self) -> bool:
+        """Initialize database connection for persistence."""
+        if self._db_initialized:
+            return True
+
+        try:
+            # Get database URL from settings if not provided
+            if self._database_url is None:
+                try:
+                    from prsm.core.config import get_settings
+                    settings = get_settings()
+                    self._database_url = getattr(settings, 'database_url', 'sqlite:///~/.prsm/distillation.db')
+                except Exception:
+                    self._database_url = 'sqlite:///~/.prsm/distillation.db'
+
+            # Convert sync URL to async
+            db_url = self._database_url
+            if db_url.startswith("postgresql://"):
+                db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
+            elif db_url.startswith("sqlite:///"):
+                # Expand path for SQLite
+                from pathlib import Path
+                path = db_url.replace("sqlite:///", "")
+                path = str(Path(path).expanduser())
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+                db_url = f"sqlite+aiosqlite:///{path}"
+
+            # Create async engine and session factory
+            from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+            engine = create_async_engine(db_url, echo=False)
+            self._session_factory = async_sessionmaker(engine, expire_on_commit=False)
+            self._db_initialized = True
+
+            logger.info("distillation_database_initialized", database_url=self._database_url.split("://")[0])
+            return True
+
+        except Exception as e:
+            logger.error("distillation_database_init_failed", error=str(e))
+            return False
     
     async def create_distillation_job(
         self,
@@ -685,62 +730,341 @@ class AutomatedDistillationEngine:
     
     # Placeholder methods for database operations
     async def _store_distillation_job(self, job: DistillationJob):
-        """Store distillation job in database"""
-        pass
-    
+        """Store distillation job in database."""
+        if not self._session_factory:
+            await self.initialize()
+
+        try:
+            from prsm.core.database import DistillationJobModel
+
+            async with self._session_factory() as session:
+                record = DistillationJobModel(
+                    job_id=job.job_id,
+                    user_id=job.user_id,
+                    teacher_model_id=job.teacher_models[0].model_id if job.teacher_models else "unknown",
+                    student_model_id=job.student_model.model_id if job.student_model else "unknown",
+                    strategy=job.strategy.value if hasattr(job.strategy, 'value') else str(job.strategy),
+                    status=job.status.value if hasattr(job.status, 'value') else str(job.status),
+                    priority=5,
+                    config={
+                        "training_config": job.training_config,
+                        "quality_thresholds": job.quality_thresholds,
+                        "budget_constraints": job.budget_constraints
+                    },
+                    created_at=datetime.now(timezone.utc).timestamp()
+                )
+                session.add(record)
+                await session.commit()
+                logger.info("distillation_job_stored", job_id=job.job_id)
+        except Exception as e:
+            logger.error("store_distillation_job_failed", error=str(e))
+
     async def _store_distillation_result(self, result: DistillationResult):
-        """Store distillation result in database"""
-        pass
-    
+        """Store distillation result in database."""
+        if not self._session_factory:
+            await self.initialize()
+
+        try:
+            from prsm.core.database import DistillationResultModel, DistillationJobModel
+            from sqlalchemy import update
+
+            current_time = datetime.now(timezone.utc).timestamp()
+
+            async with self._session_factory() as session:
+                # Add result record
+                result_record = DistillationResultModel(
+                    job_id=result.job_id,
+                    teacher_model_id="teacher",
+                    student_model_id=result.student_model_path,
+                    strategy="response_based",
+                    accuracy_score=result.quality_assessment.get("accuracy", 0.0),
+                    compression_ratio=result.efficiency_gains.get("size_reduction", 1.0),
+                    training_loss=result.performance_metrics.get("training_loss", 0.0),
+                    validation_loss=result.performance_metrics.get("validation_loss", 0.0),
+                    tokens_used=int(result.cost_analysis.get("tokens_used", 0)),
+                    ftns_cost=result.cost_analysis.get("ftns_cost", 0.0),
+                    created_at=current_time,
+                    metadata={
+                        "recommendations": result.recommendations,
+                        "deployment_ready": result.deployment_ready
+                    }
+                )
+                session.add(result_record)
+
+                # Update job status
+                stmt = update(DistillationJobModel).where(
+                    DistillationJobModel.job_id == result.job_id
+                ).values(
+                    status="completed",
+                    completed_at=current_time,
+                    result={
+                        "student_model_path": result.student_model_path,
+                        "performance_metrics": result.performance_metrics,
+                        "efficiency_gains": result.efficiency_gains,
+                        "quality_assessment": result.quality_assessment
+                    }
+                )
+                await session.execute(stmt)
+                await session.commit()
+                logger.info("distillation_result_stored", job_id=result.job_id)
+        except Exception as e:
+            logger.error("store_distillation_result_failed", error=str(e))
+
     async def _get_job_from_database(self, job_id: str) -> Optional[Dict[str, Any]]:
-        """Get job data from database"""
-        return None
-    
+        """Get job data from database."""
+        if not self._session_factory:
+            await self.initialize()
+
+        try:
+            from prsm.core.database import DistillationJobModel
+
+            async with self._session_factory() as session:
+                record = await session.get(DistillationJobModel, job_id)
+                if record is None:
+                    return None
+
+                return {
+                    "job_id": record.job_id,
+                    "user_id": record.user_id,
+                    "teacher_model_id": record.teacher_model_id,
+                    "student_model_id": record.student_model_id,
+                    "strategy": record.strategy,
+                    "status": record.status,
+                    "priority": record.priority,
+                    "config": record.config,
+                    "result": record.result,
+                    "error": record.error,
+                    "created_at": record.created_at,
+                    "started_at": record.started_at,
+                    "completed_at": record.completed_at
+                }
+        except Exception as e:
+            logger.error("get_job_from_database_failed", error=str(e))
+            return None
+
     async def _get_user_jobs_from_database(self, user_id: str, limit: int) -> List[Dict[str, Any]]:
-        """Get user's jobs from database"""
-        return []
-    
+        """Get user's jobs from database."""
+        if not self._session_factory:
+            await self.initialize()
+
+        try:
+            from prsm.core.database import DistillationJobModel
+
+            async with self._session_factory() as session:
+                stmt = (
+                    select(DistillationJobModel)
+                    .where(DistillationJobModel.user_id == user_id)
+                    .order_by(DistillationJobModel.created_at.desc())
+                    .limit(limit)
+                )
+                result = await session.execute(stmt)
+                records = result.scalars().all()
+
+                return [
+                    {
+                        "job_id": r.job_id,
+                        "status": r.status,
+                        "strategy": r.strategy,
+                        "created_at": r.created_at,
+                        "completed_at": r.completed_at
+                    }
+                    for r in records
+                ]
+        except Exception as e:
+            logger.error("get_user_jobs_from_database_failed", error=str(e))
+            return []
+
     async def _count_completed_jobs(self) -> int:
-        """Count completed jobs"""
-        return 0
-    
+        """Count completed jobs."""
+        if not self._session_factory:
+            await self.initialize()
+
+        try:
+            from prsm.core.database import DistillationJobModel
+
+            async with self._session_factory() as session:
+                stmt = select(func.count()).select_from(DistillationJobModel).where(
+                    DistillationJobModel.status == 'completed'
+                )
+                result = await session.execute(stmt)
+                return result.scalar() or 0
+        except Exception as e:
+            logger.error("count_completed_jobs_failed", error=str(e))
+            return 0
+
     async def _calculate_success_rate(self) -> float:
-        """Calculate job success rate"""
-        return 0.85
-    
+        """Calculate job success rate."""
+        if not self._session_factory:
+            await self.initialize()
+
+        try:
+            from prsm.core.database import DistillationJobModel
+
+            async with self._session_factory() as session:
+                # Count total jobs
+                total_stmt = select(func.count()).select_from(DistillationJobModel)
+                total_result = await session.execute(total_stmt)
+                total = total_result.scalar() or 0
+
+                if total == 0:
+                    return 0.0
+
+                # Count completed jobs
+                completed_stmt = select(func.count()).select_from(DistillationJobModel).where(
+                    DistillationJobModel.status == 'completed'
+                )
+                completed_result = await session.execute(completed_stmt)
+                completed = completed_result.scalar() or 0
+
+                return completed / total
+        except Exception as e:
+            logger.error("calculate_success_rate_failed", error=str(e))
+            return 0.0
+
     async def _calculate_average_improvement(self) -> float:
-        """Calculate average performance improvement"""
-        return 0.15
-    
+        """Calculate average performance improvement."""
+        if not self._session_factory:
+            await self.initialize()
+
+        try:
+            from prsm.core.database import DistillationResultModel
+
+            async with self._session_factory() as session:
+                # Get mean of (1.0 - training_loss) clamped to [0, 1]
+                stmt = select(func.avg(
+                    func.least(1.0, func.greatest(0.0, 1.0 - DistillationResultModel.training_loss))
+                )).select_from(DistillationResultModel)
+                result = await session.execute(stmt)
+                avg = result.scalar()
+                return float(avg) if avg is not None else 0.0
+        except Exception as e:
+            logger.error("calculate_average_improvement_failed", error=str(e))
+            return 0.0
+
     async def _calculate_cost_savings(self) -> float:
-        """Calculate total cost savings"""
-        return 25000.0
-    
+        """Calculate total cost savings."""
+        if not self._session_factory:
+            await self.initialize()
+
+        try:
+            from prsm.core.database import DistillationResultModel
+
+            async with self._session_factory() as session:
+                # Sum ftns_cost, multiply by savings factor (teacher inference cost minus distillation cost)
+                stmt = select(func.sum(DistillationResultModel.ftns_cost)).select_from(DistillationResultModel)
+                result = await session.execute(stmt)
+                total_cost = result.scalar()
+
+                if total_cost is None or total_cost == 0:
+                    return 0.0
+
+                # Savings factor: assume distillation saves ~2.5x over direct teacher inference
+                savings_factor = 2.5
+                return float(total_cost) * savings_factor
+        except Exception as e:
+            logger.error("calculate_cost_savings_failed", error=str(e))
+            return 0.0
+
     async def _get_popular_strategies(self) -> Dict[str, int]:
-        """Get popular distillation strategies"""
-        return {
-            "response_based": 45,
-            "multi_teacher": 28,
-            "progressive": 15,
-            "feature_based": 12
-        }
-    
+        """Get popular distillation strategies."""
+        if not self._session_factory:
+            await self.initialize()
+
+        try:
+            from prsm.core.database import DistillationJobModel
+
+            async with self._session_factory() as session:
+                stmt = (
+                    select(DistillationJobModel.strategy, func.count().label('count'))
+                    .group_by(DistillationJobModel.strategy)
+                    .order_by(func.count().desc())
+                    .limit(5)
+                )
+                result = await session.execute(stmt)
+                return {row.strategy: row.count for row in result}
+        except Exception as e:
+            logger.error("get_popular_strategies_failed", error=str(e))
+            return {}
+
     async def _get_model_type_distribution(self) -> Dict[str, int]:
-        """Get model type distribution"""
-        return {
-            "language_model": 60,
-            "vision_model": 25,
-            "multimodal": 15
-        }
-    
+        """Get model type distribution."""
+        if not self._session_factory:
+            await self.initialize()
+
+        try:
+            from prsm.core.database import DistillationJobModel
+
+            async with self._session_factory() as session:
+                # Group by teacher_model_id prefix (split on '/' to get provider)
+                stmt = select(DistillationJobModel.teacher_model_id)
+                result = await session.execute(stmt)
+                records = result.scalars().all()
+
+                distribution: Dict[str, int] = {}
+                for model_id in records:
+                    # Extract provider from model_id (e.g., "openai/gpt-4" -> "openai")
+                    if "/" in model_id:
+                        provider = model_id.split("/")[0]
+                    else:
+                        provider = "unknown"
+                    distribution[provider] = distribution.get(provider, 0) + 1
+
+                return distribution
+        except Exception as e:
+            logger.error("get_model_type_distribution_failed", error=str(e))
+            return {}
+
     # Additional helper methods (simplified implementations)
     async def _prepare_training_data(self, job: DistillationJob):
-        """Prepare training data for distillation"""
-        pass
-    
-    async def _evaluate_teacher_models(self, job: DistillationJob):
-        """Evaluate teacher model performance"""
-        pass
+        """Prepare training data for distillation."""
+        try:
+            # Look up teacher model from model_registry or IPFS via CID in job config
+            # Create dataset config dict for the backend's train() call
+            config = {
+                "teacher_model_id": job.teacher_models[0].model_id if job.teacher_models else None,
+                "student_model_id": job.student_model.model_id if job.student_model else None,
+                "max_samples": job.training_config.get("max_samples", 10000),
+                "batch_size": job.training_config.get("batch_size", 32),
+                "dataset_id": job.dataset.dataset_id if job.dataset else None
+            }
+            return config
+        except Exception as e:
+            logger.error("prepare_training_data_failed", error=str(e))
+            return {}
+
+    async def _evaluate_teacher_models(self, job: DistillationJob) -> List[str]:
+        """Evaluate teacher model performance."""
+        try:
+            if not self._session_factory:
+                await self.initialize()
+
+            from prsm.core.database import FederationPeerModel
+
+            async with self._session_factory() as session:
+                # Fetch quality scores from federation_peers for nodes with matching model capabilities
+                stmt = select(FederationPeerModel).where(
+                    FederationPeerModel.is_active == True
+                ).order_by(FederationPeerModel.quality_score.desc())
+                result = await session.execute(stmt)
+                peers = result.scalars().all()
+
+                # Filter peers that have the teacher model
+                teacher_model_id = job.teacher_models[0].model_id if job.teacher_models else None
+                qualified_peers = []
+                for peer in peers:
+                    capabilities = peer.capabilities or {}
+                    if capabilities.get("model_id") == teacher_model_id:
+                        qualified_peers.append(peer.peer_id)
+
+                if not qualified_peers:
+                    # Self-serve if no peers found
+                    return [teacher_model_id] if teacher_model_id else []
+
+                return qualified_peers
+        except Exception as e:
+            logger.error("evaluate_teacher_models_failed", error=str(e))
+            # Return teacher model ID as fallback
+            return [job.teacher_models[0].model_id] if job.teacher_models else []
     
     async def _validate_student_model(self, job: DistillationJob, training_results: Dict[str, Any]) -> Dict[str, Any]:
         """Validate trained student model"""
@@ -757,16 +1081,90 @@ class AutomatedDistillationEngine:
         }
     
     async def _prepare_deployment(self, job: DistillationJob, optimization_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Prepare model for deployment"""
-        return {"model_path": f"/models/deployed/{job.job_id}"}
-    
+        """Prepare model for deployment."""
+        try:
+            # Determine checkpoint path
+            checkpoint_path = Path.home() / ".prsm" / "distillation" / job.job_id / "final_checkpoint"
+
+            # Verify checkpoint exists
+            if not checkpoint_path.exists():
+                # Try alternative location
+                checkpoint_path = Path(f"/models/distillation/{job.job_id}/final_checkpoint")
+
+            if not checkpoint_path.exists():
+                raise FileNotFoundError(f"No checkpoint for job {job.job_id}")
+
+            deployment_package = {
+                "model_path": str(checkpoint_path),
+                "job_id": job.job_id,
+                "deployed_at": datetime.now(timezone.utc).timestamp(),
+                "optimization_results": optimization_results
+            }
+
+            logger.info("deployment_prepared", job_id=job.job_id, model_path=str(checkpoint_path))
+            return deployment_package
+
+        except FileNotFoundError as e:
+            logger.error("deployment_checkpoint_missing", job_id=job.job_id, error=str(e))
+            raise
+        except Exception as e:
+            logger.error("prepare_deployment_failed", error=str(e))
+            return {"model_path": f"/models/deployed/{job.job_id}", "error": str(e)}
+
     async def _setup_monitoring(self, job: DistillationJob, deployment_package: Dict[str, Any]):
-        """Setup monitoring for deployed model"""
-        pass
-    
-    async def _update_job_status(self, job_id: str, status: str):
-        """Update job status in database"""
-        pass
+        """Setup monitoring for deployed model."""
+        try:
+            # Write monitoring config
+            monitoring_dir = Path.home() / ".prsm" / "distillation" / job.job_id
+            monitoring_dir.mkdir(parents=True, exist_ok=True)
+
+            monitoring_config = {
+                "job_id": job.job_id,
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "metrics_interval_secs": 60,
+                "model_path": deployment_package.get("model_path"),
+                "alert_thresholds": {
+                    "latency_ms": 1000,
+                    "error_rate": 0.05,
+                    "memory_mb": 4096
+                }
+            }
+
+            config_path = monitoring_dir / "monitoring.json"
+            with open(config_path, "w") as f:
+                json.dump(monitoring_config, f, indent=2)
+
+            logger.info("monitoring_configured", job_id=job.job_id, config_path=str(config_path))
+
+        except Exception as e:
+            logger.error("setup_monitoring_failed", error=str(e))
+
+    async def _update_job_status(self, job_id: str, status: str, error: Optional[str] = None):
+        """Update job status in database."""
+        if not self._session_factory:
+            await self.initialize()
+
+        try:
+            from prsm.core.database import DistillationJobModel
+
+            async with self._session_factory() as session:
+                stmt = update(DistillationJobModel).where(
+                    DistillationJobModel.job_id == job_id
+                ).values(
+                    status=status,
+                    error=error
+                )
+                if status == "running":
+                    stmt = stmt.values(started_at=datetime.now(timezone.utc).timestamp())
+                elif status in ("completed", "failed"):
+                    stmt = stmt.values(completed_at=datetime.now(timezone.utc).timestamp())
+
+                await session.execute(stmt)
+                await session.commit()
+                logger.info("job_status_updated", job_id=job_id, status=status)
+
+        except Exception as e:
+            logger.error("update_job_status_failed", error=str(e))
     
     async def _handle_job_failure(self, job_id: str, error: str):
         """Handle job failure"""
