@@ -430,6 +430,99 @@ class PRSMSettings(BaseSettings):
             "announce_interval_secs": self.bt_announce_interval_secs,
         }
 
+
+class IngestionSettings(BaseSettings):
+    """
+    Configuration for data ingestion from public sources.
+
+    Controls rate limiting, quality thresholds, and storage settings
+    for the PublicSourcePorter ingestion pipeline.
+    """
+
+    # Enable/disable ingestion
+    enabled: bool = Field(default=True, env="PRSM_INGESTION_ENABLED")
+
+    # Rate limiting (requests per second)
+    arxiv_rate_limit: float = Field(default=3.0, env="PRSM_ARXIV_RATE_LIMIT")
+    pubmed_rate_limit: float = Field(default=3.0, env="PRSM_PUBMED_RATE_LIMIT")
+    github_rate_limit: float = Field(default=60.0, env="PRSM_GITHUB_RATE_LIMIT")  # per hour for unauthenticated
+    wikipedia_rate_limit: float = Field(default=10.0, env="PRSM_WIKIPEDIA_RATE_LIMIT")
+
+    # API keys for higher rate limits
+    pubmed_api_key: Optional[str] = Field(default=None, env="NCBI_API_KEY")
+    github_token: Optional[str] = Field(default=None, env="GITHUB_TOKEN")
+
+    # Content limits
+    max_content_size_mb: int = Field(default=100, env="PRSM_MAX_CONTENT_SIZE_MB")
+    max_items_per_batch: int = Field(default=50, env="PRSM_MAX_ITEMS_PER_BATCH")
+
+    # Quality thresholds
+    quality_threshold: float = Field(default=0.7, env="PRSM_QUALITY_THRESHOLD")
+    min_word_count: int = Field(default=50, env="PRSM_MIN_WORD_COUNT")
+    max_word_count: int = Field(default=1000000, env="PRSM_MAX_WORD_COUNT")
+
+    # Storage settings
+    auto_pin_to_ipfs: bool = Field(default=True, env="PRSM_AUTO_PIN_IPFS")
+    store_provenance: bool = Field(default=True, env="PRSM_STORE_PROVENANCE")
+
+    # Batch processing
+    batch_size: int = Field(default=50, env="PRSM_INGESTION_BATCH_SIZE")
+    max_concurrent_fetches: int = Field(default=5, env="PRSM_MAX_CONCURRENT_FETCHES")
+
+    # Retry settings
+    max_retries: int = Field(default=3, env="PRSM_INGESTION_MAX_RETRIES")
+    retry_delay_seconds: float = Field(default=1.0, env="PRSM_INGESTION_RETRY_DELAY")
+
+    # Timeout settings
+    fetch_timeout_seconds: float = Field(default=30.0, env="PRSM_FETCH_TIMEOUT")
+    total_ingestion_timeout_seconds: float = Field(default=300.0, env="PRSM_TOTAL_INGESTION_TIMEOUT")
+
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "case_sensitive": False,
+        "extra": "allow",
+        "env_prefix": ""
+    }
+
+    @property
+    def ingestion_config(self) -> Dict[str, Any]:
+        """Get ingestion configuration as a dictionary."""
+        return {
+            "enabled": self.enabled,
+            "rate_limits": {
+                "arxiv": self.arxiv_rate_limit,
+                "pubmed": self.pubmed_rate_limit,
+                "github": self.github_rate_limit,
+                "wikipedia": self.wikipedia_rate_limit,
+            },
+            "api_keys": {
+                "pubmed": self.pubmed_api_key,
+                "github": self.github_token,
+            },
+            "content_limits": {
+                "max_size_mb": self.max_content_size_mb,
+                "max_items_per_batch": self.max_items_per_batch,
+            },
+            "quality": {
+                "threshold": self.quality_threshold,
+                "min_word_count": self.min_word_count,
+                "max_word_count": self.max_word_count,
+            },
+            "storage": {
+                "auto_pin_to_ipfs": self.auto_pin_to_ipfs,
+                "store_provenance": self.store_provenance,
+            },
+            "processing": {
+                "batch_size": self.batch_size,
+                "max_concurrent_fetches": self.max_concurrent_fetches,
+                "max_retries": self.max_retries,
+                "retry_delay_seconds": self.retry_delay_seconds,
+                "fetch_timeout_seconds": self.fetch_timeout_seconds,
+                "total_timeout_seconds": self.total_ingestion_timeout_seconds,
+            },
+        }
+
     @property
     def is_development(self) -> bool:
         return self.environment == Environment.DEVELOPMENT
@@ -516,3 +609,15 @@ try:
     settings = get_settings()
 except Exception:
     settings = None
+
+
+@lru_cache()
+def get_ingestion_settings() -> IngestionSettings:
+    """
+    Get cached ingestion settings instance.
+    """
+    try:
+        return IngestionSettings()
+    except Exception as e:
+        print(f"Warning: Failed to load ingestion settings: {e}")
+        return IngestionSettings()

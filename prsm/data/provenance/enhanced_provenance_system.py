@@ -17,9 +17,14 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from uuid import uuid4
+from uuid import uuid4, UUID
+from abc import ABC, abstractmethod
+from pathlib import Path
+import asyncio
 import hashlib
 import json
+import gzip
+import pickle
 
 logger = structlog.get_logger(__name__)
 
@@ -73,6 +78,878 @@ class ReasoningProvenance:
     confidence_score: float
     total_steps: int
     verification_chain: List[str] = field(default_factory=list)
+
+
+# =============================================================================
+# Persistence Backend Classes
+# =============================================================================
+
+class ProvenancePersistenceBackend(ABC):
+    """
+    Abstract base class for provenance persistence backends.
+
+    Implementations can use PostgreSQL, SQLite, or other storage systems.
+    """
+
+    @abstractmethod
+    async def initialize(self) -> bool:
+        """Initialize the backend (create tables, verify connection)."""
+        pass
+
+    @abstractmethod
+    async def save_record(self, record: ProvenanceRecord) -> bool:
+        """Save a provenance record to persistent storage."""
+        pass
+
+    @abstractmethod
+    async def load_record(self, record_id: str) -> Optional[ProvenanceRecord]:
+        """Load a provenance record by ID."""
+        pass
+
+    @abstractmethod
+    async def list_records(
+        self,
+        filters: Optional[Dict[str, Any]] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[ProvenanceRecord]:
+        """List provenance records with optional filters."""
+        pass
+
+    @abstractmethod
+    async def delete_record(self, record_id: str) -> bool:
+        """Delete (soft delete) a provenance record."""
+        pass
+
+    @abstractmethod
+    async def save_reasoning_chain(self, chain: ReasoningProvenance) -> bool:
+        """Save a reasoning chain to persistent storage."""
+        pass
+
+    @abstractmethod
+    async def load_reasoning_chain(self, chain_id: str) -> Optional[ReasoningProvenance]:
+        """Load a reasoning chain by ID."""
+        pass
+
+    @abstractmethod
+    async def list_chains(
+        self,
+        node_id: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[ReasoningProvenance]:
+        """List reasoning chains, optionally filtered by node."""
+        pass
+
+    @abstractmethod
+    async def close(self) -> None:
+        """Close database connections."""
+        pass
+
+
+class PostgreSQLProvenanceBackend(ProvenancePersistenceBackend):
+    """
+    PostgreSQL backend for provenance persistence.
+
+    Uses the existing PRSM database connection pool.
+    """
+
+    def __init__(self, db_url: Optional[str] = None):
+        self.db_url = db_url
+        self._engine = None
+        self._session_factory = None
+
+    async def initialize(self) -> bool:
+        """Initialize PostgreSQL connection."""
+        try:
+            from prsm.core.database import get_async_engine, async_sessionmaker
+
+            self._engine = await get_async_engine()
+            if self._engine is None:
+                logger.error("Failed to get database engine")
+                return False
+
+            # Create session factory
+            from sqlalchemy.ext.asyncio import async_sessionmaker
+            self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
+
+            logger.info("PostgreSQL provenance backend initialized")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize PostgreSQL backend: {e}")
+            return False
+
+    async def save_record(self, record: ProvenanceRecord) -> bool:
+        """Save a provenance record to PostgreSQL."""
+        if not self._session_factory:
+            return False
+
+        try:
+            from sqlalchemy import text
+
+            async with self._session_factory() as session:
+                # Check if record exists
+                existing = await session.execute(
+                    text("SELECT record_id FROM provenance_records WHERE record_id = :record_id"),
+                    {"record_id": record.record_id}
+                )
+                if existing.fetchone():
+                    # Update existing record
+                    await session.execute(
+                        text("""
+                            UPDATE provenance_records SET
+                                provenance_type = :provenance_type,
+                                source_entity = :source_entity,
+                                target_entity = :target_entity,
+                                operation = :operation,
+                                inputs = :inputs,
+                                outputs = :outputs,
+                                metadata = :metadata,
+                                trust_level = :trust_level,
+                                verification_status = :verification_status,
+                                content_hash = :content_hash,
+                                updated_at = NOW()
+                            WHERE record_id = :record_id
+                        """),
+                        self._record_to_db(record)
+                    )
+                else:
+                    # Insert new record
+                    await session.execute(
+                        text("""
+                            INSERT INTO provenance_records (
+                                record_id, provenance_type, source_entity, target_entity,
+                                operation, inputs, outputs, metadata, trust_level,
+                                verification_status, content_hash, timestamp, active
+                            ) VALUES (
+                                :record_id, :provenance_type, :source_entity, :target_entity,
+                                :operation, :inputs, :outputs, :metadata, :trust_level,
+                                :verification_status, :content_hash, :timestamp, TRUE
+                            )
+                        """),
+                        self._record_to_db(record)
+                    )
+                await session.commit()
+
+            logger.debug("Saved provenance record", record_id=record.record_id)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save provenance record: {e}")
+            return False
+
+    async def load_record(self, record_id: str) -> Optional[ProvenanceRecord]:
+        """Load a provenance record by ID."""
+        if not self._session_factory:
+            return None
+
+        try:
+            from sqlalchemy import text
+
+            async with self._session_factory() as session:
+                result = await session.execute(
+                    text("SELECT * FROM provenance_records WHERE record_id = :record_id AND active = TRUE"),
+                    {"record_id": record_id}
+                )
+                row = result.fetchone()
+                if row:
+                    return self._db_to_record(row)
+                return None
+        except Exception as e:
+            logger.error(f"Failed to load provenance record: {e}")
+            return None
+
+    async def list_records(
+        self,
+        filters: Optional[Dict[str, Any]] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[ProvenanceRecord]:
+        """List provenance records with optional filters."""
+        if not self._session_factory:
+            return []
+
+        try:
+            from sqlalchemy import text
+
+            query = "SELECT * FROM provenance_records WHERE active = TRUE"
+            params = {"limit": limit, "offset": offset}
+
+            if filters:
+                if "node_id" in filters:
+                    query += " AND source_entity = :node_id"
+                    params["node_id"] = filters["node_id"]
+                if "trust_level" in filters:
+                    query += " AND trust_level = :trust_level"
+                    params["trust_level"] = filters["trust_level"]
+                if "provenance_type" in filters:
+                    query += " AND provenance_type = :provenance_type"
+                    params["provenance_type"] = filters["provenance_type"]
+
+            query += " ORDER BY timestamp DESC LIMIT :limit OFFSET :offset"
+
+            async with self._session_factory() as session:
+                result = await session.execute(text(query), params)
+                rows = result.fetchall()
+                return [self._db_to_record(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to list provenance records: {e}")
+            return []
+
+    async def delete_record(self, record_id: str) -> bool:
+        """Soft delete a provenance record."""
+        if not self._session_factory:
+            return False
+
+        try:
+            from sqlalchemy import text
+
+            async with self._session_factory() as session:
+                await session.execute(
+                    text("UPDATE provenance_records SET active = FALSE WHERE record_id = :record_id"),
+                    {"record_id": record_id}
+                )
+                await session.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete provenance record: {e}")
+            return False
+
+    async def save_reasoning_chain(self, chain: ReasoningProvenance) -> bool:
+        """Save a reasoning chain to PostgreSQL."""
+        if not self._session_factory:
+            return False
+
+        try:
+            from sqlalchemy import text
+
+            async with self._session_factory() as session:
+                # Get node_id from first step if available
+                node_id = chain.reasoning_steps[0].source_entity if chain.reasoning_steps else "unknown"
+
+                # Check if chain exists
+                existing = await session.execute(
+                    text("SELECT chain_id FROM reasoning_chains WHERE chain_id = :chain_id"),
+                    {"chain_id": chain.reasoning_id}
+                )
+
+                chain_data = {
+                    "chain_id": chain.reasoning_id,
+                    "node_id": node_id,
+                    "query": chain.query,
+                    "final_conclusion": chain.final_conclusion,
+                    "confidence_score": chain.confidence_score,
+                    "total_steps": chain.total_steps,
+                    "step_count": len(chain.reasoning_steps),
+                    "finalized": bool(chain.final_conclusion),
+                    "metadata": json.dumps({
+                        "data_sources_count": len(chain.data_sources),
+                        "model_calls_count": len(chain.model_calls),
+                        "verification_chain": chain.verification_chain,
+                    }),
+                }
+
+                if existing.fetchone():
+                    await session.execute(
+                        text("""
+                            UPDATE reasoning_chains SET
+                                node_id = :node_id,
+                                query = :query,
+                                final_conclusion = :final_conclusion,
+                                confidence_score = :confidence_score,
+                                total_steps = :total_steps,
+                                step_count = :step_count,
+                                finalized = :finalized,
+                                metadata = :metadata,
+                                finalized_at = CASE WHEN :finalized THEN NOW() ELSE finalized_at END
+                            WHERE chain_id = :chain_id
+                        """),
+                        chain_data
+                    )
+                else:
+                    await session.execute(
+                        text("""
+                            INSERT INTO reasoning_chains (
+                                chain_id, node_id, query, final_conclusion,
+                                confidence_score, total_steps, step_count, finalized, metadata
+                            ) VALUES (
+                                :chain_id, :node_id, :query, :final_conclusion,
+                                :confidence_score, :total_steps, :step_count, :finalized, :metadata
+                            )
+                        """),
+                        chain_data
+                    )
+                await session.commit()
+
+            logger.debug("Saved reasoning chain", chain_id=chain.reasoning_id)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save reasoning chain: {e}")
+            return False
+
+    async def load_reasoning_chain(self, chain_id: str) -> Optional[ReasoningProvenance]:
+        """Load a reasoning chain by ID."""
+        if not self._session_factory:
+            return None
+
+        try:
+            from sqlalchemy import text
+
+            async with self._session_factory() as session:
+                result = await session.execute(
+                    text("SELECT * FROM reasoning_chains WHERE chain_id = :chain_id"),
+                    {"chain_id": chain_id}
+                )
+                row = result.fetchone()
+                if not row:
+                    return None
+
+                # Load related records
+                records_result = await session.execute(
+                    text("""
+                        SELECT * FROM provenance_records
+                        WHERE target_entity = :chain_id AND active = TRUE
+                        ORDER BY timestamp
+                    """),
+                    {"chain_id": chain_id}
+                )
+                records = [self._db_to_record(r) for r in records_result.fetchall()]
+
+                metadata = json.loads(row.metadata) if hasattr(row, 'metadata') and row.metadata else {}
+
+                return ReasoningProvenance(
+                    reasoning_id=row.chain_id,
+                    query=row.query,
+                    reasoning_steps=records,
+                    data_sources=[r for r in records if r.provenance_type == ProvenanceType.DATA_SOURCE],
+                    model_calls=[r for r in records if r.provenance_type == ProvenanceType.MODEL_PREDICTION],
+                    final_conclusion=row.final_conclusion or "",
+                    confidence_score=float(row.confidence_score) if row.confidence_score else 0.0,
+                    total_steps=row.total_steps or 0,
+                    verification_chain=metadata.get("verification_chain", []),
+                )
+        except Exception as e:
+            logger.error(f"Failed to load reasoning chain: {e}")
+            return None
+
+    async def list_chains(
+        self,
+        node_id: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[ReasoningProvenance]:
+        """List reasoning chains."""
+        if not self._session_factory:
+            return []
+
+        try:
+            from sqlalchemy import text
+
+            query = "SELECT chain_id FROM reasoning_chains"
+            params = {"limit": limit, "offset": offset}
+
+            if node_id:
+                query += " WHERE node_id = :node_id"
+                params["node_id"] = node_id
+
+            query += " ORDER BY created_at DESC LIMIT :limit OFFSET :offset"
+
+            async with self._session_factory() as session:
+                result = await session.execute(text(query), params)
+                chain_ids = [row.chain_id for row in result.fetchall()]
+
+                chains = []
+                for chain_id in chain_ids:
+                    chain = await self.load_reasoning_chain(chain_id)
+                    if chain:
+                        chains.append(chain)
+                return chains
+        except Exception as e:
+            logger.error(f"Failed to list reasoning chains: {e}")
+            return []
+
+    async def close(self) -> None:
+        """Close database connections."""
+        # Engine is managed by prsm.core.database, no cleanup needed
+        pass
+
+    def _record_to_db(self, record: ProvenanceRecord) -> Dict[str, Any]:
+        """Convert ProvenanceRecord to database dict."""
+        return {
+            "record_id": record.record_id,
+            "provenance_type": record.provenance_type.value,
+            "source_entity": record.source_entity,
+            "target_entity": record.target_entity,
+            "operation": record.operation,
+            "inputs": json.dumps(record.inputs),
+            "outputs": json.dumps(record.outputs),
+            "metadata": json.dumps(record.metadata),
+            "trust_level": record.trust_level.value,
+            "verification_status": record.verification_status,
+            "content_hash": record.content_hash,
+            "timestamp": record.timestamp,
+        }
+
+    def _db_to_record(self, row) -> ProvenanceRecord:
+        """Convert database row to ProvenanceRecord."""
+        return ProvenanceRecord(
+            record_id=row.record_id,
+            provenance_type=ProvenanceType(row.provenance_type),
+            timestamp=row.timestamp if hasattr(row, 'timestamp') else datetime.now(timezone.utc),
+            source_entity=row.source_entity,
+            target_entity=row.target_entity,
+            operation=row.operation,
+            inputs=json.loads(row.inputs) if row.inputs else [],
+            outputs=json.loads(row.outputs) if row.outputs else [],
+            metadata=json.loads(row.metadata) if row.metadata else {},
+            trust_level=TrustLevel(row.trust_level),
+            verification_status=row.verification_status if hasattr(row, 'verification_status') else False,
+            content_hash=row.content_hash or "",
+        )
+
+
+class SQLiteProvenanceBackend(ProvenancePersistenceBackend):
+    """
+    SQLite backend for provenance persistence.
+
+    Lightweight fallback for single-node / development use.
+    Uses aiosqlite for async operations.
+    """
+
+    def __init__(self, db_path: str = "~/.prsm/provenance.db"):
+        self.db_path = Path(db_path).expanduser()
+        self._connection = None
+
+    async def initialize(self) -> bool:
+        """Initialize SQLite database."""
+        try:
+            import aiosqlite
+
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._connection = await aiosqlite.connect(self.db_path)
+
+            # Create tables
+            await self._connection.executescript("""
+                CREATE TABLE IF NOT EXISTS provenance_records (
+                    record_id TEXT PRIMARY KEY,
+                    provenance_type TEXT NOT NULL,
+                    source_entity TEXT NOT NULL,
+                    target_entity TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    inputs TEXT,
+                    outputs TEXT,
+                    metadata TEXT,
+                    trust_level TEXT NOT NULL,
+                    verification_status INTEGER DEFAULT 0,
+                    content_hash TEXT,
+                    timestamp TEXT NOT NULL,
+                    active INTEGER DEFAULT 1
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_prov_source ON provenance_records(source_entity);
+                CREATE INDEX IF NOT EXISTS idx_prov_target ON provenance_records(target_entity);
+                CREATE INDEX IF NOT EXISTS idx_prov_trust ON provenance_records(trust_level);
+                CREATE INDEX IF NOT EXISTS idx_prov_timestamp ON provenance_records(timestamp);
+
+                CREATE TABLE IF NOT EXISTS reasoning_chains (
+                    chain_id TEXT PRIMARY KEY,
+                    node_id TEXT,
+                    query TEXT NOT NULL,
+                    final_conclusion TEXT,
+                    confidence_score REAL,
+                    total_steps INTEGER,
+                    step_count INTEGER,
+                    finalized INTEGER DEFAULT 0,
+                    metadata TEXT,
+                    created_at TEXT NOT NULL,
+                    finalized_at TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_chain_node ON reasoning_chains(node_id);
+            """)
+            await self._connection.commit()
+
+            logger.info("SQLite provenance backend initialized", path=str(self.db_path))
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize SQLite backend: {e}")
+            return False
+
+    async def save_record(self, record: ProvenanceRecord) -> bool:
+        """Save a provenance record to SQLite."""
+        if not self._connection:
+            return False
+
+        try:
+            await self._connection.execute("""
+                INSERT OR REPLACE INTO provenance_records (
+                    record_id, provenance_type, source_entity, target_entity,
+                    operation, inputs, outputs, metadata, trust_level,
+                    verification_status, content_hash, timestamp, active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """, (
+                record.record_id,
+                record.provenance_type.value,
+                record.source_entity,
+                record.target_entity,
+                record.operation,
+                json.dumps(record.inputs),
+                json.dumps(record.outputs),
+                json.dumps(record.metadata),
+                record.trust_level.value,
+                int(record.verification_status),
+                record.content_hash,
+                record.timestamp.isoformat(),
+            ))
+            await self._connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save provenance record to SQLite: {e}")
+            return False
+
+    async def load_record(self, record_id: str) -> Optional[ProvenanceRecord]:
+        """Load a provenance record by ID."""
+        if not self._connection:
+            return None
+
+        try:
+            cursor = await self._connection.execute(
+                "SELECT * FROM provenance_records WHERE record_id = ? AND active = 1",
+                (record_id,)
+            )
+            row = await cursor.fetchone()
+            if row:
+                return self._row_to_record(row)
+            return None
+        except Exception as e:
+            logger.error(f"Failed to load provenance record from SQLite: {e}")
+            return None
+
+    async def list_records(
+        self,
+        filters: Optional[Dict[str, Any]] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[ProvenanceRecord]:
+        """List provenance records."""
+        if not self._connection:
+            return []
+
+        try:
+            query = "SELECT * FROM provenance_records WHERE active = 1"
+            params = []
+
+            if filters:
+                if "node_id" in filters:
+                    query += " AND source_entity = ?"
+                    params.append(filters["node_id"])
+                if "trust_level" in filters:
+                    query += " AND trust_level = ?"
+                    params.append(filters["trust_level"])
+
+            query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+
+            cursor = await self._connection.execute(query, params)
+            rows = await cursor.fetchall()
+            return [self._row_to_record(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Failed to list provenance records from SQLite: {e}")
+            return []
+
+    async def delete_record(self, record_id: str) -> bool:
+        """Soft delete a provenance record."""
+        if not self._connection:
+            return False
+
+        try:
+            await self._connection.execute(
+                "UPDATE provenance_records SET active = 0 WHERE record_id = ?",
+                (record_id,)
+            )
+            await self._connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete provenance record from SQLite: {e}")
+            return False
+
+    async def save_reasoning_chain(self, chain: ReasoningProvenance) -> bool:
+        """Save a reasoning chain to SQLite."""
+        if not self._connection:
+            return False
+
+        try:
+            node_id = chain.reasoning_steps[0].source_entity if chain.reasoning_steps else "unknown"
+
+            await self._connection.execute("""
+                INSERT OR REPLACE INTO reasoning_chains (
+                    chain_id, node_id, query, final_conclusion,
+                    confidence_score, total_steps, step_count, finalized, metadata, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """, (
+                chain.reasoning_id,
+                node_id,
+                chain.query,
+                chain.final_conclusion,
+                chain.confidence_score,
+                chain.total_steps,
+                len(chain.reasoning_steps),
+                int(bool(chain.final_conclusion)),
+                json.dumps({
+                    "verification_chain": chain.verification_chain,
+                    "data_sources_count": len(chain.data_sources),
+                    "model_calls_count": len(chain.model_calls),
+                }),
+            ))
+            await self._connection.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save reasoning chain to SQLite: {e}")
+            return False
+
+    async def load_reasoning_chain(self, chain_id: str) -> Optional[ReasoningProvenance]:
+        """Load a reasoning chain by ID."""
+        if not self._connection:
+            return None
+
+        try:
+            cursor = await self._connection.execute(
+                "SELECT * FROM reasoning_chains WHERE chain_id = ?",
+                (chain_id,)
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return None
+
+            # Load related records
+            records_cursor = await self._connection.execute(
+                "SELECT * FROM provenance_records WHERE target_entity = ? AND active = 1 ORDER BY timestamp",
+                (chain_id,)
+            )
+            records = [self._row_to_record(r) for r in await records_cursor.fetchall()]
+
+            metadata = json.loads(row[8]) if row[8] else {}
+
+            return ReasoningProvenance(
+                reasoning_id=row[0],
+                query=row[2],
+                reasoning_steps=records,
+                data_sources=[r for r in records if r.provenance_type == ProvenanceType.DATA_SOURCE],
+                model_calls=[r for r in records if r.provenance_type == ProvenanceType.MODEL_PREDICTION],
+                final_conclusion=row[3] or "",
+                confidence_score=row[4] or 0.0,
+                total_steps=row[5] or 0,
+                verification_chain=metadata.get("verification_chain", []),
+            )
+        except Exception as e:
+            logger.error(f"Failed to load reasoning chain from SQLite: {e}")
+            return None
+
+    async def list_chains(
+        self,
+        node_id: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[ReasoningProvenance]:
+        """List reasoning chains."""
+        if not self._connection:
+            return []
+
+        try:
+            if node_id:
+                cursor = await self._connection.execute(
+                    "SELECT chain_id FROM reasoning_chains WHERE node_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                    (node_id, limit, offset)
+                )
+            else:
+                cursor = await self._connection.execute(
+                    "SELECT chain_id FROM reasoning_chains ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                    (limit, offset)
+                )
+
+            chain_ids = [row[0] for row in await cursor.fetchall()]
+            chains = []
+            for chain_id in chain_ids:
+                chain = await self.load_reasoning_chain(chain_id)
+                if chain:
+                    chains.append(chain)
+            return chains
+        except Exception as e:
+            logger.error(f"Failed to list reasoning chains from SQLite: {e}")
+            return []
+
+    async def close(self) -> None:
+        """Close SQLite connection."""
+        if self._connection:
+            await self._connection.close()
+            self._connection = None
+
+    def _row_to_record(self, row) -> ProvenanceRecord:
+        """Convert SQLite row to ProvenanceRecord."""
+        return ProvenanceRecord(
+            record_id=row[0],
+            provenance_type=ProvenanceType(row[1]),
+            timestamp=datetime.fromisoformat(row[11]) if row[11] else datetime.now(timezone.utc),
+            source_entity=row[2],
+            target_entity=row[3],
+            operation=row[4],
+            inputs=json.loads(row[5]) if row[5] else [],
+            outputs=json.loads(row[6]) if row[6] else [],
+            metadata=json.loads(row[7]) if row[7] else {},
+            trust_level=TrustLevel(row[8]),
+            verification_status=bool(row[9]),
+            content_hash=row[10] or "",
+        )
+
+
+class ProvenanceGossipBridge:
+    """
+    Connects EnhancedProvenanceSystem to GossipProtocol for cross-node verification.
+
+    Enables nodes to broadcast provenance records and verify each other's chains.
+    """
+
+    def __init__(
+        self,
+        provenance_system: 'EnhancedProvenanceSystem',
+        gossip: Any,
+        node_id: str = "unknown",
+    ):
+        self.provenance = provenance_system
+        self.gossip = gossip
+        self.node_id = node_id
+        self._running = False
+        self._verification_queue: List[Dict[str, Any]] = []
+
+    async def start(self) -> None:
+        """Start listening for provenance gossip messages."""
+        if self._running:
+            return
+
+        # Subscribe to provenance message types
+        self.gossip.subscribe("provenance_broadcast", self._on_provenance_broadcast)
+        self.gossip.subscribe("provenance_verify", self._on_provenance_verify)
+        self.gossip.subscribe("provenance_verified", self._on_provenance_verified)
+
+        self._running = True
+        logger.info("Provenance gossip bridge started", node_id=self.node_id)
+
+    async def stop(self) -> None:
+        """Stop the gossip bridge."""
+        self._running = False
+        logger.info("Provenance gossip bridge stopped")
+
+    async def broadcast_record(self, record: ProvenanceRecord) -> None:
+        """Broadcast a provenance record to the network."""
+        if not self._running:
+            return
+
+        try:
+            payload = {
+                "record_id": record.record_id,
+                "provenance_type": record.provenance_type.value,
+                "source_entity": record.source_entity,
+                "target_entity": record.target_entity,
+                "operation": record.operation,
+                "content_hash": record.content_hash,
+                "trust_level": record.trust_level.value,
+                "timestamp": record.timestamp.isoformat(),
+                "broadcaster_node_id": self.node_id,
+            }
+
+            await self.gossip.publish("provenance_broadcast", payload)
+
+            logger.debug("Broadcast provenance record", record_id=record.record_id)
+        except Exception as e:
+            logger.error(f"Failed to broadcast provenance record: {e}")
+
+    async def _on_provenance_broadcast(
+        self,
+        subtype: str,
+        data: Dict[str, Any],
+        origin: str
+    ) -> None:
+        """Handle incoming provenance broadcast from another node."""
+        try:
+            # Add to verification queue
+            self._verification_queue.append({
+                "record_data": data,
+                "origin": origin,
+                "received_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+            logger.debug(
+                "Received provenance broadcast",
+                record_id=data.get("record_id"),
+                origin=origin
+            )
+        except Exception as e:
+            logger.error(f"Error handling provenance broadcast: {e}")
+
+    async def _on_provenance_verify(
+        self,
+        subtype: str,
+        data: Dict[str, Any],
+        origin: str
+    ) -> None:
+        """Handle verification request from another node."""
+        try:
+            record_id = data.get("record_id")
+            if not record_id:
+                return
+
+            # Verify the record
+            is_valid = self.provenance.verify_provenance_chain(record_id)
+
+            # Send verification response
+            response = {
+                "record_id": record_id,
+                "is_valid": is_valid,
+                "verifier_node_id": self.node_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+            await self.gossip.publish("provenance_verified", response)
+
+            logger.debug(
+                "Responded to verification request",
+                record_id=record_id,
+                is_valid=is_valid
+            )
+        except Exception as e:
+            logger.error(f"Error handling verification request: {e}")
+
+    async def _on_provenance_verified(
+        self,
+        subtype: str,
+        data: Dict[str, Any],
+        origin: str
+    ) -> None:
+        """Handle verification response from another node."""
+        try:
+            record_id = data.get("record_id")
+            is_valid = data.get("is_valid", False)
+            verifier = data.get("verifier_node_id", "unknown")
+
+            # Update trust score based on verification
+            if record_id and record_id in self.provenance.provenance_records:
+                record = self.provenance.provenance_records[record_id]
+                if is_valid:
+                    # Increase trust level if verified by peer
+                    trust_upgrade = {
+                        TrustLevel.UNCERTAIN: TrustLevel.PROVISIONAL,
+                        TrustLevel.PROVISIONAL: TrustLevel.CREDIBLE,
+                        TrustLevel.CREDIBLE: TrustLevel.TRUSTED,
+                    }
+                    record.trust_level = trust_upgrade.get(record.trust_level, record.trust_level)
+
+                logger.debug(
+                    "Received verification response",
+                    record_id=record_id,
+                    is_valid=is_valid,
+                    verifier=verifier
+                )
+        except Exception as e:
+            logger.error(f"Error handling verification response: {e}")
 
 
 class EnhancedProvenanceSystem:
