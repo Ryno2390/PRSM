@@ -509,40 +509,60 @@ async def get_trace_details(
         logger.info("Getting trace details",
                    user_id=current_user,
                    trace_id=trace_id)
-        
-        # Get trace details (placeholder - would fetch from monitoring system)
-        trace_details = {
-            "trace_id": trace_id,
-            "operation": "marketplace_recommendation",
-            "component": "recommendation",
-            "total_duration_ms": 245.3,
-            "spans": [
-                {
-                    "name": "database_query",
-                    "duration_ms": 45.2,
-                    "status": "success"
-                },
-                {
-                    "name": "ml_inference",
-                    "duration_ms": 180.1,
-                    "status": "success"
-                },
-                {
-                    "name": "response_formatting",
-                    "duration_ms": 20.0,
-                    "status": "success"
-                }
-            ],
-            "success": True,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "metadata": {
-                "user_id": current_user,
-                "request_size": "2.3KB",
-                "response_size": "15.7KB"
-            }
-        }
-        
-        return trace_details
+
+        # Try to get trace from in-memory buffer or database
+        from prsm.core.database import get_async_session
+        from sqlalchemy import select, text
+
+        # Check if there's a trace store available via app.state
+        # For now, implement a minimal approach querying audit/event logs
+        async with get_async_session() as session:
+            # Try to find trace-related events in audit logs if available
+            # This is a minimal implementation - would be enhanced with dedicated trace store
+            try:
+                # Check for audit_log table with trace metadata
+                result = await session.execute(
+                    text("""
+                        SELECT metadata, created_at FROM audit_log
+                        WHERE metadata::text LIKE :trace_pattern
+                        ORDER BY created_at DESC
+                        LIMIT 10
+                    """),
+                    {"trace_pattern": f'%"trace_id": "{trace_id}"%'}
+                )
+                rows = result.fetchall()
+
+                if rows:
+                    spans = []
+                    total_duration = 0.0
+                    for row in rows:
+                        metadata = row[0] if isinstance(row[0], dict) else {}
+                        span_name = metadata.get("operation", "unknown")
+                        duration = metadata.get("duration_ms", 0)
+                        total_duration += duration
+                        spans.append({
+                            "name": span_name,
+                            "duration_ms": duration,
+                            "status": metadata.get("status", "success"),
+                            "timestamp": row[1] if row[1] else None
+                        })
+
+                    return {
+                        "trace_id": trace_id,
+                        "spans": spans,
+                        "total_duration_ms": total_duration,
+                        "status": "success" if all(s["status"] == "success" for s in spans) else "partial",
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }
+            except Exception as query_error:
+                logger.debug("Trace query failed, returning not found",
+                           trace_id=trace_id, error=str(query_error))
+
+        # If no trace found, return 404
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Trace {trace_id} not found"
+        )
         
     except Exception as e:
         logger.error("Failed to get trace details",

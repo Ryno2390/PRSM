@@ -332,6 +332,16 @@ class CDNIntegration:
         self.cdn_endpoints = cdn_config.get("endpoints", [])
         self.api_keys = cdn_config.get("api_keys", {})
         self.cache_zones = cdn_config.get("zones", {})
+
+        # Real operation counters for analytics
+        self._warming_attempts = 0
+        self._warming_successes = 0
+        self._warming_failures = 0
+        self._purge_attempts = 0
+        self._purge_successes = 0
+        self._purge_failures = 0
+        self._total_urls_warmed = 0
+        self._total_patterns_purged = 0
         
     async def warm_cache(self, urls: List[str], priority: str = "normal") -> Dict[str, Any]:
         """Warm CDN cache with specified URLs"""
@@ -341,16 +351,20 @@ class CDNIntegration:
             "failed_warming": 0,
             "errors": []
         }
-        
+
+        # Track warming attempt
+        self._warming_attempts += 1
+        self._total_urls_warmed += len(urls)
+
         # Create warming tasks
         warming_tasks = []
         for url in urls:
             task = asyncio.create_task(self._warm_single_url(url, priority))
             warming_tasks.append(task)
-        
+
         # Execute warming requests
         completed_tasks = await asyncio.gather(*warming_tasks, return_exceptions=True)
-        
+
         for i, result in enumerate(completed_tasks):
             if isinstance(result, Exception):
                 results["failed_warming"] += 1
@@ -362,12 +376,16 @@ class CDNIntegration:
                 results["successful_warming"] += 1
             else:
                 results["failed_warming"] += 1
-        
+
+        # Update counters
+        self._warming_successes += results["successful_warming"]
+        self._warming_failures += results["failed_warming"]
+
         logger.info("CDN cache warming completed",
                    total=results["total_urls"],
                    successful=results["successful_warming"],
                    failed=results["failed_warming"])
-        
+
         return results
     
     async def purge_cache(self, patterns: List[str]) -> Dict[str, Any]:
@@ -378,7 +396,11 @@ class CDNIntegration:
             "failed_purges": 0,
             "purge_ids": []
         }
-        
+
+        # Track purge attempt
+        self._purge_attempts += 1
+        self._total_patterns_purged += len(patterns)
+
         for pattern in patterns:
             try:
                 purge_id = await self._purge_pattern(pattern)
@@ -387,37 +409,62 @@ class CDNIntegration:
                     results["purge_ids"].append(purge_id)
                 else:
                     results["failed_purges"] += 1
-                    
+
             except Exception as e:
                 results["failed_purges"] += 1
                 logger.error("CDN purge failed", pattern=pattern, error=str(e))
-        
+
+        # Update counters
+        self._purge_successes += results["successful_purges"]
+        self._purge_failures += results["failed_purges"]
+
         return results
     
     async def get_cache_analytics(self, time_range: str = "24h") -> Dict[str, Any]:
-        """Get CDN cache analytics and performance metrics"""
-        # This would integrate with actual CDN APIs
-        # For now, return simulated analytics
-        
-        import random
-        
+        """Get CDN cache analytics and performance metrics.
+
+        Returns real tracked values from operations performed through this instance.
+        Note: Metrics like cache_hit_ratio and geographic_distribution require
+        integration with the actual CDN provider's analytics API. These are
+        returned as unavailable unless a real CDN backend is configured.
+        """
+        total_warming_ops = self._warming_successes + self._warming_failures
+        warming_success_rate = (
+            self._warming_successes / total_warming_ops if total_warming_ops > 0 else 0.0
+        )
+
+        total_purge_ops = self._purge_successes + self._purge_failures
+        purge_success_rate = (
+            self._purge_successes / total_purge_ops if total_purge_ops > 0 else 0.0
+        )
+
         return {
             "time_range": time_range,
-            "total_requests": random.randint(50000, 200000),
-            "cache_hit_ratio": random.uniform(0.85, 0.95),
-            "bandwidth_saved_gb": random.uniform(100, 500),
-            "avg_response_time_ms": random.uniform(50, 150),
-            "geographic_distribution": {
-                "us-east": random.uniform(0.3, 0.4),
-                "us-west": random.uniform(0.2, 0.3),
-                "europe": random.uniform(0.2, 0.3),
-                "asia": random.uniform(0.1, 0.2)
+            # Real tracked metrics
+            "warming": {
+                "attempts": self._warming_attempts,
+                "total_urls": self._total_urls_warmed,
+                "successes": self._warming_successes,
+                "failures": self._warming_failures,
+                "success_rate": round(warming_success_rate, 4),
             },
-            "top_cached_content": [
-                {"url": "/api/v1/models", "hits": random.randint(5000, 15000)},
-                {"url": "/api/v1/sessions", "hits": random.randint(3000, 10000)},
-                {"url": "/static/js/app.js", "hits": random.randint(2000, 8000)}
-            ]
+            "purging": {
+                "attempts": self._purge_attempts,
+                "total_patterns": self._total_patterns_purged,
+                "successes": self._purge_successes,
+                "failures": self._purge_failures,
+                "success_rate": round(purge_success_rate, 4),
+            },
+            # These require actual CDN API integration
+            "cdn_provider_metrics": {
+                "available": False,
+                "reason": "No CDN provider API configured. Configure cdn_config with API credentials to enable provider metrics."
+            },
+            # Legacy fields for backwards compatibility - zeros indicate not available
+            "total_requests": 0,
+            "cache_hit_ratio": 0.0,
+            "bandwidth_saved_gb": 0.0,
+            "avg_response_time_ms": 0.0,
         }
     
     async def _warm_single_url(self, url: str, priority: str) -> bool:

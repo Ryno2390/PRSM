@@ -388,47 +388,115 @@ async def create_task(
 @router.get("/{team_id}/tasks")
 async def get_team_tasks(team_id: UUID, status: Optional[str] = Query(None)):
     """Get team tasks with optional status filter"""
+    from prsm.core.database import get_async_session, TeamTaskModel
+    from sqlalchemy import select, desc
+
     team = await team_service.get_team(team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
-    
-    # In a full implementation, this would query tasks from the database
-    # For now, return placeholder
-    return {"message": "Task listing not yet implemented"}
+
+    try:
+        async with get_async_session() as session:
+            # Build query with optional status filter
+            stmt = select(TeamTaskModel).where(TeamTaskModel.team_id == team_id)
+            if status:
+                stmt = stmt.where(TeamTaskModel.status == status)
+            stmt = stmt.order_by(desc(TeamTaskModel.created_at)).limit(100)
+
+            result = await session.execute(stmt)
+            tasks = result.scalars().all()
+
+            return [
+                {
+                    "task_id": str(task.task_id),
+                    "title": task.title,
+                    "description": task.description,
+                    "task_type": task.task_type,
+                    "status": task.status,
+                    "priority": task.priority,
+                    "assigned_to": task.assigned_to or [],
+                    "progress_percentage": task.progress_percentage,
+                    "ftns_budget": task.ftns_budget,
+                    "ftns_spent": task.ftns_spent,
+                    "due_date": task.due_date.isoformat() if task.due_date else None,
+                    "created_at": task.created_at.isoformat() if task.created_at else None,
+                    "tags": task.tags or []
+                }
+                for task in tasks
+            ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve tasks: {str(e)}")
 
 
 # === Wallet Management Endpoints ===
 
 @router.post("/{team_id}/wallet/deposit")
 async def deposit_ftns(
-    team_id: UUID, 
-    request: DepositFTNSRequest, 
+    team_id: UUID,
+    request: DepositFTNSRequest,
     user_id: str = Depends(get_current_user_id)
 ):
     """Deposit FTNS tokens to team wallet"""
+    from prsm.core.database import get_async_session, TeamWalletModel, FTNSBalanceModel, FTNSTransactionModel
+    from sqlalchemy import select, update
+    from uuid import uuid4
+
     try:
         team = await validate_team_access(team_id, user_id)
-        
-        # Get team wallet (would need to implement wallet retrieval)
-        # For now, create a mock wallet
-        from ..teams.models import TeamWallet
-        wallet = TeamWallet(team_id=team_id)
-        
-        success = await wallet_service.deposit_ftns(
-            wallet, request.amount, user_id, request.description
-        )
-        
-        if success:
+
+        async with get_async_session() as session:
+            # Check user has sufficient balance
+            user_balance_stmt = select(FTNSBalanceModel).where(FTNSBalanceModel.user_id == user_id)
+            user_result = await session.execute(user_balance_stmt)
+            user_wallet = user_result.scalar_one_or_none()
+
+            if not user_wallet or user_wallet.balance < request.amount:
+                raise HTTPException(status_code=400, detail="Insufficient balance")
+
+            # Get or create team wallet
+            wallet_stmt = select(TeamWalletModel).where(TeamWalletModel.team_id == team_id)
+            wallet_result = await session.execute(wallet_stmt)
+            team_wallet = wallet_result.scalar_one_or_none()
+
+            if not team_wallet:
+                raise HTTPException(status_code=404, detail="Team wallet not found")
+
+            # Perform atomic transfer
+            # 1. Deduct from user wallet
+            user_wallet.balance -= request.amount
+
+            # 2. Credit to team wallet
+            team_wallet.total_balance += request.amount
+            team_wallet.available_balance += request.amount
+
+            # 3. Record transaction
+            transaction = FTNSTransactionModel(
+                transaction_id=uuid4(),
+                from_user=user_id,
+                to_user=f"team_{team_id}",
+                amount=request.amount,
+                transaction_type="team_deposit",
+                description=request.description,
+                status="completed",
+                created_at=datetime.now(timezone.utc)
+            )
+            session.add(transaction)
+
+            await session.commit()
+
             return {
                 "status": "success",
                 "amount_deposited": request.amount,
-                "new_balance": wallet.total_balance
+                "new_balance": team_wallet.total_balance,
+                "transaction_id": str(transaction.transaction_id)
             }
-        else:
-            raise HTTPException(status_code=400, detail="Deposit failed")
-            
+
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Deposit failed: {str(e)}")
 
 
 @router.post("/{team_id}/wallet/distribute")
