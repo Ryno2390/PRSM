@@ -789,12 +789,92 @@ async def log_alert_handler(alert: TaskAlert):
 
 
 async def slack_alert_handler(alert: TaskAlert):
-    """Send task alerts to Slack (placeholder)"""
-    # This would integrate with Slack API
-    pass
+    """Send task alerts to Slack via webhook URL from settings."""
+    import os
+    import httpx
+
+    webhook_url = os.environ.get('SLACK_WEBHOOK_URL')
+    if not webhook_url:
+        logger.debug("slack_webhook_not_configured", alert_id=alert.alert_id)
+        return
+
+    color = {"critical": "#FF0000", "warning": "#FFA500", "info": "#36A64F",
+             "emergency": "#8B0000"}.get(
+        alert.severity.value.lower(), "#808080"
+    )
+    component = alert.queue_name or alert.worker_id or "cluster"
+    payload = {
+        "attachments": [{
+            "color": color,
+            "title": f"PRSM Task Alert: {alert.alert_type.value}",
+            "text": alert.message,
+            "fields": [
+                {"title": "Severity", "value": alert.severity.value, "short": True},
+                {"title": "Component", "value": component, "short": True},
+                {"title": "Metric Value", "value": f"{alert.metric_value:.2f}", "short": True},
+                {"title": "Threshold", "value": f"{alert.threshold:.2f}", "short": True},
+                {"title": "Time", "value": alert.timestamp.isoformat(), "short": False},
+            ],
+            "footer": "PRSM Task Monitoring",
+        }]
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(webhook_url, json=payload)
+            resp.raise_for_status()
+        logger.info("slack_alert_sent", alert_id=alert.alert_id)
+    except Exception as e:
+        logger.error("slack_alert_failed", alert_id=alert.alert_id, error=str(e))
 
 
 async def email_alert_handler(alert: TaskAlert):
-    """Send task alerts via email (placeholder)"""
-    # This would integrate with email service
-    pass
+    """Send task alerts via email using SMTP settings from environment."""
+    import os
+    import smtplib
+    import asyncio
+    from email.mime.text import MIMEText
+
+    smtp_host = os.environ.get('ALERT_SMTP_HOST')
+    smtp_port = int(os.environ.get('ALERT_SMTP_PORT', '587'))
+    smtp_user = os.environ.get('ALERT_SMTP_USER')
+    smtp_pass = os.environ.get('ALERT_SMTP_PASS')
+    alert_email = os.environ.get('ALERT_EMAIL_TO')
+
+    if not all([smtp_host, smtp_user, smtp_pass, alert_email]):
+        logger.debug("email_alert_not_configured", alert_id=alert.alert_id)
+        return
+
+    subject = f"[PRSM {alert.severity.value.upper()}] Task Alert: {alert.alert_type.value}"
+    component = alert.queue_name or alert.worker_id or "cluster"
+    body = f"""PRSM Task Alert Notification
+
+Alert Type: {alert.alert_type.value}
+Severity:   {alert.severity.value}
+Component:  {component}
+Time:       {alert.timestamp.isoformat()}
+Message:    {alert.message}
+
+Metric Value: {alert.metric_value:.2f}
+Threshold:    {alert.threshold:.2f}
+
+This is an automated notification from the PRSM task monitoring system.
+"""
+
+    msg = MIMEText(body)
+    msg['Subject'] = subject
+    msg['From'] = smtp_user
+    msg['To'] = alert_email
+
+    def _send_smtp():
+        with smtplib.SMTP(smtp_host, smtp_port) as smtp:
+            smtp.starttls()
+            smtp.login(smtp_user, smtp_pass)
+            smtp.send_message(msg)
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _send_smtp)
+        logger.info("email_alert_sent", alert_id=alert.alert_id, to=alert_email)
+    except Exception as e:
+        logger.error("email_alert_failed", alert_id=alert.alert_id, error=str(e))

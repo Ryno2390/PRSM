@@ -673,11 +673,42 @@ class AntiHoardingEngine:
     
     async def _get_user_transactions(self, user_id: str, start_date: datetime, end_date: datetime):
         """Get user transactions within date range"""
-        
+
         try:
-            # This would integrate with the actual FTNS transaction system
-            # For now, return empty list as placeholder
-            return []
+            from prsm.core.database import FTNSTransactionModel
+
+            # Query transactions where user is either sender or recipient
+            result = await self.db.execute(
+                select(FTNSTransactionModel)
+                .where(
+                    and_(
+                        or_(
+                            FTNSTransactionModel.from_user == user_id,
+                            FTNSTransactionModel.to_user == user_id,
+                        ),
+                        FTNSTransactionModel.created_at >= start_date,
+                        FTNSTransactionModel.created_at <= end_date,
+                    )
+                )
+                .order_by(desc(FTNSTransactionModel.created_at))
+            )
+
+            rows = result.scalars().all()
+
+            # Convert to list of transaction objects with expected attributes
+            transactions = []
+            for r in rows:
+                tx = type('Transaction', (), {
+                    'transaction_id': str(r.transaction_id),
+                    'amount': Decimal(str(r.amount)),
+                    'transaction_type': r.transaction_type,
+                    'from_user_id': r.from_user,
+                    'to_user_id': r.to_user,
+                    'timestamp': r.created_at,
+                })()
+                transactions.append(tx)
+
+            return transactions
         except Exception as e:
             await logger.aerror("Failed to get user transactions", user_id=user_id, error=str(e))
             return []
@@ -695,22 +726,35 @@ class AntiHoardingEngine:
     
     async def _get_users_with_balances(self, min_balance: Decimal = Decimal('0.001')) -> List[str]:
         """Get list of users with balances above threshold"""
-        
+
         try:
-            # This would integrate with the actual FTNS balance system
-            # For now, return empty list as placeholder
-            return []
+            from prsm.core.database import FTNSBalanceModel
+
+            result = await self.db.execute(
+                select(FTNSBalanceModel.user_id)
+                .where(FTNSBalanceModel.balance >= float(min_balance))
+                .limit(10000)  # Prevent full-table scan explosion
+            )
+
+            return [row[0] for row in result.all()]
         except Exception as e:
             await logger.aerror("Failed to get users with balances", error=str(e))
             return []
     
     async def _get_user_creation_date(self, user_id: str) -> Optional[datetime]:
         """Get user account creation date"""
-        
+
         try:
-            # This would integrate with the user management system
-            # For now, return None as placeholder
-            return None
+            from prsm.core.database import FTNSBalanceModel
+
+            result = await self.db.execute(
+                select(FTNSBalanceModel.created_at).where(
+                    FTNSBalanceModel.user_id == user_id
+                )
+            )
+
+            row = result.scalar_one_or_none()
+            return row if row is not None else None
         except Exception as e:
             await logger.aerror("Failed to get user creation date", user_id=user_id, error=str(e))
             return None

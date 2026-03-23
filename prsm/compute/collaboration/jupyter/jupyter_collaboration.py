@@ -244,28 +244,147 @@ class JupyterCollaboration:
         
         return result
     
-    async def _execute_code(self, code: str) -> Dict[str, Any]:
-        """Execute Python code (placeholder - would integrate with Jupyter kernel)"""
-        # This is a simplified placeholder
-        # In a real implementation, this would connect to a Jupyter kernel
+    async def _execute_code(self, code: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+        """Execute Python code using Jupyter kernel if available, or exec fallback"""
+        import time
+        import io
+        import sys
+
+        start_time = time.perf_counter()
+
+        # Try to use jupyter_client if available
         try:
-            # For demo purposes, we'll simulate execution
-            if "print(" in code:
-                output = "Code execution simulated - print statements would appear here"
-            elif "import" in code:
-                output = "Modules imported successfully"
-            else:
-                output = "Code executed successfully"
-            
+            import jupyter_client
+
+            # Get or create kernel for this session
+            if not hasattr(self, '_kernels'):
+                self._kernels: Dict[str, tuple] = {}
+
+            kernel_key = session_id or "default"
+
+            if kernel_key not in self._kernels:
+                # Start a new kernel
+                km = jupyter_client.KernelManager()
+                km.start_kernel()
+                kc = km.client()
+                self._kernels[kernel_key] = (km, kc)
+
+            km, kc = self._kernels[kernel_key]
+
+            # Execute the code
+            msg_id = kc.execute(code)
+
+            # Collect output with timeout
+            outputs = []
+            execution_count = None
+            error = None
+
+            try:
+                while True:
+                    try:
+                        msg = await asyncio.wait_for(
+                            asyncio.get_event_loop().run_in_executor(
+                                None, kc.get_iopub_msg, 30
+                            ),
+                            timeout=30.0
+                        )
+                    except asyncio.TimeoutError:
+                        error = "execution_timeout"
+                        break
+
+                    if msg['parent_header'].get('msg_id') != msg_id:
+                        continue
+
+                    msg_type = msg['header']['msg_type']
+                    content = msg['content']
+
+                    if msg_type == 'status' and content.get('execution_state') == 'idle':
+                        break
+                    elif msg_type == 'execute_input':
+                        execution_count = content.get('execution_count')
+                    elif msg_type == 'stream':
+                        outputs.append({
+                            "output_type": "stream",
+                            "name": content.get('name', 'stdout'),
+                            "text": content.get('text', '').split('\n')
+                        })
+                    elif msg_type == 'execute_result':
+                        outputs.append({
+                            "output_type": "execute_result",
+                            "data": content.get('data', {}),
+                            "execution_count": content.get('execution_count')
+                        })
+                    elif msg_type == 'error':
+                        error = content.get('ename', 'UnknownError')
+                        outputs.append({
+                            "output_type": "error",
+                            "ename": content.get('ename'),
+                            "evalue": content.get('evalue'),
+                            "traceback": content.get('traceback', [])
+                        })
+            except Exception as e:
+                error = str(e)
+
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+
             return {
-                "status": "ok",
-                "outputs": [{
+                "status": "error" if error else "ok",
+                "outputs": outputs,
+                "execution_count": execution_count or 0,
+                "success": error is None,
+                "error": error,
+                "execution_time_ms": execution_time_ms
+            }
+
+        except ImportError:
+            # Fall back to exec() in sandboxed namespace
+            pass
+
+        # Fallback: exec() in sandboxed namespace
+        try:
+            # Create sandboxed execution environment
+            exec_globals = {'__builtins__': __builtins__}
+            exec_locals = {}
+
+            # Capture stdout
+            old_stdout = sys.stdout
+            sys.stdout = captured_stdout = io.StringIO()
+
+            try:
+                exec(code, exec_globals, exec_locals)
+                output_text = captured_stdout.getvalue()
+            finally:
+                sys.stdout = old_stdout
+
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+
+            outputs = []
+            if output_text:
+                outputs.append({
                     "output_type": "stream",
                     "name": "stdout",
-                    "text": [output]
-                }]
+                    "text": output_text.split('\n')
+                })
+
+            # Check for return value
+            if exec_locals.get('_') is not None:
+                outputs.append({
+                    "output_type": "execute_result",
+                    "data": {"text/plain": str(exec_locals['_'])},
+                    "execution_count": 0
+                })
+
+            return {
+                "status": "ok",
+                "outputs": outputs,
+                "execution_count": 0,
+                "success": True,
+                "error": None,
+                "execution_time_ms": execution_time_ms
             }
+
         except Exception as e:
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
             return {
                 "status": "error",
                 "outputs": [{
@@ -273,7 +392,11 @@ class JupyterCollaboration:
                     "ename": type(e).__name__,
                     "evalue": str(e),
                     "traceback": [str(e)]
-                }]
+                }],
+                "execution_count": 0,
+                "success": False,
+                "error": str(e),
+                "execution_time_ms": execution_time_ms
             }
     
     async def apply_collaborative_edit(self, 
