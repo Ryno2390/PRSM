@@ -553,69 +553,80 @@ class TestAPIErrorHandling:
 class TestAPIPerformance:
     """Test API performance under load"""
     
-    async def test_concurrent_api_requests(self, async_test_client):
+    async def test_concurrent_api_requests(self, async_test_client, test_app):
         """Test API performance under concurrent load"""
         if async_test_client is None:
             pytest.skip("Async test client not available")
-        
+
+        from prsm.interface.auth import get_current_user
+        from unittest.mock import MagicMock
+
         performance_results = {}
         auth_token = "performance_test_token"
         headers = {"Authorization": f"Bearer {auth_token}"}
-        
-        with patch('prsm.core.auth.auth_manager.AuthManager.get_current_user') as mock_validate, \
-             patch('prsm.economy.tokenomics.ftns_service.FTNSService.get_user_balance') as mock_balance:
-            
-            mock_validate.return_value = {
-                "valid": True,
-                "user_id": "perf_user",
-                "user_role": "researcher"
-            }
-            
+
+        # Build a mock user object with the .id attribute the endpoint expects
+        mock_user = MagicMock()
+        mock_user.id = "perf_user"
+        mock_user.user_id = "perf_user"
+        mock_user.role = "researcher"
+
+        async def override_get_current_user():
+            return mock_user
+
+        with patch('prsm.core.database.FTNSQueries.get_user_balance', new_callable=AsyncMock) as mock_balance:
             mock_balance.return_value = {
-                "total_balance": Decimal("1000.0"),
+                "balance": Decimal("1000.0"),
                 "available_balance": Decimal("1000.0"),
-                "reserved_balance": Decimal("0.0")
+                "locked_balance": Decimal("0.0"),
             }
-            
-            async def make_balance_request():
-                """Single balance request"""
-                start_time = asyncio.get_event_loop().time()
-                response = await async_test_client.get("/api/v1/ftns/balance", headers=headers)
-                end_time = asyncio.get_event_loop().time()
-                
-                return {
-                    "status_code": response.status_code,
-                    "response_time": end_time - start_time,
-                    "success": response.status_code == 200
+
+            # Override the FastAPI dependency on the test app instance
+            test_app.dependency_overrides[get_current_user] = override_get_current_user
+
+            try:
+                async def make_balance_request():
+                    """Single balance request"""
+                    start_time = asyncio.get_event_loop().time()
+                    response = await async_test_client.get("/api/v1/ftns/balance", headers=headers)
+                    end_time = asyncio.get_event_loop().time()
+
+                    return {
+                        "status_code": response.status_code,
+                        "response_time": end_time - start_time,
+                        "success": response.status_code == 200
+                    }
+
+                # Execute 20 concurrent requests
+                tasks = [make_balance_request() for _ in range(20)]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # Analyze results
+                successful_requests = [r for r in results if isinstance(r, dict) and r["success"]]
+                failed_requests = [r for r in results if not (isinstance(r, dict) and r.get("success", False))]
+
+                if successful_requests:
+                    avg_response_time = sum(r["response_time"] for r in successful_requests) / len(successful_requests)
+                    max_response_time = max(r["response_time"] for r in successful_requests)
+                    min_response_time = min(r["response_time"] for r in successful_requests)
+                else:
+                    avg_response_time = max_response_time = min_response_time = 0
+
+                performance_results["concurrent_requests"] = {
+                    "total_requests": 20,
+                    "successful_requests": len(successful_requests),
+                    "failed_requests": len(failed_requests),
+                    "success_rate": len(successful_requests) / 20,
+                    "avg_response_time": avg_response_time,
+                    "max_response_time": max_response_time,
+                    "min_response_time": min_response_time
                 }
-            
-            # Execute 20 concurrent requests
-            tasks = [make_balance_request() for _ in range(20)]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Analyze results
-            successful_requests = [r for r in results if isinstance(r, dict) and r["success"]]
-            failed_requests = [r for r in results if not (isinstance(r, dict) and r.get("success", False))]
-            
-            if successful_requests:
-                avg_response_time = sum(r["response_time"] for r in successful_requests) / len(successful_requests)
-                max_response_time = max(r["response_time"] for r in successful_requests)
-                min_response_time = min(r["response_time"] for r in successful_requests)
-            else:
-                avg_response_time = max_response_time = min_response_time = 0
-            
-            performance_results["concurrent_requests"] = {
-                "total_requests": 20,
-                "successful_requests": len(successful_requests),
-                "failed_requests": len(failed_requests),
-                "success_rate": len(successful_requests) / 20,
-                "avg_response_time": avg_response_time,
-                "max_response_time": max_response_time,
-                "min_response_time": min_response_time
-            }
-            
-            # Performance assertions
-            assert len(successful_requests) >= 15  # At least 75% success rate
-            assert avg_response_time < 2.0  # Average response time under 2 seconds
-        
+
+                # Performance assertions
+                assert len(successful_requests) >= 15  # At least 75% success rate
+                assert avg_response_time < 2.0  # Average response time under 2 seconds
+
+            finally:
+                test_app.dependency_overrides.pop(get_current_user, None)
+
         return performance_results

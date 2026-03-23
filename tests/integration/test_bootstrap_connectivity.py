@@ -114,6 +114,7 @@ class TestBootstrapWebSocket:
         except ImportError:
             return False
     
+    @pytest.mark.skip(reason="Requires live WebSocket server on port 8765 — run manually")
     def test_websocket_port_is_open(self):
         """Test that the WebSocket port is accepting connections."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
