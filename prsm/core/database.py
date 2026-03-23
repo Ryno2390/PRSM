@@ -96,14 +96,17 @@ async def get_async_engine():
         elif database_url.startswith("sqlite:///"):
             database_url = database_url.replace("sqlite:///", "sqlite+aiosqlite:///")
         
-        async_engine = create_async_engine(
-            database_url,
-            echo=settings.database_echo,
-            pool_size=settings.database_pool_size,
-            max_overflow=settings.database_max_overflow,
-            pool_pre_ping=True,  # Health check connections
-            pool_recycle=3600,   # Recycle connections every hour
-        )
+        engine_kwargs: dict = {
+            "echo": settings.database_echo,
+            "pool_pre_ping": True,
+            "pool_recycle": 3600,
+        }
+        # SQLite does not support server-style connection pooling
+        if not database_url.startswith("sqlite"):
+            engine_kwargs["pool_size"] = settings.database_pool_size
+            engine_kwargs["max_overflow"] = settings.database_max_overflow
+
+        async_engine = create_async_engine(database_url, **engine_kwargs)
         
         logger.info("Async database engine created", url_scheme=database_url.split("://")[0])
     
