@@ -246,7 +246,25 @@ class PRSMSettings(BaseSettings):
     rsi_enabled: bool = Field(default=True, env="PRSM_RSI_ENABLED")
     rsi_evaluation_frequency: int = Field(default=86400, env="PRSM_RSI_EVAL_FREQUENCY")  # 24 hours
     rsi_improvement_threshold: float = Field(default=0.05, env="PRSM_RSI_IMPROVEMENT_THRESHOLD")
-    
+
+    # === BitTorrent Configuration ===
+    bt_enabled: bool = Field(default=True, env="PRSM_BT_ENABLED")
+    bt_port_range_start: int = Field(default=6881, env="PRSM_BT_PORT_RANGE_START")
+    bt_port_range_end: int = Field(default=6891, env="PRSM_BT_PORT_RANGE_END")
+    bt_dht_enabled: bool = Field(default=True, env="PRSM_BT_DHT_ENABLED")
+    bt_max_upload_mbps: float = Field(default=10.0, env="PRSM_BT_MAX_UPLOAD_MBPS")
+    bt_max_download_mbps: float = Field(default=50.0, env="PRSM_BT_MAX_DOWNLOAD_MBPS")
+    bt_max_torrents: int = Field(default=50, env="PRSM_BT_MAX_TORRENTS")
+    bt_max_downloads: int = Field(default=10, env="PRSM_BT_MAX_DOWNLOADS")
+    bt_data_dir: str = Field(default="~/.prsm/torrents", env="PRSM_BT_DATA_DIR")
+    bt_seeder_reward_per_gb: float = Field(default=0.10, env="PRSM_BT_SEEDER_REWARD_PER_GB")
+    bt_download_cost_per_gb: float = Field(default=0.05, env="PRSM_BT_DOWNLOAD_COST_PER_GB")
+    bt_proof_reward: float = Field(default=0.01, env="PRSM_BT_PROOF_REWARD")
+    bt_proof_slash: float = Field(default=0.05, env="PRSM_BT_PROOF_SLASH")
+    bt_reward_interval_secs: int = Field(default=3600, env="PRSM_BT_REWARD_INTERVAL")
+    bt_challenge_interval_secs: int = Field(default=7200, env="PRSM_BT_CHALLENGE_INTERVAL")
+    bt_announce_interval_secs: int = Field(default=1800, env="PRSM_BT_ANNOUNCE_INTERVAL")
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8", 
@@ -389,7 +407,29 @@ class PRSMSettings(BaseSettings):
             rate_limit_rpm=self.backend_rate_limit_rpm,
             mock_delay_seconds=self.mock_delay_seconds,
         )
-    
+
+    @property
+    def bittorrent_config(self) -> Dict[str, Any]:
+        """BitTorrent configuration for P2P file distribution."""
+        return {
+            "enabled": self.bt_enabled,
+            "port_range_start": self.bt_port_range_start,
+            "port_range_end": self.bt_port_range_end,
+            "dht_enabled": self.bt_dht_enabled,
+            "max_upload_mbps": self.bt_max_upload_mbps,
+            "max_download_mbps": self.bt_max_download_mbps,
+            "max_torrents": self.bt_max_torrents,
+            "max_downloads": self.bt_max_downloads,
+            "data_dir": self.bt_data_dir,
+            "seeder_reward_per_gb": self.bt_seeder_reward_per_gb,
+            "download_cost_per_gb": self.bt_download_cost_per_gb,
+            "proof_reward": self.bt_proof_reward,
+            "proof_slash": self.bt_proof_slash,
+            "reward_interval_secs": self.bt_reward_interval_secs,
+            "challenge_interval_secs": self.bt_challenge_interval_secs,
+            "announce_interval_secs": self.bt_announce_interval_secs,
+        }
+
     @property
     def is_development(self) -> bool:
         return self.environment == Environment.DEVELOPMENT

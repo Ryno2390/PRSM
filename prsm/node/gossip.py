@@ -60,6 +60,12 @@ GOSSIP_KNOWLEDGE_RESPONSE = "agent_knowledge_response"
 GOSSIP_DIGEST_REQUEST = "digest_request"
 GOSSIP_DIGEST_RESPONSE = "digest_response"
 
+# Gossip subtypes for BitTorrent integration
+GOSSIP_BITTORRENT_ANNOUNCE = "bittorrent_announce"
+GOSSIP_BITTORRENT_WITHDRAW = "bittorrent_withdraw"
+GOSSIP_BITTORRENT_STATS = "bittorrent_stats"
+GOSSIP_BITTORRENT_REQUEST = "bittorrent_request"
+
 # Retention configuration per gossip subtype (in seconds)
 # Messages older than these values are pruned from the gossip log
 GOSSIP_RETENTION_SECONDS: Dict[str, float] = {
@@ -92,6 +98,11 @@ GOSSIP_RETENTION_SECONDS: Dict[str, float] = {
     "capability_announce": 86400,
     # FTNS transactions: 24 hour retention for audit trail
     "ftns_transaction": 86400,
+    # BitTorrent messages: 24 hour retention for announces, 1 hour for withdrawals
+    "bittorrent_announce": 86400,
+    "bittorrent_withdraw": 3600,
+    "bittorrent_stats": 1800,      # 30 minutes — stats decay quickly
+    "bittorrent_request": 300,     # 5 minutes — short-lived requests
     # Heartbeat: very short retention (not stored anyway)
     "heartbeat": 60,
     # Digest exchange: not stored

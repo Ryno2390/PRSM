@@ -49,6 +49,12 @@ from prsm.node.agent_registry import AgentRegistry
 from prsm.node.agent_collaboration import AgentCollaboration, BidStrategy
 from prsm.economy.tokenomics.staking_manager import StakingManager, StakingConfig, StakeType
 
+# BitTorrent integration
+from prsm.core.bittorrent_client import BitTorrentClient, BitTorrentConfig
+from prsm.core.bittorrent_manifest import TorrentManifestStore
+from prsm.node.bittorrent_provider import BitTorrentProvider, BitTorrentProviderConfig
+from prsm.node.bittorrent_requester import BitTorrentRequester, BitTorrentRequesterConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -488,6 +494,11 @@ class PRSMNode:
         self.agent_registry: Optional[AgentRegistry] = None
         self.agent_collaboration: Optional[AgentCollaboration] = None
         self.staking_manager: Optional[StakingManager] = None
+        # BitTorrent components
+        self.bt_client: Optional[BitTorrentClient] = None
+        self.bt_manifest_store: Optional[TorrentManifestStore] = None
+        self.bt_provider: Optional[BitTorrentProvider] = None
+        self.bt_requester: Optional[BitTorrentRequester] = None
         self.teacher_registry: Dict[str, Any] = {}  # teacher_id (str) → DistilledTeacher instance
         self.training_jobs: Dict[str, TrainingJob] = {}  # run_id (str UUID) → TrainingJob
 
@@ -694,6 +705,60 @@ class PRSMNode:
         )
         logger.info("Staking manager initialized")
 
+        # ── BitTorrent Integration ───────────────────────────────────
+        # Initialize BitTorrent client
+        bt_config = BitTorrentConfig(
+            port_range_start=getattr(self.config, 'bt_port_start', 6881),
+            port_range_end=getattr(self.config, 'bt_port_end', 6891),
+            download_dir=str(self.config.data_dir / "torrents"),
+            dht_enabled=getattr(self.config, 'bt_dht_enabled', True),
+        )
+        self.bt_client = BitTorrentClient(config=bt_config)
+        bt_available = await self.bt_client.initialize()
+        if bt_available:
+            logger.info("BitTorrent client initialized")
+
+            # Initialize manifest store
+            self.bt_manifest_store = TorrentManifestStore(
+                database_url=f"sqlite:///{self.config.data_dir}/torrent_manifests.db"
+            )
+            await self.bt_manifest_store.initialize()
+
+            # Initialize provider (seeder)
+            bt_provider_config = BitTorrentProviderConfig(
+                max_torrents=getattr(self.config, 'bt_max_torrents', 50),
+                data_dir=str(self.config.data_dir / "torrents"),
+                seeder_reward_per_gb=getattr(self.config, 'bt_seeder_reward_per_gb', Decimal("0.10")),
+            )
+            self.bt_provider = BitTorrentProvider(
+                identity=self.identity,
+                transport=self.transport,
+                gossip=self.gossip,
+                ledger=self.ledger,
+                bt_client=self.bt_client,
+                manifest_store=self.bt_manifest_store,
+                config=bt_provider_config,
+                node_config=self.config,
+            )
+
+            # Initialize requester (downloader)
+            bt_requester_config = BitTorrentRequesterConfig(
+                max_concurrent_downloads=getattr(self.config, 'bt_max_downloads', 10),
+                data_dir=str(self.config.data_dir / "torrents"),
+                download_cost_per_gb=getattr(self.config, 'bt_download_cost_per_gb', Decimal("0.05")),
+            )
+            self.bt_requester = BitTorrentRequester(
+                identity=self.identity,
+                gossip=self.gossip,
+                bt_client=self.bt_client,
+                manifest_store=self.bt_manifest_store,
+                ledger=self.ledger,
+                config=bt_requester_config,
+            )
+            logger.info("BitTorrent provider and requester initialized")
+        else:
+            logger.info("BitTorrent not available - libtorrent may not be installed")
+
         # Create FTNS adapter for teacher rewards/charges
         self._ftns_adapter = _NodeFTNSAdapter(self.ledger, self.identity.node_id)
 
@@ -777,6 +842,12 @@ class PRSMNode:
             self.agent_collaboration.start()
             await self.agent_collaboration.load_state()
 
+        # Start BitTorrent components
+        if self.bt_provider:
+            await self.bt_provider.start()
+        if self.bt_requester:
+            await self.bt_requester.start()
+
         # Start management API in background
         self._api_task = asyncio.create_task(self._run_api())
 
@@ -834,6 +905,13 @@ class PRSMNode:
 
         if self.agent_collaboration:
             await self.agent_collaboration.stop()
+        # Stop BitTorrent components
+        if self.bt_requester:
+            await self.bt_requester.stop()
+        if self.bt_provider:
+            await self.bt_provider.stop()
+        if self.bt_client:
+            await self.bt_client.shutdown()
         if self.ledger_sync:
             await self.ledger_sync.stop()
         if self.content_uploader:
@@ -894,6 +972,11 @@ class PRSMNode:
             "ledger_sync": self.ledger_sync.get_stats() if self.ledger_sync else None,
             "agents": self.agent_registry.get_stats() if self.agent_registry else None,
             "collaboration": self.agent_collaboration.get_stats() if self.agent_collaboration else None,
+            "bittorrent": {
+                "available": self.bt_client.available if self.bt_client else False,
+                "provider": self.bt_provider.get_stats() if self.bt_provider else None,
+                "requester": self.bt_requester.get_stats() if self.bt_requester else None,
+            },
         }
         return status
 
