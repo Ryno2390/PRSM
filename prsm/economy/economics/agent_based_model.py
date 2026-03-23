@@ -29,7 +29,7 @@ economic scenarios and market conditions.
 - Bootstrap effectiveness (critical mass achievement)
 """
 
-import random
+import uuid
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -105,6 +105,24 @@ class AgentProfile:
     network_connectivity: int  # number of connections
     economic_strategy: str  # strategy description
 
+    # Behavioral ranges (min, max) — replace hardcoded random.uniform calls
+    content_creation_probability: float = 0.3   # was random.random() < 0.3
+    content_quality_range: Tuple[float, float] = (0.3, 1.0)
+    creation_cost_range: Tuple[float, float] = (1.0, 5.0)
+    validation_probability: float = 0.2         # was random.random() < 0.2
+    validation_fee_range: Tuple[float, float] = (0.1, 0.5)
+    query_probability: float = 0.4              # was random.random() < 0.4
+    query_cost_range: Tuple[float, float] = (0.5, 3.0)
+    compute_reward_range: Tuple[float, float] = (0.8, 2.5)
+    operational_cost_range: Tuple[float, float] = (0.3, 1.0)
+    investment_probability: float = 0.1         # was random.random() < 0.1
+    investment_cost_range: Tuple[float, float] = (5.0, 20.0)
+    staking_probability: float = 0.3            # was random.random() < 0.3
+    stake_fraction_range: Tuple[float, float] = (0.1, 0.3)
+    trading_probability: float = 0.2            # was random.random() < 0.2
+    trade_fraction_range: Tuple[float, float] = (0.05, 0.15)
+    trade_price_change_range: Tuple[float, float] = (-0.1, 0.1)
+
 class PRSMEconomicAgent(Agent):
     """
     Base agent class for PRSM economic simulation
@@ -145,9 +163,9 @@ class PRSMEconomicAgent(Agent):
     
     def step(self):
         """Execute one step of agent behavior"""
-        
+
         # Decide whether to act this step based on activity frequency
-        if random.random() < self.activity_frequency:
+        if self.model.rng.random() < self.activity_frequency:
             self._execute_economic_action()
         
         # Update reputation and satisfaction periodically
@@ -169,123 +187,133 @@ class PRSMEconomicAgent(Agent):
     
     def _content_creator_action(self):
         """Content creator specific actions"""
-        
+
         # Decide whether to create new content
-        if random.random() < 0.3:  # 30% chance to create content
-            content_quality = random.uniform(0.3, 1.0)
-            creation_cost = Decimal(str(random.uniform(1.0, 5.0)))
-            
+        if self.model.rng.random() < self.profile.content_creation_probability:
+            lo, hi = self.profile.content_quality_range
+            content_quality = float(self.model.rng.uniform(lo, hi))
+            lo, hi = self.profile.creation_cost_range
+            creation_cost = Decimal(str(self.model.rng.uniform(lo, hi)))
+
             if self.ftns_balance >= creation_cost:
                 # Create content
                 self.ftns_balance -= creation_cost
                 self.total_spending += creation_cost
-                
+
                 # Register content creation with model
                 revenue = self.model.register_content_creation(
                     self.unique_id, content_quality, creation_cost
                 )
-                
+
                 self.ftns_balance += revenue
                 self.total_earnings += revenue
-                
+
                 self._record_transaction(EconomicAction.CREATE_CONTENT, -creation_cost + revenue)
-        
+
         # Participate in quality validation (earn small fees)
-        if random.random() < 0.2:  # 20% chance to validate
-            validation_fee = Decimal(str(random.uniform(0.1, 0.5)))
+        if self.model.rng.random() < self.profile.validation_probability:
+            lo, hi = self.profile.validation_fee_range
+            validation_fee = Decimal(str(self.model.rng.uniform(lo, hi)))
             self.ftns_balance += validation_fee
             self.total_earnings += validation_fee
-            
+
             self._record_transaction(EconomicAction.VALIDATE_QUALITY, validation_fee)
     
     def _query_user_action(self):
         """Query user specific actions"""
-        
+
         # Decide whether to make a query
-        if random.random() < 0.4:  # 40% chance to query
-            query_cost = Decimal(str(random.uniform(0.5, 3.0)))
-            
+        if self.model.rng.random() < self.profile.query_probability:
+            lo, hi = self.profile.query_cost_range
+            query_cost = Decimal(str(self.model.rng.uniform(lo, hi)))
+
             if self.ftns_balance >= query_cost:
                 # Make query
                 self.ftns_balance -= query_cost
                 self.total_spending += query_cost
-                
+
                 # Register query with model
                 query_quality = self.model.process_query(self.unique_id, query_cost)
-                
+
                 # Update satisfaction based on query quality
                 if query_quality >= self.quality_threshold:
                     self.satisfaction_score += 0.01
                 else:
                     self.satisfaction_score -= 0.02
-                
+
                 self.satisfaction_score = max(0.0, min(1.0, self.satisfaction_score))
-                
+
                 self._record_transaction(EconomicAction.CONSUME_CONTENT, -query_cost)
     
     def _node_operator_action(self):
         """Node operator specific actions"""
-        
+
         # Provide compute resources (always active)
-        compute_reward = Decimal(str(random.uniform(0.8, 2.5)))
-        operational_cost = Decimal(str(random.uniform(0.3, 1.0)))
-        
+        lo, hi = self.profile.compute_reward_range
+        compute_reward = Decimal(str(self.model.rng.uniform(lo, hi)))
+        lo, hi = self.profile.operational_cost_range
+        operational_cost = Decimal(str(self.model.rng.uniform(lo, hi)))
+
         net_reward = compute_reward - operational_cost
-        
+
         self.ftns_balance += net_reward
         if net_reward > 0:
             self.total_earnings += net_reward
         else:
             self.total_spending += abs(net_reward)
-        
+
         # Register compute provision with model
         self.model.register_compute_provision(self.unique_id, compute_reward)
-        
+
         self._record_transaction(EconomicAction.PROVIDE_COMPUTE, net_reward)
-        
+
         # Occasionally invest in infrastructure
-        if random.random() < 0.1:  # 10% chance to invest
-            investment_cost = Decimal(str(random.uniform(5.0, 20.0)))
-            
+        if self.model.rng.random() < self.profile.investment_probability:
+            lo, hi = self.profile.investment_cost_range
+            investment_cost = Decimal(str(self.model.rng.uniform(lo, hi)))
+
             if self.ftns_balance >= investment_cost:
                 self.ftns_balance -= investment_cost
                 self.total_spending += investment_cost
-                
+
                 # Investment improves future rewards (simplified)
                 self.activity_frequency *= 1.02
     
     def _token_holder_action(self):
         """Token holder specific actions"""
-        
+
         # Staking decision
-        if random.random() < 0.3:  # 30% chance to stake
-            stake_amount = self.ftns_balance * Decimal(str(random.uniform(0.1, 0.3)))
-            
+        if self.model.rng.random() < self.profile.staking_probability:
+            lo, hi = self.profile.stake_fraction_range
+            stake_amount = self.ftns_balance * Decimal(str(self.model.rng.uniform(lo, hi)))
+
             if stake_amount >= Decimal('1.0'):
                 staking_reward = self.model.stake_tokens(self.unique_id, stake_amount)
-                
+
                 self.ftns_balance += staking_reward
                 self.total_earnings += staking_reward
-                
+
                 self._record_transaction(EconomicAction.STAKE_TOKENS, staking_reward)
-        
+
         # Trading decision
-        if random.random() < 0.2:  # 20% chance to trade
-            trade_amount = self.ftns_balance * Decimal(str(random.uniform(0.05, 0.15)))
-            
+        if self.model.rng.random() < self.profile.trading_probability:
+            lo, hi = self.profile.trade_fraction_range
+            trade_amount = self.ftns_balance * Decimal(str(self.model.rng.uniform(lo, hi)))
+
             if trade_amount >= Decimal('0.5'):
                 # Simulate trading (simplified)
-                price_change = random.uniform(-0.1, 0.1)  # ±10% price change
+                lo, hi = self.profile.trade_price_change_range
+                price_change = self.model.rng.uniform(lo, hi)
                 trade_result = trade_amount * Decimal(str(1 + price_change))
-                
+
                 profit_loss = trade_result - trade_amount
                 self.ftns_balance += profit_loss
-                
+
                 if profit_loss > 0:
                     self.total_earnings += profit_loss
                 else:
                     self.total_spending += abs(profit_loss)
-                
+
                 self._record_transaction(EconomicAction.TRADE_TOKENS, profit_loss)
     
     def _update_reputation(self):
@@ -348,18 +376,22 @@ class PRSMEconomicModel(Model):
     price discovery, incentive mechanisms, and stakeholder interactions.
     """
     
-    def __init__(self, 
+    def __init__(self,
                  num_agents: int = 10000,
                  initial_token_supply: Decimal = Decimal('1000000'),
-                 market_condition: MarketCondition = MarketCondition.STABLE):
-        
+                 market_condition: MarketCondition = MarketCondition.STABLE,
+                 seed: Optional[int] = None):
+
         if not MESA_AVAILABLE:
             raise ImportError("Mesa framework required. Install with: pip install mesa")
-        
+
         super().__init__()
         self.num_agents = num_agents
         self.initial_token_supply = initial_token_supply
         self.market_condition = market_condition
+
+        # Seeded RNG for reproducible simulations
+        self.rng = np.random.default_rng(seed)
         
         # Economic state
         self.circulating_supply = initial_token_supply
@@ -483,14 +515,14 @@ class PRSMEconomicModel(Model):
         }
         
         config = base_profiles[stakeholder_type]
-        
+
         return AgentProfile(
             agent_type=stakeholder_type,
-            initial_balance=Decimal(str(random.uniform(*config["initial_balance"]))),
-            risk_tolerance=random.uniform(*config["risk_tolerance"]),
-            activity_frequency=random.uniform(*config["activity_frequency"]),
-            quality_threshold=random.uniform(*config["quality_threshold"]),
-            network_connectivity=random.randint(*config["network_connectivity"]),
+            initial_balance=Decimal(str(self.rng.uniform(*config["initial_balance"]))),
+            risk_tolerance=float(self.rng.uniform(*config["risk_tolerance"])),
+            activity_frequency=float(self.rng.uniform(*config["activity_frequency"])),
+            quality_threshold=float(self.rng.uniform(*config["quality_threshold"])),
+            network_connectivity=int(self.rng.integers(config["network_connectivity"][0], config["network_connectivity"][1] + 1)),
             economic_strategy=config["strategy"]
         )
     
@@ -553,7 +585,7 @@ class PRSMEconomicModel(Model):
         elif self.market_condition == MarketCondition.BEAR:
             price_change_factor *= 0.98
         elif self.market_condition == MarketCondition.VOLATILE:
-            volatility = random.uniform(-0.03, 0.03)
+            volatility = self.rng.uniform(-0.03, 0.03)
             price_change_factor *= (1.0 + volatility)
         
         # Update token price
@@ -662,28 +694,32 @@ class PRSMEconomicModel(Model):
     
     def process_query(self, user_id: int, cost: Decimal) -> float:
         """Process user query and return quality score"""
-        
+
         # Select content based on availability (simplified)
         if self.content_registry:
-            content_id = random.choice(list(self.content_registry.keys()))
+            content_ids = list(self.content_registry.keys())
+            qualities = np.array([self.content_registry[cid]['quality'] for cid in content_ids])
+            # Normalize to probability weights (quality-biased selection)
+            weights = qualities / qualities.sum()
+            content_id = self.rng.choice(content_ids, p=weights)
             content = self.content_registry[content_id]
-            
+
             # Update usage
             content['usage_count'] += 1
-            
+
             # Distribute revenue to content creator
             creator_revenue = cost * Decimal('0.3')  # 30% to creator
             content['total_revenue'] += creator_revenue
-            
+
             # Find creator and pay them
             for agent in self.schedule.agents:
                 if agent.unique_id == content['creator_id']:
                     agent.ftns_balance += creator_revenue
                     agent.total_earnings += creator_revenue
                     break
-            
+
             return content['quality']
-        
+
         return 0.5  # Default quality if no content available
     
     def register_compute_provision(self, operator_id: int, reward: Decimal):
@@ -845,7 +881,7 @@ class EconomicSimulationRunner:
         start_time = datetime.now(timezone.utc)
         
         simulation_report = {
-            "simulation_id": str(random.randint(100000, 999999)),
+            "simulation_id": str(uuid.uuid4()),
             "start_time": start_time,
             "scenarios": [],
             "comparative_analysis": {},

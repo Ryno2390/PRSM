@@ -496,7 +496,13 @@ class PRSMConfig(BaseConfigSchema):
 
     @property
     def database_url(self):
-        return f"{self.database.type.value}://{self.database.host}:{self.database.port}/{self.database.database}" if self.database else "sqlite:///prsm.db"
+        if not self.database:
+            return "sqlite:///prsm.db"
+        # .value extracts the string primitive from both enum instances and plain strings
+        db_type = self.database.type.value if hasattr(self.database.type, 'value') else self.database.type
+        if db_type == "sqlite":
+            return f"sqlite:///{self.database.database}"
+        return f"{db_type}://{self.database.host}:{self.database.port}/{self.database.database}"
 
     @property
     def redis_url(self):
