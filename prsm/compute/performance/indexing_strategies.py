@@ -298,13 +298,54 @@ class IndexAnalyzer:
             return []
     
     async def _get_last_used_time(self, index_name: str) -> Optional[datetime]:
-        """Get last time index was used (placeholder implementation)"""
-        # This would require additional tracking or pg_stat_statements
-        return None
-    
+        """Query pg_stat_user_indexes for last scan time."""
+        try:
+            connection_pool = get_connection_pool()
+            if connection_pool is None:
+                return None
+            async with connection_pool.get_connection(QueryType.SELECT) as (conn, _):
+                result = await conn.fetchrow(
+                    "SELECT last_idx_scan FROM pg_stat_user_indexes "
+                    "WHERE indexrelname = $1",
+                    index_name,
+                )
+                if result and result["last_idx_scan"]:
+                    ts = result["last_idx_scan"]
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    return ts
+                return None
+        except Exception as e:
+            logger.debug(f"Could not query last_used_time for {index_name}: {e}")
+            return None
+
     async def _get_index_created_time(self, index_name: str) -> datetime:
-        """Get index creation time (placeholder implementation)"""
-        # This would require system catalog queries
+        """Query pg_indexes/pg_class for index creation time (via OID ordering)."""
+        try:
+            connection_pool = get_connection_pool()
+            if connection_pool is None:
+                return datetime.now(timezone.utc)
+            async with connection_pool.get_connection(QueryType.SELECT) as (conn, _):
+                # pg_stat_user_indexes doesn't store creation time directly;
+                # use pg_class OID as a proxy (lower OID = created earlier)
+                result = await conn.fetchrow(
+                    """
+                    SELECT (to_timestamp(((c.oid::bigint >> 32) & 0xFFFF) * 65536))
+                           AT TIME ZONE 'UTC' AS approx_created
+                    FROM pg_class c
+                    JOIN pg_indexes i ON i.indexname = c.relname
+                    WHERE i.indexname = $1
+                    LIMIT 1
+                    """,
+                    index_name,
+                )
+                if result and result["approx_created"]:
+                    ts = result["approx_created"]
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    return ts
+        except Exception as e:
+            logger.debug(f"Could not query created_time for {index_name}: {e}")
         return datetime.now(timezone.utc)
     
     async def _calculate_index_selectivity(self, table_name: str, columns: List[str]) -> float:

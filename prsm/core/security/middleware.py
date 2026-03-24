@@ -234,13 +234,38 @@ class GeolocationFilterMiddleware(BaseHTTPMiddleware):
         # Check for private/local IPs (always allow)
         if self._is_private_ip(client_ip):
             return await call_next(request)
-        
-        # For production, would implement actual GeoIP lookup
-        # For now, just log the request
-        logger.debug("Request geolocation check",
-                    ip=client_ip,
-                    path=request.url.path)
-        
+
+        # Try geoip2 for country-level filtering if configured
+        if self.blocked_countries or self.allowed_countries:
+            try:
+                import geoip2.database
+                import geoip2.errors
+                db_path = getattr(settings, "geoip_db_path", None)
+                if db_path:
+                    with geoip2.database.Reader(db_path) as reader:
+                        try:
+                            record = reader.country(client_ip)
+                            country_code = record.country.iso_code
+                            if self.blocked_countries and country_code in self.blocked_countries:
+                                return Response(
+                                    content="Access denied: region not permitted",
+                                    status_code=403,
+                                )
+                            if self.allowed_countries and country_code not in self.allowed_countries:
+                                return Response(
+                                    content="Access denied: region not permitted",
+                                    status_code=403,
+                                )
+                        except geoip2.errors.AddressNotFoundError:
+                            pass  # Unknown IP — allow
+            except ImportError:
+                pass  # geoip2 not installed — skip country filtering
+
+        # Enforce explicit blocked-IP list from settings (no geoip2 needed)
+        blocked_ips = getattr(settings, "blocked_ips", [])
+        if client_ip in blocked_ips:
+            return Response(content="Access denied", status_code=403)
+
         return await call_next(request)
     
     def _is_private_ip(self, ip: str) -> bool:

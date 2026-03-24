@@ -195,8 +195,8 @@ async def add_torrent(
 
     source = request.source
     if source.startswith("magnet:"):
-        # Magnet URI
-        pass
+        # Magnet URI — bt_client.add_torrent accepts it directly
+        pass  # intentional: source remains the magnet URI string
     else:
         # Assume it's a file path, read the torrent bytes
         try:
