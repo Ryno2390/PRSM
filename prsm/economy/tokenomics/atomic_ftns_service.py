@@ -52,6 +52,17 @@ getcontext().prec = 28
 logger = structlog.get_logger(__name__)
 settings = get_settings()
 
+# SQLite does not support SELECT FOR UPDATE / ANY() — skip those clauses when running
+# on a sqlite:// connection (development / CI).  Wrapped in a helper to avoid
+# module-load failures in PyTorch DataLoader worker subprocesses.
+def _is_sqlite() -> bool:
+    try:
+        return get_settings().database_url.startswith("sqlite")
+    except Exception:
+        return True  # Default to SQLite-safe mode on any error
+
+_SQLITE = _is_sqlite()
+
 
 class AtomicOperationError(Exception):
     """Base exception for atomic operation failures"""
@@ -136,6 +147,17 @@ class AtomicFTNSService:
         if self._initialized:
             return
         self._initialized = True
+        # When using the module-level engine (no injected db_service), ensure all
+        # ORM-defined tables exist.  This is idempotent — SQLAlchemy only creates
+        # tables that are missing, so it is safe to call on every startup.
+        if self._db_service is None:
+            try:
+                from prsm.core.database import get_async_engine, Base
+                engine = await get_async_engine()
+                async with engine.begin() as conn:
+                    await conn.run_sync(Base.metadata.create_all)
+            except Exception as e:
+                logger.warning("AtomicFTNSService could not auto-create tables", error=str(e))
         logger.info("AtomicFTNSService initialized")
 
     async def _get_session(self):
@@ -220,13 +242,14 @@ class AtomicFTNSService:
         async with await self._get_session() as session:
             try:
                 # Use INSERT ... ON CONFLICT for atomic upsert
+                # Note: account_type is not in the ORM model; excluded here.
                 query = text("""
                     INSERT INTO ftns_balances
                     (user_id, balance, locked_balance, total_earned, total_spent,
-                     account_type, version, created_at, updated_at)
+                     version, created_at, updated_at)
                     VALUES
                     (:user_id, :balance, 0, :total_earned, 0,
-                     :account_type, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                     1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     ON CONFLICT (user_id) DO NOTHING
                     RETURNING user_id
                 """)
@@ -235,7 +258,6 @@ class AtomicFTNSService:
                     "user_id": user_id,
                     "balance": str(initial_balance),
                     "total_earned": str(initial_balance),
-                    "account_type": account_type
                 })
 
                 await session.commit()
@@ -304,12 +326,20 @@ class AtomicFTNSService:
                     )
 
                 # Step 2: Acquire row lock and get current balance
-                balance_query = text("""
-                    SELECT balance, locked_balance, version
-                    FROM ftns_balances
-                    WHERE user_id = :user_id
-                    FOR UPDATE NOWAIT
-                """)
+                # SQLite has no row-level locking; rely on OCC version check instead.
+                if _SQLITE:
+                    balance_query = text("""
+                        SELECT balance, locked_balance, version
+                        FROM ftns_balances
+                        WHERE user_id = :user_id
+                    """)
+                else:
+                    balance_query = text("""
+                        SELECT balance, locked_balance, version
+                        FROM ftns_balances
+                        WHERE user_id = :user_id
+                        FOR UPDATE NOWAIT
+                    """)
 
                 try:
                     result = await session.execute(
@@ -377,27 +407,26 @@ class AtomicFTNSService:
                 # Step 6: Create transaction record
                 tx_query = text("""
                     INSERT INTO ftns_transactions
-                    (id, from_user_id, to_user_id, amount, transaction_type,
+                    (transaction_id, from_user, to_user, amount, transaction_type,
                      description, status, idempotency_key,
                      balance_before_sender, balance_after_sender,
-                     metadata, created_at)
+                     created_at)
                     VALUES
-                    (:id::uuid, :from_user, NULL, :amount, 'deduction',
+                    (:transaction_id, :from_user, :to_user, :amount, 'deduction',
                      :description, 'completed', :idempotency_key,
                      :balance_before, :balance_after,
-                     :metadata, CURRENT_TIMESTAMP)
+                     CURRENT_TIMESTAMP)
                 """)
 
-                import json
                 await session.execute(tx_query, {
-                    "id": transaction_id,
+                    "transaction_id": transaction_id,
                     "from_user": user_id,
+                    "to_user": self.SYSTEM_FEES,  # Required NOT NULL — fees go to system
                     "amount": str(amount),
                     "description": description,
                     "idempotency_key": idempotency_key,
                     "balance_before": str(current_balance),
                     "balance_after": str(new_balance),
-                    "metadata": json.dumps(metadata or {})
                 })
 
                 # Step 7: Record idempotency key
@@ -489,17 +518,28 @@ class AtomicFTNSService:
                 # Lock accounts in consistent order to prevent deadlocks
                 first_user, second_user = sorted([from_user_id, to_user_id])
 
-                lock_query = text("""
-                    SELECT user_id, balance, locked_balance, version
-                    FROM ftns_balances
-                    WHERE user_id = ANY(:user_ids)
-                    ORDER BY user_id
-                    FOR UPDATE
-                """)
-
-                result = await session.execute(
-                    lock_query, {"user_ids": [first_user, second_user]}
-                )
+                # SQLite: no FOR UPDATE and no ANY() — use OR instead.
+                if _SQLITE:
+                    lock_query = text("""
+                        SELECT user_id, balance, locked_balance, version
+                        FROM ftns_balances
+                        WHERE user_id = :user1 OR user_id = :user2
+                        ORDER BY user_id
+                    """)
+                    result = await session.execute(
+                        lock_query, {"user1": first_user, "user2": second_user}
+                    )
+                else:
+                    lock_query = text("""
+                        SELECT user_id, balance, locked_balance, version
+                        FROM ftns_balances
+                        WHERE user_id = ANY(:user_ids)
+                        ORDER BY user_id
+                        FOR UPDATE
+                    """)
+                    result = await session.execute(
+                        lock_query, {"user_ids": [first_user, second_user]}
+                    )
                 rows = {row.user_id: row for row in result.fetchall()}
 
                 if from_user_id not in rows:
@@ -558,22 +598,21 @@ class AtomicFTNSService:
                 })
 
                 # Record transaction
-                import json
                 await session.execute(text("""
                     INSERT INTO ftns_transactions
-                    (id, from_user_id, to_user_id, amount, transaction_type,
+                    (transaction_id, from_user, to_user, amount, transaction_type,
                      description, status, idempotency_key,
                      balance_before_sender, balance_after_sender,
                      balance_before_receiver, balance_after_receiver,
-                     metadata, created_at)
+                     created_at)
                     VALUES
-                    (:id::uuid, :from_user, :to_user, :amount, 'transfer',
+                    (:transaction_id, :from_user, :to_user, :amount, 'transfer',
                      :description, 'completed', :idempotency_key,
                      :balance_before_s, :balance_after_s,
                      :balance_before_r, :balance_after_r,
-                     :metadata, CURRENT_TIMESTAMP)
+                     CURRENT_TIMESTAMP)
                 """), {
-                    "id": transaction_id,
+                    "transaction_id": transaction_id,
                     "from_user": from_user_id,
                     "to_user": to_user_id,
                     "amount": str(amount),
@@ -583,7 +622,6 @@ class AtomicFTNSService:
                     "balance_after_s": str(sender_balance - amount),
                     "balance_before_r": str(receiver.balance),
                     "balance_after_r": str(Decimal(str(receiver.balance)) + amount),
-                    "metadata": json.dumps(metadata or {})
                 })
 
                 # Record idempotency
@@ -650,13 +688,12 @@ class AtomicFTNSService:
                         idempotent_replay=True
                     )
 
-                # Lock and update receiver
-                result = await session.execute(text("""
-                    SELECT balance, version
-                    FROM ftns_balances
-                    WHERE user_id = :user_id
-                    FOR UPDATE
-                """), {"user_id": to_user_id})
+                # Lock and update receiver (SQLite has no FOR UPDATE)
+                if _SQLITE:
+                    _recv_lock_sql = "SELECT balance, version FROM ftns_balances WHERE user_id = :user_id"
+                else:
+                    _recv_lock_sql = "SELECT balance, version FROM ftns_balances WHERE user_id = :user_id FOR UPDATE"
+                result = await session.execute(text(_recv_lock_sql), {"user_id": to_user_id})
 
                 row = result.fetchone()
                 if not row:
@@ -683,20 +720,19 @@ class AtomicFTNSService:
                 })
 
                 # Record transaction
-                import json
                 await session.execute(text("""
                     INSERT INTO ftns_transactions
-                    (id, from_user_id, to_user_id, amount, transaction_type,
+                    (transaction_id, from_user, to_user, amount, transaction_type,
                      description, status, idempotency_key,
                      balance_before_receiver, balance_after_receiver,
-                     metadata, created_at)
+                     created_at)
                     VALUES
-                    (:id::uuid, :system, :to_user, :amount, 'mint',
+                    (:transaction_id, :system, :to_user, :amount, 'mint',
                      :description, 'completed', :idempotency_key,
                      :balance_before, :balance_after,
-                     :metadata, CURRENT_TIMESTAMP)
+                     CURRENT_TIMESTAMP)
                 """), {
-                    "id": transaction_id,
+                    "transaction_id": transaction_id,
                     "system": self.SYSTEM_MINT,
                     "to_user": to_user_id,
                     "amount": str(amount),
@@ -704,7 +740,6 @@ class AtomicFTNSService:
                     "idempotency_key": idempotency_key,
                     "balance_before": str(current_balance),
                     "balance_after": str(new_balance),
-                    "metadata": json.dumps(metadata or {})
                 })
 
                 await self._record_idempotency(

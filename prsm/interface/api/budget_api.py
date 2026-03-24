@@ -611,15 +611,15 @@ def _get_category_description(category: SpendingCategory) -> str:
     descriptions = {
         SpendingCategory.MODEL_INFERENCE: "Costs for LLM API calls and model inference",
         SpendingCategory.AGENT_COORDINATION: "Costs for agent orchestration and coordination",
-        SpendingCategory.TOOL_EXECUTION: "Costs for MCP tool usage and execution",
-        SpendingCategory.DATA_ACCESS: "Costs for dataset and knowledge base access",
-        SpendingCategory.MARKETPLACE_TRADING: "Costs for marketplace transactions (U2U and A2A)",
+        SpendingCategory.AGENT_EXECUTION: "Costs for agent and MCP tool execution",
         SpendingCategory.CONTEXT_PROCESSING: "Costs for context compression and management",
-        SpendingCategory.SAFETY_VALIDATION: "Costs for safety and security validation",
-        SpendingCategory.STORAGE_OPERATIONS: "Costs for IPFS and data storage operations",
-        SpendingCategory.NETWORK_OPERATIONS: "Costs for P2P network participation"
+        SpendingCategory.REASONING_OPERATION: "Costs for complex reasoning operations",
+        SpendingCategory.BREAKTHROUGH_DETECTION: "Costs for breakthrough analysis and detection",
+        SpendingCategory.SYNTHESIS_GENERATION: "Costs for content synthesis and generation",
+        SpendingCategory.DATABASE_OPERATION: "Costs for database queries and operations",
+        SpendingCategory.SYSTEM_OVERHEAD: "General PRSM system operational costs",
     }
-    
+
     return descriptions.get(category, "General PRSM system costs")
 
 

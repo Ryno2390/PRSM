@@ -61,7 +61,7 @@ async def test_hierarchical_consensus():
                 peer_nodes.append(peer)
             
             # Test hierarchical consensus
-            result = await test_scenario_consensus(peer_nodes, scenario, collector)
+            result = await _run_scenario_consensus(peer_nodes, scenario, collector)
             results.append(result)
         
         # Summary of results
@@ -106,7 +106,7 @@ async def test_hierarchical_consensus():
         return []
 
 
-async def test_scenario_consensus(peer_nodes, scenario, collector):
+async def _run_scenario_consensus(peer_nodes, scenario, collector):
     """Test consensus for a specific scenario"""
     try:
         # Initialize hierarchical consensus network

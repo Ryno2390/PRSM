@@ -28,17 +28,28 @@ except Exception as e:
 
 class TestBudgetAPI:
     """Test suite for Budget Management API endpoints"""
-    
+
+    @pytest.fixture(autouse=True)
+    def _override_auth(self):
+        """Bypass FastAPI auth dependency for all tests in this class."""
+        from prsm.interface.auth import get_current_user as _get_current_user
+        app.dependency_overrides[_get_current_user] = lambda: {
+            "user_id": "test_api_user_001",
+            "username": "test_user",
+        }
+        yield
+        app.dependency_overrides.clear()
+
     @pytest.fixture
     def client(self):
         """Create test client"""
         return TestClient(app)
-    
+
     @pytest.fixture
     def mock_user(self):
         """Mock authenticated user"""
         return {"user_id": "test_api_user_001", "username": "test_user"}
-    
+
     @pytest.fixture
     def budget_manager_mock(self):
         """Mock budget manager for isolated API testing"""
@@ -49,26 +60,28 @@ class TestBudgetAPI:
         print("\n🔮 Testing Cost Prediction API...")
         
         # Mock the authentication and budget manager
-        with patch('prsm.api.budget_api.get_current_user') as mock_auth, \
-             patch('prsm.api.budget_api.get_ftns_budget_manager') as mock_manager:
+        with patch('prsm.interface.api.budget_api.get_current_user') as mock_auth, \
+             patch('prsm.interface.api.budget_api.get_ftns_budget_manager') as mock_manager:
             
             # Setup mocks
             mock_auth.return_value = {"user_id": "test_user"}
             mock_budget_manager = AsyncMock()
             mock_manager.return_value = mock_budget_manager
             
-            # Mock prediction response
-            from prsm.economy.tokenomics.ftns_budget_manager import BudgetPrediction
-            mock_prediction = BudgetPrediction(
-                query_complexity=0.7,
-                estimated_total_cost=Decimal('85.5'),
-                category_estimates={
-                    SpendingCategory.MODEL_INFERENCE: Decimal('51.3'),
-                    SpendingCategory.TOOL_EXECUTION: Decimal('25.6'),
-                    SpendingCategory.AGENT_COORDINATION: Decimal('8.6')
-                },
-                confidence_score=0.82
-            )
+            # Mock prediction response — use MagicMock so we control all attributes
+            from unittest.mock import MagicMock
+            mock_prediction = MagicMock()
+            mock_prediction.prediction_id = "pred-test-001"
+            mock_prediction.query_complexity = 0.7
+            mock_prediction.estimated_total_cost = Decimal('85.5')
+            mock_prediction.category_estimates = {
+                SpendingCategory.MODEL_INFERENCE: Decimal('51.3'),
+                SpendingCategory.AGENT_EXECUTION: Decimal('25.6'),
+                SpendingCategory.AGENT_COORDINATION: Decimal('8.6')
+            }
+            mock_prediction.confidence_score = 0.82
+            mock_prediction.get_recommended_budget.return_value = Decimal('95.0')
+            mock_prediction.prediction_factors = {"complexity_score": 0.7}
             mock_budget_manager.predict_session_cost.return_value = mock_prediction
             
             # Make API request
@@ -95,8 +108,8 @@ class TestBudgetAPI:
         """Test budget creation endpoint"""
         print("\n💳 Testing Budget Creation API...")
         
-        with patch('prsm.api.budget_api.get_current_user') as mock_auth, \
-             patch('prsm.api.budget_api.get_ftns_budget_manager') as mock_manager:
+        with patch('prsm.interface.api.budget_api.get_current_user') as mock_auth, \
+             patch('prsm.interface.api.budget_api.get_ftns_budget_manager') as mock_manager:
             
             # Setup mocks
             mock_auth.return_value = {"user_id": "test_user"}
@@ -156,8 +169,8 @@ class TestBudgetAPI:
         """Test budget status monitoring endpoint"""
         print("\n📊 Testing Budget Status API...")
         
-        with patch('prsm.api.budget_api.get_current_user') as mock_auth, \
-             patch('prsm.api.budget_api.get_ftns_budget_manager') as mock_manager:
+        with patch('prsm.interface.api.budget_api.get_current_user') as mock_auth, \
+             patch('prsm.interface.api.budget_api.get_ftns_budget_manager') as mock_manager:
             
             # Setup mocks
             mock_auth.return_value = {"user_id": "test_user"}
@@ -214,8 +227,8 @@ class TestBudgetAPI:
         """Test budget spending tracking endpoint"""
         print("\n💰 Testing Spending API...")
         
-        with patch('prsm.api.budget_api.get_current_user') as mock_auth, \
-             patch('prsm.api.budget_api.get_ftns_budget_manager') as mock_manager:
+        with patch('prsm.interface.api.budget_api.get_current_user') as mock_auth, \
+             patch('prsm.interface.api.budget_api.get_ftns_budget_manager') as mock_manager:
             
             # Setup mocks
             mock_auth.return_value = {"user_id": "test_user"}
@@ -259,8 +272,8 @@ class TestBudgetAPI:
         """Test budget expansion request endpoint"""
         print("\n📈 Testing Budget Expansion API...")
         
-        with patch('prsm.api.budget_api.get_current_user') as mock_auth, \
-             patch('prsm.api.budget_api.get_ftns_budget_manager') as mock_manager:
+        with patch('prsm.interface.api.budget_api.get_current_user') as mock_auth, \
+             patch('prsm.interface.api.budget_api.get_ftns_budget_manager') as mock_manager:
             
             # Setup mocks
             mock_auth.return_value = {"user_id": "test_user"}
@@ -282,7 +295,8 @@ class TestBudgetAPI:
             mock_expand_request.remaining_budget = Decimal('15.0')
             mock_expand_request.auto_generated = False
             mock_expand_request.approved = None  # Pending
-            mock_expand_request.expires_at = "2024-01-01T01:00:00Z"
+            from datetime import datetime, timezone as _tz
+            mock_expand_request.expires_at = datetime(2024, 1, 1, 1, 0, 0, tzinfo=_tz.utc)
             
             mock_budget_manager.request_budget_expansion.return_value = mock_expand_request
             
@@ -316,8 +330,8 @@ class TestBudgetAPI:
         """Test budget expansion approval endpoint"""
         print("\n👤 Testing Expansion Approval API...")
         
-        with patch('prsm.api.budget_api.get_current_user') as mock_auth, \
-             patch('prsm.api.budget_api.get_ftns_budget_manager') as mock_manager:
+        with patch('prsm.interface.api.budget_api.get_current_user') as mock_auth, \
+             patch('prsm.interface.api.budget_api.get_ftns_budget_manager') as mock_manager:
             
             # Setup mocks
             mock_auth.return_value = {"user_id": "test_user"}
@@ -355,8 +369,8 @@ class TestBudgetAPI:
         """Test user budgets listing endpoint"""
         print("\n📋 Testing User Budgets API...")
         
-        with patch('prsm.api.budget_api.get_current_user') as mock_auth, \
-             patch('prsm.api.budget_api.get_ftns_budget_manager') as mock_manager:
+        with patch('prsm.interface.api.budget_api.get_current_user') as mock_auth, \
+             patch('prsm.interface.api.budget_api.get_ftns_budget_manager') as mock_manager:
             
             # Setup mocks
             mock_auth.return_value = {"user_id": "test_user"}
@@ -414,8 +428,8 @@ class TestBudgetAPI:
         """Test budget analytics endpoint"""
         print("\n📊 Testing Budget Analytics API...")
         
-        with patch('prsm.api.budget_api.get_current_user') as mock_auth, \
-             patch('prsm.api.budget_api.get_ftns_budget_manager') as mock_manager:
+        with patch('prsm.interface.api.budget_api.get_current_user') as mock_auth, \
+             patch('prsm.interface.api.budget_api.get_ftns_budget_manager') as mock_manager:
             
             # Setup mocks
             mock_auth.return_value = {"user_id": "test_user"}
@@ -425,18 +439,19 @@ class TestBudgetAPI:
             from uuid import uuid4
             budget_id = uuid4()
             
-            # Mock budget status
+            # Mock budget status (include available_budget which the handler requires)
             mock_budget_manager.get_budget_status.return_value = {
                 "budget_id": str(budget_id),
                 "status": "active",
                 "total_budget": 100.0,
                 "total_spent": 45.0,
+                "available_budget": 55.0,
                 "utilization_percentage": 45.0,
                 "triggered_alerts": [],
                 "pending_expansions": 0,
                 "category_breakdown": {
                     "model_inference": {"spent": 30.0},
-                    "tool_execution": {"spent": 15.0}
+                    "agent_execution": {"spent": 15.0}
                 }
             }
             
@@ -480,11 +495,11 @@ class TestBudgetAPI:
         assert "total_count" in data
         assert data["total_count"] > 0
         
-        # Check that expected categories are present
+        # Check that expected categories are present (use current SpendingCategory enum values)
         categories = data["categories"]
         assert "model_inference" in categories
-        assert "tool_execution" in categories
-        assert "marketplace_trading" in categories
+        assert "agent_execution" in categories
+        assert "agent_coordination" in categories
         
         print(f"✅ Categories API working: {data['total_count']} categories available")
         
@@ -498,8 +513,8 @@ class TestBudgetAPI:
         from uuid import uuid4
         invalid_budget_id = uuid4()
         
-        with patch('prsm.api.budget_api.get_current_user') as mock_auth, \
-             patch('prsm.api.budget_api.get_ftns_budget_manager') as mock_manager:
+        with patch('prsm.interface.api.budget_api.get_current_user') as mock_auth, \
+             patch('prsm.interface.api.budget_api.get_ftns_budget_manager') as mock_manager:
             
             mock_auth.return_value = {"user_id": "test_user"}
             mock_budget_manager = AsyncMock()
