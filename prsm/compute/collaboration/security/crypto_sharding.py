@@ -105,20 +105,22 @@ class BasicCryptoSharding:
         """Calculate SHA-256 hash of file for integrity verification"""
         return hashlib.sha256(file_data).hexdigest()
     
-    def shard_file(self, 
-                   file_path: str, 
+    def shard_file(self,
+                   file_path: str,
                    user_permissions: List[str],
                    num_shards: Optional[int] = None,
-                   required_shards: Optional[int] = None) -> Tuple[List[ShardInfo], ReconstructionManifest]:
+                   required_shards: Optional[int] = None,
+                   created_by: Optional[str] = None) -> Tuple[List[ShardInfo], ReconstructionManifest]:
         """
         Shard a file into encrypted pieces for secure distribution.
-        
+
         Args:
             file_path: Path to the file to shard
             user_permissions: List of user IDs who can access this file
             num_shards: Number of shards to create (uses default if None)
             required_shards: Minimum shards needed (uses default if None)
-            
+            created_by: User ID of the creator (defaults to first user in permissions)
+
         Returns:
             Tuple of (shard_list, reconstruction_manifest)
         """
@@ -190,8 +192,8 @@ class BasicCryptoSharding:
             shard_locations={i: f"shard_{i}" for i in range(num_shards)},
             access_control={
                 "permitted_users": user_permissions,
-                "created_by": "system",  # TODO: Add actual user tracking
-                "access_policy": "M_of_N",  
+                "created_by": created_by or (user_permissions[0] if user_permissions else "system"),
+                "access_policy": "M_of_N",
                 "encryption_algorithm": "AES-256"
             },
             created_timestamp=timestamp
@@ -260,24 +262,32 @@ class BasicCryptoSharding:
         
         return reconstructed_data
     
-    def create_secure_workspace(self, 
+    def create_secure_workspace(self,
                                workspace_name: str,
                                participants: List[str],
-                               workspace_type: str = "standard") -> Dict[str, Any]:
+                               workspace_type: str = "standard",
+                               ttl_hours: int = 24) -> Dict[str, Any]:
         """
         Create a secure workspace for collaboration.
-        
+
         Args:
             workspace_name: Name of the workspace
             participants: List of user IDs who can access the workspace
             workspace_type: Type of workspace (standard, enterprise, research)
-            
+            ttl_hours: Time-to-live in hours for workspace auto-expiration (default 24)
+
         Returns:
             Workspace configuration dictionary
         """
+        from datetime import datetime, timezone, timedelta
+
         workspace_id = secrets.token_urlsafe(16)
         timestamp = time.time()
-        
+
+        # Calculate expiration time
+        created_time = datetime.now(timezone.utc)
+        expiration_time = created_time + timedelta(hours=ttl_hours)
+
         workspace_config = {
             "workspace_id": workspace_id,
             "name": workspace_name,
@@ -289,7 +299,8 @@ class BasicCryptoSharding:
                 "default_shards": self.default_shards,
                 "required_shards": self.required_shards,
                 "access_logging": True,
-                "auto_expire": None  # TODO: Add expiration support
+                "auto_expire": expiration_time.isoformat(),
+                "ttl_hours": ttl_hours
             },
             "collaboration_features": {
                 "file_sharing": True,
@@ -298,7 +309,7 @@ class BasicCryptoSharding:
                 "audit_trail": True
             }
         }
-        
+
         return workspace_config
     
     def validate_shard_integrity(self, shard: ShardInfo) -> bool:

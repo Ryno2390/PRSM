@@ -48,6 +48,7 @@ from pydantic import BaseModel, Field
 from ..models.integration_models import SecurityRisk, LicenseType, SecurityScanResult
 from prsm.core.config import settings
 from prsm.core.models import TimestampMixin
+from .audit_logger import audit_logger
 from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
 
 logger = structlog.get_logger(__name__)
@@ -1301,14 +1302,25 @@ class SandboxManager:
                 "system": "prsm_sandbox_manager",
                 "action_taken": "quarantine_and_emergency_response"
             }
-            
+
             # Log security alert (would also send to SIEM/monitoring systems)
             logger.critical("SECURITY ALERT", **alert_data)
-            
-            # TODO: Integrate with external security systems
-            # await security_monitoring_client.send_alert(alert_data)
-            # await siem_client.log_security_incident(alert_data)
-            
+
+            # Emit structured security event to audit logger
+            await audit_logger.log_security_event(
+                event_type="sandbox_security_threat",
+                user_id="system",
+                details={
+                    "severity": scan_result.risk_level,
+                    "scan_id": str(scan_result.scan_id),
+                    "vulnerabilities_count": len(scan_result.vulnerabilities_found),
+                    "vulnerabilities": scan_result.vulnerabilities_found[:10],  # Limit for log size
+                    "recommendations": scan_result.recommendations[:5] if scan_result.recommendations else [],
+                    "action_taken": "quarantine_and_emergency_response"
+                },
+                security_level="critical"
+            )
+
         except Exception as e:
             logger.error("Failed to notify security systems", error=str(e))
     

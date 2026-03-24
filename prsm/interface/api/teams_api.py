@@ -19,6 +19,8 @@ from ..teams.models import (
     Team, TeamMember, TeamTask, TeamProposal,
     TeamRole, TeamType, GovernanceModel, RewardPolicy
 )
+from prsm.core.auth.auth_manager import get_current_user
+from prsm.core.auth.models import User
 
 # Initialize router
 router = APIRouter(prefix="/api/v1/teams", tags=["teams"])
@@ -117,10 +119,9 @@ class DistributeRewardsRequest(BaseModel):
 
 # === Helper Functions ===
 
-def get_current_user_id() -> str:
+def get_current_user_id(current_user: User = Depends(get_current_user)) -> str:
     """Get current user ID from authentication context"""
-    # Placeholder - in production, this would extract from JWT token or session
-    return "current_user_placeholder"
+    return str(current_user.id)
 
 
 async def validate_team_access(team_id: UUID, user_id: str, required_role: Optional[TeamRole] = None) -> Team:

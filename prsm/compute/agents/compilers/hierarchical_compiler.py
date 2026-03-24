@@ -2287,10 +2287,10 @@ class HierarchicalCompiler(BaseAgent):
     Reasoning mode: {reasoning_mode}
     """
     # Initial implementation
-    result = None
-    
-    # TODO: Implement solution logic
-    
+    # TODO: Implement solution logic based on the problem description above
+    # Consider: input parsing, core algorithm, edge cases, and output formatting
+    result = None  # Replace with actual solution logic
+
     return result
 # Example usage
 if __name__ == "__main__":
@@ -2302,10 +2302,10 @@ if __name__ == "__main__":
      * {description}
      * Reasoning mode: {reasoning_mode}
      */
-    let result = null;
-    
-    // TODO: Implement solution logic
-    
+    // TODO: Implement solution logic based on the problem description above
+    // Consider: input parsing, core algorithm, edge cases, and output formatting
+    let result = null;  // Replace with actual solution logic
+
     return result;
 }}
 // Example usage
@@ -2315,8 +2315,9 @@ console.log(`Result: ${{result}}`);'''
                 solution_template = '''// {description}
 // Reasoning mode: {reasoning_mode}
 function solve() {{
-    // TODO: Implement solution logic
-    return null;
+    // TODO: Implement solution logic based on the problem description above
+    // Consider: input parsing, core algorithm, edge cases, and output formatting
+    return null;  // Replace with actual solution logic
 }}'''
             
             return solution_template.format(

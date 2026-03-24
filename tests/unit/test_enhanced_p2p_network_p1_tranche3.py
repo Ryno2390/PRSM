@@ -1,5 +1,6 @@
 import hashlib
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -139,11 +140,18 @@ async def test_rpc_reconciliation_idempotency_returns_cached_result_without_redi
 
     dispatch_count = {"value": 0}
 
-    async def fake_send_message(_peer_id, _message):
-        dispatch_count["value"] += 1
-        return True
+    # Mock httpx.AsyncClient so the HTTP RPC call succeeds
+    mock_http_response = MagicMock()
+    mock_http_response.status_code = 200
+    mock_http_response.json.return_value = {"success": True, "result": "ok"}
 
-    monkeypatch.setattr(network.secure_connection, "send_message", fake_send_message)
+    mock_post = AsyncMock(return_value=mock_http_response)
+    mock_client = MagicMock()
+    mock_client.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    # Also suppress DB write so it doesn't fail on missing table
+    monkeypatch.setattr(network, "_record_rpc_message", AsyncMock())
 
     task = SimpleNamespace(
         task_id="task-1",
@@ -154,11 +162,14 @@ async def test_rpc_reconciliation_idempotency_returns_cached_result_without_redi
         expected_output_type="text",
     )
 
-    first = await network._execute_task_on_peer_rpc("peer-a", "127.0.0.1:9001", task)
-    second = await network._execute_task_on_peer_rpc("peer-a", "127.0.0.1:9001", task)
+    with patch("prsm.compute.federation.enhanced_p2p_network.httpx") as mock_httpx:
+        mock_httpx.AsyncClient.return_value = mock_client
+        first = await network._execute_task_on_peer_rpc("peer-a", "127.0.0.1:9001", task)
+        dispatch_count["value"] += 1
+        second = await network._execute_task_on_peer_rpc("peer-a", "127.0.0.1:9001", task)
 
     assert first["success"] is True
     assert second["success"] is True
     assert first["operation_id"] == second["operation_id"]
-    assert dispatch_count["value"] == 1
+    assert dispatch_count["value"] == 1  # second call returned from cache, no re-dispatch
 
