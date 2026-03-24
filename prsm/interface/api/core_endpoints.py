@@ -45,10 +45,17 @@ async def _execute_nwtn_query(
     from prsm.compute.nwtn.reasoning.s1_neuro_symbolic import NeuroSymbolicOrchestrator
     from prsm.core.models import AgentType
 
+    # Resolve current_user to a plain string ID regardless of whether the
+    # dependency injected a User object or a raw string.
+    if hasattr(current_user, "id"):
+        user_id_str: str = str(current_user.id)
+    else:
+        user_id_str = str(current_user)
+
     # Fix session_id BEFORE inference — this becomes the idempotency key.
     # If the client retries the same session_id, the deduction won't double-charge.
     session_id = user_input.session_id or uuid4()
-    idempotency_key = f"query:{current_user}:{session_id}"
+    idempotency_key = f"query:{user_id_str}:{session_id}"
 
     logger.info("Processing NWTN query",
                 user_id=user_input.user_id,
@@ -70,7 +77,7 @@ async def _execute_nwtn_query(
     if ftns_amount > 0:
         try:
             deduct_result = await FTNSQueries.execute_atomic_deduct(
-                user_id=current_user,
+                user_id=user_id_str,
                 amount=ftns_amount,
                 idempotency_key=idempotency_key,
                 description=f"NWTN query: {user_input.prompt[:80]}",
@@ -79,20 +86,20 @@ async def _execute_nwtn_query(
             if deduct_result["success"]:
                 ftns_charged = ftns_amount
                 logger.info("FTNS deducted",
-                            user_id=current_user,
+                            user_id=user_id_str,
                             tokens=tokens_used,
                             ftns=ftns_charged,
                             transaction_id=deduct_result.get("transaction_id"),
                             new_balance=deduct_result.get("new_balance"))
             else:
                 logger.warning("FTNS deduction rejected",
-                               user_id=current_user,
+                               user_id=user_id_str,
                                ftns_amount=ftns_amount,
                                reason=deduct_result.get("error_message"))
         except Exception as exc:
             # DB down, network error, etc. — do not block inference result.
             logger.error("FTNS deduction unavailable",
-                         user_id=current_user,
+                         user_id=user_id_str,
                          ftns_amount=ftns_amount,
                          error=str(exc))
 

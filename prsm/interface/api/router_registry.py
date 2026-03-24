@@ -240,7 +240,7 @@ def _include_service_routers(app: FastAPI) -> None:
     try:
         from prsm.interface.api.content_api import router as content_router
         app.include_router(content_router, tags=["Content"])
-        registered.append("/api/v1/content")
+        logger.debug("Content router registered")
     except Exception as e:
         logger.warning(f"Content router not loaded: {e}")
 

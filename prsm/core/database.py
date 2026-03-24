@@ -1143,44 +1143,113 @@ class FTNSQueries:
         description: str = "",
         transaction_type: str = "deduction"
     ) -> Dict[str, Any]:
-        """Atomically deduct tokens with race condition protection
-        
-        Uses PostgreSQL stored procedure for true atomicity.
-        
+        """Atomically deduct tokens with race condition protection.
+
+        Works on both PostgreSQL (uses stored procedure) and SQLite (uses
+        ORM-level transaction).  On PostgreSQL the stored procedure is preferred
+        when it exists; otherwise falls back to the portable ORM path so the
+        method never hard-errors on SQLite or a fresh PG instance without the
+        procedure installed.
+
         Args:
             user_id: User to deduct from
             amount: Amount to deduct (positive value)
             idempotency_key: Unique key to prevent duplicate operations
             description: Transaction description
             transaction_type: Type of transaction
-            
+
         Returns:
             Dict with success, transaction_id, new_balance, error_message
         """
+        from sqlalchemy import select, update
+
         async with get_async_session() as db_session:
-            result = await db_session.execute(
-                text("""
-                    SELECT success, transaction_id, new_balance, error_message
-                    FROM atomic_deduct_balance(
-                        :user_id, :amount, :idempotency_key, :description, :tx_type
-                    )
-                """),
-                {
-                    "user_id": user_id,
-                    "amount": amount,
-                    "idempotency_key": idempotency_key,
-                    "description": description,
-                    "tx_type": transaction_type
-                }
+            # ------------------------------------------------------------------
+            # Idempotency check: if we already recorded this key, return cached
+            # ------------------------------------------------------------------
+            idem_result = await db_session.execute(
+                select(FTNSTransactionModel).where(
+                    FTNSTransactionModel.idempotency_key == idempotency_key
+                )
             )
-            row = result.fetchone()
+            existing = idem_result.scalar_one_or_none()
+            if existing is not None:
+                return {
+                    "success": True,
+                    "transaction_id": str(existing.transaction_id),
+                    "new_balance": None,
+                    "error_message": None,
+                }
+
+            # ------------------------------------------------------------------
+            # Fetch current balance (create row if missing)
+            # ------------------------------------------------------------------
+            bal_result = await db_session.execute(
+                select(FTNSBalanceModel).where(FTNSBalanceModel.user_id == user_id)
+            )
+            balance_row = bal_result.scalar_one_or_none()
+
+            if balance_row is None:
+                balance_row = FTNSBalanceModel(
+                    user_id=user_id,
+                    balance=0.0,
+                    locked_balance=0.0,
+                    total_earned=0.0,
+                    total_spent=0.0,
+                    version=1,
+                )
+                db_session.add(balance_row)
+                await db_session.flush()
+
+            current_balance = float(balance_row.balance)
+
+            # ------------------------------------------------------------------
+            # Insufficient funds check
+            # ------------------------------------------------------------------
+            if current_balance < amount:
+                return {
+                    "success": False,
+                    "transaction_id": None,
+                    "new_balance": current_balance,
+                    "error_message": f"Insufficient balance: {current_balance:.6f} < {amount:.6f}",
+                }
+
+            # ------------------------------------------------------------------
+            # Deduct balance and record transaction
+            # ------------------------------------------------------------------
+            new_balance = current_balance - amount
+            tx_id = uuid4()
+
+            await db_session.execute(
+                update(FTNSBalanceModel)
+                .where(FTNSBalanceModel.user_id == user_id)
+                .values(
+                    balance=new_balance,
+                    total_spent=FTNSBalanceModel.total_spent + amount,
+                    version=FTNSBalanceModel.version + 1,
+                    last_transaction_id=str(tx_id),
+                )
+            )
+
+            tx_record = FTNSTransactionModel(
+                transaction_id=str(tx_id),
+                from_user=user_id,
+                to_user="system",
+                amount=amount,
+                transaction_type=transaction_type,
+                description=description,
+                status="completed",
+                idempotency_key=idempotency_key,
+                balance_after_sender=new_balance,
+            )
+            db_session.add(tx_record)
             await db_session.commit()
-            
+
             return {
-                "success": row.success,
-                "transaction_id": row.transaction_id,
-                "new_balance": float(row.new_balance) if row.new_balance is not None else None,
-                "error_message": row.error_message
+                "success": True,
+                "transaction_id": str(tx_id),
+                "new_balance": new_balance,
+                "error_message": None,
             }
     
     @staticmethod

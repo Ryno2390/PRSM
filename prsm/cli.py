@@ -1393,9 +1393,9 @@ def teacher():
     pass
 
 
-@teacher.command()
+@teacher.command("list")
 @click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
-def list(api_url: str):
+def list_teachers(api_url: str):
     """List available teacher models"""
     import httpx
     
@@ -1770,10 +1770,10 @@ def cancel(job_id: str, api_url: str):
         console.print(f"❌ Error: {e}", style="red")
 
 
-@compute.command()
+@compute.command("list")
 @click.option('--limit', default=10, type=int, help='Maximum number of jobs to list')
 @click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
-def list(limit: int, api_url: str):
+def list_compute_jobs(limit: int, api_url: str):
     """List recent compute jobs."""
     import httpx
     
