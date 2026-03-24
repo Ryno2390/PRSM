@@ -96,7 +96,7 @@ class BackendConfig:
     
     # Model defaults
     default_model: Dict[BackendType, str] = field(default_factory=lambda: {
-        BackendType.ANTHROPIC: "claude-3-5-sonnet-20241022",
+        BackendType.ANTHROPIC: "claude-sonnet-4-5",
         BackendType.OPENAI: "gpt-4o",
         BackendType.LOCAL: "llama3.2",
         BackendType.MOCK: "mock-model"
@@ -178,11 +178,24 @@ class BackendConfig:
                     continue
             return backends if backends else [BackendType.MOCK]
         
+        # Auto-detect primary backend from available API keys when not explicitly set
+        anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        explicit_primary = os.getenv("PRSM_PRIMARY_BACKEND")
+        if explicit_primary:
+            primary = get_backend_type("PRSM_PRIMARY_BACKEND", BackendType.MOCK)
+        elif anthropic_api_key:
+            primary = BackendType.ANTHROPIC
+        elif openai_api_key:
+            primary = BackendType.OPENAI
+        else:
+            primary = BackendType.MOCK
+
         return cls(
-            primary_backend=get_backend_type("PRSM_PRIMARY_BACKEND", BackendType.MOCK),
+            primary_backend=primary,
             fallback_chain=parse_fallback_chain(os.getenv("PRSM_FALLBACK_CHAIN")),
-            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
-            openai_api_key=os.getenv("OPENAI_API_KEY"),
+            anthropic_api_key=anthropic_api_key,
+            openai_api_key=openai_api_key,
             local_model_path=os.getenv("PRSM_LOCAL_MODEL_PATH"),
             ollama_host=os.getenv("PRSM_OLLAMA_HOST", "http://localhost:11434"),
             use_ollama=get_bool_env("PRSM_USE_OLLAMA", True),
