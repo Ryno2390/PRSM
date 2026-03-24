@@ -52,7 +52,7 @@ class AnthropicBackend(ModelBackend):
         session: HTTP session for requests
     """
     
-    DEFAULT_MODEL = "claude-3-5-sonnet-20241022"
+    DEFAULT_MODEL = "claude-sonnet-4-5"
     API_VERSION = "2023-06-01"
     BASE_URL = "https://api.anthropic.com/v1"
     
