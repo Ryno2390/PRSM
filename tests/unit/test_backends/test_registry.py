@@ -104,7 +104,7 @@ class TestBackendConfig:
         """Test getting default model for backend type"""
         config = BackendConfig()
         
-        assert config.get_default_model(BackendType.ANTHROPIC) == "claude-3-5-sonnet-20241022"
+        assert config.get_default_model(BackendType.ANTHROPIC) == "claude-sonnet-4-5"
         assert config.get_default_model(BackendType.OPENAI) == "gpt-4o"
         assert config.get_default_model(BackendType.MOCK) == "mock-model"
     
