@@ -122,26 +122,27 @@ class TestSessionFixture:
             assert atomic_ftns_service._initialized is True
     
     @pytest.mark.asyncio
-    async def test_get_session_does_not_call_database_service(self, atomic_ftns_service):
-        """Mock DatabaseService. Assert _db_service.get_session is NEVER called.
-        This is a regression guard: the old bug must not reappear."""
-        # Create a mock database service
-        mock_db_service = Mock()
-        mock_db_service.get_session = Mock()
-        
-        # Assign the mock to the service
-        atomic_ftns_service._db_service = mock_db_service
-        
+    async def test_get_session_uses_injected_database_service(self, atomic_ftns_service):
+        """When _db_service is injected, _get_session() must delegate to it.
+        Regression guard: the fix in commit 3e3923e must stay in place."""
+        # Create a mock database service that returns a valid async context manager
         mock_context_manager = AsyncMock()
         mock_context_manager.__aenter__ = AsyncMock(return_value=AsyncMock(spec=AsyncSession))
         mock_context_manager.__aexit__ = AsyncMock(return_value=None)
-        
-        with patch('prsm.economy.tokenomics.atomic_ftns_service.get_async_session', return_value=mock_context_manager):
+
+        mock_db_service = Mock()
+        mock_db_service.get_session = Mock(return_value=mock_context_manager)
+
+        # Assign the mock to the service
+        atomic_ftns_service._db_service = mock_db_service
+
+        with patch('prsm.economy.tokenomics.atomic_ftns_service.get_async_session') as mock_global:
             await atomic_ftns_service._get_session()
-            
-            # The old bug was calling self._db_service.get_session()
-            # This should NEVER be called - we use get_async_session() instead
-            mock_db_service.get_session.assert_not_called()
+
+            # Injected _db_service.get_session() MUST be called
+            mock_db_service.get_session.assert_called_once()
+            # Module-level get_async_session() must NOT be called when _db_service is set
+            mock_global.assert_not_called()
 
 
 # =============================================================================
