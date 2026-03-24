@@ -523,3 +523,9 @@ def create_pipeline_budget(user_id: str, token_amount: Decimal,
             'auto_created': True
         }
     )
+
+
+# Aliases expected by budget_api.py
+FTNSBudget = BudgetAllocation
+BudgetExpandRequest = BudgetAllocation  # Same schema, used for expansion requests
+BudgetPrediction = BudgetAllocation     # Same schema, used for predictions

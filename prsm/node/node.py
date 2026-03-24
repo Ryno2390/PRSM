@@ -710,7 +710,7 @@ class PRSMNode:
         bt_config = BitTorrentConfig(
             port_range_start=getattr(self.config, 'bt_port_start', 6881),
             port_range_end=getattr(self.config, 'bt_port_end', 6891),
-            download_dir=str(self.config.data_dir / "torrents"),
+            download_dir=str(Path(self.config.data_dir) / "torrents"),
             dht_enabled=getattr(self.config, 'bt_dht_enabled', True),
         )
         self.bt_client = BitTorrentClient(config=bt_config)

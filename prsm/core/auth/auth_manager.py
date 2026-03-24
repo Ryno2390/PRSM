@@ -14,7 +14,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import select, or_
 from sqlalchemy.exc import IntegrityError
 
-from prsm.core.database import get_database_service, get_async_session
+from prsm.core.database import get_database_service, get_async_session, FTNSBalanceModel, FTNSTransactionModel
 from prsm.core.auth.models import User, UserRole, Permission, LoginRequest, RegisterRequest, TokenResponse
 from prsm.core.auth.jwt_handler import jwt_handler, TokenData
 from prsm.core.integrations.security.audit_logger import audit_logger
@@ -158,6 +158,41 @@ class AuthManager:
                     detail="Database error during registration"
                 )
             
+            # Grant initial FTNS balance so new users can run queries immediately
+            _INITIAL_FTNS_GRANT = 100.0
+            try:
+                async with get_async_session() as ftns_session:
+                    balance_row = FTNSBalanceModel(
+                        user_id=str(user.id),
+                        balance=_INITIAL_FTNS_GRANT,
+                        locked_balance=0.0,
+                        total_earned=_INITIAL_FTNS_GRANT,
+                        total_spent=0.0,
+                        version=1,
+                    )
+                    ftns_session.add(balance_row)
+                    grant_tx = FTNSTransactionModel(
+                        transaction_id=str(uuid4()),
+                        from_user=None,
+                        to_user=str(user.id),
+                        amount=_INITIAL_FTNS_GRANT,
+                        transaction_type="welcome_grant",
+                        description="Initial FTNS allocation for new user",
+                        status="completed",
+                        idempotency_key=f"welcome:{user.id}",
+                        balance_after_receiver=_INITIAL_FTNS_GRANT,
+                    )
+                    ftns_session.add(grant_tx)
+                    await ftns_session.commit()
+                logger.info("Initial FTNS balance granted",
+                            user_id=str(user.id),
+                            amount=_INITIAL_FTNS_GRANT)
+            except Exception as ftns_err:
+                # Non-fatal: user is created, balance can be set manually later
+                logger.warning("Failed to grant initial FTNS balance",
+                               user_id=str(user.id),
+                               error=str(ftns_err))
+
             await audit_logger.log_auth_event(
                 "user_registered",
                 {
@@ -168,12 +203,12 @@ class AuthManager:
                 },
                 client_info
             )
-            
+
             logger.info("User registered successfully",
                        user_id=str(user.id),
                        username=user.username,
                        email=user.email)
-            
+
             return user
             
         except HTTPException:

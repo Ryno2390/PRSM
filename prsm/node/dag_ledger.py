@@ -244,8 +244,25 @@ class DAGLedger:
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA foreign_keys=ON")
         await self._create_tables()
+        await self._migrate_schema()
         await self._load_state()
         
+    async def _migrate_schema(self) -> None:
+        """Apply incremental schema migrations for columns added after initial creation."""
+        # Add public_key to dag_transactions if missing (schema v2)
+        cursor = await self._db.execute("PRAGMA table_info(dag_transactions)")
+        dag_cols = {row[1] async for row in cursor}
+        if "public_key" not in dag_cols:
+            await self._db.execute("ALTER TABLE dag_transactions ADD COLUMN public_key TEXT")
+
+        # Add public_key to wallets if missing (schema v2)
+        cursor = await self._db.execute("PRAGMA table_info(wallets)")
+        wallet_cols = {row[1] async for row in cursor}
+        if "public_key" not in wallet_cols:
+            await self._db.execute("ALTER TABLE wallets ADD COLUMN public_key TEXT")
+
+        await self._db.commit()
+
     async def _create_tables(self) -> None:
         await self._db.executescript("""
             CREATE TABLE IF NOT EXISTS wallets (
