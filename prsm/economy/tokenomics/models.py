@@ -40,7 +40,7 @@ from sqlalchemy import (
     Column, String, Integer, Float, Boolean, DateTime, Text, JSON,
     ForeignKey, Index, CheckConstraint, UniqueConstraint, DECIMAL
 )
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB
+from prsm.core.db_types import UUID as PG_UUID, JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func

@@ -19,6 +19,7 @@ from decimal import Decimal
 from datetime import timedelta
 
 import structlog
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
@@ -385,7 +386,7 @@ class DeploymentManager:
             
             # Test connectivity
             async with engine.begin() as conn:
-                result = await conn.execute("SELECT 1")
+                result = await conn.execute(text("SELECT 1"))
                 await result.fetchone()
             
             await engine.dispose()
