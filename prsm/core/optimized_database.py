@@ -8,6 +8,7 @@ settings to support high concurrent load and improve performance.
 
 import os
 from typing import Optional
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
@@ -65,7 +66,7 @@ class OptimizedDatabaseConfig:
         """Check database connectivity and performance"""
         try:
             async with self.async_session_factory() as session:
-                result = await session.execute("SELECT 1")
+                result = await session.execute(text("SELECT 1"))
                 return result.scalar() == 1
         except Exception as e:
             logger.error(f"Database health check failed: {e}")

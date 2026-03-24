@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Any, Union
 
 from pydantic import BaseModel, Field, validator
 from sqlalchemy import Column, String, DateTime, Text, Integer, Boolean, ForeignKey, LargeBinary
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from prsm.core.db_types import UUID, JSONB
 from sqlalchemy.orm import relationship
 
 from prsm.core.database import Base

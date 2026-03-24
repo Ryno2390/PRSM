@@ -195,7 +195,7 @@ class DatabaseConfig(BaseConfigSchema):
     type: DatabaseTypeEnum = Field(DatabaseTypeEnum.SQLITE, description="Database type")
     host: str = Field("localhost", description="Database host")
     port: int = Field(5432, ge=1, le=65535, description="Database port")
-    database: str = Field("prsm", description="Database name")
+    database: str = Field("prsm.db", description="Database name")
     username: Optional[str] = Field(None, description="Database username")
     password: Optional[str] = Field(None, description="Database password")
     
@@ -501,7 +501,11 @@ class PRSMConfig(BaseConfigSchema):
         # .value extracts the string primitive from both enum instances and plain strings
         db_type = self.database.type.value if hasattr(self.database.type, 'value') else self.database.type
         if db_type == "sqlite":
-            return f"sqlite:///{self.database.database}"
+            db_name = self.database.database
+            # Ensure SQLite uses a proper file path (add .db extension if missing)
+            if not db_name.endswith(".db") and not db_name.endswith(".sqlite") and "/" not in db_name:
+                db_name = db_name + ".db"
+            return f"sqlite:///{db_name}"
         return f"{db_type}://{self.database.host}:{self.database.port}/{self.database.database}"
 
     @property

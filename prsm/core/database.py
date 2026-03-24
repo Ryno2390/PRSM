@@ -38,7 +38,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
-from sqlalchemy.dialects.postgresql import UUID
+from prsm.core.db_types import UUID
 from sqlalchemy.sql import func
 import structlog
 
@@ -908,13 +908,13 @@ class DatabaseManager:
         try:
             async with get_async_session() as session:
                 # Simple connectivity test
-                result = await session.execute("SELECT 1")
+                result = await session.execute(text("SELECT 1"))
                 result.scalar()
-                
+
                 # Performance test
                 import time
                 start_time = time.time()
-                await session.execute("SELECT COUNT(*) FROM information_schema.tables")
+                await session.execute(text("SELECT 1"))  # lightweight connectivity probe
                 response_time = time.time() - start_time
                 
                 self.connection_healthy = True

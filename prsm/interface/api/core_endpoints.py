@@ -59,7 +59,7 @@ async def _execute_nwtn_query(
     orchestrator = NeuroSymbolicOrchestrator(node_id="api_node_primary")
     result = await orchestrator.solve_task(
         user_input.prompt,
-        user_input.context_allocation or ""
+        str(user_input.context_allocation) if user_input.context_allocation is not None else ""
     )
 
     tokens_used: int = result.get("tokens_used", 0)
