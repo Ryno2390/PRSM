@@ -142,6 +142,8 @@ class AtomicFTNSService:
         """Get database session context manager."""
         if not self._initialized:
             await self.initialize()
+        if self._db_service is not None:
+            return self._db_service.get_session()
         return get_async_session()
 
     # =========================================================================
@@ -224,7 +226,7 @@ class AtomicFTNSService:
                      account_type, version, created_at, updated_at)
                     VALUES
                     (:user_id, :balance, 0, :total_earned, 0,
-                     :account_type, 1, NOW(), NOW())
+                     :account_type, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     ON CONFLICT (user_id) DO NOTHING
                     RETURNING user_id
                 """)
@@ -352,7 +354,7 @@ class AtomicFTNSService:
                         balance = :new_balance,
                         total_spent = total_spent + :amount,
                         version = :new_version,
-                        updated_at = NOW()
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE user_id = :user_id
                     AND version = :current_version
                 """)
@@ -383,7 +385,7 @@ class AtomicFTNSService:
                     (:id::uuid, :from_user, NULL, :amount, 'deduction',
                      :description, 'completed', :idempotency_key,
                      :balance_before, :balance_after,
-                     :metadata::jsonb, NOW())
+                     :metadata, CURRENT_TIMESTAMP)
                 """)
 
                 import json
@@ -533,7 +535,7 @@ class AtomicFTNSService:
                     SET balance = balance - :amount,
                         total_spent = total_spent + :amount,
                         version = version + 1,
-                        updated_at = NOW()
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE user_id = :user_id AND version = :version
                 """), {
                     "amount": str(amount),
@@ -547,7 +549,7 @@ class AtomicFTNSService:
                     SET balance = balance + :amount,
                         total_earned = total_earned + :amount,
                         version = version + 1,
-                        updated_at = NOW()
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE user_id = :user_id AND version = :version
                 """), {
                     "amount": str(amount),
@@ -569,7 +571,7 @@ class AtomicFTNSService:
                      :description, 'completed', :idempotency_key,
                      :balance_before_s, :balance_after_s,
                      :balance_before_r, :balance_after_r,
-                     :metadata::jsonb, NOW())
+                     :metadata, CURRENT_TIMESTAMP)
                 """), {
                     "id": transaction_id,
                     "from_user": from_user_id,
@@ -672,7 +674,7 @@ class AtomicFTNSService:
                     SET balance = balance + :amount,
                         total_earned = total_earned + :amount,
                         version = version + 1,
-                        updated_at = NOW()
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE user_id = :user_id AND version = :version
                 """), {
                     "amount": str(amount),
@@ -692,7 +694,7 @@ class AtomicFTNSService:
                     (:id::uuid, :system, :to_user, :amount, 'mint',
                      :description, 'completed', :idempotency_key,
                      :balance_before, :balance_after,
-                     :metadata::jsonb, NOW())
+                     :metadata, CURRENT_TIMESTAMP)
                 """), {
                     "id": transaction_id,
                     "system": self.SYSTEM_MINT,
@@ -753,7 +755,7 @@ class AtomicFTNSService:
             SELECT transaction_id
             FROM ftns_idempotency_keys
             WHERE idempotency_key = :key
-            AND expires_at > NOW()
+            AND expires_at > CURRENT_TIMESTAMP
         """), {"key": idempotency_key})
 
         row = result.fetchone()
@@ -775,7 +777,7 @@ class AtomicFTNSService:
              status, created_at, expires_at)
             VALUES
             (:key, :tx_id, :user_id, :op_type, :amount,
-             'completed', NOW(), NOW() + INTERVAL '24 hours')
+             'completed', CURRENT_TIMESTAMP, datetime('now', '+24 hours'))
             ON CONFLICT (idempotency_key) DO NOTHING
         """), {
             "key": idempotency_key,

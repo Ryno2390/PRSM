@@ -300,12 +300,12 @@ class FTNSTransactionModel(Base):
 
 class FTNSBalanceModel(Base):
     """Database model for FTNS balances
-    
+
     Includes version column for optimistic concurrency control (OCC)
     to prevent race conditions during balance updates.
     """
     __tablename__ = "ftns_balances"
-    
+
     user_id = Column(String(255), primary_key=True)
     balance = Column(Float, default=0.0, nullable=False)
     locked_balance = Column(Float, default=0.0, nullable=False)
@@ -316,10 +316,24 @@ class FTNSBalanceModel(Base):
     last_dividend = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+
     __table_args__ = (
         Index('idx_ftns_balance_updated', 'updated_at'),
     )
+
+
+class FTNSIdempotencyKeyModel(Base):
+    """Database model for FTNS idempotency keys (double-spend prevention)."""
+    __tablename__ = "ftns_idempotency_keys"
+
+    idempotency_key = Column(String(255), primary_key=True)
+    transaction_id  = Column(String(255), nullable=False)
+    user_id         = Column(String(255), nullable=False)
+    operation_type  = Column(String(50),  nullable=False)
+    amount          = Column(String(50),  nullable=False)
+    status          = Column(String(20),  default="completed")
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at      = Column(DateTime(timezone=True), nullable=False)
 
 
 class TeacherModelModel(Base):
@@ -1316,7 +1330,7 @@ class FTNSQueries:
             result = await db_session.execute(
                 text("""
                     SELECT transaction_id FROM ftns_idempotency_keys
-                    WHERE idempotency_key = :key AND expires_at > NOW()
+                    WHERE idempotency_key = :key AND expires_at > CURRENT_TIMESTAMP
                 """),
                 {"key": idempotency_key}
             )
