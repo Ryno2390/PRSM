@@ -95,12 +95,11 @@ class TestAuthManager:
     async def test_auth_manager_initialization(self, auth_manager):
         """Test auth manager initialization"""
         with patch('prsm.core.database.get_database_service') as mock_db:
-            with patch('prsm.core.auth.jwt_handler.jwt_handler.initialize') as mock_jwt:
+            with patch.object(auth_manager.jwt_handler, 'initialize', new_callable=AsyncMock) as mock_jwt:
                 mock_db.return_value = Mock()
-                mock_jwt.return_value = None
-                
+
                 await auth_manager.initialize()
-                
+
                 assert auth_manager.db_service is not None
                 mock_jwt.assert_called_once()
 

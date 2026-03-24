@@ -381,7 +381,7 @@ class TestPyprojectToml:
         content = pyproject_path.read_text()
         
         assert "[project]" in content
-        assert 'name = "prsm"' in content
+        assert 'name = "prsm-network"' in content
         assert "version" in content
         assert "description" in content
     

@@ -526,44 +526,43 @@ class TestPricingModels:
         """
         resource_type = ResourceType.GPU_UNITS  # Default is SURGE_PRICING
         pricing_engine.pricing_models[resource_type] = PricingModel.SURGE_PRICING
+
+        with patch.object(pricing_engine, '_get_time_based_multiplier', return_value=1.0):
+            # High ratio case: demand=0.9, supply=0.3 → ratio=3.0
+            await pricing_engine.update_market_conditions(
+                resource_type=resource_type,
+                demand_level=0.9,
+                supply_level=0.3,
+                active_workflows=100,
+                queued_workflows=50
+            )
+
+            high_ratio_price = await pricing_engine.get_current_price(resource_type)
+            base_price = pricing_engine.base_prices[resource_type]
+            high_multiplier = high_ratio_price / base_price
+
+            # Surge pricing: ratio > 2.0 → multiplier = 1.5 + (ratio - 2.0) * 0.5
+            # ratio = 3.0 → multiplier = 1.5 + 0.5 = 2.0 (before time multiplier)
+            assert high_multiplier > 1.5, f"Expected multiplier > 1.5 for high ratio, got {high_multiplier}"
         
-        # High ratio case: demand=0.9, supply=0.3 → ratio=3.0
-        await pricing_engine.update_market_conditions(
-            resource_type=resource_type,
-            demand_level=0.9,
-            supply_level=0.3,
-            active_workflows=100,
-            queued_workflows=50
-        )
-        
-        high_ratio_price = await pricing_engine.get_current_price(resource_type)
-        base_price = pricing_engine.base_prices[resource_type]
-        high_multiplier = high_ratio_price / base_price
-        
-        # Surge pricing: ratio > 2.0 → multiplier = 1.5 + (ratio - 2.0) * 0.5
-        # ratio = 3.0 → multiplier = 1.5 + 0.5 = 2.0 (before time multiplier)
-        assert high_multiplier > 1.5, f"Expected multiplier > 1.5 for high ratio, got {high_multiplier}"
-        
-        # Reset history for low ratio test
-        pricing_engine.price_history[resource_type] = []
-        
-        # Low ratio case: demand=0.15, supply=0.5 → ratio=0.3
-        await pricing_engine.update_market_conditions(
-            resource_type=resource_type,
-            demand_level=0.15,
-            supply_level=0.5,
-            active_workflows=10,
-            queued_workflows=5
-        )
-        
-        low_ratio_price = await pricing_engine.get_current_price(resource_type)
-        low_multiplier = low_ratio_price / base_price
-        
-        # Surge pricing: ratio < 0.5 → multiplier = max(0.3, 1.0 - (0.5 - ratio) * 0.4)
-        # ratio = 0.3 → multiplier = 1.0 - 0.08 = 0.92
-        # Note: Time multiplier is applied after, so final may be higher
-        # Just verify the surge logic gives a discount (before time multiplier)
-        assert low_multiplier <= 1.3, f"Expected reduced multiplier for low ratio, got {low_multiplier}"
+            # Reset history for low ratio test
+            pricing_engine.price_history[resource_type] = []
+
+            # Low ratio case: demand=0.15, supply=0.5 → ratio=0.3
+            await pricing_engine.update_market_conditions(
+                resource_type=resource_type,
+                demand_level=0.15,
+                supply_level=0.5,
+                active_workflows=10,
+                queued_workflows=5
+            )
+
+            low_ratio_price = await pricing_engine.get_current_price(resource_type)
+            low_multiplier = low_ratio_price / base_price
+
+            # Surge pricing: ratio < 0.5 → multiplier = max(0.3, 1.0 - (0.5 - ratio) * 0.4)
+            # ratio = 0.3 → multiplier = 1.0 - 0.08 = 0.92
+            assert low_multiplier <= 1.3, f"Expected reduced multiplier for low ratio, got {low_multiplier}"
 
     @pytest.mark.asyncio
     async def test_exponential_demand_scales_correctly(self, pricing_engine):
@@ -575,48 +574,49 @@ class TestPricingModels:
         resource_type = ResourceType.CPU_CORES
         pricing_engine.pricing_models[resource_type] = PricingModel.EXPONENTIAL_DEMAND
         base_price = pricing_engine.base_prices[resource_type]
-        
-        # Test demand_level = 0.5
-        pricing_engine.price_history[resource_type] = []
-        await pricing_engine.update_market_conditions(
-            resource_type=resource_type,
-            demand_level=0.5,
-            supply_level=0.5,
-            active_workflows=50,
-            queued_workflows=25
-        )
-        price_05 = await pricing_engine.get_current_price(resource_type)
-        multiplier_05 = price_05 / base_price
-        # 2^(0.5 * 2 - 1) = 2^0 = 1.0
-        assert 0.9 <= multiplier_05 <= 1.3, f"Expected multiplier ~1.0 for demand=0.5, got {multiplier_05}"
-        
-        # Test demand_level = 1.0
-        pricing_engine.price_history[resource_type] = []
-        await pricing_engine.update_market_conditions(
-            resource_type=resource_type,
-            demand_level=1.0,
-            supply_level=0.5,
-            active_workflows=100,
-            queued_workflows=50
-        )
-        price_10 = await pricing_engine.get_current_price(resource_type)
-        multiplier_10 = price_10 / base_price
-        # 2^(1.0 * 2 - 1) = 2^1 = 2.0
-        assert 1.8 <= multiplier_10 <= 2.5, f"Expected multiplier ~2.0 for demand=1.0, got {multiplier_10}"
-        
-        # Test demand_level = 0.0
-        pricing_engine.price_history[resource_type] = []
-        await pricing_engine.update_market_conditions(
-            resource_type=resource_type,
-            demand_level=0.0,
-            supply_level=0.5,
-            active_workflows=0,
-            queued_workflows=0
-        )
-        price_00 = await pricing_engine.get_current_price(resource_type)
-        multiplier_00 = price_00 / base_price
-        # 2^(0 * 2 - 1) = 2^-1 = 0.5
-        assert 0.4 <= multiplier_00 <= 0.7, f"Expected multiplier ~0.5 for demand=0.0, got {multiplier_00}"
+
+        with patch.object(pricing_engine, '_get_time_based_multiplier', return_value=1.0):
+            # Test demand_level = 0.5
+            pricing_engine.price_history[resource_type] = []
+            await pricing_engine.update_market_conditions(
+                resource_type=resource_type,
+                demand_level=0.5,
+                supply_level=0.5,
+                active_workflows=50,
+                queued_workflows=25
+            )
+            price_05 = await pricing_engine.get_current_price(resource_type)
+            multiplier_05 = price_05 / base_price
+            # 2^(0.5 * 2 - 1) = 2^0 = 1.0
+            assert 0.9 <= multiplier_05 <= 1.3, f"Expected multiplier ~1.0 for demand=0.5, got {multiplier_05}"
+
+            # Test demand_level = 1.0
+            pricing_engine.price_history[resource_type] = []
+            await pricing_engine.update_market_conditions(
+                resource_type=resource_type,
+                demand_level=1.0,
+                supply_level=0.5,
+                active_workflows=100,
+                queued_workflows=50
+            )
+            price_10 = await pricing_engine.get_current_price(resource_type)
+            multiplier_10 = price_10 / base_price
+            # 2^(1.0 * 2 - 1) = 2^1 = 2.0
+            assert 1.8 <= multiplier_10 <= 2.5, f"Expected multiplier ~2.0 for demand=1.0, got {multiplier_10}"
+
+            # Test demand_level = 0.0
+            pricing_engine.price_history[resource_type] = []
+            await pricing_engine.update_market_conditions(
+                resource_type=resource_type,
+                demand_level=0.0,
+                supply_level=0.5,
+                active_workflows=0,
+                queued_workflows=0
+            )
+            price_00 = await pricing_engine.get_current_price(resource_type)
+            multiplier_00 = price_00 / base_price
+            # 2^(0 * 2 - 1) = 2^-1 = 0.5
+            assert 0.4 <= multiplier_00 <= 0.7, f"Expected multiplier ~0.5 for demand=0.0, got {multiplier_00}"
 
     @pytest.mark.asyncio
     async def test_linear_demand_bounds(self, pricing_engine):
@@ -627,33 +627,34 @@ class TestPricingModels:
         resource_type = ResourceType.MEMORY_GB  # Default is LINEAR_DEMAND
         pricing_engine.pricing_models[resource_type] = PricingModel.LINEAR_DEMAND
         base_price = pricing_engine.base_prices[resource_type]
-        
-        # Test demand_level = 0.0
-        await pricing_engine.update_market_conditions(
-            resource_type=resource_type,
-            demand_level=0.0,
-            supply_level=0.5,
-            active_workflows=0,
-            queued_workflows=0
-        )
-        price_00 = await pricing_engine.get_current_price(resource_type)
-        multiplier_00 = price_00 / base_price
-        # 0.5 + 1.5 * 0 = 0.5
-        assert 0.4 <= multiplier_00 <= 0.7, f"Expected multiplier ~0.5 for demand=0.0, got {multiplier_00}"
-        
-        # Test demand_level = 1.0
-        pricing_engine.price_history[resource_type] = []
-        await pricing_engine.update_market_conditions(
-            resource_type=resource_type,
-            demand_level=1.0,
-            supply_level=0.5,
-            active_workflows=100,
-            queued_workflows=50
-        )
-        price_10 = await pricing_engine.get_current_price(resource_type)
-        multiplier_10 = price_10 / base_price
-        # 0.5 + 1.5 * 1 = 2.0
-        assert 1.8 <= multiplier_10 <= 2.5, f"Expected multiplier ~2.0 for demand=1.0, got {multiplier_10}"
+
+        with patch.object(pricing_engine, '_get_time_based_multiplier', return_value=1.0):
+            # Test demand_level = 0.0
+            await pricing_engine.update_market_conditions(
+                resource_type=resource_type,
+                demand_level=0.0,
+                supply_level=0.5,
+                active_workflows=0,
+                queued_workflows=0
+            )
+            price_00 = await pricing_engine.get_current_price(resource_type)
+            multiplier_00 = price_00 / base_price
+            # 0.5 + 1.5 * 0 = 0.5
+            assert 0.4 <= multiplier_00 <= 0.7, f"Expected multiplier ~0.5 for demand=0.0, got {multiplier_00}"
+
+            # Test demand_level = 1.0
+            pricing_engine.price_history[resource_type] = []
+            await pricing_engine.update_market_conditions(
+                resource_type=resource_type,
+                demand_level=1.0,
+                supply_level=0.5,
+                active_workflows=100,
+                queued_workflows=50
+            )
+            price_10 = await pricing_engine.get_current_price(resource_type)
+            multiplier_10 = price_10 / base_price
+            # 0.5 + 1.5 * 1 = 2.0
+            assert 1.8 <= multiplier_10 <= 2.5, f"Expected multiplier ~2.0 for demand=1.0, got {multiplier_10}"
 
     @pytest.mark.asyncio
     async def test_auction_based_pricing(self, pricing_engine):
@@ -661,22 +662,23 @@ class TestPricingModels:
         resource_type = ResourceType.FTNS_CREDITS
         pricing_engine.pricing_models[resource_type] = PricingModel.AUCTION_BASED
         base_price = pricing_engine.base_prices[resource_type]
-        
-        # High competition: demand/supply ratio = 2.0
-        await pricing_engine.update_market_conditions(
-            resource_type=resource_type,
-            demand_level=0.8,
-            supply_level=0.4,
-            active_workflows=80,
-            queued_workflows=40
-        )
-        
-        price = await pricing_engine.get_current_price(resource_type)
-        multiplier = price / base_price
-        
-        # Auction: multiplier = 0.5 + min(3.0, ratio) * 0.5
-        # ratio = 2.0 → multiplier = 0.5 + 1.0 = 1.5
-        assert 1.2 <= multiplier <= 2.0, f"Expected multiplier ~1.5 for auction, got {multiplier}"
+
+        with patch.object(pricing_engine, '_get_time_based_multiplier', return_value=1.0):
+            # High competition: demand/supply ratio = 2.0
+            await pricing_engine.update_market_conditions(
+                resource_type=resource_type,
+                demand_level=0.8,
+                supply_level=0.4,
+                active_workflows=80,
+                queued_workflows=40
+            )
+
+            price = await pricing_engine.get_current_price(resource_type)
+            multiplier = price / base_price
+
+            # Auction: multiplier = 0.5 + min(3.0, ratio) * 0.5
+            # ratio = 2.0 → multiplier = 0.5 + 1.0 = 1.5
+            assert 1.2 <= multiplier <= 2.0, f"Expected multiplier ~1.5 for auction, got {multiplier}"
 
 
 # =============================================================================
