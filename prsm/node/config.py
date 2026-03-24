@@ -18,14 +18,14 @@ import os
 # Multi-region bootstrap server configuration
 # Primary server (US region by default)
 DEFAULT_BOOTSTRAP_NODES = [
-    os.getenv("BOOTSTRAP_PRIMARY", "wss://bootstrap.prsm.io:9001"),
+    os.getenv("BOOTSTRAP_PRIMARY", "wss://bootstrap1.prsm-network.com:8765"),
 ]
 
 # Multi-region fallback bootstrap servers for high availability
 # Nodes try servers in order: Primary (US) → EU → APAC
 FALLBACK_BOOTSTRAP_NODES = [
-    os.getenv("BOOTSTRAP_FALLBACK_EU", "wss://bootstrap-eu.prsm.io:9001"),
-    os.getenv("BOOTSTRAP_FALLBACK_APAC", "wss://bootstrap-apac.prsm.io:9001"),
+    os.getenv("BOOTSTRAP_FALLBACK_EU", "wss://bootstrap-eu.prsm-network.com:8765"),
+    os.getenv("BOOTSTRAP_FALLBACK_APAC", "wss://bootstrap-apac.prsm-network.com:8765"),
 ]
 
 

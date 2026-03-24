@@ -7,6 +7,10 @@
   "max_retries": 3,
   "p2p_port": 8765,
   "bootstrap_nodes": ["wss://bootstrap1.prsm-network.com:8765"],
+  "bootstrap_fallback_nodes": [
+    "wss://bootstrap-eu.prsm-network.com:8765",
+    "wss://bootstrap-apac.prsm-network.com:8765"
+  ],
   "node_identity_path": "config/node_identity.json",
   "ipfs_auto_start": true,
   "api_port": 8080,
