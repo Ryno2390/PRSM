@@ -49,6 +49,7 @@ from prsm.core.ipfs_client import get_ipfs_client
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
 from prsm.core.safety.monitor import SafetyMonitor
+from prsm.compute.agents.executors.model_executor import ModelExecutor
 
 # HTTP client for RPC execution
 try:
@@ -1234,7 +1235,7 @@ class ProductionP2PNetwork:
                 }
                 self.in_flight_tasks[operation_id]['state'] = 'committed'
                 self.in_flight_tasks[operation_id]['finalized_by'] = 'dispatch_acknowledged'
-                logger.info("rpc_execution_success", peer_id=peer_id, task_id=str(task.task_id), execution_time=execution_time)
+                logger.info("rpc_execution_success: peer_id=%s task_id=%s execution_time=%s", peer_id, str(task.task_id), execution_time)
             else:
                 response = {
                     "peer_id": peer_id,
@@ -1247,7 +1248,7 @@ class ProductionP2PNetwork:
                 }
                 self.in_flight_tasks[operation_id]['state'] = 'aborted'
                 self.in_flight_tasks[operation_id]['finalized_by'] = 'rpc_failed'
-                logger.error("rpc_execution_failed", peer_id=peer_id, task_id=str(task.task_id), error=rpc_error)
+                logger.error("rpc_execution_failed: peer_id=%s task_id=%s error=%s", peer_id, str(task.task_id), rpc_error)
 
             self.in_flight_tasks[operation_id]['updated_at'] = datetime.now(timezone.utc).isoformat()
             self.completed_task_results[operation_id] = dict(response)
@@ -1258,7 +1259,7 @@ class ProductionP2PNetwork:
             return response
 
         except Exception as e:
-            logger.error("rpc_execution_exception", peer_id=peer_id, error=str(e))
+            logger.error("rpc_execution_exception: peer_id=%s error=%s", peer_id, str(e))
             fallback_operation_id = locals().get('operation_id')
             if fallback_operation_id and fallback_operation_id in self.in_flight_tasks:
                 self.in_flight_tasks[fallback_operation_id]['state'] = 'aborted'
@@ -1315,7 +1316,7 @@ class ProductionP2PNetwork:
                 await session.commit()
 
         except Exception as e:
-            logger.error("record_rpc_message_failed", error=str(e))
+            logger.error("record_rpc_message_failed: %s", str(e))
 
     async def _handle_rpc_request(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         """Handle incoming RPC request via TCP socket."""
@@ -1351,7 +1352,7 @@ class ProductionP2PNetwork:
         except asyncio.TimeoutError:
             logger.error("rpc_request_timeout")
         except Exception as e:
-            logger.error("handle_rpc_request_failed", error=str(e))
+            logger.error("handle_rpc_request_failed: %s", str(e))
         finally:
             writer.close()
             try:
@@ -1364,15 +1365,43 @@ class ProductionP2PNetwork:
         try:
             instruction = request.get("instruction", "")
             args = request.get("args", {})
+            model_id = args.get("model_id", "gpt-3.5-turbo")  # Default fallback
+            parameters = args.get("parameters", {})
 
-            # This would integrate with the actual model execution system
-            # For now, return a placeholder
-            return {
-                "success": True,
-                "result": f"Executed: {instruction[:100]}...",
-                "tokens_used": len(instruction.split())
+            # Create model executor and execute the task
+            executor = ModelExecutor()
+
+            # Prepare input for the model executor
+            input_data = {
+                "task": instruction,
+                "models": [model_id],
+                "parallel": False,
+                **parameters
             }
+
+            # Execute the task
+            results = await executor.process(input_data, context={"user_id": "p2p_network"})
+
+            if results and results[0].success:
+                result_content = results[0].result
+                if isinstance(result_content, dict):
+                    content = result_content.get("content", str(result_content))
+                else:
+                    content = str(result_content)
+
+                return {
+                    "success": True,
+                    "result": content,
+                    "model_id": results[0].model_id,
+                    "execution_time": results[0].execution_time,
+                    "tokens_used": len(content.split())  # Approximate token count
+                }
+            else:
+                error_msg = results[0].error if results else "No results returned"
+                return {"success": False, "error": error_msg}
+
         except Exception as e:
+            logger.error("model_execution_failed: %s", str(e))
             return {"success": False, "error": str(e)}
 
     async def _handle_shard_retrieve_request(self, request: dict) -> dict:

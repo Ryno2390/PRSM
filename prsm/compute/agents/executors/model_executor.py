@@ -16,8 +16,9 @@ from prsm.core.usage_tracker import (
     ResourceType, CostCategory, OperationType
 )
 from prsm.compute.agents.base import BaseAgent
+from prsm.core.safety.monitor import SafetyMonitor
 from .api_clients import (
-    ModelClientRegistry, ModelProvider, ModelExecutionRequest, 
+    ModelClientRegistry, ModelProvider, ModelExecutionRequest,
     ModelExecutionResponse
 )
 
@@ -606,7 +607,7 @@ class ModelExecutor(BaseAgent):
     async def _validate_response(self, content: str, model_id: str) -> Dict[str, Any]:
         """
         Validate model response through PRSM safety systems
-        
+
         🛡️ SAFETY VALIDATION:
         1. Content filtering for harmful outputs
         2. Quality assessment and confidence scoring
@@ -614,29 +615,41 @@ class ModelExecutor(BaseAgent):
         4. Format validation and standardization
         """
         try:
-            # TODO: Integrate with actual safety monitor
-            # For now, perform basic validation
-            
             if not content or len(content.strip()) == 0:
                 raise ValueError("Empty response from model")
-            
-            # Basic safety checks
-            unsafe_patterns = ['harmful', 'illegal', 'dangerous']
-            if any(pattern in content.lower() for pattern in unsafe_patterns):
-                logger.warning("Potentially unsafe content detected", model_id=model_id)
-            
+
+            # Use SafetyMonitor for comprehensive validation
+            safety_monitor = SafetyMonitor()
+            safety_criteria = ["no_harmful_content", "privacy_protection", "bias_prevention"]
+
+            # Perform safety validation
+            is_safe, safety_score, violated_criteria, details = await safety_monitor._perform_safety_validation(
+                content, safety_criteria
+            )
+
+            # Log any safety concerns
+            if violated_criteria:
+                logger.warning(
+                    "Safety validation concerns detected",
+                    model_id=model_id,
+                    safety_score=safety_score,
+                    violations=violated_criteria
+                )
+
             # Format response consistently
             validated_result = {
                 "type": "model_response",
                 "content": content.strip(),
                 "model_id": model_id,
-                "validation_passed": True,
-                "safety_score": 0.9,  # Placeholder score
+                "validation_passed": is_safe,
+                "safety_score": safety_score,
+                "violated_criteria": violated_criteria,
+                "validation_details": details,
                 "timestamp": time.time()
             }
-            
+
             return validated_result
-            
+
         except Exception as e:
             logger.error(f"Response validation failed: {e}")
             return {
@@ -644,6 +657,7 @@ class ModelExecutor(BaseAgent):
                 "content": "Response failed safety validation",
                 "model_id": model_id,
                 "validation_passed": False,
+                "safety_score": 0.0,
                 "error": str(e)
             }
     

@@ -13,6 +13,13 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, Union
 from enum import Enum
 
+try:
+    import httpx
+    HTTPX_AVAILABLE = True
+except ImportError:
+    httpx = None
+    HTTPX_AVAILABLE = False
+
 from ..config.credential_manager import CredentialManager, CredentialType, CredentialData
 from ..models.integration_models import IntegrationPlatform
 from prsm.core.config import settings
@@ -392,27 +399,136 @@ class SecureAPIClientFactory:
         credentials: Dict[str, Any],
         client_type: SecureClientType
     ) -> bool:
-        """Validate that credentials are still valid"""
+        """Validate that credentials are still valid by making test API calls"""
         try:
             # Check if credentials have required fields
             required_fields = self._get_required_fields_for_client_type(client_type)
-            
+
             for field in required_fields:
                 if field not in credentials:
                     logger.warning("Missing required credential field",
                                   client_type=client_type,
                                   field=field)
                     return False
-            
-            # TODO: Add platform-specific validation (API calls to test credentials)
-            # For now, just check basic structure
+
+            # Perform platform-specific API validation
+            if HTTPX_AVAILABLE:
+                validation_result = await self._validate_credentials_via_api(credentials, client_type)
+                if not validation_result:
+                    return False
+
             return True
-            
+
         except Exception as e:
             logger.error("Failed to validate credentials",
                         client_type=client_type,
                         error=str(e))
             return False
+
+    async def _validate_credentials_via_api(
+        self,
+        credentials: Dict[str, Any],
+        client_type: SecureClientType
+    ) -> bool:
+        """Make lightweight API calls to validate credentials are actually valid"""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                if client_type == SecureClientType.ANTHROPIC:
+                    # Test Anthropic API with a minimal request
+                    api_key = credentials.get("api_key")
+                    if not api_key:
+                        return False
+                    response = await client.get(
+                        "https://api.anthropic.com/v1/models",
+                        headers={
+                            "x-api-key": api_key,
+                            "anthropic-version": "2023-06-01"
+                        }
+                    )
+                    if response.status_code == 401:
+                        logger.warning("Invalid Anthropic API key")
+                        return False
+                    return True
+
+                elif client_type == SecureClientType.HUGGINGFACE:
+                    # Test HuggingFace API
+                    api_key = credentials.get("api_key") or credentials.get("token")
+                    if not api_key:
+                        return False
+                    response = await client.get(
+                        "https://huggingface.co/api/whoami-v2",
+                        headers={"Authorization": f"Bearer {api_key}"}
+                    )
+                    if response.status_code == 401:
+                        logger.warning("Invalid HuggingFace API key")
+                        return False
+                    return True
+
+                elif client_type == SecureClientType.GITHUB:
+                    # Test GitHub API
+                    api_key = credentials.get("api_key") or credentials.get("token")
+                    if not api_key:
+                        return False
+                    response = await client.get(
+                        "https://api.github.com/user",
+                        headers={"Authorization": f"token {api_key}"}
+                    )
+                    if response.status_code == 401:
+                        logger.warning("Invalid GitHub API key")
+                        return False
+                    return True
+
+                elif client_type == SecureClientType.PINECONE:
+                    # Pinecone requires environment-specific endpoints
+                    # For now, validate API key format
+                    api_key = credentials.get("api_key")
+                    if not api_key or len(api_key) < 20:
+                        logger.warning("Invalid Pinecone API key format")
+                        return False
+                    return True
+
+                elif client_type == SecureClientType.WEAVIATE:
+                    # Weaviate uses URL + API key
+                    url = credentials.get("url")
+                    api_key = credentials.get("api_key")
+                    if not url:
+                        return False
+                    headers = {}
+                    if api_key:
+                        headers["Authorization"] = f"Bearer {api_key}"
+                    response = await client.get(
+                        f"{url}/v1/meta",
+                        headers=headers
+                    )
+                    if response.status_code in [401, 403]:
+                        logger.warning("Invalid Weaviate credentials")
+                        return False
+                    return True
+
+                elif client_type == SecureClientType.OLLAMA:
+                    # Ollama is local, check if server is running
+                    base_url = credentials.get("base_url", "http://localhost:11434")
+                    try:
+                        response = await client.get(f"{base_url}/api/tags")
+                        return response.status_code == 200
+                    except Exception:
+                        logger.warning("Ollama server not reachable")
+                        return False
+
+                else:
+                    # Unknown client type - pass basic validation
+                    return True
+
+        except httpx.TimeoutException:
+            logger.warning("API validation timeout", client_type=client_type)
+            # Don't fail on timeout - network issues shouldn't block credential use
+            return True
+        except Exception as e:
+            logger.warning("API validation error",
+                          client_type=client_type,
+                          error=str(e))
+            # Don't fail on network errors - pass validation
+            return True
     
     async def _create_client(
         self,

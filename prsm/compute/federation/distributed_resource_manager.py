@@ -277,28 +277,31 @@ class ResourceCapabilityDetector:
     async def _detect_gpu_capabilities(self) -> Optional[ResourceSpec]:
         """
         Detect GPU capabilities using multiple fallback methods.
-        
+
         Priority order:
-        1. pynvml (NVIDIA Management Library) - most accurate
-        2. torch.cuda (PyTorch) - good for ML workloads
-        3. Return None if no GPU detected
-        
+        1. pynvml (NVIDIA Management Library) - most accurate for NVIDIA
+        2. amdsmi (AMD System Management Interface) - for AMD GPUs
+        3. torch.cuda (PyTorch) - good for ML workloads
+        4. Return None if no GPU detected
+
         Returns:
             ResourceSpec with GPU details, or None if no GPU available
         """
-        # TODO: ROCm/AMD support via amdsmi
-        
-        # Try pynvml first (most detailed)
+        # Try pynvml first (NVIDIA - most detailed)
         gpu_info = self._get_gpu_info_via_pynvml()
-        
-        # Fall back to torch.cuda if pynvml failed
+
+        # Try AMD GPU detection if NVIDIA not found
+        if gpu_info is None:
+            gpu_info = self._get_gpu_info_via_amdsmi()
+
+        # Fall back to torch.cuda if neither found
         if gpu_info is None:
             gpu_info = self._get_gpu_info_via_torch()
-        
+
         if gpu_info is None:
             # No GPU detected
             return None
-        
+
         return ResourceSpec(
             resource_type=ResourceType.COMPUTE_GPU,
             measurement_unit=ResourceMeasurement.GPU_MEMORY_GB,
@@ -309,7 +312,8 @@ class ResourceCapabilityDetector:
                 "cuda_cores": gpu_info["cuda_cores"],
                 "memory_bandwidth": gpu_info["memory_bandwidth"],
                 "compute_capability": gpu_info["compute_capability"],
-                "device_name": gpu_info.get("device_name", "Unknown")
+                "device_name": gpu_info.get("device_name", "Unknown"),
+                "gpu_vendor": gpu_info.get("gpu_vendor", "NVIDIA")
             }
         )
     
@@ -425,18 +429,17 @@ class ResourceCapabilityDetector:
     async def _detect_gpu_memory(self) -> float:
         """
         Detect GPU memory capacity using multiple fallback methods.
-        
+
         Priority order:
-        1. pynvml (NVIDIA Management Library) - most accurate
-        2. torch.cuda (PyTorch) - good for ML workloads
-        3. GPUtil - cross-platform fallback
-        4. Return 0.0 if no GPU detected
-        
+        1. pynvml (NVIDIA Management Library) - most accurate for NVIDIA
+        2. amdsmi (AMD System Management Interface) - for AMD GPUs
+        3. torch.cuda (PyTorch) - good for ML workloads
+        4. GPUtil - cross-platform fallback
+        5. Return 0.0 if no GPU detected
+
         Returns:
             float: GPU memory in GB, or 0.0 if no GPU available
         """
-        # TODO: ROCm/AMD support via amdsmi
-        
         # Priority 1: Try pynvml (NVIDIA Management Library)
         try:
             import pynvml
@@ -451,8 +454,27 @@ class ResourceCapabilityDetector:
             logger.debug("pynvml not available, trying next method")
         except Exception as e:
             logger.debug("pynvml detection failed", error=str(e))
-        
-        # Priority 2: Try torch.cuda (PyTorch)
+
+        # Priority 2: Try amdsmi (AMD System Management Interface)
+        try:
+            import amdsmi
+            amdsmi.amdsmi_init()
+            socket_handles = amdsmi.amdsmi_get_processor_handles()
+            if socket_handles:
+                # Get first GPU's memory info
+                device_handle = socket_handles[0]
+                memory_info = amdsmi.amdsmi_dev_gpu_memory_info_get(device_handle)
+                total_gb = memory_info.get("vram_size", 0) / (1024**3)
+                amdsmi.amdsmi_shut_down()
+                if total_gb > 0:
+                    logger.debug("GPU memory detected via amdsmi", total_gb=total_gb)
+                    return total_gb
+        except ImportError:
+            logger.debug("amdsmi not available, trying next method")
+        except Exception as e:
+            logger.debug("amdsmi detection failed", error=str(e))
+
+        # Priority 3: Try torch.cuda (PyTorch)
         try:
             import torch
             if torch.cuda.is_available():
@@ -577,7 +599,112 @@ class ResourceCapabilityDetector:
         except Exception as e:
             logger.debug("torch GPU info detection failed", error=str(e))
             return None
-    
+
+    def _get_gpu_info_via_amdsmi(self) -> Optional[Dict[str, Any]]:
+        """
+        Get detailed GPU information via AMD System Management Interface (amdsmi).
+
+        Returns:
+            Dict with keys: memory_gb, cuda_cores, compute_capability,
+                           memory_bandwidth, device_name, gpu_vendor
+            or None if detection fails
+        """
+        try:
+            import amdsmi
+
+            amdsmi.amdsmi_init()
+            socket_handles = amdsmi.amdsmi_get_processor_handles()
+
+            if not socket_handles:
+                amdsmi.amdsmi_shut_down()
+                return None
+
+            # Get first AMD GPU
+            device_handle = socket_handles[0]
+
+            # Get device identification
+            device_id = amdsmi.amdsmi_dev_id_get(device_handle)
+            device_name = f"AMD GPU {device_id}"
+
+            # Get memory info
+            try:
+                memory_info = amdsmi.amdsmi_dev_gpu_memory_info_get(device_handle)
+                memory_gb = memory_info.get("vram_size", 0) / (1024**3)
+            except Exception:
+                # Fallback: estimate based on device
+                memory_gb = 8.0  # Default 8GB for unknown AMD GPUs
+
+            # AMD uses "stream processors" instead of CUDA cores
+            # Approximate based on device family (simplified)
+            cuda_cores = 2560  # Default for mid-range AMD GPU
+
+            # ROCm compute capability (gfx architecture)
+            try:
+                target = amdsmi.amdsmi_dev_target_get(device_handle)
+                compute_capability = f"gfx{target}" if target else "gfx900"
+            except Exception:
+                compute_capability = "gfx900"  # Default ROCm target
+
+            # Memory bandwidth from lookup
+            memory_bandwidth = self._get_amd_memory_bandwidth(device_name)
+
+            amdsmi.amdsmi_shut_down()
+
+            return {
+                "memory_gb": memory_gb,
+                "cuda_cores": cuda_cores,  # Actually stream processors
+                "compute_capability": compute_capability,
+                "memory_bandwidth": memory_bandwidth,
+                "device_name": device_name,
+                "gpu_vendor": "AMD"
+            }
+        except ImportError:
+            logger.debug("amdsmi not available")
+            return None
+        except Exception as e:
+            logger.debug("amdsmi GPU info detection failed", error=str(e))
+            return None
+
+    def _get_amd_memory_bandwidth(self, device_name: str) -> float:
+        """
+        Get memory bandwidth for AMD GPU devices from lookup table.
+
+        Args:
+            device_name: AMD GPU device name
+
+        Returns:
+            float: Memory bandwidth in GB/s, or 512.0 as default
+        """
+        # AMD GPU memory bandwidth lookup (GB/s)
+        AMD_MEMORY_BANDWIDTH = {
+            "RX 7900 XTX": 960,
+            "RX 7900 XT": 800,
+            "RX 7900 GRE": 576,
+            "RX 7800 XT": 624,
+            "RX 7700 XT": 432,
+            "RX 7600": 288,
+            "RX 6900 XT": 512,
+            "RX 6800 XT": 512,
+            "RX 6800": 512,
+            "RX 6700 XT": 384,
+            "RX 6600 XT": 288,
+            "RX 6600": 224,
+            "MI300X": 5300,
+            "MI300A": 5300,
+            "MI250X": 3200,
+            "MI210": 1600,
+            "MI100": 1200,
+            "MI50": 1024,
+        }
+
+        clean_name = device_name.upper().replace("AMD", "").strip()
+
+        for key, bandwidth in AMD_MEMORY_BANDWIDTH.items():
+            if key.upper() in clean_name:
+                return float(bandwidth)
+
+        return 512.0  # Default for unknown AMD GPUs
+
     def _get_memory_bandwidth(self, device_name: str) -> float:
         """
         Get memory bandwidth for a GPU device from lookup table.
