@@ -1,286 +1,242 @@
 # PRSM Implementation Status
-## Comprehensive Mapping of Current State vs. Architectural Vision
+## Comprehensive Mapping of Current State vs. Production Readiness
 
-[![Status](https://img.shields.io/badge/status-Advanced%20Prototype-orange.svg)](#current-implementation-status)
-[![Transparency](https://img.shields.io/badge/transparency-Audit%20Compliant-green.svg)](#audit-compliance)
-[![Updated](https://img.shields.io/badge/updated-2025--01--17-blue.svg)](#)
+[![Status](https://img.shields.io/badge/status-Alpha%20v0.2.1-blue.svg)](#current-implementation-status)
+[![Tests](https://img.shields.io/badge/tests-404%20passing%2C%201%20failing-yellow.svg)](#test-suite-status)
+[![Updated](https://img.shields.io/badge/updated-2026--03--24-green.svg)](#)
 
-**This document provides a comprehensive, audit-ready assessment of PRSM's current implementation status versus architectural documentation claims, addressing Series A investment due diligence requirements.**
+**This document tracks PRSM's current technical implementation state, known bugs, and the remaining work required before general user participation is possible.**
 
 ---
 
 ## Executive Summary
 
-**PRSM is an advanced prototype with core breakthrough technologies implemented and validated.** The platform has moved beyond proof-of-concept to working implementations of key innovations including SEAL autonomous learning, scalable P2P networking, and Byzantine fault tolerance. Series A funding will complete production validation and enterprise deployment.
-
-### Investment Readiness Assessment
-
-| Component | Status | Evidence | Production Timeline |
-|-----------|--------|----------|-------------------|
-| **Core Technologies** | ✅ **Implemented** | Working code, demos available | Ready for scaling |
-| **Architecture Foundation** | ✅ **Complete** | All major systems operational | Production hardening needed |
-| **Security Framework** | 🚧 **Framework Ready** | Implementation complete, audits pending | 6 months to certification |
-| **Scale Validation** | 📋 **Planned** | Tested to 50 nodes, enterprise scale pending | 12 months to 1000+ users |
+As of commit `e6d6cf2` (March 24, 2026), PRSM's core P2P infrastructure is end-to-end functional. A user can run `prsm node start`, join the live bootstrap network, execute compute jobs, and have FTNS tokens charged and credited in real time. One failing security test exists with a known fix. Several items remain before broad, non-technical user participation is practical.
 
 ---
 
 ## Current Implementation Status
 
-### ✅ IMPLEMENTED & WORKING
+### ✅ Fully Implemented and Production-Ready
 
-#### SEAL Self-Evolving AI Learning
-- **Status**: Production-grade implementation complete
-- **Evidence**: `/prsm/teachers/seal.py` - Real PyTorch neural networks with working ML training loops
-- **Capabilities**: 
-  - Multi-layer neural architecture (performance, safety, quality heads)
-  - Real gradient descent and backpropagation training
-  - Reinforcement learning with Q-learning and experience replay
-  - Transformer integration with DialoGPT for response generation
-- **Investment Note**: Core breakthrough technology proven and working
+#### P2P Node Infrastructure
+- `prsm node start` boots cleanly with a wizard-driven configuration flow
+- Ed25519 keypair identity generated/persisted at `~/.prsm/node_identity.json`
+- WebSocket transport layer, gossip protocol, and peer discovery all functional
+- All 274 API endpoints register cleanly via FastAPI on port 8000
+- Live TUI dashboard (or `--no-dashboard` for static output)
+- Connected to live bootstrap: `wss://bootstrap1.prsm-network.com:8765`
 
-#### Scalable P2P Network Architecture
-- **Status**: Production-ready networking implemented
-- **Evidence**: `/prsm/federation/scalable_p2p_network.py` - Supports 50-1000+ nodes
-- **Capabilities**:
-  - Hybrid network topology with role-based nodes
-  - Dynamic peer discovery with DHT-based protocols
-  - Cryptographic message signing and verification
-  - Load balancing with weighted least connections
-- **Performance**: Sub-second consensus for <50 nodes, <5 seconds for 1000+ nodes
+**Key files:** `prsm/cli.py`, `prsm/node/node.py`, `prsm/node/transport.py`, `prsm/node/gossip.py`, `prsm/node/discovery.py`
 
-#### Byzantine Fault Tolerance & Consensus
-- **Status**: Real PBFT implementation complete
-- **Evidence**: `/prsm/federation/enhanced_consensus_system.py` - Production PBFT with cryptographic verification
-- **Capabilities**:
-  - 33% Byzantine node tolerance (industry standard)
-  - Automatic view changes and leader election
-  - Digital signatures and Merkle proof chains
-  - Fault detection and isolation within 30 seconds
-- **Investment Note**: Addresses key Series A audit requirement for "real consensus mechanisms"
+#### FTNS Token Economy
+- DAG-based accounting with IOTA-style Tangle architecture — no mining fees, fast confirmation
+- Atomic balance operations with Ed25519 cryptographic verification and row-level SQLite locking
+- Real charging: ~0.01 FTNS/token on live Anthropic queries
+- Transaction types: compute payment, storage incentive, training reward, transfer, staking, penalties
+- Welcome grant: 100 FTNS on first node registration
+- FTNS token live on Ethereum Sepolia: `0xd979c096BE297F4C3a85175774Bc38C22b95E6a4`
+- Staking manager with lock/unlock operations
 
-#### Comprehensive Fault Tolerance
-- **Status**: Production-grade fault management implemented
-- **Evidence**: `/prsm/federation/production_fault_tolerance.py` - ML-based anomaly detection
-- **Capabilities**:
-  - Multi-layered fault detection (7 categories)
-  - Automated recovery with 95%+ success rate
-  - Network partition detection and healing
-  - ML-based anomaly detection with Isolation Forest
-- **Performance**: Sub-30 second fault detection, <2 minute partition recovery
+**Key files:** `prsm/node/dag_ledger.py`, `prsm/node/local_ledger.py`, `prsm/economy/tokenomics/staking_manager.py`
 
-#### Security Framework Implementation
-- **Status**: Comprehensive framework implemented, certification pending
-- **Evidence**: `/docs/SECURITY_ARCHITECTURE.md` + implemented components
-- **Capabilities**:
-  - STRIDE threat modeling implementation
-  - Defense-in-depth architecture
-  - Zero-trust security principles
-  - Privacy-preserving features ready for implementation
-- **Investment Note**: Framework complete, SOC2/ISO27001 audits require funding
+#### Compute Marketplace
+- Job submission, acceptance, execution, and FTNS payment pipeline fully wired end-to-end
+- Cross-node job routing with FTNS escrow
+- Local compute provider with psutil-based resource detection
+- AI backends: Anthropic (auto-detects primary model from API key) + OpenAI
+- NWTN 5-agent pipeline: Architect → Primer → Solver → Verifier → Scribe
+- Job types: benchmark, inference, embedding
+- Teacher model training framework with async training jobs
 
-#### Token Economics Validation
-- **Status**: Economic model validated through comprehensive testing
-- **Evidence**: `/demos/tokenomics_simulation.py` - Multi-scenario stress testing
-- **Capabilities**:
-  - 4 economic scenarios tested (Normal, Volatility, Shock, Oversupply)
-  - Fairness validation (Gini coefficient ≤0.7 achieved)
-  - Attack resistance (freeloader impact <5%)
-  - Quality incentive correlation proven
-- **Performance**: 99%+ economic stability across all test scenarios
+**Key files:** `prsm/compute/nwtn/`, `prsm/node/compute_provider.py`, `prsm/node/compute_requester.py`
+
+#### Data Sharing and Storage
+- IPFS client with chunked uploads/downloads for multi-GB files, retry with backoff, gateway fallback (`prsm/core/ipfs_client.py`)
+- BitTorrent integration: torrent manifests, distributed transfer, proof-of-transfer verification
+- Content provenance: semantic attribution, royalty distribution, content indexing
+- Shard-level integrity verification
+
+**Key files:** `prsm/core/ipfs_client.py`, `prsm/node/bittorrent_provider.py`, `prsm/node/content_uploader.py`, `prsm/data/provenance/`
+
+#### Marketplace API
+- 9 asset types: AI models, datasets, agent workflows, MCP tools, compute resources, knowledge resources, evaluation services, training services, safety tools
+- Full order lifecycle: creation → fulfillment → rating
+- SQLAlchemy ORM with ACID compliance and parameterized queries
+- Revenue analytics with 30-day reporting
+- Advanced search with database-optimized filtering
+
+**Key files:** `prsm/interface/api/routers/marketplace.py`
+
+#### API Infrastructure
+- 50+ routers, 274 endpoints
+- JWT authentication with role-based access control
+- WebSocket support for real-time updates
+- OpenAPI/Swagger docs auto-generated
 
 ---
 
-### 🚧 IN DEVELOPMENT (Production Validation Phase)
+### 🔴 Failing Test (Security Critical)
 
-#### Performance Benchmarking
-- **Status**: Algorithms implemented, production metrics pending
-- **Evidence**: `/results/performance_benchmark_results.json` - Test framework ready
-- **Current State**: Components functional, comprehensive benchmarking requires infrastructure
-- **Series A Objective**: Establish production baselines and validate SLA requirements
+#### Test
+```
+tests/security/test_double_spend_prevention.py::test_idempotency_key_prevents_duplicate_transactions
+```
 
-#### Full System Integration
-- **Status**: Components working individually, end-to-end integration ongoing
-- **Evidence**: Individual component tests passing, system integration tests in development
-- **Current State**: Major components communicate successfully, optimization ongoing
-- **Series A Objective**: Complete integration testing and performance optimization
+#### Error
+```
+sqlite3.OperationalError: no such table: ftns_idempotency_keys
+```
 
-#### Enterprise Scale Testing
-- **Status**: Tested to 50 nodes, enterprise scale requires infrastructure
-- **Evidence**: Network formation demonstrated with 12-node simulation
-- **Current State**: Algorithms proven scalable, infrastructure deployment needed
-- **Series A Objective**: Validate 1000+ concurrent users with enterprise SLAs
+#### Root Cause
+`AtomicFTNSService._get_session()` (lines 141–145 of `prsm/economy/tokenomics/atomic_ftns_service.py`) ignores the injected `database_service` constructor argument and always calls `get_async_session()` — the real database connection. The test injects a mock session to avoid hitting the DB, but it is bypassed.
 
----
+#### Fix Required (2 lines in `atomic_ftns_service.py`)
+```python
+async def _get_session(self):
+    if not self._initialized:
+        await self.initialize()
+    if self._db_service is not None:           # ADD
+        return self._db_service.get_session()  # ADD
+    return get_async_session()
+```
 
-### 📋 PLANNED (Series A Development)
+#### Secondary Issue: Missing Table
+`ftns_idempotency_keys` is referenced in raw SQL within `atomic_ftns_service.py` and `database.py` but no SQLAlchemy model exists, so the table is never created. This is not hit in the node startup path today but will surface when `AtomicFTNSService` is used against a real database.
 
-#### Production Infrastructure Deployment
-- **Objective**: Deploy scalable infrastructure supporting enterprise workloads
-- **Timeline**: 6-12 months post-funding
-- **Requirements**: Cloud infrastructure, monitoring, CI/CD pipelines
-- **Success Criteria**: 1000+ concurrent users, 99.9% uptime SLA
+A model needs to be added to `prsm/core/database.py`:
+```python
+class FTNSIdempotencyKeyModel(Base):
+    __tablename__ = "ftns_idempotency_keys"
+    idempotency_key = Column(String(255), primary_key=True)
+    transaction_id  = Column(String(255), nullable=False)
+    user_id         = Column(String(255), nullable=False)
+    operation_type  = Column(String(50),  nullable=False)
+    amount          = Column(String(50),  nullable=False)
+    status          = Column(String(20),  default="completed")
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at      = Column(DateTime(timezone=True), nullable=False)
+```
 
-#### Security Compliance Certification
-- **Objective**: Complete SOC2 Type II and ISO27001 compliance audits
-- **Timeline**: 6-9 months post-funding
-- **Requirements**: Third-party security auditors, penetration testing
-- **Success Criteria**: Enterprise-grade security certifications
+#### Tertiary Issue: PostgreSQL-Only SQL Dialect
+Raw SQL in `atomic_ftns_service.py` uses syntax that fails on SQLite:
+- `NOW()` → SQLite requires `CURRENT_TIMESTAMP`
+- `INTERVAL '24 hours'` → SQLite requires `datetime('now', '+24 hours')`
 
-#### Advanced UI/UX Development
-- **Objective**: Production-grade user interfaces for enterprise adoption
-- **Timeline**: 12-18 months post-funding
-- **Requirements**: Frontend development team, UX design, user testing
-- **Success Criteria**: Enterprise-ready dashboard and management interfaces
-
-#### Marketplace Platform Enhancement
-- **Objective**: Complete marketplace features for model and data trading
-- **Timeline**: 18-24 months post-funding
-- **Requirements**: Advanced economic mechanisms, regulatory compliance
-- **Success Criteria**: Functional decentralized AI marketplace
-
----
-
-### 🔮 FUTURE VISION (Post-Series A)
-
-#### Global IPFS Spine Integration
-- **Vision**: Decentralized global knowledge infrastructure
-- **Timeline**: Series B funding objective (24+ months)
-- **Requirements**: Massive infrastructure investment, content partnerships
-- **Impact**: Transform global knowledge accessibility and compensation
-
-#### Advanced AI Coordination at Scale
-- **Vision**: Coordinate thousands of AI models globally
-- **Timeline**: Series C and beyond (36+ months)
-- **Requirements**: Breakthrough scalability research, global adoption
-- **Impact**: Become primary global AI coordination infrastructure
+Non-blocking for the current node startup path (which uses `local_ledger.py`/`dag_ledger.py`, not `AtomicFTNSService`), but relevant if this service is ever wired to a local SQLite node.
 
 ---
 
-## Audit Compliance & Investor Due Diligence
+### ⚠️ Stubbed Features (NotImplementedError)
 
-### Series A Investment Audit Remediation
+All stubs are in optional or advanced features outside the core node execution path. None block basic node operation.
 
-**All critical Series A audit gaps have been addressed:**
-
-✅ **"Implement Real SEAL Components"**
-- **Previous State**: Mock implementations and placeholder functions
-- **Current State**: Working PyTorch neural networks with real ML training loops
-- **Evidence**: `/prsm/teachers/seal.py` with comprehensive implementation
-- **Validation**: Functional training, improvement tracking, quality evaluation
-
-✅ **"Scale from 3-node demo to 50+ nodes"**
-- **Previous State**: Basic 3-node demonstration
-- **Current State**: Scalable networking supporting 50-1000+ nodes
-- **Evidence**: `/prsm/federation/scalable_p2p_network.py` with production architecture
-- **Validation**: 12-node demonstration, algorithm scalability proven
-
-✅ **"Real Byzantine fault tolerance"**
-- **Previous State**: Basic consensus simulation
-- **Current State**: Production PBFT with cryptographic verification
-- **Evidence**: `/prsm/federation/enhanced_consensus_system.py` with real BFT
-- **Validation**: 33% Byzantine tolerance, automatic recovery, view changes
-
-✅ **"Comprehensive fault recovery"**
-- **Previous State**: Limited error handling
-- **Current State**: Production fault tolerance with ML-based detection
-- **Evidence**: `/prsm/federation/production_fault_tolerance.py` with 7 recovery categories
-- **Validation**: Sub-30s detection, 95%+ recovery success rate
-
-### Investment Risk Mitigation
-
-**Key risks identified in audit have been systematically addressed:**
-
-1. **"Documentation vs. Reality Gap"** → **RESOLVED**
-   - This document provides comprehensive current state mapping
-   - All documentation updated with clear implementation status indicators
-   - Realistic timelines and funding requirements specified
-
-2. **"Unproven Research at Scale"** → **MITIGATED**
-   - Core technologies implemented and demonstrated
-   - SEAL technology working with real ML training
-   - P2P networking validated with fault tolerance
-   - Economic model stress-tested across multiple scenarios
-
-3. **"Extreme Complexity"** → **MANAGED**
-   - Modular architecture allows independent validation
-   - Core components proven individually before integration
-   - Clear phase-gate approach to production deployment
-   - Series A scope focused on production validation, not research
+| File | What's Stubbed | User Impact |
+|------|---------------|-------------|
+| `economy/payments/crypto_exchange.py` | Fiat ↔ crypto exchange | Cannot convert FTNS to fiat |
+| `economy/payments/fiat_gateway.py` | Credit card / bank payments | No fiat on-ramp to purchase FTNS |
+| `compute/chronos/price_oracles.py` | Dynamic pricing from oracles | Compute prices are static |
+| `compute/agents/executors/ollama_client.py` | Local LLM inference via Ollama | No inference without an Anthropic/OpenAI API key |
+| `compute/ai_orchestration/model_manager.py` | Cross-backend model routing | Some multi-model routing paths incomplete |
+| `data/analytics/real_time_processor.py` | Streaming analytics pipeline | Analytics are batch-only |
 
 ---
 
-## Technical Validation Evidence
+### 🟡 Gaps Before General User Participation
 
-### Demonstration Suite Available
+These are not bugs — they are gaps between "technically functional" and "broadly usable."
 
-**Comprehensive demos validate all claims:**
+#### Mainnet FTNS Token (Priority: High)
+FTNS is live on Ethereum Sepolia testnet only. Provenance royalties and compute payments have no real monetary value until mainnet deployment.
 
-1. **SEAL Implementation Demo**: `/demos/seal_implementation_demo.py`
-   - Demonstrates real neural network training
-   - Shows improvement tracking and quality evaluation
-   - Validates autonomous learning capabilities
+#### Single Bootstrap Node (Priority: High)
+Only one bootstrap server exists: `wss://bootstrap1.prsm-network.com:8765`. Single point of failure for new peer discovery. Multi-region fallback nodes (EU, Asia-Pacific) are on the roadmap but not deployed.
 
-2. **P2P Network Enhancement Demo**: `/demos/p2p_network_enhancements_demo.py`
-   - 12-node network formation in <10 seconds
-   - Byzantine fault tolerance with automatic recovery
-   - Consensus performance under various conditions
+#### IPFS Dependency Not Bundled (Priority: Medium)
+Data sharing requires a locally running IPFS daemon. IPFS is not auto-started by `prsm node start`. Non-technical users will encounter this immediately.
+- Setup instructions: `docs/MACOS_SETUP.md`, `docs/QUICKSTART_GUIDE.md`
 
-3. **Tokenomics Validation**: `/demos/tokenomics_simulation.py`
-   - Multi-agent economic modeling
-   - Stress testing across 4 scenarios
-   - Fairness and attack resistance validation
+#### Compute Requires Personal API Keys (Priority: Medium)
+Participating as a compute provider or requester requires personal Anthropic or OpenAI API keys. No pooled or anonymized compute arrangement exists. The Ollama integration (`ollama_client.py`) would enable local inference without API keys but is currently stubbed.
 
-4. **Complete System Integration**: Available for investor technical evaluation
-
-### Code Quality Metrics
-
-- **Test Coverage**: Comprehensive test suites for all major components
-- **Documentation**: Architecture, security, and implementation guides
-- **Code Organization**: Clean separation of concerns, modular design
-- **Security**: STRIDE threat modeling implemented throughout
+#### No Web Onboarding UI (Priority: Low-Medium)
+Node setup is CLI-only. No browser-based onboarding exists for non-technical users.
 
 ---
 
-## Series A Investment Readiness
+## Test Suite Status
 
-### Core Value Proposition Validated
+| Metric | Value |
+|--------|-------|
+| Total collected | 3,521 |
+| Passing | 404 |
+| Skipped | 76 |
+| Failing | 1 |
+| Benchmark suite | Times out (excluded from main run) |
 
-**PRSM has proven the fundamental breakthroughs that drive its investment thesis:**
-
-1. **Autonomous AI Improvement (SEAL)**: ✅ Working implementation
-2. **Scalable Decentralized Coordination**: ✅ Proven architecture  
-3. **Byzantine Fault Tolerance**: ✅ Production-grade consensus
-4. **Economic Model Viability**: ✅ Stress-tested and validated
-5. **Security Framework**: ✅ Enterprise-ready architecture
-
-### Clear Path to Production
-
-**Series A funding enables systematic transition to enterprise deployment:**
-
-- **Technical Risk**: Minimized through working prototype validation
-- **Execution Risk**: Clear milestones with proven development capability
-- **Market Risk**: Addressed through enterprise security and compliance roadmap
-- **Scalability Risk**: Architecture proven, infrastructure deployment straightforward
-
-### Competitive Differentiation Maintained
-
-**PRSM's unique advantages remain intact and defensible:**
-
-- **First-mover advantage** in decentralized AI coordination
-- **Novel technical architecture** with proven implementation
-- **Legal/regulatory compliance** framework ready for deployment
-- **Open-source community adoption** driving proprietary value
+The single failing test is `test_idempotency_key_prevents_duplicate_transactions` — see the bug report above.
 
 ---
 
-## Conclusion
+## Production Readiness by Subsystem
 
-**PRSM successfully transitions from ambitious vision to investment-ready opportunity.** Core breakthrough technologies have been implemented and validated, audit concerns systematically addressed, and clear production roadmap established.
-
-**The platform demonstrates the rare combination of visionary architecture with proven implementation**, positioning it for Series A success and enterprise market capture.
-
-**Investment Recommendation**: All technical, execution, and market risks have been substantially mitigated through prototype validation. Series A funding enables systematic production deployment of proven technologies.
+| Subsystem | Status | Notes |
+|-----------|--------|-------|
+| P2P Node Infrastructure | ✅ Ready | Identity, transport, discovery, gossip |
+| FTNS DAG Ledger (local) | ✅ Ready | SQLite, atomic ops, Ed25519 signatures |
+| Compute Job Pipeline | ✅ Ready | Submit, accept, execute, pay |
+| AI Backends (Anthropic/OpenAI) | ✅ Ready | Auto-detection, real charging |
+| IPFS Storage | ✅ Functional | Requires daemon; not auto-started |
+| BitTorrent Transfer | ✅ Functional | Proof-of-transfer implemented |
+| Marketplace API | ✅ Ready | 9 asset types, full order lifecycle |
+| Content Provenance | ✅ Ready | Attribution + royalty distribution |
+| AtomicFTNSService | ⚠️ Partially broken | Missing table, mock bypass bug, PG-only SQL |
+| Ollama / Local LLM | 🔴 Stubbed | `NotImplementedError` |
+| Fiat Gateway | 🔴 Stubbed | `NotImplementedError` |
+| Crypto Exchange | 🔴 Stubbed | `NotImplementedError` |
+| Real-time Analytics | 🔴 Stubbed | `NotImplementedError` |
+| Mainnet Token | 📋 Planned | Sepolia testnet only |
+| Multi-region Bootstrap | 📋 Planned | Single node today |
 
 ---
 
-*This implementation status document is maintained current as of each major development milestone. For technical due diligence questions or live demonstrations, please contact the development team.*
+## Recommended Fix Priority
+
+### Immediate (unblock the test suite)
+1. Fix `AtomicFTNSService._get_session()` to use injected `_db_service` — 2 lines in `atomic_ftns_service.py`
+2. Add `FTNSIdempotencyKeyModel` to `prsm/core/database.py` schema
+
+### Short-term (unblock non-developer users)
+3. Auto-start or bundle IPFS daemon in `prsm node start`
+4. Implement Ollama client for local inference without API keys
+5. Document API key alternatives or add a shared compute tier
+
+### Medium-term (real economic value)
+6. Mainnet FTNS token deployment
+7. Deploy EU + Asia-Pacific bootstrap fallback nodes
+
+### Longer-term (growth)
+8. Web-based node onboarding UI
+9. Fiat gateway for FTNS on-ramp
+10. Dynamic price oracles for compute pricing
+
+---
+
+## Key File Locations
+
+| Purpose | Path |
+|---------|------|
+| CLI entry point | `prsm/cli.py` |
+| Node orchestrator | `prsm/node/node.py` |
+| DAG ledger | `prsm/node/dag_ledger.py` |
+| Local SQLite ledger | `prsm/node/local_ledger.py` |
+| Atomic FTNS service (has bugs) | `prsm/economy/tokenomics/atomic_ftns_service.py` |
+| Database schema / ORM | `prsm/core/database.py` |
+| Anthropic backend | `prsm/compute/nwtn/backends/anthropic_backend.py` |
+| IPFS client | `prsm/core/ipfs_client.py` |
+| Marketplace API | `prsm/interface/api/routers/marketplace.py` |
+| Security tests | `tests/security/` |
+
+---
+
+*Last updated against commit `e6d6cf2` on the `main` branch — March 24, 2026.*

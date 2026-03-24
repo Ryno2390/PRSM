@@ -741,10 +741,12 @@ class DAGLedger:
             (wallet_id, amount, time.time())
         )
 
-        # For new wallet inserts, seed the version cache.
-        # For existing wallets, credit doesn't change version — don't update cache.
+        # The ON CONFLICT DO UPDATE always increments version in the DB.
+        # Mirror that increment in the cache so subsequent deductions see the correct version.
         if wallet_id not in self._balance_version_cache:
             self._balance_version_cache[wallet_id] = 1
+        else:
+            self._balance_version_cache[wallet_id] += 1
 
         logger.debug(
             f"Atomic balance credit completed for {wallet_id[:8]}... "
