@@ -10,6 +10,8 @@ with intelligent load balancing, health monitoring, and performance optimization
 import asyncio
 import json
 import logging
+import os
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -17,6 +19,8 @@ from typing import Dict, List, Any, Optional, Union, Callable, Set
 import uuid
 from pathlib import Path
 import math
+
+import aiohttp
 
 from prsm.compute.plugins import require_optional, has_optional_dependency
 
@@ -751,16 +755,113 @@ class ModelManager:
                 model.status = ModelStatus.AVAILABLE
     
     async def _execute_model_request(self, model: ModelInstance, request_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute request on model (placeholder for actual implementation)"""
-        
-        # Simulate API call
-        await asyncio.sleep(0.1)  # Simulate processing time
-        
+        """Execute request on model via real API call."""
+        prompt = request_data.get("prompt", "")
+        parameters = request_data.get("parameters", {})
+
+        api_key = model.api_key or os.getenv(
+            f"{model.provider.value.upper()}_API_KEY", ""
+        )
+
+        if model.provider == ModelProvider.ANTHROPIC:
+            return await self._call_anthropic(model, prompt, api_key, parameters)
+        elif model.provider == ModelProvider.OPENAI:
+            return await self._call_openai(model, prompt, api_key, parameters)
+        elif model.provider == ModelProvider.OLLAMA:
+            return await self._call_ollama(model, prompt, parameters)
+        else:
+            raise NotImplementedError(
+                f"No client implemented for provider {model.provider.value}. "
+                "Add a _call_<provider> method."
+            )
+
+    async def _call_anthropic(
+        self, model: ModelInstance, prompt: str, api_key: str,
+        parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Call Anthropic API."""
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+        payload = {
+            "model": model.model_name,
+            "max_tokens": parameters.get("max_tokens", model.max_tokens),
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        start = time.time()
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.anthropic.com/v1/messages",
+                headers=headers, json=payload
+            ) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+        elapsed_ms = (time.time() - start) * 1000
+        content = data["content"][0]["text"]
+        usage = data.get("usage", {})
         return {
             "model_id": model.model_id,
-            "response": "This is a simulated response",
-            "tokens_used": 100,
-            "execution_time_ms": 100
+            "response": content,
+            "tokens_used": usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
+            "execution_time_ms": elapsed_ms,
+        }
+
+    async def _call_openai(
+        self, model: ModelInstance, prompt: str, api_key: str,
+        parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Call OpenAI API."""
+        base_url = model.api_base or "https://api.openai.com/v1"
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": model.model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": parameters.get("max_tokens", model.max_tokens),
+            "temperature": parameters.get("temperature", model.temperature),
+        }
+        start = time.time()
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{base_url}/chat/completions", headers=headers, json=payload
+            ) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+        elapsed_ms = (time.time() - start) * 1000
+        content = data["choices"][0]["message"]["content"]
+        usage = data.get("usage", {})
+        return {
+            "model_id": model.model_id,
+            "response": content,
+            "tokens_used": usage.get("total_tokens", 0),
+            "execution_time_ms": elapsed_ms,
+        }
+
+    async def _call_ollama(
+        self, model: ModelInstance, prompt: str, parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Call Ollama API."""
+        base_url = model.api_base or "http://localhost:11434"
+        payload = {
+            "model": model.model_name,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": parameters.get("temperature", model.temperature)},
+        }
+        start = time.time()
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{base_url}/api/generate", json=payload
+            ) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+        elapsed_ms = (time.time() - start) * 1000
+        return {
+            "model_id": model.model_id,
+            "response": data.get("response", ""),
+            "tokens_used": data.get("eval_count", 0),
+            "execution_time_ms": elapsed_ms,
         }
     
     async def _check_rate_limits(self, model: ModelInstance) -> bool:

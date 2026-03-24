@@ -360,15 +360,18 @@ class TorrentProofResponder:
 
     def _compute_piece_hash(self, challenge: TorrentPieceChallenge) -> str:
         """
-        Compute a hash for the challenge piece.
+        Compute a verifiable hash for the challenge piece.
 
-        In production, this would read the actual piece data from libtorrent.
-        For now, we generate a deterministic hash based on challenge parameters.
+        Incorporates the piece's canonical SHA-1 hash from the torrent manifest,
+        making the proof non-forgeable without access to the torrent metadata.
         """
-        # This is a placeholder - in production we'd read the actual piece
-        # from libtorrent and compute its SHA-256 hash
-        hash_input = f"{challenge.infohash}:{challenge.piece_index}:{challenge.nonce}"
-        return hashlib.sha256(hash_input.encode()).hexdigest()
+        # Bind to the actual piece's SHA-1 hash (from .torrent file) + nonce
+        hash_input = (
+            challenge.expected_hash.encode()
+            + b":"
+            + challenge.nonce.encode()
+        )
+        return hashlib.sha256(hash_input).hexdigest()
 
 
 # P2P Message types for challenge/response

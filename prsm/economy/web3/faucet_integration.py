@@ -230,50 +230,86 @@ class PolygonFaucetIntegration:
             )
     
     async def _request_chainlink(self, wallet_address: str, config: Dict) -> FaucetResult:
-        """Request from Chainlink faucet"""
+        """Request from Chainlink faucet."""
         try:
-            # Chainlink faucet requires different approach
-            # This is a simplified implementation
-            
-            payload = {
-                "address": wallet_address
-            }
-            
+            payload = {"address": wallet_address}
             headers = {
                 "Content-Type": "application/json",
-                "User-Agent": "PRSM-Web3-Integration/1.0"
+                "User-Agent": "PRSM-Web3-Integration/1.0",
             }
-            
-            # Note: Actual Chainlink faucet may require additional authentication
-            # This is a placeholder implementation
-            
-            return FaucetResult(
-                status=FaucetStatus.FAILED,
-                message="Chainlink faucet integration not implemented"
-            )
-            
+            async with self.session.post(
+                config["api_endpoint"],
+                json=payload,
+                headers=headers,
+            ) as response:
+                if response.status == 200:
+                    data = await response.json(content_type=None)
+                    if data.get("success") or data.get("result") == "ok":
+                        return FaucetResult(
+                            status=FaucetStatus.SUCCESS,
+                            transaction_hash=data.get("txHash") or data.get("hash"),
+                            amount=config["amount"],
+                            message="Chainlink faucet request successful",
+                        )
+                    return FaucetResult(
+                        status=FaucetStatus.FAILED,
+                        message=data.get("message", "Chainlink request rejected"),
+                    )
+                elif response.status == 429:
+                    retry_after = int(response.headers.get("Retry-After", 3600))
+                    return FaucetResult(
+                        status=FaucetStatus.RATE_LIMITED,
+                        retry_after=retry_after,
+                        message="Chainlink rate limit exceeded",
+                    )
+                else:
+                    return FaucetResult(
+                        status=FaucetStatus.FAILED,
+                        message=f"Chainlink HTTP {response.status}",
+                    )
         except Exception as e:
-            return FaucetResult(
-                status=FaucetStatus.FAILED,
-                message=str(e)
-            )
-    
+            return FaucetResult(status=FaucetStatus.FAILED, message=str(e))
+
     async def _request_alchemy(self, wallet_address: str, config: Dict) -> FaucetResult:
-        """Request from Alchemy faucet"""
+        """Request from Alchemy faucet."""
         try:
-            # Alchemy faucet implementation
-            # This is a placeholder - actual implementation would depend on their API
-            
-            return FaucetResult(
-                status=FaucetStatus.FAILED,
-                message="Alchemy faucet integration not implemented"
-            )
-            
+            payload = {"address": wallet_address}
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": "PRSM-Web3-Integration/1.0",
+            }
+            async with self.session.post(
+                config["api_endpoint"],
+                json=payload,
+                headers=headers,
+            ) as response:
+                if response.status == 200:
+                    data = await response.json(content_type=None)
+                    if data.get("success") or data.get("status") == "ok":
+                        return FaucetResult(
+                            status=FaucetStatus.SUCCESS,
+                            transaction_hash=data.get("txHash") or data.get("hash"),
+                            amount=config["amount"],
+                            message="Alchemy faucet request successful",
+                        )
+                    return FaucetResult(
+                        status=FaucetStatus.FAILED,
+                        message=data.get("message", "Alchemy request rejected"),
+                    )
+                elif response.status == 429:
+                    retry_after = int(response.headers.get("Retry-After", 3600))
+                    return FaucetResult(
+                        status=FaucetStatus.RATE_LIMITED,
+                        retry_after=retry_after,
+                        message="Alchemy rate limit exceeded",
+                    )
+                else:
+                    return FaucetResult(
+                        status=FaucetStatus.FAILED,
+                        message=f"Alchemy HTTP {response.status}",
+                    )
         except Exception as e:
-            return FaucetResult(
-                status=FaucetStatus.FAILED,
-                message=str(e)
-            )
+            return FaucetResult(status=FaucetStatus.FAILED, message=str(e))
     
     async def _monitor_pending_request(self, result: FaucetResult) -> FaucetResult:
         """Monitor pending faucet request"""

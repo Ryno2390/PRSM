@@ -7,7 +7,7 @@ FastAPI middleware for request validation and security checking.
 
 import logging
 import time
-from typing import Dict, Any, Optional, Type, Callable
+from typing import Dict, Any, Optional, Type, Callable, List
 from fastapi import Request, Response, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError as PydanticValidationError
@@ -28,6 +28,7 @@ class ValidationMiddleware:
     def __init__(self, app, validation_config: Optional[Dict[str, Any]] = None):
         self.app = app
         self.config = validation_config or {}
+        self._request_counts: Dict[str, List[float]] = {}
         self.route_schemas: Dict[str, Type[BaseModel]] = {}
         self.validation_stats = {
             "total_requests": 0,
@@ -186,9 +187,22 @@ class ValidationMiddleware:
             )
     
     def _is_rate_limited(self, client_ip: str) -> bool:
-        """Basic rate limiting check (placeholder implementation)"""
-        # This would be implemented with Redis or similar for production
-        # For now, just return False
+        """Sliding-window rate limiter."""
+        window_seconds = self.config.get("rate_limit_window_seconds", 60)
+        max_requests = self.config.get("rate_limit_max_requests", 100)
+        now = time.time()
+        window_start = now - window_seconds
+
+        # Evict timestamps outside the window
+        self._request_counts[client_ip] = [
+            t for t in self._request_counts.get(client_ip, [])
+            if t > window_start
+        ]
+
+        if len(self._request_counts[client_ip]) >= max_requests:
+            return True
+
+        self._request_counts[client_ip].append(now)
         return False
     
     async def _validate_response(self, response: Response) -> Response:

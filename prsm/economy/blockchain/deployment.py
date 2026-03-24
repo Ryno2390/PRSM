@@ -739,9 +739,11 @@ class ContractDeployer:
                 artifact = json.load(f)
                 return artifact.get("bytecode", "")
         
-        # Return placeholder for testing
-        logger.warning("Using placeholder bytecode - compile contracts first!")
-        return "0x" + "0" * 100  # Placeholder
+        # Contract artifacts not found - raise error instead of using placeholder
+        raise RuntimeError(
+            "Contract artifacts not found. "
+            "Run 'npx hardhat compile' to generate artifacts in contracts/artifacts/."
+        )
     
     async def _get_bridge_bytecode(self) -> str:
         """
@@ -757,8 +759,10 @@ class ContractDeployer:
                 artifact = json.load(f)
                 return artifact.get("bytecode", "")
         
-        logger.warning("Using placeholder bytecode - compile contracts first!")
-        return "0x" + "0" * 100  # Placeholder
+        raise RuntimeError(
+            "Contract artifacts not found. "
+            "Run 'npx hardhat compile' to generate artifacts in contracts/artifacts/."
+        )
     
     async def _verify_contract(self, contract: DeployedContract) -> bool:
         """

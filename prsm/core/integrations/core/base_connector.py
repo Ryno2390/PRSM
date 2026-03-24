@@ -375,10 +375,13 @@ class BaseConnector(ABC):
         return scan_result
     
     async def _simulate_download(self, external_id: str) -> bool:
-        """Simulate content download (placeholder implementation)"""
-        # Simulate download delay
-        await asyncio.sleep(0.5)
-        return True
+        """Verify content is accessible by fetching its metadata."""
+        try:
+            metadata = await self.get_content_metadata(external_id)
+            return metadata is not None and len(metadata) > 0
+        except Exception as e:
+            logger.warning("Content accessibility check failed: %s %s", external_id, e)
+            return False
     
     async def _create_provenance_record(self, request: ImportRequest, metadata: Dict[str, Any]) -> ProvenanceMetadata:
         """Create provenance record for FTNS creator rewards"""

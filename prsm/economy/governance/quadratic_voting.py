@@ -540,9 +540,8 @@ class QuadraticVotingSystem:
                 if delegation.councils and council_context not in delegation.councils:
                     continue
                 
-                # Add delegated power (would need delegator's token balance in real implementation)
-                # For now, use a placeholder calculation
-                delegated_power += delegation.delegated_power_percentage * 0.1  # Placeholder
+                # Add delegated power from pre-computed delegation chains
+                delegated_power += self.delegation_chains.get(delegator_id, {}).get(user_id, 0.0)
         
         return delegated_power
     
