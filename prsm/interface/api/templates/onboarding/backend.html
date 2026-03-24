@@ -1,0 +1,76 @@
+{% extends "onboarding/base.html" %}
+
+{% block title %}Backend Selection{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h2 class="card-title mb-4">Backend Selection</h2>
+
+    <p class="text-muted mb-4">
+      Choose your primary LLM backend and fallback chain.
+      Available backends are based on the API keys you provided.
+    </p>
+
+    <form method="POST" action="/onboarding/backend">
+      <h5 class="mb-3">Primary Backend</h5>
+      <div class="mb-4">
+        {% for backend in available_backends %}
+        <div class="form-check">
+          <input class="form-check-input"
+                 type="radio"
+                 name="primary_backend"
+                 id="primary_{{ backend }}"
+                 value="{{ backend }}"
+                 {% if backend == current_selection %}checked{% endif %}
+                 {% if backend == "mock" and available_backends|length == 1 %}checked{% endif %}>
+          <label class="form-check-label" for="primary_{{ backend }}">
+            <strong>{{ backend|title }}</strong>
+            {% if backend == "anthropic" %}
+              <span class="text-muted">- Claude models</span>
+            {% elif backend == "openai" %}
+              <span class="text-muted">- GPT models</span>
+            {% elif backend == "ollama" %}
+              <span class="text-muted">- Local models via Ollama</span>
+            {% elif backend == "mock" %}
+              <span class="text-muted">- Testing backend (no real inference)</span>
+            {% endif %}
+          </label>
+        </div>
+        {% endfor %}
+      </div>
+
+      <h5 class="mb-3">Fallback Chain</h5>
+      <div class="mb-4">
+        <label for="fallback_chain" class="form-label">
+          Comma-separated list of fallback backends
+        </label>
+        <input type="text"
+               class="form-control"
+               id="fallback_chain"
+               name="fallback_chain"
+               value="{{ available_backends|join(', ') }}"
+               placeholder="mock">
+        <div class="form-text">
+          If the primary backend fails, requests will be retried with these backends in order.
+        </div>
+      </div>
+
+      <div class="d-flex justify-content-between mt-4">
+        <a href="/onboarding/api-keys" class="btn btn-outline-secondary">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-left me-1" viewBox="0 0 16 16">
+            <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8z"/>
+          </svg>
+          Back
+        </a>
+        <button type="submit" class="btn btn-primary">
+          Continue
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-right ms-1" viewBox="0 0 16 16">
+            <path fill-rule="evenodd" d="M1 8a.5.5 0 0 1 .5-.5h11.793l-3.147-3.146a.5.5 0 0 1 .708-.708l4 4a.5.5 0 0 1 0 .708l-4 4a.5.5 0 0 1-.708-.708L13.293 8.5H1.5A.5.5 0 0 1 1 8z"/>
+          </svg>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

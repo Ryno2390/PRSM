@@ -895,6 +895,10 @@ class PRSMNode:
             f"API: http://127.0.0.1:{self.config.api_port}, "
             f"Dashboard: http://127.0.0.1:{self.config.api_port}/"
         )
+        logger.info(
+            "Node onboarding UI available",
+            url=f"http://127.0.0.1:{self.config.api_port}/onboarding/"
+        )
 
     async def stop(self) -> None:
         """Gracefully shut down all subsystems."""

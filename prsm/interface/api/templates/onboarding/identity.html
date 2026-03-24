@@ -1,0 +1,129 @@
+{% extends "onboarding/base.html" %}
+
+{% block title %}Node Identity{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h2 class="card-title mb-4">Node Identity</h2>
+
+    <p class="text-muted mb-4">
+      Your node needs a cryptographic identity to participate in the PRSM network.
+      This is an Ed25519 keypair used for authentication and message signing.
+    </p>
+
+    {% if existing_identity %}
+    <div class="card mb-4">
+      <div class="card-body">
+        <h5 class="card-title">Existing Identity Found</h5>
+        <div class="row">
+          <div class="col-md-6">
+            <strong>Node ID:</strong><br>
+            <code>{{ existing_identity.node_id[:16] }}...</code>
+          </div>
+          <div class="col-md-6">
+            <strong>Display Name:</strong><br>
+            <span>{{ existing_identity.display_name }}</span>
+          </div>
+        </div>
+        <small class="text-muted d-block mt-2">
+          Identity file: {{ identity_path }}
+        </small>
+      </div>
+    </div>
+    {% endif %}
+
+    <form method="POST" action="/onboarding/identity" enctype="multipart/form-data" id="identityForm">
+      <input type="hidden" name="action" id="actionInput" value="generate">
+
+      <div class="mb-4">
+        <label class="form-label"><strong>Identity Action</strong></label>
+
+        <div class="form-check mb-2">
+          <input class="form-check-input"
+                 type="radio"
+                 name="identity_action"
+                 id="action_generate"
+                 value="generate"
+                 {% if not existing_identity %}checked{% endif %}
+                 onchange="toggleIdentityForm('generate')">
+          <label class="form-check-label" for="action_generate">
+            <strong>Generate New Identity</strong>
+            <span class="text-muted d-block">Create a fresh Ed25519 keypair</span>
+          </label>
+        </div>
+
+        <div class="form-check">
+          <input class="form-check-input"
+                 type="radio"
+                 name="identity_action"
+                 id="action_import"
+                 value="import"
+                 {% if existing_identity %}checked{% endif %}
+                 onchange="toggleIdentityForm('import')">
+          <label class="form-check-label" for="action_import">
+            <strong>Import Existing Identity</strong>
+            <span class="text-muted d-block">Use an identity file from another node</span>
+          </label>
+        </div>
+      </div>
+
+      <div id="generateSection" class="mb-4" {% if existing_identity %}style="display: none;"{% endif %}>
+        <label for="display_name" class="form-label">Display Name (optional)</label>
+        <input type="text"
+               class="form-control"
+               id="display_name"
+               name="display_name"
+               placeholder="my-prsm-node"
+               value="prsm-node">
+        <div class="form-text">
+          A human-readable name for your node (not used for authentication)
+        </div>
+      </div>
+
+      <div id="importSection" class="mb-4" {% if not existing_identity %}style="display: none;"{% endif %}>
+        <label for="identity_file" class="form-label">Identity File (JSON)</label>
+        <input type="file"
+               class="form-control"
+               id="identity_file"
+               name="identity_file"
+               accept=".json">
+        <div class="form-text">
+          Upload a node_identity.json file exported from another PRSM node
+        </div>
+      </div>
+
+      <div class="d-flex justify-content-between mt-4">
+        <a href="/onboarding/network" class="btn btn-outline-secondary">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-left me-1" viewBox="0 0 16 16">
+            <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8z"/>
+          </svg>
+          Back
+        </a>
+        <button type="submit" class="btn btn-primary">
+          Continue
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-right ms-1" viewBox="0 0 16 16">
+            <path fill-rule="evenodd" d="M1 8a.5.5 0 0 1 .5-.5h11.793l-3.147-3.146a.5.5 0 0 1 .708-.708l4 4a.5.5 0 0 1 0 .708l-4 4a.5.5 0 0 1-.708-.708L13.293 8.5H1.5A.5.5 0 0 1 1 8z"/>
+          </svg>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function toggleIdentityForm(action) {
+    document.getElementById('actionInput').value = action;
+    const generateSection = document.getElementById('generateSection');
+    const importSection = document.getElementById('importSection');
+
+    if (action === 'generate') {
+        generateSection.style.display = 'block';
+        importSection.style.display = 'none';
+    } else {
+        generateSection.style.display = 'none';
+        importSection.style.display = 'block';
+    }
+}
+</script>
+{% endblock %}
