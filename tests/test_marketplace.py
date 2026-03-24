@@ -21,17 +21,13 @@ async def test_model_listing():
     print("🧪 Testing model listing...")
     
     marketplace = get_marketplace()
-    
-    # Give test users initial FTNS balance for fees
-    from prsm.economy.tokenomics.ftns_service import ftns_service
-    
-    # Give users multiple model rewards for sufficient balance
-    for i in range(10):  # Give 10 model rewards = 1000 FTNS each
-        await ftns_service.reward_contribution("model_owner_1", "model", 1.0)
-        await ftns_service.reward_contribution("model_owner_2", "model", 1.0)
-        await ftns_service.reward_contribution("buyer_1", "model", 1.0)
-        await ftns_service.reward_contribution("dynamic_owner", "model", 1.0)
-        await ftns_service.reward_contribution("dynamic_buyer", "model", 1.0)
+
+    # Create test accounts with sufficient balance in the AtomicFTNSService database
+    from prsm.economy.tokenomics.atomic_ftns_service import get_atomic_ftns_service
+    from decimal import Decimal as _D
+    ftns = await get_atomic_ftns_service()
+    for _uid in ["model_owner_1", "model_owner_2", "buyer_1", "dynamic_owner", "dynamic_buyer"]:
+        await ftns.ensure_account_exists(_uid, initial_balance=_D("10000"))
     
     # Create pricing model
     pricing = PricingModel(
@@ -75,7 +71,14 @@ async def test_marketplace_transactions():
     print("🧪 Testing marketplace transactions...")
     
     marketplace = get_marketplace()
-    
+
+    # Ensure test accounts exist with balance for listing fees + transaction costs
+    from prsm.economy.tokenomics.atomic_ftns_service import get_atomic_ftns_service
+    from decimal import Decimal as _D
+    ftns = await get_atomic_ftns_service()
+    for _uid in ["model_owner_2", "buyer_1"]:
+        await ftns.ensure_account_exists(_uid, initial_balance=_D("10000"))
+
     # Create a second listing for transactions
     pricing2 = PricingModel(
         base_price=5.0,
@@ -312,7 +315,14 @@ async def test_dynamic_pricing():
     print("🧪 Testing dynamic pricing...")
     
     marketplace = get_marketplace()
-    
+
+    # Ensure test accounts exist with balance
+    from prsm.economy.tokenomics.atomic_ftns_service import get_atomic_ftns_service
+    from decimal import Decimal as _D
+    ftns = await get_atomic_ftns_service()
+    for _uid in ["dynamic_owner", "dynamic_buyer"]:
+        await ftns.ensure_account_exists(_uid, initial_balance=_D("10000"))
+
     # Create listing with dynamic pricing
     dynamic_pricing = PricingModel(
         base_price=20.0,

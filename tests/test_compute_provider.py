@@ -141,6 +141,10 @@ class TestComputeProvider:
         provider, identity, ledger = setup
         await provider.start()
 
+        # Ensure self-job rejection is active (allow_self_compute=False means
+        # own jobs are always rejected regardless of peer count)
+        provider.allow_self_compute = False
+
         # Simulate receiving our own job offer
         await provider._on_job_offer(
             GOSSIP_JOB_OFFER,

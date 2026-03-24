@@ -18,6 +18,7 @@ from unittest.mock import Mock, AsyncMock, MagicMock, patch
 import tempfile
 
 # Mock Web3 before importing modules
+import importlib.machinery
 mock_web3_module = MagicMock()
 mock_web3_module.Web3 = MagicMock()
 mock_web3_module.Web3.to_checksum_address = lambda x: x if x.startswith('0x') else '0x' + x
@@ -25,13 +26,22 @@ mock_web3_module.Web3.keccak = lambda text=None, data=None: b'\x00' * 32
 mock_web3_module.Web3.from_wei = lambda value, unit: Decimal(value) / Decimal(10**18)
 mock_web3_module.Web3.to_wei = lambda value, unit: int(value * 10**9) if unit == 'gwei' else int(value)
 mock_web3_module.Web3.is_connected = lambda: True
+# Set a proper __spec__ so Python 3.14 module checks don't fail in later tests
+mock_web3_module.__spec__ = importlib.machinery.ModuleSpec('web3', None)
 
-# Patch Web3 imports
+# Patch Web3 imports — set __spec__ on every mock to avoid Python 3.14 importlib errors
 import sys
+_mock_web3_contract = MagicMock()
+_mock_web3_contract.__spec__ = importlib.machinery.ModuleSpec('web3.contract', None)
+_mock_web3_exceptions = MagicMock()
+_mock_web3_exceptions.__spec__ = importlib.machinery.ModuleSpec('web3.exceptions', None)
+_mock_eth_account = MagicMock()
+_mock_eth_account.__spec__ = importlib.machinery.ModuleSpec('eth_account', None)
+
 sys.modules['web3'] = mock_web3_module
-sys.modules['web3.contract'] = MagicMock()
-sys.modules['web3.exceptions'] = MagicMock()
-sys.modules['eth_account'] = MagicMock()
+sys.modules['web3.contract'] = _mock_web3_contract
+sys.modules['web3.exceptions'] = _mock_web3_exceptions
+sys.modules['eth_account'] = _mock_eth_account
 
 # Import modules to test
 from prsm.economy.blockchain.networks import (
