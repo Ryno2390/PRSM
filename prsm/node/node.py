@@ -505,6 +505,7 @@ class PRSMNode:
         self._started = False
         self._start_time: Optional[float] = None
         self._api_task: Optional[asyncio.Task] = None
+        self._ipfs_daemon_proc: Optional[Any] = None  # Track IPFS daemon process if we started it
 
     async def initialize(self) -> None:
         """Load or generate identity, initialize all subsystems."""
@@ -820,6 +821,9 @@ class PRSMNode:
         await self.gossip.start()
         await self.discovery.start()
 
+        # Ensure IPFS daemon is available (auto-start if possible)
+        await self._ensure_ipfs_available()
+
         if self.compute_provider:
             await self.compute_provider.start()
         await self.compute_requester.start()
@@ -931,8 +935,87 @@ class PRSMNode:
         if self.ledger:
             await self.ledger.close()
 
+        # Terminate IPFS daemon if we started it
+        if hasattr(self, '_ipfs_daemon_proc') and self._ipfs_daemon_proc is not None:
+            try:
+                self._ipfs_daemon_proc.terminate()
+                self._ipfs_daemon_proc = None
+                logger.info("IPFS daemon terminated")
+            except Exception as e:
+                logger.warning(f"Failed to terminate IPFS daemon: {e}")
+
         self._started = False
         logger.info("PRSM node stopped")
+
+    async def _ensure_ipfs_available(self) -> bool:
+        """
+        Check IPFS daemon availability. Start it automatically if ipfs is on PATH
+        and the daemon is not already running.
+
+        Returns True if IPFS is (or becomes) available.
+        Returns False if IPFS is unavailable — node continues without it.
+        """
+        import shutil
+        import subprocess
+
+        ipfs_binary = shutil.which("ipfs")
+
+        # 1. Is the daemon already running? (fast check via HTTP)
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "http://127.0.0.1:5001/api/v0/id",
+                    timeout=aiohttp.ClientTimeout(total=2)
+                ) as resp:
+                    if resp.status == 200:
+                        logger.info("IPFS daemon already running")
+                        return True
+        except Exception:
+            pass  # Daemon not reachable — try to start it
+
+        # 2. ipfs not installed → warn and continue
+        if not ipfs_binary:
+            logger.warning(
+                "IPFS daemon not running and 'ipfs' not found on PATH. "
+                "Data storage features will be limited. "
+                "Install IPFS: https://docs.ipfs.tech/install/command-line/"
+            )
+            return False
+
+        # 3. ipfs is installed → start the daemon as a background subprocess
+        try:
+            logger.info("Starting IPFS daemon automatically...")
+            proc = subprocess.Popen(
+                [ipfs_binary, "daemon", "--init"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._ipfs_daemon_proc = proc  # Store so we can terminate on shutdown
+
+            # Wait up to 10 seconds for the daemon to become ready
+            import aiohttp
+            for _ in range(20):
+                await asyncio.sleep(0.5)
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            "http://127.0.0.1:5001/api/v0/id",
+                            timeout=aiohttp.ClientTimeout(total=1)
+                        ) as resp:
+                            if resp.status == 200:
+                                logger.info("IPFS daemon started successfully")
+                                return True
+                except Exception:
+                    continue
+
+            logger.warning("IPFS daemon started but did not become ready within 10s. "
+                          "Data storage features may be limited.")
+            return False
+
+        except Exception as e:
+            logger.error(f"Failed to start IPFS daemon: {e}")
+            return False
 
     async def get_status(self) -> Dict[str, Any]:
         """Comprehensive node status."""
