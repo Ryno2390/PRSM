@@ -1,0 +1,14 @@
+{
+  "primary_backend": "mock",
+  "fallback_chain": ["mock"],
+  "anthropic_api_key": null,
+  "openai_api_key": null,
+  "timeout_seconds": 120,
+  "max_retries": 3,
+  "p2p_port": 8765,
+  "bootstrap_nodes": ["wss://bootstrap1.prsm-network.com:8765"],
+  "node_identity_path": "config/node_identity.json",
+  "ipfs_auto_start": true,
+  "api_port": 8080,
+  "log_level": "INFO"
+}

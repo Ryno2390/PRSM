@@ -1,0 +1,53 @@
+{% extends "onboarding/base.html" %}
+
+{% block title %}Setup Complete{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+  <div class="card-body text-center">
+    <div class="mb-4">
+      <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="currentColor" class="text-success" viewBox="0 0 16 16">
+        <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z"/>
+      </svg>
+    </div>
+
+    <h2 class="card-title mb-3">Setup Complete!</h2>
+
+    <p class="lead mb-4">
+      Your PRSM node has been configured successfully.
+    </p>
+
+    <div class="alert alert-success text-start">
+      <h5 class="alert-heading">Next Steps</h5>
+      <hr>
+      <ol class="mb-0">
+        <li class="mb-2">
+          Configuration saved to: <code>{{ config_path }}</code>
+        </li>
+        <li class="mb-2">
+          Start your node with the command below:
+        </li>
+      </ol>
+    </div>
+
+    <div class="card bg-dark text-light mb-4">
+      <div class="card-body">
+        <code class="fs-5">$ prsm node start</code>
+      </div>
+    </div>
+
+    <p class="text-muted mb-4">
+      Your node will be available at:
+      <br>
+      <strong>API:</strong> <code>http://localhost:8080</code>
+      <br>
+      <strong>P2P:</strong> <code>ws://localhost:8765</code>
+    </p>
+
+    <div class="d-flex justify-content-center gap-3">
+      <a href="/" class="btn btn-outline-primary">Go to Dashboard</a>
+      <a href="/docs" class="btn btn-primary">View API Docs</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends "onboarding/base.html" %}
+
+{% block title %}Review & Launch{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h2 class="card-title mb-4">Review Configuration</h2>
+
+    <p class="text-muted mb-4">
+      Review your configuration below. Click "Write Config & Finish" to save
+      your settings and complete the onboarding process.
+    </p>
+
+    <h5 class="mb-3">Configuration Preview</h5>
+    <div class="config-preview mb-4">
+      <pre>{{ config | tojson(indent=2) }}</pre>
+    </div>
+
+    <div class="row mb-4">
+      <div class="col-md-6">
+        <h6>Backend</h6>
+        <ul class="list-unstyled">
+          <li><strong>Primary:</strong> {{ config.primary_backend }}</li>
+          <li><strong>Fallback:</strong> {{ config.fallback_chain | join(', ') }}</li>
+        </ul>
+      </div>
+      <div class="col-md-6">
+        <h6>Network</h6>
+        <ul class="list-unstyled">
+          <li><strong>P2P Port:</strong> {{ config.p2p_port }}</li>
+          <li><strong>API Port:</strong> {{ config.api_port }}</li>
+          <li><strong>IPFS Auto-Start:</strong> {{ config.ipfs_auto_start }}</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="alert alert-info">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-info-circle me-2" viewBox="0 0 16 16">
+        <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+        <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
+      </svg>
+      Configuration will be saved to: <code>{{ config_path }}</code>
+    </div>
+
+    <form method="POST" action="/onboarding/launch">
+      <div class="d-flex justify-content-between mt-4">
+        <a href="/onboarding/identity" class="btn btn-outline-secondary">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-left me-1" viewBox="0 0 16 16">
+            <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8z"/>
+          </svg>
+          Back
+        </a>
+        <button type="submit" class="btn btn-success btn-lg">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-check-circle me-2" viewBox="0 0 16 16">
+            <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+            <path d="M10.97 4.97a.235.235 0 0 0-.02.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-1.071-1.05z"/>
+          </svg>
+          Write Config & Finish
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

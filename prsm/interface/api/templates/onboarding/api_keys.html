@@ -1,0 +1,76 @@
+{% extends "onboarding/base.html" %}
+
+{% block title %}API Keys{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+  <div class="card-body">
+    <h2 class="card-title mb-4">API Keys</h2>
+
+    <p class="text-muted mb-4">
+      Configure your LLM provider API keys. At least one provider is recommended
+      for full functionality. You can also use the mock backend for testing.
+    </p>
+
+    <form method="POST" action="/onboarding/api-keys">
+      <div class="mb-4">
+        <label for="anthropic_api_key" class="form-label">
+          <strong>Anthropic API Key</strong>
+          <span class="text-muted">(optional)</span>
+        </label>
+        <input type="password"
+               class="form-control"
+               id="anthropic_api_key"
+               name="anthropic_api_key"
+               placeholder="sk-ant-..."
+               autocomplete="off">
+        <div class="form-text">
+          Required for Claude models via Anthropic API.
+          Get your key at <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <label for="openai_api_key" class="form-label">
+          <strong>OpenAI API Key</strong>
+          <span class="text-muted">(optional)</span>
+        </label>
+        <input type="password"
+               class="form-control"
+               id="openai_api_key"
+               name="openai_api_key"
+               placeholder="sk-..."
+               autocomplete="off">
+        <div class="form-text">
+          Required for GPT models via OpenAI API.
+          Get your key at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a>
+        </div>
+      </div>
+
+      <div class="alert alert-info">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-info-circle me-2" viewBox="0 0 16 16">
+          <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+          <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
+        </svg>
+        <strong>Note:</strong> Keys will be validated with a test API call.
+        Leave blank to use local/mock backend only.
+      </div>
+
+      <div class="d-flex justify-content-between mt-4">
+        <a href="/onboarding/" class="btn btn-outline-secondary">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-left me-1" viewBox="0 0 16 16">
+            <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8z"/>
+          </svg>
+          Back
+        </a>
+        <button type="submit" class="btn btn-primary">
+          Validate & Continue
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-right ms-1" viewBox="0 0 16 16">
+            <path fill-rule="evenodd" d="M1 8a.5.5 0 0 1 .5-.5h11.793l-3.147-3.146a.5.5 0 0 1 .708-.708l4 4a.5.5 0 0 1 0 .708l-4 4a.5.5 0 0 1-.708-.708L13.293 8.5H1.5A.5.5 0 0 1 1 8z"/>
+          </svg>
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
