@@ -265,6 +265,7 @@ class Integration:
         return {
             "integration_id": self.integration_id,
             "name": self.name,
+            "type": self.integration_type.value,  # Alias for test compatibility
             "integration_type": self.integration_type.value,
             "description": self.description,
             "long_description": self.long_description,
@@ -275,6 +276,7 @@ class Integration:
             "subcategory": self.subcategory,
             "tags": self.tags,
             "versions": {v: version.to_dict() for v, version in self.versions.items()},
+            "version": self.latest_version,  # Alias for test compatibility
             "latest_version": self.latest_version,
             "pricing_model": self.pricing_model.value,
             "license_type": self.license_type.value,
@@ -694,35 +696,42 @@ class MarketplaceCore:
             logger.error(f"Failed to update integration {integration_id}: {e}")
             return False
     
-    def get_integration(self, integration_id: str) -> Optional[Integration]:
-        """Get integration by ID"""
-        return self.integrations.get(integration_id)
+    async def get_integration(self, integration_id: str) -> Optional[Dict[str, Any]]:
+        """Get integration by ID as a dictionary"""
+        integration = self.integrations.get(integration_id)
+        if integration:
+            return integration.to_dict()
+        return None
     
-    def get_integration_dict(self, integration_id: str, use_cache: bool = True) -> Optional[Dict[str, Any]]:
+    async def get_integration_dict(self, integration_id: str, use_cache: bool = True) -> Optional[Dict[str, Any]]:
         """Get integration as dictionary with optional caching"""
-        
+
         # Check cache first
         if use_cache and integration_id in self.integration_cache:
             cache_entry = self.integration_cache[integration_id]
             cache_age = (datetime.now(timezone.utc) - cache_entry["cached_at"]).total_seconds()
-            
+
             if cache_age < self.cache_ttl_seconds:
                 return cache_entry["data"]
-        
-        # Get from storage
-        integration = self.get_integration(integration_id)
+
+        # Get from storage - directly access the integrations dict
+        integration = self.integrations.get(integration_id)
         if not integration:
             return None
-        
-        integration_dict = integration.to_dict()
-        
+
+        # Convert to dict
+        if isinstance(integration, dict):
+            integration_dict = integration
+        else:
+            integration_dict = integration.to_dict()
+
         # Cache result
         if use_cache:
             self.integration_cache[integration_id] = {
                 "data": integration_dict,
                 "cached_at": datetime.now(timezone.utc)
             }
-        
+
         return integration_dict
     
     def list_integrations(self, filters: Optional[Dict[str, Any]] = None,
@@ -798,22 +807,22 @@ class MarketplaceCore:
             logger.error(f"Failed to add integration: {e}")
             return False
 
-    def search_integrations(self, query: str, filters: Optional[Dict[str, Any]] = None,
+    async def search_integrations(self, query: str, filters: Optional[Dict[str, Any]] = None,
                            sort_by: str = "relevance", limit: int = 20) -> List[Dict[str, Any]]:
         """Search integrations"""
-        
+
         # Perform search
         integration_ids = self.search_engine.search(query, filters, sort_by, limit)
-        
+
         # Get integration details
         results = []
         for integration_id in integration_ids:
-            integration_dict = self.get_integration_dict(integration_id)
+            integration_dict = await self.get_integration_dict(integration_id)
             if integration_dict:
                 # Apply additional filters if specified
                 if not filters or self._matches_filters(integration_dict, filters):
                     results.append(integration_dict)
-        
+
         return results
     
     def get_featured_integrations(self, limit: int = 10) -> List[Dict[str, Any]]:

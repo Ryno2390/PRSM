@@ -1030,6 +1030,84 @@ class DashboardManager:
         except Exception as e:
             logger.error(f"Error saving dashboard {config.dashboard_id}: {e}")
 
+    async def create_dashboard(self, config: Dict[str, Any]) -> str:
+        """Create a new dashboard. Returns dashboard_id."""
+        dashboard_id = f"dashboard_{uuid.uuid4().hex[:8]}"
+        now = datetime.now(timezone.utc)
+
+        # Create widgets from config
+        widgets = []
+        for i, widget_config in enumerate(config.get("widgets", [])):
+            widgets.append(WidgetConfiguration(
+                widget_id=f"widget_{i}",
+                widget_type=WidgetType.CHART if widget_config.get("type") == "chart" else WidgetType.TABLE,
+                title=widget_config.get("title", f"Widget {i+1}"),
+                position={"x": i * 3, "y": 0, "width": 3, "height": 2}
+            ))
+
+        dashboard_config = DashboardConfiguration(
+            dashboard_id=dashboard_id,
+            name=config.get("name", "Untitled Dashboard"),
+            dashboard_type=DashboardType.OPERATIONAL,
+            description=config.get("description", ""),
+            widgets=widgets,
+            created_at=now,
+            updated_at=now
+        )
+
+        self.dashboards[dashboard_id] = dashboard_config
+        self._save_dashboard(dashboard_config)
+        self.manager_stats["total_dashboards"] += 1
+
+        logger.info(f"Created dashboard: {dashboard_id}")
+        return dashboard_id
+
+    async def update_dashboard_data(self, dashboard_id: str, data: Dict[str, Any]) -> bool:
+        """Update dashboard with new data."""
+        if dashboard_id not in self.dashboards:
+            logger.error(f"Dashboard not found: {dashboard_id}")
+            return False
+
+        dashboard = self.dashboards[dashboard_id]
+        dashboard.updated_at = datetime.now(timezone.utc)
+        dashboard.last_accessed = datetime.now(timezone.utc)
+
+        # Store data in dashboard's data field
+        if not hasattr(dashboard, '_data'):
+            dashboard._data = {}
+        dashboard._data.update(data)
+
+        self._save_dashboard(dashboard)
+        logger.info(f"Updated dashboard data: {dashboard_id}")
+        return True
+
+    async def get_dashboard(self, dashboard_id: str) -> Optional[Dict[str, Any]]:
+        """Get dashboard by ID."""
+        if dashboard_id not in self.dashboards:
+            return None
+
+        dashboard = self.dashboards[dashboard_id]
+        dashboard.last_accessed = datetime.now(timezone.utc)
+        dashboard.access_count += 1
+
+        return {
+            "dashboard_id": dashboard.dashboard_id,
+            "name": dashboard.name,
+            "type": dashboard.dashboard_type.value,
+            "description": dashboard.description,
+            "widgets": [
+                {
+                    "widget_id": w.widget_id,
+                    "type": w.widget_type.value,
+                    "title": w.title,
+                    "position": w.position
+                }
+                for w in dashboard.widgets
+            ],
+            "created_at": dashboard.created_at.isoformat(),
+            "updated_at": dashboard.updated_at.isoformat()
+        }
+
 
 # Export main classes
 __all__ = [

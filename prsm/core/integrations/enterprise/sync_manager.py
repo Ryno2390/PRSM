@@ -67,12 +67,10 @@ class SyncConfiguration:
     """Configuration for data synchronization"""
     sync_id: str
     name: str
-    description: str = ""
-    
-    # Source and target
     source_connector_id: str
     target_connector_id: str
-    
+    description: str = ""
+
     # Sync settings
     sync_type: SyncType = SyncType.BATCH
     sync_direction: str = "source_to_target"  # source_to_target, target_to_source, bidirectional

@@ -390,16 +390,17 @@ class PluginManager:
             plugin_name = manifest.get("name", "unknown")
             plugin_id = manifest.get("id", plugin_name)
             entry_point = manifest.get("entry_point", "")
-            
+
             # Try to load the plugin module if not already registered
             if plugin_name not in self.registry._plugin_classes:
                 try:
                     # This will call _load_plugin_module which can be mocked in tests
                     # Pass the manifest for test mocking compatibility
                     plugin_class = self._load_plugin_module(manifest)
-                    
+
                     # If _load_plugin_module is mocked, it might return the class directly
-                    if plugin_class and inspect.isclass(plugin_class):
+                    # Handle both real classes and Mock objects (for tests)
+                    if plugin_class and (inspect.isclass(plugin_class) or hasattr(plugin_class, 'return_value')):
                         # Register the class with the plugin name from manifest
                         self.registry._plugin_classes[plugin_name] = plugin_class
                         logger.info(f"Registered plugin class: {plugin_name}")

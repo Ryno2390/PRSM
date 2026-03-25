@@ -609,33 +609,37 @@ class OrchestrationOptimizer:
 
 class AIOrchestrator:
     """Main AI orchestration system"""
-    
+
     def __init__(self, storage_path: Optional[Path] = None):
         self.storage_path = storage_path or Path("./orchestration_data")
         self.storage_path.mkdir(exist_ok=True)
-        
+
         # Core components
         self.model_manager = ModelManager(self.storage_path / "models")
         self.task_distributor = TaskDistributor(self.model_manager)
         self.reasoning_engine = ReasoningEngine(self.model_manager, self.task_distributor)
         self.workflow_manager = WorkflowManager(
-            self.model_manager, 
-            self.task_distributor, 
+            self.model_manager,
+            self.task_distributor,
             self.reasoning_engine
         )
-        
+
         # Orchestration components
         self.pattern_library = OrchestrationPatternLibrary()
         self.optimizer = OrchestrationOptimizer(self.model_manager)
-        
+
         # Request tracking
         self.active_requests: Dict[str, asyncio.Task] = {}
         self.request_history: Dict[str, OrchestrationResult] = {}
-        
+
         # Configuration
         self.max_concurrent_requests = 100
         self.default_timeout_seconds = 300
-        
+
+        # Initialization state
+        self.is_initialized: bool = False
+        self._registered_models: Dict[str, Dict[str, Any]] = {}
+
         # Statistics
         self.stats = {
             "total_requests": 0,
@@ -645,16 +649,59 @@ class AIOrchestrator:
             "orchestration_patterns_used": {},
             "uptime_start": datetime.now(timezone.utc)
         }
-        
+
         logger.info("AI Orchestrator initialized")
     
     async def initialize(self):
         """Initialize all orchestrator components"""
-        
+
         # Start task distributor workers
         await self.task_distributor.start_workers(num_workers=10)
-        
+
+        self.is_initialized = True
         logger.info("AI Orchestrator fully initialized and ready")
+
+    async def register_model(self, model_config: Dict[str, Any]) -> str:
+        """Register a model for orchestration. Returns a model_id."""
+        import uuid
+        model_id = model_config.get("model_id") or str(uuid.uuid4())
+        self._registered_models[model_id] = {
+            **model_config,
+            "registered_at": datetime.now(timezone.utc).isoformat()
+        }
+        logger.info(f"Registered model: {model_id}")
+        return model_id
+
+    async def execute_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a task using the registered models."""
+        valid_task_types = ["reasoning", "generation", "analysis", "classification",
+                           "text-generation", "rag", "ensemble", "workflow"]
+        task_type = task.get("type", "")
+        if task_type not in valid_task_types:
+            raise ValueError(f"Unknown task type: {task_type}")
+
+        # Delegate to internal execution
+        return await self._execute_task(task)
+
+    async def _execute_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Internal task execution - patchable in tests."""
+        # Create an OrchestrationRequest and delegate to orchestrate()
+        request = OrchestrationRequest(
+            request_id=str(uuid.uuid4()) if 'uuid' in dir() else f"req_{datetime.now().timestamp()}",
+            task_type=task.get("type", "reasoning"),
+            input_data=task.get("content", task.get("input_data", {})),
+            context=task.get("context", {}),
+            requirements=task.get("requirements", {}),
+            max_execution_time_seconds=task.get("timeout", 300)
+        )
+        result = await self.orchestrate(request)
+        return {
+            "result": result.result_data,
+            "success": result.success,
+            "confidence": result.confidence_score / 100.0 if result.confidence_score else 0.8,
+            "models_used": result.models_used,
+            "execution_time_ms": result.total_execution_time_ms
+        }
     
     async def orchestrate(self, request: OrchestrationRequest) -> OrchestrationResult:
         """Main orchestration method"""
