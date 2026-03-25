@@ -20,13 +20,14 @@ from .metrics_collector import MetricsCollector, MetricDefinition
 from .visualization_engine import VisualizationEngine, ChartType
 from .bi_query_engine import BusinessIntelligenceEngine, QueryBuilder
 from .real_time_processor import RealTimeProcessor, StreamProcessor
+from .analytics_engine import AnalyticsEngine, AnalyticsConfig
 
 __version__ = "1.0.0"
 __author__ = "PRSM Core Team"
 
 __all__ = [
     'DashboardManager',
-    'Dashboard', 
+    'Dashboard',
     'MetricsCollector',
     'MetricDefinition',
     'VisualizationEngine',
@@ -34,5 +35,7 @@ __all__ = [
     'BusinessIntelligenceEngine',
     'QueryBuilder',
     'RealTimeProcessor',
-    'StreamProcessor'
+    'StreamProcessor',
+    'AnalyticsEngine',
+    'AnalyticsConfig'
 ]

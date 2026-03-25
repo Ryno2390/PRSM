@@ -1312,3 +1312,271 @@ def get_embedding_generator():
     if embedding_generator is None:
         embedding_generator = EmbeddingGenerator()
     return embedding_generator
+
+
+class VectorDatabase:
+    """
+    High-level vector database interface for semantic similarity search.
+
+    Provides a simplified interface for storing and searching embeddings,
+    with support for in-memory (numpy), ChromaDB, or other backends.
+
+    Usage:
+        vdb = VectorDatabase(backend="memory")
+        await vdb.store_embedding("doc1", [0.1, 0.2, ...], {"title": "Doc 1"})
+        results = await vdb.search_similar([0.1, 0.2, ...], top_k=10)
+    """
+
+    def __init__(self, backend: str = "memory", config: Optional[Dict[str, Any]] = None):
+        """
+        Initialize the vector database.
+
+        Args:
+            backend: Backend type - "memory", "chroma", "pinecone", etc.
+            config: Optional configuration dictionary
+        """
+        self.backend = backend
+        self.config = config or {}
+        self._store: Dict[str, Dict[str, Any]] = {}
+        self._vectors: Dict[str, np.ndarray] = {}
+        self._initialized = False
+
+    async def initialize(self) -> bool:
+        """Initialize the vector database."""
+        if self._initialized:
+            return True
+
+        try:
+            if self.backend == "chroma":
+                # Try to use ChromaDB if available
+                try:
+                    import chromadb
+                    self._chroma_client = chromadb.Client()
+                    self._collection = self._chroma_client.create_collection("prsm_vectors")
+                    logger.info("VectorDatabase initialized with ChromaDB backend")
+                except ImportError:
+                    logger.warning("ChromaDB not available, falling back to in-memory")
+                    self.backend = "memory"
+            else:
+                logger.info("VectorDatabase initialized with in-memory backend")
+
+            self._initialized = True
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to initialize VectorDatabase: {e}")
+            return False
+
+    async def store_embedding(
+        self,
+        doc_id: str,
+        embedding: List[float],
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Store an embedding with associated metadata.
+
+        Args:
+            doc_id: Unique identifier for the document
+            embedding: Vector embedding (list of floats)
+            metadata: Optional metadata dictionary
+
+        Returns:
+            True if successful
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            if self.backend == "chroma" and hasattr(self, "_collection"):
+                self._collection.add(
+                    ids=[doc_id],
+                    embeddings=[embedding],
+                    metadatas=[metadata or {}]
+                )
+            else:
+                # In-memory storage
+                self._store[doc_id] = {
+                    "id": doc_id,
+                    "metadata": metadata or {},
+                    "content": metadata.get("content", "") if metadata else ""
+                }
+                self._vectors[doc_id] = np.array(embedding, dtype=np.float32)
+
+            logger.debug(f"Stored embedding for doc_id={doc_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to store embedding: {e}")
+            return False
+
+    async def add_embedding(
+        self,
+        doc_id: str,
+        embedding: List[float],
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """Alias for store_embedding."""
+        return await self.store_embedding(doc_id, embedding, metadata)
+
+    async def search(
+        self,
+        query_embedding: List[float],
+        top_k: int = 10,
+        filter_metadata: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for similar embeddings.
+
+        Args:
+            query_embedding: Query vector
+            top_k: Number of results to return
+            filter_metadata: Optional metadata filters
+
+        Returns:
+            List of search results with id, score, and metadata
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        results = []
+
+        try:
+            if self.backend == "chroma" and hasattr(self, "_collection"):
+                chroma_results = self._collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=top_k
+                )
+                for i, doc_id in enumerate(chroma_results["ids"][0]):
+                    results.append({
+                        "id": doc_id,
+                        "score": 1.0 - chroma_results["distances"][0][i],  # Convert distance to similarity
+                        "metadata": chroma_results["metadatas"][0][i] if chroma_results["metadatas"] else {}
+                    })
+            else:
+                # In-memory cosine similarity search
+                query_vec = np.array(query_embedding, dtype=np.float32)
+                query_norm = np.linalg.norm(query_vec)
+
+                if query_norm == 0:
+                    return results
+
+                similarities = []
+                for doc_id, vec in self._vectors.items():
+                    vec_norm = np.linalg.norm(vec)
+                    if vec_norm == 0:
+                        continue
+
+                    similarity = np.dot(query_vec, vec) / (query_norm * vec_norm)
+
+                    # Apply metadata filter if provided
+                    if filter_metadata:
+                        doc_data = self._store.get(doc_id, {})
+                        doc_metadata = doc_data.get("metadata", {})
+                        match = all(
+                            doc_metadata.get(k) == v
+                            for k, v in filter_metadata.items()
+                        )
+                        if not match:
+                            continue
+
+                    similarities.append((doc_id, similarity))
+
+                # Sort by similarity (descending)
+                similarities.sort(key=lambda x: x[1], reverse=True)
+
+                for doc_id, score in similarities[:top_k]:
+                    doc_data = self._store.get(doc_id, {})
+                    results.append({
+                        "id": doc_id,
+                        "score": float(score),
+                        "metadata": doc_data.get("metadata", {}),
+                        "content": doc_data.get("content", "")
+                    })
+
+        except Exception as e:
+            logger.error(f"Search failed: {e}")
+
+        return results
+
+    async def search_similar(
+        self,
+        query_embedding: List[float],
+        top_k: int = 10,
+        filter_metadata: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for similar embeddings (alias for search).
+
+        Returns results in format expected by tests:
+        - content: Document content
+        - metadata: Document metadata
+        - similarity_score: Similarity score
+        """
+        raw_results = await self.search(query_embedding, top_k, filter_metadata)
+
+        # Transform to expected format
+        return [
+            {
+                "content": r.get("content", ""),
+                "metadata": r.get("metadata", {}),
+                "similarity_score": r.get("score", 0.0)
+            }
+            for r in raw_results
+        ]
+
+    async def delete(self, doc_id: str) -> bool:
+        """
+        Delete an embedding by ID.
+
+        Args:
+            doc_id: Document ID to delete
+
+        Returns:
+            True if successful
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        try:
+            if self.backend == "chroma" and hasattr(self, "_collection"):
+                self._collection.delete(ids=[doc_id])
+            else:
+                self._store.pop(doc_id, None)
+                self._vectors.pop(doc_id, None)
+
+            logger.debug(f"Deleted embedding for doc_id={doc_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to delete embedding: {e}")
+            return False
+
+    async def count(self) -> int:
+        """Get the number of stored embeddings."""
+        if self.backend == "chroma" and hasattr(self, "_collection"):
+            return self._collection.count()
+        return len(self._store)
+
+    async def clear(self) -> bool:
+        """Clear all stored embeddings."""
+        try:
+            if self.backend == "chroma" and hasattr(self, "_collection"):
+                # Delete and recreate collection
+                self._chroma_client.delete_collection("prsm_vectors")
+                self._collection = self._chroma_client.create_collection("prsm_vectors")
+            else:
+                self._store.clear()
+                self._vectors.clear()
+
+            logger.info("VectorDatabase cleared")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to clear VectorDatabase: {e}")
+            return False
+
+    async def close(self):
+        """Close the database connection."""
+        self._initialized = False
+        logger.debug("VectorDatabase closed")

@@ -11,8 +11,7 @@ Optimized test for OpenAI free tier with:
 """
 
 import pytest
-pytest.skip('OpenAIClient not implemented - use EnhancedOpenAIClient from enhanced_openai_client.py (Phase 6)', allow_module_level=True)
-
+import os
 import asyncio
 import json
 import sys
@@ -26,10 +25,10 @@ import click
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from prsm.compute.agents.executors.api_clients import (
-    OpenAIClient, 
-    ModelExecutionRequest, 
+    ModelExecutionRequest,
     ModelProvider
 )
+from prsm.compute.agents.executors.enhanced_openai_client import EnhancedOpenAIClient
 
 
 async def run_with_rate_limiting(api_key: str):
@@ -39,7 +38,7 @@ async def run_with_rate_limiting(api_key: str):
     click.echo("=" * 50)
     click.echo("Testing with GPT-3.5-turbo and 3 RPM rate limits\n")
     
-    client = OpenAIClient(api_key)
+    client = EnhancedOpenAIClient(api_key)
     await client.initialize()
     
     results = []

@@ -17,8 +17,6 @@ These tests verify that all components work together seamlessly from end-to-end.
 """
 
 import pytest
-pytest.skip('prsm.core.vector_db.VectorDatabase not yet implemented (separate vector DB module)', allow_module_level=True)
-
 import asyncio
 import json
 import tempfile
@@ -482,7 +480,7 @@ class TestFullSpectrumIntegration:
         unified_pipeline.process_query_full_pipeline = AsyncMock(return_value={
             'query_id': 'query_12345',
             'response': {
-                'text': 'Shor\'s algorithm represents a quantum computational breakthrough...',
+                'text': 'Shor\'s algorithm represents a quantum computational breakthrough that enables efficient factorization of large integers, with profound implications for cryptographic security and the future of post-quantum cryptography.',
                 'confidence': 0.94,
                 'sources': [
                     'quantum_algorithms_primer.pdf',
