@@ -310,66 +310,190 @@ def get_request_context(request: Request) -> Dict[str, Any]:
     }
 
 
+# Per-endpoint rate limit configuration
+# 0 = unlimited
+ENDPOINT_RATE_LIMITS = {
+    "/health": {"limit": 0, "window": 60},           # Unlimited - health checks
+    "/api/v1/query": {"limit": 10, "window": 60},    # Expensive AI calls
+    "/api/v1/sessions": {"limit": 20, "window": 60}, # Session management
+    "/api/v1/marketplace": {"limit": 100, "window": 60},  # Browse marketplace
+    "/api/v1/ftns": {"limit": 50, "window": 60},     # FTNS operations
+    "/docs": {"limit": 0, "window": 60},             # Unlimited - documentation
+    "/redoc": {"limit": 0, "window": 60},            # Unlimited - documentation
+    "/openapi.json": {"limit": 0, "window": 60},     # Unlimited - API spec
+    "default": {"limit": 200, "window": 60},         # Default for all other endpoints
+}
+
+
+def _get_endpoint_limit(path: str) -> Dict[str, int]:
+    """Get rate limit configuration for a given path."""
+    # Check for exact match first
+    if path in ENDPOINT_RATE_LIMITS:
+        return ENDPOINT_RATE_LIMITS[path]
+
+    # Check for prefix match (e.g., /api/v1/query/123 -> /api/v1/query)
+    for endpoint, config in ENDPOINT_RATE_LIMITS.items():
+        if endpoint != "default" and path.startswith(endpoint):
+            return config
+
+    return ENDPOINT_RATE_LIMITS["default"]
+
+
+async def _extract_user_id_from_token(request: Request) -> str:
+    """Extract user ID from JWT token in Authorization header."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+
+    token = auth_header[7:]  # Remove "Bearer " prefix
+
+    try:
+        # Import here to avoid circular imports
+        from prsm.core.auth.jwt_handler import jwt_handler
+
+        # Decode token without full verification (we just need the user ID)
+        # Full verification happens in auth middleware
+        import jwt
+        from prsm.core.config import get_settings
+        settings = get_settings()
+
+        payload = jwt.decode(
+            token,
+            settings.secret_key if settings else "test-secret-key",
+            algorithms=[settings.jwt_algorithm if settings else "HS256"],
+            options={"verify_signature": False, "verify_exp": False}
+        )
+        return payload.get("sub")  # User ID
+    except Exception as e:
+        logger.debug(f"Failed to extract user ID from token: {e}")
+        return None
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Global rate limiting middleware (in-memory fallback)"""
+    """
+    Global rate limiting middleware with per-IP, per-user, and per-endpoint limits.
+
+    Features:
+    - Per-IP rate limiting (existing behavior)
+    - Per-user rate limiting for authenticated requests
+    - Per-endpoint rate limiting with configurable limits
+    - Unlimited access for health/documentation endpoints
+    """
 
     def __init__(self, app, default_limit: int = 1000, window: int = 60):
         super().__init__(app)
         self.default_limit = default_limit
         self.window = window
-        self._requests: Dict[str, list] = {}
+        self._ip_requests: Dict[str, list] = {}      # IP-keyed request timestamps
+        self._user_requests: Dict[str, list] = {}    # User-ID-keyed request timestamps
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        # Skip rate limiting for health checks and documentation
-        if request.url.path in ["/health", "/docs", "/redoc", "/openapi.json"]:
+        current_time = time.time()
+        path = request.url.path
+
+        # Get endpoint-specific rate limit configuration
+        endpoint_config = _get_endpoint_limit(path)
+        endpoint_limit = endpoint_config["limit"]
+        endpoint_window = endpoint_config["window"]
+
+        # Unlimited endpoints (limit = 0)
+        if endpoint_limit == 0:
             return await call_next(request)
 
         # Get client identifier (IP address)
-        client_id = request.client.host if request.client else "unknown"
-        current_time = time.time()
+        client_ip = request.client.host if request.client else "unknown"
 
-        # Clean old requests
-        if client_id in self._requests:
-            self._requests[client_id] = [
-                req_time for req_time in self._requests[client_id]
-                if current_time - req_time < self.window
-            ]
-        else:
-            self._requests[client_id] = []
+        # Extract user ID if authenticated
+        user_id = await _extract_user_id_from_token(request)
 
-        # Check rate limit
-        if len(self._requests[client_id]) >= self.default_limit:
+        # === Per-IP Rate Limiting ===
+        ip_key = f"ip:{client_ip}"
+        self._clean_old_requests(ip_key, current_time, endpoint_window)
+
+        if ip_key not in self._ip_requests:
+            self._ip_requests[ip_key] = []
+
+        # Check IP-based rate limit
+        if len(self._ip_requests[ip_key]) >= endpoint_limit:
             logger.warning(
-                f"Rate limit exceeded for client: {client_id}",
+                f"IP rate limit exceeded",
                 extra={
-                    "client_id": client_id,
-                    "request_count": len(self._requests[client_id]),
-                    "limit": self.default_limit,
-                    "window": self.window,
+                    "client_ip": client_ip,
+                    "request_count": len(self._ip_requests[ip_key]),
+                    "limit": endpoint_limit,
+                    "window": endpoint_window,
+                    "path": path,
                     "request_id": getattr(request.state, 'request_id', None)
                 }
             )
-
             from fastapi import HTTPException
             raise HTTPException(
                 status_code=429,
-                detail="Rate limit exceeded. Too many requests.",
-                headers={"Retry-After": str(self.window)}
+                detail=f"Rate limit exceeded. Limit: {endpoint_limit} requests per {endpoint_window} seconds.",
+                headers={"Retry-After": str(endpoint_window)}
             )
 
-        # Add current request
-        self._requests[client_id].append(current_time)
+        # === Per-User Rate Limiting (for authenticated requests) ===
+        if user_id:
+            user_key = f"user:{user_id}"
+            # User gets a separate bucket with the same limit as the endpoint
+            user_limit = endpoint_limit  # Same limit for user as for IP
+
+            self._clean_old_requests(user_key, current_time, endpoint_window)
+
+            if user_key not in self._user_requests:
+                self._user_requests[user_key] = []
+
+            # Check user-based rate limit
+            if len(self._user_requests[user_key]) >= user_limit:
+                logger.warning(
+                    f"User rate limit exceeded",
+                    extra={
+                        "user_id": user_id,
+                        "request_count": len(self._user_requests[user_key]),
+                        "limit": user_limit,
+                        "window": endpoint_window,
+                        "path": path,
+                        "request_id": getattr(request.state, 'request_id', None)
+                    }
+                )
+                from fastapi import HTTPException
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"User rate limit exceeded. Limit: {user_limit} requests per {endpoint_window} seconds.",
+                    headers={"Retry-After": str(endpoint_window)}
+                )
+
+            # Record user request
+            self._user_requests[user_key].append(current_time)
+
+        # Record IP request
+        self._ip_requests[ip_key].append(current_time)
 
         # Process request
         response = await call_next(request)
 
         # Add rate limit headers
-        remaining = self.default_limit - len(self._requests[client_id])
-        response.headers["X-RateLimit-Limit"] = str(self.default_limit)
-        response.headers["X-RateLimit-Remaining"] = str(remaining)
-        response.headers["X-RateLimit-Reset"] = str(int(current_time + self.window))
+        ip_remaining = endpoint_limit - len(self._ip_requests.get(ip_key, []))
+        response.headers["X-RateLimit-Limit"] = str(endpoint_limit)
+        response.headers["X-RateLimit-Remaining"] = str(max(0, ip_remaining))
+        response.headers["X-RateLimit-Reset"] = str(int(current_time + endpoint_window))
+        response.headers["X-RateLimit-Window"] = str(endpoint_window)
 
         return response
+
+    def _clean_old_requests(self, key: str, current_time: float, window: int):
+        """Remove requests older than the window from the specified bucket."""
+        if key in self._ip_requests:
+            self._ip_requests[key] = [
+                req_time for req_time in self._ip_requests[key]
+                if current_time - req_time < window
+            ]
+        if key in self._user_requests:
+            self._user_requests[key] = [
+                req_time for req_time in self._user_requests[key]
+                if current_time - req_time < window
+            ]
 
 
 def configure_middleware_stack(app) -> None:

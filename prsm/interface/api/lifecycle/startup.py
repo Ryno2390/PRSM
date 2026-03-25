@@ -232,7 +232,7 @@ async def _init_authentication() -> None:
 
 
 async def _init_observability() -> None:
-    """Initialize Prometheus metrics collection."""
+    """Initialize Prometheus metrics collection and OpenTelemetry tracing."""
     import os
 
     if os.getenv("PRSM_METRICS_ENABLED", "true").lower() != "true":
@@ -265,6 +265,65 @@ async def _init_observability() -> None:
 
     except Exception as e:
         logger.warning("Metrics initialization failed — monitoring disabled", error=str(e))
+
+    # === OpenTelemetry Tracing Initialization ===
+    # Configure distributed tracing for observability
+    # Supports: console (development), jaeger, otlp (production)
+    try:
+        await _init_tracing()
+    except Exception as e:
+        logger.warning("Tracing initialization failed — tracing disabled", error=str(e))
+
+
+async def _init_tracing() -> None:
+    """
+    Initialize OpenTelemetry tracing with environment-appropriate exporter.
+
+    Configuration via environment variables:
+    - OTEL_EXPORTER: Exporter type (console|jaeger|otlp), default: console
+    - OTEL_EXPORTER_OTLP_ENDPOINT: OTLP endpoint URL
+    - JAEGER_HOST: Jaeger agent host (default: localhost)
+    - JAEGER_PORT: Jaeger agent port (default: 6831)
+    """
+    import os
+
+    if os.getenv("OTEL_TRACING_ENABLED", "true").lower() != "true":
+        logger.info("OpenTelemetry tracing disabled via OTEL_TRACING_ENABLED")
+        return
+
+    try:
+        from prsm.compute.performance.tracing import TracingManager
+
+        exporter_type = os.getenv("OTEL_EXPORTER", "console")
+        service_name = os.getenv("OTEL_SERVICE_NAME", "prsm-node")
+
+        manager = TracingManager(
+            service_name=service_name,
+            exporter_type=exporter_type,
+            jaeger_host=os.getenv("JAEGER_HOST", "localhost"),
+            jaeger_port=int(os.getenv("JAEGER_PORT", "6831")),
+            otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+        )
+
+        await manager.initialize()
+
+        logger.info(
+            "OpenTelemetry tracing initialized",
+            exporter=exporter_type,
+            service_name=service_name
+        )
+
+        # Store reference for shutdown
+        import prsm.interface.api.lifecycle.startup as startup_module
+        startup_module._tracing_manager = manager
+
+    except ImportError:
+        logger.info(
+            "OpenTelemetry not available — tracing disabled. "
+            "Install with: pip install opentelemetry-api opentelemetry-sdk"
+        )
+    except Exception as e:
+        logger.warning("Tracing initialization failed", error=str(e))
 
 
 async def _init_analytics() -> None:
