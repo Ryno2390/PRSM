@@ -2,8 +2,15 @@
 """
 PRSM Python SDK - Streaming Examples
 
-This example demonstrates streaming capabilities including real-time responses,
-batch streaming, and advanced streaming patterns.
+WHAT IT DOES: Demonstrates streaming capabilities including real-time responses,
+              batch streaming, and advanced streaming patterns for AI queries.
+
+PRSM SERVICES USED: models.stream() (or client.stream() in current API)
+
+FTNS CONSUMPTION: Streaming queries consume FTNS based on tokens generated.
+                  Each streaming response incurs standard query costs.
+
+NOTE: Core streaming available via async for chunk in client.stream(prompt)
 """
 
 import asyncio

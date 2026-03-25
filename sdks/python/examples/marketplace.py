@@ -2,8 +2,17 @@
 """
 PRSM Python SDK - Marketplace Examples
 
-This example demonstrates marketplace functionality including model discovery,
-FTNS token management, and marketplace interactions.
+WHAT IT DOES: Demonstrates marketplace model discovery, FTNS token management,
+              model purchasing/access, contribution workflow, and analytics.
+
+PRSM SERVICES USED: marketplace.search_models(), marketplace.get_ftns_balance(),
+                    marketplace.list_models(), marketplace.purchase_model_access()
+
+FTNS CONSUMPTION: Shows balance checking and token purchasing. Actual FTNS spent
+                  only when purchasing model access or submitting models.
+
+NOTE: Core marketplace functionality is available via client.marketplace.search_models(),
+      client.marketplace.list_models(), client.ftns.get_balance(), etc.
 """
 
 import asyncio

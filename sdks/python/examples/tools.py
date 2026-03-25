@@ -1,7 +1,19 @@
 #!/usr/bin/env python3
 """
 PRSM Python SDK - Tool Execution Example
-Demonstrates AI agent tool usage and execution capabilities
+
+WHAT IT DOES: Demonstrates MCP (Model Context Protocol) tool execution including
+              listing available tools, executing tools with parameters, and
+              handling tool responses.
+
+PRSM SERVICES USED: tools.list_available(), tools.execute(), tools.get_tool_info()
+
+FTNS CONSUMPTION: Tool execution costs vary by tool. Some tools are free,
+                  others charge FTNS per execution. Use tools.estimate_cost()
+                  before execution.
+
+NOTE: Core tool functionality available via client.tools.list_available(),
+      client.tools.execute(tool_name, parameters)
 """
 
 import os

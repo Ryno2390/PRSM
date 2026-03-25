@@ -2,8 +2,18 @@
 """
 PRSM Python SDK - FastAPI Integration Example
 
-This example demonstrates how to integrate PRSM SDK with FastAPI for production
-web applications, including proper error handling, authentication, and monitoring.
+WHAT IT DOES: Production-ready FastAPI integration with PRSM SDK, including
+              health endpoints, query endpoints with streaming support,
+              model optimization, budget tracking, and proper error handling.
+
+PRSM SERVICES USED: models.infer(), models.stream(), cost_optimization.optimize_request(),
+                    marketplace.list_models(), cost_optimization.get_budget()
+
+FTNS CONSUMPTION: Per-request costs based on model and token usage. Budget endpoint
+                  shows current utilization and remaining balance.
+
+DEPLOYMENT: Can be deployed via Docker, Kubernetes, or any ASGI server (uvicorn, gunicorn).
+            See production/README.md for deployment configurations.
 """
 
 import asyncio

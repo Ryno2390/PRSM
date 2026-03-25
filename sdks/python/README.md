@@ -252,6 +252,9 @@ isort prsm_sdk
 ### Running Tests
 
 ```bash
+# Run unit tests (no server needed)
+pytest tests/test_client.py tests/test_models.py
+
 # Run all tests
 pytest
 
@@ -261,6 +264,23 @@ pytest --cov=prsm_sdk --cov-report=html
 # Run specific test file
 pytest tests/test_client.py
 ```
+
+### Running Integration Tests
+
+Integration tests require a live PRSM server to be running:
+
+```bash
+# Start a PRSM node
+prsm node start &
+
+# Set your API key and run integration tests
+PRSM_TEST_API_KEY=your_key pytest tests/test_integration.py -v
+
+# Or with a custom server URL
+PRSM_TEST_URL=http://localhost:8000 PRSM_TEST_API_KEY=your_key pytest tests/test_integration.py -v
+```
+
+Integration tests will be skipped automatically if no server is available.
 
 ## Examples
 
