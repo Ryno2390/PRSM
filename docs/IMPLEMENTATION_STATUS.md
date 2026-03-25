@@ -180,7 +180,7 @@ All Phase 4 deployment tests pass (14 tests: 8 passing, 6 live tests correctly s
 | Payment Gateway (Stripe/PayPal) | ✅ Implemented | Requires STRIPE_API_KEY / PAYPAL_CLIENT_ID env vars |
 | Price Oracles (CoinGecko/CoinCap) | ✅ Implemented | Free tier, no key required |
 | Ollama / Local LLM | ✅ Implemented | Requires local Ollama install |
-| AtomicFTNSService | ⚠️ Partially broken | Missing table, mock bypass bug, PG-only SQL |
+| AtomicFTNSService | ✅ Ready | Fixed in commit e6d6cf2: injected DB session, idempotency table, SQLite-portable ORM |
 | Mainnet Token | 📋 Planned | Sepolia testnet only; config ready for mainnet |
 | Multi-region Bootstrap | 📋 Config Ready | Single node deployed; EU/APAC config in place |
 
