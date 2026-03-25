@@ -106,11 +106,9 @@ class ValidationRule:
     """Configuration for data validation rules"""
     rule_id: str
     name: str
-    description: str = ""
-    
-    # Validation configuration
     field_name: str
     validation_type: str  # required, type, range, pattern, custom
+    description: str = ""
     validation_level: ValidationLevel = ValidationLevel.ERROR
     
     # Validation parameters
