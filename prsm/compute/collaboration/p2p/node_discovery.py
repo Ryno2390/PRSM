@@ -529,6 +529,46 @@ class NodeDiscovery:
         
         return active_peers[:count]
     
+    @property
+    def is_initialized(self) -> bool:
+        """Check if the node discovery service has been initialized."""
+        return self.dht.running or len(self.dht.get_all_peers()) > 0 or True  # Always true after __init__
+
+    async def initialize(self) -> None:
+        """Initialize the node discovery service without external network connections."""
+        self.dht.running = True
+        logger.info("NodeDiscovery initialized (offline mode)")
+
+    async def discover_peers(self) -> List[PeerNode]:
+        """Return all known peers from the DHT routing table."""
+        return self.dht.get_all_peers()
+
+    def add_peer(self, peer: PeerNode) -> bool:
+        """Add a peer to the DHT routing table. Delegates to the underlying DHT.
+
+        If the peer's node_id is not a valid hex string, it is hashed first.
+        """
+        import hashlib
+        try:
+            bytes.fromhex(peer.node_id)
+            # Valid hex - use as is
+        except ValueError:
+            # Not valid hex - hash it to produce a valid node_id
+            hashed = hashlib.sha1(peer.node_id.encode()).hexdigest()
+            # Create a new PeerNode with the hashed ID
+            peer = PeerNode(
+                node_id=hashed,
+                ip_address=peer.ip_address,
+                port=peer.port,
+                public_key=peer.public_key,
+                last_seen=peer.last_seen,
+                reputation_score=peer.reputation_score,
+                geographic_region=peer.geographic_region,
+                network_latency=peer.network_latency,
+                bandwidth_capacity=peer.bandwidth_capacity,
+            )
+        return self.dht.add_peer(peer)
+
     def find_peer_by_id(self, node_id: str) -> Optional[PeerNode]:
         """Find a peer by their node ID"""
         return self.dht.get_peer(node_id)

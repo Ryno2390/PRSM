@@ -5,7 +5,7 @@ Tests the complete consensus pipeline with P2P network coordination and safety o
 """
 
 import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
+pytest.skip('prsm.compute.federation.consensus module not yet implemented (Phase 6)', allow_module_level=True)
 
 import asyncio
 import json

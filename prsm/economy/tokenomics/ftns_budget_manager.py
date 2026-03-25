@@ -43,6 +43,8 @@ class SpendingCategory(Enum):
     SYNTHESIS_GENERATION = "synthesis_generation"
     DATABASE_OPERATION = "database_operation"
     SYSTEM_OVERHEAD = "system_overhead"
+    TOOL_EXECUTION = "tool_execution"
+    MARKETPLACE_TRADING = "marketplace_trading"
 
 
 class BudgetStatus(Enum):
@@ -52,6 +54,7 @@ class BudgetStatus(Enum):
     EXCEEDED = "exceeded"
     CANCELLED = "cancelled"
     PENDING = "pending"
+    SUSPENDED = "suspended"
 
 
 class ResourceType(Enum):
@@ -104,6 +107,8 @@ class FTNSBudgetManager:
         self.allocations: Dict[str, BudgetAllocation] = {}
         self.active_budgets: Dict[str, Any] = {}  # For orchestrator compatibility
         self.budget_history: Dict[str, Any] = {}  # For orchestrator compatibility
+        self.session_budgets: Dict[str, Any] = {}  # FTNSBudget objects by budget_id
+        self.pending_expansions: Dict[str, Any] = {}  # Pending expansion requests
         self.resource_costs = {
             ResourceType.CPU_HOURS: Decimal('0.10'),
             ResourceType.GPU_HOURS: Decimal('2.50'),
@@ -398,21 +403,117 @@ class FTNSBudgetManager:
         
         return expired_count
     
-    async def spend_budget_amount(self, budget_id: str, amount: Decimal, spending_category: str, description: str = "") -> bool:
+    async def predict_session_cost(self, user_input, session) -> 'BudgetPrediction':
         """
-        Spend amount from budget - compatibility method for orchestrator
-        
+        Predict the cost of a session based on user input complexity.
+
         Args:
-            budget_id: Budget allocation ID
+            user_input: UserInput object with prompt
+            session: PRSMSession object
+
+        Returns:
+            BudgetPrediction with estimated costs
+        """
+        prompt = user_input.prompt if hasattr(user_input, 'prompt') else str(user_input)
+        prompt_lower = prompt.lower()
+
+        # Estimate complexity based on keywords
+        complexity_keywords = ["analyze", "comprehensive", "simulation", "monte carlo",
+                               "dimensional", "quantum", "photonic", "apm", "calculate",
+                               "multi", "complex", "resonance"]
+        simple_keywords = ["what", "how", "is", "define", "speed", "simple", "basic"]
+
+        complexity_score = sum(1 for kw in complexity_keywords if kw in prompt_lower)
+        simplicity_score = sum(1 for kw in simple_keywords if kw in prompt_lower)
+
+        # Normalized complexity between 0 and 1
+        query_complexity = min(1.0, complexity_score / max(len(complexity_keywords) * 0.3, 1))
+        if simplicity_score > complexity_score:
+            query_complexity = max(0.0, query_complexity - 0.3)
+
+        confidence_score = 0.7 + (0.2 * (1 - query_complexity))  # Higher confidence for simpler queries
+
+        # Base cost estimates by category
+        base_cost = Decimal('10') + Decimal(str(int(query_complexity * 90)))
+
+        category_estimates = {
+            SpendingCategory.MODEL_INFERENCE: base_cost * Decimal('0.4'),
+            SpendingCategory.AGENT_COORDINATION: base_cost * Decimal('0.25'),
+            SpendingCategory.CONTEXT_PROCESSING: base_cost * Decimal('0.15'),
+            SpendingCategory.REASONING_OPERATION: base_cost * Decimal('0.1'),
+            SpendingCategory.SYNTHESIS_GENERATION: base_cost * Decimal('0.1'),
+        }
+
+        estimated_total = sum(category_estimates.values())
+
+        return BudgetPrediction(
+            estimated_total_cost=estimated_total,
+            confidence_score=round(confidence_score, 2),
+            query_complexity=round(query_complexity, 2),
+            category_estimates=category_estimates,
+            estimated_duration_seconds=float(10 + query_complexity * 290),
+            risk_level="high" if query_complexity > 0.7 else "medium" if query_complexity > 0.4 else "low",
+        )
+
+    async def spend_budget_amount(self, budget_id: str, amount: Decimal, spending_category: Any, description: str = "", release_reserved: bool = False) -> bool:
+        """
+        Spend amount from an FTNSBudget or BudgetAllocation.
+
+        Args:
+            budget_id: Budget ID
             amount: Amount to spend
-            spending_category: Category of spending
+            spending_category: SpendingCategory enum or string
             description: Description of spending
-            
+            release_reserved: If True, also release reserved budget
+
         Returns:
             True if spending was successful, False otherwise
         """
         try:
-            # Record the spending as resource usage
+            # Check session_budgets first (FTNSBudget objects)
+            if budget_id in self.session_budgets:
+                budget = self.session_budgets[budget_id]
+                if budget.available_budget < amount and not budget.auto_expand_enabled:
+                    return False
+
+                # Check if auto-expansion needed
+                if budget.available_budget < amount and budget.auto_expand_enabled:
+                    # Auto-expand if within limits
+                    needed = amount - budget.available_budget
+                    if needed <= budget.max_auto_expand:
+                        budget.total_budget += needed
+                    else:
+                        return False
+
+                budget.total_spent += amount
+
+                # Handle reservation release
+                if release_reserved and budget.total_reserved > Decimal('0'):
+                    release_amount = min(amount, budget.total_reserved)
+                    budget.total_reserved -= release_amount
+
+                # Check emergency threshold (95% usage)
+                if budget.utilization_percentage >= 95 and not budget.auto_expand_enabled:
+                    budget.status = BudgetStatus.SUSPENDED
+
+                # Update category allocation
+                cat_key = spending_category if isinstance(spending_category, SpendingCategory) else SpendingCategory(spending_category)
+                if cat_key in budget.category_allocations:
+                    budget.category_allocations[cat_key].spent_amount += amount
+
+                # Record spending history
+                budget.spending_history.append({
+                    "action": "spend",
+                    "amount": float(amount),
+                    "category": cat_key.value if isinstance(cat_key, SpendingCategory) else str(cat_key),
+                    "description": description,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+
+                logger.info("Budget spent", budget_id=budget_id, amount=float(amount))
+                return True
+
+            # Fallback to BudgetAllocation logic
             return self.record_resource_usage(
                 allocation_id=budget_id,
                 resource_type=ResourceType.TOKEN_OPERATIONS,
@@ -420,54 +521,193 @@ class FTNSBudgetManager:
                 description=f"{spending_category}: {description}"
             )
         except Exception as e:
-            logger.error(f"Failed to spend budget amount: {e}", 
+            logger.error(f"Failed to spend budget amount: {e}",
                         budget_id=budget_id, amount=float(amount))
             return False
 
-    async def create_session_budget(self, session, user_input, budget_config: dict = None) -> 'BudgetAllocation':
+    async def reserve_budget_amount(self, budget_id: str, amount: Decimal, spending_category: Any, description: str = "") -> bool:
+        """Reserve budget for a pending operation."""
+        try:
+            if budget_id in self.session_budgets:
+                budget = self.session_budgets[budget_id]
+                if budget.available_budget < amount:
+                    return False
+                budget.total_reserved += amount
+                budget.spending_history.append({
+                    "action": "reserve",
+                    "amount": float(amount),
+                    "category": spending_category.value if isinstance(spending_category, SpendingCategory) else str(spending_category),
+                    "description": description,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Failed to reserve budget: {e}", budget_id=budget_id)
+            return False
+
+    async def request_budget_expansion(self, budget_id: str, amount: Decimal, reason: str) -> 'BudgetExpansionRequest':
+        """Request a budget expansion, auto-approving if within auto-expand limits."""
+        import uuid
+        if budget_id not in self.session_budgets:
+            raise ValueError(f"Budget {budget_id} not found")
+
+        budget = self.session_budgets[budget_id]
+        request_id = str(uuid.uuid4())
+
+        request = BudgetExpansionRequest(
+            request_id=request_id,
+            budget_id=budget_id,
+            user_id=budget.user_id,
+            requested_amount=amount,
+            reason=reason,
+        )
+
+        # Auto-approve if within auto-expand limits
+        if budget.auto_expand_enabled and amount <= budget.max_auto_expand:
+            request.approved = True
+            request.approved_amount = amount
+            request.auto_generated = True
+            budget.total_budget += amount
+            logger.info("Budget auto-expanded", budget_id=budget_id, amount=float(amount))
+        else:
+            # Queue for manual approval
+            self.pending_expansions[request_id] = request
+            logger.info("Budget expansion queued for approval", request_id=request_id)
+
+        return request
+
+    async def approve_budget_expansion(self, request_id: str, approved: bool, approved_amount: Decimal, reason: str = "") -> bool:
+        """Approve or deny a pending budget expansion request."""
+        if request_id not in self.pending_expansions:
+            return False
+
+        request = self.pending_expansions[request_id]
+        request.approved = approved
+        request.approved_amount = approved_amount
+        request.approval_reason = reason
+
+        if approved and request.budget_id in self.session_budgets:
+            budget = self.session_budgets[request.budget_id]
+            budget.total_budget += approved_amount
+
+        del self.pending_expansions[request_id]
+        return True
+
+    async def get_budget_status(self, budget_id: str) -> Optional[Dict[str, Any]]:
+        """Get comprehensive budget status and analytics."""
+        if budget_id not in self.session_budgets:
+            return None
+
+        budget = self.session_budgets[budget_id]
+
+        # Build category breakdown
+        category_breakdown = {}
+        for cat, alloc in budget.category_allocations.items():
+            category_breakdown[cat.value] = {
+                "allocated": float(alloc.allocated_amount),
+                "spent": float(alloc.spent_amount),
+                "reserved": float(alloc.reserved_amount),
+            }
+
+        return {
+            "budget_id": str(budget.budget_id),
+            "session_id": str(budget.session_id),
+            "user_id": budget.user_id,
+            "total_budget": float(budget.total_budget),
+            "total_spent": float(budget.total_spent),
+            "total_reserved": float(budget.total_reserved),
+            "available_budget": float(budget.available_budget),
+            "utilization_percentage": budget.utilization_percentage,
+            "status": budget.status.value,
+            "category_breakdown": category_breakdown,
+        }
+
+    async def create_session_budget(self, session, user_input, budget_config: dict = None) -> 'FTNSBudget':
         """
-        Create a budget allocation for a NWTN session
-        
+        Create a session-level FTNSBudget with prediction, category allocations, and expansion config.
+
         Args:
             session: PRSMSession object
             user_input: UserInput object
             budget_config: Budget configuration dict
-            
+
         Returns:
-            BudgetAllocation for the session
+            FTNSBudget for the session
         """
-        # Extract user_id and session_id from the provided objects
+        import uuid
+
+        budget_config = budget_config or {}
         user_id = session.user_id if hasattr(session, 'user_id') else str(session)
-        session_id = str(session.session_id) if hasattr(session, 'session_id') else str(session)
-        
-        # Determine budget amount from config or use default
-        base_budget = Decimal('50000')  # Large default for NWTN maximum capacity
-        if budget_config and 'base_budget' in budget_config:
-            base_budget = Decimal(str(budget_config['base_budget']))
-        
-        logger.info("Creating session budget", 
-                   user_id=user_id, session_id=session_id, budget=base_budget)
-        
-        # Create budget allocation for the session
-        allocation = self.create_budget_allocation(
+        session_id = session.session_id if hasattr(session, 'session_id') else str(session)
+
+        # Get prediction
+        prediction = await self.predict_session_cost(user_input, session)
+
+        # Determine total budget
+        if 'total_budget' in budget_config:
+            total_budget = Decimal(str(budget_config['total_budget']))
+        else:
+            total_budget = prediction.recommended_budget
+
+        # Auto-expand config
+        auto_expand = budget_config.get('auto_expand', False)
+        max_auto_expand = Decimal(str(budget_config.get('max_auto_expand', 0)))
+        expansion_increment = Decimal(str(budget_config.get('expansion_increment', 25)))
+
+        # Build category allocations
+        category_allocations: Dict[SpendingCategory, CategoryAllocation] = {}
+        raw_cat_config = budget_config.get('category_allocations', {})
+
+        if raw_cat_config:
+            # Use user-provided allocations
+            for cat_name, cat_cfg in raw_cat_config.items():
+                try:
+                    cat = SpendingCategory(cat_name)
+                except ValueError:
+                    continue
+                if 'amount' in cat_cfg:
+                    alloc_amount = Decimal(str(cat_cfg['amount']))
+                elif 'percentage' in cat_cfg:
+                    alloc_amount = total_budget * Decimal(str(cat_cfg['percentage'])) / Decimal('100')
+                else:
+                    alloc_amount = Decimal('0')
+                category_allocations[cat] = CategoryAllocation(
+                    category=cat, allocated_amount=alloc_amount
+                )
+        else:
+            # Use prediction-based allocations
+            for cat, est in prediction.category_estimates.items():
+                if total_budget > Decimal('0'):
+                    ratio = est / prediction.estimated_total_cost
+                    alloc_amount = total_budget * ratio
+                else:
+                    alloc_amount = est
+                category_allocations[cat] = CategoryAllocation(
+                    category=cat, allocated_amount=alloc_amount
+                )
+
+        budget_id = str(uuid.uuid4())
+        budget = FTNSBudget(
+            budget_id=budget_id,
+            session_id=session_id,
             user_id=user_id,
-            budget_type=BudgetType.PIPELINE_EXECUTION,
-            token_amount=base_budget,
-            metadata={"session_id": session_id, "description": f"NWTN session budget for {session_id}"}
+            total_budget=total_budget,
+            status=BudgetStatus.ACTIVE,
+            initial_prediction=prediction,
+            category_allocations=category_allocations,
+            auto_expand_enabled=auto_expand,
+            max_auto_expand=max_auto_expand,
+            expansion_increment=expansion_increment,
         )
-        
-        logger.info("Session budget created successfully", 
-                   allocation_id=allocation.allocation_id, budget=base_budget)
-        
-        # Create compatibility wrapper for orchestrator expectations
-        class SessionBudget:
-            def __init__(self, allocation):
-                self.allocation = allocation
-                self.budget_id = allocation.allocation_id
-                self.total_budget = allocation.allocated_tokens
-                self.initial_prediction = None
-        
-        return SessionBudget(allocation)
+
+        self.session_budgets[budget_id] = budget
+        self.active_budgets[budget_id] = budget
+
+        logger.info("Session FTNSBudget created",
+                   budget_id=budget_id, user_id=user_id, total_budget=float(total_budget))
+
+        return budget
 
 
 # Global budget manager instance
@@ -525,7 +765,89 @@ def create_pipeline_budget(user_id: str, token_amount: Decimal,
     )
 
 
+@dataclass
+class CategoryAllocation:
+    """Budget allocation for a spending category"""
+    category: SpendingCategory
+    allocated_amount: Decimal
+    spent_amount: Decimal = field(default_factory=lambda: Decimal('0'))
+    reserved_amount: Decimal = field(default_factory=lambda: Decimal('0'))
+
+
+@dataclass
+class BudgetExpansionRequest:
+    """Request for budget expansion"""
+    request_id: str
+    budget_id: str
+    user_id: str
+    requested_amount: Decimal
+    reason: str
+    auto_generated: bool = False
+    approved: Optional[bool] = None
+    approved_amount: Optional[Decimal] = None
+    approval_reason: Optional[str] = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class FTNSBudget:
+    """Session budget with full tracking and expansion capabilities"""
+    budget_id: str
+    session_id: Any
+    user_id: str
+    total_budget: Decimal
+    status: BudgetStatus
+    initial_prediction: Optional['BudgetPrediction']
+    category_allocations: Dict[SpendingCategory, CategoryAllocation]
+    auto_expand_enabled: bool = False
+    max_auto_expand: Decimal = field(default_factory=lambda: Decimal('0'))
+    expansion_increment: Decimal = field(default_factory=lambda: Decimal('25'))
+    total_spent: Decimal = field(default_factory=lambda: Decimal('0'))
+    total_reserved: Decimal = field(default_factory=lambda: Decimal('0'))
+    spending_history: List[Dict[str, Any]] = field(default_factory=list)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def available_budget(self) -> Decimal:
+        return self.total_budget - self.total_spent - self.total_reserved
+
+    @property
+    def utilization_percentage(self) -> float:
+        if self.total_budget == Decimal('0'):
+            return 0.0
+        return float((self.total_spent / self.total_budget) * 100)
+
+
 # Aliases expected by budget_api.py
-FTNSBudget = BudgetAllocation
-BudgetExpandRequest = BudgetAllocation  # Same schema, used for expansion requests
-BudgetPrediction = BudgetAllocation     # Same schema, used for predictions
+BudgetExpandRequest = BudgetExpansionRequest
+
+
+@dataclass
+class BudgetPrediction:
+    """Budget prediction for a session or operation"""
+    estimated_total_cost: Decimal
+    confidence_score: float
+    query_complexity: float
+    category_estimates: Dict[SpendingCategory, Decimal]
+    estimated_duration_seconds: float = 0.0
+    recommended_budget: Decimal = Decimal('0')
+    risk_level: str = "low"
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def __post_init__(self):
+        if self.recommended_budget == Decimal('0'):
+            self.recommended_budget = self.estimated_total_cost * Decimal('1.2')
+
+
+@dataclass
+class BudgetAlert:
+    """Budget alert for monitoring and notifications"""
+    alert_id: str
+    user_id: str
+    alert_type: str  # 'warning', 'critical', 'exceeded'
+    message: str
+    current_spend: Decimal
+    budget_limit: Decimal
+    percentage_used: float
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    acknowledged: bool = False

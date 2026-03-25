@@ -18,21 +18,19 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-try:
-    from prsm.core.models import (
-        ArchitectTask, PeerNode, ModelShard, ModelType, TaskStatus,
-        SafetyLevel
-    )
-    from prsm.core.safety.circuit_breaker import ThreatLevel
-    from prsm.compute.federation.p2p_network import P2PModelNetwork, get_p2p_network
-except (ImportError, ModuleNotFoundError) as e:
-    pytest.skip("P2P network module dependencies not yet fully implemented", allow_module_level=True)
+from prsm.core.models import (
+    ArchitectTask, PeerNode, ModelShard, ModelType, TaskStatus,
+    SafetyLevel
+)
+from prsm.core.safety.circuit_breaker import ThreatLevel
+from prsm.compute.federation.p2p_network import P2PModelNetwork, get_p2p_network
 
 
 class TestP2PFederation:
     """Comprehensive test suite for P2P federation functionality"""
-    
-    def __init__(self):
+
+    def setup_method(self):
+        """Setup for each test method"""
         self.p2p_network = get_p2p_network()
         self.test_results = {}
         self.test_peers = []
@@ -84,6 +82,7 @@ class TestP2PFederation:
         
         return passed_tests == total_tests
     
+    @pytest.mark.asyncio
     async def test_peer_management(self) -> bool:
         """Test peer addition, removal, and management"""
         try:
@@ -154,6 +153,7 @@ class TestP2PFederation:
             print(f"    💥 Error in peer management test: {str(e)}")
             return False
     
+    @pytest.mark.asyncio
     async def test_model_shard_distribution(self) -> bool:
         """Test model distribution into shards across peers"""
         try:
@@ -226,6 +226,7 @@ class TestP2PFederation:
             print(f"    💥 Error in shard distribution test: {str(e)}")
             return False
     
+    @pytest.mark.asyncio
     async def test_distributed_execution(self) -> bool:
         """Test distributed task execution across peers"""
         try:
@@ -300,6 +301,7 @@ class TestP2PFederation:
             print(f"    💥 Error in distributed execution test: {str(e)}")
             return False
     
+    @pytest.mark.asyncio
     async def test_peer_contribution_validation(self) -> bool:
         """Test peer contribution validation and consensus"""
         try:
@@ -380,6 +382,7 @@ class TestP2PFederation:
             print(f"    💥 Error in contribution validation test: {str(e)}")
             return False
     
+    @pytest.mark.asyncio
     async def test_network_status(self) -> bool:
         """Test network status monitoring and reporting"""
         try:
@@ -421,6 +424,7 @@ class TestP2PFederation:
             print(f"    💥 Error in network status test: {str(e)}")
             return False
     
+    @pytest.mark.asyncio
     async def test_safety_integration(self) -> bool:
         """Test safety framework integration"""
         try:
@@ -485,6 +489,7 @@ class TestP2PFederation:
             print(f"    💥 Error in safety integration test: {str(e)}")
             return False
     
+    @pytest.mark.asyncio
     async def test_performance_scalability(self) -> bool:
         """Test performance and scalability metrics"""
         try:
@@ -563,6 +568,7 @@ class TestP2PFederation:
             print(f"    💥 Error in performance test: {str(e)}")
             return False
     
+    @pytest.mark.asyncio
     async def test_fault_tolerance(self) -> bool:
         """Test fault tolerance and error handling"""
         try:

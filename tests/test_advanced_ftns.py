@@ -4,9 +4,6 @@ Enhanced FTNS Features Test Suite
 Tests dynamic pricing, dividend distribution, and research impact tracking
 """
 
-import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
-
 import asyncio
 import time
 from datetime import datetime, timezone
@@ -47,7 +44,7 @@ async def test_dividend_distribution():
     advanced_ftns = get_advanced_ftns()
     
     # Give test users some initial FTNS balance
-    from prsm.economy.tokenomics.ftns_service import ftns_service
+    from prsm.economy.tokenomics import ftns_service
     token_holders = ["user1", "user2", "user3", "user4"]
     
     for user in token_holders:

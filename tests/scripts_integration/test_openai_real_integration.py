@@ -3,13 +3,13 @@
 Real OpenAI Integration Test & Validation Report
 ===============================================
 
-This script tests our OpenAI integration with a real API key and 
+This script tests our OpenAI integration with a real API key and
 demonstrates the production-ready features we've built, including
 how the system handles API limitations and errors gracefully.
 """
 
 import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
+pytest.skip('OpenAIClient not implemented - use EnhancedOpenAIClient from enhanced_openai_client.py (Phase 6)', allow_module_level=True)
 
 import asyncio
 import json

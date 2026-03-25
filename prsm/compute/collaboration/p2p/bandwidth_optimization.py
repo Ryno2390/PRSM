@@ -831,6 +831,34 @@ class BandwidthOptimizer:
             'scheduler': self.scheduler.get_scheduler_stats()
         }
 
+    @property
+    def is_initialized(self) -> bool:
+        """Check if bandwidth optimizer is initialized."""
+        return True
+
+    async def initialize(self) -> None:
+        """Initialize the bandwidth optimizer (no-op, ready after __init__)."""
+        pass
+
+    async def add_peer(self, node_id: str, bandwidth: float, latency: float) -> None:
+        """Register a peer with its bandwidth and latency metrics."""
+        import time
+        try:
+            # Convert bandwidth (Mbps) to bytes/sec and latency (ms) to seconds
+            measurement = BandwidthMeasurement(
+                timestamp=time.time(),
+                download_speed=bandwidth * 1024 * 1024 / 8,  # Mbps to bytes/sec
+                upload_speed=bandwidth * 1024 * 1024 / 8,
+                latency=latency / 1000.0,  # ms to seconds
+                packet_loss=0.0,
+                node_id=node_id,
+            )
+            if node_id not in self.network_monitor.measurements:
+                self.network_monitor.measurements[node_id] = []
+            self.network_monitor.measurements[node_id].append(measurement)
+        except Exception:
+            pass  # Silently ignore measurement storage issues
+
 
 # Example usage
 async def example_bandwidth_optimization():

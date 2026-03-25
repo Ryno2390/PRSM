@@ -21,9 +21,6 @@ Usage:
     python tests/test_150k_papers_provenance.py --skip-ingestion --query-only
 """
 
-import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
-
 import asyncio
 import json
 import time
@@ -38,12 +35,18 @@ from decimal import Decimal, getcontext
 from dataclasses import dataclass, field
 import statistics
 import sys
+import pytest
+
+# Skip if required NWTN modules don't exist
+try:
+    from prsm.compute.nwtn.voicebox import NWTNVoicebox, VoiceboxResponse
+except ImportError:
+    pytest.skip('prsm.compute.nwtn.voicebox not yet implemented (Phase 6)', allow_module_level=True)
 
 import structlog
 
 # Import PRSM systems
 from prsm.compute.nwtn.meta_reasoning_engine import MetaReasoningEngine
-from prsm.compute.nwtn.voicebox import NWTNVoicebox, VoiceboxResponse
 from prsm.compute.nwtn.content_royalty_engine import ContentRoyaltyEngine, QueryComplexity
 from prsm.compute.nwtn.content_ingestion_engine import NWTNContentIngestionEngine, IngestionStatus
 from prsm.data.provenance.enhanced_provenance_system import EnhancedProvenanceSystem, ContentType

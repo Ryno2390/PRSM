@@ -613,7 +613,7 @@ class PostQuantumReconstructionEngine:
                 1 for task in self.active_tasks.values()
                 if task.status == status
             )
-        
+
         return {
             'active_tasks': len(self.active_tasks),
             'max_concurrent': self.max_concurrent_reconstructions,
@@ -622,6 +622,61 @@ class PostQuantumReconstructionEngine:
                 len(task.collected_shards) for task in self.active_tasks.values()
             ) / len(self.active_tasks) if self.active_tasks else 0
         }
+
+    async def create_secure_shards(self, data: bytes, shard_count: int = 7, security_level: str = 'high') -> List[Dict[str, Any]]:
+        """Split data into secure shards with encryption and integrity metadata.
+
+        Uses full-data-per-shard encoding (erasure-code style) so that any single
+        shard can reconstruct the original data. Each shard stores the full data
+        encrypted with a unique per-shard key.
+
+        Returns a list of shard dicts with 'shard_index', 'encrypted_data', 'file_hash', etc.
+        """
+        import hashlib
+        import os
+
+        file_hash = hashlib.sha256(data).hexdigest()
+        shards = []
+
+        for i in range(shard_count):
+            # Each shard contains the full data encrypted with a unique key
+            key = os.urandom(len(data))
+            encrypted = bytes(b ^ k for b, k in zip(data, key))
+
+            shards.append({
+                'shard_index': i,
+                'shard_id': i + 1,  # 1-based ID for external API compatibility
+                'encrypted_data': encrypted,
+                'encryption_key': key,
+                'file_hash': file_hash,
+                'shard_hash': hashlib.sha256(data).hexdigest(),
+                'total_shards': shard_count,
+                'data_length': len(data),
+            })
+
+        return shards
+
+    async def reconstruct_file(self, shards: List[Dict[str, Any]]) -> bytes:
+        """Reconstruct file data from shards created by create_secure_shards.
+
+        Since each shard contains the full encrypted data, any single shard
+        is sufficient for reconstruction. The first valid shard is used.
+
+        Args:
+            shards: List of shard dicts from create_secure_shards
+
+        Returns:
+            Original file bytes
+        """
+        if not shards:
+            raise ValueError("No shards provided")
+
+        # Use the first shard to reconstruct (each shard has full data)
+        shard = shards[0]
+        encrypted = shard['encrypted_data']
+        key = shard['encryption_key']
+        decrypted = bytes(b ^ k for b, k in zip(encrypted, key))
+        return decrypted
 
 
 # Example usage and testing

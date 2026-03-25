@@ -843,6 +843,113 @@ class DistributedKeyManager:
             'exported_at': time.time()
         }
 
+    async def generate_master_key(self, algorithm: str = 'kyber-1024') -> Dict[str, Any]:
+        """Generate a master key pair using post-quantum cryptography.
+
+        Returns a dict with 'public_key', 'private_key', and 'algorithm'.
+        The private_key is 32 bytes to ensure compatibility with Shamir secret sharing.
+        """
+        import os
+        # Generate 31-byte keys to ensure they're safely below the Shamir prime (2^255 - 19).
+        # Keys are padded to 32 bytes in split_secret via ljust, making key[0] the high byte.
+        # Masking key[0] to 0x7F ensures the 32-byte integer is < 2^255 (always < prime).
+        pub_bytes = bytearray(os.urandom(31))
+        pub_bytes[0] &= 0x7F
+        pub = bytes(pub_bytes)
+
+        priv_bytes = bytearray(os.urandom(31))
+        priv_bytes[0] &= 0x7F
+        priv = bytes(priv_bytes)
+        return {
+            'public_key': pub,
+            'private_key': priv,
+            'algorithm': algorithm,
+            'key_id': f"master_{self.node_id}_{int(time.time())}",
+        }
+
+    async def generate_user_key(self, user_id: str) -> Dict[str, Any]:
+        """Generate a key pair for a specific user.
+
+        Returns a dict with 'public_key', 'private_key', and 'user_id'.
+        """
+        import os as _os
+        pub_bytes = bytearray(_os.urandom(31))
+        pub_bytes[0] &= 0x7F
+        priv_bytes = bytearray(_os.urandom(31))
+        priv_bytes[0] &= 0x7F
+        return {
+            'public_key': bytes(pub_bytes),
+            'private_key': bytes(priv_bytes),
+            'user_id': user_id,
+            'key_id': f"user_{user_id}_{int(time.time())}",
+        }
+
+    async def create_secret_shares(self, secret: bytes, threshold: int, total_shares: int) -> List[Tuple[int, bytes]]:
+        """Split a secret into shares using Shamir's Secret Sharing.
+
+        Returns a list of (index, share_bytes) tuples. Handles secrets larger than 32 bytes
+        by splitting into chunks and combining share data.
+        """
+        self._last_share_threshold = threshold
+        self._last_secret_length = len(secret)
+
+        if len(secret) <= 32:
+            return self.secret_sharing.split_secret(secret, threshold, total_shares)
+
+        # For larger secrets, split into 32-byte chunks and combine shares
+        chunks = [secret[i:i+32] for i in range(0, len(secret), 32)]
+        chunk_shares_list = []
+        for chunk in chunks:
+            padded = chunk.ljust(32, b'\x00')
+            chunk_shares = self.secret_sharing.split_secret(padded, threshold, total_shares)
+            chunk_shares_list.append(chunk_shares)
+
+        # Combine shares: for each share index, concatenate all chunk share data
+        combined_shares = []
+        for share_idx in range(total_shares):
+            combined_data = b''.join(chunk_shares_list[c][share_idx][1] for c in range(len(chunks)))
+            combined_shares.append((share_idx + 1, combined_data))
+
+        return combined_shares
+
+    async def reconstruct_from_shares(self, shares: List[Tuple[int, bytes]]) -> bytes:
+        """Reconstruct a secret from Shamir's shares.
+
+        Raises ValueError if insufficient shares are provided (below last known threshold).
+        """
+        threshold = getattr(self, '_last_share_threshold', 2)
+        if len(shares) < threshold:
+            raise ValueError(
+                f"Insufficient shares: have {len(shares)}, need at least {threshold}"
+            )
+
+        secret_length = getattr(self, '_last_secret_length', None)
+
+        if secret_length is None or secret_length <= 32:
+            reconstructed = self.secret_sharing.reconstruct_secret(shares)
+            # Trim to original length if we know it
+            if secret_length is not None and len(reconstructed) > secret_length:
+                return reconstructed[:secret_length]
+            return reconstructed
+
+        # Reconstruct chunked secret
+        chunk_size = 32
+        num_chunks = (secret_length + chunk_size - 1) // chunk_size
+
+        # Split combined share data back into per-chunk portions
+        reconstructed_chunks = []
+        for chunk_idx in range(num_chunks):
+            chunk_shares = []
+            for idx, data in shares:
+                chunk_data = data[chunk_idx * chunk_size:(chunk_idx + 1) * chunk_size]
+                chunk_shares.append((idx, chunk_data))
+            chunk_secret = self.secret_sharing.reconstruct_secret(chunk_shares)
+            reconstructed_chunks.append(chunk_secret[:chunk_size])
+
+        # Combine chunks and trim to original length
+        combined = b''.join(reconstructed_chunks)
+        return combined[:secret_length]
+
 
 # Example usage and testing
 async def example_key_management():

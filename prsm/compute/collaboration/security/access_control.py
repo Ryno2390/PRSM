@@ -721,6 +721,111 @@ class PostQuantumAccessController:
         
         logger.info(f"Imported {imported_count} access rules")
 
+    async def register_user(self, user: Dict[str, Any]) -> bool:
+        """Register a user with their authentication key.
+
+        Args:
+            user: Dict with 'id', 'role', 'institution', 'auth_key', etc.
+
+        Returns:
+            True if registration succeeded
+        """
+        user_id = user.get('id', '')
+        if not user_id:
+            return False
+        self._registered_users = getattr(self, '_registered_users', {})
+        self._registered_users[user_id] = user
+        logger.info(f"Registered user: {user_id}")
+        return True
+
+    async def create_access_matrix(self, resource_id: str, security_level: str = 'medium') -> Dict[str, Any]:
+        """Create an access control matrix for a resource.
+
+        Args:
+            resource_id: Resource identifier
+            security_level: Security level ('low', 'medium', 'high')
+
+        Returns:
+            Dict with 'resource_id', 'security_level', 'required_approvals', etc.
+        """
+        required_approvals = 2 if security_level == 'high' else 1
+        return {
+            'resource_id': resource_id,
+            'security_level': security_level,
+            'required_approvals': required_approvals,
+            'allowed_operations': ['read', 'write', 'evaluate'],
+            'created_at': time.time(),
+        }
+
+    async def request_authorization(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Request authorization for a resource access operation.
+
+        Args:
+            request: Dict with 'resource_id', 'user_id', 'operation', etc.
+
+        Returns:
+            Dict with 'request_id', 'status' ('pending' or 'approved'), 'required_approvals', etc.
+        """
+        import uuid
+        request_id = str(uuid.uuid4())
+        self._pending_auth_requests = getattr(self, '_pending_auth_requests', {})
+        # Use 2 required approvals as default for all requests
+        required_approvals = 2
+        auth_request = {
+            'request_id': request_id,
+            'resource_id': request.get('resource_id', ''),
+            'user_id': request.get('user_id', ''),
+            'operation': request.get('operation', ''),
+            'status': 'pending',
+            'approvals': [],
+            'required_approvals': required_approvals,
+        }
+        self._pending_auth_requests[request_id] = auth_request
+        return auth_request
+
+    async def process_approval(self, request_id: str, approval: Dict[str, Any]) -> bool:
+        """Process an approval decision for a pending authorization request.
+
+        Args:
+            request_id: ID of the pending request
+            approval: Dict with 'approver_id' and 'decision' ('approve' or 'deny')
+
+        Returns:
+            True if the approval was processed
+        """
+        self._pending_auth_requests = getattr(self, '_pending_auth_requests', {})
+        if request_id not in self._pending_auth_requests:
+            return False
+
+        request = self._pending_auth_requests[request_id]
+        decision = approval.get('decision', 'approve')
+        approver_id = approval.get('approver_id', '')
+
+        if decision == 'approve':
+            request['approvals'].append(approver_id)
+            # Auto-approve after 2 approvals
+            if len(request['approvals']) >= 2:
+                request['status'] = 'approved'
+        else:
+            request['status'] = 'denied'
+
+        return True
+
+    async def get_authorization_status(self, request_id: str) -> Dict[str, Any]:
+        """Get the current status of an authorization request.
+
+        Args:
+            request_id: ID of the request
+
+        Returns:
+            Dict with 'request_id', 'status', 'approvals', etc.
+        """
+        self._pending_auth_requests = getattr(self, '_pending_auth_requests', {})
+        return self._pending_auth_requests.get(request_id, {
+            'request_id': request_id,
+            'status': 'not_found',
+        })
+
 
 # Example usage and testing
 async def example_access_control():

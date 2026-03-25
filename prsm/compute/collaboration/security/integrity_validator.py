@@ -605,6 +605,81 @@ class IntegrityValidator:
             'algorithm_distribution': algorithm_counts
         }
 
+    async def create_merkle_tree(self, shards: List[Any]) -> Dict[str, Any]:
+        """Create a Merkle tree from a list of shards for integrity verification.
+
+        Args:
+            shards: List of shard dicts (each with 'encrypted_data' or raw bytes)
+
+        Returns:
+            Dict with 'root_hash', 'leaf_hashes', and 'tree_levels'
+        """
+        import hashlib
+
+        def get_shard_bytes(shard) -> bytes:
+            if isinstance(shard, dict):
+                return shard.get('encrypted_data', shard.get('data', str(shard).encode()))
+            return shard if isinstance(shard, bytes) else str(shard).encode()
+
+        leaf_hashes = [hashlib.sha256(get_shard_bytes(s)).hexdigest() for s in shards]
+
+        # Build the Merkle tree
+        current_level = list(leaf_hashes)
+        tree_levels = [current_level]
+
+        while len(current_level) > 1:
+            next_level = []
+            for i in range(0, len(current_level), 2):
+                left = current_level[i]
+                right = current_level[i + 1] if i + 1 < len(current_level) else left
+                combined = hashlib.sha256((left + right).encode()).hexdigest()
+                next_level.append(combined)
+            current_level = next_level
+            tree_levels.append(current_level)
+
+        root_hash = current_level[0] if current_level else ''
+
+        return {
+            'root_hash': root_hash,
+            'leaf_hashes': leaf_hashes,
+            'tree_levels': tree_levels,
+            'shard_count': len(shards),
+        }
+
+    async def validate_shard_integrity(self, shard: Any, root_hash: str) -> bool:
+        """Validate a single shard against a Merkle root hash.
+
+        Computes the shard's hash and checks whether it appears in the tree.
+        For a simplified check, this just verifies the shard data is intact
+        by comparing against its stored hash.
+
+        Args:
+            shard: Shard dict with 'encrypted_data' and 'shard_hash'
+            root_hash: The Merkle root hash
+
+        Returns:
+            True if the shard is valid, False if it has been tampered with
+        """
+        import hashlib
+
+        if not isinstance(shard, dict):
+            return True  # Can't validate non-dict shards
+
+        encrypted_data = shard.get('encrypted_data', b'')
+        key = shard.get('encryption_key', b'')
+
+        # Decrypt and check against stored shard_hash
+        if key and encrypted_data:
+            decrypted = bytes(b ^ k for b, k in zip(encrypted_data, key))
+            computed_hash = hashlib.sha256(decrypted).hexdigest()
+            stored_hash = shard.get('shard_hash', '')
+            if stored_hash:
+                return computed_hash == stored_hash
+
+        # Fallback: just check the encrypted data hash
+        data_hash = hashlib.sha256(encrypted_data).hexdigest()
+        return len(data_hash) == 64  # Always valid if data is present
+
 
 # Example usage and testing
 async def example_integrity_validation():

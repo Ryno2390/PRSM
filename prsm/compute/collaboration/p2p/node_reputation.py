@@ -663,6 +663,37 @@ class ReputationSystem:
             'exported_at': time.time()
         }
     
+    @property
+    def is_initialized(self) -> bool:
+        """Check if the reputation system is initialized."""
+        return True  # Always true after __init__
+
+    async def initialize(self) -> None:
+        """Initialize the reputation system (no-op, already initialized in __init__)."""
+        logger.info("ReputationSystem initialized")
+
+    async def update_reputation(self, node_id: str, score: float) -> None:
+        """Set or update the reputation score for a node directly.
+
+        Stores the score as a simple metric update for retrieval via get_reputation().
+        """
+        # Store the raw score in metrics for easy retrieval
+        self.tracker.update_metrics(node_id, raw_reputation=score)
+        # Also update the cache directly for performance
+        self.reputation_cache[node_id] = type('_Score', (), {
+            'overall_score': score,
+            'node_id': node_id
+        })()
+
+    async def get_trusted_peers(self, min_reputation: float = 0.7) -> List[str]:
+        """Return a list of node IDs whose cached reputation score >= min_reputation."""
+        trusted = []
+        for node_id, score in self.reputation_cache.items():
+            raw_score = getattr(score, 'overall_score', None)
+            if raw_score is not None and raw_score >= min_reputation:
+                trusted.append(node_id)
+        return trusted
+
     def import_reputation_data(self, data: Dict[str, Any]):
         """Import reputation data for a node"""
         node_id = data['node_id']

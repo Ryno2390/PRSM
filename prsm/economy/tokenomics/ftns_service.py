@@ -64,6 +64,26 @@ MAX_TRANSACTION_AMOUNT = Decimal('1000000.0')  # Maximum single transaction
 DEFAULT_REWARD_MULTIPLIER = Decimal('1.0')
 STAKING_REWARD_RATE = Decimal('0.05')  # 5% annual staking rewards
 
+# NWTN Pricing Constants
+BASE_NWTN_FEE = Decimal('0.1')  # Base fee for NWTN queries
+CONTEXT_UNIT_COST = Decimal('0.1')  # Cost per context unit
+ARCHITECT_DECOMPOSITION_COST = Decimal('0.05')  # Cost for task decomposition
+COMPILER_SYNTHESIS_COST = Decimal('0.03')  # Cost for result synthesis
+
+# Agent cost mapping - compiler (complex synthesis) > executor > architect > prompter > router
+AGENT_COSTS = {
+    'architect': Decimal('0.05'),
+    'router': Decimal('0.02'),
+    'executor': Decimal('0.08'),
+    'compiler': Decimal('0.10'),
+    'prompter': Decimal('0.04'),
+}
+
+# Reward constants
+REWARD_PER_MB = Decimal('0.001')  # Reward per MB of data contributed
+MODEL_CONTRIBUTION_REWARD = Decimal('1.0')  # Reward for model contributions
+SUCCESSFUL_TEACHING_REWARD = Decimal('0.5')  # Reward for successful teaching
+
 # Export these constants
 __all__ = [
     'FTNSService',
@@ -79,6 +99,14 @@ __all__ = [
     'MAX_TRANSACTION_AMOUNT',
     'DEFAULT_REWARD_MULTIPLIER',
     'STAKING_REWARD_RATE',
+    'BASE_NWTN_FEE',
+    'CONTEXT_UNIT_COST',
+    'ARCHITECT_DECOMPOSITION_COST',
+    'COMPILER_SYNTHESIS_COST',
+    'AGENT_COSTS',
+    'REWARD_PER_MB',
+    'MODEL_CONTRIBUTION_REWARD',
+    'SUCCESSFUL_TEACHING_REWARD',
 ]
 
 
@@ -167,8 +195,10 @@ class FTNSService:
             DeprecationWarning,
             stacklevel=2
         )
-        self.user_balances: Dict[str, FTNSBalance] = {}
-        self.transactions: List[FTNSTransaction] = []
+        self.user_balances: Dict[str, Any] = {}
+        # balances is the public API name used by tests and external code
+        self.balances: Dict[str, Any] = self.user_balances
+        self.transactions: List[Any] = []
         self.total_staked = Decimal('0')
         self.guardrails = LaunchGuardrails(start_time=datetime.now(timezone.utc))
         self.reward_rates = {
@@ -179,8 +209,107 @@ class FTNSService:
             FTNSTransactionType.KNOWLEDGE_DISTILLATION: Decimal('20.0'),
             FTNSTransactionType.PIPELINE_EXECUTION: Decimal('2.0')
         }
-        
+
         logger.warning("FTNSService initialized (DEPRECATED - use AtomicFTNSService instead)")
+
+    async def _get_user_tier_multiplier(self, user_id: str) -> float:
+        """Get pricing multiplier based on user tier. Returns 1.0 by default."""
+        return 1.0
+
+    async def calculate_context_cost(self, session: Any, context_units: int) -> float:
+        """Calculate context cost for a session.
+
+        Cost = context_units * CONTEXT_UNIT_COST * tier_multiplier * complexity_multiplier
+        """
+        user_id = session.user_id if hasattr(session, 'user_id') else str(session)
+        tier_multiplier = await self._get_user_tier_multiplier(user_id)
+
+        # Complexity multiplier from session if available
+        complexity_multiplier = 1.0
+        complexity_estimate = getattr(session, 'complexity_estimate', None)
+        if complexity_estimate is not None:
+            complexity_multiplier = 1.0 + float(complexity_estimate) * 0.5
+
+        # Use Decimal arithmetic for precision, then convert to float
+        from decimal import Decimal as _Decimal, ROUND_HALF_UP
+        cost_dec = _Decimal(str(context_units)) * CONTEXT_UNIT_COST * _Decimal(str(tier_multiplier)) * _Decimal(str(complexity_multiplier))
+        # Round to 8 decimal places then convert to float
+        cost_dec = cost_dec.quantize(_Decimal('0.00000001'), rounding=ROUND_HALF_UP)
+        return float(cost_dec)
+
+    async def charge_context_access(self, user_id: str, context_units: int) -> bool:
+        """Charge user for context access. Returns True if successful, False if insufficient balance."""
+        cost = context_units * float(CONTEXT_UNIT_COST)
+        balance_obj = self.balances.get(user_id)
+        if balance_obj is None:
+            return False
+
+        current_balance = float(balance_obj.balance)
+        if current_balance < cost:
+            return False
+
+        # Deduct from balance
+        balance_obj.balance = type(balance_obj.balance)(current_balance - cost) if hasattr(balance_obj.balance, '__class__') else current_balance - cost
+        # Handle Decimal vs float
+        try:
+            from decimal import Decimal as _Decimal
+            balance_obj.balance = _Decimal(str(current_balance - cost))
+        except Exception:
+            balance_obj.balance = current_balance - cost
+
+        # Create transaction record using the prsm.core.models FTNSTransaction if available
+        try:
+            from prsm.core.models import FTNSTransaction as CoreFTNSTransaction
+            tx = CoreFTNSTransaction(
+                from_user=user_id,
+                to_user="system",
+                amount=cost,
+                transaction_type="charge",
+                description=f"Context access: {context_units} units",
+            )
+        except Exception:
+            tx = type('Tx', (), {
+                'from_user': user_id,
+                'to_user': 'system',
+                'amount': cost,
+                'transaction_type': 'charge',
+                'transaction_id': f"ftns_{len(self.transactions) + 1:06d}",
+                'created_at': datetime.now(timezone.utc)
+            })()
+        self.transactions.append(tx)
+        return True
+
+    async def _calculate_contribution_reward(self, contribution_type: str, amount: float, metadata: Any) -> Decimal:
+        """Calculate reward amount for a given contribution type and amount."""
+        if contribution_type == "data":
+            return Decimal(str(amount)) * REWARD_PER_MB
+        elif contribution_type == "model":
+            return MODEL_CONTRIBUTION_REWARD
+        elif contribution_type == "teaching":
+            return Decimal(str(amount))
+        else:
+            return Decimal(str(amount)) * REWARD_PER_MB
+
+    async def _update_balance(self, user_id: str, delta: Any) -> None:
+        """Update a user's balance by delta (positive = add, negative = subtract)."""
+        if user_id not in self.balances:
+            try:
+                from prsm.core.models import FTNSBalance as CoreFTNSBalance
+                self.balances[user_id] = CoreFTNSBalance(user_id=user_id, balance=Decimal('0'))
+            except Exception:
+                self.balances[user_id] = FTNSBalance(
+                    user_id=user_id, balance=Decimal('0'), last_updated=datetime.now(timezone.utc)
+                )
+
+        balance_obj = self.balances[user_id]
+        current = Decimal(str(float(balance_obj.balance)))
+        delta_dec = Decimal(str(float(delta)))
+        new_val = current + delta_dec
+        # Keep same type as existing balance
+        if isinstance(balance_obj.balance, float):
+            balance_obj.balance = float(new_val)
+        else:
+            balance_obj.balance = new_val
 
     def stake_tokens(self, user_id: str, amount: Decimal) -> bool:
         """Stakes tokens while enforcing Launch Guardrails (Capped Mainnet)"""
@@ -211,28 +340,38 @@ class FTNSService:
             return True
         return False
     
-    async def get_user_balance(self, user_id: str) -> "FTNSBalance":
+    async def get_user_balance(self, user_id: str) -> Any:
         """Get current FTNS balance for user (async for test compatibility)"""
-        if user_id not in self.user_balances:
-            self.user_balances[user_id] = FTNSBalance(
-                user_id=user_id,
-                balance=Decimal('0'),
-                last_updated=datetime.now(timezone.utc)
-            )
-        
-        return self.user_balances[user_id]
-    
-    def get_user_balance_sync(self, user_id: str) -> "FTNSBalance":
+        if user_id is None:
+            raise ValueError("user_id cannot be None")
+        if user_id not in self.balances:
+            try:
+                from prsm.core.models import FTNSBalance as CoreFTNSBalance
+                self.balances[user_id] = CoreFTNSBalance(
+                    user_id=user_id,
+                    balance=Decimal('0'),
+                    locked_balance=Decimal('0'),
+                )
+            except Exception:
+                self.balances[user_id] = FTNSBalance(
+                    user_id=user_id,
+                    balance=Decimal('0'),
+                    last_updated=datetime.now(timezone.utc)
+                )
+
+        return self.balances[user_id]
+
+    def get_user_balance_sync(self, user_id: str) -> Any:
         """Get current FTNS balance (sync version)"""
-        if user_id not in self.user_balances:
-            self.user_balances[user_id] = FTNSBalance(
+        if user_id not in self.balances:
+            self.balances[user_id] = FTNSBalance(
                 user_id=user_id,
                 balance=Decimal('0'),
                 last_updated=datetime.now(timezone.utc)
             )
-        
-        return self.user_balances[user_id]
-    
+
+        return self.balances[user_id]
+
     def get_user_balance_decimal(self, user_id: str) -> Decimal:
         """Get current FTNS balance as Decimal (sync version for internal use)"""
         return self.get_user_balance_sync(user_id).balance
@@ -263,13 +402,15 @@ class FTNSService:
             balance_obj = self.get_user_balance_sync(user_id)
             current_balance = balance_obj.balance
             new_balance = current_balance + award_amount
-            
+
             # Update balance record
-            if user_id in self.user_balances:
-                balance_record = self.user_balances[user_id]
+            if user_id in self.balances:
+                balance_record = self.balances[user_id]
                 balance_record.balance = new_balance
-                balance_record.total_earned += award_amount
-                balance_record.last_updated = datetime.now(timezone.utc)
+                if hasattr(balance_record, 'total_earned'):
+                    balance_record.total_earned += award_amount
+                if hasattr(balance_record, 'last_updated'):
+                    balance_record.last_updated = datetime.now(timezone.utc)
             else:
                 balance_record = FTNSBalance(
                     user_id=user_id,
@@ -277,7 +418,7 @@ class FTNSService:
                     last_updated=datetime.now(timezone.utc),
                     total_earned=award_amount
                 )
-                self.user_balances[user_id] = balance_record
+                self.balances[user_id] = balance_record
             
             # Create transaction record
             tx_type_val = transaction_type.value if transaction_type else "unknown"
@@ -331,10 +472,12 @@ class FTNSService:
             
             # Update balance
             new_balance = current_balance - amount
-            balance_record = self.user_balances[user_id]
+            balance_record = self.balances[user_id]
             balance_record.balance = new_balance
-            balance_record.total_spent += amount
-            balance_record.last_updated = datetime.now(timezone.utc)
+            if hasattr(balance_record, 'total_spent'):
+                balance_record.total_spent += amount
+            if hasattr(balance_record, 'last_updated'):
+                balance_record.last_updated = datetime.now(timezone.utc)
             
             # Create transaction record
             transaction = FTNSTransaction(
@@ -362,24 +505,34 @@ class FTNSService:
             return False
     
     async def reward_contribution(self, user_id: str, contribution_type: str, amount: float) -> bool:
-        """Async method for rewarding contributions (wrapper for award_tokens)."""
+        """Async method for rewarding contributions. Creates a core-model FTNSTransaction."""
         try:
-            type_map = {
-                "data": FTNSTransactionType.DATA_CONTRIBUTION,
-                "training": FTNSTransactionType.TRAINING_REWARD,
-                "model": FTNSTransactionType.MODEL_IMPROVEMENT,
-                "collaboration": FTNSTransactionType.COLLABORATIVE_REASONING,
-                "knowledge": FTNSTransactionType.KNOWLEDGE_DISTILLATION,
-                "pipeline": FTNSTransactionType.PIPELINE_EXECUTION,
-            }
-            tx_type = type_map.get(contribution_type, FTNSTransactionType.DATA_CONTRIBUTION)
-            
-            self.award_tokens(
-                user_id=user_id,
-                transaction_type=tx_type,
-                base_amount=Decimal(str(amount)),
-                description=f"Contribution reward: {contribution_type}"
-            )
+            reward_amount = await self._calculate_contribution_reward(contribution_type, amount, None)
+
+            # Update balance
+            await self._update_balance(user_id, reward_amount)
+
+            # Create transaction using core models if available
+            try:
+                from prsm.core.models import FTNSTransaction as CoreFTNSTransaction
+                from decimal import Decimal as _Decimal
+                tx = CoreFTNSTransaction(
+                    from_user=None,  # System mint
+                    to_user=user_id,
+                    amount=_Decimal(str(reward_amount)),
+                    transaction_type="reward",
+                    description=f"Contribution reward: {contribution_type}",
+                )
+            except Exception:
+                tx = type('Tx', (), {
+                    'from_user': None,
+                    'to_user': user_id,
+                    'amount': reward_amount,
+                    'transaction_type': 'reward',
+                    'transaction_id': f"ftns_{len(self.transactions) + 1:06d}",
+                    'created_at': datetime.now(timezone.utc)
+                })()
+            self.transactions.append(tx)
             return True
         except Exception as e:
             logger.error(f"Failed to reward contribution: {e}")
@@ -456,7 +609,7 @@ class FTNSService:
     
     def get_service_statistics(self) -> Dict[str, Any]:
         """Get FTNS service usage statistics"""
-        total_users = len(self.user_balances)
+        total_users = len(self.balances)
         total_transactions = len(self.transactions)
         total_tokens_distributed = sum(
             tx.amount for tx in self.transactions 

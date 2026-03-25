@@ -989,14 +989,78 @@ class DatabaseFTNSService:
     async def get_circulating_supply(self) -> Decimal:
         """Get circulating FTNS token supply (excluding system wallets)"""
         session = await self._get_session()
-        
+
         result = await session.execute(
             select(func.sum(FTNSWallet.balance + FTNSWallet.locked_balance + FTNSWallet.staked_balance))
             .where(FTNSWallet.wallet_type != WalletType.TREASURY.value)
         )
-        
+
         circulating = result.scalar()
         return Decimal(str(circulating)) if circulating else Decimal('0.0')
+
+    async def get_user_balance(self, user_id: str) -> Any:
+        """Get user balance as an object with a .balance attribute.
+
+        This is a compatibility wrapper around get_wallet_balance().
+        Returns an object with attributes: user_id, balance, locked_balance.
+        """
+        try:
+            balance_dict = await self.get_wallet_balance(user_id)
+            from dataclasses import dataclass
+            from decimal import Decimal as _Decimal
+
+            @dataclass
+            class BalanceObj:
+                user_id: str
+                balance: _Decimal
+                locked_balance: _Decimal = _Decimal('0')
+
+            return BalanceObj(
+                user_id=user_id,
+                balance=balance_dict.get('available_balance', _Decimal('0')),
+                locked_balance=balance_dict.get('locked_balance', _Decimal('0')),
+            )
+        except Exception:
+            from dataclasses import dataclass
+            from decimal import Decimal as _Decimal
+
+            @dataclass
+            class EmptyBalance:
+                user_id: str
+                balance: _Decimal = _Decimal('0')
+                locked_balance: _Decimal = _Decimal('0')
+
+            return EmptyBalance(user_id=user_id)
+
+    async def reward_contribution(self, user_id: str, contribution_type: str, amount: float) -> bool:
+        """High-level alias for rewarding contributions by type.
+
+        Maps contribution_type to the appropriate reward method.
+
+        Args:
+            user_id: User to reward
+            contribution_type: Type of contribution ('data', 'model', 'teaching', etc.)
+            amount: Reward amount in FTNS
+
+        Returns:
+            True if reward was created successfully
+        """
+        try:
+            await self.create_transaction(
+                from_user_id=None,  # System minting
+                to_user_id=user_id,
+                amount=Decimal(str(amount)),
+                transaction_type=TransactionType.REWARD,
+                description=f"Contribution reward: {contribution_type}",
+                transaction_metadata={
+                    "contribution_type": contribution_type,
+                    "reward_amount": float(amount),
+                }
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to reward contribution for user {user_id}: {e}")
+            return False
 
 
 # Global service instance

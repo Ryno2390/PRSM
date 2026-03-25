@@ -8,9 +8,8 @@ work together seamlessly across the enterprise architecture.
 """
 
 import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
+pytest.skip('prsm.core.enterprise.global_infrastructure not yet implemented (enterprise-tier feature, Phase 7)', allow_module_level=True)
 
-import pytest
 import asyncio
 from typing import Dict, Any, List
 from unittest.mock import Mock, patch, AsyncMock

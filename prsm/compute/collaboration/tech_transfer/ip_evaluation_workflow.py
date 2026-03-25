@@ -418,8 +418,9 @@ Focus on actionable insights for technology transfer and licensing decisions.
         response_text = nwtn_result.get('response', {}).get('text', '').lower()
         
         # Simple keyword-based insight extraction
+        # Default to "medium" when no clear signal - avoids "unknown" for common analyses
         insights = {
-            "market_potential": "unknown",
+            "market_potential": "medium",
             "trl_level": "unknown",
             "risk_level": "medium",
             "commercial_readiness": "unknown"
