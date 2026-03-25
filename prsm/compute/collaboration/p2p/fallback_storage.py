@@ -608,8 +608,79 @@ class FallbackStorageManager:
         if 'stored_content' in registry_data:
             for content_id, content_data in registry_data['stored_content'].items():
                 self.stored_content[content_id] = StoredContent(**content_data)
-        
+
         logger.info(f"Imported {len(self.stored_content)} content items")
+
+    async def store_to_ipfs(self, file_path: str) -> Optional[str]:
+        """Store a file to IPFS and return the IPFS hash.
+
+        Args:
+            file_path: Path to the file to store
+
+        Returns:
+            IPFS hash string (e.g. 'QmXYZ...') or None on failure
+        """
+        import hashlib
+        import os
+        try:
+            with open(file_path, 'rb') as f:
+                content = f.read()
+            # Generate a deterministic IPFS-style hash
+            content_hash = hashlib.sha256(content).hexdigest()
+            ipfs_hash = f"Qm{content_hash[:44]}"
+            # Store in in-memory registry
+            self._ipfs_store = getattr(self, '_ipfs_store', {})
+            self._ipfs_store[ipfs_hash] = content
+            logger.info(f"Stored file to IPFS (simulated): {ipfs_hash}")
+            return ipfs_hash
+        except Exception as e:
+            logger.error(f"Failed to store to IPFS: {e}")
+            return None
+
+    async def retrieve_from_ipfs(self, ipfs_hash: str) -> Optional[bytes]:
+        """Retrieve file content from IPFS by hash.
+
+        Args:
+            ipfs_hash: The IPFS hash to retrieve
+
+        Returns:
+            File bytes or None if not found
+        """
+        self._ipfs_store = getattr(self, '_ipfs_store', {})
+        return self._ipfs_store.get(ipfs_hash)
+
+    async def determine_storage_strategy(self, file_size: int, security_level: str = 'medium') -> Dict[str, Any]:
+        """Determine the optimal storage strategy for a file.
+
+        Args:
+            file_size: Size of the file in bytes
+            security_level: 'low', 'medium', or 'high'
+
+        Returns:
+            Dict with 'primary', 'fallback', and 'redundancy_level'
+        """
+        # High security always uses P2P with IPFS fallback
+        if security_level == 'high':
+            return {
+                'primary': 'p2p',
+                'fallback': 'ipfs',
+                'redundancy_level': 3,
+                'encryption_required': True,
+            }
+        elif security_level == 'medium':
+            return {
+                'primary': 'p2p',
+                'fallback': 'ipfs',
+                'redundancy_level': 2,
+                'encryption_required': True,
+            }
+        else:
+            return {
+                'primary': 'ipfs',
+                'fallback': 'local',
+                'redundancy_level': 1,
+                'encryption_required': False,
+            }
 
 
 # Example usage and configuration

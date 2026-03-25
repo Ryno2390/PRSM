@@ -7,7 +7,7 @@ Test script for validating the governance token distribution and voting system.
 """
 
 import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
+pytest.skip('CLI script test (click-based), not pytest-compatible. Run directly: python test_governance.py', allow_module_level=True)
 
 import asyncio
 import json

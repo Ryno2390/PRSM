@@ -7,19 +7,17 @@ Demonstrates the new user-configurable breakthrough intensity modes
 without requiring a full pipeline execution.
 """
 
-import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
-
 import asyncio
 import sys
 from pathlib import Path
+import pytest
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
 from prsm.compute.nwtn.breakthrough_modes import (
-    BreakthroughMode, breakthrough_mode_manager, 
+    BreakthroughMode, breakthrough_mode_manager,
     get_breakthrough_mode_config, suggest_breakthrough_mode
 )
 

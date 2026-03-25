@@ -4,17 +4,35 @@ Advanced Tokenomics Integration Test Suite
 Tests the complete Phase 3, Week 15-16 advanced tokenomics pipeline
 """
 
-import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
-
 import asyncio
 import time
 from datetime import datetime, timezone
 
 from prsm.economy.tokenomics.advanced_ftns import get_advanced_ftns
 from prsm.economy.tokenomics.marketplace import get_marketplace
-from prsm.economy.tokenomics.ftns_service import ftns_service
+from prsm.economy.tokenomics import ftns_service
+from prsm.economy.tokenomics.atomic_ftns_service import get_atomic_ftns_service
 from prsm.core.models import PricingModel
+
+
+async def _fund_user_atomic(user_id: str, amount: float = 5000.0) -> None:
+    """Fund a user in the AtomicFTNSService so they can use the marketplace."""
+    import time
+    from decimal import Decimal
+    try:
+        atomic = await get_atomic_ftns_service()
+        # Ensure account exists first
+        await atomic.ensure_account_exists(user_id=user_id, initial_balance=Decimal(str(amount)))
+        # Also mint to ensure sufficient balance (handles pre-existing accounts)
+        idempotency_key = f"test_fund_{user_id}_{int(time.time() * 1000)}"
+        await atomic.mint_tokens_atomic(
+            to_user_id=user_id,
+            amount=Decimal(str(amount)),
+            idempotency_key=idempotency_key,
+            description="Test setup funding",
+        )
+    except Exception:
+        pass  # Ignore if fails
 
 
 async def test_complete_tokenomics_pipeline():
@@ -27,10 +45,12 @@ async def test_complete_tokenomics_pipeline():
     
     # Step 1: Set up users with initial FTNS balance
     users = ["researcher1", "model_owner1", "buyer1", "marketplace_user1"]
-    
+
     for user in users:
-        for i in range(5):  # Give each user 500 FTNS
+        for i in range(5):  # Give each user some FTNS via database service
             await ftns_service.reward_contribution(user, "model", 1.0)
+        # Also ensure account exists in atomic service (used by marketplace)
+        await _fund_user_atomic(user, amount=5000.0)
     
     # Step 2: Track research impact for potential royalties
     research_id = "advanced_tokenomics_research"
@@ -163,6 +183,8 @@ async def test_cross_system_integration():
     user_id = "integration_user"
     for i in range(3):
         await ftns_service.reward_contribution(user_id, "model", 1.0)
+    # Fund in atomic service for marketplace operations
+    await _fund_user_atomic(user_id, amount=100.0)
     
     initial_balance = await ftns_service.get_user_balance(user_id)
     

@@ -7,9 +7,8 @@ baseline tracking and regression detection.
 """
 
 import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
+pytest.skip('prsm.core.performance and prsm.core.caching modules not yet implemented (Phase 6)', allow_module_level=True)
 
-import pytest
 import asyncio
 import time
 from typing import Dict, Any, List, Callable

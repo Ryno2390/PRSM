@@ -25,9 +25,17 @@ async def test_model_listing():
     # Create test accounts with sufficient balance in the AtomicFTNSService database
     from prsm.economy.tokenomics.atomic_ftns_service import get_atomic_ftns_service
     from decimal import Decimal as _D
+    import time as _time
     ftns = await get_atomic_ftns_service()
     for _uid in ["model_owner_1", "model_owner_2", "buyer_1", "dynamic_owner", "dynamic_buyer"]:
         await ftns.ensure_account_exists(_uid, initial_balance=_D("10000"))
+        # Also mint to ensure sufficient balance regardless of prior state
+        await ftns.mint_tokens_atomic(
+            to_user_id=_uid,
+            amount=_D("10000"),
+            idempotency_key=f"test_setup_{_uid}_{int(_time.time())}",
+            description="Test setup funding"
+        )
     
     # Create pricing model
     pricing = PricingModel(
@@ -75,9 +83,17 @@ async def test_marketplace_transactions():
     # Ensure test accounts exist with balance for listing fees + transaction costs
     from prsm.economy.tokenomics.atomic_ftns_service import get_atomic_ftns_service
     from decimal import Decimal as _D
+    import time as _time
     ftns = await get_atomic_ftns_service()
     for _uid in ["model_owner_2", "buyer_1"]:
         await ftns.ensure_account_exists(_uid, initial_balance=_D("10000"))
+        # Also mint to ensure sufficient balance regardless of prior state
+        await ftns.mint_tokens_atomic(
+            to_user_id=_uid,
+            amount=_D("10000"),
+            idempotency_key=f"test_txn_{_uid}_{int(_time.time())}",
+            description="Test transaction funding"
+        )
 
     # Create a second listing for transactions
     pricing2 = PricingModel(
@@ -319,9 +335,16 @@ async def test_dynamic_pricing():
     # Ensure test accounts exist with balance
     from prsm.economy.tokenomics.atomic_ftns_service import get_atomic_ftns_service
     from decimal import Decimal as _D
+    import time as _time
     ftns = await get_atomic_ftns_service()
     for _uid in ["dynamic_owner", "dynamic_buyer"]:
         await ftns.ensure_account_exists(_uid, initial_balance=_D("10000"))
+        await ftns.mint_tokens_atomic(
+            to_user_id=_uid,
+            amount=_D("10000"),
+            idempotency_key=f"test_dyn_{_uid}_{int(_time.time())}",
+            description="Test dynamic pricing funding"
+        )
 
     # Create listing with dynamic pricing
     dynamic_pricing = PricingModel(

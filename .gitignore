@@ -220,6 +220,9 @@ dist/
 /archive/
 # Allow planning/archive (completed plan docs belong in the repo)
 !planning/archive/
+# Examples/demos archive directories - development artifacts, not for repo
+examples_and_demos/archive/
+examples_and_demos/demos/analogical_reasoning/archive/
 
 # NWTN Data Files - exclude corpus and processed data
 prsm/nwtn/corpus/

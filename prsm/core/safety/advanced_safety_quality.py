@@ -34,7 +34,7 @@ import structlog
 from prsm.compute.teachers.seal import SEALService
 from prsm.compute.teachers.rlt.quality_monitor import QualityMetrics, QualityMonitor
 from prsm.core.monitoring.rlt_performance_monitor import RLTPerformanceMonitor, RLTMetrics
-from ..benchmarking.rlt_evaluation_benchmark import EvaluationProblem, TeachingEvaluationResult
+from prsm.compute.benchmarking.rlt_evaluation_benchmark import EvaluationProblem, TeachingEvaluationResult
 
 logger = structlog.get_logger(__name__)
 

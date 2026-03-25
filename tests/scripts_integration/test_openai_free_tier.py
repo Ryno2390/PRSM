@@ -11,7 +11,7 @@ Optimized test for OpenAI free tier with:
 """
 
 import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
+pytest.skip('OpenAIClient not implemented - use EnhancedOpenAIClient from enhanced_openai_client.py (Phase 6)', allow_module_level=True)
 
 import asyncio
 import json

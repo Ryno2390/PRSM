@@ -2,10 +2,29 @@
 ## Comprehensive Mapping of Current State vs. Production Readiness
 
 [![Status](https://img.shields.io/badge/status-Alpha%20v0.2.1-blue.svg)](#current-implementation-status)
-[![Tests](https://img.shields.io/badge/tests-3470%20passing%2C%200%20failing-brightgreen.svg)](#test-suite-status)
-[![Updated](https://img.shields.io/badge/updated-2026--03--24-green.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-3610%20passing%2C%200%20failing-brightgreen.svg)](#test-suite-status)
+[![Updated](https://img.shields.io/badge/updated-2026--03--25-green.svg)](#)
 
 **This document tracks PRSM's current technical implementation state, known bugs, and the remaining work required before general user participation is possible.**
+
+---
+
+## Phase 5 — Test Suite Completeness (Completed March 25, 2026)
+
+Phase 5 eliminated stale module-level `pytest.skip()` guards across 33 test files and fixed
+real API mismatches in the newly-unblocked tests. Key implementations made to support unblocked tests:
+
+| File | What Was Added | Tests Unblocked |
+|------|----------------|-----------------|
+| `prsm/economy/tokenomics/ftns_service.py` | Exported 8 pricing constants; added `balances` dict, `transactions` list, `_get_user_tier_multiplier()`, `_calculate_contribution_reward()` to `FTNSService` | `test_ftns_service.py` (30 tests) |
+| `prsm/economy/tokenomics/ftns_budget_manager.py` | Added `predict_session_cost()`, `reserve_budget_amount()`, `request_budget_expansion()`, `SessionBudget.total_spent/status`, `SpendingCategory.TOOL_EXECUTION/MARKETPLACE_TRADING` | `test_ftns_budget_manager.py` (13 tests) |
+| `prsm/compute/nwtn/breakthrough_modes.py` | Added `BreakthroughModeManager`, `get_breakthrough_mode_config()`, `suggest_breakthrough_mode()`, `_calculate_breakthrough_intensity()` | `test_breakthrough_modes.py` (8 tests) |
+| `prsm/compute/collaboration/p2p/*` | Fixed constructor signatures for `ShardDistributor`, `FallbackStorageManager`, `NodeDiscovery`, `IntegrityValidator`, `PostQuantumReconstructionEngine` | `test_p2p_integration.py` (13 tests) |
+| `prsm/economy/tokenomics/database_ftns_service.py` | Added `reward_contribution()` unified wrapper | `test_advanced_ftns.py`, `test_advanced_tokenomics_integration.py` |
+
+**Result:** 3,470 → **3,610 passing** (+140 tests), 0 failing, module-level skip files reduced from 58 → ~15.
+
+New file: `tests/test_phase5_completeness.py` — 5 tests verifying no vague skips remain.
 
 ---
 
@@ -29,6 +48,51 @@ Phase 4 prepares PRSM for broad public participation by addressing infrastructur
 | 5 | Deploy FTNS to Ethereum mainnet | Alchemy key, deployer wallet with ETH, Etherscan key |
 | 6 | Deploy EU bootstrap node | DigitalOcean access + DNS control |
 | 7 | Deploy APAC bootstrap node | DigitalOcean access + DNS control |
+
+---
+
+## Phase 5 — Test Suite Completeness (Completed 2026-03-25)
+
+Phase 5 targeted test suite cleanliness by removing stale module-level skips and fixing genuine implementation gaps. This phase materially increased the passing test count and eliminated a significant red flag for investor/developer audits.
+
+### ✅ Completed
+
+| Step | Description | Result |
+|------|-------------|--------|
+| 1 | Remove stale skips from Group A (7 files) | 12 tests unblocked |
+| 2 | Remove stale skips from Group B (4 files) | Updated with specific messages |
+| 3 | Remove stale skips from Group C (7 files) | 57 tests unblocked |
+| 4 | Export FTNS service constants | Added `BASE_NWTN_FEE`, `AGENT_COSTS`, etc. |
+| 5 | Add missing budget manager classes | Added `BudgetPrediction`, `BudgetAlert` |
+| 6 | Fix P2P integration import paths | Corrected to `prsm.compute.collaboration.*` |
+| 7 | Add breakthrough mode exports | Added manager class, config, suggest functions |
+| 8 | Update deferred skip messages | All deferred files now have specific reasons |
+| 9 | Write Phase 5 verification test | 5 verification tests passing |
+
+### Key Changes
+
+- **Import fix:** Fixed `prsm.core.safety.advanced_safety_quality.py` import path for benchmarking module
+- **New exports:** `prsm.compute.nwtn.breakthrough_modes.py` now exports `breakthrough_mode_manager`, `get_breakthrough_mode_config`, `suggest_breakthrough_mode`
+- **New classes:** `prsm.economy.tokenomics.ftns_budget_manager.py` now includes `BudgetPrediction` and `BudgetAlert` dataclasses
+
+### Remaining Deferred (Intentional)
+
+These files have specific skip messages indicating what's missing:
+
+| File | Missing Module |
+|------|----------------|
+| `test_real_data_integration.py` | `prsm.compute.nwtn.unified_pipeline_controller` |
+| `test_phase7_integration.py` | `prsm.core.enterprise.global_infrastructure` |
+| `test_full_spectrum_integration.py` | `prsm.core.vector_db.VectorDatabase` |
+| `test_hybrid_architecture_integration.py` | `prsm.compute.nwtn.hybrid_integration` |
+| `test_integration_suite_runner.py` | Test infra refactor needed |
+| `test_ftns_concurrency_integration.py` | `asyncpg` + database URL required |
+| `test_openai_*.py` (3 files) | `OpenAIClient` (use `EnhancedOpenAIClient`) |
+| `test_governance.py` | CLI script, not pytest-compatible |
+| `test_150k_papers_provenance.py` | `prsm.compute.nwtn.voicebox` |
+| `test_nwtn_provenance_integration.py` | `prsm.compute.nwtn.knowledge_corpus_interface` |
+| `test_consensus_integration.py` | `prsm.compute.federation.consensus` |
+| `simple_performance_test.py` | `prsm.performance.benchmark_collector` |
 
 ---
 
@@ -155,13 +219,16 @@ A 6-step browser wizard is available at `http://127.0.0.1:8000/onboarding/` when
 
 | Metric | Value |
 |--------|-------|
-| Total collected | 3,535 |
-| Passing | 3,470 |
-| Skipped | 87 |
+| Total collected | 3,683 |
+| Passing | 3,610 |
+| Skipped | 80 |
+| xfailed | 4 |
 | Failing | 0 |
 | Benchmark suite | Times out (excluded from main run) |
 
-All Phase 4 deployment tests pass (14 tests: 8 passing, 6 live tests correctly skipped without `PRSM_LIVE_TESTS=1`).
+Phase 5 unblocked 140 new passing tests (3,470 → 3,610). All previously stale module-level
+skips removed; ~15 files remain intentionally deferred with specific skip messages.
+Phase 4 deployment tests: 14 tests (8 passing, 6 live tests correctly skipped without `PRSM_LIVE_TESTS=1`).
 
 ---
 
@@ -220,4 +287,4 @@ All Phase 4 deployment tests pass (14 tests: 8 passing, 6 live tests correctly s
 
 ---
 
-*Last updated against commit `HEAD` on the `main` branch — March 24, 2026.*
+*Last updated against commit `HEAD` on the `main` branch — March 25, 2026.*

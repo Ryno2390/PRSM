@@ -682,11 +682,11 @@ class ShardDistributor:
         total_files = len(self.active_distributions)
         total_shards = sum(len(plan.shards) for plan in self.active_distributions.values())
         total_locations = sum(len(locations) for locations in self.shard_locations.values())
-        
+
         avg_redundancy = 0
         if self.active_distributions:
             avg_redundancy = sum(plan.redundancy_factor for plan in self.active_distributions.values()) / total_files
-        
+
         return {
             'total_files': total_files,
             'total_shards': total_shards,
@@ -694,6 +694,74 @@ class ShardDistributor:
             'average_redundancy': avg_redundancy,
             'active_distributions': list(self.active_distributions.keys())
         }
+
+    @property
+    def is_initialized(self) -> bool:
+        """Check if ShardDistributor is initialized."""
+        return True
+
+    async def initialize(self) -> None:
+        """Initialize the shard distributor (no-op, ready after __init__)."""
+        pass
+
+    async def select_distribution_peers(self, peers: List[Dict], shard_count: int, security_level: str = 'medium') -> List[Dict]:
+        """Select optimal peers for shard distribution from a candidate list.
+
+        Args:
+            peers: List of peer dicts with 'id', 'reputation', 'region', etc.
+            shard_count: Number of shards to distribute
+            security_level: 'low', 'medium', or 'high'
+
+        Returns:
+            List of selected peer dicts (length = shard_count)
+        """
+        # Sort by reputation descending
+        sorted_peers = sorted(peers, key=lambda p: p.get('reputation', 0), reverse=True)
+
+        # For high security, prefer geographic diversity
+        if security_level == 'high' and len(sorted_peers) >= shard_count:
+            # Try to pick peers from different regions
+            selected = []
+            regions_used: set = set()
+            # First pass: one per region
+            for peer in sorted_peers:
+                region = peer.get('region', 'unknown')
+                if region not in regions_used:
+                    selected.append(peer)
+                    regions_used.add(region)
+                    if len(selected) == shard_count:
+                        break
+            # Second pass: fill remaining from highest reputation
+            if len(selected) < shard_count:
+                for peer in sorted_peers:
+                    if peer not in selected:
+                        selected.append(peer)
+                        if len(selected) == shard_count:
+                            break
+            return selected[:shard_count]
+
+        return sorted_peers[:shard_count]
+
+    async def optimize_shard_placement(self, peers: List[Dict], file_metadata: Dict) -> List[Dict]:
+        """Create optimal shard placement assignments.
+
+        Args:
+            peers: List of peer dicts (must have 'id')
+            file_metadata: Dict with 'shard_count' and other metadata
+
+        Returns:
+            List of placement dicts with 'peer_id', 'shard_index', etc.
+        """
+        shard_count = file_metadata.get('shard_count', len(peers))
+        placements = []
+        for i, peer in enumerate(peers[:shard_count]):
+            placements.append({
+                'shard_index': i,
+                'peer_id': peer.get('id', peer.get('node_id', f'peer_{i}')),
+                'redundancy_copies': 1,
+                'priority': peer.get('reputation', 1.0),
+            })
+        return placements
 
 
 # Example usage

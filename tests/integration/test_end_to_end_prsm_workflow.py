@@ -17,9 +17,6 @@ This test suite validates:
 - Performance under realistic loads
 """
 
-import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
-
 import asyncio
 import pytest
 import uuid
@@ -33,6 +30,14 @@ import time
 from prsm.core.models import UserInput, PRSMResponse, AgentType
 from prsm.core.config import get_settings
 from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
+
+try:
+    from tests.fixtures.nwtn_mocks import MockContextManager, MockFTNSService, MockIPFSClient, MockModelRegistry
+except ImportError:
+    import sys
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+    from tests.fixtures.nwtn_mocks import MockContextManager, MockFTNSService, MockIPFSClient, MockModelRegistry
 
 # Agent pipeline imports
 from prsm.compute.agents.base import BaseAgent
@@ -54,8 +59,13 @@ class TestEndToEndPRSMWorkflow:
     
     @pytest.fixture(scope="class")
     async def orchestrator(self):
-        """Initialize NWTN orchestrator"""
-        return NWTNOrchestrator()
+        """Initialize NWTN orchestrator with mock dependencies"""
+        return NWTNOrchestrator(
+            context_manager=MockContextManager(),
+            ftns_service=MockFTNSService(),
+            ipfs_client=MockIPFSClient(),
+            model_registry=MockModelRegistry()
+        )
     
     @pytest.fixture(scope="class")
     async def marketplace_service(self):
@@ -102,7 +112,7 @@ class TestEndToEndPRSMWorkflow:
             context_allocation=200.0,
             max_execution_time=120.0,
             quality_threshold=0.9,
-            preferred_agents=[AgentType.RESEARCH_AGENT, AgentType.ANALYSIS_AGENT]
+            preferred_agents=[AgentType.ARCHITECT, AgentType.COMPILER]
         )
     
     @pytest.fixture

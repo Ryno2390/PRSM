@@ -5,7 +5,7 @@ Tests the core performance measurement functionality directly.
 """
 
 import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
+pytest.skip('prsm.performance.benchmark_collector module not yet implemented (Phase 6)', allow_module_level=True)
 
 import asyncio
 import sys

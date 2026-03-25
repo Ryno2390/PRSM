@@ -5,9 +5,6 @@ Test the complete 5-layer agent system with NWTN orchestrator
 Phase 1 / Week 4 - Agent Foundation Layer Testing
 """
 
-import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
-
 import asyncio
 import sys
 from typing import Dict, Any
@@ -38,10 +35,11 @@ from tests.fixtures.nwtn_mocks import (
 )
 
 
-class AgentFrameworkTester:
+class TestAgentFramework:
     """Test the complete agent framework"""
-    
-    def __init__(self):
+
+    def setup_method(self):
+        """Setup for each test method"""
         self.agents = {}
         # Initialize orchestrator with mock services for testing
         self.orchestrator = NWTNOrchestrator(

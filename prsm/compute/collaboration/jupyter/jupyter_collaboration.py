@@ -450,7 +450,11 @@ class JupyterCollaboration:
         if notebook_id not in self.notebook_connections:
             return
         
-        message = json.dumps(change)
+        def _default_serializer(obj):
+            if hasattr(obj, 'isoformat'):
+                return obj.isoformat()
+            return str(obj)
+        message = json.dumps(change, default=_default_serializer)
         disconnected = []
         
         for connection in self.notebook_connections[notebook_id]:

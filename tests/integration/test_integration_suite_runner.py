@@ -15,7 +15,7 @@ This runner:
 """
 
 import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
+pytest.skip('Integration suite runner requires refactoring for relative test imports (Phase 6)', allow_module_level=True)
 
 import asyncio
 import json

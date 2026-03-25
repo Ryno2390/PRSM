@@ -16,12 +16,9 @@ import pytest
 
 sys.path.insert(0, '.')
 
-try:
-    from prsm.compute.nwtn.meta_reasoning_engine import MetaReasoningEngine, ThinkingMode
-    from prsm.compute.nwtn.external_storage_config import get_external_knowledge_base
-    from prsm.compute.nwtn.breakthrough_modes import BreakthroughMode
-except (ImportError, ModuleNotFoundError) as e:
-    pytest.skip("NWTN meta_reasoning_engine module not yet implemented", allow_module_level=True)
+from prsm.compute.nwtn.meta_reasoning_engine import MetaReasoningEngine, ThinkingMode
+from prsm.compute.nwtn.external_storage_config import get_external_knowledge_base
+from prsm.compute.nwtn.breakthrough_modes import BreakthroughMode
 
 async def test_direct_nwtn_prompt_1():
     """Direct test of NWTN meta-reasoning with full corpus access"""

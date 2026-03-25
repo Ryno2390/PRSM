@@ -18,9 +18,6 @@ This test suite validates:
 - Edge case scenario handling
 """
 
-import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
-
 import asyncio
 import pytest
 import uuid
@@ -39,6 +36,14 @@ from prsm.core.models import UserInput, PRSMResponse
 from prsm.core.config import get_settings
 from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
 
+try:
+    from tests.fixtures.nwtn_mocks import MockContextManager, MockFTNSService, MockIPFSClient, MockModelRegistry
+except ImportError:
+    import sys
+    import os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+    from tests.fixtures.nwtn_mocks import MockContextManager, MockFTNSService, MockIPFSClient, MockModelRegistry
+
 # Service imports
 from prsm.economy.marketplace.real_marketplace_service import RealMarketplaceService
 from prsm.economy.tokenomics.database_ftns_service import DatabaseFTNSService
@@ -53,8 +58,13 @@ class TestSystemResilienceIntegration:
     
     @pytest.fixture(scope="class")
     def orchestrator(self):
-        """Initialize orchestrator for testing"""
-        return NWTNOrchestrator()
+        """Initialize orchestrator for testing with mock dependencies"""
+        return NWTNOrchestrator(
+            context_manager=MockContextManager(),
+            ftns_service=MockFTNSService(),
+            ipfs_client=MockIPFSClient(),
+            model_registry=MockModelRegistry()
+        )
     
     @pytest.fixture(scope="class")
     def marketplace_service(self):
@@ -535,7 +545,12 @@ class TestSystemResilienceIntegration:
             ))
             
             # Simulate service restart by creating new instances
-            new_orchestrator = NWTNOrchestrator()
+            new_orchestrator = NWTNOrchestrator(
+                context_manager=MockContextManager(),
+                ftns_service=MockFTNSService(),
+                ipfs_client=MockIPFSClient(),
+                model_registry=MockModelRegistry()
+            )
             new_marketplace = RealMarketplaceService()
             
             # Test operation with new instances
@@ -640,7 +655,12 @@ async def run_system_resilience_tests():
     
     try:
         # Initialize services
-        orchestrator = NWTNOrchestrator()
+        orchestrator = NWTNOrchestrator(
+            context_manager=MockContextManager(),
+            ftns_service=MockFTNSService(),
+            ipfs_client=MockIPFSClient(),
+            model_registry=MockModelRegistry()
+        )
         marketplace_service = RealMarketplaceService()
         ftns_service = DatabaseFTNSService()
         api_client = TestClient(app)

@@ -75,10 +75,10 @@ class TestFTNSService:
         # Mock premium user tier with 0.8 multiplier (20% discount)
         with patch.object(ftns_service, '_get_user_tier_multiplier', return_value=0.8):
             cost = await ftns_service.calculate_context_cost(mock_session, 100)
-            
-            expected_cost = 100 * CONTEXT_UNIT_COST * 0.8  # 10.0 * 0.8 = 8.0
+
+            expected_cost = float(100 * CONTEXT_UNIT_COST * Decimal('0.8'))  # 10.0 * 0.8 = 8.0
             assert cost == expected_cost
-    
+
     @pytest.mark.asyncio
     async def test_calculate_context_cost_with_complexity(self, ftns_service, mock_session):
         """Test context cost calculation with complexity multiplier using mock"""
@@ -86,20 +86,20 @@ class TestFTNSService:
         mock_session_with_complexity = Mock()
         mock_session_with_complexity.user_id = "test_user_001"
         mock_session_with_complexity.complexity_estimate = 0.5  # 50% complexity increase
-        
+
         with patch.object(ftns_service, '_get_user_tier_multiplier', return_value=1.0):
             cost = await ftns_service.calculate_context_cost(mock_session_with_complexity, 100)
-            
+
             # Base cost * complexity multiplier: 10.0 * (1.0 + 0.5 * 0.5) = 10.0 * 1.25 = 12.5
-            expected_cost = 100 * CONTEXT_UNIT_COST * 1.25
+            expected_cost = float(100 * CONTEXT_UNIT_COST * Decimal('1.25'))
             assert cost == expected_cost
     
     @pytest.mark.parametrize("context_units,expected_base_cost", [
         (0, 0.0),
-        (1, 0.1),
-        (10, 1.0),
-        (100, 10.0),
-        (1000, 100.0),
+        (1, float(Decimal('1') * Decimal('0.1'))),
+        (10, float(Decimal('10') * Decimal('0.1'))),
+        (100, float(Decimal('100') * Decimal('0.1'))),
+        (1000, float(Decimal('1000') * Decimal('0.1'))),
     ])
     @pytest.mark.asyncio
     async def test_calculate_context_cost_parametrized(
@@ -116,10 +116,10 @@ class TestFTNSService:
         with patch.object(ftns_service, '_get_user_tier_multiplier', return_value=1.0):
             # Test with fractional context units that require precision
             cost = await ftns_service.calculate_context_cost(mock_session, 333)
-            
+
             # Should maintain precision: 333 * 0.1 = 33.3 exactly
-            expected_cost = 33.3
-            assert cost == expected_cost
+            expected_cost = float(Decimal('333') * CONTEXT_UNIT_COST)
+            assert abs(cost - expected_cost) < 1e-8
             assert len(str(cost).split('.')[-1]) <= 8  # Max 8 decimal places
     
     # === Context Charging Tests ===
@@ -131,10 +131,10 @@ class TestFTNSService:
         ftns_service.balances[user_id] = mock_balance
         
         result = await ftns_service.charge_context_access(user_id, 100)
-        
+
         assert result is True
         # Balance should be reduced by cost (100 * 0.1 = 10.0)
-        assert ftns_service.balances[user_id].balance == 990.0
+        assert float(ftns_service.balances[user_id].balance) == 990.0
     
     @pytest.mark.asyncio
     async def test_charge_context_access_insufficient_balance(self, ftns_service, mock_balance):
@@ -145,10 +145,10 @@ class TestFTNSService:
         ftns_service.balances[user_id] = mock_balance
         
         result = await ftns_service.charge_context_access(user_id, 100)
-        
+
         assert result is False
         # Balance should remain unchanged
-        assert ftns_service.balances[user_id].balance == 5.0
+        assert float(ftns_service.balances[user_id].balance) == 5.0
     
     @pytest.mark.asyncio
     async def test_charge_context_access_creates_transaction(self, ftns_service, mock_balance):
@@ -226,8 +226,8 @@ class TestFTNSService:
         
         balance = await ftns_service.get_user_balance(user_id)
         assert balance.user_id == user_id
-        assert balance.balance == 0.0
-        assert balance.locked_balance == 0.0
+        assert float(balance.balance) == 0.0
+        assert float(balance.locked_balance) == 0.0
         assert user_id in ftns_service.balances
     
     @pytest.mark.asyncio
@@ -235,20 +235,20 @@ class TestFTNSService:
         """Test balance update - adding funds"""
         user_id = "test_user_001"
         ftns_service.balances[user_id] = mock_balance
-        original_balance = mock_balance.balance
-        
+        original_balance = float(mock_balance.balance)
+
         await ftns_service._update_balance(user_id, 100.0)
-        assert ftns_service.balances[user_id].balance == original_balance + 100.0
-    
+        assert float(ftns_service.balances[user_id].balance) == original_balance + 100.0
+
     @pytest.mark.asyncio
     async def test_update_balance_subtract(self, ftns_service, mock_balance):
         """Test balance update - subtracting funds"""
         user_id = "test_user_001"
         ftns_service.balances[user_id] = mock_balance
-        original_balance = mock_balance.balance
-        
+        original_balance = float(mock_balance.balance)
+
         await ftns_service._update_balance(user_id, -50.0)
-        assert ftns_service.balances[user_id].balance == original_balance - 50.0
+        assert float(ftns_service.balances[user_id].balance) == original_balance - 50.0
     
     @pytest.mark.asyncio
     async def test_reward_contribution_creates_transaction(self, ftns_service):
@@ -262,7 +262,7 @@ class TestFTNSService:
         transaction = ftns_service.transactions[0]
         assert transaction.to_user == user_id
         assert transaction.from_user is None  # System mint
-        assert transaction.amount == 100.0 * REWARD_PER_MB
+        assert transaction.amount == Decimal('100.0') * REWARD_PER_MB
         assert transaction.transaction_type == "reward"
     
     # === Financial Edge Cases ===
@@ -280,7 +280,7 @@ class TestFTNSService:
         large_units = 1000000  # 1 million context units
         with patch.object(ftns_service, '_get_user_tier_multiplier', return_value=1.0):
             cost = await ftns_service.calculate_context_cost(mock_session, large_units)
-            expected_cost = large_units * CONTEXT_UNIT_COST
+            expected_cost = float(large_units * CONTEXT_UNIT_COST)
             assert cost == expected_cost
     
     @pytest.mark.asyncio
@@ -289,12 +289,12 @@ class TestFTNSService:
         user_id = "test_user_001"
         balance = FTNSBalance(user_id=user_id, balance=10.0)
         ftns_service.balances[user_id] = balance
-        
+
         # Try to charge more than available (200 * 0.1 = 20.0 > 10.0)
         result = await ftns_service.charge_context_access(user_id, 200)
-        
+
         assert result is False
-        assert ftns_service.balances[user_id].balance == 10.0  # Unchanged
+        assert float(ftns_service.balances[user_id].balance) == 10.0  # Unchanged
     
     # === Integration with Core Models ===
     
@@ -333,7 +333,7 @@ class TestFTNSService:
             # Current implementation doesn't validate negative units, just calculates cost
             cost = await ftns_service.calculate_context_cost(mock_session, -10)
             # Should return negative cost for negative units
-            expected_cost = -10 * CONTEXT_UNIT_COST
+            expected_cost = float(-10 * CONTEXT_UNIT_COST)
             assert cost == expected_cost
 
 
@@ -370,4 +370,4 @@ class TestFTNSServiceIntegration:
         assert hasattr(transaction, 'transaction_type')
         assert hasattr(transaction, 'created_at')
         assert transaction.to_user == user_id
-        assert transaction.amount == 25.0 * REWARD_PER_MB
+        assert transaction.amount == Decimal('25.0') * REWARD_PER_MB

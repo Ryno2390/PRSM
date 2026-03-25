@@ -31,7 +31,7 @@ try:
     from prsm.compute.nwtn.hybrid_integration import HybridNWTNManager
     from prsm.core.models import AgentTask, AgentResponse
 except (ImportError, ModuleNotFoundError) as e:
-    pytest.skip("AgentTask not found in core.models - model structure changed", allow_module_level=True)
+    pytest.skip("prsm.compute.nwtn.hybrid_integration not yet implemented (Phase 6)", allow_module_level=True)
 
 
 class TestHybridArchitectureIntegration:

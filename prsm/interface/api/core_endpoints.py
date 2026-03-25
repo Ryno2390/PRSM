@@ -226,9 +226,14 @@ def _register_health_endpoint(app: FastAPI) -> None:
         def _is_not_configured(error: str) -> bool:
             return any(marker in error for marker in _NOT_CONFIGURED_MARKERS)
 
+        from prsm.core.config import get_settings as _get_settings
+        _settings = _get_settings()
+        _version = getattr(_settings, 'PRSM_VERSION', getattr(_settings, 'VERSION', '0.2.0'))
+
         health_status: Dict[str, Any] = {
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
+            "version": _version,
             "components": {}
         }
 

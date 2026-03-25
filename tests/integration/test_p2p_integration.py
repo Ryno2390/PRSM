@@ -13,14 +13,12 @@ has access to complete file data.
 """
 
 import pytest
-pytest.skip('Module dependencies not yet fully implemented', allow_module_level=True)
-
-import pytest
 import asyncio
 import tempfile
 import os
 import json
 import hashlib
+import time
 from unittest.mock import Mock, patch, AsyncMock
 from pathlib import Path
 import logging
@@ -30,18 +28,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Import the components we're testing
-import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'prsm'))
-
-from collaboration.p2p.node_discovery import NodeDiscovery
-from collaboration.p2p.shard_distribution import ShardDistributor
-from collaboration.p2p.bandwidth_optimization import BandwidthOptimizer
-from collaboration.p2p.node_reputation import ReputationSystem
-from collaboration.p2p.fallback_storage import FallbackStorageManager
-from collaboration.security.key_management import DistributedKeyManager
-from collaboration.security.access_control import PostQuantumAccessController
-from collaboration.security.reconstruction_engine import PostQuantumReconstructionEngine
-from collaboration.security.integrity_validator import IntegrityValidator
+from prsm.compute.collaboration.p2p.node_discovery import NodeDiscovery, PeerNode
+from prsm.compute.collaboration.p2p.shard_distribution import ShardDistributor
+from prsm.compute.collaboration.p2p.bandwidth_optimization import BandwidthOptimizer
+from prsm.compute.collaboration.p2p.node_reputation import ReputationSystem
+from prsm.compute.collaboration.p2p.fallback_storage import FallbackStorageManager
+from prsm.compute.collaboration.security.key_management import DistributedKeyManager
+from prsm.compute.collaboration.security.access_control import PostQuantumAccessController
+from prsm.compute.collaboration.security.reconstruction_engine import PostQuantumReconstructionEngine
+from prsm.compute.collaboration.security.integrity_validator import IntegrityValidator
 
 
 class TestP2PIntegration:
@@ -68,24 +63,31 @@ class TestP2PIntegration:
         return NodeDiscovery()
     
     @pytest.fixture
-    def shard_distributor(self):
+    def shard_distributor(self, node_discovery):
         """Initialize Shard Distributor component"""
-        return ShardDistributor()
-    
+        return ShardDistributor(node_discovery=node_discovery)
+
     @pytest.fixture
     def bandwidth_optimizer(self):
         """Initialize Bandwidth Optimizer component"""
         return BandwidthOptimizer()
-    
+
     @pytest.fixture
     def reputation_system(self):
         """Initialize Reputation System component"""
         return ReputationSystem()
-    
+
     @pytest.fixture
-    def fallback_storage(self, temp_dir):
-        """Initialize Fallback Storage Manager component"""
-        return FallbackStorageManager(storage_path=temp_dir)
+    def fallback_storage(self):
+        """Initialize Fallback Storage Manager component with a mock IPFS client"""
+        from prsm.compute.collaboration.p2p.fallback_storage import IPFSClient, IPFSNode
+        mock_node = IPFSNode(
+            node_id="test-node-1",
+            api_url="http://localhost:5001",
+            gateway_url="http://localhost:8080"
+        )
+        ipfs_client = IPFSClient(nodes=[mock_node])
+        return FallbackStorageManager(ipfs_client=ipfs_client)
     
     @pytest.mark.asyncio
     async def test_full_p2p_network_initialization(self, node_discovery, shard_distributor, 
@@ -120,8 +122,17 @@ class TestP2PIntegration:
         ]
         
         # Add peers to discovery system
+        import time
         for peer in mock_peers:
-            await node_discovery.add_peer(peer)
+            peer_node = PeerNode(
+                node_id=peer['id'],
+                ip_address=peer['address'],
+                port=peer['port'],
+                public_key=f"pubkey_{peer['id']}",
+                last_seen=time.time(),
+                reputation_score=peer['reputation']
+            )
+            node_discovery.add_peer(peer_node)
             await reputation_system.update_reputation(peer['id'], peer['reputation'])
         
         # Test peer discovery
@@ -227,26 +238,38 @@ class TestP2PIntegration:
 
 class TestSecurityIntegration:
     """Integration tests for security components"""
-    
+
     @pytest.fixture
-    def key_manager(self, temp_dir):
+    def temp_dir(self):
+        """Create temporary directory for test files"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            yield tmp_dir
+
+    @pytest.fixture
+    def key_manager(self):
         """Initialize Distributed Key Manager"""
-        return DistributedKeyManager(storage_path=temp_dir)
-    
+        return DistributedKeyManager(node_id="test-node-key-manager")
+
     @pytest.fixture
-    def access_controller(self, temp_dir):
+    def access_controller(self, key_manager):
         """Initialize Post-Quantum Access Controller"""
-        return PostQuantumAccessController(config_path=temp_dir)
-    
+        return PostQuantumAccessController(node_id="test-node-access", key_manager=key_manager)
+
     @pytest.fixture
-    def reconstruction_engine(self):
-        """Initialize Post-Quantum Reconstruction Engine"""
-        return PostQuantumReconstructionEngine()
-    
+    def reconstruction_engine(self, key_manager, access_controller):
+        """Initialize Post-Quantum Reconstruction Engine with required dependencies"""
+        from unittest.mock import MagicMock
+        mock_p2p = MagicMock()
+        return PostQuantumReconstructionEngine(
+            key_manager=key_manager,
+            access_controller=access_controller,
+            p2p_network=mock_p2p
+        )
+
     @pytest.fixture
-    def integrity_validator(self):
-        """Initialize Integrity Validator"""
-        return IntegrityValidator()
+    def integrity_validator(self, key_manager):
+        """Initialize Integrity Validator with required key manager"""
+        return IntegrityValidator(key_manager=key_manager)
     
     @pytest.fixture
     def sample_secure_file(self, temp_dir):
@@ -447,20 +470,30 @@ class TestSecurityIntegration:
 
 class TestEndToEndIntegration:
     """End-to-end integration tests simulating real-world workflows"""
-    
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create temporary directory for test files"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            yield tmp_dir
+
     @pytest.mark.asyncio
     async def test_university_industry_collaboration_workflow(self, temp_dir):
         """Test complete university-industry collaboration workflow"""
         logger.info("Testing university-industry collaboration workflow...")
         
         # Initialize all components
+        from unittest.mock import MagicMock
         node_discovery = NodeDiscovery()
-        shard_distributor = ShardDistributor()
-        key_manager = DistributedKeyManager(storage_path=temp_dir)
-        access_controller = PostQuantumAccessController(config_path=temp_dir)
-        reconstruction_engine = PostQuantumReconstructionEngine()
-        integrity_validator = IntegrityValidator()
-        
+        shard_distributor = ShardDistributor(node_discovery=node_discovery)
+        key_manager = DistributedKeyManager(node_id="test-node-e2e")
+        access_controller = PostQuantumAccessController(node_id="test-node-e2e-access", key_manager=key_manager)
+        mock_p2p = MagicMock()
+        reconstruction_engine = PostQuantumReconstructionEngine(
+            key_manager=key_manager, access_controller=access_controller, p2p_network=mock_p2p
+        )
+        integrity_validator = IntegrityValidator(key_manager=key_manager)
+
         await node_discovery.initialize()
         await shard_distributor.initialize()
         
@@ -571,9 +604,13 @@ class TestEndToEndIntegration:
         logger.info("Testing multi-institutional grant collaboration...")
         
         # Initialize components
-        key_manager = DistributedKeyManager(storage_path=temp_dir)
-        access_controller = PostQuantumAccessController(config_path=temp_dir)
-        reconstruction_engine = PostQuantumReconstructionEngine()
+        from unittest.mock import MagicMock
+        key_manager = DistributedKeyManager(node_id="test-node-grant")
+        access_controller = PostQuantumAccessController(node_id="test-node-grant-access", key_manager=key_manager)
+        mock_p2p = MagicMock()
+        reconstruction_engine = PostQuantumReconstructionEngine(
+            key_manager=key_manager, access_controller=access_controller, p2p_network=mock_p2p
+        )
         
         # Scenario: NSF Quantum Computing Initiative grant collaboration
         
@@ -672,7 +709,13 @@ async def test_ui_backend_integration():
 
 class TestPerformanceIntegration:
     """Performance and scalability integration tests"""
-    
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create temporary directory for test files"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            yield tmp_dir
+
     @pytest.mark.asyncio
     async def test_large_file_handling(self, temp_dir):
         """Test handling of large files with sharding"""
@@ -685,8 +728,14 @@ class TestPerformanceIntegration:
         with open(large_file, 'wb') as f:
             f.write(large_content)
         
-        reconstruction_engine = PostQuantumReconstructionEngine()
-        
+        from unittest.mock import MagicMock
+        _km = DistributedKeyManager(node_id="test-perf-km")
+        _ac = PostQuantumAccessController(node_id="test-perf-ac", key_manager=_km)
+        _p2p = MagicMock()
+        reconstruction_engine = PostQuantumReconstructionEngine(
+            key_manager=_km, access_controller=_ac, p2p_network=_p2p
+        )
+
         # Test sharding large file
         with open(large_file, 'rb') as f:
             file_content = f.read()
@@ -720,8 +769,14 @@ class TestPerformanceIntegration:
     async def test_concurrent_operations(self):
         """Test concurrent file operations"""
         logger.info("Testing concurrent operations...")
-        
-        reconstruction_engine = PostQuantumReconstructionEngine()
+
+        from unittest.mock import MagicMock
+        _km = DistributedKeyManager(node_id="test-concurrent-km")
+        _ac = PostQuantumAccessController(node_id="test-concurrent-ac", key_manager=_km)
+        _p2p = MagicMock()
+        reconstruction_engine = PostQuantumReconstructionEngine(
+            key_manager=_km, access_controller=_ac, p2p_network=_p2p
+        )
         
         # Create multiple test files
         test_files = []
