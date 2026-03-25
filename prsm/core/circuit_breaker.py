@@ -551,6 +551,26 @@ class CircuitBreakerOpenException(Exception):
     pass
 
 
+class ServiceUnavailableError(Exception):
+    """
+    Raised when a circuit breaker is OPEN and the external service is unavailable.
+
+    This is an alias for HTTP service calls, providing a more descriptive error
+    name for external service failures. Used primarily in HTTP client integrations.
+
+    Usage:
+        try:
+            result = await breaker.call(external_api_call, **kwargs)
+        except ServiceUnavailableError:
+            # Fall back to secondary service or cached result
+            raise BackendUnavailableError("External API temporarily unavailable")
+    """
+    def __init__(self, service_name: str, message: str = None):
+        self.service_name = service_name
+        self.message = message or f"{service_name} circuit is OPEN - service unavailable"
+        super().__init__(self.message)
+
+
 # Global circuit breaker registry
 circuit_registry = CircuitBreakerRegistry()
 
@@ -560,6 +580,46 @@ circuit_registry = CircuitBreakerRegistry()
 def get_circuit_breaker(name: str, config: CircuitBreakerConfig = None) -> CircuitBreaker:
     """Get or create a circuit breaker"""
     return circuit_registry.get_or_create(name, config)
+
+
+def get_breaker(
+    service_name: str,
+    failure_threshold: int = 5,
+    recovery_timeout: int = 60,
+    success_threshold: int = 2,
+) -> CircuitBreaker:
+    """
+    Get or create a circuit breaker with simplified parameters.
+
+    This is a convenience function for HTTP service circuit breakers with
+    common default configuration. Uses module-level singleton pattern.
+
+    Args:
+        service_name: Unique identifier for the service
+        failure_threshold: Consecutive failures before opening (default: 5)
+        recovery_timeout: Seconds before attempting recovery (default: 60)
+        success_threshold: Successes needed to close from HALF_OPEN (default: 2)
+
+    Returns:
+        CircuitBreaker instance for the service
+
+    Example:
+        from prsm.core.circuit_breaker import get_breaker, ServiceUnavailableError
+
+        breaker = get_breaker("anthropic", failure_threshold=5, recovery_timeout=60)
+
+        async def call_anthropic():
+            try:
+                return await breaker.call(client.messages.create, **kwargs)
+            except CircuitBreakerOpenException:
+                raise ServiceUnavailableError("anthropic")
+    """
+    config = CircuitBreakerConfig(
+        failure_threshold=failure_threshold,
+        recovery_timeout=float(recovery_timeout),
+        success_threshold=success_threshold,
+    )
+    return circuit_registry.get_or_create(service_name, config)
 
 
 async def protected_call(

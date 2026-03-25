@@ -11,7 +11,7 @@ Usage:
     async with backend:
         result = await backend.generate("What is AI?")
         print(result.content)
-        
+
         # Embeddings
         embed_result = await backend.embed("text to embed")
         print(len(embed_result.embedding))
@@ -31,6 +31,13 @@ from .exceptions import (
     BackendAuthenticationError,
     BackendResponseError,
     BackendTimeoutError,
+)
+
+# Circuit breaker for external API calls
+from prsm.core.circuit_breaker import (
+    get_breaker,
+    CircuitBreakerOpenException,
+    ServiceUnavailableError
 )
 
 
@@ -124,7 +131,7 @@ class OpenAIBackend(ModelBackend):
     ):
         """
         Initialize the OpenAI backend.
-        
+
         Args:
             api_key: OpenAI API key (can also be set via OPENAI_API_KEY env var)
             timeout: Request timeout in seconds
@@ -135,6 +142,14 @@ class OpenAIBackend(ModelBackend):
         self.timeout = timeout
         self.base_url = kwargs.get("base_url", self.BASE_URL)
         self._session: Optional[Any] = None
+
+        # Circuit breaker for API calls
+        self._circuit_breaker = get_breaker(
+            "openai",
+            failure_threshold=5,
+            recovery_timeout=60,
+            success_threshold=2
+        )
     
     @property
     def backend_type(self) -> BackendType:
@@ -270,14 +285,15 @@ class OpenAIBackend(ModelBackend):
             payload["presence_penalty"] = kwargs["presence_penalty"]
         if "stop" in kwargs:
             payload["stop"] = kwargs["stop"]
-        
-        try:
+
+        # Define the API call function for circuit breaker
+        async def _make_api_call():
             async with self._session.post(
                 f"{self.base_url}/chat/completions",
                 json=payload
             ) as response:
                 if response.status == 200:
-                    data = await response.json()
+                    return await response.json()
                 elif response.status == 429:
                     retry_after = response.headers.get("retry-after")
                     raise BackendRateLimitError(
@@ -307,9 +323,19 @@ class OpenAIBackend(ModelBackend):
                         backend_type=self.backend_type.value,
                         status_code=response.status
                     )
-            
+
+        try:
+            # Execute with circuit breaker protection
+            try:
+                data = await self._circuit_breaker.call(_make_api_call)
+            except CircuitBreakerOpenException:
+                raise BackendUnavailableError(
+                    "OpenAI API temporarily unavailable (circuit breaker open)",
+                    backend_type=self.backend_type.value
+                )
+
             execution_time = time.time() - start_time
-            
+
             # Parse response
             choices = data.get("choices", [])
             if not choices:
@@ -318,12 +344,12 @@ class OpenAIBackend(ModelBackend):
                     backend_type=self.backend_type.value,
                     response_data=data
                 )
-            
+
             choice = choices[0]
             content = choice.get("message", {}).get("content", "")
-            
+
             usage = data.get("usage", {})
-            
+
             return GenerateResult(
                 content=content,
                 model_id=model,
@@ -337,7 +363,7 @@ class OpenAIBackend(ModelBackend):
                 finish_reason=choice.get("finish_reason", "stop"),
                 metadata={"raw_response": data}
             )
-        
+
         except aiohttp.ClientError as e:
             raise BackendUnavailableError(
                 f"Network error calling OpenAI API: {e}",

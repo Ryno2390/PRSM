@@ -29,6 +29,13 @@ from .exceptions import (
     BackendTimeoutError,
 )
 
+# Circuit breaker for external API calls
+from prsm.core.circuit_breaker import (
+    get_breaker,
+    CircuitBreakerOpenException,
+    ServiceUnavailableError
+)
+
 
 class AnthropicBackend(ModelBackend):
     """
@@ -113,7 +120,7 @@ class AnthropicBackend(ModelBackend):
     ):
         """
         Initialize the Anthropic backend.
-        
+
         Args:
             api_key: Anthropic API key (can also be set via ANTHROPIC_API_KEY env var)
             timeout: Request timeout in seconds
@@ -125,6 +132,14 @@ class AnthropicBackend(ModelBackend):
         self.base_url = kwargs.get("base_url", self.BASE_URL)
         self._session: Optional[Any] = None
         self._models_cache: Dict[str, Any] = {}
+
+        # Circuit breaker for API calls
+        self._circuit_breaker = get_breaker(
+            "anthropic",
+            failure_threshold=5,
+            recovery_timeout=60,
+            success_threshold=2
+        )
     
     @property
     def backend_type(self) -> BackendType:
@@ -256,14 +271,15 @@ class AnthropicBackend(ModelBackend):
             payload["top_k"] = kwargs["top_k"]
         if "stop_sequences" in kwargs:
             payload["stop_sequences"] = kwargs["stop_sequences"]
-        
-        try:
+
+        # Define the API call function for circuit breaker
+        async def _make_api_call():
             async with self._session.post(
                 f"{self.base_url}/messages",
                 json=payload
             ) as response:
                 if response.status == 200:
-                    data = await response.json()
+                    return await response.json()
                 elif response.status == 429:
                     retry_after = response.headers.get("retry-after")
                     raise BackendRateLimitError(
@@ -293,18 +309,28 @@ class AnthropicBackend(ModelBackend):
                         backend_type=self.backend_type.value,
                         status_code=response.status
                     )
-            
+
+        try:
+            # Execute with circuit breaker protection
+            try:
+                data = await self._circuit_breaker.call(_make_api_call)
+            except CircuitBreakerOpenException:
+                raise BackendUnavailableError(
+                    "Anthropic API temporarily unavailable (circuit breaker open)",
+                    backend_type=self.backend_type.value
+                )
+
             execution_time = time.time() - start_time
-            
+
             # Parse response
             content = data.get("content", [{}])
             if isinstance(content, list) and len(content) > 0:
                 text = content[0].get("text", "")
             else:
                 text = ""
-            
+
             usage = data.get("usage", {})
-            
+
             return GenerateResult(
                 content=text,
                 model_id=model,
@@ -318,7 +344,7 @@ class AnthropicBackend(ModelBackend):
                 finish_reason=data.get("stop_reason", "stop"),
                 metadata={"raw_response": data}
             )
-        
+
         except aiohttp.ClientError as e:
             raise BackendUnavailableError(
                 f"Network error calling Anthropic API: {e}",
