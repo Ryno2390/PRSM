@@ -1461,7 +1461,11 @@ class GlobalInfrastructureManager:
             logger.error(f"Error stopping infrastructure manager: {e}")
 
 
-def initialize_global_infrastructure(config: GlobalInfrastructureConfig, 
+# Alias for backward compatibility and test imports
+GlobalInfrastructure = GlobalInfrastructureManager
+
+
+def initialize_global_infrastructure(config: GlobalInfrastructureConfig,
                                    redis_client: aioredis.Redis) -> GlobalInfrastructureManager:
     """Initialize the global infrastructure system"""
     global global_infrastructure
