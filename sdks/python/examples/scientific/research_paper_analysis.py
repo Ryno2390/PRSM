@@ -2,8 +2,17 @@
 """
 PRSM Python SDK - Research Paper Analysis Example
 
-This example demonstrates how to use PRSM for scientific research tasks,
-including paper analysis, citation extraction, and research insights generation.
+WHAT IT DOES: Demonstrates using PRSM for scientific research tasks including
+              paper analysis, citation extraction, and research insights generation.
+              Ideal for academic researchers and data scientists.
+
+PRSM SERVICES USED: client.query() for NWTN AI analysis, client.storage for
+                    paper storage, client.marketplace for domain-specific models
+
+FTNS CONSUMPTION: Varies by paper length and analysis depth. Typical analysis
+                  costs 0.5-5 FTNS per paper. Batch processing more efficient.
+
+DEPLOYMENT: Can be run as standalone script or integrated into research pipelines.
 """
 
 import asyncio

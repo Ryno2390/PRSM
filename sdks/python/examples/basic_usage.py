@@ -2,8 +2,18 @@
 """
 PRSM Python SDK - Basic Usage Example
 
-This example demonstrates the fundamental capabilities of the PRSM Python SDK,
-including model inference, cost optimization, and error handling.
+WHAT IT DOES: Demonstrates fundamental SDK capabilities including model inference,
+              cost optimization, model comparison, streaming, error handling, and
+              budget management.
+
+PRSM SERVICES USED: models.infer(), cost_optimization.optimize_request(),
+                    models.compare(), models.stream(), cost_optimization.get_budget()
+
+FTNS CONSUMPTION: Variable - depends on model selection and query complexity.
+                  Budget management examples show cost control patterns.
+
+NOTE: This example uses an extended API surface. Core functionality is available
+      via client.query(), client.ftns, client.marketplace, client.storage, etc.
 """
 
 import asyncio

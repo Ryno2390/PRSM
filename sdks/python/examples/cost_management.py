@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
 """
 PRSM Python SDK - Cost Management Example
-Demonstrates budget control, cost tracking, and optimization features
+
+WHAT IT DOES: Demonstrates budget control, cost tracking, and optimization features
+              for managing FTNS spending across AI queries and services.
+
+PRSM SERVICES USED: FTNS balance checking, cost estimation, budget tracking
+
+FTNS CONSUMPTION: This example is primarily about managing costs. Minimal FTNS
+                  spent on demonstration queries.
+
+NOTE: Core cost management available via client.ftns.get_balance(),
+      client.estimate_cost(prompt)
 """
 
 import os
