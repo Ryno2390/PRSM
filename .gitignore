@@ -217,7 +217,9 @@ out/
 build/
 dist/
 # Archive folder - local backup only, not for repo
-archive/
+/archive/
+# Allow planning/archive (completed plan docs belong in the repo)
+!planning/archive/
 
 # NWTN Data Files - exclude corpus and processed data
 prsm/nwtn/corpus/
