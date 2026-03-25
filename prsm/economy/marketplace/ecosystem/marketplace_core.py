@@ -753,6 +753,51 @@ class MarketplaceCore:
         
         return results
     
+    def add_integration(self, integration_data: Dict[str, Any]) -> bool:
+        """Add a new integration to the marketplace.
+
+        Args:
+            integration_data: Dictionary containing integration details including:
+                - id: Unique identifier
+                - name: Integration name
+                - type: Integration type (ai_model, plugin, etc.)
+                - description: Integration description
+                - version: Version string
+                - developer_id: Developer identifier
+                - categories: List of categories
+                - pricing_model: Pricing model type
+                - performance_metrics: Optional performance metrics
+
+        Returns:
+            True if integration was added successfully
+        """
+        try:
+            integration_id = integration_data.get('id', str(uuid.uuid4()))
+
+            # Create integration object
+            integration = Integration(
+                integration_id=integration_id,
+                name=integration_data.get('name', 'Unknown'),
+                developer_id=integration_data.get('developer_id', 'unknown'),
+                category=integration_data.get('categories', ['general'])[0] if isinstance(integration_data.get('categories'), list) else 'general',
+                description=integration_data.get('description', ''),
+                integration_type=IntegrationType(integration_data.get('type', 'ai_model')),
+                status=IntegrationStatus.PUBLISHED,
+            )
+
+            # Add to integrations dict
+            self.integrations[integration_id] = integration
+
+            # Index in search engine
+            self.search_engine.index_integration(integration)
+
+            logger.info(f"Added integration: {integration_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to add integration: {e}")
+            return False
+
     def search_integrations(self, query: str, filters: Optional[Dict[str, Any]] = None,
                            sort_by: str = "relevance", limit: int = 20) -> List[Dict[str, Any]]:
         """Search integrations"""

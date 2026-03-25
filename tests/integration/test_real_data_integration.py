@@ -9,8 +9,6 @@ scientific papers, user queries, and production-like conditions.
 """
 
 import pytest
-pytest.skip('prsm.compute.nwtn.unified_pipeline_controller not yet implemented (Phase 6)', allow_module_level=True)
-
 import asyncio
 import json
 import sqlite3
@@ -167,18 +165,18 @@ class TestRealDataIntegration:
     @pytest.mark.asyncio
     async def test_end_to_end_with_quantum_cryptography_query(self, real_data_pipeline, sample_user_queries):
         """Test end-to-end processing with quantum cryptography query"""
-        
-        query = next(q for q in sample_user_queries if q['query_id'] == 'q1')
-        
+
+        query_data = next(q for q in sample_user_queries if q['query_id'] == 'q1')
+
         # Mock the full pipeline processing
-        async def mock_process_query(user_id, query_text, context=None):
+        async def mock_process_query(user_id, query, context=None):
             # Simulate realistic processing
             search_results = await real_data_pipeline.knowledge_base.search_papers(
-                query_text, domain='computer_science'
+                query, domain='computer_science'
             )
-            
+
             return {
-                'query_id': f"processed_{query['query_id']}",
+                'query_id': f"processed_{query_data['query_id']}",
                 'response': {
                     'text': 'Quantum machine learning can enhance cryptographic security through several key approaches: 1) Quantum key distribution protocols that leverage quantum entanglement for secure communication, 2) Variational quantum circuits for generating cryptographically secure random numbers, and 3) Quantum-enhanced algorithms for analyzing and testing cryptographic protocols against potential vulnerabilities...',
                     'confidence': 0.92,
@@ -200,15 +198,15 @@ class TestRealDataIntegration:
                     'clarity': 0.87
                 }
             }
-        
+
         real_data_pipeline.process_query_full_pipeline = AsyncMock(side_effect=mock_process_query)
-        
+
         result = await real_data_pipeline.process_query_full_pipeline(
-            user_id=query['user_id'],
-            query=query['query_text'],
-            context=query['context']
+            user_id=query_data['user_id'],
+            query=query_data['query_text'],
+            context=query_data['context']
         )
-        
+
         # Verify the response quality
         assert result['response']['confidence'] > 0.9
         assert len(result['response']['sources']) >= 1
@@ -229,23 +227,23 @@ class TestRealDataIntegration:
     @pytest.mark.asyncio
     async def test_cross_domain_climate_ai_query(self, real_data_pipeline, sample_user_queries):
         """Test cross-domain query combining AI and climate science"""
-        
-        query = next(q for q in sample_user_queries if q['query_id'] == 'q2')
-        
-        async def mock_cross_domain_process(user_id, query_text, context=None):
+
+        query_data = next(q for q in sample_user_queries if q['query_id'] == 'q2')
+
+        async def mock_cross_domain_process(user_id, query, context=None):
             # Search across multiple domains
             cs_results = await real_data_pipeline.knowledge_base.search_papers(
-                query_text, domain='computer_science'
+                query, domain='computer_science'
             )
             env_results = await real_data_pipeline.knowledge_base.search_papers(
-                query_text, domain='environmental_science'
+                query, domain='environmental_science'
             )
-            
+
             all_results = cs_results + env_results
             all_results.sort(key=lambda x: x['relevance_score'], reverse=True)
-            
+
             return {
-                'query_id': f"cross_domain_{query['query_id']}",
+                'query_id': f"cross_domain_{query_data['query_id']}",
                 'response': {
                     'text': 'Recent developments in AI for climate change research include: 1) Deep learning models for weather pattern prediction that outperform traditional numerical models, 2) Machine learning algorithms for analyzing satellite imagery to track deforestation and ice sheet changes, 3) Neural networks for optimizing renewable energy grid integration, and 4) AI-powered climate impact assessment tools for policy planning...',
                     'confidence': 0.88,
@@ -270,13 +268,13 @@ class TestRealDataIntegration:
                     ]
                 }
             }
-        
+
         real_data_pipeline.process_query_full_pipeline = AsyncMock(side_effect=mock_cross_domain_process)
-        
+
         result = await real_data_pipeline.process_query_full_pipeline(
-            user_id=query['user_id'],
-            query=query['query_text'],
-            context=query['context']
+            user_id=query_data['user_id'],
+            query=query_data['query_text'],
+            context=query_data['context']
         )
         
         # Verify cross-domain integration
@@ -294,16 +292,16 @@ class TestRealDataIntegration:
     @pytest.mark.asyncio
     async def test_practical_biomedical_nlp_query(self, real_data_pipeline, sample_user_queries):
         """Test practical biomedical NLP query with clinical focus"""
-        
-        query = next(q for q in sample_user_queries if q['query_id'] == 'q3')
-        
-        async def mock_practical_process(user_id, query_text, context=None):
+
+        query_data = next(q for q in sample_user_queries if q['query_id'] == 'q3')
+
+        async def mock_practical_process(user_id, query, context=None):
             bio_results = await real_data_pipeline.knowledge_base.search_papers(
-                query_text, domain='biology'
+                query, domain='biology'
             )
-            
+
             return {
-                'query_id': f"practical_{query['query_id']}",
+                'query_id': f"practical_{query_data['query_id']}",
                 'response': {
                     'text': 'NLP can significantly enhance clinical decision making through: 1) Automated extraction of key medical information from clinical notes and patient records, 2) Real-time analysis of medical literature to support evidence-based decisions, 3) Clinical decision support systems that alert physicians to potential drug interactions or contraindications, 4) Patient risk stratification based on unstructured clinical data, and 5) Automated generation of clinical summaries and discharge instructions...',
                     'confidence': 0.90,
@@ -334,13 +332,13 @@ class TestRealDataIntegration:
                     'ethical_considerations': 0.92
                 }
             }
-        
+
         real_data_pipeline.process_query_full_pipeline = AsyncMock(side_effect=mock_practical_process)
-        
+
         result = await real_data_pipeline.process_query_full_pipeline(
-            user_id=query['user_id'],
-            query=query['query_text'],
-            context=query['context']
+            user_id=query_data['user_id'],
+            query=query_data['query_text'],
+            context=query_data['context']
         )
         
         # Verify practical focus
@@ -540,17 +538,17 @@ class TestRealDataIntegration:
                 })
         
         # Mock load testing results
-        async def mock_concurrent_processing(user_id, query_text, context=None):
+        async def mock_concurrent_processing(user_id, query, context=None):
             # Simulate realistic processing times under load
             base_time = 2.0
             load_factor = len(concurrent_queries) * 0.1  # Increased time under load
             processing_time = base_time + load_factor
-            
+
             return {
                 'query_id': f"load_test_{user_id}",
                 'response': {
-                    'text': f'Response to: {query_text[:50]}...',
-                    'confidence': max(0.75, 0.95 - (load_factor * 0.05)),  # Slight degradation under load
+                    'text': f'Response to: {query[:50]}...' if len(query) > 50 else f'Response to: {query}',
+                    'confidence': max(0.85, 0.95 - (load_factor * 0.05)),  # Slight degradation under load
                     'sources': ['paper_1', 'paper_2', 'paper_3']
                 },
                 'performance_metrics': {

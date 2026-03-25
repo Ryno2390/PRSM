@@ -13,8 +13,7 @@ Usage:
 """
 
 import pytest
-pytest.skip('OpenAIClient not implemented - use EnhancedOpenAIClient from enhanced_openai_client.py (Phase 6)', allow_module_level=True)
-
+import os
 import asyncio
 import json
 import sys
@@ -29,11 +28,11 @@ import structlog
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from prsm.compute.agents.executors.api_clients import (
-    OpenAIClient, 
-    ModelExecutionRequest, 
+    ModelExecutionRequest,
     ModelProvider,
     ModelClientRegistry
 )
+from prsm.compute.agents.executors.enhanced_openai_client import EnhancedOpenAIClient
 
 logger = structlog.get_logger(__name__)
 
@@ -49,7 +48,7 @@ class OpenAIIntegrationTester:
     async def setup(self):
         """Initialize the OpenAI client"""
         click.echo("🔧 Setting up OpenAI client...")
-        self.client = OpenAIClient(api_key=self.api_key)
+        self.client = EnhancedOpenAIClient(api_key=self.api_key)
         await self.client.initialize()
         click.echo("✅ OpenAI client initialized")
     

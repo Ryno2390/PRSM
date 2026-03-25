@@ -15,8 +15,6 @@ This runner:
 """
 
 import pytest
-pytest.skip('Integration suite runner requires refactoring for relative test imports (Phase 6)', allow_module_level=True)
-
 import asyncio
 import json
 import time
@@ -26,15 +24,15 @@ from typing import Dict, Any, List, Optional
 import sys
 import os
 
-# Import all integration test modules
-from test_marketplace_production_integration import run_marketplace_integration_tests
-from test_end_to_end_prsm_workflow import run_end_to_end_integration_tests
-from test_api_integration_comprehensive import run_api_integration_tests
-from test_system_resilience_integration import run_system_resilience_tests
+# Import all integration test modules with absolute imports
+from tests.integration.test_marketplace_production_integration import run_marketplace_integration_tests
+from tests.integration.test_end_to_end_prsm_workflow import run_end_to_end_integration_tests
+from tests.integration.test_api_integration_comprehensive import run_api_integration_tests
+from tests.integration.test_system_resilience_integration import run_system_resilience_tests
 
 # Existing integration tests
-from test_complete_prsm_system import main as run_complete_system_test
-from test_system_health import run_system_health_check
+from tests.integration.test_complete_prsm_system import main as run_complete_system_test
+from tests.integration.test_system_health import run_system_health_check
 
 
 class IntegrationTestSuiteRunner:
