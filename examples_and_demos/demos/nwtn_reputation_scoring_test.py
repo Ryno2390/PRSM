@@ -624,6 +624,8 @@ async def run_test(
     await store.open()
     await store.create_session(session_id)
 
+    from prsm.compute.nwtn.team.convergence import ConvergenceTracker
+
     promoter = _build_promoter(fast, bsc_model, n_rounds)
     if not fast:
         info(f"Loading BSC predictor: {bsc_model} (may take 15-30s)")
@@ -631,6 +633,9 @@ async def run_test(
         ok("BSC predictor ready")
     else:
         ok("Fast mode: keyword heuristic BSC active")
+
+    # Convergence tracker — ends session early when all agents signal done
+    convergence = ConvergenceTracker(min_consecutive_rounds=2)
 
     # Log the epsilon schedule so it's visible in output
     from prsm.compute.nwtn.bsc.kl_filter import ProgressiveKLFilter
@@ -770,12 +775,20 @@ async def run_test(
         # Feed responses through BSC
         n_promoted = n_discarded = 0
         for (agent, _, _sys), response in zip(tasks, responses):
+            # Register agent with convergence tracker (idempotent)
+            convergence.register_agent(agent.id)
             if isinstance(response, Exception):
                 warn(f"{agent.id}: call failed — {response}")
                 continue
 
             all_agent_outputs[agent.id].append(response)
             agent_hdr(agent.id, agent.role, agent.model, round_n + 1)
+
+            # Scan for convergence signals before BSC evaluation
+            if isinstance(response, str):
+                converged_now = convergence.scan_output(agent.id, response, round_n)
+                if converged_now:
+                    info(f"{agent.id}: convergence signal detected (R{round_n+1})")
 
             # Split response into chunks (sentences / paragraphs)
             chunks = _split_into_chunks(response)
@@ -805,15 +818,30 @@ async def run_test(
 
         bsc_stats = promoter.stats
         wb_count = await store.entry_count(session_id)
+        converged_agents = convergence.converged_agents()
         round_stats.append({
             "round": round_n + 1,
             "promoted": n_promoted,
             "discarded": n_discarded,
             "epsilon": round(promoter._kl_filter.epsilon, 3),
             "whiteboard_entries": wb_count,
+            "converged_agents": converged_agents,
         })
         ok(f"Round {round_n+1} complete: {n_promoted} promoted, {n_discarded} discarded | "
            f"whiteboard: {wb_count} entries | ε={promoter._kl_filter.epsilon:.3f}")
+
+        # Check for early convergence (all agents signalled completion)
+        if convergence.all_converged() and round_n < n_rounds - 1:
+            summary = convergence.convergence_summary()
+            converged_at = {a: r for a, r in summary['converged'].items()}
+            ok(
+                f"EARLY CONVERGENCE DETECTED at R{round_n+1} — "
+                f"all agents done: {converged_at}"
+            )
+            info("Ending session early — running final synthesis")
+            # Update n_rounds so the progress counter is correct
+            n_rounds = round_n + 1
+            break
 
         # Inject round boundary summary (Fix 4) — gives agents a clear
         # "here is what changed this round" anchor for the next round
@@ -903,6 +931,17 @@ async def run_test(
 #   because round headers are very different from prior whiteboard content.
 
 _ROUND_HEADER_RE = re.compile(r'^ROUND\s+\d+\s*[—\-]\s*[A-Z].*?\n', re.MULTILINE)
+
+# Task description lines injected as part of the round prompt.
+# These lines look like our prompt instructions, not agent responses.
+# Patterns: "Review the ...", "  1. Has your ...", "  2. Has any ...", etc.
+_TASK_DESCRIPTION_RE = re.compile(
+    r'^(Review\s+the\s+|Based on the\s+(shared|latest|above)|'
+    r'\s+\d+\.\s+(Has your|Has any|If all|If issues|Does the|Are there|'
+    r'Produce|Write|Provide|List|Check|Confirm|Validate|Ensure))',
+    re.MULTILINE | re.IGNORECASE,
+)
+
 _PREAMBLE_RE    = re.compile(
     r'^(Sure[,.]|Of course[,.]|Based on the (information|context|whiteboard)|'
     r'I (will|\'ll|can) (help|address|review|implement|analyze)|Let me|Okay[,.])',
@@ -912,17 +951,24 @@ _PREAMBLE_RE    = re.compile(
 
 def pre_filter_prompt_echo(chunk: str) -> str:
     """
-    Strip round-header echoes before BSC evaluation.
+    Strip round-header echoes AND injected task descriptions before BSC.
 
-    Evidence: 9/112 live-test promotions (8%) were our own round headers
-    reflected back by Qwen, scoring 1.00 (maximum surprise) because the
-    header text is very different from the whiteboard content.
+    Two-stage strip (evidence-based from 9-round live test):
+    Stage 1 — Header: ``ROUND N — TASK NAME\\n``
+    Stage 2 — Task description lines: ``Review the coder output...``,
+              ``  1. Has your security concern been addressed?``, etc.
+
+    Without stage 2, the current filter only removed the header line but
+    left the multi-line task instructions, which still reached the BSC as
+    agent-authored content (they are not — they are our own prompts).
 
     Production usage (WhiteboardMonitor API)::
 
         monitor.add_pre_filter(pre_filter_prompt_echo)
     """
-    return _ROUND_HEADER_RE.sub('', chunk).strip()
+    chunk = _ROUND_HEADER_RE.sub('', chunk)
+    chunk = _TASK_DESCRIPTION_RE.sub('', chunk)
+    return chunk.strip()
 
 
 def pre_filter_llm_preamble(chunk: str) -> str:

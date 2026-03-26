@@ -65,6 +65,7 @@ Typical session flow
 from .assembler import AgentTeam, AgentRole, TeamAssembler, TeamMember
 from .branch_manager import BranchManager, BranchState, BranchStatus, GitDiff
 from .checkpoint import CheckpointDecision, CheckpointReviewer
+from .convergence import ConvergenceTracker, ConvergenceSignal, AgentConvergenceState
 from .interview import InterviewSession, ProjectBrief, QAPair, QuestionCallback
 from .planner import MetaPlan, MetaPlanner, Milestone
 
@@ -91,4 +92,8 @@ __all__ = [
     # Checkpoint
     "CheckpointReviewer",
     "CheckpointDecision",
+    # Convergence
+    "ConvergenceTracker",
+    "ConvergenceSignal",
+    "AgentConvergenceState",
 ]
