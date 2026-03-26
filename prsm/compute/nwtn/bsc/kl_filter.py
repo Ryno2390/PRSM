@@ -133,6 +133,79 @@ class KLFilter:
         return self._epsilon
 
 
+class ProgressiveKLFilter(KLFilter):
+    """
+    KL filter whose epsilon decreases linearly as a session progresses.
+
+    Rationale (from live test findings)
+    ------------------------------------
+    In a multi-round Agent Team session the whiteboard accumulates context
+    quickly.  By round 6-9 the BSC predictor's baseline has shifted so much
+    that even genuine discoveries score only moderately — they are no longer
+    *surprising relative to everything already known*.  A static epsilon
+    causes premature convergence: the BSC stops promoting real insights
+    because they look "expected" against the now-dense whiteboard.
+
+    Progressive epsilon compensates: as the session matures and novelty
+    naturally becomes rarer, we relax the threshold so that the *remaining*
+    genuine discoveries still get through.
+
+    Schedule (defaults):
+      Round 0 → epsilon = initial_epsilon   (e.g. 0.55)
+      Round N → epsilon = max(min_epsilon,
+                              initial_epsilon − round * step_per_round)
+      where step_per_round = (initial_epsilon − min_epsilon) / total_rounds
+
+    Parameters
+    ----------
+    initial_epsilon : float
+        Starting epsilon (default 0.55).
+    min_epsilon : float
+        Floor — epsilon never drops below this (default 0.38).
+    total_rounds : int
+        Expected number of rounds in the session.  Epsilon reaches
+        ``min_epsilon`` at this round (default 9).
+    min_token_count : int
+        Same as ``KLFilter``.
+    """
+
+    def __init__(
+        self,
+        initial_epsilon: float = 0.55,
+        min_epsilon: float = 0.38,
+        total_rounds: int = 9,
+        min_token_count: int = 8,
+    ) -> None:
+        super().__init__(epsilon=initial_epsilon, min_token_count=min_token_count)
+        self._initial_epsilon = initial_epsilon
+        self._min_epsilon = min_epsilon
+        self._total_rounds = max(1, total_rounds)
+        self._current_round: int = 0
+        self._step = (initial_epsilon - min_epsilon) / self._total_rounds
+
+    def advance_round(self, round_number: int) -> None:
+        """
+        Update epsilon for the given round number (0-indexed).
+
+        Call this at the start of each new round before processing chunks.
+        """
+        self._current_round = round_number
+        new_epsilon = self._initial_epsilon - round_number * self._step
+        self._epsilon = max(self._min_epsilon, new_epsilon)
+
+    @property
+    def current_round(self) -> int:
+        return self._current_round
+
+    def epsilon_schedule(self) -> list:
+        """Return the epsilon value for every round (for logging/debugging)."""
+        return [
+            round(max(self._min_epsilon,
+                      self._initial_epsilon - r * self._step), 4)
+            for r in range(self._total_rounds + 1)
+        ]
+
+
 class AdaptiveKLFilter(KLFilter):
     """
     KL filter that temporarily raises epsilon during high-surprise bursts
