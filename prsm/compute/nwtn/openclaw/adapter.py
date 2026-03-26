@@ -158,6 +158,9 @@ class NWTNOpenClawAdapter:
         # Active sessions (session_id → SessionState)
         self._sessions: Dict[str, SessionState] = {}
 
+        # Convergence trackers (session_id → ConvergenceTracker)
+        self._convergence: Dict[str, Any] = {}
+
     # ------------------------------------------------------------------
     # Session lifecycle
     # ------------------------------------------------------------------
@@ -360,6 +363,66 @@ class NWTNOpenClawAdapter:
                 if self._sessions[session_id].status == "active":
                     await self._inject_user_context(msg.text or "", session_id)
                     break
+
+    def scan_agent_convergence(
+        self,
+        session_id: str,
+        agent_id: str,
+        output: str,
+        round_number: int,
+    ) -> bool:
+        """
+        Scan one agent's output for convergence signals and update the
+        session's ``ConvergenceTracker``.
+
+        Should be called after each agent's round output is received,
+        before the BSC evaluates it.
+
+        Parameters
+        ----------
+        session_id : str
+        agent_id : str
+        output : str
+            The agent's full text output for this round.
+        round_number : int
+            0-indexed round number.
+
+        Returns
+        -------
+        bool
+            True if a convergence signal was detected.
+        """
+        from prsm.compute.nwtn.team.convergence import ConvergenceTracker
+        if session_id not in self._convergence:
+            self._convergence[session_id] = ConvergenceTracker(min_consecutive_rounds=2)
+        tracker: ConvergenceTracker = self._convergence[session_id]
+        tracker.register_agent(agent_id)
+        return tracker.scan_output(agent_id, output, round_number)
+
+    def is_session_converged(self, session_id: str) -> bool:
+        """
+        Return True if ALL agents in the session have reached stable
+        convergence and the session can end early.
+
+        When True the caller should:
+        1. Call ``adapter.inject_round_summary(session_id, round_number)``
+        2. Call ``adapter.end_session(session_id)``
+        3. Read the final code artefacts and Project Ledger entry
+
+        See also
+        --------
+        :meth:`convergence_summary` — detailed per-agent breakdown.
+        :class:`prsm.compute.nwtn.team.convergence.ConvergenceTracker`
+        """
+        tracker = self._convergence.get(session_id)
+        return tracker is not None and tracker.all_converged()
+
+    def convergence_summary(self, session_id: str) -> dict:
+        """Return a per-agent convergence breakdown for *session_id*."""
+        tracker = self._convergence.get(session_id)
+        if tracker is None:
+            return {"all_converged": False, "converged": {}, "pending": [], "signals_by_agent": {}}
+        return tracker.convergence_summary()
 
     async def advance_bsc_round(
         self,
