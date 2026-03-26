@@ -89,7 +89,7 @@ class BSCDeploymentConfig:
     similarity_threshold: float = 0.85
 
     # Embedding model for semantic de-duplication
-    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
     # Extra flags stored as a dict for future extensibility
     extra: dict = field(default_factory=dict)
