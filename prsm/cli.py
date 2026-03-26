@@ -5728,6 +5728,19 @@ def _default_key_file(session_id: str) -> Path:
 @click.option("--success", default="", help="Success criteria (comma-separated)")
 @click.option("--timeline", default="", help="Target timeline")
 @click.option("--repo-path", default=None, help="Git repo path for agent branches (default: cwd)")
+@click.option(
+    "--orchestrator-model",
+    default=None,
+    envvar="NWTN_ORCHESTRATOR_MODEL",
+    help=(
+        "Model for meta-level orchestration: running the interview and generating "
+        "the MetaPlan.  This is the 'thinking' model — it replaces the implicit human "
+        "operator who would otherwise decide how to decompose the goal and assemble "
+        "the team.  Accepts any OpenRouter model ID (e.g. 'anthropic/claude-3-haiku', "
+        "'mistralai/mistral-large', 'google/gemini-2.0-flash-001').  "
+        "Requires OPENROUTER_API_KEY.  Falls back to template mode if not set."
+    ),
+)
 @click.option("--format", "output_format",
               type=click.Choice(["json", "text"]), default="json",
               help="Output format (default: json)")
@@ -5739,6 +5752,7 @@ def agent_team_start(
     success: str,
     timeline: str,
     repo_path: Optional[str],
+    orchestrator_model: Optional[str],
     output_format: str,
 ):
     """Start a new NWTN Agent Team session.
@@ -5765,7 +5779,37 @@ def agent_team_start(
     key_file  = _default_key_file(sid)
     repo      = Path(repo_path) if repo_path else Path.cwd()
 
-    # Build ProjectBrief directly from CLI flags (no interactive interview)
+    # Resolve orchestrator backend (OpenRouter if key + model present)
+    import os as _os
+    _orch_model = orchestrator_model or _os.environ.get("NWTN_ORCHESTRATOR_MODEL")
+    _orch_key   = _os.environ.get("OPENROUTER_API_KEY", "")
+    _orch_backend = None
+    _orch_label   = "template-fallback"
+
+    if _orch_model and _orch_key:
+        try:
+            from prsm.compute.nwtn.backends.openrouter_backend import OpenRouterBackend
+
+            class _TextWrap:
+                def __init__(self, r): self.text = r.content
+
+            class _OrchestratorBackend:
+                def __init__(self, b): self._b = b
+                async def generate(self, prompt, max_tokens=1200, temperature=0.3, **kw):
+                    return _TextWrap(await self._b.generate(
+                        prompt, max_tokens=max_tokens, temperature=temperature
+                    ))
+
+            _raw = OpenRouterBackend(api_key=_orch_key, default_model=_orch_model)
+            _orch_backend = _OrchestratorBackend(_raw)
+            _orch_label   = _orch_model
+        except Exception as _e:
+            if output_format == "json":
+                _agent_error(f"Failed to initialise orchestrator backend: {_e}")
+
+    # Build ProjectBrief from CLI flags (orchestrator LLM is used for
+    # MetaPlanning; the brief itself comes from the CLI flags here since
+    # --orchestrator-model does not yet drive an interactive interview via CLI)
     brief = ProjectBrief(
         session_id=sid,
         goal=goal,
@@ -5773,11 +5817,14 @@ def agent_team_start(
         constraints=[c.strip() for c in constraints.split(",") if c.strip()],
         success_criteria=[s.strip() for s in success.split(",") if s.strip()],
         timeline=timeline or None,
-        llm_assisted=False,
+        llm_assisted=bool(_orch_backend),
     )
 
     async def _run():
-        planner  = MetaPlanner(backend_registry=None)
+        if _orch_backend and _orch_key:
+            await _raw.initialize()
+
+        planner   = MetaPlanner(backend_registry=_orch_backend)
         meta_plan = await planner.generate(brief)
 
         assembler = TeamAssembler(
@@ -5838,6 +5885,7 @@ def agent_team_start(
         "key_file": str(key_file),
         "repo_path": str(repo),
         "status": "active",
+        "orchestrator_model": _orch_label,
         "meta_plan_title": meta_plan.title,
         "created_at": __import__("datetime").datetime.now(
             __import__("datetime").timezone.utc

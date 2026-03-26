@@ -180,10 +180,11 @@ async def run_demo(
     fast_mode: bool,
     session_id: str,
     artefact_dir: Path,
+    orchestrator_model: str = "anthropic/claude-3-haiku",
     interview_model: str = "meta-llama/llama-3.1-8b-instruct",
-    planning_model: str = "google/gemini-flash-1.5",
+    planning_model: str = "mistralai/mistral-small-3.1-24b-instruct",
     synthesis_model: str = "anthropic/claude-3-haiku",
-    checkpoint_model: str = "deepseek/deepseek-coder-v2-lite-instruct",
+    checkpoint_model: str = "qwen/qwen2.5-coder-7b-instruct",
 ) -> None:
     import os as _os
     from prsm.compute.nwtn.bsc import (
@@ -198,8 +199,15 @@ async def run_demo(
     )
 
     # Detect OpenRouter key
-    openrouter_key = _os.environ.get("OPENROUTER_API_KEY", "")
+    openrouter_key  = _os.environ.get("OPENROUTER_API_KEY", "")
     use_openrouter  = bool(openrouter_key) and not fast_mode
+
+    # When orchestrator_model is set, it overrides interview + planning
+    # unless those are explicitly provided as different values.
+    _DEFAULT_INTERVIEW = "meta-llama/llama-3.1-8b-instruct"
+    _DEFAULT_PLANNING  = "mistralai/mistral-small-3.1-24b-instruct"
+    effective_interview = interview_model if interview_model != _DEFAULT_INTERVIEW else orchestrator_model
+    effective_planning  = planning_model  if planning_model  != _DEFAULT_PLANNING  else orchestrator_model
 
     total_steps = 8
 
@@ -289,10 +297,11 @@ async def run_demo(
         print(f"\n  {BOLD}Model routing (PRSM micro-model philosophy):{RESET}")
         from prsm.compute.nwtn.backends.openrouter_backend import OPENROUTER_MODELS
         for task, mdl in [
-            ("Interview",   interview_model),
-            ("MetaPlanner", planning_model),
-            ("Synthesis",   synthesis_model),
-            ("Checkpoint",  checkpoint_model),
+            ("Orchestrator", orchestrator_model),
+            ("Interview",    effective_interview),
+            ("MetaPlanner",  effective_planning),
+            ("Synthesis",    synthesis_model),
+            ("Checkpoint",   checkpoint_model),
         ]:
             info_dict = OPENROUTER_MODELS.get(mdl, {})
             price = info_dict.get("pricing", {}).get("input", 0) * 1000
@@ -308,13 +317,14 @@ async def run_demo(
     goal = "Add WebSocket streaming to the PRSM API for real-time query updates"
 
     if use_openrouter:
-        info(f"Using {interview_model} for interview")
+        info(f"Orchestrator model: {orchestrator_model}")
+        info(f"Interview model:    {effective_interview}")
         from prsm.compute.nwtn.backends.openrouter_backend import OpenRouterBackend
         from prsm.compute.nwtn.team.interview import InterviewSession
 
         interview_backend = OpenRouterBackend(
             api_key=openrouter_key,
-            default_model=interview_model,
+            default_model=effective_interview,
         )
         await interview_backend.initialize()
 
@@ -369,10 +379,10 @@ async def run_demo(
     step(3, total_steps, "MetaPlanner — generating structured project plan…")
 
     if use_openrouter:
-        info(f"Using {planning_model} for MetaPlanner")
+        info(f"Planning model: {effective_planning}")
         plan_backend = OpenRouterBackend(
             api_key=openrouter_key,
-            default_model=planning_model,
+            default_model=effective_planning,
         )
         await plan_backend.initialize()
 
@@ -700,14 +710,34 @@ def main() -> None:
         help="OpenRouter API key (overrides OPENROUTER_API_KEY env var)",
     )
     parser.add_argument(
+        "--orchestrator-model",
+        default="anthropic/claude-3-haiku",
+        envvar="NWTN_ORCHESTRATOR_MODEL",
+        help=(
+            "The meta-reasoning model: drives the interview AND MetaPlanner "
+            "unless overridden by --interview-model or --planning-model. "
+            "This is the model that replaces what a human operator (or this "
+            "conversation) would implicitly do when setting up an Agent Team. "
+            "Default: anthropic/claude-3-haiku ($0.25/1M)"
+        ),
+    )
+    parser.add_argument(
         "--interview-model",
         default="meta-llama/llama-3.1-8b-instruct",
-        help="OpenRouter model for interview mode (default: Llama 3.1 8B — $0.02/1M)",
+        help=(
+            "Explicit override for the interview model only. "
+            "When not set, --orchestrator-model is used. "
+            "Default: Llama 3.1 8B ($0.02/1M)"
+        ),
     )
     parser.add_argument(
         "--planning-model",
         default="mistralai/mistral-small-3.1-24b-instruct",
-        help="OpenRouter model for MetaPlanner (default: Mistral Small 3.1 — $0.03/1M)",
+        help=(
+            "Explicit override for the MetaPlanner model only. "
+            "When not set, --orchestrator-model is used. "
+            "Default: Mistral Small 3.1 ($0.03/1M)"
+        ),
     )
     parser.add_argument(
         "--synthesis-model",
@@ -753,12 +783,15 @@ def main() -> None:
     print(f"  {BOLD}Session:{RESET}    {args.session_id}")
     print(f"  {BOLD}Mode:{RESET}       {mode_label}")
     if has_key and not args.fast:
-        print(f"  {BOLD}OpenRouter models:{RESET}")
-        print(f"    Interview  → {args.interview_model}")
-        print(f"    Planning   → {args.planning_model}")
+        print(f"  {BOLD}OpenRouter model routing:{RESET}")
+        print(f"    {CYAN}Orchestrator{RESET} → {args.orchestrator_model}  {DIM}(interview + planning){RESET}")
         print(f"    Synthesis  → {args.synthesis_model}")
         print(f"    Checkpoint → {args.checkpoint_model}")
-        print(f"    BSC        → {args.model} (local MPS, no API cost)")
+        print(f"    BSC        → {args.model} {DIM}(local MPS, no API cost){RESET}")
+        if args.interview_model != "meta-llama/llama-3.1-8b-instruct":
+            print(f"    {DIM}Interview override  → {args.interview_model}{RESET}")
+        if args.planning_model != "mistralai/mistral-small-3.1-24b-instruct":
+            print(f"    {DIM}Planning override   → {args.planning_model}{RESET}")
     print(f"  {BOLD}Artefacts:{RESET}  {artefact_dir}")
     print(
         f"\n  This demo is {BOLD}self-referential{RESET}: we use NWTN's Agent Team "
@@ -773,6 +806,7 @@ def main() -> None:
                 fast_mode=args.fast,
                 session_id=args.session_id,
                 artefact_dir=artefact_dir,
+                orchestrator_model=args.orchestrator_model,
                 interview_model=args.interview_model,
                 planning_model=args.planning_model,
                 synthesis_model=args.synthesis_model,
