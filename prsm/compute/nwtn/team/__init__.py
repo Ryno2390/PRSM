@@ -67,6 +67,21 @@ from .branch_manager import BranchManager, BranchState, BranchStatus, GitDiff
 from .checkpoint import CheckpointDecision, CheckpointReviewer
 from .convergence import ConvergenceTracker, ConvergenceSignal, AgentConvergenceState
 from .interview import InterviewSession, ProjectBrief, QAPair, QuestionCallback
+from .live_scribe import (
+    LiveScribe,
+    UpdatePriority,
+    PrioritizedUpdate,
+    PriorityTagger,
+    ConflictDetector,
+    ConflictReport,
+    ConflictLog,
+    AgentInbox,
+    InboxEntry,
+    AgentInboxState,
+    CheckpointLifecycleManager,
+    CheckpointReadiness,
+    CheckpointCycleResult,
+)
 from .planner import MetaPlan, MetaPlanner, Milestone
 
 __all__ = [
@@ -96,4 +111,18 @@ __all__ = [
     "ConvergenceTracker",
     "ConvergenceSignal",
     "AgentConvergenceState",
+    # Live Scribe
+    "LiveScribe",
+    "UpdatePriority",
+    "PrioritizedUpdate",
+    "PriorityTagger",
+    "ConflictDetector",
+    "ConflictReport",
+    "ConflictLog",
+    "AgentInbox",
+    "InboxEntry",
+    "AgentInboxState",
+    "CheckpointLifecycleManager",
+    "CheckpointReadiness",
+    "CheckpointCycleResult",
 ]
