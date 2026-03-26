@@ -31,10 +31,11 @@ class BackendType(str, Enum):
     - LOCAL: Local inference (Ollama, transformers, etc.)
     - MOCK: Testing backend with deterministic responses
     """
-    ANTHROPIC = "anthropic"
-    OPENAI = "openai"
-    LOCAL = "local"
-    MOCK = "mock"
+    ANTHROPIC   = "anthropic"
+    OPENAI      = "openai"
+    OPENROUTER  = "openrouter"   # 200+ models via openrouter.ai
+    LOCAL       = "local"
+    MOCK        = "mock"
 
 
 @dataclass

@@ -10,6 +10,7 @@ hardcoded mock outputs.
 Supported Backends:
 - Anthropic (Claude API)
 - OpenAI (GPT API)
+- OpenRouter (200+ models via openrouter.ai — Llama, Gemini, Mistral, DeepSeek, …)
 - Local (Ollama/Transformers)
 - Mock (Testing)
 
@@ -36,6 +37,12 @@ from .base import (
 )
 
 from .config import BackendConfig
+
+from .openrouter_backend import (
+    OpenRouterBackend,
+    OPENROUTER_MODELS,
+    TASK_MODEL_ROUTING,
+)
 
 from .registry import BackendRegistry, BackendHealth
 

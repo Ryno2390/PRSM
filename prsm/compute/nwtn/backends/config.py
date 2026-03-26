@@ -78,6 +78,8 @@ class BackendConfig:
     # API Keys (loaded from environment)
     anthropic_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
+    openrouter_default_model: str = "google/gemini-flash-1.5-8b"
     
     # Local backend settings
     local_model_path: Optional[str] = None
@@ -96,10 +98,11 @@ class BackendConfig:
     
     # Model defaults
     default_model: Dict[BackendType, str] = field(default_factory=lambda: {
-        BackendType.ANTHROPIC: "claude-sonnet-4-5",
-        BackendType.OPENAI: "gpt-4o",
-        BackendType.LOCAL: "llama3.2",
-        BackendType.MOCK: "mock-model"
+        BackendType.ANTHROPIC:  "claude-sonnet-4-5",
+        BackendType.OPENAI:     "gpt-4o",
+        BackendType.OPENROUTER: "google/gemini-flash-1.5-8b",
+        BackendType.LOCAL:      "llama3.2",
+        BackendType.MOCK:       "mock-model",
     })
     
     default_embedding_model: Dict[BackendType, str] = field(default_factory=lambda: {
@@ -179,11 +182,14 @@ class BackendConfig:
             return backends if backends else [BackendType.MOCK]
         
         # Auto-detect primary backend from available API keys when not explicitly set
-        anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-        openai_api_key = os.getenv("OPENAI_API_KEY")
-        explicit_primary = os.getenv("PRSM_PRIMARY_BACKEND")
+        anthropic_api_key    = os.getenv("ANTHROPIC_API_KEY")
+        openai_api_key       = os.getenv("OPENAI_API_KEY")
+        openrouter_api_key   = os.getenv("OPENROUTER_API_KEY")
+        explicit_primary     = os.getenv("PRSM_PRIMARY_BACKEND")
         if explicit_primary:
             primary = get_backend_type("PRSM_PRIMARY_BACKEND", BackendType.MOCK)
+        elif openrouter_api_key:
+            primary = BackendType.OPENROUTER   # OpenRouter first: widest model choice
         elif anthropic_api_key:
             primary = BackendType.ANTHROPIC
         elif openai_api_key:
@@ -196,6 +202,10 @@ class BackendConfig:
             fallback_chain=parse_fallback_chain(os.getenv("PRSM_FALLBACK_CHAIN")),
             anthropic_api_key=anthropic_api_key,
             openai_api_key=openai_api_key,
+            openrouter_api_key=openrouter_api_key,
+            openrouter_default_model=os.getenv(
+                "OPENROUTER_DEFAULT_MODEL", "google/gemini-flash-1.5-8b"
+            ),
             local_model_path=os.getenv("PRSM_LOCAL_MODEL_PATH"),
             ollama_host=os.getenv("PRSM_OLLAMA_HOST", "http://localhost:11434"),
             use_ollama=get_bool_env("PRSM_USE_OLLAMA", True),
