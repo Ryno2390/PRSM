@@ -492,6 +492,7 @@ def _build_promoter(fast: bool, bsc_model: str, n_rounds: int = 9):
                                                           most_similar_index=None, reason="fast")
             async def add_to_index(self, _): return 0
             def clear(self): pass
+            def advance_round(self, **kw): return 0  # no-op in fast mode
 
         kl = ProgressiveKLFilter(
             initial_epsilon=0.50,
@@ -500,18 +501,17 @@ def _build_promoter(fast: bool, bsc_model: str, n_rounds: int = 9):
         )
         return BSCPromoter(predictor=_HeuristicPredictor(),
                            kl_filter=kl,
-                           deduplicator=_NullDedup()), kl
+                           deduplicator=_NullDedup())
     else:
         from prsm.compute.nwtn.bsc import BSCDeploymentConfig, BSCPromoter, DeploymentMode
         from prsm.compute.nwtn.bsc.kl_filter import ProgressiveKLFilter as _PL
         cfg = BSCDeploymentConfig(
             mode=DeploymentMode.LOCAL_TRANSFORMERS,
             model_name=bsc_model,
-            epsilon=0.50,                # ProgressiveKLFilter overrides this per round
+            epsilon=0.50,
             similarity_threshold=0.82,
             embedding_model="sentence-transformers/all-MiniLM-L6-v2",
         )
-        # Build promoter with ProgressiveKLFilter instead of the default AdaptiveKLFilter
         from prsm.compute.nwtn.bsc.predictor import BSCPredictor
         from prsm.compute.nwtn.bsc.semantic_dedup import SemanticDeduplicator
         predictor = BSCPredictor(cfg)
@@ -521,8 +521,7 @@ def _build_promoter(fast: bool, bsc_model: str, n_rounds: int = 9):
             similarity_threshold=cfg.similarity_threshold,
             device=cfg.device,
         )
-        promoter = BSCPromoter(predictor=predictor, kl_filter=kl, deduplicator=dedup)
-        return promoter, kl
+        return BSCPromoter(predictor=predictor, kl_filter=kl, deduplicator=dedup)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -625,7 +624,7 @@ async def run_test(
     await store.open()
     await store.create_session(session_id)
 
-    promoter, kl_filter = _build_promoter(fast, bsc_model, n_rounds)
+    promoter = _build_promoter(fast, bsc_model, n_rounds)
     if not fast:
         info(f"Loading BSC predictor: {bsc_model} (may take 15-30s)")
         await promoter.warmup()
@@ -634,9 +633,12 @@ async def run_test(
         ok("Fast mode: keyword heuristic BSC active")
 
     # Log the epsilon schedule so it's visible in output
-    schedule = kl_filter.epsilon_schedule()
-    info(f"ProgressiveKLFilter schedule: "
-         f"ε={schedule[0]} → ε={schedule[min(n_rounds, len(schedule)-1)]} over {n_rounds} rounds")
+    from prsm.compute.nwtn.bsc.kl_filter import ProgressiveKLFilter
+    if isinstance(promoter._kl_filter, ProgressiveKLFilter):
+        schedule = promoter._kl_filter.epsilon_schedule()
+        info(f"ProgressiveKLFilter schedule: "
+             f"ε={schedule[0]} → ε={schedule[min(n_rounds, len(schedule)-1)]} "
+             f"over {n_rounds} rounds")
 
     agents = _build_agents(orchestrator_model, coder_model, scientist_model, security_model)
     ok(f"Agent team assembled: {len(agents)} agents")
@@ -706,9 +708,17 @@ async def run_test(
         step(round_n + 2, total_steps,
              f"Round {round_n + 1}/{n_rounds} — all agents work in parallel")
 
-        # Advance ProgressiveKLFilter epsilon for this round
-        kl_filter.advance_round(round_n)
-        info(f"BSC epsilon this round: {kl_filter.epsilon:.3f}")
+        # Advance BSC round (ProgressiveKLFilter epsilon + dedup sliding window)
+        # Uses the unified BSCPromoter.advance_round() — same API available
+        # in production via NWTNOpenClawAdapter.advance_bsc_round()
+        round_diag = promoter.advance_round(
+            round_number=round_n,
+            dedup_keep_last_n_rounds=2,
+            dedup_entries_per_round=8,
+        )
+        info(f"BSC ε={round_diag['epsilon']:.3f} | "
+             f"dedup evicted={round_diag['dedup_evicted']} "
+             f"index={round_diag['dedup_index_size']}")
 
         # General whiteboard state for BSC perplexity evaluation.
         # (The BSC predictor needs to assess surprise relative to ALL context,
@@ -794,11 +804,11 @@ async def run_test(
             "round": round_n + 1,
             "promoted": n_promoted,
             "discarded": n_discarded,
-            "epsilon": round(kl_filter.epsilon, 3),
+            "epsilon": round(promoter._kl_filter.epsilon, 3),
             "whiteboard_entries": wb_count,
         })
         ok(f"Round {round_n+1} complete: {n_promoted} promoted, {n_discarded} discarded | "
-           f"whiteboard: {wb_count} entries | ε={kl_filter.epsilon:.3f}")
+           f"whiteboard: {wb_count} entries | ε={promoter._kl_filter.epsilon:.3f}")
 
         # Inject round boundary summary (Fix 4) — gives agents a clear
         # "here is what changed this round" anchor for the next round
@@ -880,15 +890,38 @@ def _split_into_chunks(text: str, min_words: int = 15) -> List[str]:
     """
     Split agent output into BSC-evaluable chunks.
 
-    Strategy: split on double-newlines (paragraphs) first, then fall back
-    to sentence splitting for very long paragraphs.
+    Problem fixed (from live test data analysis)
+    --------------------------------------------
+    A 377-word code block split at double-newlines produces 8 sub-chunks.
+    Individual class definitions and method bodies score 0.14-0.20 (low
+    surprise) and all get discarded, producing noise without signal.
+
+    The *entire file* is the unit of value — not the individual class.
+
+    Strategy:
+    1. Extract code blocks (``` ... ```) as ATOMIC chunks.  A complete file
+       is evaluated as one unit, giving the BSC a chance to assess whether
+       the whole implementation is novel relative to the current context.
+    2. Split the remaining non-code text on double-newlines as before.
+    3. Filter chunks below min_words.
     """
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-    chunks = []
-    for para in paragraphs:
-        if len(para.split()) >= min_words:
-            chunks.append(para)
-    return chunks if chunks else [text]
+    # Step 1: extract code blocks as atomic units
+    code_block_re = re.compile(r'```(?:python|bash|sh|json)?\n(.*?)```', re.DOTALL)
+    code_chunks: List[str] = []
+    remainder = text
+
+    for match in code_block_re.finditer(text):
+        full_block = match.group(0)  # includes the ``` markers
+        code_chunks.append(full_block)
+        remainder = remainder.replace(full_block, "\n\n")  # replace with whitespace
+
+    # Step 2: split non-code text on paragraphs
+    prose_chunks = [p.strip() for p in remainder.split("\n\n") if p.strip()]
+
+    # Step 3: combine and filter
+    all_chunks = code_chunks + prose_chunks
+    result = [c for c in all_chunks if len(c.split()) >= min_words]
+    return result if result else [text]
 
 
 def _extract_code_files(outputs: List[str]) -> Dict[str, str]:
