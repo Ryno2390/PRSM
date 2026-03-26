@@ -3,29 +3,38 @@
 NWTN Agent Team Demo
 ====================
 
-Demonstrates the full Phase 10 pipeline end-to-end using locally-cached
-HuggingFace models (no internet required, no OpenClaw required):
+Demonstrates the full Phase 10 pipeline end-to-end, including real LLM
+calls via OpenRouter with task-based model routing.
 
-    Step 1  Load BSC predictor and embedding models
-    Step 2  Create a MetaPlan from a project goal
-    Step 3  Assemble an Agent Team from the PRSM registry
-    Step 4  Simulate agent work — feed chunks through the live BSC pipeline
-    Step 5  Query the Active Whiteboard (BSC-filtered results)
-    Step 6  Run Nightly Synthesis → append to Project Ledger
-    Step 7  Verify the tamper-evident hash chain
+    Step 1  Load BSC predictor (local Qwen 3B on MPS — free) + OpenRouter backends
+    Step 2  NWTN Interview Mode — Llama 3.1 8B gathers project requirements
+    Step 3  MetaPlanner — Gemini Flash generates structured project plan
+    Step 4  Assemble Agent Team from PRSM model registry
+    Step 5  Simulate agent work — live BSC filtering
+    Step 6  Nightly Synthesis — Claude Haiku writes a coherent narrative
+    Step 7  Verify tamper-evident hash chain
+
+Model routing (the PRSM micro-model philosophy in action):
+
+    Interview       meta-llama/llama-3.1-8b-instruct    $0.000055/1K  cheap+fast
+    MetaPlanner     google/gemini-flash-1.5              $0.000075/1K  structured JSON
+    Synthesis       anthropic/claude-3-haiku             $0.00025/1K   quality prose
+    CheckpointReview deepseek/deepseek-coder-v2-lite     $0.00014/1K   code-specialized
+    BSC Predictor   Qwen2.5-3B (local MPS)               free           perplexity only
 
 The demo uses a real PRSM development goal so it is self-referential:
 the system designed to help build PRSM is tested by building part of PRSM.
 
 Usage
 -----
+    # Full demo with real LLM calls (requires OPENROUTER_API_KEY in .env):
     python examples_and_demos/demos/nwtn_agent_team_demo.py
 
-    # Use a lighter model for faster startup:
-    python examples_and_demos/demos/nwtn_agent_team_demo.py --model microsoft/DialoGPT-medium
-
-    # Skip the BSC predictor (use heuristic scoring) for instant startup:
+    # Instant heuristic mode (no API calls, no model loading):
     python examples_and_demos/demos/nwtn_agent_team_demo.py --fast
+
+    # Override any task model:
+    python examples_and_demos/demos/nwtn_agent_team_demo.py --synthesis-model anthropic/claude-3.5-haiku
 
 Requirements
 ------------
@@ -171,7 +180,12 @@ async def run_demo(
     fast_mode: bool,
     session_id: str,
     artefact_dir: Path,
+    interview_model: str = "meta-llama/llama-3.1-8b-instruct",
+    planning_model: str = "google/gemini-flash-1.5",
+    synthesis_model: str = "anthropic/claude-3-haiku",
+    checkpoint_model: str = "deepseek/deepseek-coder-v2-lite-instruct",
 ) -> None:
+    import os as _os
     from prsm.compute.nwtn.bsc import (
         BSCDeploymentConfig, BSCPromoter, DeploymentMode,
     )
@@ -183,7 +197,11 @@ async def run_demo(
         NarrativeSynthesizer, ProjectLedger, LedgerSigner,
     )
 
-    total_steps = 7
+    # Detect OpenRouter key
+    openrouter_key = _os.environ.get("OPENROUTER_API_KEY", "")
+    use_openrouter  = bool(openrouter_key) and not fast_mode
+
+    total_steps = 8
 
     # ------------------------------------------------------------------
     # Step 1: Load BSC
@@ -262,27 +280,113 @@ async def run_demo(
         info(f"Embeddings: sentence-transformers/all-MiniLM-L6-v2")
         info(f"Device:     {cfg.device}")
 
+    # Thin wrapper: Phase 10 components expect result.text; GenerateResult has .content
+    class _TextResult:
+        def __init__(self, content): self.text = content
+
+    # Show model routing table when using OpenRouter
+    if use_openrouter:
+        print(f"\n  {BOLD}Model routing (PRSM micro-model philosophy):{RESET}")
+        from prsm.compute.nwtn.backends.openrouter_backend import OPENROUTER_MODELS
+        for task, mdl in [
+            ("Interview",   interview_model),
+            ("MetaPlanner", planning_model),
+            ("Synthesis",   synthesis_model),
+            ("Checkpoint",  checkpoint_model),
+        ]:
+            info_dict = OPENROUTER_MODELS.get(mdl, {})
+            price = info_dict.get("pricing", {}).get("input", 0) * 1000
+            provider = info_dict.get("provider", "?")
+            print(f"    {CYAN}{task:<14}{RESET} {mdl:<48} {DIM}${price:.4f}/1K  [{provider}]{RESET}")
+        print(f"    {CYAN}BSC Predictor {RESET} {predictor_model:<48} {DIM}free [local MPS]{RESET}")
+
     # ------------------------------------------------------------------
-    # Step 2: MetaPlan
+    # Step 2: Interview Mode (with real LLM if OpenRouter available)
     # ------------------------------------------------------------------
-    step(2, total_steps, "Generating MetaPlan from project goal…")
+    step(2, total_steps, "NWTN Interview Mode — gathering project requirements…")
 
     goal = "Add WebSocket streaming to the PRSM API for real-time query updates"
-    brief = ProjectBrief(
-        session_id=session_id,
-        goal=goal,
-        technology_stack=["Python", "FastAPI", "asyncio", "Redis Streams"],
-        constraints=["Must pass all existing security checks", "No breaking API changes"],
-        success_criteria=[
-            "All streaming tests pass",
-            "Memory growth < 1 MB/min under load",
-            "Rate limiter covers WebSocket connections",
-        ],
-        timeline="1 week",
-        llm_assisted=False,
-    )
 
-    planner = MetaPlanner(backend_registry=None)
+    if use_openrouter:
+        info(f"Using {interview_model} for interview")
+        from prsm.compute.nwtn.backends.openrouter_backend import OpenRouterBackend
+        from prsm.compute.nwtn.team.interview import InterviewSession
+
+        interview_backend = OpenRouterBackend(
+            api_key=openrouter_key,
+            default_model=interview_model,
+        )
+        await interview_backend.initialize()
+
+        class _SimpleBackend:
+            async def generate(self, prompt, max_tokens=600, temperature=0.3, **kw):
+                r = await interview_backend.generate(
+                    prompt, max_tokens=max_tokens, temperature=temperature,
+                )
+                return _TextResult(r.content)
+
+        qa_answers = {
+            "technology": "Python, FastAPI, aiohttp, Redis Streams, asyncio",
+            "constraints": "Must pass existing security tests, no breaking API changes",
+            "success": "All streaming tests pass, memory < 1 MB/min under load, rate limiter covers WebSocket",
+            "timeline": "1 week",
+        }
+
+        async def _canned_ask(question: str) -> str:
+            q_lower = question.lower()
+            for key, answer in qa_answers.items():
+                if key in q_lower:
+                    return answer
+            return "n/a"
+
+        session_obj = InterviewSession(
+            ask=_canned_ask,
+            backend_registry=_SimpleBackend(),
+            session_id=session_id,
+        )
+        brief = await session_obj.run(goal)
+        ok(f"Interview complete ({len(brief.raw_qa)} questions answered via LLM)")
+    else:
+        from prsm.compute.nwtn.team.interview import ProjectBrief
+        brief = ProjectBrief(
+            session_id=session_id,
+            goal=goal,
+            technology_stack=["Python", "FastAPI", "asyncio", "Redis Streams"],
+            constraints=["Must pass all existing security checks", "No breaking API changes"],
+            success_criteria=[
+                "All streaming tests pass",
+                "Memory growth < 1 MB/min under load",
+                "Rate limiter covers WebSocket connections",
+            ],
+            timeline="1 week",
+            llm_assisted=False,
+        )
+        info("Template brief (fast mode — no interview LLM)")
+
+    # ------------------------------------------------------------------
+    # Step 3: MetaPlan (with real LLM if OpenRouter available)
+    # ------------------------------------------------------------------
+    step(3, total_steps, "MetaPlanner — generating structured project plan…")
+
+    if use_openrouter:
+        info(f"Using {planning_model} for MetaPlanner")
+        plan_backend = OpenRouterBackend(
+            api_key=openrouter_key,
+            default_model=planning_model,
+        )
+        await plan_backend.initialize()
+
+        class _PlanBackend:
+            async def generate(self, prompt, max_tokens=1200, temperature=0.3, **kw):
+                r = await plan_backend.generate(
+                    prompt, max_tokens=max_tokens, temperature=temperature,
+                )
+                return _TextResult(r.content)
+
+        planner = MetaPlanner(backend_registry=_PlanBackend())
+    else:
+        planner = MetaPlanner(backend_registry=None)
+
     meta_plan = await planner.generate(brief)
 
     ok(f"MetaPlan: {meta_plan.title}")
@@ -293,9 +397,9 @@ async def run_demo(
     info(f"Required roles: {', '.join(r.role for r in meta_plan.required_roles)}")
 
     # ------------------------------------------------------------------
-    # Step 3: Assemble team
+    # Step 4: Assemble team
     # ------------------------------------------------------------------
-    step(3, total_steps, "Assembling Agent Team from PRSM model registry…")
+    step(4, total_steps, "Assembling Agent Team from PRSM model registry…")
 
     assembler = TeamAssembler(
         date_suffix=datetime.now(timezone.utc).strftime("%Y%m%d"),
@@ -309,9 +413,9 @@ async def run_demo(
         info(f"    branch: {m.branch_name}", indent=6)
 
     # ------------------------------------------------------------------
-    # Step 4: Feed agent outputs through the live BSC pipeline
+    # Step 5: Feed agent outputs through the live BSC pipeline
     # ------------------------------------------------------------------
-    step(4, total_steps, "Simulating agent team work — BSC filtering live…")
+    step(5, total_steps, "Simulating agent team work — BSC filtering live…")
 
     db_path = artefact_dir / "whiteboard.db"
     store = WhiteboardStore(db_path)
@@ -372,9 +476,9 @@ async def run_demo(
     info(f"Final predictor baseline: {bsc_stats['predictor_baseline_perplexity']:.1f}")
 
     # ------------------------------------------------------------------
-    # Step 5: Query the whiteboard
+    # Step 6: Query the whiteboard
     # ------------------------------------------------------------------
-    step(5, total_steps, "Reading the Active Whiteboard (agent shared context)…")
+    step(6, total_steps, "Reading the Active Whiteboard (agent shared context)…")
 
     query = WhiteboardQuery(store)
     state = await query.compressed_state(session_id, max_chars=2000)
@@ -382,12 +486,30 @@ async def run_demo(
     print(state)
 
     # ------------------------------------------------------------------
-    # Step 6: Nightly Synthesis → Project Ledger
+    # Step 7: Nightly Synthesis → Project Ledger (Claude Haiku via OpenRouter)
     # ------------------------------------------------------------------
-    step(6, total_steps, "Running Nightly Synthesis → appending to Project Ledger…")
+    step(7, total_steps, "Running Nightly Synthesis → appending to Project Ledger…")
 
     snapshot = await query.snapshot(session_id)
-    synthesizer = NarrativeSynthesizer(backend_registry=None)
+
+    if use_openrouter:
+        info(f"Using {synthesis_model} for narrative synthesis")
+        synth_backend_raw = OpenRouterBackend(
+            api_key=openrouter_key,
+            default_model=synthesis_model,
+        )
+        await synth_backend_raw.initialize()
+
+        class _SynthBackend:
+            async def generate(self, prompt, max_tokens=800, temperature=0.4, **kw):
+                r = await synth_backend_raw.generate(
+                    prompt, max_tokens=max_tokens, temperature=temperature,
+                )
+                return _TextResult(r.content)
+
+        synthesizer = NarrativeSynthesizer(backend_registry=_SynthBackend())
+    else:
+        synthesizer = NarrativeSynthesizer(backend_registry=None)
     synthesis = await synthesizer.synthesise(snapshot, meta_plan=meta_plan)
 
     ledger_dir = artefact_dir / "ledger"
@@ -415,9 +537,9 @@ async def run_demo(
         print(f"    {DIM}… ({len(synthesis.narrative) - 600} more chars){RESET}")
 
     # ------------------------------------------------------------------
-    # Step 7: Verify the tamper-evident chain
+    # Step 8: Verify the tamper-evident chain
     # ------------------------------------------------------------------
-    step(7, total_steps, "Verifying tamper-evident hash chain…")
+    step(8, total_steps, "Verifying tamper-evident hash chain…")
 
     verification = ledger.verify()
     if verification.valid:
@@ -548,18 +670,54 @@ def print_summary(
 
 
 def main() -> None:
+    # Load .env if present (picks up OPENROUTER_API_KEY)
+    _env_file = Path(__file__).resolve().parent.parent.parent / ".env"
+    if _env_file.exists():
+        import os as _os
+        for line in _env_file.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                if k.strip() not in _os.environ:
+                    _os.environ[k.strip()] = v.strip()
+
     parser = argparse.ArgumentParser(
         description="NWTN Agent Team end-to-end demonstration"
     )
     parser.add_argument(
         "--model",
         default="Qwen/Qwen2.5-3B-Instruct",
-        help="HuggingFace model ID for the BSC predictor (must be cached locally)",
+        help="HuggingFace model for the BSC predictor (locally cached)",
     )
     parser.add_argument(
         "--fast",
         action="store_true",
-        help="Skip model loading; use heuristic surprise scorer (instant startup)",
+        help="Heuristic mode: no model loading, no API calls, instant startup",
+    )
+    parser.add_argument(
+        "--openrouter-key",
+        default=None,
+        help="OpenRouter API key (overrides OPENROUTER_API_KEY env var)",
+    )
+    parser.add_argument(
+        "--interview-model",
+        default="meta-llama/llama-3.1-8b-instruct",
+        help="OpenRouter model for interview mode (default: Llama 3.1 8B — $0.02/1M)",
+    )
+    parser.add_argument(
+        "--planning-model",
+        default="mistralai/mistral-small-3.1-24b-instruct",
+        help="OpenRouter model for MetaPlanner (default: Mistral Small 3.1 — $0.03/1M)",
+    )
+    parser.add_argument(
+        "--synthesis-model",
+        default="anthropic/claude-3-haiku",
+        help="OpenRouter model for Nightly Synthesis (default: Claude 3 Haiku — $0.25/1M)",
+    )
+    parser.add_argument(
+        "--checkpoint-model",
+        default="qwen/qwen2.5-coder-7b-instruct",
+        help="OpenRouter model for CheckpointReviewer (default: Qwen2.5 Coder 7B — $0.03/1M)",
     )
     parser.add_argument(
         "--session-id",
@@ -573,6 +731,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # Apply key override
+    if args.openrouter_key:
+        import os as _os
+        _os.environ["OPENROUTER_API_KEY"] = args.openrouter_key
+
     import tempfile
     if args.output_dir:
         artefact_dir = Path(args.output_dir)
@@ -581,10 +744,21 @@ def main() -> None:
         artefact_dir = Path.home() / ".prsm" / "sessions" / args.session_id
         artefact_dir.mkdir(parents=True, exist_ok=True)
 
+    import os as _os
+    has_key = bool(_os.environ.get("OPENROUTER_API_KEY", ""))
+    mode_label = "heuristic (fast)" if args.fast else ("OpenRouter LLM" if has_key else f"local {args.model}")
+
     hdr("NWTN Agent Team — End-to-End Demo")
     print(f"\n  {BOLD}Goal:{RESET}       Add WebSocket streaming to the PRSM API")
     print(f"  {BOLD}Session:{RESET}    {args.session_id}")
-    print(f"  {BOLD}Predictor:{RESET}  {'heuristic (fast mode)' if args.fast else args.model}")
+    print(f"  {BOLD}Mode:{RESET}       {mode_label}")
+    if has_key and not args.fast:
+        print(f"  {BOLD}OpenRouter models:{RESET}")
+        print(f"    Interview  → {args.interview_model}")
+        print(f"    Planning   → {args.planning_model}")
+        print(f"    Synthesis  → {args.synthesis_model}")
+        print(f"    Checkpoint → {args.checkpoint_model}")
+        print(f"    BSC        → {args.model} (local MPS, no API cost)")
     print(f"  {BOLD}Artefacts:{RESET}  {artefact_dir}")
     print(
         f"\n  This demo is {BOLD}self-referential{RESET}: we use NWTN's Agent Team "
@@ -599,6 +773,10 @@ def main() -> None:
                 fast_mode=args.fast,
                 session_id=args.session_id,
                 artefact_dir=artefact_dir,
+                interview_model=args.interview_model,
+                planning_model=args.planning_model,
+                synthesis_model=args.synthesis_model,
+                checkpoint_model=args.checkpoint_model,
             )
         )
     except KeyboardInterrupt:

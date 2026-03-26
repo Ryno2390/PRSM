@@ -205,10 +205,18 @@ class BackendRegistry:
                 timeout=self.config.timeout_seconds
             )
         
+        elif backend_type == BackendType.OPENROUTER:
+            from .openrouter_backend import OpenRouterBackend
+            return OpenRouterBackend(
+                api_key=self.config.openrouter_api_key,
+                default_model=self.config.openrouter_default_model,
+                timeout=self.config.timeout_seconds,
+            )
+
         elif backend_type == BackendType.MOCK:
             from .mock_backend import MockBackend
             return MockBackend(delay_seconds=self.config.mock_delay_seconds)
-        
+
         else:
             raise ValueError(f"Unknown backend type: {backend_type}")
     
