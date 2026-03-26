@@ -69,6 +69,14 @@ Typical end-of-session flow
 
 from .dag_anchor import AnchorReceipt, DAGAnchor
 from .ledger import LedgerEntry, ProjectLedger
+from .memory_commit import (
+    CheckpointMemoryCommitter,
+    LocalMemoryStore,
+    MemoryChunk,
+    MemoryCommitResult,
+    MemorySearchResult,
+    NarrativeChunker,
+)
 from .reconstructor import NarrativeSynthesizer, SynthesisResult
 from .signer import EntrySignature, LedgerSigner, VerificationResult, hash_content, GENESIS_HASH
 
@@ -88,4 +96,11 @@ __all__ = [
     # DAG anchor
     "DAGAnchor",
     "AnchorReceipt",
+    # Checkpoint Memory
+    "CheckpointMemoryCommitter",
+    "NarrativeChunker",
+    "LocalMemoryStore",
+    "MemoryChunk",
+    "MemoryCommitResult",
+    "MemorySearchResult",
 ]
