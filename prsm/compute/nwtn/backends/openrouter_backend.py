@@ -194,11 +194,23 @@ OPENROUTER_MODELS: Dict[str, Dict[str, Any]] = {
 
 # Recommended model for each Phase 10 NWTN task (cost-optimised defaults)
 TASK_MODEL_ROUTING: Dict[str, str] = {
-    "interview":    "meta-llama/llama-3.1-8b-instruct",       # $0.02/1M — cheap conversational
-    "planning":     "mistralai/mistral-small-3.1-24b-instruct",# $0.03/1M — structured JSON
-    "synthesis":    "anthropic/claude-3-haiku",                # $0.25/1M — quality narrative
-    "checkpoint":   "qwen/qwen2.5-coder-7b-instruct",          # $0.03/1M — code-specialized
-    "general":      "google/gemini-2.0-flash-lite-001",        # $0.075/1M — budget general
+    # ── Meta-level orchestration ─────────────────────────────────────────────
+    # The orchestrator is the "meta-thinker": it assembles the team, drives the
+    # interview, and generates the MetaPlan.  It replaces what a human operator
+    # (or a senior engineer in this conversation) would implicitly do when
+    # setting up an Agent Team.  It needs genuine cross-domain reasoning, not
+    # just pattern-completion — so it earns a slightly higher price point.
+    "orchestrator": "anthropic/claude-3-haiku",                # $0.25/1M — reasoning + structure
+
+    # ── Worker / specialist models ───────────────────────────────────────────
+    # Each worker model is chosen for the cognitive profile of its task, not
+    # for general capability.  Using a frontier model here would be like hiring
+    # a PhD to write form letters.
+    "interview":    "meta-llama/llama-3.1-8b-instruct",        # $0.02/1M — fluent conversation
+    "planning":     "mistralai/mistral-small-3.1-24b-instruct", # $0.03/1M — JSON schema discipline
+    "synthesis":    "anthropic/claude-3-haiku",                 # $0.25/1M — coherent narrative
+    "checkpoint":   "qwen/qwen2.5-coder-7b-instruct",           # $0.03/1M — code semantics
+    "general":      "google/gemini-2.0-flash-lite-001",         # $0.075/1M — budget fallback
 }
 
 

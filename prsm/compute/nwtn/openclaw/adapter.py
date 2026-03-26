@@ -60,6 +60,8 @@ class SessionState:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     status: str = "initialising"
     """'initialising' | 'interviewing' | 'planning' | 'active' | 'synthesising' | 'closed'"""
+    orchestrator_model: str = "template-fallback"
+    """The model driving meta-level reasoning (interview + planning)."""
     meta_plan_title: str = ""
     team_members: List[str] = field(default_factory=list)
     """Branch names of assembled team members."""
@@ -93,8 +95,21 @@ class NWTNOpenClawAdapter:
         Root directory where OpenClaw stores agent MEMORY.md files.
     dag_anchor : DAGAnchor, optional
         For milestone DAG anchoring.
+    orchestrator_backend : optional
+        LLM backend for **meta-level orchestration**: running the interview
+        mode and generating the MetaPlan.  This is the model that replaces
+        the implicit human operator deciding how to decompose the goal and
+        assemble the team.  Should be a model with strong cross-domain
+        reasoning (e.g. Claude 3 Haiku, Mistral Large).  If None and
+        ``backend_registry`` is also None, template fallbacks are used.
     backend_registry : optional
-        LLM backends for interview/planning/synthesis.
+        Legacy single-backend parameter.  Prefer ``orchestrator_backend``
+        for clarity.  If both are provided, ``orchestrator_backend`` wins
+        for interview/planning; ``backend_registry`` is used elsewhere.
+    synthesis_backend : optional
+        Separate LLM backend for Nightly Synthesis narrative generation.
+        Narrative quality benefits from a model with strong prose skills
+        (e.g. Claude Haiku).  Defaults to ``orchestrator_backend`` if None.
     """
 
     def __init__(
@@ -109,7 +124,9 @@ class NWTNOpenClawAdapter:
         model_registry=None,
         agent_base_dir: Optional[Path] = None,
         dag_anchor=None,
-        backend_registry=None,
+        orchestrator_backend=None,
+        synthesis_backend=None,
+        backend_registry=None,   # legacy; prefer orchestrator_backend
     ) -> None:
         self._store = whiteboard_store
         self._promoter = promoter
@@ -121,7 +138,16 @@ class NWTNOpenClawAdapter:
         self._model_registry = model_registry
         self._agent_dir = agent_base_dir or DEFAULT_OPENCLAW_AGENT_DIR
         self._dag_anchor = dag_anchor
-        self._backend = backend_registry
+
+        # Orchestrator: the explicit meta-reasoning model.
+        # Falls back to backend_registry for backwards compatibility.
+        self._orchestrator = orchestrator_backend or backend_registry
+
+        # Synthesis: separate model (narrative quality) or falls back to orchestrator.
+        self._synthesis_backend = synthesis_backend or self._orchestrator
+
+        # Legacy alias
+        self._backend = self._orchestrator
 
         # Lazy-initialised components
         self._monitor = None
@@ -170,7 +196,15 @@ class NWTNOpenClawAdapter:
         from prsm.compute.nwtn.whiteboard import WhiteboardMonitor
 
         session_id = session_id or str(_uuid.uuid4())[:8]
-        state = SessionState(session_id=session_id, goal=goal, status="initialising")
+        orchestrator_label = getattr(
+            self._orchestrator, "default_model", "template-fallback"
+        )
+        state = SessionState(
+            session_id=session_id,
+            goal=goal,
+            status="initialising",
+            orchestrator_model=orchestrator_label,
+        )
         self._sessions[session_id] = state
 
         await self._store.create_session(session_id)
@@ -184,19 +218,23 @@ class NWTNOpenClawAdapter:
                 return "n/a"
             question_cb = _silent
 
-        # 1. Interview
+        # 1. Interview — driven by the orchestrator model
         state.status = "interviewing"
-        logger.info("Adapter: starting interview for session=%s", session_id)
+        logger.info(
+            "Adapter: starting interview for session=%s (orchestrator=%s)",
+            session_id,
+            getattr(self._orchestrator, "default_model", "template-fallback"),
+        )
         interview = InterviewSession(
             ask=question_cb,
-            backend_registry=self._backend,
+            backend_registry=self._orchestrator,   # explicit orchestrator
             session_id=session_id,
         )
         brief = await interview.run(goal)
 
-        # 2. Plan
+        # 2. Plan — also driven by the orchestrator model
         state.status = "planning"
-        planner = MetaPlanner(backend_registry=self._backend)
+        planner = MetaPlanner(backend_registry=self._orchestrator)  # explicit orchestrator
         meta_plan = await planner.generate(brief)
         state.meta_plan_title = meta_plan.title
         logger.info(
