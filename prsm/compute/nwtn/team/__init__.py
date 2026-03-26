@@ -82,6 +82,15 @@ from .live_scribe import (
     CheckpointReadiness,
     CheckpointCycleResult,
 )
+from .consensus import (
+    ConsensusEngine,
+    DomainAuthorityCalculator,
+    ResolutionHistory,
+    ResolutionMethod,
+    ResolutionOutcome,
+    Vote,
+    VotePosition,
+)
 from .meta_plan_updater import (
     MilestoneStatus,
     MilestoneProgress,
@@ -142,4 +151,12 @@ __all__ = [
     "ReplanSuggestion",
     "ReplanResult",
     "EffortDriftDetector",
+    # Consensus
+    "ConsensusEngine",
+    "DomainAuthorityCalculator",
+    "ResolutionHistory",
+    "ResolutionMethod",
+    "ResolutionOutcome",
+    "Vote",
+    "VotePosition",
 ]
