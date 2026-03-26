@@ -270,6 +270,66 @@ class BSCPromoter:
             reason=reason,
         )
 
+    def advance_round(
+        self,
+        round_number: int,
+        dedup_keep_last_n_rounds: int = 2,
+        dedup_entries_per_round: int = 10,
+    ) -> dict:
+        """
+        Advance the BSC pipeline to the next round of a multi-round session.
+
+        Coordinates two round-aware components:
+
+        1. ``ProgressiveKLFilter.advance_round(round_number)`` — decreases
+           epsilon so later rounds are more permissive (genuine discoveries
+           in rounds 6-9 still clear the threshold even as context density
+           increases).
+
+        2. ``SemanticDeduplicator.advance_round(...)`` — evicts the oldest
+           embeddings from the dedup index so it compares against RECENT
+           context only, preventing over-filtering of valid new discoveries
+           that happen to be semantically adjacent to early-round entries.
+
+        Parameters
+        ----------
+        round_number : int
+            The round about to start (0-indexed).
+        dedup_keep_last_n_rounds : int
+            How many rounds of dedup embeddings to retain (default 2).
+        dedup_entries_per_round : int
+            Approximate promoted entries per round (used to compute window).
+
+        Returns
+        -------
+        dict
+            Diagnostics: ``{"round": n, "epsilon": e, "dedup_evicted": k,
+            "dedup_index_size": s}``.
+        """
+        from .kl_filter import ProgressiveKLFilter
+
+        new_epsilon = self._kl_filter.epsilon
+        if isinstance(self._kl_filter, ProgressiveKLFilter):
+            self._kl_filter.advance_round(round_number)
+            new_epsilon = self._kl_filter.epsilon
+
+        evicted = self._deduplicator.advance_round(
+            keep_last_n_rounds=dedup_keep_last_n_rounds,
+            entries_per_round=dedup_entries_per_round,
+        )
+
+        logger.info(
+            "BSCPromoter.advance_round: round=%d epsilon=%.3f "
+            "dedup_evicted=%d dedup_size=%d",
+            round_number, new_epsilon, evicted, self._deduplicator.index_size,
+        )
+        return {
+            "round": round_number,
+            "epsilon": new_epsilon,
+            "dedup_evicted": evicted,
+            "dedup_index_size": self._deduplicator.index_size,
+        }
+
     def reset_session(self) -> None:
         """
         Clear the deduplication index at the start of a new working session.

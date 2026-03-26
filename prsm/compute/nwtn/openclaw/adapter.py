@@ -361,6 +361,57 @@ class NWTNOpenClawAdapter:
                     await self._inject_user_context(msg.text or "", session_id)
                     break
 
+    async def advance_bsc_round(
+        self,
+        round_number: int,
+        dedup_keep_last_n_rounds: int = 2,
+        dedup_entries_per_round: int = 10,
+    ) -> dict:
+        """
+        Advance the BSC pipeline's round-aware components.
+
+        Should be called at the START of each new round before agents begin
+        writing to their MEMORY.md files.  Coordinates:
+
+        - ``ProgressiveKLFilter.advance_round()`` — relaxes epsilon so
+          later-round discoveries still get through as context density rises
+        - ``SemanticDeduplicator.advance_round()`` — evicts oldest embeddings
+          so the dedup window stays focused on recent context
+
+        This is the production equivalent of the manual
+        ``kl_filter.advance_round(n)`` call in the test script.  Calling it
+        from the adapter ensures the BSC stays calibrated regardless of
+        whether it is driven by the test harness or by live OpenClaw agents.
+
+        Parameters
+        ----------
+        round_number : int
+            The round about to start (0-indexed).
+        dedup_keep_last_n_rounds : int
+            Dedup sliding window width in rounds (default 2).
+        dedup_entries_per_round : int
+            Approximate BSC promotions per round (default 10).
+
+        Returns
+        -------
+        dict
+            Diagnostics from ``BSCPromoter.advance_round()``.
+        """
+        if self._promoter is None:
+            return {"round": round_number, "epsilon": None, "dedup_evicted": 0}
+        result = self._promoter.advance_round(
+            round_number=round_number,
+            dedup_keep_last_n_rounds=dedup_keep_last_n_rounds,
+            dedup_entries_per_round=dedup_entries_per_round,
+        )
+        logger.info(
+            "Adapter.advance_bsc_round: round=%d epsilon=%s dedup_evicted=%d",
+            round_number,
+            result.get("epsilon"),
+            result.get("dedup_evicted", 0),
+        )
+        return result
+
     async def inject_round_summary(
         self,
         session_id: str,

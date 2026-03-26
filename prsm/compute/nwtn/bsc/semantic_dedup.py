@@ -167,6 +167,49 @@ class SemanticDeduplicator:
         self._embeddings.clear()
         logger.debug("SemanticDeduplicator: index cleared")
 
+    def advance_round(self, keep_last_n_rounds: int = 2, entries_per_round: int = 10) -> int:
+        """
+        Slide the dedup index window forward to prevent over-filtering in
+        long multi-round sessions.
+
+        Problem (from live test findings)
+        -----------------------------------
+        In a 9-round session the index accumulates ~38 entries spanning all
+        rounds.  By round 8-9 a genuine new discovery can score 0.68+
+        similarity to an early-round entry that discussed a related (but
+        distinct) topic, causing incorrect filtering.
+
+        Strategy: keep only the most recent ``keep_last_n_rounds × entries_per_round``
+        entries.  Older entries are evicted from the index.  The sliding
+        window means the dedup only compares against RECENT context, not the
+        entire session history.
+
+        Parameters
+        ----------
+        keep_last_n_rounds : int
+            How many rounds of entries to keep (default 2 = last 2 rounds).
+        entries_per_round : int
+            Approximate entries per round (used to compute the keep threshold).
+
+        Returns
+        -------
+        int
+            Number of entries evicted.
+        """
+        keep = keep_last_n_rounds * entries_per_round
+        before = len(self._embeddings)
+        if before > keep:
+            # Drop the oldest entries (front of the list)
+            self._embeddings = self._embeddings[-keep:]
+            evicted = before - len(self._embeddings)
+            logger.debug(
+                "SemanticDeduplicator.advance_round: evicted %d oldest entries "
+                "(index %d → %d)",
+                evicted, before, len(self._embeddings),
+            )
+            return evicted
+        return 0
+
     @property
     def index_size(self) -> int:
         """Number of embeddings currently in the index."""
