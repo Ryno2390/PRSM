@@ -57,7 +57,7 @@ Quick start
 """
 
 from .deployment import BSCDeploymentConfig, DeploymentMode
-from .kl_filter import AdaptiveKLFilter, FilterDecision, KLFilter, KLFilterResult
+from .kl_filter import AdaptiveKLFilter, FilterDecision, KLFilter, KLFilterResult, ProgressiveKLFilter
 from .predictor import BSCPredictor, SurpriseScore
 from .promoter import BSCPromoter, ChunkMetadata, PromotionDecision
 from .semantic_dedup import DedupResult, SemanticDeduplicator
@@ -72,6 +72,7 @@ __all__ = [
     # KL Filter
     "KLFilter",
     "AdaptiveKLFilter",
+    "ProgressiveKLFilter",
     "KLFilterResult",
     "FilterDecision",
     # Semantic De-duplication

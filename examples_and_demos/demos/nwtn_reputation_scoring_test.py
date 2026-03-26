@@ -210,6 +210,17 @@ class ModelRegistry:
                     "  4. Document the migration path for existing deployments\n"
                     "Write this as Python docstrings / inline comments, not separate prose."
                 ),
+                *(
+                    (
+                        f"ROUND {r} — SCHEMA REVIEW\n"
+                        "Review the shared whiteboard above.  Has the coder's implementation\n"
+                        "deviated from your schema?  Has the security reviewer raised any\n"
+                        "architectural concerns you need to address?  If yes, produce a\n"
+                        "REVISED schema with a clear changelog.  If no changes needed,\n"
+                        "confirm the schema is stable and explain why."
+                    )
+                    for r in range(4, 10)
+                ),
             ],
         ),
 
@@ -268,6 +279,18 @@ class ModelRegistry:
                     "  3. What is the worst-case scenario score under your formula?\n"
                     "     (i.e. what inputs produce score → 0 and score → 1?)"
                 ),
+                *(
+                    (
+                        f"ROUND {r} — FORMULA AUDIT\n"
+                        "Review the coder's latest implementation (see whiteboard above).\n"
+                        "Does it correctly implement your formula from Round 2?  If the\n"
+                        "coder made any simplifications or assumptions, evaluate whether\n"
+                        "they preserve the statistical properties you designed for.\n"
+                        "If the implementation is correct, say so.  If not, provide the\n"
+                        "exact correction as a code snippet."
+                    )
+                    for r in range(4, 10)
+                ),
             ],
         ),
 
@@ -276,11 +299,21 @@ class ModelRegistry:
             role="Backend Engineer",
             model=coder_model,
             system_prompt=(
-                "You are a senior Python engineer working on PRSM.  You write clean, "
-                "well-typed, production-ready Python 3.11+ code.  You use dataclasses "
-                "and Pydantic where appropriate.  You write thorough docstrings.  "
-                "You never leave TODOs — if you can't implement something completely, "
-                "you implement what you can and explicitly flag the gap."
+                "You are a senior Python engineer working on PRSM (Protocol for Recursive "
+                "Scientific Modeling), a P2P distributed AI protocol.\n\n"
+                "CRITICAL — correct import paths for this codebase:\n"
+                "  from prsm.compute.federation.model_registry import ModelRegistry, ModelDetails\n"
+                "  from prsm.compute.federation.model_registry import ModelCapability, ModelProvider\n"
+                "  (NOT prsm.models.model_registry — that path does not exist)\n\n"
+                "You write clean, well-typed, production-ready Python 3.11+ code. "
+                "You use Pydantic BaseModel where appropriate and standard dataclasses "
+                "for lightweight internal types.  You write thorough docstrings.  "
+                "You NEVER leave TODOs — if you cannot implement something completely, "
+                "you implement what you can and flag the gap explicitly with a comment "
+                "starting '# OPEN:' so the architect can see it.\n\n"
+                "For code files, wrap each in:\n"
+                "  ```python\n  # FILE: path/to/file.py\n  <code>\n  ```\n"
+                "Use this EXACT format — the test harness extracts files by this pattern."
             ),
             round_prompts=[
                 # Round 1
@@ -331,6 +364,22 @@ class ModelRegistry:
                     "  - Test the registry integration (patch_model_registry)\n\n"
                     "Wrap each file in a clearly labelled code block:\n"
                     "```python\n# FILE: prsm/compute/federation/reputation_scoring.py\n...\n```"
+                ),
+                # Rounds 4-9: iterative refinement based on feedback
+                *(
+                    (
+                        f"ROUND {r} — REFINEMENT\n"
+                        "Review the latest whiteboard entries above.  In particular:\n"
+                        "  1. Has the security reviewer or data scientist flagged any bugs\n"
+                        "     or gaps in your previous implementation?  Fix them precisely.\n"
+                        "  2. Are there any OPEN: comments from your previous round that\n"
+                        "     you now have enough information to resolve?\n"
+                        "  3. If no changes are needed, say so explicitly and explain why\n"
+                        "     the current implementation is already correct.\n"
+                        "Produce updated code files only if there are changes.  "
+                        "Use the same ```python # FILE: ... ``` format."
+                    )
+                    for r in range(4, 10)
                 ),
             ],
         ),
@@ -392,6 +441,18 @@ class ModelRegistry:
                     "  5. One concrete code change the coder must make before production.\n"
                     "     Write the actual Python diff (before/after)."
                 ),
+                *(
+                    (
+                        f"ROUND {r} — ONGOING SECURITY REVIEW\n"
+                        "Review the latest coder output on the whiteboard above.\n"
+                        "  1. Has your Round 3 security concern been addressed?\n"
+                        "  2. Has any new security issue been introduced in the revisions?\n"
+                        "  3. If all previously identified issues are resolved, issue a\n"
+                        "     SECURITY CLEARED statement with your final confidence level.\n"
+                        "  4. If issues remain, provide the EXACT code fix required."
+                    )
+                    for r in range(4, 10)
+                ),
             ],
         ),
     ]
@@ -401,11 +462,11 @@ class ModelRegistry:
 # BSC pipeline (fast / real)
 # ══════════════════════════════════════════════════════════════════════════
 
-def _build_promoter(fast: bool, bsc_model: str):
+def _build_promoter(fast: bool, bsc_model: str, n_rounds: int = 9):
     import math as _math
     from prsm.compute.nwtn.bsc.predictor import SurpriseScore
     from prsm.compute.nwtn.bsc.semantic_dedup import DedupResult
-    from prsm.compute.nwtn.bsc.kl_filter import AdaptiveKLFilter
+    from prsm.compute.nwtn.bsc.kl_filter import ProgressiveKLFilter
     from prsm.compute.nwtn.bsc.promoter import BSCPromoter
 
     if fast:
@@ -432,25 +493,54 @@ def _build_promoter(fast: bool, bsc_model: str):
             async def add_to_index(self, _): return 0
             def clear(self): pass
 
+        kl = ProgressiveKLFilter(
+            initial_epsilon=0.50,
+            min_epsilon=0.35,
+            total_rounds=n_rounds,
+        )
         return BSCPromoter(predictor=_HeuristicPredictor(),
-                           kl_filter=AdaptiveKLFilter(epsilon=0.50),
-                           deduplicator=_NullDedup())
+                           kl_filter=kl,
+                           deduplicator=_NullDedup()), kl
     else:
         from prsm.compute.nwtn.bsc import BSCDeploymentConfig, BSCPromoter, DeploymentMode
+        from prsm.compute.nwtn.bsc.kl_filter import ProgressiveKLFilter as _PL
         cfg = BSCDeploymentConfig(
             mode=DeploymentMode.LOCAL_TRANSFORMERS,
             model_name=bsc_model,
-            epsilon=0.50,
+            epsilon=0.50,                # ProgressiveKLFilter overrides this per round
             similarity_threshold=0.82,
             embedding_model="sentence-transformers/all-MiniLM-L6-v2",
         )
-        promoter = BSCPromoter.from_config(cfg)
-        return promoter
+        # Build promoter with ProgressiveKLFilter instead of the default AdaptiveKLFilter
+        from prsm.compute.nwtn.bsc.predictor import BSCPredictor
+        from prsm.compute.nwtn.bsc.semantic_dedup import SemanticDeduplicator
+        predictor = BSCPredictor(cfg)
+        kl = _PL(initial_epsilon=0.50, min_epsilon=0.35, total_rounds=n_rounds)
+        dedup = SemanticDeduplicator(
+            model_name=cfg.embedding_model,
+            similarity_threshold=cfg.similarity_threshold,
+            device=cfg.device,
+        )
+        promoter = BSCPromoter(predictor=predictor, kl_filter=kl, deduplicator=dedup)
+        return promoter, kl
 
 
 # ══════════════════════════════════════════════════════════════════════════
 # OpenRouter agent calls
 # ══════════════════════════════════════════════════════════════════════════
+
+# Fallback model chains per agent role (Fix 1 — agent failure resilience).
+# If the primary model is unavailable, these are tried in order.
+_AGENT_FALLBACKS: Dict[str, List[str]] = {
+    "agent/architect":        ["google/gemini-2.0-flash-001", "deepseek/deepseek-chat-v3-0324"],
+    "agent/data-scientist":   ["google/gemini-2.0-flash-001", "deepseek/deepseek-chat-v3-0324",
+                               "anthropic/claude-3-haiku"],
+    "agent/backend-coder":    ["deepseek/deepseek-chat-v3-0324", "qwen/qwen2.5-coder-7b-instruct",
+                               "anthropic/claude-3-haiku"],
+    "agent/security-reviewer":["qwen/qwen2.5-coder-7b-instruct", "deepseek/deepseek-chat-v3-0324",
+                               "anthropic/claude-3-haiku"],
+}
+
 
 async def call_agent(
     agent: Agent,
@@ -459,23 +549,46 @@ async def call_agent(
     max_tokens: int = 1500,
     temperature: float = 0.4,
 ) -> str:
-    """Call the agent's model via OpenRouter and return the text response."""
+    """
+    Call the agent's model via OpenRouter with automatic fallback on failure.
+
+    Tries the agent's primary model first, then each model in
+    ``_AGENT_FALLBACKS[agent.id]`` in order until one succeeds.
+    This directly addresses Finding 1 from the live test: the data scientist
+    model (mistral-small) was down for all 3 rounds with no recovery.
+    """
     from prsm.compute.nwtn.backends.openrouter_backend import OpenRouterBackend
-    b = OpenRouterBackend(api_key=api_key, default_model=agent.model)
-    await b.initialize()
-    try:
-        result = await asyncio.wait_for(
-            b.generate(
-                prompt=prompt,
-                system_prompt=agent.system_prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            ),
-            timeout=60.0,
-        )
-        return result.content
-    finally:
-        await b._session.close()
+
+    models_to_try = [agent.model] + _AGENT_FALLBACKS.get(agent.id, [])
+    last_exc: Optional[Exception] = None
+
+    for model_id in models_to_try:
+        b = OpenRouterBackend(api_key=api_key, default_model=model_id)
+        try:
+            await b.initialize()
+            result = await asyncio.wait_for(
+                b.generate(
+                    prompt=prompt,
+                    system_prompt=agent.system_prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                ),
+                timeout=60.0,
+            )
+            if model_id != agent.model:
+                warn(f"{agent.id}: primary model unavailable, used fallback {model_id}")
+            return result.content
+        except Exception as exc:
+            last_exc = exc
+            info(f"{agent.id}: {model_id} failed ({type(exc).__name__}), trying next fallback…")
+        finally:
+            if b._session:
+                await b._session.close()
+
+    raise RuntimeError(
+        f"All models exhausted for {agent.id}: {models_to_try}. "
+        f"Last error: {last_exc}"
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -512,13 +625,18 @@ async def run_test(
     await store.open()
     await store.create_session(session_id)
 
-    promoter = _build_promoter(fast, bsc_model)
+    promoter, kl_filter = _build_promoter(fast, bsc_model, n_rounds)
     if not fast:
         info(f"Loading BSC predictor: {bsc_model} (may take 15-30s)")
         await promoter.warmup()
         ok("BSC predictor ready")
     else:
         ok("Fast mode: keyword heuristic BSC active")
+
+    # Log the epsilon schedule so it's visible in output
+    schedule = kl_filter.epsilon_schedule()
+    info(f"ProgressiveKLFilter schedule: "
+         f"ε={schedule[0]} → ε={schedule[min(n_rounds, len(schedule)-1)]} over {n_rounds} rounds")
 
     agents = _build_agents(orchestrator_model, coder_model, scientist_model, security_model)
     ok(f"Agent team assembled: {len(agents)} agents")
@@ -588,40 +706,60 @@ async def run_test(
         step(round_n + 2, total_steps,
              f"Round {round_n + 1}/{n_rounds} — all agents work in parallel")
 
-        # Get current whiteboard context (what agents share)
-        wb_ctx = await query.compressed_state(session_id, max_chars=3000)
+        # Advance ProgressiveKLFilter epsilon for this round
+        kl_filter.advance_round(round_n)
+        info(f"BSC epsilon this round: {kl_filter.epsilon:.3f}")
 
-        # Build each agent's prompt for this round
+        # General whiteboard state for BSC perplexity evaluation.
+        # (The BSC predictor needs to assess surprise relative to ALL context,
+        # not just what a specific agent can see — this is the full shared state.)
+        wb_ctx = await query.compressed_state(session_id, max_chars=2000)
+
+        # Build each agent's prompt using ANTI-ECHO context (Fix 3)
         tasks = []
         for agent in agents:
             if round_n >= len(agent.round_prompts):
                 continue
             base_prompt = agent.round_prompts[round_n]
             if round_n > 0:
-                full_prompt = (
-                    f"SHARED WHITEBOARD (discoveries from all agents so far):\n"
-                    f"{'─'*60}\n{wb_ctx}\n{'─'*60}\n\n"
-                    f"{base_prompt}"
+                # Anti-echo: agent sees its OWN previous entries separately
+                # from PEER entries. This prevents self-echoing back as "new".
+                agent_ctx = await query.compressed_state_for_agent(
+                    session_id, agent.id, max_chars=3000
                 )
+                # Whiteboard context goes in the SYSTEM prompt to frame
+                # the task, not the user prompt (prevents literal re-quoting)
+                full_system = (
+                    agent.system_prompt + "\n\n"
+                    "CURRENT WHITEBOARD STATE (use this as background context):\n"
+                    f"{'─'*60}\n{agent_ctx}\n{'─'*60}"
+                )
+                # Create a modified agent for this round with updated system prompt
+                tasks.append((agent, base_prompt, full_system))
             else:
-                full_prompt = base_prompt
+                tasks.append((agent, base_prompt, None))
 
-            tasks.append((agent, full_prompt))
-
-        # Call all agents in parallel
-        async def _call_one(agent, prompt):
+        async def _call_one(agent, prompt, system_override):
             if not api_key or fast:
                 return _mock_response(agent, round_n)
+            # Temporarily use the override system prompt if provided
+            if system_override:
+                orig = agent.system_prompt
+                agent.system_prompt = system_override
+                try:
+                    return await call_agent(agent, prompt, api_key, max_tokens=1500)
+                finally:
+                    agent.system_prompt = orig
             return await call_agent(agent, prompt, api_key, max_tokens=1500)
 
         responses = await asyncio.gather(
-            *[_call_one(a, p) for a, p in tasks],
+            *[_call_one(a, p, s) for a, p, s in tasks],
             return_exceptions=True,
         )
 
         # Feed responses through BSC
         n_promoted = n_discarded = 0
-        for (agent, _), response in zip(tasks, responses):
+        for (agent, _, _sys), response in zip(tasks, responses):
             if isinstance(response, Exception):
                 warn(f"{agent.id}: call failed — {response}")
                 continue
@@ -651,14 +789,32 @@ async def run_test(
                     n_discarded += 1
 
         bsc_stats = promoter.stats
+        wb_count = await store.entry_count(session_id)
         round_stats.append({
             "round": round_n + 1,
             "promoted": n_promoted,
             "discarded": n_discarded,
-            "whiteboard_entries": await store.entry_count(session_id),
+            "epsilon": round(kl_filter.epsilon, 3),
+            "whiteboard_entries": wb_count,
         })
         ok(f"Round {round_n+1} complete: {n_promoted} promoted, {n_discarded} discarded | "
-           f"whiteboard: {await store.entry_count(session_id)} entries total")
+           f"whiteboard: {wb_count} entries | ε={kl_filter.epsilon:.3f}")
+
+        # Inject round boundary summary (Fix 4) — gives agents a clear
+        # "here is what changed this round" anchor for the next round
+        if round_n < n_rounds - 1:
+            top = await query.top_surprise(session_id, n=3)
+            if top:
+                bullets = "\n".join(
+                    f"  • [{e.agent_short}] {e.chunk[:100]}{'…' if len(e.chunk)>100 else ''}"
+                    for e in top
+                )
+                boundary_text = (
+                    f"=== ROUND {round_n+1} COMPLETE — KEY DISCOVERIES ===\n"
+                    f"{bullets}\n"
+                    f"Agents in Round {round_n+2}: respond to the above, build on it, correct it."
+                )
+                await store.write(_force_write(boundary_text, "nwtn/round-scribe"))
 
     # ── Synthesis ──────────────────────────────────────────────────────────
     step(n_rounds + 2, total_steps, "Nightly Synthesis — narrative generation…")
@@ -869,7 +1025,9 @@ def _print_results(result: dict, output_dir: Path, elapsed: float) -> None:
 
     print(f"\n  {BOLD}BSC Statistics by Round:{RESET}")
     for r in result["round_stats"]:
-        print(f"    Round {r['round']}: {GREEN}{r['promoted']} promoted{RESET}, "
+        eps = r.get('epsilon', '?')
+        print(f"    Round {r['round']} (ε={eps}): "
+              f"{GREEN}{r['promoted']} promoted{RESET}, "
               f"{DIM}{r['discarded']} discarded{RESET} | "
               f"whiteboard: {r['whiteboard_entries']} entries")
 
@@ -924,8 +1082,8 @@ def main() -> None:
                    help="Security reviewer agent. Default: qwen2.5-coder-7b")
     p.add_argument("--bsc-model",          default="Qwen/Qwen2.5-3B-Instruct",
                    help="Local BSC predictor (HuggingFace, runs on MPS). Default: Qwen2.5-3B")
-    p.add_argument("--rounds",             type=int, default=3,
-                   help="Number of work rounds per agent (default: 3)")
+    p.add_argument("--rounds",             type=int, default=9,
+                   help="Number of work rounds per agent (default: 9)")
     p.add_argument("--fast",               action="store_true",
                    help="Heuristic BSC + mock agent responses. No API calls. Instant.")
     p.add_argument("--session-id",         default=None)

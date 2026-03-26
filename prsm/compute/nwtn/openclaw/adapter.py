@@ -361,6 +361,78 @@ class NWTNOpenClawAdapter:
                     await self._inject_user_context(msg.text or "", session_id)
                     break
 
+    async def inject_round_summary(
+        self,
+        session_id: str,
+        round_number: int,
+        summary: Optional[str] = None,
+    ) -> None:
+        """
+        Force-promote a round-boundary summary entry to the whiteboard.
+
+        Problem solved (from live test findings)
+        -----------------------------------------
+        Without an explicit round boundary marker, agents entering Round 2+
+        have no clear signal about *what changed* since the previous round.
+        They receive the full whiteboard dump and must infer pivots themselves.
+        A forced round summary gives every agent a clear "here is what happened
+        in round N and what is now different" anchor point.
+
+        If ``summary`` is None, a brief auto-generated summary is created
+        from the highest-surprise entries since the last round boundary.
+
+        Parameters
+        ----------
+        session_id : str
+        round_number : int
+            The round that just completed (1-indexed).
+        summary : str, optional
+            Explicit summary text.  If None, auto-generated from the whiteboard.
+        """
+        from prsm.compute.nwtn.whiteboard.query import WhiteboardQuery
+        from prsm.compute.nwtn.bsc import (
+            PromotionDecision, ChunkMetadata, FilterDecision, KLFilterResult,
+        )
+        from datetime import datetime, timezone
+
+        if summary is None:
+            query = WhiteboardQuery(self._store)
+            top = await query.top_surprise(session_id, n=5)
+            if top:
+                bullets = "\n".join(
+                    f"  • [{e.agent_short}] {e.chunk[:120]}…"
+                    if len(e.chunk) > 120 else f"  • [{e.agent_short}] {e.chunk}"
+                    for e in top[:3]
+                )
+                summary = (
+                    f"=== ROUND {round_number} COMPLETE ===\n"
+                    f"Top discoveries promoted to whiteboard this round:\n{bullets}\n"
+                    f"Agents entering Round {round_number + 1} should respond to the above."
+                )
+            else:
+                summary = f"=== ROUND {round_number} COMPLETE — no new discoveries ==="
+
+        await self._store.write(PromotionDecision(
+            promoted=True,
+            chunk=summary,
+            metadata=ChunkMetadata(
+                source_agent="nwtn/round-scribe",
+                session_id=session_id,
+                timestamp=datetime.now(timezone.utc),
+            ),
+            surprise_score=1.0, raw_perplexity=0.0, similarity_score=0.0,
+            kl_result=KLFilterResult(
+                decision=FilterDecision.PROMOTE, score=1.0, epsilon=0.0,
+                reason=f"Round {round_number} boundary summary (forced)",
+            ),
+            dedup_result=None,
+            reason=f"Round {round_number} boundary summary forced by orchestrator",
+        ))
+        logger.info(
+            "Adapter: round %d summary injected for session=%s",
+            round_number, session_id,
+        )
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

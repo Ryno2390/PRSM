@@ -128,6 +128,85 @@ class WhiteboardQuery:
         """Return the total number of entries in the session."""
         return await self._store.entry_count(session_id)
 
+    async def compressed_state_for_agent(
+        self,
+        session_id: str,
+        requesting_agent: str,
+        max_chars: int = 3000,
+    ) -> str:
+        """
+        Return the whiteboard context tailored for a specific agent.
+
+        Problem solved (from live test findings)
+        -----------------------------------------
+        When agents receive the full whiteboard as context and their own
+        prior entries are in it, they tend to echo those entries back in
+        their next response.  The BSC correctly catches the echo as a
+        semantic duplicate, but it wastes tokens and pollutes the input.
+
+        This method separates the agent's own prior outputs into a clearly
+        labelled "YOUR PREVIOUS CONTRIBUTIONS" section at the top, and
+        presents PEER entries (from other agents) as the main shared context.
+        This framing naturally suppresses self-echoing.
+
+        Parameters
+        ----------
+        session_id : str
+        requesting_agent : str
+            The agent ID requesting context (e.g. ``"agent/security-reviewer"``).
+        max_chars : int
+            Total character budget for the returned string.
+
+        Returns
+        -------
+        str
+            Structured context string with own-entries separated from peers.
+        """
+        all_entries = await self._store.get_all(session_id)
+        own    = [e for e in all_entries if e.source_agent == requesting_agent]
+        peers  = [e for e in all_entries if e.source_agent != requesting_agent]
+
+        # Budget split: 25% own summary, 75% peer context
+        own_budget  = max_chars // 4
+        peer_budget = max_chars - own_budget - 200  # 200 chars for headers
+
+        # Own entries — show only the 3 most recent (summary, not full echo)
+        own_section = ""
+        if own:
+            own_lines = [
+                f"  [{e.timestamp_short}] {e.chunk[:120]}{'…' if len(e.chunk) > 120 else ''}"
+                for e in own[-3:]
+            ]
+            own_text = "\n".join(own_lines)
+            if len(own_text) > own_budget:
+                own_text = own_text[:own_budget] + "…"
+            own_section = (
+                f"YOUR PREVIOUS CONTRIBUTIONS (do NOT repeat these):\n"
+                f"{own_text}\n\n"
+            )
+
+        # Peer entries — use hybrid compressed state, excluding own
+        peer_section = ""
+        if peers:
+            peer_count  = len(peers)
+            peer_agents = sorted({e.source_agent for e in peers})
+            lines: List[str] = [
+                f"SHARED WHITEBOARD — {peer_count} entries from "
+                f"{len(peer_agents)} other agent(s): "
+                f"{', '.join(a.removeprefix('agent/') for a in peer_agents)}\n"
+            ]
+            budget = peer_budget
+            for e in peers:
+                line = f"[{e.agent_short} @ {e.timestamp_short}] {e.chunk}\n"
+                if budget - len(line) < 0:
+                    lines.append(f"[{e.agent_short}] {e.chunk[:budget - 20]}…\n")
+                    break
+                lines.append(line)
+                budget -= len(line)
+            peer_section = "\n".join(lines)
+
+        return own_section + peer_section
+
     # ------------------------------------------------------------------
     # Onboarding helper
     # ------------------------------------------------------------------

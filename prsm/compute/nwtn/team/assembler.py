@@ -71,6 +71,10 @@ class TeamMember:
     source: str = "registry"
     """'registry' | 'fallback' — how this member was resolved."""
 
+    fallback_models: List[str] = field(default_factory=list)
+    """Ordered list of alternative model IDs to try if model_id is unavailable.
+    Populated from _FALLBACK_MODEL_CHAINS keyed by role slug."""
+
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -154,6 +158,37 @@ _GENERIC_FALLBACK = (
     "anthropic/claude-sonnet-4-6",
     ["reasoning", "analysis", "code_generation"],
 )
+
+# Fallback models tried (in order) when the primary model is unavailable.
+# Populated from live test findings: mistral-small was down; deepseek and
+# gemini-flash are reliable alternatives for analytical/planning tasks.
+_FALLBACK_MODEL_CHAINS: Dict[str, List[str]] = {
+    "architect":         [
+        "anthropic/claude-3-haiku",
+        "google/gemini-2.0-flash-001",
+        "mistralai/mistral-small-3.1-24b-instruct",
+    ],
+    "data-scientist":    [
+        "google/gemini-2.0-flash-001",          # confirmed available
+        "deepseek/deepseek-chat-v3-0324",        # strong at structured math
+        "anthropic/claude-3-haiku",
+    ],
+    "backend-coder":     [
+        "deepseek/deepseek-chat-v3-0324",
+        "qwen/qwen-2.5-coder-32b-instruct",
+        "anthropic/claude-3-haiku",
+    ],
+    "security-reviewer": [
+        "qwen/qwen2.5-coder-7b-instruct",
+        "deepseek/deepseek-chat-v3-0324",
+        "anthropic/claude-3-haiku",
+    ],
+    "tester": [
+        "deepseek/deepseek-chat-v3-0324",
+        "qwen/qwen2.5-coder-7b-instruct",
+        "anthropic/claude-3-haiku",
+    ],
+}
 
 
 # ======================================================================
@@ -304,6 +339,9 @@ class TeamAssembler:
 
         agent_name, model_id, capabilities = default
         import uuid as _uuid
+        fallbacks = _FALLBACK_MODEL_CHAINS.get(slug, [])
+        # Exclude the primary model from the fallback list
+        fallbacks = [m for m in fallbacks if m != model_id]
         return TeamMember(
             role=slug,
             agent_id=str(_uuid.uuid4()),
@@ -313,4 +351,5 @@ class TeamAssembler:
             capabilities=capabilities,
             score=0.8,
             source="fallback",
+            fallback_models=fallbacks,
         )
