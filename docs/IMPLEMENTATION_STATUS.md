@@ -3,7 +3,7 @@
 [![Status](https://img.shields.io/badge/status-Beta%20v0.2.2-blue.svg)](#current-implementation-status)
 [![Tests](https://img.shields.io/badge/tests-3818%20passing-brightgreen.svg)](#test-suite-status)
 [![Completion](https://img.shields.io/badge/code--complete-99%25-brightgreen.svg)](#)
-[![Updated](https://img.shields.io/badge/updated-2026--03--25-green.svg)](#)
+[![Updated](https://img.shields.io/badge/updated-2026--03--26-green.svg)](#)
 
 ---
 
@@ -21,6 +21,201 @@ A developer cloning this repo today can:
 
 **All remaining work is infrastructure** — external accounts, credentials, and deployed services.
 No further code phases are planned. The infrastructure roadmap is documented below.
+
+---
+
+---
+
+## Phase 10: NWTN Agent Team Architecture
+
+> **Status: Planning** — Architecture finalized 2026-03-26. Implementation not yet started.
+
+### Vision
+
+Phase 10 is a paradigm shift in how PRSM is used. Phases 1–9 built a complete,
+production-ready protocol infrastructure. Phase 10 defines the **interface layer** —
+but designed for **AI agents**, not humans.
+
+The core insight: the near-future UX is not a dashboard. It is an AI agent receiving
+a natural-language goal and executing it autonomously. PRSM's CLI, APIs, and SDKs
+should be optimized for AI agent consumption (machine-readable, deterministic,
+composable) rather than for human dashboards. NWTN is re-architected to be the
+coordination intelligence that makes this possible.
+
+### What Changes in NWTN
+
+The original NWTN was a **hierarchical orchestrator** — one "boss" agent decomposing
+tasks and dispatching sub-agents, then aggregating results. This is token-efficient
+but brittle: the orchestrator makes final calls on conflicting information, cannot
+benefit from peer-review between specialists, and wastes tokens when the plan changes
+mid-stream (sub-agents finish useless work before the orchestrator realizes).
+
+The new NWTN is a **flat Agent Team harness** — a coordination layer that enables
+multiple specialist agents to work in parallel, share a lean shared context (the
+"whiteboard"), and course-correct in real time without a hierarchical bottleneck.
+The token problem of flat architectures is solved by the **Bayesian Surprise
+Compressor (BSC)**.
+
+### Core Innovations
+
+#### 1. Bayesian Surprise Compressor (BSC)
+
+The BSC is the gatekeeper of the shared whiteboard. Instead of every agent writing
+everything to shared context (which causes token explosion), a small predictor model
+(1–3B parameters) evaluates the **informational surprise** of each agent's output
+before it is promoted to the whiteboard.
+
+- **Predictor**: A small quantized model evaluates the perplexity (cross-entropy loss)
+  of each new agent output chunk relative to the current compressed context. This is
+  evaluation-only — no generation required — making it 3–5x cheaper than a generation
+  call of the same model size.
+- **KL Filter**: Calculates KL divergence between predicted and actual state. If
+  divergence exceeds epsilon (the surprise threshold), the chunk is promoted.
+- **Semantic De-duplication**: Cosine similarity check against existing whiteboard
+  embeddings. High-surprise chunks that are semantically redundant with existing
+  whiteboard entries are discarded despite their surprise score.
+- **Promoter**: Writes surviving chunks to the Active Whiteboard as structured
+  fact-value pairs with source agent and timestamp metadata.
+
+**Deployment**: BSC can run locally (via MLX or llama.cpp on Apple Silicon — a 3B
+quantized model runs comfortably on an M2/M3 MacBook Pro or Mac Mini with 16GB RAM)
+or as a PRSM network service (a node provides BSC-as-a-service and earns FTNS).
+User's choice; the interface is identical either way.
+
+#### 2. Event-Driven Blackboard (Active Whiteboard)
+
+The shared context that all team members can read. During a working session:
+
+- **Data structure**: SQLite-backed fact-value store with source agent, timestamp,
+  and surprise score metadata. Structured for machine querying, not human reading.
+- **Write access**: Only the BSC writes to the whiteboard. Agents write to their own
+  private memory (OpenClaw's `MEMORY.md`); NWTN monitors these files and BSC-filters
+  what crosses into shared context.
+- **Read access**: All team agents. New agents joining mid-session can read the full
+  whiteboard to onboard instantly without being fed the entire raw chat history.
+
+#### 3. Three-Tier Memory & Time Horizon
+
+| Tier | Storage | Contents | Lifetime |
+|------|---------|----------|----------|
+| Sensory Buffer | Working memory (RAM) | Raw last N exchanges per agent | Per session |
+| Active Whiteboard | SQLite | BSC-promoted surprise facts | Per session (wiped at end) |
+| Project Ledger | Git-tracked Markdown | Nightly synthesis narratives | Permanent, accumulating |
+
+**Nightly Synthesis**: At end of session, a Re-constructor Agent reads the messy
+Active Whiteboard and synthesizes a structured Markdown narrative — not a bullet
+list, but a coherent account: what pivots occurred, what was completed, what is
+still pending, and why. This is appended to the Project Ledger.
+
+**Project Ledger**: A single, accumulating Markdown file. New agents onboarding to
+a project read the Ledger to understand the full project history. Feeding the Ledger
+into the next session is vastly more token-efficient than feeding raw chat history.
+
+#### 4. Tamper-Evident Project Ledger
+
+Each Nightly Synthesis entry is:
+- **Signed** with the user's PRSM keypair (cryptographic authorship)
+- **Chained** — each entry includes the SHA hash of the previous entry, so any
+  modification to historical entries breaks all subsequent hashes (identical property
+  to blockchain, using Git's native commit hashing)
+- **Anchored** — major project milestones are anchored to PRSM's DAG ledger for
+  external, decentralized verification independent of the local git repo
+
+#### 5. Git-Based Agent Workflow
+
+- Each agent on the team works in its own git branch
+  (`agent/security-YYYYMMDD`, `agent/coder-YYYYMMDD`, etc.)
+- **NWTN as merge manager**: NWTN reviews each agent's branch diff against the
+  meta-plan and the main branch before allowing a merge. Merges only happen at
+  defined checkpoints.
+- **Rollback**: Because all agent work is branch-isolated, any unauthorized or
+  broken addition is detectable (hash chain break) and reversible (revert to last
+  clean checkpoint on main).
+- **FTNS feedback loop**: Verified, merged agent contributions become provenance
+  records on the PRSM network. Nodes providing agent compute earn FTNS for
+  contributions that pass NWTN's checkpoint review — incentivizing quality.
+
+#### 6. OpenClaw Integration
+
+NWTN does not replace OpenClaw. OpenClaw is the **individual agent runtime**
+(skills, sandbox, gateway, heartbeat, per-agent `MEMORY.md`). NWTN is the
+**team coordination layer** that makes multiple OpenClaw instances work as a
+flat team.
+
+- OpenClaw's `MEMORY.md` is the source NWTN monitors for BSC filtering
+- OpenClaw's Heartbeat is the trigger for Nightly Synthesis
+- OpenClaw's Skills Registry maps to PRSM's model registry for specialist discovery
+- OpenClaw's Gateway is the human entry point where NWTN's interview mode lives
+
+### Implementation Plan
+
+#### Sub-phase 10.1 — BSC Core
+```
+prsm/compute/nwtn/bsc/
+  predictor.py          # Small model perplexity evaluator (local or network)
+  kl_filter.py          # KL divergence calculator
+  semantic_dedup.py     # Embedding cosine similarity check
+  promoter.py           # Threshold-based whiteboard promotion
+  deployment.py         # Local (MLX/llama.cpp) vs. network service mode
+```
+
+#### Sub-phase 10.2 — Active Whiteboard
+```
+prsm/compute/nwtn/whiteboard/
+  store.py              # SQLite-backed fact-value store
+  monitor.py            # File watcher: monitors agent MEMORY.md files
+  schema.py             # Fact schema: value, source_agent, timestamp, surprise_score
+  query.py              # Structured query interface for agents
+```
+
+#### Sub-phase 10.3 — Agent Team Coordination
+```
+prsm/compute/nwtn/team/
+  interview.py          # NWTN interview mode: gathers project requirements from user
+  planner.py            # Meta-plan generator: produces the "north star" document
+  assembler.py          # Team assembly: discovers specialist agents from PRSM registry
+  branch_manager.py     # Creates and manages per-agent git branches
+  checkpoint.py         # NWTN merge manager: reviews diffs, approves merges
+```
+
+#### Sub-phase 10.4 — Nightly Synthesis & Project Ledger
+```
+prsm/compute/nwtn/synthesis/
+  reconstructor.py      # Re-constructor agent: narrative synthesis from whiteboard
+  ledger.py             # Project Ledger: append-only, Markdown narrative
+  signer.py             # PRSM keypair signing + SHA hash chain
+  dag_anchor.py         # Anchors major milestones to PRSM DAG
+```
+
+#### Sub-phase 10.5 — OpenClaw Integration
+```
+prsm/compute/nwtn/openclaw/
+  adapter.py            # Bridge between NWTN coordination and OpenClaw agent instances
+  skills_bridge.py      # Maps PRSM model registry entries to OpenClaw skills
+  gateway.py            # User entry point: receives goal, triggers interview mode
+  heartbeat_hook.py     # Hooks OpenClaw heartbeat to trigger Nightly Synthesis
+```
+
+#### Sub-phase 10.6 — AI-Agent-Centric CLI
+- Audit all existing PRSM CLI commands for machine-readability
+- Ensure all outputs support `--format json` for agent consumption
+- Add agent-callable PRSM operations: team spawn, whiteboard query, ledger read,
+  checkpoint request, branch status
+- Remove or demote human-dashboard-oriented output formats
+
+### Success Criteria
+
+Phase 10 is complete when:
+1. A user can state a goal to NWTN via a Gateway; NWTN interviews them and produces
+   a meta-plan
+2. NWTN assembles a team of specialist agents from the PRSM network (or local)
+3. Agents work in parallel in isolated git branches; the BSC maintains a lean
+   shared whiteboard
+4. At session end, NWTN synthesizes a signed, chained Nightly Synthesis entry and
+   appends it to the Project Ledger
+5. A new agent joining the project can onboard by reading the Project Ledger alone
+6. An unauthorized Ledger modification is detectable within one hash-chain verification
+7. PRSM itself is being built using this system (self-referential bootstrap validation)
 
 ---
 
