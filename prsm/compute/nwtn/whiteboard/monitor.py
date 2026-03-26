@@ -118,6 +118,31 @@ class WhiteboardMonitor:
     max_buffer_secs : float
         Seconds before a non-empty buffer is force-flushed regardless of
         quiet time.
+    pre_filters : list of callable, optional
+        Functions applied to each chunk **before** BSC evaluation, in order.
+        Signature: ``(chunk: str) -> str``.  Return the empty string to drop
+        the chunk entirely (it will not be submitted to the BSC).
+
+        Use cases (from live 9-round test findings):
+          - Strip prompt-header echoes: LLMs sometimes repeat the round
+            header (``ROUND N — TASK DESCRIPTION``) at the start of their
+            response.  The BSC scored these at 1.00 (maximum surprise because
+            they are very different from prior whiteboard content) and promoted
+            them as if they were agent discoveries.  8% of promotions in the
+            live test were prompt echoes.  A pre-filter strips them cleanly.
+          - Remove boilerplate preamble (``Sure, I'll help with...``).
+          - Sanitise PII before the chunk reaches the whiteboard.
+
+        Example — register a round-header stripper::
+
+            import re
+            def strip_round_header(chunk: str) -> str:
+                return re.sub(r'^ROUND \\d+\\s*[—-][^\\n]*\\n', '', chunk).strip()
+
+            monitor = WhiteboardMonitor(
+                promoter=promoter, store=store,
+                pre_filters=[strip_round_header],
+            )
     """
 
     def __init__(
@@ -127,12 +152,14 @@ class WhiteboardMonitor:
         min_chunk_chars: int = DEFAULT_MIN_CHUNK_CHARS,
         debounce_secs: float = DEFAULT_DEBOUNCE_SECS,
         max_buffer_secs: float = DEFAULT_MAX_BUFFER_SECS,
+        pre_filters: Optional[List] = None,
     ) -> None:
         self._promoter = promoter
         self._store = store
         self._min_chunk_chars = min_chunk_chars
         self._debounce_secs = debounce_secs
         self._max_buffer_secs = max_buffer_secs
+        self._pre_filters: List = list(pre_filters or [])
 
         # file_path (str) → WatchedAgent
         self._agents: Dict[str, WatchedAgent] = {}
@@ -181,6 +208,26 @@ class WhiteboardMonitor:
         """Deregister a file.  Any buffered content is discarded."""
         resolved = str(Path(file_path).resolve())
         self._agents.pop(resolved, None)
+
+    def add_pre_filter(self, fn) -> None:
+        """
+        Append a pre-filter function applied to chunks before BSC evaluation.
+
+        The function receives a chunk string and returns a (possibly modified)
+        string.  Return the empty string to drop the chunk entirely.
+
+        Pre-filters are applied in registration order.
+
+        Parameters
+        ----------
+        fn : callable
+            ``(chunk: str) -> str``
+        """
+        self._pre_filters.append(fn)
+
+    def clear_pre_filters(self) -> None:
+        """Remove all registered pre-filter functions."""
+        self._pre_filters.clear()
 
     @property
     def watched_paths(self) -> Set[str]:
@@ -383,6 +430,16 @@ class WhiteboardMonitor:
 
         if not chunk:
             return
+
+        # Apply pre-filters before any other processing
+        for fn in self._pre_filters:
+            chunk = fn(chunk)
+            if not chunk:
+                logger.debug(
+                    "WhiteboardMonitor: chunk dropped by pre-filter for %s",
+                    agent.source_agent,
+                )
+                return
 
         if not force and len(chunk) < self._min_chunk_chars:
             # Too short and not forced — put it back and wait

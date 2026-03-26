@@ -782,6 +782,11 @@ async def run_test(
             for chunk in chunks:
                 if len(chunk.split()) < 8:
                     continue
+                # Apply pre-BSC filters (prompt-echo stripping, preamble removal)
+                # This is the test-harness equivalent of WhiteboardMonitor.add_pre_filter()
+                chunk = apply_pre_filters(chunk)
+                if not chunk or len(chunk.split()) < 8:
+                    continue
                 ctx_for_bsc = wb_ctx[-1500:] if len(wb_ctx) > 1500 else wb_ctx
                 decision = await promoter.process_chunk(
                     chunk=chunk,
@@ -886,6 +891,69 @@ async def run_test(
 # Helpers
 # ══════════════════════════════════════════════════════════════════════════
 
+
+# ── Pre-BSC filters (production equivalent of WhiteboardMonitor.add_pre_filter) ──
+#
+# These are the same functions you would register on WhiteboardMonitor in a
+# production deployment.  In the test harness we apply them manually to agent
+# response text before the BSC sees it.
+#
+# Evidence-based (from 9-round live test):
+#   9 of 112 promotions (8%) were prompt echoes scoring 1.00 (maximum surprise)
+#   because round headers are very different from prior whiteboard content.
+
+_ROUND_HEADER_RE = re.compile(r'^ROUND\s+\d+\s*[—\-]\s*[A-Z].*?\n', re.MULTILINE)
+_PREAMBLE_RE    = re.compile(
+    r'^(Sure[,.]|Of course[,.]|Based on the (information|context|whiteboard)|'
+    r'I (will|\'ll|can) (help|address|review|implement|analyze)|Let me|Okay[,.])',
+    re.IGNORECASE,
+)
+
+
+def pre_filter_prompt_echo(chunk: str) -> str:
+    """
+    Strip round-header echoes before BSC evaluation.
+
+    Evidence: 9/112 live-test promotions (8%) were our own round headers
+    reflected back by Qwen, scoring 1.00 (maximum surprise) because the
+    header text is very different from the whiteboard content.
+
+    Production usage (WhiteboardMonitor API)::
+
+        monitor.add_pre_filter(pre_filter_prompt_echo)
+    """
+    return _ROUND_HEADER_RE.sub('', chunk).strip()
+
+
+def pre_filter_llm_preamble(chunk: str) -> str:
+    """Strip common LLM preamble phrases (Sure, Of course, Based on...) """
+    lines = chunk.split('\n')
+    if lines and _PREAMBLE_RE.match(lines[0][:80]):
+        return '\n'.join(lines[1:]).strip()
+    return chunk
+
+
+# Ordered list of pre-filters applied to every agent response chunk
+PRE_FILTERS = [pre_filter_prompt_echo, pre_filter_llm_preamble]
+
+
+def apply_pre_filters(chunk: str) -> str:
+    """
+    Apply all registered pre-filters.  Returns '' to drop chunk entirely.
+
+    Code blocks (``` ... ```) bypass all filters — they are structured
+    content that should never be stripped by prose-oriented filters.
+    """
+    # Code blocks are atomic structured content — bypass all prose filters
+    if chunk.lstrip().startswith('```'):
+        return chunk
+    for fn in PRE_FILTERS:
+        chunk = fn(chunk)
+        if not chunk:
+            return ''
+    return chunk
+
+
 def _split_into_chunks(text: str, min_words: int = 15) -> List[str]:
     """
     Split agent output into BSC-evaluable chunks.
@@ -927,19 +995,47 @@ def _split_into_chunks(text: str, min_words: int = 15) -> List[str]:
 def _extract_code_files(outputs: List[str]) -> Dict[str, str]:
     """
     Extract labelled code blocks from the coder agent's output.
-    Looks for: ```python\n# FILE: path/to/file.py\n...\n```
+
+    Fix applied (from 9-round live test analysis)
+    ----------------------------------------------
+    The extractor previously CONCATENATED all versions of the same file
+    across rounds, producing incoherent output like::
+
+        # R1 skeleton (incomplete, has OPEN: comments)
+        # --- (continued from later round) ---
+        # R3 complete implementation
+
+    The correct behaviour is LATEST VERSION WINS: if the same file path
+    appears in R1 and R3, keep only the R3 version. This gives the most
+    recent, complete implementation as the deliverable.
+
+    Looks for: ```python\\n# FILE: path/to/file.py\\n...\\n```
     """
-    files: Dict[str, str] = {}
-    for output in outputs:
+    # Track (round_index, code) per filepath — higher index = later round
+    file_versions: Dict[str, List[tuple]] = {}  # filepath -> [(round_idx, code)]
+
+    for round_idx, output in enumerate(outputs):
         pattern = r"```python\n# FILE: ([^\n]+)\n(.*?)```"
         for match in re.finditer(pattern, output, re.DOTALL):
             filepath = match.group(1).strip()
             code = match.group(2)
-            if filepath in files:
-                files[filepath] += "\n\n# --- (continued from later round) ---\n\n" + code
-            else:
-                files[filepath] = code
-    return files
+            file_versions.setdefault(filepath, []).append((round_idx, code))
+
+    # Keep only the latest version of each file
+    result: Dict[str, str] = {}
+    for filepath, versions in file_versions.items():
+        # Sort by round index descending, take the first (latest)
+        versions.sort(key=lambda x: x[0], reverse=True)
+        latest_round, latest_code = versions[0]
+        result[filepath] = latest_code
+        if len(versions) > 1:
+            earlier_rounds = [v[0] + 1 for v in versions[1:]]
+            info(
+                f"Code version tracking: kept R{latest_round+1} version of "
+                f"{Path(filepath).name} (discarded R{earlier_rounds} drafts)"
+            )
+
+    return result
 
 
 def _mock_response(agent: Agent, round_n: int) -> str:
