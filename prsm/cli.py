@@ -20,6 +20,100 @@ from prsm.compute.nwtn.backends.config import detect_available_backends
 
 console = Console()
 
+# ---------------------------------------------------------------------------
+# AI-agent-centric output helpers (Sub-phase 10.6)
+# ---------------------------------------------------------------------------
+
+def _agent_output(data: dict, format: str = "json") -> None:
+    """
+    Write structured output to stdout.
+
+    In ``json`` mode (the default for agent callers) the output is a single
+    valid JSON document — no colour, no Rich formatting, no spinners.
+    In ``text`` mode the caller should render with Rich as normal.
+
+    All agent-callable commands should call this helper so the same command
+    works for both human inspection and programmatic consumption.
+
+    Conventions:
+    - Success:  exit 0,  ``{"ok": true, ...}``
+    - Failure:  exit 1,  ``{"ok": false, "error": "..."}``
+    """
+    import json
+    sys.stdout.write(json.dumps(data, indent=2, default=str) + "\n")
+    sys.stdout.flush()
+
+
+def _agent_error(message: str, code: int = 1) -> None:
+    """Write a JSON error to stdout and exit with *code*."""
+    import json
+    sys.stdout.write(json.dumps({"ok": False, "error": message}) + "\n")
+    sys.stdout.flush()
+    raise SystemExit(code)
+
+
+# Default paths for Phase 10 session artefacts
+_PRSM_HOME        = Path.home() / ".prsm"
+_SESSIONS_DIR     = _PRSM_HOME / "sessions"
+
+
+def _session_dir(session_id: str) -> Path:
+    return _SESSIONS_DIR / session_id
+
+
+def _load_session_meta(session_id: str) -> Optional[dict]:
+    """Load the JSON metadata file for a session, or None if not found."""
+    import json
+    meta_file = _session_dir(session_id) / "meta.json"
+    if meta_file.exists():
+        return json.loads(meta_file.read_text())
+    return None
+
+
+def _save_session_meta(session_id: str, meta: dict) -> None:
+    """Persist session metadata to disk."""
+    import json
+    d = _session_dir(session_id)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "meta.json").write_text(json.dumps(meta, indent=2, default=str))
+
+
+def _run_async(coro):
+    """
+    Run *coro* and return its result regardless of whether an event loop is
+    already running in the current thread (e.g. inside pytest-asyncio).
+
+    Strategy:
+    - Try ``asyncio.run()`` in the current thread first (fast path, works in
+      production where no loop is running).
+    - If a loop is already running, spawn a daemon thread with a fresh loop
+      and block until completion (safe, no nesting required).
+    """
+    import threading
+
+    try:
+        asyncio.get_running_loop()
+        # A loop IS running — use a separate thread
+        result_box: list = [None]
+        exc_box:    list = [None]
+
+        def _worker():
+            try:
+                result_box[0] = asyncio.run(coro)
+            except Exception as e:
+                exc_box[0] = e
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        t.join()
+        if exc_box[0]:
+            raise exc_box[0]
+        return result_box[0]
+
+    except RuntimeError:
+        # No loop running — safe to call asyncio.run() directly
+        return asyncio.run(coro)
+
 
 PREFLIGHT_PASS = "PASS"
 PREFLIGHT_WARN = "WARN"
@@ -416,29 +510,70 @@ def serve(host: str, port: int, reload: bool, workers: int):
 
 
 @main.command()
-def status():
-    """Show PRSM system status"""
+@click.option("--format", "output_format",
+              type=click.Choice(["text", "json"]), default="text",
+              help="Output format: 'text' (human) or 'json' (agent-parseable)")
+def status(output_format: str):
+    """Show PRSM system status.
+
+    Use --format json for machine-readable output (AI agent consumption).
+    """
     _init_config()
     from prsm.core.config import get_settings
     settings = get_settings()
+
+    if settings:
+        data = {
+            "ok": True,
+            "components": {
+                "configuration": {
+                    "status": "loaded",
+                    "environment": getattr(settings, "environment", "unknown"),
+                },
+                "database": {
+                    "status": "configured",
+                    "url": str(getattr(settings, "database_url", "sqlite (default)")),
+                },
+                "ipfs": {
+                    "status": "configured",
+                    "host": getattr(settings, "ipfs_host", "localhost"),
+                    "port": getattr(settings, "ipfs_port", 5001),
+                },
+                "nwtn": {
+                    "enabled": getattr(settings, "nwtn_enabled", True),
+                    "model": getattr(settings, "nwtn_default_model", "default"),
+                },
+                "ftns": {
+                    "enabled": getattr(settings, "ftns_enabled", True),
+                    "initial_grant": getattr(settings, "ftns_initial_grant", 100),
+                },
+            },
+        }
+    else:
+        data = {
+            "ok": True,
+            "components": {
+                "configuration": {"status": "defaults", "note": "No .env file found"},
+                "nwtn": {"enabled": True, "model": "default"},
+                "ftns": {"enabled": True, "initial_grant": 100},
+            },
+        }
+
+    if output_format == "json":
+        _agent_output(data)
+        return
+
     table = Table(title="PRSM System Status")
     table.add_column("Component", style="cyan")
     table.add_column("Status", style="magenta")
     table.add_column("Details", style="green")
-
-    if settings:
-        table.add_row("Configuration", "✅ Loaded", f"Environment: {getattr(settings, 'environment', 'unknown')}")
-        table.add_row("Database", "🔄 Checking...", str(getattr(settings, 'database_url', 'sqlite (default)')))
-        table.add_row("IPFS", "🔄 Checking...", f"{getattr(settings, 'ipfs_host', 'localhost')}:{getattr(settings, 'ipfs_port', 5001)}")
-        table.add_row("NWTN", "✅ Enabled" if getattr(settings, 'nwtn_enabled', True) else "❌ Disabled",
-                      f"Model: {getattr(settings, 'nwtn_default_model', 'default')}")
-        table.add_row("FTNS", "✅ Enabled" if getattr(settings, 'ftns_enabled', True) else "❌ Disabled",
-                      f"Initial grant: {getattr(settings, 'ftns_initial_grant', 100)}")
-    else:
-        table.add_row("Configuration", "⚠️ Using defaults", "No .env file found")
-        table.add_row("NWTN", "✅ Enabled", "Default model")
-        table.add_row("FTNS", "✅ Enabled", "Default settings")
-
+    for name, info in data["components"].items():
+        enabled = info.get("enabled", True)
+        status_text = "✅ Loaded" if info.get("status") == "loaded" else \
+                      "⚠️ Defaults" if info.get("status") == "defaults" else \
+                      "✅ Enabled" if enabled else "❌ Disabled"
+        detail = info.get("url", info.get("model", info.get("note", "")))
+        table.add_row(name.capitalize(), status_text, str(detail))
     console.print(table)
 
 
@@ -1102,8 +1237,14 @@ def peers():
 
 
 @node.command()
-def info():
-    """Show node identity and configuration"""
+@click.option("--format", "output_format",
+              type=click.Choice(["text", "json"]), default="text",
+              help="Output format: 'text' (human) or 'json' (agent-parseable)")
+def info(output_format: str):
+    """Show node identity and configuration.
+
+    Use --format json for machine-readable output (AI agent consumption).
+    """
     from prsm.node.config import NodeConfig
     from prsm.node.identity import load_node_identity
 
@@ -1111,20 +1252,38 @@ def info():
     identity = load_node_identity(config.identity_path)
 
     if not identity:
+        if output_format == "json":
+            _agent_error("No node identity found. Run: prsm node start --wizard")
         console.print("No node identity found. Run 'prsm node start --wizard' first.", style="yellow")
+        return
+
+    data = {
+        "ok": True,
+        "node_id": identity.node_id,
+        "display_name": config.display_name,
+        "public_key_b64": identity.public_key_b64,
+        "roles": [r.value for r in config.roles],
+        "p2p_port": config.p2p_port,
+        "api_port": config.api_port,
+        "data_dir": config.data_dir,
+        "bootstrap_nodes": config.bootstrap_nodes or [],
+    }
+
+    if output_format == "json":
+        _agent_output(data)
         return
 
     table = Table(title="PRSM Node Info")
     table.add_column("Property", style="cyan")
     table.add_column("Value", style="green")
-    table.add_row("Node ID", identity.node_id)
-    table.add_row("Display Name", config.display_name)
-    table.add_row("Public Key", identity.public_key_b64[:32] + "...")
-    table.add_row("Roles", ", ".join(r.value for r in config.roles))
-    table.add_row("P2P Port", str(config.p2p_port))
-    table.add_row("API Port", str(config.api_port))
-    table.add_row("Data Dir", config.data_dir)
-    table.add_row("Bootstrap Nodes", ", ".join(config.bootstrap_nodes) if config.bootstrap_nodes else "none")
+    table.add_row("Node ID", data["node_id"])
+    table.add_row("Display Name", data["display_name"])
+    table.add_row("Public Key", data["public_key_b64"][:32] + "...")
+    table.add_row("Roles", ", ".join(data["roles"]))
+    table.add_row("P2P Port", str(data["p2p_port"]))
+    table.add_row("API Port", str(data["api_port"]))
+    table.add_row("Data Dir", data["data_dir"])
+    table.add_row("Bootstrap Nodes", ", ".join(data["bootstrap_nodes"]) or "none")
     console.print(table)
 
 
@@ -5525,6 +5684,664 @@ def logs_cmd(workflow_id: str, run_id: Optional[str], limit: int, api_url: str):
     else:
         console.print(f"❌ Logs failed: HTTP {response.status_code}", style="red")
         raise SystemExit(1)
+
+
+# ============================================================================
+# NWTN AGENT-TEAM COMMANDS  (Sub-phase 10.6 — AI-agent-centric interface)
+# ============================================================================
+# These commands operate against LOCAL Phase 10 infrastructure (no API server
+# required).  All outputs default to machine-readable JSON for AI agent use.
+# Pass --format text for human-readable Rich output.
+# ============================================================================
+
+@nwtn.group("agent-team")
+def agent_team():
+    """AI Agent Team coordination commands (Phase 10).
+
+    Manage NWTN sessions, whiteboards, ledgers, and checkpoint reviews.
+    All commands emit JSON by default for AI agent consumption.
+    """
+    pass
+
+
+def _default_db_path(session_id: str) -> Path:
+    return _session_dir(session_id) / "whiteboard.db"
+
+
+def _default_ledger_dir(session_id: str) -> Path:
+    return _session_dir(session_id) / "ledger"
+
+
+def _default_key_file(session_id: str) -> Path:
+    return _session_dir(session_id) / "ledger.key"
+
+
+# ---------------------------------------------------------------------------
+# agent-team start
+# ---------------------------------------------------------------------------
+
+@agent_team.command("start")
+@click.argument("goal")
+@click.option("--session-id", default=None, help="Explicit session ID (auto-generated if omitted)")
+@click.option("--tech", default="", help="Technology stack (comma-separated)")
+@click.option("--constraints", default="", help="Hard constraints (comma-separated)")
+@click.option("--success", default="", help="Success criteria (comma-separated)")
+@click.option("--timeline", default="", help="Target timeline")
+@click.option("--repo-path", default=None, help="Git repo path for agent branches (default: cwd)")
+@click.option("--format", "output_format",
+              type=click.Choice(["json", "text"]), default="json",
+              help="Output format (default: json)")
+def agent_team_start(
+    goal: str,
+    session_id: Optional[str],
+    tech: str,
+    constraints: str,
+    success: str,
+    timeline: str,
+    repo_path: Optional[str],
+    output_format: str,
+):
+    """Start a new NWTN Agent Team session.
+
+    GOAL is the project objective in natural language.
+
+    Examples (agent use):
+
+    \b
+    prsm nwtn agent-team start "Build a BSC system" \\
+      --tech "Python,aiosqlite" \\
+      --success "Tests pass" \\
+      --format json
+    """
+    import uuid as _uuid
+    from prsm.compute.nwtn.team import InterviewSession, MetaPlanner, TeamAssembler
+    from prsm.compute.nwtn.team.interview import ProjectBrief, QAPair
+    from prsm.compute.nwtn.whiteboard import WhiteboardStore
+    from prsm.compute.nwtn.synthesis import ProjectLedger, LedgerSigner
+
+    sid = session_id or str(_uuid.uuid4())[:8]
+    db_path   = _default_db_path(sid)
+    ldir      = _default_ledger_dir(sid)
+    key_file  = _default_key_file(sid)
+    repo      = Path(repo_path) if repo_path else Path.cwd()
+
+    # Build ProjectBrief directly from CLI flags (no interactive interview)
+    brief = ProjectBrief(
+        session_id=sid,
+        goal=goal,
+        technology_stack=[t.strip() for t in tech.split(",") if t.strip()],
+        constraints=[c.strip() for c in constraints.split(",") if c.strip()],
+        success_criteria=[s.strip() for s in success.split(",") if s.strip()],
+        timeline=timeline or None,
+        llm_assisted=False,
+    )
+
+    async def _run():
+        planner  = MetaPlanner(backend_registry=None)
+        meta_plan = await planner.generate(brief)
+
+        assembler = TeamAssembler(
+            date_suffix=__import__("datetime").datetime.now(
+                __import__("datetime").timezone.utc
+            ).strftime("%Y%m%d"),
+        )
+        team = await assembler.assemble(meta_plan)
+
+        # Persist whiteboard store
+        store = WhiteboardStore(db_path)
+        await store.open()
+        await store.create_session(sid)
+
+        # Write meta-plan as first whiteboard entry
+        from prsm.compute.nwtn.bsc import (
+            PromotionDecision, ChunkMetadata, FilterDecision, KLFilterResult,
+        )
+        from datetime import datetime, timezone
+        await store.write(PromotionDecision(
+            promoted=True,
+            chunk=meta_plan.to_whiteboard_entry(),
+            metadata=ChunkMetadata(
+                source_agent="nwtn/planner", session_id=sid,
+                timestamp=datetime.now(timezone.utc),
+            ),
+            surprise_score=1.0, raw_perplexity=0.0, similarity_score=0.0,
+            kl_result=KLFilterResult(
+                decision=FilterDecision.PROMOTE, score=1.0,
+                epsilon=0.0, reason="MetaPlan forced-promoted at session start",
+            ),
+            dedup_result=None,
+            reason="MetaPlan written at session start",
+        ))
+        await store.close()
+
+        # Bootstrap ledger and signer
+        ledger = ProjectLedger(ledger_dir=ldir, project_title=meta_plan.title)
+        ledger.load()
+        signer = LedgerSigner(keyfile_path=key_file)
+        signer.load_or_generate()
+
+        return meta_plan, team
+
+    try:
+        meta_plan, team = _run_async(_run())
+    except Exception as exc:
+        if output_format == "json":
+            _agent_error(f"Session start failed: {exc}")
+        console.print(f"[red]Error: {exc}[/red]")
+        raise SystemExit(1)
+
+    meta = {
+        "session_id": sid,
+        "goal": goal,
+        "db_path": str(db_path),
+        "ledger_dir": str(ldir),
+        "key_file": str(key_file),
+        "repo_path": str(repo),
+        "status": "active",
+        "meta_plan_title": meta_plan.title,
+        "created_at": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        ).isoformat(),
+        "team": [
+            {
+                "role": m.role,
+                "branch": m.branch_name,
+                "model": m.model_id,
+                "agent_name": m.agent_name,
+            }
+            for m in team.members
+        ],
+    }
+    _save_session_meta(sid, meta)
+
+    if output_format == "json":
+        _agent_output({"ok": True, **meta})
+        return
+
+    console.print(f"[bold green]Session {sid} started[/bold green]")
+    console.print(f"  Goal:       {goal}")
+    console.print(f"  MetaPlan:   {meta_plan.title}")
+    console.print(f"  Team size:  {len(team.members)}")
+    for m in team.members:
+        console.print(f"    [{m.role}] {m.agent_name} → {m.branch_name}")
+
+
+# ---------------------------------------------------------------------------
+# agent-team status
+# ---------------------------------------------------------------------------
+
+@agent_team.command("status")
+@click.argument("session_id")
+@click.option("--format", "output_format",
+              type=click.Choice(["json", "text"]), default="json")
+def agent_team_status(session_id: str, output_format: str):
+    """Show status of an Agent Team session.
+
+    SESSION_ID is returned by 'agent-team start'.
+    """
+    meta = _load_session_meta(session_id)
+    if not meta:
+        if output_format == "json":
+            _agent_error(f"Session '{session_id}' not found. Run: prsm nwtn agent-team start")
+        console.print(f"[red]Session '{session_id}' not found.[/red]")
+        raise SystemExit(1)
+
+    async def _enrich():
+        db_path = Path(meta.get("db_path", _default_db_path(session_id)))
+        from prsm.compute.nwtn.whiteboard import WhiteboardStore
+        from prsm.compute.nwtn.synthesis import ProjectLedger
+
+        wb_count = 0
+        if db_path.exists():
+            store = WhiteboardStore(db_path)
+            await store.open()
+            wb_count = await store.entry_count(session_id)
+            await store.close()
+
+        ledger_dir = Path(meta.get("ledger_dir", _default_ledger_dir(session_id)))
+        ledger = ProjectLedger(ledger_dir=ledger_dir)
+        if (ledger_dir / "project_ledger.json").exists():
+            ledger.load()
+
+        return wb_count, ledger.entry_count
+
+    try:
+        wb_count, ledger_count = _run_async(_enrich())
+    except Exception:
+        wb_count, ledger_count = 0, 0
+
+    result = {
+        "ok": True,
+        "session_id": session_id,
+        "status": meta.get("status", "unknown"),
+        "goal": meta.get("goal", ""),
+        "meta_plan_title": meta.get("meta_plan_title", ""),
+        "created_at": meta.get("created_at", ""),
+        "team": meta.get("team", []),
+        "whiteboard_entries": wb_count,
+        "ledger_entries": ledger_count,
+    }
+
+    if output_format == "json":
+        _agent_output(result)
+        return
+
+    console.print(f"[bold]Session {session_id}[/bold]  [{result['status']}]")
+    console.print(f"  Goal:      {result['goal']}")
+    console.print(f"  MetaPlan:  {result['meta_plan_title']}")
+    console.print(f"  Whiteboard entries: {wb_count}")
+    console.print(f"  Ledger entries:     {ledger_count}")
+
+
+# ---------------------------------------------------------------------------
+# agent-team whiteboard
+# ---------------------------------------------------------------------------
+
+@agent_team.command("whiteboard")
+@click.argument("session_id")
+@click.option("--strategy", type=click.Choice(["recent", "top", "hybrid"]), default="hybrid",
+              help="Entry selection strategy")
+@click.option("--max-chars", type=int, default=4000, help="Max characters in compressed state")
+@click.option("--entries", is_flag=True, help="Include full entry list")
+@click.option("--format", "output_format",
+              type=click.Choice(["json", "text"]), default="json")
+def agent_team_whiteboard(
+    session_id: str,
+    strategy: str,
+    max_chars: int,
+    entries: bool,
+    output_format: str,
+):
+    """Read the Active Whiteboard for a session.
+
+    Returns the compressed state string and optionally the full entry list.
+    The compressed state is what agents use as shared situational awareness.
+    """
+    meta = _load_session_meta(session_id)
+    db_path = Path(
+        meta.get("db_path", _default_db_path(session_id)) if meta else _default_db_path(session_id)
+    )
+
+    async def _read():
+        from prsm.compute.nwtn.whiteboard import WhiteboardStore, WhiteboardQuery
+        store = WhiteboardStore(db_path)
+        await store.open()
+        query = WhiteboardQuery(store)
+        state  = await query.compressed_state(session_id, max_chars=max_chars, strategy=strategy)
+        count  = await query.entry_count(session_id)
+        entry_list = []
+        if entries:
+            all_entries = await store.get_all(session_id)
+            entry_list = [
+                {
+                    "id": e.id,
+                    "source_agent": e.source_agent,
+                    "chunk": e.chunk,
+                    "surprise_score": e.surprise_score,
+                    "timestamp": e.timestamp.isoformat(),
+                }
+                for e in all_entries
+            ]
+        await store.close()
+        return state, count, entry_list
+
+    try:
+        state, count, entry_list = _run_async(_read())
+    except Exception as exc:
+        if output_format == "json":
+            _agent_error(f"Whiteboard read failed: {exc}")
+        console.print(f"[red]Error: {exc}[/red]")
+        raise SystemExit(1)
+
+    result = {
+        "ok": True,
+        "session_id": session_id,
+        "entry_count": count,
+        "strategy": strategy,
+        "compressed_state": state,
+    }
+    if entries:
+        result["entries"] = entry_list
+
+    if output_format == "json":
+        _agent_output(result)
+        return
+
+    console.print(f"[bold]Whiteboard — {session_id} ({count} entries)[/bold]\n")
+    console.print(state)
+
+
+# ---------------------------------------------------------------------------
+# agent-team ledger
+# ---------------------------------------------------------------------------
+
+@agent_team.command("ledger")
+@click.argument("session_id", required=False, default=None)
+@click.option("--ledger-dir", default=None, help="Path to ledger directory")
+@click.option("--max-entries", type=int, default=10)
+@click.option("--verify", is_flag=True, help="Verify chain integrity before returning")
+@click.option("--format", "output_format",
+              type=click.Choice(["json", "text"]), default="json")
+def agent_team_ledger(
+    session_id: Optional[str],
+    ledger_dir: Optional[str],
+    max_entries: int,
+    verify: bool,
+    output_format: str,
+):
+    """Read the Project Ledger.
+
+    Returns recent entries, onboarding context, and optional chain verification.
+    This is the primary agent onboarding document — feed it at session start.
+    """
+    if ledger_dir:
+        ldir = Path(ledger_dir)
+    elif session_id:
+        meta = _load_session_meta(session_id)
+        ldir = Path(meta.get("ledger_dir", _default_ledger_dir(session_id)) if meta else _default_ledger_dir(session_id))
+    else:
+        if output_format == "json":
+            _agent_error("Provide SESSION_ID or --ledger-dir")
+        console.print("[red]Provide SESSION_ID or --ledger-dir[/red]")
+        raise SystemExit(1)
+
+    from prsm.compute.nwtn.synthesis import ProjectLedger
+
+    ledger = ProjectLedger(ledger_dir=ldir)
+    ledger.load()
+
+    chain_ok = None
+    if verify:
+        result_v = ledger.verify()
+        chain_ok = result_v.valid
+
+    ctx = ledger.to_onboarding_context(max_entries=max_entries)
+
+    entries_out = []
+    for e in ledger._entries[-max_entries:]:
+        entries_out.append({
+            "entry_index": e.entry_index,
+            "session_id": e.session_id,
+            "timestamp": e.timestamp.isoformat(),
+            "content_hash": e.content_hash[:16] + "...",
+            "chain_hash": e.chain_hash[:16] + "...",
+            "agents": e.agents_involved,
+            "whiteboard_entries": e.whiteboard_entry_count,
+            "dag_anchor": e.dag_anchor_tx,
+        })
+
+    result = {
+        "ok": True,
+        "ledger_dir": str(ldir),
+        "entry_count": ledger.entry_count,
+        "entries": entries_out,
+        "onboarding_context": ctx,
+    }
+    if chain_ok is not None:
+        result["chain_valid"] = chain_ok
+        result["latest_chain_hash"] = ledger.latest_chain_hash()
+
+    if output_format == "json":
+        _agent_output(result)
+        return
+
+    console.print(f"[bold]Project Ledger[/bold] — {ledger.entry_count} entries")
+    if chain_ok is not None:
+        icon = "✅" if chain_ok else "❌"
+        console.print(f"Chain integrity: {icon}")
+    console.print()
+    console.print(ctx)
+
+
+# ---------------------------------------------------------------------------
+# agent-team checkpoint
+# ---------------------------------------------------------------------------
+
+@agent_team.command("checkpoint")
+@click.argument("branch")
+@click.argument("session_id")
+@click.option("--repo-path", default=None, help="Git repo path (default: cwd)")
+@click.option("--auto-merge", is_flag=True, help="Merge automatically if approved")
+@click.option("--format", "output_format",
+              type=click.Choice(["json", "text"]), default="json")
+def agent_team_checkpoint(
+    branch: str,
+    session_id: str,
+    repo_path: Optional[str],
+    auto_merge: bool,
+    output_format: str,
+):
+    """Request a checkpoint review for an agent branch.
+
+    BRANCH is the git branch name (e.g. agent/coder-20260326).
+    SESSION_ID identifies the session whose MetaPlan is used for evaluation.
+
+    The reviewer evaluates the branch diff against the MetaPlan and returns
+    an approve/reject decision with a meta-plan alignment score.
+
+    With --auto-merge, the branch is merged to main immediately if approved.
+    """
+    meta = _load_session_meta(session_id)
+    repo = Path(repo_path or (meta.get("repo_path", ".") if meta else "."))
+
+    async def _review():
+        from prsm.compute.nwtn.team import BranchManager, MetaPlanner
+        from prsm.compute.nwtn.team.checkpoint import CheckpointReviewer
+        from prsm.compute.nwtn.team.planner import MetaPlan, Milestone, AgentRole
+
+        bm = BranchManager(repo_path=repo)
+
+        # Reconstruct a minimal MetaPlan from session metadata
+        goal = meta.get("goal", "Project") if meta else "Project"
+        title = meta.get("meta_plan_title", goal) if meta else goal
+        plan = MetaPlan(
+            session_id=session_id,
+            title=title,
+            objective=goal,
+            milestones=[
+                Milestone(
+                    title=title,
+                    description=goal,
+                    merge_criteria=["Work is complete and tests pass"],
+                )
+            ],
+            required_roles=[AgentRole(role="agent", description="Team member")],
+        )
+
+        ldir = Path(meta.get("ledger_dir", _default_ledger_dir(session_id)) if meta else _default_ledger_dir(session_id))
+        ledger_sha = ""
+        if (ldir / "project_ledger.json").exists():
+            from prsm.compute.nwtn.synthesis import ProjectLedger
+            ledger = ProjectLedger(ledger_dir=ldir)
+            ledger.load()
+            ledger_sha = ledger.latest_chain_hash()
+
+        reviewer = CheckpointReviewer(
+            branch_manager=bm,
+            meta_plan=plan,
+            ledger_sha=ledger_sha,
+        )
+        decision = await reviewer.review(branch)
+
+        if auto_merge and decision.approved:
+            await reviewer.approve_and_merge(decision)
+
+        return decision
+
+    try:
+        decision = _run_async(_review())
+    except Exception as exc:
+        if output_format == "json":
+            _agent_error(f"Checkpoint review failed: {exc}")
+        console.print(f"[red]Error: {exc}[/red]")
+        raise SystemExit(1)
+
+    result = {
+        "ok": True,
+        "branch": branch,
+        "session_id": session_id,
+        "approved": decision.approved,
+        "verdict": decision.verdict,
+        "reason": decision.reason,
+        "diff_summary": decision.diff_summary,
+        "meta_plan_alignment": round(decision.meta_plan_alignment, 4),
+        "heuristic": decision.heuristic,
+        "milestone_index": decision.milestone_index,
+        "merge_commit_sha": decision.merge_commit_sha,
+    }
+
+    if output_format == "json":
+        _agent_output(result)
+        return
+
+    icon = "✅ APPROVED" if decision.approved else "❌ REJECTED"
+    console.print(f"[bold]{branch}[/bold] — {icon}")
+    console.print(f"  Alignment:  {decision.meta_plan_alignment:.3f}")
+    console.print(f"  Reason:     {decision.reason}")
+    if decision.merge_commit_sha:
+        console.print(f"  Merge SHA:  {decision.merge_commit_sha[:12]}...")
+
+
+# ---------------------------------------------------------------------------
+# agent-team branches
+# ---------------------------------------------------------------------------
+
+@agent_team.command("branches")
+@click.option("--repo-path", default=None, help="Git repo path (default: cwd)")
+@click.option("--format", "output_format",
+              type=click.Choice(["json", "text"]), default="json")
+def agent_team_branches(repo_path: Optional[str], output_format: str):
+    """List all agent branches and their status.
+
+    Shows all 'agent/*' branches in the repository with commit counts
+    and merge status.
+    """
+    repo = Path(repo_path or ".")
+
+    async def _list():
+        from prsm.compute.nwtn.team import BranchManager
+        bm = BranchManager(repo_path=repo)
+        branches = await bm.list_agent_branches()
+        details = []
+        for b in branches:
+            count = await bm.commit_count_on_branch(b)
+            state = bm.get_state(b)
+            details.append({
+                "branch": b,
+                "commits_ahead": count,
+                "status": state.status.value if state else "active",
+            })
+        return details
+
+    try:
+        details = _run_async(_list())
+    except Exception as exc:
+        if output_format == "json":
+            _agent_error(f"Branch listing failed: {exc}")
+        console.print(f"[red]Error: {exc}[/red]")
+        raise SystemExit(1)
+
+    result = {
+        "ok": True,
+        "repo_path": str(repo),
+        "branch_count": len(details),
+        "branches": details,
+    }
+
+    if output_format == "json":
+        _agent_output(result)
+        return
+
+    if not details:
+        console.print("[dim]No agent branches found.[/dim]")
+        return
+
+    table = Table(title="Agent Branches")
+    table.add_column("Branch", style="cyan")
+    table.add_column("Commits Ahead", style="green")
+    table.add_column("Status", style="magenta")
+    for d in details:
+        table.add_row(d["branch"], str(d["commits_ahead"]), d["status"])
+    console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# agent-team synthesise
+# ---------------------------------------------------------------------------
+
+@agent_team.command("synthesise")
+@click.argument("session_id")
+@click.option("--format", "output_format",
+              type=click.Choice(["json", "text"]), default="json")
+def agent_team_synthesise(session_id: str, output_format: str):
+    """Run Nightly Synthesis for a session and append to the Project Ledger.
+
+    Reads the current Active Whiteboard, synthesises a narrative using the
+    template Re-constructor (no LLM required), signs it with the session
+    keypair, and appends it to the Project Ledger.
+
+    Run this at the end of each working session to keep the ledger current.
+    """
+    meta = _load_session_meta(session_id)
+    db_path   = Path(meta.get("db_path",   _default_db_path(session_id))   if meta else _default_db_path(session_id))
+    ldir      = Path(meta.get("ledger_dir", _default_ledger_dir(session_id)) if meta else _default_ledger_dir(session_id))
+    key_file  = Path(meta.get("key_file",   _default_key_file(session_id))  if meta else _default_key_file(session_id))
+
+    async def _synthesise():
+        from prsm.compute.nwtn.whiteboard import WhiteboardStore, WhiteboardQuery
+        from prsm.compute.nwtn.synthesis import (
+            NarrativeSynthesizer, ProjectLedger, LedgerSigner,
+        )
+
+        store = WhiteboardStore(db_path)
+        await store.open()
+        query = WhiteboardQuery(store)
+        snapshot = await query.snapshot(session_id)
+
+        synth   = NarrativeSynthesizer(backend_registry=None)
+        result  = await synth.synthesise(snapshot)
+
+        ledger  = ProjectLedger(ledger_dir=ldir, project_title=meta.get("meta_plan_title", "PRSM") if meta else "PRSM")
+        ledger.load()
+        signer  = LedgerSigner(keyfile_path=key_file)
+        signer.load_or_generate()
+
+        entry = ledger.append(result, signer)
+        verification = ledger.verify()
+        await store.close()
+        return entry, verification
+
+    try:
+        entry, verification = _run_async(_synthesise())
+    except Exception as exc:
+        if output_format == "json":
+            _agent_error(f"Synthesis failed: {exc}")
+        console.print(f"[red]Error: {exc}[/red]")
+        raise SystemExit(1)
+
+    result = {
+        "ok": True,
+        "session_id": session_id,
+        "entry_index": entry.entry_index,
+        "timestamp": entry.timestamp.isoformat(),
+        "content_hash": entry.content_hash,
+        "chain_hash": entry.chain_hash,
+        "previous_hash": entry.previous_hash,
+        "whiteboard_entries_synthesised": entry.whiteboard_entry_count,
+        "agents_involved": entry.agents_involved,
+        "chain_valid": verification.valid,
+        "ledger_entry_count": verification.entry_count,
+    }
+
+    if output_format == "json":
+        _agent_output(result)
+        return
+
+    icon = "✅" if verification.valid else "❌"
+    console.print(f"[bold green]Synthesis complete[/bold green] — Entry #{entry.entry_index}")
+    console.print(f"  Chain valid:  {icon}")
+    console.print(f"  Chain hash:   {entry.chain_hash[:20]}…")
+    console.print(f"  Ledger total: {verification.entry_count} entries")
 
 
 if __name__ == "__main__":
