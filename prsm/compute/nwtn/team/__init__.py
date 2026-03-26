@@ -82,6 +82,15 @@ from .live_scribe import (
     CheckpointReadiness,
     CheckpointCycleResult,
 )
+from .meta_plan_updater import (
+    MilestoneStatus,
+    MilestoneProgress,
+    MilestoneAdjustment,
+    ReplanSuggestion,
+    ReplanResult,
+    EffortDriftDetector,
+    MetaPlanUpdater,
+)
 from .planner import MetaPlan, MetaPlanner, Milestone
 
 __all__ = [
@@ -125,4 +134,12 @@ __all__ = [
     "CheckpointLifecycleManager",
     "CheckpointReadiness",
     "CheckpointCycleResult",
+    # Meta-Plan Updater
+    "MetaPlanUpdater",
+    "MilestoneStatus",
+    "MilestoneProgress",
+    "MilestoneAdjustment",
+    "ReplanSuggestion",
+    "ReplanResult",
+    "EffortDriftDetector",
 ]
