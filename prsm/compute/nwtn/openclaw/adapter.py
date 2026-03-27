@@ -68,6 +68,8 @@ class SessionState:
     whiteboard_entries: int = 0
     synthesis_count: int = 0
     last_synthesis: Optional[datetime] = None
+    scribe_running: bool = False
+    """True when ScribeAgent is active for this session."""
 
 
 # ======================================================================
@@ -154,6 +156,12 @@ class NWTNOpenClawAdapter:
         self._heartbeat_hook = None
         self._branch_manager = None
         self._skills_bridge = None
+
+        # Event bus and ScribeAgent components
+        from prsm.compute.nwtn.bsc.event_bus import EventBus
+        self._event_bus = EventBus()
+        self._scribe_agent = None
+        self._router = None
 
         # Active sessions (session_id → SessionState)
         self._sessions: Dict[str, SessionState] = {}
@@ -283,6 +291,34 @@ class NWTNOpenClawAdapter:
             )
         await self._monitor.start()
 
+        # 6.5. Wire ScribeAgent + WhiteboardRouter
+        # These require a LiveScribe which needs convergence_tracker, synthesizer, ledger, team, meta_plan
+        # Build a minimal LiveScribe for the ScribeAgent to wrap
+        from prsm.compute.nwtn.team.live_scribe import LiveScribe
+        from prsm.compute.nwtn.team.convergence import ConvergenceTracker
+        from prsm.compute.nwtn.team.scribe_agent import ScribeAgent
+        from prsm.compute.nwtn.team.whiteboard_router import WhiteboardRouter
+
+        convergence_tracker = ConvergenceTracker()
+        live_scribe = LiveScribe(
+            whiteboard_store=self._store,
+            meta_plan=meta_plan,
+            team=team,
+            convergence_tracker=convergence_tracker,
+            narrative_synthesizer=self._synthesizer,
+            project_ledger=self._ledger,
+            backend_registry=self._orchestrator,
+        )
+        await live_scribe.setup()
+
+        inbox = live_scribe._inbox  # AgentInbox is created inside LiveScribe.__init__
+        self._router = WhiteboardRouter(agent_inbox=inbox, event_bus=self._event_bus)
+        self._scribe_agent = ScribeAgent(live_scribe=live_scribe, router=self._router)
+        await self._scribe_agent.start(self._event_bus)
+
+        state.scribe_running = True
+        logger.info("Adapter: ScribeAgent started for session %s", session_id)
+
         # 7. Start heartbeat hook
         self._heartbeat_hook = _build_heartbeat_hook(
             store=self._store,
@@ -320,6 +356,12 @@ class NWTNOpenClawAdapter:
         # Stop monitor
         if self._monitor:
             await self._monitor.stop()
+
+        # Stop ScribeAgent
+        if self._scribe_agent is not None:
+            await self._scribe_agent.stop()
+            self._scribe_agent = None
+            self._router = None
 
         # Archive whiteboard
         await self._store.archive_session(session_id)

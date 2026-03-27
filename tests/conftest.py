@@ -580,7 +580,7 @@ def mock_external_connections_early():
          patch('subprocess.Popen') as mock_popen:
         
         mock_run.return_value = Mock(returncode=0, stdout=b'', stderr=b'')
-        mock_popen.return_value = Mock(returncode=0, communicate=lambda: (b'', b''))
+        mock_popen.return_value = Mock(returncode=0, communicate=lambda **kwargs: (b'', b''))
         
         yield
 
