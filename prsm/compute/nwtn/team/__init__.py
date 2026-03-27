@@ -30,6 +30,13 @@ CheckpointReviewer / CheckpointDecision
     allowing any merge.  Writes tamper-evident commit messages cross-linking
     the Project Ledger.
 
+CheckpointEvaluator / EvaluationResult / EvaluationBatch
+    Adversarial evaluator that assesses each agent's work against MetaPlan
+    milestone criteria before checkpoint synthesis.  Skeptical by default:
+    assumes work is incomplete until proven otherwise.  Logs divergence notes
+    between agent self-assessments and evaluator judgments for the P3 tuning
+    loop.
+
 Typical session flow
 --------------------
 .. code-block:: python
@@ -67,6 +74,7 @@ from .branch_manager import BranchManager, BranchState, BranchStatus, GitDiff
 from .checkpoint import CheckpointDecision, CheckpointReviewer
 from .convergence import ConvergenceTracker, ConvergenceSignal, AgentConvergenceState
 from .interview import InterviewSession, ProjectBrief, QAPair, QuestionCallback
+from .evaluator import CheckpointEvaluator, EvaluationBatch, EvaluationResult
 from .live_scribe import (
     LiveScribe,
     UpdatePriority,
@@ -143,6 +151,10 @@ __all__ = [
     "CheckpointLifecycleManager",
     "CheckpointReadiness",
     "CheckpointCycleResult",
+    # Checkpoint Evaluator
+    "CheckpointEvaluator",
+    "EvaluationResult",
+    "EvaluationBatch",
     # Meta-Plan Updater
     "MetaPlanUpdater",
     "MilestoneStatus",

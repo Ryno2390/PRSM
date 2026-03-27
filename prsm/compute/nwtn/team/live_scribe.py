@@ -773,9 +773,24 @@ class CheckpointLifecycleManager:
         # Agents currently "at home" (waiting for next assignment)
         self._agents_home: Set[str] = set()
 
+        # Evaluator — adversarial criterion-based assessment at each checkpoint
+        # Imported lazily to avoid circular imports
+        from prsm.compute.nwtn.team.evaluator import CheckpointEvaluator
+        self._evaluator = CheckpointEvaluator(
+            meta_plan=meta_plan,
+            backend_registry=backend_registry,
+        )
+
+        # Agent inbox reference (injected by LiveScribe after construction)
+        self._inbox: Optional["AgentInbox"] = None
+
     def set_whiteboard_store(self, store: "WhiteboardStore") -> None:
         """Inject the whiteboard store (called by LiveScribe during init)."""
         self._whiteboard_store = store
+
+    def set_inbox(self, inbox: "AgentInbox") -> None:
+        """Inject the AgentInbox so evaluator results can notify failing agents."""
+        self._inbox = inbox
 
     # ------------------------------------------------------------------
     # Public API
@@ -891,7 +906,15 @@ class CheckpointLifecycleManager:
                     error="Could not retrieve whiteboard snapshot",
                 )
 
-            # 3. Run synthesis
+            # 3. Adversarial evaluation — assess each agent's work before synthesis.
+            #    The evaluator is skeptical by default: criteria are NOT met until
+            #    proven otherwise.  Failing agents get an IMPORTANT inbox flag.
+            evaluation_batch = await self._run_checkpoint_evaluation(
+                snapshot=snapshot,
+                ready_agents=readiness.ready_agents,
+            )
+
+            # 4. Run synthesis (evaluation results are embedded in the narrative)
             previous_summary = self._ledger.to_onboarding_context(max_entries=1, max_chars=1000)
             synthesis = await self._synthesizer.synthesise(
                 snapshot=snapshot,
@@ -899,16 +922,24 @@ class CheckpointLifecycleManager:
                 previous_summary=previous_summary,
             )
 
-            # 4. Append to ledger (signing is handled internally)
+            # Inject evaluation block into the synthesis narrative
+            if evaluation_batch is not None:
+                synthesis = self._embed_evaluation_in_synthesis(synthesis, evaluation_batch)
+
+            # 5. Append to ledger (signing is handled internally)
             from prsm.compute.nwtn.synthesis.signer import LedgerSigner
             signer = LedgerSigner()  # Generates new key if needed
             ledger_entry = self._ledger.append(synthesis, signer)
 
-            # 5. Assign next milestones
+            # 6. Assign next milestones
             next_assignments = await self.assign_next_checkpoints()
 
-            # 6. Prepare narrative summary for agents
+            # 7. Prepare narrative summary for agents
             narrative_summary = self._build_narrative_summary(synthesis, next_assignments)
+
+            # 8. Notify failing agents via inbox so they know to address gaps
+            if evaluation_batch is not None:
+                await self._notify_failing_agents(evaluation_batch)
 
             # Clear signals and send agents back to work
             self._checkpoint_signals.clear()
@@ -916,8 +947,10 @@ class CheckpointLifecycleManager:
 
             logger.info(
                 "CheckpointLifecycleManager: checkpoint cycle complete, "
-                "%d next assignments made",
+                "%d next assignments made (eval passed: %s/%s)",
                 len(next_assignments),
+                len(evaluation_batch.passed_agents) if evaluation_batch else "n/a",
+                len(readiness.ready_agents),
             )
 
             return CheckpointCycleResult(
@@ -980,6 +1013,153 @@ class CheckpointLifecycleManager:
             logger.error("CheckpointLifecycleManager: no whiteboard store — call set_whiteboard_store()")
             return None
         return await self._whiteboard_store.snapshot(self._plan.session_id)
+
+    async def _run_checkpoint_evaluation(
+        self,
+        snapshot,
+        ready_agents: List[str],
+    ) -> Optional["EvaluationBatch"]:
+        """
+        Run adversarial evaluation on each agent's checkpoint work.
+
+        Groups whiteboard entries by source agent and evaluates against
+        the agent's current milestone criteria.
+
+        Parameters
+        ----------
+        snapshot : WhiteboardSnapshot
+            Current whiteboard snapshot.
+        ready_agents : List[str]
+            Agent IDs that reached the checkpoint.
+
+        Returns
+        -------
+        EvaluationBatch or None if evaluation fails or no entries exist.
+        """
+        if not ready_agents:
+            return None
+
+        try:
+            # Group entries by source agent
+            agent_entries: Dict[str, List] = {agent_id: [] for agent_id in ready_agents}
+
+            for entry in snapshot.entries:
+                if entry.source_agent in agent_entries:
+                    agent_entries[entry.source_agent].append(entry)
+
+            # Determine which milestone to evaluate against (use most common assignment)
+            milestone_idx = 0
+            if self._current_assignments:
+                milestone_idx = max(
+                    self._current_assignments.values(),
+                    key=lambda idx: list(self._current_assignments.values()).count(idx),
+                )
+            milestone_idx = min(milestone_idx, len(self._plan.milestones) - 1)
+            milestone = self._plan.milestones[milestone_idx]
+
+            logger.info(
+                "CheckpointLifecycleManager: running adversarial evaluation "
+                "for %d agents at milestone %d (%s)",
+                len(ready_agents), milestone_idx, milestone.title,
+            )
+
+            batch = await self._evaluator.evaluate_team(
+                agent_entries=agent_entries,
+                milestone=milestone,
+            )
+
+            # Log summary for operators
+            for result in batch.results:
+                level = logging.WARNING if not result.passed else logging.INFO
+                logger.log(level, "  Evaluator: %s", result.summary())
+
+            return batch
+
+        except Exception as exc:
+            logger.warning(
+                "CheckpointLifecycleManager: evaluation failed (%s) — "
+                "proceeding with synthesis without evaluation",
+                exc,
+            )
+            return None
+
+    def _embed_evaluation_in_synthesis(
+        self,
+        synthesis: "SynthesisResult",
+        evaluation_batch: "EvaluationBatch",
+    ) -> "SynthesisResult":
+        """
+        Embed the evaluation block into the synthesis narrative.
+
+        Returns a new SynthesisResult with the evaluation summary appended.
+        """
+        try:
+            eval_block = evaluation_batch.to_narrative_block()
+            updated_narrative = synthesis.narrative + "\n\n" + eval_block
+
+            # Return a copy with updated narrative (SynthesisResult is a dataclass)
+            import dataclasses
+            return dataclasses.replace(synthesis, narrative=updated_narrative)
+        except Exception as exc:
+            logger.warning(
+                "CheckpointLifecycleManager: could not embed evaluation in narrative (%s)", exc
+            )
+            return synthesis
+
+    async def _notify_failing_agents(self, evaluation_batch: "EvaluationBatch") -> None:
+        """
+        Send IMPORTANT inbox notifications to agents whose work failed evaluation.
+
+        Creates a synthetic PrioritizedUpdate for each failing agent so they
+        know to address the gaps before the next checkpoint.
+        """
+        if self._inbox is None:
+            logger.debug(
+                "CheckpointLifecycleManager: no inbox reference — cannot notify failing agents"
+            )
+            return
+
+        for result in evaluation_batch.results:
+            if result.passed:
+                continue
+
+            # Build a human-readable message about what needs fixing
+            issues_text = "\n".join(f"  • {issue}" for issue in result.issues_found[:5])
+            message = (
+                f"⚠️ Checkpoint evaluation: your work did NOT fully meet milestone criteria "
+                f"(score={result.quality_score:.2f}).\n\n"
+                f"Issues identified:\n{issues_text}\n\n"
+                f"Please address these before the next checkpoint.\n"
+                f"(Evaluator confidence: {result.confidence:.2f})"
+            )
+
+            # We create a synthetic "evaluator" whiteboard entry for the notification
+            try:
+                from prsm.compute.nwtn.whiteboard.schema import WhiteboardEntry
+                fake_entry = WhiteboardEntry(
+                    id=-1,
+                    session_id=self._plan.session_id,
+                    source_agent="nwtn/evaluator",
+                    chunk=message,
+                    surprise_score=0.8,
+                    promoted_at=datetime.now(timezone.utc),
+                )
+                update = PrioritizedUpdate(
+                    entry=fake_entry,
+                    priority=UpdatePriority.IMPORTANT,
+                    relevant_agents=[result.agent_id],
+                    reason="checkpoint evaluation failed — criteria not met",
+                )
+                await self._inbox.push(update, target_agents=[result.agent_id])
+                logger.info(
+                    "CheckpointLifecycleManager: notified %s of evaluation failure",
+                    result.agent_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "CheckpointLifecycleManager: could not send inbox notification to %s: %s",
+                    result.agent_id, exc,
+                )
 
     def _build_narrative_summary(
         self,
@@ -1239,6 +1419,8 @@ class LiveScribe:
             backend_registry=backend_registry,
         )
         self._checkpoint_mgr.set_whiteboard_store(whiteboard_store)
+        # Wire inbox so the evaluator can send failure notifications to agents
+        self._checkpoint_mgr.set_inbox(self._inbox)
 
         # Register team members with convergence tracker (inbox registration
         # is deferred to setup() to avoid requiring a running event loop at
@@ -1477,6 +1659,58 @@ class LiveScribe:
         return await self._inbox.has_urgent(agent_id)
 
     # ------------------------------------------------------------------
+    # Evaluator tuning interface (P3 loop)
+    # ------------------------------------------------------------------
+
+    def review_evaluation_history(self) -> List[Dict[str, Any]]:
+        """
+        Return the full evaluation history with divergence notes.
+
+        Delegates to ``CheckpointEvaluator.review_evaluation_history()``.
+        Use this in the P3 tuning loop to identify systematic errors and
+        criterion prompts that need refinement.
+
+        Returns
+        -------
+        List[Dict]
+            Evaluation log entries with agent_id, scores, issues, divergence_notes.
+        """
+        return self._checkpoint_mgr._evaluator.review_evaluation_history()
+
+    def update_evaluation_criterion_prompt(
+        self,
+        agent_id: str,
+        criterion: str,
+        new_prompt: str,
+    ) -> None:
+        """
+        Override an evaluator's prompt for a specific (agent, criterion) pair.
+
+        Allows human operators to tune the evaluator when divergence notes
+        reveal systematic judgment errors.
+
+        Parameters
+        ----------
+        agent_id : str
+            Target agent ID, or ``"*"`` to apply globally.
+        criterion : str
+            Exact criterion text as it appears in the MetaPlan milestone.
+        new_prompt : str
+            Replacement prompt fragment for the LLM's assessment of this criterion.
+        """
+        self._checkpoint_mgr._evaluator.update_criteria_prompt(agent_id, criterion, new_prompt)
+
+    @property
+    def evaluator(self):
+        """
+        Direct access to the underlying CheckpointEvaluator.
+
+        Provided for advanced use-cases like pre-evaluation, custom hooks,
+        or integration tests.
+        """
+        return self._checkpoint_mgr._evaluator
+
+    # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
@@ -1491,6 +1725,12 @@ class LiveScribe:
 # ======================================================================
 # Exports
 # ======================================================================
+
+from prsm.compute.nwtn.team.evaluator import (  # noqa: E402 — import after dataclasses defined above
+    CheckpointEvaluator,
+    EvaluationResult,
+    EvaluationBatch,
+)
 
 __all__ = [
     # Priority system
@@ -1511,4 +1751,8 @@ __all__ = [
     "CheckpointCycleResult",
     # Main orchestrator
     "LiveScribe",
+    # Evaluator (re-exported for convenience)
+    "CheckpointEvaluator",
+    "EvaluationResult",
+    "EvaluationBatch",
 ]
