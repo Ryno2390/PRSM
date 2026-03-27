@@ -30,6 +30,7 @@ class EventType(Enum):
     CHUNK_PROMOTED = "chunk_promoted"
     CHUNK_REJECTED = "chunk_rejected"
     ROUND_ADVANCED = "round_advanced"
+    URGENT_UPDATE = "urgent_update"
 
 
 @dataclass(frozen=True)
