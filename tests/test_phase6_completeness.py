@@ -14,16 +14,10 @@ import pytest
 class TestPhase6ModuleImports:
     """Test that all Phase 6 modules import correctly."""
 
-    def test_unified_pipeline_controller_importable(self):
-        """Test UnifiedPipelineController can be imported and instantiated."""
-        from prsm.compute.nwtn.unified_pipeline_controller import UnifiedPipelineController
-
-        ctrl = UnifiedPipelineController()
-        assert ctrl is not None
-        assert hasattr(ctrl, 'process_query')
-        assert hasattr(ctrl, 'process_query_full_pipeline')
-        assert hasattr(ctrl, 'run_phase')
-        assert hasattr(ctrl, 'initialize')
+    def test_nwtn_session_importable(self):
+        """Test NWTNSession can be imported."""
+        from prsm.compute.nwtn.session import NWTNSession
+        assert NWTNSession is not None
 
     def test_vector_database_importable(self):
         """Test VectorDatabase can be imported and instantiated."""
@@ -111,28 +105,24 @@ class TestPhase6ModuleFunctionality:
     """Test basic functionality of Phase 6 modules."""
 
     @pytest.mark.asyncio
-    async def test_unified_pipeline_controller_basic_flow(self):
-        """Test basic pipeline controller flow."""
-        from prsm.compute.nwtn.unified_pipeline_controller import UnifiedPipelineController
+    async def test_nwtn_session_status(self):
+        """Test NWTNSession.status() returns expected structure."""
+        from prsm.compute.nwtn.session import NWTNSession
+        from unittest.mock import MagicMock, AsyncMock
 
-        ctrl = UnifiedPipelineController()
+        mock_adapter = MagicMock()
+        mock_state = MagicMock()
+        mock_state.session_id = "test-123"
+        mock_state.goal = "test goal"
+        mock_state.status = "active"
+        mock_state.team_members = []
+        mock_state.scribe_running = False
 
-        # The controller may require dependencies for full initialization
-        # but it should handle this gracefully
-        try:
-            await ctrl.initialize()
-        except Exception:
-            # Initialization may fail without dependencies, which is fine
-            # The controller should still be usable for testing
-            pass
+        session = NWTNSession(adapter=mock_adapter, session_state=mock_state)
+        status = session.status()
 
-        # Test process_query method exists and works even without full init
-        # The method should initialize on first call
-        result = await ctrl.process_query("What is AI?", context={"domain": "computer_science"})
-        assert result is not None
-        assert "query_id" in result
-
-        await ctrl.close()
+        assert "session_id" in status
+        assert "status" in status
 
     @pytest.mark.asyncio
     async def test_hybrid_integration_engine_basic_flow(self):
@@ -170,7 +160,7 @@ def test_phase6_summary():
     """Generate summary of Phase 6 completeness."""
     summary = {
         "modules_implemented": [
-            "UnifiedPipelineController (prsm/compute/nwtn/unified_pipeline_controller.py)",
+            "NWTNSession (prsm/compute/nwtn/session.py)",
             "VectorDatabase (prsm/core/vector_db.py)",
             "HybridIntegrationEngine (prsm/compute/nwtn/hybrid_integration.py)",
             "HybridNWTNManager (prsm/compute/nwtn/hybrid_integration.py)",
