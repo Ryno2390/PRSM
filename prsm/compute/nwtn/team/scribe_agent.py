@@ -31,11 +31,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 if TYPE_CHECKING:
     from prsm.compute.nwtn.bsc import BSCEvent, EventBus, EventType
-    from prsm.compute.nwtn.team.live_scribe import LiveScribe
+    from prsm.compute.nwtn.team.live_scribe import LiveScribe, PrioritizedUpdate
+    from prsm.compute.nwtn.team.whiteboard_router import WhiteboardRouter
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +55,18 @@ class ScribeAgent:
     ----------
     live_scribe : LiveScribe
         Pre-constructed LiveScribe instance. Must have setup() called.
+    router : WhiteboardRouter, optional
+        Optional router for priority-based update routing. If configured,
+        route_update() will delegate to this router.
     """
 
-    def __init__(self, live_scribe: "LiveScribe") -> None:
+    def __init__(
+        self,
+        live_scribe: "LiveScribe",
+        router: Optional["WhiteboardRouter"] = None,
+    ) -> None:
         self._live_scribe = live_scribe
+        self._router = router
         self._event_bus: Optional["EventBus"] = None
         self._subscription_callback: Optional[Callable[["BSCEvent"], Any]] = None
         self._running: bool = False
@@ -197,6 +206,37 @@ class ScribeAgent:
         return await self._live_scribe.get_agent_context(agent_id)
 
     # ------------------------------------------------------------------
+    # Update Routing
+    # ------------------------------------------------------------------
+
+    async def route_update(
+        self,
+        update: "PrioritizedUpdate",
+        session_id: str,
+    ):
+        """
+        Route a prioritized update through the WhiteboardRouter.
+
+        If no router is configured, this is a no-op.
+
+        Parameters
+        ----------
+        update : PrioritizedUpdate
+            The prioritized update to route.
+        session_id : str
+            Session ID for EventBus events.
+
+        Returns
+        -------
+        RoutingResult | None
+            Result from the router, or None if no router configured.
+        """
+        if self._router is None:
+            return None
+
+        return await self._router.route(update, session_id)
+
+    # ------------------------------------------------------------------
     # Status
     # ------------------------------------------------------------------
 
@@ -208,6 +248,7 @@ class ScribeAgent:
         - `running`: bool — whether the agent is currently active
         - `checkpoints_run`: int — number of checkpoint cycles triggered
         - `checkpoint_errors`: int — number of checkpoint errors
+        - `router_stats`: dict — routing statistics (if router configured)
         - Plus all fields from LiveScribe.status()
 
         Returns
@@ -219,9 +260,15 @@ class ScribeAgent:
         scribe_status = await self._live_scribe.status()
 
         async with self._lock:
-            return {
+            result = {
                 **scribe_status,
                 "running": self._running,
                 "checkpoints_run": self._checkpoints_run,
                 "checkpoint_errors": self._checkpoint_errors,
             }
+
+            # Include router stats if configured
+            if self._router is not None:
+                result["router_stats"] = self._router.get_stats()
+
+            return result
