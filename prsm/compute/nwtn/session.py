@@ -12,12 +12,29 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 
 if TYPE_CHECKING:
     from prsm.compute.nwtn.openclaw.adapter import NWTNOpenClawAdapter, SessionState
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RunResult:
+    """Result of an NWTNSession.run() execution."""
+
+    session_id: str
+    rounds_completed: int
+    converged: bool
+    convergence_summary: dict
+    final_status: str
+    elapsed_seconds: float
 
 
 class NWTNSession:
@@ -55,6 +72,8 @@ class NWTNSession:
         """
         self._adapter = adapter
         self._state = session_state
+        self._rounds_completed = 0
+        self._converged = False
 
     @classmethod
     async def create(
@@ -129,6 +148,86 @@ class NWTNSession:
         """Gracefully close the session, stopping all components."""
         await self._adapter.end_session(self._state.session_id)
 
+    async def run(
+        self,
+        max_rounds: int = 20,
+        round_poll_interval: float = 5.0,
+        agent_output_fn: Optional[Callable[[str, int], Awaitable[str]]] = None,
+    ) -> RunResult:
+        """
+        Drive the NWTN checkpoint loop until convergence or max_rounds.
+
+        Parameters
+        ----------
+        max_rounds : int
+            Maximum checkpoint rounds before giving up.
+        round_poll_interval : float
+            Seconds to wait between convergence polls (default 5s).
+        agent_output_fn : async callable(agent_id, round_number) -> str, optional
+            Called each round to get each agent's output for convergence scanning.
+            If None, convergence is never detected (useful for externally-driven sessions).
+
+        Returns
+        -------
+        RunResult
+            Summary of the run: rounds completed, converged, final status.
+        """
+        start_time = time.perf_counter()
+
+        for round_num in range(1, max_rounds + 1):
+            # Step 1: Scan agent outputs for convergence signals if fn provided
+            if agent_output_fn is not None:
+                for agent_id in self.team_members:
+                    try:
+                        output = await agent_output_fn(agent_id, round_num)
+                        self._adapter.scan_agent_convergence(
+                            self.session_id, agent_id, output, round_num
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"NWTNSession [{self.session_id}] agent_output_fn error for {agent_id}: {e}"
+                        )
+
+            # Step 2: Publish ROUND_ADVANCED event (triggers ScribeAgent checkpoint)
+            await self._adapter.advance_bsc_round(
+                self.session_id, f"Round {round_num} complete"
+            )
+
+            # Step 3: Wait for convergence check
+            await asyncio.sleep(round_poll_interval)
+
+            # Step 4: Check convergence
+            if self._adapter.is_session_converged(self.session_id):
+                self._converged = True
+                self._rounds_completed = round_num
+                logger.info(
+                    f"NWTNSession [{self.session_id}] round {round_num}/{max_rounds} — CONVERGED"
+                )
+                break
+
+            # Step 5: Log progress
+            pending = self._adapter.convergence_summary(self.session_id).get(
+                "pending_agents", []
+            )
+            logger.info(
+                f"NWTNSession [{self.session_id}] round {round_num}/{max_rounds} — pending: {pending}"
+            )
+            self._rounds_completed = round_num
+        else:
+            # Completed max_rounds without convergence
+            self._rounds_completed = max_rounds
+
+        elapsed_seconds = time.perf_counter() - start_time
+
+        return RunResult(
+            session_id=self.session_id,
+            rounds_completed=self._rounds_completed,
+            converged=self._converged,
+            convergence_summary=self._adapter.convergence_summary(self.session_id),
+            final_status=self._state.status,
+            elapsed_seconds=elapsed_seconds,
+        )
+
     def status(self) -> dict:
         """
         Return a status dictionary for the session.
@@ -137,7 +236,7 @@ class NWTNSession:
         -------
         dict
             Dictionary with keys: session_id, goal, status, team_members,
-            scribe_running.
+            scribe_running, rounds_completed, converged.
         """
         return {
             "session_id": self._state.session_id,
@@ -145,4 +244,6 @@ class NWTNSession:
             "status": self._state.status,
             "team_members": self._state.team_members,
             "scribe_running": self._state.scribe_running,
+            "rounds_completed": self._rounds_completed,
+            "converged": self._converged,
         }

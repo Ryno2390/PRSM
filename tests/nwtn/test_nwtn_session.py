@@ -478,3 +478,232 @@ async def test_full_session_lifecycle(mock_store, mock_promoter, mock_meta_plan,
         # Verify session is closed
         assert state.status == "closed"
         assert adapter._scribe_agent is None
+
+
+# ======================================================================
+# NWTNSession.run() Tests
+# ======================================================================
+
+@pytest.mark.asyncio
+async def test_run_returns_run_result():
+    """Test that run() returns RunResult with rounds_completed and converged=False when no agent_output_fn."""
+    from prsm.compute.nwtn.session import NWTNSession, RunResult
+
+    # Create mock adapter and state
+    mock_adapter = MagicMock()
+    mock_adapter.advance_bsc_round = AsyncMock(return_value=None)
+    mock_adapter.is_session_converged = MagicMock(return_value=False)
+    mock_adapter.convergence_summary = MagicMock(return_value={"pending_agents": []})
+
+    mock_state = MagicMock()
+    mock_state.session_id = "test-session"
+    mock_state.goal = "Test goal"
+    mock_state.status = "active"
+    mock_state.team_members = ["agent-1", "agent-2"]
+    mock_state.scribe_running = True
+
+    # Create session directly (bypass factory)
+    session = NWTNSession(adapter=mock_adapter, session_state=mock_state)
+
+    # Run with no agent_output_fn
+    result = await session.run(max_rounds=3, round_poll_interval=0.01)
+
+    # Verify result
+    assert isinstance(result, RunResult)
+    assert result.rounds_completed == 3
+    assert result.converged is False
+    assert result.session_id == "test-session"
+
+
+@pytest.mark.asyncio
+async def test_run_converges_early():
+    """Test that run() converges early when agent_output_fn returns TASK COMPLETE."""
+    from prsm.compute.nwtn.session import NWTNSession
+
+    # Create mock adapter
+    mock_adapter = MagicMock()
+    mock_adapter.advance_bsc_round = AsyncMock(return_value=None)
+    mock_adapter.convergence_summary = MagicMock(return_value={"pending_agents": []})
+
+    # Track convergence calls - converge after round 2
+    convergence_state = {"round": 0}
+
+    def mock_is_converged(session_id):
+        return convergence_state["round"] >= 2
+
+    def mock_scan_convergence(session_id, agent_id, output, round_num):
+        # Simulate convergence signal detection
+        if "TASK COMPLETE" in output:
+            convergence_state["round"] = round_num
+
+    mock_adapter.is_session_converged = MagicMock(side_effect=mock_is_converged)
+    mock_adapter.scan_agent_convergence = MagicMock(side_effect=mock_scan_convergence)
+
+    mock_state = MagicMock()
+    mock_state.session_id = "test-session"
+    mock_state.goal = "Test goal"
+    mock_state.status = "active"
+    mock_state.team_members = ["agent-1", "agent-2"]
+    mock_state.scribe_running = True
+
+    session = NWTNSession(adapter=mock_adapter, session_state=mock_state)
+
+    # Agent output function that returns TASK COMPLETE
+    async def agent_output_fn(agent_id, round_num):
+        return "TASK COMPLETE - All work finished"
+
+    # Run with max_rounds=5, should converge by round 2
+    result = await session.run(
+        max_rounds=5,
+        round_poll_interval=0.01,
+        agent_output_fn=agent_output_fn,
+    )
+
+    assert result.converged is True
+    assert result.rounds_completed < 5
+
+
+@pytest.mark.asyncio
+async def test_run_respects_max_rounds():
+    """Test that run() respects max_rounds when convergence never happens."""
+    from prsm.compute.nwtn.session import NWTNSession
+
+    mock_adapter = MagicMock()
+    mock_adapter.advance_bsc_round = AsyncMock(return_value=None)
+    mock_adapter.is_session_converged = MagicMock(return_value=False)
+    mock_adapter.convergence_summary = MagicMock(return_value={"pending_agents": ["agent-1"]})
+    mock_adapter.scan_agent_convergence = MagicMock(return_value=False)
+
+    mock_state = MagicMock()
+    mock_state.session_id = "test-session"
+    mock_state.goal = "Test goal"
+    mock_state.status = "active"
+    mock_state.team_members = ["agent-1"]
+    mock_state.scribe_running = True
+
+    session = NWTNSession(adapter=mock_adapter, session_state=mock_state)
+
+    async def never_converge_fn(agent_id, round_num):
+        return "Still working..."
+
+    result = await session.run(
+        max_rounds=2,
+        round_poll_interval=0.01,
+        agent_output_fn=never_converge_fn,
+    )
+
+    assert result.rounds_completed == 2
+    assert result.converged is False
+
+
+@pytest.mark.asyncio
+async def test_run_result_has_elapsed_seconds():
+    """Test that RunResult.elapsed_seconds is positive."""
+    from prsm.compute.nwtn.session import NWTNSession
+
+    mock_adapter = MagicMock()
+    mock_adapter.advance_bsc_round = AsyncMock(return_value=None)
+    mock_adapter.is_session_converged = MagicMock(return_value=False)
+    mock_adapter.convergence_summary = MagicMock(return_value={})
+
+    mock_state = MagicMock()
+    mock_state.session_id = "test-session"
+    mock_state.goal = "Test goal"
+    mock_state.status = "active"
+    mock_state.team_members = []
+    mock_state.scribe_running = True
+
+    session = NWTNSession(adapter=mock_adapter, session_state=mock_state)
+
+    result = await session.run(max_rounds=2, round_poll_interval=0.01)
+
+    assert result.elapsed_seconds > 0
+
+
+@pytest.mark.asyncio
+async def test_run_status_tracks_rounds():
+    """Test that status() returns rounds_completed after run()."""
+    from prsm.compute.nwtn.session import NWTNSession
+
+    mock_adapter = MagicMock()
+    mock_adapter.advance_bsc_round = AsyncMock(return_value=None)
+    mock_adapter.is_session_converged = MagicMock(return_value=False)
+    mock_adapter.convergence_summary = MagicMock(return_value={})
+
+    mock_state = MagicMock()
+    mock_state.session_id = "test-session"
+    mock_state.goal = "Test goal"
+    mock_state.status = "active"
+    mock_state.team_members = []
+    mock_state.scribe_running = True
+
+    session = NWTNSession(adapter=mock_adapter, session_state=mock_state)
+
+    await session.run(max_rounds=5, round_poll_interval=0.01)
+
+    status = session.status()
+    assert status["rounds_completed"] == 5
+    assert status["converged"] is False
+
+
+@pytest.mark.asyncio
+async def test_run_agent_output_error_does_not_crash():
+    """Test that run() continues when agent_output_fn raises an exception."""
+    from prsm.compute.nwtn.session import NWTNSession
+
+    mock_adapter = MagicMock()
+    mock_adapter.advance_bsc_round = AsyncMock(return_value=None)
+    mock_adapter.is_session_converged = MagicMock(return_value=False)
+    mock_adapter.convergence_summary = MagicMock(return_value={})
+
+    mock_state = MagicMock()
+    mock_state.session_id = "test-session"
+    mock_state.goal = "Test goal"
+    mock_state.status = "active"
+    mock_state.team_members = ["agent-1"]
+    mock_state.scribe_running = True
+
+    session = NWTNSession(adapter=mock_adapter, session_state=mock_state)
+
+    call_count = {"count": 0}
+
+    async def failing_agent_fn(agent_id, round_num):
+        call_count["count"] += 1
+        raise RuntimeError("Agent crashed!")
+
+    result = await session.run(
+        max_rounds=3,
+        round_poll_interval=0.01,
+        agent_output_fn=failing_agent_fn,
+    )
+
+    # Should complete all rounds despite errors
+    assert result.rounds_completed == 3
+    assert result.converged is False
+    # Verify agent_output_fn was called each round
+    assert call_count["count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_run_result_session_id_matches():
+    """Test that RunResult.session_id matches session.session_id."""
+    from prsm.compute.nwtn.session import NWTNSession
+
+    mock_adapter = MagicMock()
+    mock_adapter.advance_bsc_round = AsyncMock(return_value=None)
+    mock_adapter.is_session_converged = MagicMock(return_value=False)
+    mock_adapter.convergence_summary = MagicMock(return_value={})
+
+    mock_state = MagicMock()
+    mock_state.session_id = "unique-session-123"
+    mock_state.goal = "Test goal"
+    mock_state.status = "active"
+    mock_state.team_members = []
+    mock_state.scribe_running = True
+
+    session = NWTNSession(adapter=mock_adapter, session_state=mock_state)
+
+    result = await session.run(max_rounds=1, round_poll_interval=0.01)
+
+    assert result.session_id == session.session_id
+    assert result.session_id == "unique-session-123"
