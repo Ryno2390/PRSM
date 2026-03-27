@@ -55,6 +55,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from .deployment import BSCDeploymentConfig
+from .event_bus import BSCEvent, EventBus, EventType
 from .kl_filter import AdaptiveKLFilter, FilterDecision, KLFilter, KLFilterResult
 from .predictor import BSCPredictor, SurpriseScore
 from .quality_gate import QualityGate, QualityReport
@@ -144,11 +145,13 @@ class BSCPromoter:
         kl_filter: KLFilter,
         deduplicator: SemanticDeduplicator,
         quality_gate: Optional[QualityGate] = None,
+        event_bus: Optional[EventBus] = None,
     ) -> None:
         self._predictor = predictor
         self._kl_filter = kl_filter
         self._deduplicator = deduplicator
         self._quality_gate = quality_gate
+        self._event_bus = event_bus
 
         self._total_processed: int = 0
         self._total_promoted: int = 0
@@ -164,6 +167,7 @@ class BSCPromoter:
         config: Optional[BSCDeploymentConfig] = None,
         enable_quality_gate: bool = True,
         quality_threshold: Optional[float] = None,
+        event_bus: Optional[EventBus] = None,
     ) -> "BSCPromoter":
         """
         Convenience factory: build a fully-wired BSCPromoter from a single
@@ -204,6 +208,7 @@ class BSCPromoter:
             kl_filter=kl_filter,
             deduplicator=deduplicator,
             quality_gate=gate,
+            event_bus=event_bus,
         )
 
     # ------------------------------------------------------------------
@@ -265,7 +270,7 @@ class BSCPromoter:
                 "BSC discard [KL]: agent=%s score=%.3f reason=%s",
                 source_agent, ss.score, kl_result.reason,
             )
-            return PromotionDecision(
+            decision = PromotionDecision(
                 promoted=False,
                 chunk=chunk,
                 metadata=metadata,
@@ -276,6 +281,10 @@ class BSCPromoter:
                 dedup_result=None,
                 reason=kl_result.reason,
             )
+            await self._publish_event(
+                EventType.CHUNK_REJECTED, decision, session_id, reason="kl_filter",
+            )
+            return decision
 
         # ── Stage 3: Semantic De-duplication ────────────────────────────
         dedup_result: DedupResult = await self._deduplicator.check(chunk)
@@ -285,7 +294,7 @@ class BSCPromoter:
                 "BSC discard [dedup]: agent=%s similarity=%.3f reason=%s",
                 source_agent, dedup_result.max_similarity, dedup_result.reason,
             )
-            return PromotionDecision(
+            decision = PromotionDecision(
                 promoted=False,
                 chunk=chunk,
                 metadata=metadata,
@@ -296,6 +305,10 @@ class BSCPromoter:
                 dedup_result=dedup_result,
                 reason=dedup_result.reason,
             )
+            await self._publish_event(
+                EventType.CHUNK_REJECTED, decision, session_id, reason="semantic_dedup",
+            )
+            return decision
 
         # ── Stage 4: Quality Gate ───────────────────────────────────────
         quality_report: Optional[QualityReport] = None
@@ -320,7 +333,7 @@ class BSCPromoter:
                     source_agent, quality_report.overall_score,
                     quality_report.threshold, quality_report.reason,
                 )
-                return PromotionDecision(
+                decision = PromotionDecision(
                     promoted=False,
                     chunk=chunk,
                     metadata=metadata,
@@ -332,6 +345,10 @@ class BSCPromoter:
                     quality_report=quality_report,
                     reason=quality_report.reason,
                 )
+                await self._publish_event(
+                    EventType.CHUNK_REJECTED, decision, session_id, reason="quality_gate",
+                )
+                return decision
 
         # ── Promotion ───────────────────────────────────────────────────
         # Add to dedup index so future candidates are compared against this chunk
@@ -356,7 +373,7 @@ class BSCPromoter:
             f" quality={quality_report.overall_score:.3f}" if quality_report else "",
             ss.token_count,
         )
-        return PromotionDecision(
+        decision = PromotionDecision(
             promoted=True,
             chunk=chunk,
             metadata=metadata,
@@ -368,12 +385,43 @@ class BSCPromoter:
             quality_report=quality_report,
             reason=reason,
         )
+        await self._publish_event(
+            EventType.CHUNK_PROMOTED, decision, session_id,
+        )
+        return decision
+
+    # ------------------------------------------------------------------
+    # Event publishing
+    # ------------------------------------------------------------------
+
+    async def _publish_event(
+        self,
+        event_type: EventType,
+        decision: "PromotionDecision",
+        session_id: str,
+        **extra_data: object,
+    ) -> None:
+        """Publish a BSC event if an EventBus is configured.  Fire-and-forget."""
+        if self._event_bus is None:
+            return
+        try:
+            await self._event_bus.publish(BSCEvent(
+                event_type=event_type,
+                data={"decision": decision, **extra_data},
+                session_id=session_id,
+            ))
+        except Exception:
+            logger.exception(
+                "BSCPromoter: failed to publish %s event",
+                event_type.value,
+            )
 
     def advance_round(
         self,
         round_number: int,
         dedup_keep_last_n_rounds: int = 2,
         dedup_entries_per_round: int = 10,
+        session_id: str = "",
     ) -> dict:
         """
         Advance the BSC pipeline to the next round of a multi-round session.
@@ -422,12 +470,24 @@ class BSCPromoter:
             "dedup_evicted=%d dedup_size=%d",
             round_number, new_epsilon, evicted, self._deduplicator.index_size,
         )
-        return {
+        result = {
             "round": round_number,
             "epsilon": new_epsilon,
             "dedup_evicted": evicted,
             "dedup_index_size": self._deduplicator.index_size,
         }
+        # Publish ROUND_ADVANCED event (fire-and-forget)
+        if self._event_bus is not None and session_id:
+            # Use asyncio.create_task for fire-and-forget
+            import asyncio
+            asyncio.create_task(
+                self._event_bus.publish(BSCEvent(
+                    event_type=EventType.ROUND_ADVANCED,
+                    data=result,
+                    session_id=session_id,
+                ))
+            )
+        return result
 
     def reset_session(self) -> None:
         """
