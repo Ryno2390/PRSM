@@ -29,6 +29,13 @@ Pipeline
     │ Semantic Dedup   │  Cosine-similarity check against whiteboard embeddings.
     │                  │  Redundant rephrasings are discarded despite high score.
     └──────┬───────────┘
+           │  (novel, non-redundant chunks reach here)
+           ▼
+    ┌──────────────────┐
+    │  Quality Gate    │  Four-dimension quality check: factual consistency,
+    │                  │  source reliability, actionability, coherence.
+    │                  │  Novel-but-wrong chunks are blocked here.
+    └──────┬───────────┘
            │
     PromotionDecision(promoted=True)
            │
@@ -60,6 +67,8 @@ from .deployment import BSCDeploymentConfig, DeploymentMode
 from .kl_filter import AdaptiveKLFilter, FilterDecision, KLFilter, KLFilterResult, ProgressiveKLFilter
 from .predictor import BSCPredictor, SurpriseScore
 from .promoter import BSCPromoter, ChunkMetadata, PromotionDecision
+from .quality_gate import QualityGate, QualityReport
+from .quality_scorer import QualityScore, QualityScorer
 from .semantic_dedup import DedupResult, SemanticDeduplicator
 
 __all__ = [
@@ -78,6 +87,11 @@ __all__ = [
     # Semantic De-duplication
     "SemanticDeduplicator",
     "DedupResult",
+    # Quality Gate (new in Sub-phase 10.1b)
+    "QualityScorer",
+    "QualityScore",
+    "QualityGate",
+    "QualityReport",
     # Promoter (main entry point)
     "BSCPromoter",
     "PromotionDecision",
