@@ -16,6 +16,16 @@ database or file.  The downstream whiteboard (Sub-phase 10.2) reads the
 ``PromotionDecision`` objects and persists the accepted chunks.  This keeps
 the BSC Core testable in isolation.
 
+Pipeline (updated)
+------------------
+.. code-block::
+
+    Text Chunk → Predictor → KL Filter → Semantic Dedup → Quality Gate → Promotion
+
+The Quality Gate sits after semantic de-duplication.  It evaluates four
+dimensions — factual consistency, source reliability, actionability, and
+coherence — and only allows promotion if BOTH novelty AND quality pass.
+
 Typical usage
 -------------
 .. code-block:: python
@@ -47,6 +57,7 @@ from typing import Optional
 from .deployment import BSCDeploymentConfig
 from .kl_filter import AdaptiveKLFilter, FilterDecision, KLFilter, KLFilterResult
 from .predictor import BSCPredictor, SurpriseScore
+from .quality_gate import QualityGate, QualityReport
 from .semantic_dedup import DedupResult, SemanticDeduplicator
 
 logger = logging.getLogger(__name__)
@@ -101,7 +112,10 @@ class PromotionDecision:
     dedup_result: Optional[DedupResult]
     """None if the KL filter discarded the chunk before reaching semantic dedup."""
 
-    reason: str
+    quality_report: Optional["QualityReport"] = None
+    """None if the chunk was discarded before reaching the quality gate."""
+
+    reason: str = ""
     """Final human-readable explanation of the outcome."""
 
     # Assigned after whiteboard write (Sub-phase 10.2 fills this in)
@@ -110,13 +124,18 @@ class PromotionDecision:
 
 class BSCPromoter:
     """
-    Full BSC pipeline: predictor → KL filter → semantic dedup.
+    Full BSC pipeline: predictor → KL filter → semantic dedup → quality gate.
 
     Parameters
     ----------
     predictor : BSCPredictor
     kl_filter : KLFilter
     deduplicator : SemanticDeduplicator
+    quality_gate : QualityGate, optional
+        Quality gate filter.  If None, quality checking is disabled and the
+        pipeline falls back to the pre-gate behaviour (KL + dedup only).
+        Pass a :class:`~prsm.compute.nwtn.bsc.quality_gate.QualityGate`
+        instance to enable the full four-dimension quality check.
     """
 
     def __init__(
@@ -124,23 +143,43 @@ class BSCPromoter:
         predictor: BSCPredictor,
         kl_filter: KLFilter,
         deduplicator: SemanticDeduplicator,
+        quality_gate: Optional[QualityGate] = None,
     ) -> None:
         self._predictor = predictor
         self._kl_filter = kl_filter
         self._deduplicator = deduplicator
+        self._quality_gate = quality_gate
 
         self._total_processed: int = 0
         self._total_promoted: int = 0
+        self._total_quality_failed: int = 0
 
     # ------------------------------------------------------------------
     # Factory
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_config(cls, config: Optional[BSCDeploymentConfig] = None) -> "BSCPromoter":
+    def from_config(
+        cls,
+        config: Optional[BSCDeploymentConfig] = None,
+        enable_quality_gate: bool = True,
+        quality_threshold: Optional[float] = None,
+    ) -> "BSCPromoter":
         """
         Convenience factory: build a fully-wired BSCPromoter from a single
         ``BSCDeploymentConfig`` object (or auto-detect defaults).
+
+        Parameters
+        ----------
+        config : BSCDeploymentConfig, optional
+            Deployment configuration.  Auto-detected if None.
+        enable_quality_gate : bool
+            Whether to attach a :class:`QualityGate` to the pipeline.
+            Default True.  Set False to disable quality gating (e.g., for
+            benchmarking the novelty-only pipeline).
+        quality_threshold : float, optional
+            Override the quality gate threshold.  If None, uses
+            ``QualityGate``'s default (0.35).
         """
         cfg = config or BSCDeploymentConfig.auto()
         cfg.validate()
@@ -152,7 +191,20 @@ class BSCPromoter:
             similarity_threshold=cfg.similarity_threshold,
             device=cfg.device,
         )
-        return cls(predictor=predictor, kl_filter=kl_filter, deduplicator=deduplicator)
+
+        gate: Optional[QualityGate] = None
+        if enable_quality_gate:
+            gate_kwargs: dict = {}
+            if quality_threshold is not None:
+                gate_kwargs["threshold"] = quality_threshold
+            gate = QualityGate(**gate_kwargs)
+
+        return cls(
+            predictor=predictor,
+            kl_filter=kl_filter,
+            deduplicator=deduplicator,
+            quality_gate=gate,
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -245,18 +297,64 @@ class BSCPromoter:
                 reason=dedup_result.reason,
             )
 
+        # ── Stage 4: Quality Gate ───────────────────────────────────────
+        quality_report: Optional[QualityReport] = None
+        if self._quality_gate is not None:
+            # Build a partial PromotionDecision to pass metadata to the gate
+            _partial = PromotionDecision(
+                promoted=False,  # placeholder; gate doesn't rely on this
+                chunk=chunk,
+                metadata=metadata,
+                surprise_score=ss.score,
+                raw_perplexity=ss.raw_perplexity,
+                similarity_score=dedup_result.max_similarity,
+                kl_result=kl_result,
+                dedup_result=dedup_result,
+            )
+            quality_report = await self._quality_gate.evaluate(_partial)
+
+            if not quality_report.passed:
+                self._total_quality_failed += 1
+                logger.debug(
+                    "BSC discard [quality]: agent=%s overall=%.3f threshold=%.3f reason=%s",
+                    source_agent, quality_report.overall_score,
+                    quality_report.threshold, quality_report.reason,
+                )
+                return PromotionDecision(
+                    promoted=False,
+                    chunk=chunk,
+                    metadata=metadata,
+                    surprise_score=ss.score,
+                    raw_perplexity=ss.raw_perplexity,
+                    similarity_score=dedup_result.max_similarity,
+                    kl_result=kl_result,
+                    dedup_result=dedup_result,
+                    quality_report=quality_report,
+                    reason=quality_report.reason,
+                )
+
         # ── Promotion ───────────────────────────────────────────────────
         # Add to dedup index so future candidates are compared against this chunk
         await self._deduplicator.add_to_index(chunk)
         self._total_promoted += 1
 
+        quality_suffix = ""
+        if quality_report is not None:
+            quality_suffix = (
+                f", quality={quality_report.overall_score:.3f}"
+                f"{'[fallback]' if quality_report.fallback_pass else ''}"
+            )
+
         reason = (
             f"PROMOTED — surprise={ss.score:.3f} (perplexity={ss.raw_perplexity:.1f}), "
-            f"similarity={dedup_result.max_similarity:.3f} — novel high-surprise chunk"
+            f"similarity={dedup_result.max_similarity:.3f}{quality_suffix}"
+            f" — novel high-quality chunk"
         )
         logger.info(
-            "BSC promote: agent=%s score=%.3f similarity=%.3f tokens=%d",
-            source_agent, ss.score, dedup_result.max_similarity, ss.token_count,
+            "BSC promote: agent=%s score=%.3f similarity=%.3f%s tokens=%d",
+            source_agent, ss.score, dedup_result.max_similarity,
+            f" quality={quality_report.overall_score:.3f}" if quality_report else "",
+            ss.token_count,
         )
         return PromotionDecision(
             promoted=True,
@@ -267,6 +365,7 @@ class BSCPromoter:
             similarity_score=dedup_result.max_similarity,
             kl_result=kl_result,
             dedup_result=dedup_result,
+            quality_report=quality_report,
             reason=reason,
         )
 
@@ -353,9 +452,10 @@ class BSCPromoter:
     @property
     def stats(self) -> dict:
         """Summary statistics for the current session."""
-        return {
+        result: dict = {
             "total_processed": self._total_processed,
             "total_promoted": self._total_promoted,
+            "total_quality_failed": self._total_quality_failed,
             "promotion_rate": round(self.promotion_rate, 4),
             "whiteboard_entries": self._deduplicator.index_size,
             "predictor_baseline_perplexity": round(
@@ -363,3 +463,6 @@ class BSCPromoter:
             ),
             "kl_epsilon": self._kl_filter.epsilon,
         }
+        if self._quality_gate is not None:
+            result["quality_gate"] = self._quality_gate.stats
+        return result
