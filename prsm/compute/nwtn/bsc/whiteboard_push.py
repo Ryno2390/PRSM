@@ -34,6 +34,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
+from .circuit_breaker import CircuitBreaker, CircuitOpenError
 from .event_bus import BSCEvent, EventBus, EventType
 
 if TYPE_CHECKING:
@@ -84,9 +85,15 @@ class WhiteboardPushHandler:
         The scribe that distributes updates to agent inboxes.
     """
 
-    def __init__(self, event_bus: EventBus, live_scribe: "LiveScribe") -> None:
+    def __init__(
+        self,
+        event_bus: EventBus,
+        live_scribe: "LiveScribe",
+        circuit_breaker: Optional[CircuitBreaker] = None,
+    ) -> None:
         self._bus = event_bus
         self._scribe = live_scribe
+        self._circuit_breaker = circuit_breaker
         self._stats = PushStats()
         self._running = False
 
@@ -119,9 +126,12 @@ class WhiteboardPushHandler:
     # Stats
     # ------------------------------------------------------------------
 
-    def get_stats(self) -> Dict[str, int]:
+    def get_stats(self) -> Dict[str, Any]:
         """Return cumulative push statistics."""
-        return self._stats.to_dict()
+        stats = self._stats.to_dict()
+        if self._circuit_breaker is not None:
+            stats["circuit_breaker"] = self._circuit_breaker.get_stats()
+        return stats
 
     def reset_stats(self) -> None:
         """Reset all counters to zero."""
@@ -147,8 +157,21 @@ class WhiteboardPushHandler:
             )
             return
 
+        # Check if circuit breaker is open
+        if self._circuit_breaker is not None:
+            try:
+                state = await self._circuit_breaker.get_state()
+            except Exception:
+                # If we can't check state, proceed anyway
+                state = None
+
         try:
-            update = await self._scribe.on_chunk_promoted(decision)
+            if self._circuit_breaker is not None:
+                update = await self._circuit_breaker.call(
+                    self._scribe.on_chunk_promoted(decision)
+                )
+            else:
+                update = await self._scribe.on_chunk_promoted(decision)
             self._stats.pushed += 1
             if getattr(update, "conflict_detected", False):
                 self._stats.conflicts += 1
@@ -164,6 +187,14 @@ class WhiteboardPushHandler:
                 getattr(decision.metadata, "source_agent", "unknown"),
                 event.session_id,
                 getattr(decision, "surprise_score", 0.0),
+            )
+        except CircuitOpenError:
+            self._stats.skipped += 1
+            logger.warning(
+                "WhiteboardPushHandler: circuit breaker open, skipping chunk from %s "
+                "(session=%s)",
+                getattr(decision.metadata, "source_agent", "unknown"),
+                event.session_id,
             )
         except Exception:
             self._stats.failed += 1
