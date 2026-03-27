@@ -293,6 +293,54 @@ class WhiteboardStore:
             rows = await cur.fetchall()
         return [_row_to_entry(r) for r in rows]
 
+    async def query_for_agent(
+        self,
+        session_id: str,
+        agent_id: str,
+        max_entries: int = 20,
+        include_own: bool = False,
+    ) -> List[WhiteboardEntry]:
+        """
+        Pull whiteboard entries relevant to a specific agent.
+
+        Returns entries from OTHER agents (excluding agent_id unless
+        include_own=True), sorted by (surprise_score DESC, timestamp DESC).
+        Caps at max_entries.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier.
+        agent_id : str
+            Agent identifier (e.g., "agent/coder-20260326").
+        max_entries : int
+            Maximum number of entries to return. Default 20.
+        include_own : bool
+            If True, include entries from agent_id. Default False.
+
+        Returns
+        -------
+        List[WhiteboardEntry]
+            Filtered and sorted entries.
+        """
+        all_entries = await self.get_all(session_id)
+
+        # Filter by agent_id unless include_own is True
+        if include_own:
+            filtered = all_entries
+        else:
+            filtered = [e for e in all_entries if e.source_agent != agent_id]
+
+        # Sort by surprise_score DESC, then timestamp DESC
+        sorted_entries = sorted(
+            filtered,
+            key=lambda e: (e.surprise_score, e.timestamp),
+            reverse=True,
+        )
+
+        # Cap at max_entries
+        return sorted_entries[:max_entries]
+
     async def entry_count(self, session_id: str) -> int:
         """Return the number of entries for *session_id*."""
         self._require_open()
