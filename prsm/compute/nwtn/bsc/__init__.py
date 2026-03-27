@@ -64,17 +64,24 @@ Quick start
 """
 
 from .deployment import BSCDeploymentConfig, DeploymentMode
+from .event_bus import BSCEvent, EventBus, EventType
 from .kl_filter import AdaptiveKLFilter, FilterDecision, KLFilter, KLFilterResult, ProgressiveKLFilter
+from .pipeline import BSCPipeline
 from .predictor import BSCPredictor, SurpriseScore
 from .promoter import BSCPromoter, ChunkMetadata, PromotionDecision
 from .quality_gate import QualityGate, QualityReport
 from .quality_scorer import QualityScore, QualityScorer
 from .semantic_dedup import DedupResult, SemanticDeduplicator
+from .whiteboard_push import WhiteboardPushHandler
 
 __all__ = [
     # Deployment
     "BSCDeploymentConfig",
     "DeploymentMode",
+    # Event Bus (new in Sub-phase 10.2 — whiteboard push)
+    "EventBus",
+    "BSCEvent",
+    "EventType",
     # Predictor
     "BSCPredictor",
     "SurpriseScore",
@@ -96,4 +103,8 @@ __all__ = [
     "BSCPromoter",
     "PromotionDecision",
     "ChunkMetadata",
+    # Whiteboard Push (new in Sub-phase 10.2)
+    "WhiteboardPushHandler",
+    # Full Pipeline (new in Sub-phase 10.2)
+    "BSCPipeline",
 ]
