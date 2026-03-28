@@ -13,7 +13,7 @@ import { APIError, SafetyLevel } from './types';
  * Base error class for all PRSM SDK errors
  */
 export class PRSMError extends Error {
-  public readonly code: string;
+  public code: string;
   public readonly requestId?: string;
   public readonly timestamp: string;
   public readonly details?: Record<string, any>;

@@ -869,10 +869,10 @@ export class ToolsManager {
 
       const data = await response.json();
       return data.data || data; // Handle both APIResponse<T> and direct T
-    } catch (error) {
+    } catch (error: unknown) {
       clearTimeout(timeoutId);
 
-      if (error.name === 'AbortError') {
+      if (error instanceof Error && error.name === 'AbortError') {
         throw new NetworkError('Request timeout');
       }
 

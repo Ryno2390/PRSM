@@ -85,6 +85,7 @@
 // ============================================================================
 
 export { PRSMClient } from './client';
+import { PRSMClient } from './client';
 
 // ============================================================================
 // CORE TYPE EXPORTS
@@ -246,6 +247,13 @@ export { ToolsManager, type ToolsManagerConfig } from './tools';
 export { WebSocketManager, type WebSocketManagerConfig, WebSocketState, MessageType } from './websocket';
 export { StorageManager, type StorageManagerConfig } from './storage';
 export { GovernanceManager, type GovernanceManagerConfig } from './governance';
+
+// Import for use in convenience functions below
+import { FTNSManager } from './ftns';
+import { ToolsManager } from './tools';
+import { MemoryTokenStorage, LocalStorageTokenStorage } from './auth';
+import type { TokenStorage } from './auth';
+import type { PRSMClientConfig } from './types';
 
 // ============================================================================
 // TOKEN STORAGE EXPORTS
