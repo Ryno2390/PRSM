@@ -435,7 +435,9 @@ exists at `0xd979c096BE297F4C3a85175774Bc38C22b95E6a4`. Hardhat config at
 
 ---
 
-### 3. Stripe Live Payment Integration — Priority: MEDIUM
+### 3. Stripe Live Payment Integration — Priority: LEGAL PREREQUISITE
+
+> **Prerequisite:** Requires a registered business entity (LLC or equivalent) and a dedicated business bank account. Do not connect personal bank accounts to a production payment processor. Form the LLC first, then return to this step.
 
 **Why:** Fiat on-ramp (buying FTNS with USD/EUR) enables non-crypto users to participate.
 Currently blocked only by missing live API keys.
@@ -466,6 +468,12 @@ The code already handles webhook verification, payment intents, and cancellation
 - Webhook URL: `/api/v1/payments/paypal/webhook`
 
 **Estimated cost:** Stripe fee: 2.9% + $0.30 per transaction. No setup cost.
+
+**Dependency chain:**
+```
+Form LLC → Open business bank account → Stripe live account → Configure API keys → Enable fiat on-ramp
+```
+**Estimated LLC formation cost:** ~$50–500 depending on state (NC: ~$125 filing fee). Services like Stripe Atlas ($500) or Clerky handle formation + registered agent + EIN in one step.
 
 ---
 
