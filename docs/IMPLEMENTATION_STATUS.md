@@ -571,6 +571,7 @@ P2P message validation (`prsm/node/`).
 |----------|-------|
 | Bootstrap node | `wss://bootstrap1.prsm-network.com:8765` (DigitalOcean NYC3, 159.203.129.218) |
 | FTNS test token | `0xd979c096BE297F4C3a85175774Bc38C22b95E6a4` (Ethereum Sepolia) |
+| **FTNS live token** | **`0x5276a3756C85f2E9e46f6D34386167a209aa16e5` (Base mainnet)** |
 | Hardhat config | `contracts/hardhat.config.js` (mainnet-ready) |
 | Docker compose | `docker/docker-compose.bootstrap.yml` (production-ready) |
 | Deployment guide | `docs/BOOTSTRAP_DEPLOYMENT_GUIDE.md` |
