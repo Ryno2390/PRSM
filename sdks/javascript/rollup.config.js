@@ -2,20 +2,21 @@ import typescript from 'rollup-plugin-typescript2';
 import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import { terser } from 'rollup-plugin-terser';
-import pkg from './package.json';
+import ts from 'typescript';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
+// Hardcoded from package.json to avoid JSON import assertion issues
+const pkg = {
+  main: 'dist/index.js',
+  module: 'dist/index.esm.js',
+  types: 'dist/index.d.ts'
+};
+
 const external = [
-  ...Object.keys(pkg.dependencies || {}),
-  ...Object.keys(pkg.peerDependencies || {}),
-  'ws',
-  'node-fetch',
-  'eventemitter3',
-  'cross-fetch',
-  'uuid',
-  'retry',
-  'form-data'
+  'aiohttp', 'pydantic', 'structlog', 'websockets', 'cryptography',
+  'ws', 'node-fetch', 'eventemitter3', 'cross-fetch', 'uuid', 'retry', 'form-data',
+  'axios', 'typescript'
 ];
 
 const plugins = [
@@ -27,7 +28,7 @@ const plugins = [
     include: /node_modules/
   }),
   typescript({
-    typescript: require('typescript'),
+    typescript: ts,
     tsconfig: 'tsconfig.json',
     clean: true,
     exclude: [
@@ -102,7 +103,7 @@ export default [
         include: /node_modules/
       }),
       typescript({
-        typescript: require('typescript'),
+        typescript: ts,
         tsconfig: 'tsconfig.json',
         clean: true,
         exclude: [
