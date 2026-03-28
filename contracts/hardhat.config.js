@@ -47,6 +47,38 @@ module.exports = {
       skipDryRun: true
     },
     
+    // Base Mainnet
+    "base": {
+      url: process.env.BASE_RPC_URL || "https://mainnet.base.org",
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      chainId: 8453,
+      gas: "auto",
+      gasPrice: "auto",
+      confirmations: 3,
+      timeoutBlocks: 200,
+      skipDryRun: false
+    },
+
+    // Base Fork (dry-run)
+    "base-fork": {
+      url: process.env.BASE_RPC_URL || "https://mainnet.base.org",
+      forking: {
+        url: process.env.BASE_RPC_URL || "https://mainnet.base.org",
+      },
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      chainId: 8453,
+    },
+
+    // Ethereum Mainnet Fork (dry-run)
+    "mainnet-fork": {
+      url: process.env.MAINNET_RPC_URL || "",
+      forking: {
+        url: process.env.MAINNET_RPC_URL || "",
+      },
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      chainId: 1,
+    },
+
     // Ethereum Mainnet
     "mainnet": {
       url: process.env.MAINNET_RPC_URL || "",
@@ -75,6 +107,7 @@ module.exports = {
   // Contract verification
   etherscan: {
     apiKey: {
+      base: process.env.BASESCAN_API_KEY || process.env.ETHERSCAN_API_KEY || "",
       mainnet: process.env.ETHERSCAN_API_KEY || "",
       sepolia: process.env.ETHERSCAN_API_KEY || "",
       polygon: process.env.POLYGONSCAN_API_KEY || "",
