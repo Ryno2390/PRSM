@@ -255,8 +255,7 @@ contract BridgeSecurity is
             revert InsufficientSignatures(signatureThreshold, signatures.length);
         }
         
-        // Track verified validators to prevent duplicates
-        mapping(address => bool) storage verifiedValidators;
+        // Track valid signature count
         uint256 validSignatureCount = 0;
         
         // Verify each signature
@@ -269,8 +268,15 @@ contract BridgeSecurity is
                 continue;
             }
             
-            // Check for duplicate signature
-            if (verifiedValidators[validator]) {
+            // Check for duplicate signature by scanning previous signatures
+            bool isDuplicate = false;
+            for (uint256 j = 0; j < i; j++) {
+                if (signatures[j].validator == validator) {
+                    isDuplicate = true;
+                    break;
+                }
+            }
+            if (isDuplicate) {
                 emit DuplicateSignatureDetected(messageHash, validator);
                 continue;
             }
@@ -282,8 +288,6 @@ contract BridgeSecurity is
                 continue;
             }
             
-            // Mark as verified
-            verifiedValidators[validator] = true;
             validSignatureCount++;
         }
         
@@ -439,7 +443,7 @@ contract BridgeSecurity is
      */
     function hashBridgeMessage(BridgeMessage calldata message) public view returns (bytes32) {
         // Ensure domain separator is current (handles chain ID changes)
-        bytes32 domainSeparator = block.chainid == _chainId 
+        bytes32 computedDomainSeparator = block.chainid == _chainId 
             ? _domainSeparator 
             : _computeDomainSeparator();
         
@@ -454,7 +458,7 @@ contract BridgeSecurity is
         ));
         
         // Compute EIP-712 typed hash
-        return keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
+        return keccak256(abi.encodePacked("\x19\x01", computedDomainSeparator, structHash));
     }
     
     /**
