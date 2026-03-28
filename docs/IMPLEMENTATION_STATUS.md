@@ -315,7 +315,7 @@ They are ordered by priority for enabling broad user participation.
 
 ---
 
-### 1. EU + APAC Bootstrap Nodes — Priority: HIGH
+### 1. EU + APAC Bootstrap Nodes — Priority: SCALING
 
 **Why:** The network currently has a single point of failure at
 `wss://bootstrap1.prsm-network.com:8765` (DigitalOcean NYC3). New peers depend entirely
@@ -331,42 +331,54 @@ on this node for discovery. Two additional geographic nodes make the network res
    - Region: AMS3 (Amsterdam) for EU; SGP1 (Singapore) for APAC
    - Size: 4 vCPU / 8 GB RAM / 160 GB SSD (CPU-Optimized)
    - OS: Ubuntu 22.04 LTS
-   - Enable SSH key authentication
+   - Auth: SSH key (use existing key)
+   - Note the droplet IP address after creation
 
-2. **Install dependencies on droplet**
+2. **Add DNS records in Cloudflare** (`prsm-network.com`)
+   - Add A record: `bootstrap2` → Amsterdam droplet IP
+   - Add A record: `bootstrap3` → Singapore droplet IP
+   - ⚠️ Set DNS-only (grey cloud, not orange) — WebSocket (`wss://`) connections do not work through Cloudflare proxy on free plans
+
+3. **Install dependencies on droplet**
    ```bash
+   ssh root@<droplet-ip>
    apt update && apt install -y docker.io docker-compose git
    systemctl enable docker && systemctl start docker
    ```
 
-3. **Clone and configure**
+4. **Clone and configure**
    ```bash
    git clone https://github.com/Ryno2390/PRSM.git /opt/prsm
    cd /opt/prsm
    cp config/secure.env.template config/.env
-   # Edit config/.env — set at minimum:
-   #   NODE_TYPE=bootstrap
-   #   BOOTSTRAP_REGION=eu-west-1       # or apac-southeast-1
-   #   BOOTSTRAP_PUBLIC_URL=wss://bootstrap2.prsm-network.com:8765
-   #   JWT_SECRET_KEY=$(openssl rand -hex 32)
+   nano config/.env
+   ```
+   Minimum required variables:
+   ```bash
+   NODE_TYPE=bootstrap
+   BOOTSTRAP_REGION=eu-west-1          # or apac-southeast-1 for Singapore
+   BOOTSTRAP_PUBLIC_URL=wss://bootstrap2.prsm-network.com:8765  # or bootstrap3
+   JWT_SECRET_KEY=$(openssl rand -hex 32)
    ```
 
-4. **Launch**
+5. **Launch**
    ```bash
    docker-compose -f docker/docker-compose.bootstrap.yml up -d
    docker-compose -f docker/docker-compose.bootstrap.yml logs -f
    ```
 
-5. **Set DNS records** (requires control of `prsm-network.com`)
-   - `bootstrap2.prsm-network.com` → droplet IP (EU)
-   - `bootstrap3.prsm-network.com` → droplet IP (APAC)
+6. **Verify** by running `prsm node start` locally and confirming all three bootstrap nodes appear in startup logs.
 
-6. **Update `prsm/node/config.py`** with the new live addresses and commit.
+7. **Update `prsm/node/config.py`** with the new live addresses and commit.
 
-7. **Verify** by running `prsm node start` locally and confirming it connects to all three
-   bootstrap nodes in the startup logs.
+**Prerequisites before starting:**
+- DigitalOcean account with billing configured (~$48/mo per node)
+- SSH key already configured in DigitalOcean
+- Access to `prsm-network.com` DNS in Cloudflare (DNS-only mode required for WebSocket)
+- Existing NYC3 bootstrap node healthy (verify at `wss://bootstrap1.prsm-network.com:8765`)
 
-**Estimated cost:** ~$48/month per node (DigitalOcean CPU-Optimized 4vCPU/8GB).
+**Estimated cost:** ~$48/month per node × 2 = ~$96/month ongoing
+**Recommended timing:** Deploy after Stripe fiat on-ramp and SDK publishing are complete — network resilience matters most when there are active users to serve.
 
 ---
 
