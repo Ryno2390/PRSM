@@ -19,7 +19,7 @@ A developer cloning this repo today can:
 - Deploy a production node using `docker/docker-compose.bootstrap.yml`
 - Follow `docs/OPERATOR_GUIDE.md` end-to-end with no additional code changes required
 
-**All remaining work is infrastructure** — external accounts, credentials, and deployed services.
+**SDKs published, FTNS token deployed.** Remaining work is operational infrastructure — external accounts, credentials, and deployed services.
 No further code phases are planned. The infrastructure roadmap is documented below.
 
 ---
@@ -297,12 +297,12 @@ Do not fix by loosening threshold — accept as a known environment-specific fla
 | OpenTelemetry Tracing | ✅ Ready | Console/Jaeger/OTLP via `OTEL_EXPORTER` env var |
 | Secrets Management | ✅ Ready | Centralized `SecretsManager` with required validation |
 | Alembic Migrations | ✅ Ready | 3 migrations covering all ORM tables |
-| Python SDK | ✅ Ready | `sdks/python/` — complete with integration tests |
-| JavaScript/TypeScript SDK | ✅ Ready | `sdks/javascript/` — complete with examples |
-| Go SDK | ✅ Ready | `sdks/go/` — complete, all modules implemented |
+| Python SDK | ✅ Published | `pip install prsm-python-sdk` — live on PyPI v0.2.0 |
+| JavaScript/TypeScript SDK | ✅ Published | `npm install prsm-sdk` — live on npm v0.2.0 |
+| Go SDK | ✅ Published | `go get github.com/Ryno2390/PRSM/sdks/go@v0.2.0` — live on pkg.go.dev |
 | Payment Gateway (Stripe/PayPal) | 🔑 Needs credentials | Code complete; requires API keys |
 | Price Oracles (CoinGecko) | 🔑 Needs API key | Free tier available |
-| Mainnet FTNS Token | 🏗️ Needs deployment | Sepolia testnet live; mainnet config ready |
+| FTNS Token (Base mainnet) | ✅ Deployed | `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` — verified on Basescan |
 | Multi-region Bootstrap | 🏗️ Needs deployment | Single NYC3 node live; EU/APAC config ready |
 | Redis (distributed rate limiting) | 🏗️ Optional | In-memory works for single node |
 
@@ -528,7 +528,7 @@ rate limiting.
 
 ---
 
-### 6. SDK Publishing — Priority: LOW (investor milestone)
+### 6. SDK Publishing — ✅ Complete (published v0.2.0)
 
 **Why:** Publishing to public registries (`pip install prsm-sdk`, `npm install @prsm/js-sdk`,
 `go get github.com/Ryno2390/PRSM/sdks/go`) enables external developers to build on PRSM
