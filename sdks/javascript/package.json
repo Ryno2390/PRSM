@@ -1,5 +1,5 @@
 {
-  "name": "@prsm/sdk",
+  "name": "prsm-sdk",
   "version": "0.2.0",
   "description": "Official JavaScript/TypeScript SDK for PRSM (Protocol for Recursive Scientific Modeling)",
   "main": "dist/index.js",
@@ -76,8 +76,8 @@
     "@types/retry": "^0.12.0",
     "@types/uuid": "^9.0.0",
     "@types/ws": "^8.5.0",
-    "@typescript-eslint/eslint-plugin": "^6.0.0",
-    "@typescript-eslint/parser": "^6.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
     "eslint": "^8.50.0",
     "eslint-config-prettier": "^9.0.0",
     "eslint-plugin-prettier": "^5.0.0",
