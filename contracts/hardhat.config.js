@@ -106,13 +106,18 @@ module.exports = {
   
   // Contract verification
   etherscan: {
-    apiKey: {
-      base: process.env.BASESCAN_API_KEY || process.env.ETHERSCAN_API_KEY || "",
-      mainnet: process.env.ETHERSCAN_API_KEY || "",
-      sepolia: process.env.ETHERSCAN_API_KEY || "",
-      polygon: process.env.POLYGONSCAN_API_KEY || "",
-      polygonMumbai: process.env.POLYGONSCAN_API_KEY || ""
-    }
+    // Etherscan V2 unified multichain API — one key covers all networks including Base
+    apiKey: process.env.ETHERSCAN_API_KEY || "",
+    customChains: [
+      {
+        network: "base",
+        chainId: 8453,
+        urls: {
+          apiURL: "https://api.etherscan.io/v2/api",
+          browserURL: "https://basescan.org"
+        }
+      }
+    ]
   },
   
   // Gas reporting
