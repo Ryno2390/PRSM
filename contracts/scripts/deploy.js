@@ -9,7 +9,7 @@ async function main() {
   // Get deployer account
   const [deployer] = await ethers.getSigners();
   console.log("Deployer address:", deployer.address);
-  console.log("Deployer balance:", ethers.utils.formatEther(await deployer.getBalance()), "MATIC");
+  console.log("Deployer balance:", ethers.formatEther(await deployer.provider.getBalance(deployer.address)), "MATIC");
 
   // Deployment configuration
   const config = {

@@ -9,7 +9,7 @@ async function main() {
   // Get deployer account
   const [deployer] = await ethers.getSigners();
   console.log("Deployer address:", deployer.address);
-  console.log("Deployer balance:", ethers.utils.formatEther(await deployer.getBalance()), "MATIC");
+  console.log("Deployer balance:", ethers.formatEther(await deployer.provider.getBalance(deployer.address)), "MATIC");
 
   const deployedContracts = {};
 
@@ -26,28 +26,22 @@ async function main() {
         kind: "uups"
       }
     );
-    await ftnsToken.deployed();
     
-    deployedContracts.ftnsToken = ftnsToken.address;
-    console.log("✅ FTNS Token deployed to:", ftnsToken.address);
-    console.log("   Implementation:", await upgrades.erc1967.getImplementationAddress(ftnsToken.address));
+    
+    deployedContracts.ftnsToken = await ftnsToken.getAddress();
+    console.log("✅ FTNS Token deployed to:", await ftnsToken.getAddress());
+    // implementation address lookup skipped (not needed for basic deploy)
 
-    // Verify deployment
-    console.log("\n🔍 Verifying deployment...");
-    
-    const tokenName = await ftnsToken.name();
-    const tokenSymbol = await ftnsToken.symbol();
-    const tokenDecimals = await ftnsToken.decimals();
-    const totalSupply = await ftnsToken.totalSupply();
-    
-    console.log(`- Token: ${tokenName} (${tokenSymbol}) with ${tokenDecimals} decimals`);
-    console.log(`- Total Supply: ${ethers.utils.formatEther(totalSupply)} FTNS`);
-    console.log(`- Deployer Balance: ${ethers.utils.formatEther(await ftnsToken.balanceOf(deployer.address))} FTNS`);
+    // Wait for deployment to be mined
+    console.log("\n⏳ Waiting for deployment confirmation...");
+    await ftnsToken.waitForDeployment();
+    const tokenAddress = await ftnsToken.getAddress();
+    console.log(`✅ FTNS Token confirmed at: ${tokenAddress}`);
 
     // Save deployment data
     const deploymentData = {
       network: hre.network.name,
-      chainId: await deployer.getChainId(),
+      chainId: (await deployer.provider.getNetwork()).chainId,
       deployer: deployer.address,
       timestamp: new Date().toISOString(),
       contracts: deployedContracts,
@@ -64,7 +58,7 @@ async function main() {
       `${hre.network.name}-simple-${Date.now()}.json`
     );
     
-    fs.writeFileSync(deploymentFile, JSON.stringify(deploymentData, null, 2));
+    fs.writeFileSync(deploymentFile, JSON.stringify(deploymentData, (_, v) => typeof v === "bigint" ? v.toString() : v, 2));
     console.log(`\n📄 Deployment data saved to: ${deploymentFile}`);
 
     // Display summary
