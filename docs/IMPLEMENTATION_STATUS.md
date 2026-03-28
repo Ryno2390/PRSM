@@ -1,15 +1,15 @@
 # PRSM Implementation Status
 
 [![Status](https://img.shields.io/badge/status-Beta%20v0.2.2-blue.svg)](#current-implementation-status)
-[![Tests](https://img.shields.io/badge/tests-3818%20passing-brightgreen.svg)](#test-suite-status)
+[![Tests](https://img.shields.io/badge/tests-3987%20passing-brightgreen.svg)](#test-suite-status)
 [![Completion](https://img.shields.io/badge/code--complete-99%25-brightgreen.svg)](#)
-[![Updated](https://img.shields.io/badge/updated-2026--03--26-green.svg)](#)
+[![Updated](https://img.shields.io/badge/updated-2026--03--28-green.svg)](#)
 
 ---
 
 ## Executive Summary
 
-As of March 25, 2026 (commit `63a270a`), PRSM has completed all nine development phases.
+As of March 28, 2026 (commit `b435ece`), PRSM has completed all ten development phases.
 **The codebase is 99%+ complete for all code-only work.**
 
 A developer cloning this repo today can:
@@ -28,7 +28,20 @@ No further code phases are planned. The infrastructure roadmap is documented bel
 
 ## Phase 10: NWTN Agent Team Architecture
 
-> **Status: Planning** — Architecture finalized 2026-03-26. Implementation not yet started.
+> **Status: Complete** — Fully implemented and tested as of 2026-03-28. 169 dedicated tests passing.
+
+### Implementation Summary
+
+| Sub-phase | Description | Status | Key Files |
+|-----------|-------------|--------|-----------|
+| 10.1 | BSC Core (predictor, KL filter, dedup, promoter, quality gate) | ✅ Complete | `bsc/predictor.py`, `bsc/kl_filter.py`, `bsc/promoter.py`, `bsc/quality_gate.py` |
+| 10.2 | Active Whiteboard (store, monitor, schema, query) | ✅ Complete | `whiteboard/store.py`, `whiteboard/monitor.py` |
+| 10.3 | Agent Team Coordination (interview, planner, assembler, scribe, router) | ✅ Complete | `team/live_scribe.py`, `team/scribe_agent.py`, `team/whiteboard_router.py` |
+| 10.4 | Nightly Synthesis & Project Ledger (reconstruct, ledger, sign, anchor) | ✅ Complete | `synthesis/reconstructor.py`, `synthesis/ledger.py`, `synthesis/signer.py` |
+| 10.5 | OpenClaw Integration + NWTNSession factory | ✅ Complete | `openclaw/adapter.py`, `session.py` |
+| 10.6 | AI-Agent-Centric CLI + OpenRouter backend | ✅ Complete | `backends/openrouter_backend.py` |
+| — | CircuitBreaker + EventBus performance benchmarks | ✅ Complete | `bsc/circuit_breaker.py`, `tests/benchmarks/` |
+| — | Legacy Gen1 cleanup (35k lines removed) | ✅ Complete | — |
 
 ### Vision
 
@@ -217,9 +230,18 @@ Phase 10 is complete when:
 6. An unauthorized Ledger modification is detectable within one hash-chain verification
 7. PRSM itself is being built using this system (self-referential bootstrap validation)
 
+### Test Coverage
+
+169 tests in `tests/nwtn/` covering all sub-phases. All pass with `pytest tests/nwtn/ --timeout=60`.
+Performance benchmarks in `tests/benchmarks/test_eventbus_performance.py` (7 benchmarks, not in CI baseline).
+
+Key results:
+- EventBus: 24,665 ops/sec single subscriber; p99 latency 46µs; 0 MB memory growth at 100k events
+- End-to-end smoke tests: full pipeline fires correctly from goal statement to convergence detection
+
 ---
 
-## Nine-Phase Development Summary
+## Ten-Phase Development Summary
 
 | Phase | Description | Tests Added | Commit |
 |-------|-------------|-------------|--------|
@@ -232,7 +254,8 @@ Phase 10 is complete when:
 | 7 | Production hardening (migrations, rate limiting, circuit breakers, OTel) | +20 | `f473c67` |
 | 8 | SDK completion + documentation (Go SDK, 3 new guides) | +34 | `29ce485` |
 | 9 | Stub wiring + final completion (11 stubs → real implementations) | +49 | `63a270a` |
-| **Total** | | **+3,818 collected** | |
+| 10 | NWTN Agent Team Architecture (BSC, Whiteboard, Scribe, Session, OpenClaw integration) | +169 | `b435ece` |
+| **Total** | | **+3,987 collected** | |
 
 ---
 
@@ -240,8 +263,8 @@ Phase 10 is complete when:
 
 | Metric | Value |
 |--------|-------|
-| Total collected | 3,818 |
-| Passing | ~3,769 |
+| Total collected | 3,987 |
+| Passing | ~3,938 |
 | Skipped (infrastructure-gated) | ~45 |
 | xfailed | 4 |
 | Failing | 0 |
