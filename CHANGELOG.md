@@ -5,11 +5,20 @@ All notable changes to NWTN (Neural Web for Transformation Networking) will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-03-05
+## [0.2.0] - 2026-03-28
 
 ### 🚀 Major Release: Production-Ready Infrastructure
 
 This release represents a significant milestone in PRSM's development, delivering production-ready infrastructure, multi-provider LLM support, blockchain integration, and comprehensive user interfaces.
+
+### 🌐 Infrastructure Completions (2026-03-28)
+
+- **FTNS Token on Base Mainnet** — Contract deployed and verified at [`0x5276a3756C85f2E9e46f6D34386167a209aa16e5`](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5)
+- **Python SDK published to PyPI** — `pip install prsm-python-sdk` (v0.2.0)
+- **JavaScript SDK published to npm** — `npm install prsm-sdk` (v0.2.0)
+- **Go SDK published to pkg.go.dev** — `go get github.com/Ryno2390/PRSM/sdks/go@v0.2.0`
+- **CoinGecko API integrated** — Demo tier, live FTNS price feeds enabled
+- **Redis connected** — Upstash managed Redis (us-east-1) for distributed rate limiting
 
 ### Added
 

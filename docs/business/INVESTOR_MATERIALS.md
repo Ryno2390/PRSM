@@ -63,11 +63,16 @@ PRSM represents the infrastructure for AI coordination - positioned at the conve
 - **Phase 7**: Advanced Analytics & AI
 
 ### Technology Stack
-- **Backend**: Python/FastAPI, PostgreSQL, Redis
+- **Backend**: Python/FastAPI, PostgreSQL, Redis (Upstash, us-east-1)
 - **Frontend**: React, TypeScript, real-time dashboards
 - **Infrastructure**: Kubernetes, Docker, cloud-native
-- **AI/ML**: LangChain, OpenAI, Hugging Face integration
-- **Blockchain**: Ethereum compatibility for FTNS tokens
+- **AI/ML**: LangChain, OpenAI, Hugging Face integration; CoinGecko API (live price feeds)
+- **Blockchain**: FTNS token live on **Base mainnet** — [`0x5276a3756C85f2E9e46f6D34386167a209aa16e5`](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5)
+
+### SDK Availability (Live as of 2026-03-28)
+- **Python SDK**: `pip install prsm-python-sdk` — [pypi.org/project/prsm-python-sdk](https://pypi.org/project/prsm-python-sdk)
+- **JavaScript SDK**: `npm install prsm-sdk` — [npmjs.com/package/prsm-sdk](https://npmjs.com/package/prsm-sdk)
+- **Go SDK**: `go get github.com/Ryno2390/PRSM/sdks/go@v0.2.0` — [pkg.go.dev/github.com/Ryno2390/PRSM/sdks/go](https://pkg.go.dev/github.com/Ryno2390/PRSM/sdks/go)
 
 ## 👥 Team & Expertise
 

@@ -5,18 +5,21 @@ Official Software Development Kits for the Protocol for Recursive Scientific Mod
 ## Available SDKs
 
 ### 🐍 Python SDK (`python/`)
-- **Package:** `prsm-python-sdk`
+- **Package:** `prsm-python-sdk` — **v0.2.0 published ✅**
 - **PyPI:** `pip install prsm-python-sdk`
+- **Package page:** [pypi.org/project/prsm-python-sdk](https://pypi.org/project/prsm-python-sdk)
 - **Documentation:** [Python SDK Docs](python/README.md)
 
 ### 🟨 JavaScript SDK (`javascript/`)
-- **Package:** `@prsm/sdk`
-- **npm:** `npm install @prsm/sdk`
+- **Package:** `prsm-sdk` — **v0.2.0 published ✅**
+- **npm:** `npm install prsm-sdk`
+- **Package page:** [npmjs.com/package/prsm-sdk](https://npmjs.com/package/prsm-sdk)
 - **Documentation:** [JavaScript SDK Docs](javascript/README.md)
 
 ### 🐹 Go SDK (`go/`)
-- **Module:** `github.com/PRSM-AI/prsm-go-sdk`
-- **Installation:** `go get github.com/PRSM-AI/prsm-go-sdk`
+- **Module:** `github.com/Ryno2390/PRSM/sdks/go` — **v0.2.0 published ✅**
+- **Installation:** `go get github.com/Ryno2390/PRSM/sdks/go@v0.2.0`
+- **Package page:** [pkg.go.dev/github.com/Ryno2390/PRSM/sdks/go](https://pkg.go.dev/github.com/Ryno2390/PRSM/sdks/go)
 - **Documentation:** [Go SDK Docs](go/README.md)
 
 ## Quick Start
@@ -41,7 +44,7 @@ console.log(response.content);
 
 ### Go
 ```go
-import "github.com/PRSM-AI/prsm-go-sdk/client"
+import "github.com/Ryno2390/PRSM/sdks/go/client"
 
 client := client.New("your_api_key")
 response, err := client.Query("Explain quantum computing")
