@@ -47,6 +47,18 @@ module.exports = {
       skipDryRun: true
     },
     
+    // Ethereum Mainnet
+    "mainnet": {
+      url: process.env.MAINNET_RPC_URL || "",
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      chainId: 1,
+      gas: 6000000,
+      gasPrice: "auto",
+      confirmations: 3,
+      timeoutBlocks: 200,
+      skipDryRun: false
+    },
+
     // Polygon Mainnet
     "polygon-mainnet": {
       url: process.env.POLYGON_MAINNET_RPC_URL || "https://polygon-rpc.com",
@@ -63,6 +75,7 @@ module.exports = {
   // Contract verification
   etherscan: {
     apiKey: {
+      mainnet: process.env.ETHERSCAN_API_KEY || "",
       sepolia: process.env.ETHERSCAN_API_KEY || "",
       polygon: process.env.POLYGONSCAN_API_KEY || "",
       polygonMumbai: process.env.POLYGONSCAN_API_KEY || ""
