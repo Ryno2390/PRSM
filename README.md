@@ -9,7 +9,7 @@ PRSM is a peer-to-peer collaboration framework for neuro-symbolic AI research. I
 [![Security Audit](https://github.com/Ryno2390/PRSM/actions/workflows/security-audit.yml/badge.svg)](https://github.com/Ryno2390/PRSM/actions/workflows/security-audit.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **What's live today:** Bootstrap server running at `wss://bootstrap1.prsm-network.com:8765` · Real AI inference via Anthropic + OpenAI · FTNS token on Ethereum Sepolia ([`0xd979c096BE297F4C3a85175774Bc38C22b95E6a4`](https://sepolia.etherscan.io/address/0xd979c096BE297F4C3a85175774Bc38C22b95E6a4)) · 1,391+ tests passing
+> **What's live today:** Bootstrap server running at `wss://bootstrap1.prsm-network.com:8765` · Real AI inference via Anthropic + OpenAI · FTNS token on Base mainnet ([`0x5276a3756C85f2E9e46f6D34386167a209aa16e5`](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5)) · Python/JS/Go SDKs published · 1,391+ tests passing
 
 ---
 
@@ -246,11 +246,13 @@ WebSocket-based peer-to-peer connectivity with gossip protocol, peer discovery, 
 | Compute marketplace | **Working** | Job offers, acceptance, execution, payment |
 | IPFS storage integration | **Working** | Requires local IPFS daemon (Kubo) |
 | Semantic provenance | **Working** | Content attribution + royalty distribution |
-| FTNS token (Sepolia testnet) | **Live** | [`0xd979c096...`](https://sepolia.etherscan.io/address/0xd979c096BE297F4C3a85175774Bc38C22b95E6a4) |
+| FTNS token (Base mainnet) | **Live** | [`0x5276a375...`](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5) |
+| Python SDK (PyPI) | **Live** | `pip install prsm-python-sdk` (v0.2.0) |
+| JavaScript SDK (npm) | **Live** | `npm install prsm-sdk` (v0.2.0) |
+| Go SDK (pkg.go.dev) | **Live** | `go get github.com/Ryno2390/PRSM/sdks/go@v0.2.0` |
 | Bootstrap network | **Live** | `wss://bootstrap1.prsm-network.com:8765` |
 | Monitoring (Grafana) | **Live** | Prometheus + Grafana on bootstrap server |
 | Test suite | **Working** | 1,391+ tests passing |
-| Mainnet token deployment | **Planned** | Sepolia testnet first |
 | Multi-region bootstrap | **Planned** | EU + Asia-Pacific fallback nodes |
 
 ---

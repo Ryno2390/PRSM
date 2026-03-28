@@ -1,5 +1,14 @@
 # PRSM FTNS Smart Contract Deployment Guide
 
+## 🟢 FTNS Token — Live on Base Mainnet
+
+> **Deployed 2026-03-28** — The FTNS token is live on Base mainnet and verified on Basescan.
+>
+> **Contract address:** `0x5276a3756C85f2E9e46f6D34386167a209aa16e5`
+> **Basescan:** https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5
+
+---
+
 Complete guide for deploying FTNS smart contracts to Polygon Mumbai testnet.
 
 ## 🚀 Quick Deployment (5 minutes)
