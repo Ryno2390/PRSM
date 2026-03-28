@@ -18,6 +18,9 @@ import {
   UserProfile,
   SEALConfig,
   SafetyLevel,
+  ModelProvider,
+  UserRole,
+  RegisterRequest,
 } from './types';
 import { AuthManager, AuthManagerConfig, MemoryTokenStorage } from './auth';
 import { FTNSManager, FTNSManagerConfig } from './ftns';
@@ -675,10 +678,10 @@ export class PRSMClient extends EventEmitter {
     username: string;
     email: string;
     password: string;
-    role?: string;
+    role?: UserRole;
     organization?: string;
   }): Promise<UserProfile> {
-    return this.auth.register(userData);
+    return this.auth.register(userData as RegisterRequest);
   }
 
   /**
@@ -741,7 +744,7 @@ export class PRSMClient extends EventEmitter {
     return {
       content: result.results.summary,
       modelId: 'nwtn-ensemble',
-      provider: 'prsm_distilled',
+      provider: ModelProvider.PRSM_DISTILLED,
       executionTime: Date.now() - new Date(session.createdAt).getTime(),
       tokenUsage: {
         promptTokens: 0,
@@ -804,7 +807,7 @@ export class PRSMClient extends EventEmitter {
       requestOptions.body = JSON.stringify(options.body);
     }
 
-    let lastError: Error;
+    let lastError: Error = new NetworkError('Unknown error occurred');
     
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       try {
@@ -832,10 +835,10 @@ export class PRSMClient extends EventEmitter {
         const data = await response.json();
         return data.data || data; // Handle both APIResponse<T> and direct T
 
-      } catch (error) {
+      } catch (error: unknown) {
         lastError = error as Error;
         
-        if (error.name === 'AbortError') {
+        if (error instanceof Error && error.name === 'AbortError') {
           lastError = new NetworkError('Request timeout');
         }
 
@@ -871,9 +874,7 @@ export class PRSMClient extends EventEmitter {
     this.websocket.on('session_progress', (progress) => this.emit('session_progress', progress));
     this.websocket.on('safety_alert', (alert) => this.emit('safety_alert', alert));
 
-    // Forward authentication events
-    this.auth.on?.('token_refreshed', () => this.emit('token_refreshed'));
-    this.auth.on?.('logout', () => this.emit('logout'));
+    // Note: AuthManager does not emit events - token refresh is handled internally
   }
 
   /**
@@ -907,7 +908,7 @@ export class PRSMClient extends EventEmitter {
       }
 
       // Validate authentication if API key is provided
-      if (this.auth.getToken() || this.auth.apiKey) {
+      if (this.auth.getToken()) {
         this.auth.validateConfig();
       }
 
