@@ -304,7 +304,7 @@ Do not fix by loosening threshold — accept as a known environment-specific fla
 | Price Oracles (CoinGecko) | 🔑 Needs API key | Free tier available |
 | FTNS Token (Base mainnet) | ✅ Deployed | `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` — verified on Basescan |
 | Multi-region Bootstrap | 🏗️ Needs deployment | Single NYC3 node live; EU/APAC config ready |
-| Redis (distributed rate limiting) | 🏗️ Optional | In-memory works for single node |
+| Redis (distributed rate limiting) | ✅ Connected | Upstash managed Redis — `helped-dolphin-87047.upstash.io` |
 
 ---
 
