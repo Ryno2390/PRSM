@@ -32,7 +32,7 @@ dependencies = [
     "websockets>=11.0.0",
     "cryptography>=41.0.0",
 ]
-dynamic = ["version"]
+version = "0.2.0"
 requires-python = ">=3.8"
 
 [project.urls]
@@ -59,9 +59,6 @@ docs = [
 
 [project.scripts]
 prsm = "prsm_sdk.cli:main"
-
-[tool.setuptools.dynamic]
-version = {attr = "prsm_sdk.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["prsm_sdk*"]
