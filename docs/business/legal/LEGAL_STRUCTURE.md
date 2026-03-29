@@ -2,177 +2,182 @@
 
 ## Overview
 
-This document outlines PRSM's corporate structure, intellectual property status, and regulatory considerations for investor due diligence.
+PRSM is designed as a **two-entity structure** — a non-profit foundation governing the open protocol, paired with a for-profit commercial operator that funds the foundation through dividends. This architecture is modeled on precedents such as the Mozilla Foundation / Mozilla Corporation and Ethereum Foundation / ConsenSys, adapted for an AI coordination network.
+
+This document is intended for investor due diligence. Fields marked **[PENDING]** reflect entities or filings not yet established as of the document date.
 
 ---
 
-## Corporate Entity
+## Two-Entity Structure Summary
+
+```
+┌─────────────────────────────────────────────────────────┐
+│               PRSM Foundation (Non-Profit)              │
+│           501(c)(3) or equivalent · [PENDING]           │
+│                                                         │
+│  • Owns & governs the PRSM protocol                    │
+│  • Holds protocol IP                                    │
+│  • Ensures network remains open & decentralized         │
+│  • Shareholder in Prismatica Inc.                       │
+│  • Self-funds via Prismatica dividends                  │
+└────────────────────────┬────────────────────────────────┘
+                         │ Holds equity / receives dividends
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│              Prismatica Inc. (For-Profit)                │
+│         Delaware C-Corp · [PENDING FORMATION]           │
+│                                                         │
+│  • Commercial arm and mega-node operator                │
+│  • Provides base-load data, compute & storage           │
+│  • Earns FTNS provenance royalties                      │
+│  • Investor-facing entity for Series A                  │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Entity 1: PRSM Foundation
 
 | Field | Value |
 |-------|-------|
-| **Legal Name** | [PLACEHOLDER: Legal entity name] |
-| **Jurisdiction** | [PLACEHOLDER: State/Country of incorporation] |
-| **Entity Type** | [PLACEHOLDER: Inc., LLC, Non-profit, etc.] |
-| **Formation Date** | [PLACEHOLDER: Date of formation] |
-| **EIN/Tax ID** | [PLACEHOLDER: Available under NDA] |
-| **Registered Agent** | [PLACEHOLDER: Agent name and address] |
+| **Legal Name** | PRSM Foundation |
+| **Entity Type** | Non-profit corporation (501(c)(3) or equivalent) |
+| **Jurisdiction** | United States — state TBD |
+| **Formation Status** | **[PENDING]** — to be formed after Prismatica Inc. is established |
+| **Formation Method** | Independent legal counsel; standard non-profit incorporation |
+| **EIN/Tax ID** | **[PENDING]** |
+| **501(c)(3) Application** | **[PENDING]** |
+| **IRS Determination Letter** | **[PENDING]** |
+| **Founder** | Ryne Schultz |
+
+### Role and Mission
+
+The PRSM Foundation is the neutral steward of the PRSM protocol. Its responsibilities include:
+
+- **Protocol governance**: Setting standards, managing upgrades, and maintaining the openness of the PRSM network
+- **IP ownership**: Holding trademarks, patents, and core protocol intellectual property
+- **Decentralization assurance**: Ensuring no single commercial entity — including Prismatica — can capture or close the network
+- **Financial sustainability**: Receiving dividend distributions from Prismatica Inc. to fund ongoing protocol operations, research, and community grants
+
+### Relationship to Prismatica
+
+The PRSM Foundation will hold an equity stake in Prismatica Inc. This arrangement means:
+
+- The Foundation receives dividends as Prismatica generates royalty revenue
+- The Foundation has a structural incentive to promote network growth (more nodes → more FTNS demand → more Prismatica revenue → larger dividends)
+- Neither entity is financially dependent on token sales or grants alone
 
 ---
 
-## Non-Profit Structure (If Applicable)
+## Entity 2: Prismatica Inc.
 
-*Per investor materials, PRSM may be structured as a 501(c)(3) non-profit:*
+| Field | Value |
+|-------|-------|
+| **Legal Name** | Prismatica Inc. |
+| **Entity Type** | Delaware C-Corporation |
+| **Jurisdiction** | Delaware, United States |
+| **Formation Status** | **[PENDING]** — formation via Stripe Atlas in progress |
+| **Registered Agent** | **[PENDING — via Stripe Atlas]** |
+| **EIN/Tax ID** | **[PENDING]** |
+| **Founder** | Ryne Schultz (Sole Founder) |
 
-| Field | Status |
-|-------|--------|
-| **501(c)(3) Application** | [PLACEHOLDER: Pending/Approved/N/A] |
-| **IRS Determination Letter** | [PLACEHOLDER: Available/Pending/N/A] |
-| **State Charity Registration** | [PLACEHOLDER: Status] |
+### Role and Business Model
 
-**Rationale for Non-Profit Structure**:
-- Democratic governance model
-- Anti-monopoly mission alignment
-- Research institution partnership facilitation
-- Community trust building
+Prismatica Inc. is the commercial arm of the PRSM ecosystem. It operates as a **mega-node** on the PRSM network — the primary provider of base-load compute, data, and storage capacity during the network's early growth phase.
+
+**Revenue mechanism**: Prismatica earns **FTNS provenance royalties** for every unit of compute, data, and storage it contributes to the network. As network usage grows, demand for FTNS increases, and Prismatica's royalty position appreciates accordingly.
+
+This is the **investor-facing entity** for the Series A funding round.
+
+### Equity Structure
+
+| Category | Detail |
+|----------|--------|
+| **Authorized Shares** | **[PENDING — post-formation]** |
+| **Common Stock** | Founder shares — Ryne Schultz |
+| **Preferred Stock (Series A)** | **[PENDING — post-formation, pre-investment]** |
+| **PRSM Foundation stake** | To be issued upon Foundation formation |
+| **Employee Option Pool** | **[PENDING — to be established at formation]** |
+
+*Full cap table available to qualified investors under NDA upon formation.*
 
 ---
 
 ## Intellectual Property
 
-### Ownership
+### Ownership and Assignment
 
-| IP Category | Status | Owner |
-|-------------|--------|-------|
-| Source Code | Owned | [PLACEHOLDER: Entity name] |
-| Trademarks | [PLACEHOLDER: Registered/Pending] | [PLACEHOLDER: Entity name] |
-| Patents | [PLACEHOLDER: Filed/Pending/None] | [PLACEHOLDER: Entity name] |
-| Trade Secrets | Protected | [PLACEHOLDER: Entity name] |
+| IP Category | Current Owner | Planned Owner |
+|-------------|--------------|---------------|
+| Source Code | Ryne Schultz (individual) | PRSM Foundation (upon formation) |
+| PRSM Trademark | **[PENDING registration]** | PRSM Foundation |
+| Protocol Design / Architecture | Ryne Schultz (individual) | PRSM Foundation (upon formation) |
+| Prismatica Trade Secrets | Prismatica Inc. (upon formation) | Prismatica Inc. |
 
-### IP Assignment
+**IP Transfer Plan**: Upon formation of both entities, all protocol-related IP will be assigned to the PRSM Foundation. Prismatica-specific commercial IP (infrastructure tooling, proprietary systems) will be assigned to or developed within Prismatica Inc.
 
-All intellectual property created by contractors, employees, and founders is assigned to [PLACEHOLDER: Entity name] through:
-- Founder IP Assignment Agreement
-- Employee IP Assignment provisions
-- Contractor IP Assignment clauses
+### Open Source
 
-### Open Source Components
-
-PRSM utilizes open-source components under the following licenses:
-- MIT License (majority)
-- Apache 2.0 (specific components)
-- BSD-3-Clause (specific components)
+The PRSM protocol implementation is open source. Key licenses:
+- **Core Protocol**: Apache 2.0
+- **SDKs**: MIT License
+- **Tooling**: MIT / Apache 2.0 (component-specific)
 
 All open-source usage is tracked and compliant with respective license terms.
 
 ---
 
-## Equity Structure
+## FTNS Token
 
-*Detailed cap table available to qualified investors under NDA*
+The FTNS token is live on **Base mainnet** at [`0x5276a3756C85f2E9e46f6D34386167a209aa16e5`](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5).
 
-### Summary Structure
-
-| Category | Percentage Range |
-|----------|-----------------|
-| Founder(s) | [PLACEHOLDER] |
-| Employee Option Pool | [PLACEHOLDER: Typically 10-20%] |
-| Series A Investors | [PLACEHOLDER: Post-investment] |
-| Advisors | [PLACEHOLDER: Typically 1-3%] |
-
-### Authorized Shares
-
-| Class | Authorized | Issued |
-|-------|-----------|--------|
-| Common Stock | [PLACEHOLDER] | [PLACEHOLDER] |
-| Preferred Stock (Series A) | [PLACEHOLDER] | [PLACEHOLDER: Post-funding] |
-
----
-
-## FTNS Token Regulatory Considerations
-
-### Token Classification Analysis
-
-| Jurisdiction | Classification Approach | Status |
-|--------------|------------------------|--------|
-| United States | Utility token analysis | [PLACEHOLDER: Legal review pending/complete] |
-| European Union | MiCA compliance review | [PLACEHOLDER] |
-| United Kingdom | FCA guidance alignment | [PLACEHOLDER] |
-
-### Legal Opinion Status
-
-| Document | Status | Counsel |
-|----------|--------|---------|
-| Token Legal Opinion | [PLACEHOLDER: Pending/Complete] | [PLACEHOLDER: Law firm] |
-| Securities Analysis | [PLACEHOLDER: Pending/Complete] | [PLACEHOLDER: Law firm] |
-| Regulatory Risk Assessment | [PLACEHOLDER: Pending/Complete] | [PLACEHOLDER: Law firm] |
-
-### Howey Test Analysis
-
-*Preliminary analysis indicates FTNS may qualify as a utility token based on:*
-- Consumptive use case (network access)
-- Decentralized governance
-- No profit-sharing mechanism
-- Network utility vs. investment return
-
-**Note**: Final determination requires formal legal opinion from securities counsel.
+| Field | Status |
+|-------|--------|
+| **Token Classification (US)** | Utility token (consumptive use) — formal legal opinion **[PENDING]** |
+| **Howey Test Analysis** | Preliminary: utility token; no profit-sharing mechanism; consumptive use case |
+| **MiCA Compliance (EU)** | **[PENDING review]** |
+| **Token Legal Opinion** | **[PENDING — securities counsel to be engaged]** |
 
 ---
 
 ## Regulatory Compliance
 
-### Current Compliance Status
-
-| Framework | Status | Notes |
-|-----------|--------|-------|
-| AML/KYC | [PLACEHOLDER: Planned/Implemented] | Token holder verification |
-| GDPR | Implemented | Data protection framework |
-| CCPA | Implemented | California privacy compliance |
-| SOC2 | In Progress | Type II certification target |
-| ISO27001 | Planned | Post-SOC2 completion |
-
-### Planned Regulatory Engagement
-
-| Jurisdiction | Activity | Timeline |
-|--------------|----------|----------|
-| SEC (US) | Monitoring guidance | Ongoing |
-| CFTC (US) | Commodity analysis if applicable | [PLACEHOLDER] |
-| State regulators | Money transmitter analysis | [PLACEHOLDER] |
-| International | Jurisdiction-specific compliance | Post-launch |
+| Framework | Status |
+|-----------|--------|
+| GDPR | Implemented |
+| CCPA | Implemented |
+| AML/KYC (token holders) | **[PENDING — planned pre-launch]** |
+| SOC 2 Type II | In Progress |
+| ISO 27001 | Planned (post-SOC 2) |
 
 ---
 
 ## Governance Documents
 
-| Document | Status | Available |
-|----------|--------|-----------|
-| Certificate of Incorporation | [PLACEHOLDER] | Under NDA |
-| Bylaws | [PLACEHOLDER] | Under NDA |
-| Board Resolutions | [PLACEHOLDER] | Under NDA |
-| Stockholder Agreement | [PLACEHOLDER] | Under NDA |
-| Investor Rights Agreement | [PLACEHOLDER: To be drafted for Series A] | - |
+| Document | Status |
+|----------|--------|
+| Prismatica Certificate of Incorporation | **[PENDING — Stripe Atlas formation]** |
+| Prismatica Bylaws | **[PENDING]** |
+| PRSM Foundation Charter | **[PENDING]** |
+| Stockholder Agreement | **[PENDING — post-formation]** |
+| Investor Rights Agreement (Series A) | **[PENDING — to be drafted]** |
+| IP Assignment Agreements | **[PENDING — upon entity formation]** |
+
+*Governance documents will be made available to qualified investors under NDA upon formation.*
 
 ---
 
-## Key Agreements
+## Formation Timeline
 
-| Agreement Type | Status | Notes |
-|----------------|--------|-------|
-| Founder Agreement | [PLACEHOLDER] | Includes IP assignment, vesting |
-| Employee Agreements | Template ready | Standard IP, confidentiality |
-| Contractor Agreements | Template ready | IP assignment, work-for-hire |
-| Customer Agreements | [PLACEHOLDER: Draft] | Terms of service, SaaS |
-| Partnership Agreements | [PLACEHOLDER: None yet] | To be developed |
-
----
-
-## Insurance Coverage
-
-| Coverage Type | Status | Limit |
-|---------------|--------|-------|
-| Directors & Officers (D&O) | [PLACEHOLDER] | [PLACEHOLDER] |
-| Errors & Omissions (E&O) | [PLACEHOLDER] | [PLACEHOLDER] |
-| Cyber Liability | [PLACEHOLDER] | [PLACEHOLDER] |
-| General Liability | [PLACEHOLDER] | [PLACEHOLDER] |
+| Milestone | Status | Target |
+|-----------|--------|--------|
+| Form Prismatica Inc. (Stripe Atlas) | **[PENDING]** | Near-term (Q2 2026) |
+| Establish employee option pool | **[PENDING]** | At formation |
+| Engage corporate / securities counsel | **[PENDING]** | At formation |
+| Form PRSM Foundation | **[PENDING]** | Medium-term (post-Prismatica) |
+| Transfer protocol IP to Foundation | **[PENDING]** | Post-Foundation formation |
+| Issue Foundation equity stake in Prismatica | **[PENDING]** | Post-Foundation formation |
+| Series A close | **[PENDING]** | 2026 |
 
 ---
 
@@ -180,31 +185,31 @@ All open-source usage is tracked and compliant with respective license terms.
 
 | Function | Firm | Status |
 |----------|------|--------|
-| Corporate Counsel | [PLACEHOLDER] | [PLACEHOLDER: Engaged/To be engaged] |
-| Securities Counsel | [PLACEHOLDER] | [PLACEHOLDER: Engaged/To be engaged] |
-| IP Counsel | [PLACEHOLDER] | [PLACEHOLDER: Engaged/To be engaged] |
-| Regulatory Counsel | [PLACEHOLDER] | [PLACEHOLDER: Engaged/To be engaged] |
+| Corporate Counsel | **[PENDING]** | To be engaged at formation |
+| Securities Counsel | **[PENDING]** | To be engaged at formation |
+| IP Counsel | **[PENDING]** | To be engaged at Foundation formation |
+| Regulatory / Token Counsel | **[PENDING]** | To be engaged pre-launch |
 
 ---
 
 ## Due Diligence Materials
 
-The following documents are available to qualified investors under NDA:
-- [ ] Certificate of Incorporation
-- [ ] Bylaws
+The following will be available to qualified investors under NDA upon formation:
+
+- [ ] Prismatica Certificate of Incorporation
+- [ ] Prismatica Bylaws and Board Resolutions
 - [ ] Cap Table
-- [ ] Material Contracts
 - [ ] IP Assignment Agreements
-- [ ] Regulatory Correspondence
-- [ ] Token Legal Opinion (when complete)
+- [ ] Material Contracts
+- [ ] FTNS Token Legal Opinion (upon completion)
+- [ ] PRSM Foundation Charter (upon formation)
 
 ---
 
 ## Contact
 
-**Legal Inquiries**: [PLACEHOLDER: legal@prsm.ai]
-**Investment Inquiries**: [PLACEHOLDER: funding@prsm.ai]
+**Legal / Investment Inquiries**: funding@prsm.ai
 
 ---
 
-*This document contains placeholder information pending formal corporate documentation. All legal matters should be verified with qualified legal counsel. Last updated: January 2026*
+*This document reflects the intended corporate structure as of March 2026. Prismatica Inc. and the PRSM Foundation are not yet formed. All legal matters should be verified with qualified legal counsel prior to investment. Fields marked [PENDING] will be updated as milestones are completed.*

@@ -10,6 +10,63 @@
 
 PRSM represents the infrastructure for AI coordination - positioned at the convergence of three unstoppable trends: AI proliferation, coordination complexity, and economic rationality. This is an investment in completing the technological foundation for AI coordination infrastructure.
 
+## 🏛 Corporate Structure
+
+PRSM operates as a **two-entity structure** designed to align open-protocol integrity with commercial sustainability and investor returns.
+
+### Structure Overview
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                 PRSM Foundation (Non-Profit)                 │
+│              501(c)(3) or equivalent  ·  [Planned]           │
+│                                                              │
+│  Governs PRSM protocol  ·  Holds IP  ·  Ensures openness    │
+│  Shareholder in Prismatica  ·  Self-funds via dividends      │
+└───────────────────────────┬──────────────────────────────────┘
+                            │  Holds equity · Receives dividends
+                            ▼
+┌──────────────────────────────────────────────────────────────┐
+│               Prismatica Inc. (For-Profit)                   │
+│           Delaware C-Corp  ·  [Pending Formation]            │
+│                                                              │
+│  Mega-node operator  ·  Base-load compute/data/storage       │
+│  Earns FTNS royalties  ·  Investor-facing (Series A)         │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### PRSM Foundation — Neutral Protocol Layer
+
+The PRSM Foundation is the non-profit steward of the PRSM protocol — analogous to the Mozilla Foundation or Ethereum Foundation. It:
+
+- Owns and governs the PRSM protocol and associated IP
+- Ensures the network remains open, decentralized, and not capturable by any single commercial entity
+- Holds an equity stake in Prismatica Inc., receiving dividends that fund ongoing protocol operations
+
+**Formation status**: Planned — to be established after Prismatica Inc. is formed.
+
+### Prismatica Inc. — Commercial Mega-Node Operator
+
+Prismatica Inc. is the for-profit entity and the **investor-facing vehicle for Series A**. It operates as the PRSM network's primary mega-node in the early growth phase, providing base-load compute, data, and storage capacity. Prismatica earns **FTNS provenance royalties** for every resource unit it contributes to the network.
+
+**Formation status**: Pending — Delaware C-Corp via Stripe Atlas.
+
+### Why This Structure Benefits Investors
+
+| Feature | Investor Benefit |
+|---------|-----------------|
+| **Royalty model** | Prismatica earns FTNS on every network transaction involving its resources — a passive royalty position that grows with adoption |
+| **Network flywheel** | More nodes join → more compute/data/storage needed → Prismatica earns more FTNS → FTNS appreciates with supply/demand dynamics |
+| **Treasury growth** | Prismatica's FTNS holdings grow without requiring token sales at a loss |
+| **Foundation alignment** | Foundation's equity in Prismatica means protocol stewardship and commercial success are structurally aligned |
+| **Comparable models** | Early AWS (infrastructure provider for a platform ecosystem), ARM Holdings (royalties on a chip architecture), Berkshire Hathaway (float / capital compounding model) |
+
+Investing in Prismatica is equivalent to **owning a royalty position on the PRSM network** — the more the network grows, the more Prismatica earns, and the more value accrues to shareholders.
+
+See [`docs/business/PRISMATICA_STRATEGY.md`](./PRISMATICA_STRATEGY.md) and [`docs/business/legal/LEGAL_STRUCTURE.md`](./legal/LEGAL_STRUCTURE.md) for full detail.
+
+---
+
 ## 📊 Investment Opportunity
 
 **Series A: $18M**
