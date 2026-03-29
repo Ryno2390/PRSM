@@ -36,6 +36,7 @@ class RunResult:
     final_status: str
     elapsed_seconds: float
     context_resets_triggered: int = 0
+    feedback_rounds_completed: int = 0
 
 
 class NWTNSession:
@@ -155,6 +156,7 @@ class NWTNSession:
         round_poll_interval: float = 5.0,
         agent_output_fn: Optional[Callable[[str, int], Awaitable[str]]] = None,
         context_monitor=None,
+        feedback_publisher=None,
     ) -> RunResult:
         """
         Drive the NWTN checkpoint loop until convergence or max_rounds.
@@ -172,14 +174,18 @@ class NWTNSession:
             If provided, monitors token usage per agent and triggers context resets
             when agents exceed critical thresholds. Enables long-running sessions
             to continue via structured handoff artifacts.
+        feedback_publisher : EvaluatorFeedbackPublisher, optional
+            If provided, publishes evaluation feedback to agents after each round.
+            Requires the session to have evaluation results available.
 
         Returns
         -------
         RunResult
-            Summary of the run: rounds completed, converged, final status, context resets.
+            Summary of the run: rounds completed, converged, final status, context resets, feedback rounds.
         """
         start_time = time.perf_counter()
         context_resets_triggered = 0
+        feedback_rounds_completed = 0
 
         for round_num in range(1, max_rounds + 1):
             # Step 1: Scan agent outputs for convergence signals if fn provided
@@ -239,6 +245,32 @@ class NWTNSession:
                 self.session_id, f"Round {round_num} complete"
             )
 
+            # Step 2.5: Publish evaluation feedback (if publisher and evaluation results available)
+            if feedback_publisher is not None:
+                try:
+                    summary = self._adapter.convergence_summary(self.session_id)
+                    evaluation_batch = summary.get("evaluation_batch")
+                    if evaluation_batch is not None:
+                        feedback_count = await feedback_publisher.publish_feedback(
+                            batch=evaluation_batch,
+                            round_number=round_num,
+                            session_id=self.session_id,
+                        )
+                        if feedback_count > 0:
+                            feedback_rounds_completed += 1
+                            logger.info(
+                                "NWTNSession [%s] published %d feedback messages (round=%d)",
+                                self.session_id,
+                                feedback_count,
+                                round_num,
+                            )
+                except Exception as e:
+                    logger.warning(
+                        "NWTNSession [%s] feedback_publisher error: %s",
+                        self.session_id,
+                        e,
+                    )
+
             # Step 3: Wait for convergence check
             await asyncio.sleep(round_poll_interval)
 
@@ -273,6 +305,7 @@ class NWTNSession:
             final_status=self._state.status,
             elapsed_seconds=elapsed_seconds,
             context_resets_triggered=context_resets_triggered,
+            feedback_rounds_completed=feedback_rounds_completed,
         )
 
     def status(self) -> dict:
