@@ -35,6 +35,7 @@ class RunResult:
     convergence_summary: dict
     final_status: str
     elapsed_seconds: float
+    context_resets_triggered: int = 0
 
 
 class NWTNSession:
@@ -153,6 +154,7 @@ class NWTNSession:
         max_rounds: int = 20,
         round_poll_interval: float = 5.0,
         agent_output_fn: Optional[Callable[[str, int], Awaitable[str]]] = None,
+        context_monitor=None,
     ) -> RunResult:
         """
         Drive the NWTN checkpoint loop until convergence or max_rounds.
@@ -166,13 +168,18 @@ class NWTNSession:
         agent_output_fn : async callable(agent_id, round_number) -> str, optional
             Called each round to get each agent's output for convergence scanning.
             If None, convergence is never detected (useful for externally-driven sessions).
+        context_monitor : ContextPressureMonitor, optional
+            If provided, monitors token usage per agent and triggers context resets
+            when agents exceed critical thresholds. Enables long-running sessions
+            to continue via structured handoff artifacts.
 
         Returns
         -------
         RunResult
-            Summary of the run: rounds completed, converged, final status.
+            Summary of the run: rounds completed, converged, final status, context resets.
         """
         start_time = time.perf_counter()
+        context_resets_triggered = 0
 
         for round_num in range(1, max_rounds + 1):
             # Step 1: Scan agent outputs for convergence signals if fn provided
@@ -183,10 +190,49 @@ class NWTNSession:
                         self._adapter.scan_agent_convergence(
                             self.session_id, agent_id, output, round_num
                         )
+                        # Record tokens for context pressure monitoring
+                        if context_monitor is not None:
+                            token_count = len(output.split()) * 4  # Rough estimate: 4 chars per token
+                            context_monitor.record_tokens(agent_id, round_num, token_count)
                     except Exception as e:
                         logger.warning(
                             f"NWTNSession [{self.session_id}] agent_output_fn error for {agent_id}: {e}"
                         )
+
+            # Step 1.5: Check for context pressure resets (if monitor provided)
+            if context_monitor is not None:
+                agents_needing_reset = context_monitor.agents_needing_reset()
+                if agents_needing_reset:
+                    for agent_id in agents_needing_reset:
+                        try:
+                            # Build handoff artifact for the fresh agent
+                            # Get whiteboard entries from convergence summary
+                            summary = self._adapter.convergence_summary(self.session_id)
+                            whiteboard_entries = summary.get("whiteboard_entries", [])
+                            meta_plan_summary = summary.get("meta_plan_summary", "")
+
+                            handoff = context_monitor.build_handoff_artifact(
+                                agent_id=agent_id,
+                                whiteboard_entries=whiteboard_entries,
+                                meta_plan_summary=meta_plan_summary,
+                                goal=self._state.goal,
+                            )
+                            logger.info(
+                                f"NWTNSession [{self.session_id}] built handoff artifact for agent={agent_id} "
+                                f"(round={round_num}, tokens={handoff.get('tokens_before_reset', 0)})"
+                            )
+
+                            # Reset the agent's context
+                            context_monitor.reset_agent_context(agent_id)
+                            context_resets_triggered += 1
+                            logger.info(
+                                f"NWTNSession [{self.session_id}] context reset for agent={agent_id} "
+                                f"(total_resets={context_resets_triggered})"
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                f"NWTNSession [{self.session_id}] context reset error for {agent_id}: {e}"
+                            )
 
             # Step 2: Publish ROUND_ADVANCED event (triggers ScribeAgent checkpoint)
             await self._adapter.advance_bsc_round(
@@ -226,6 +272,7 @@ class NWTNSession:
             convergence_summary=self._adapter.convergence_summary(self.session_id),
             final_status=self._state.status,
             elapsed_seconds=elapsed_seconds,
+            context_resets_triggered=context_resets_triggered,
         )
 
     def status(self) -> dict:
