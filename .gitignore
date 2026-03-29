@@ -243,7 +243,10 @@ integration_validation_report.json
 simplified_integration_validation_report.json
 
 # New Architecture Data Exclusions
-prsm/compute/nwtn/corpus/
+# Allow Python files in corpus/ for codebase indexing, ignore data files
+prsm/compute/nwtn/corpus/*
+!prsm/compute/nwtn/corpus/*.py
+!prsm/compute/nwtn/corpus/__init__.py
 prsm/compute/nwtn/processed_corpus/
 
 # PRSM local data directory
@@ -292,3 +295,6 @@ sync_data/
 
 # NWTN runtime checkpoints
 NWTN_CHECKPOINTS/
+
+# Codebase vector index
+.codebase_index/
