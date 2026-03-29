@@ -26,8 +26,8 @@ class CodeChunker:
     def _rel(self, path: str) -> str:
         return str(Path(path).resolve().relative_to(self.repo_root))
 
-    def _chunk_id(self, filepath: str, name: str) -> str:
-        return hashlib.sha256(f"{filepath}:{name}".encode()).hexdigest()[:16]
+    def _chunk_id(self, filepath: str, name: str, line: int) -> str:
+        return hashlib.sha256(f"{filepath}:{name}:{line}".encode()).hexdigest()[:16]
 
     def _module_path(self, filepath: str) -> str:
         rel = self._rel(filepath)
@@ -58,7 +58,7 @@ class CodeChunker:
             docstring = ast.get_docstring(node) or ""
             rel = self._rel(filepath)
             chunks.append(CodeChunk(
-                chunk_id=self._chunk_id(rel, node.name),
+                chunk_id=self._chunk_id(rel, node.name, node.lineno),
                 filepath=rel,
                 symbol_name=node.name,
                 symbol_type=sym_type,
