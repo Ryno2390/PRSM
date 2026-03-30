@@ -599,6 +599,14 @@ P2P message validation (`prsm/node/`).
 
 ---
 
+## Research-Flagged Future Work
+
+| Item | When Relevant | Reference |
+|------|--------------|-----------|
+| Vector quantization (TurboQuant/QJL/PolarQuant) | Academic corpus indexing at millions of papers; marketplace matching at scale | [`docs/research/vector-quantization-future-work.md`](research/vector-quantization-future-work.md) |
+
+---
+
 ## What Remains Intentionally Deferred
 
 | Item | Reason |
