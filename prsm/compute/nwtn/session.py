@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 
 if TYPE_CHECKING:
     from prsm.compute.nwtn.openclaw.adapter import NWTNOpenClawAdapter, SessionState
+    from prsm.compute.nwtn.trace_logger import NWTNTraceLogger
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ class RunResult:
     elapsed_seconds: float
     context_resets_triggered: int = 0
     feedback_rounds_completed: int = 0
+    trace_path: Optional[str] = None
 
 
 class NWTNSession:
@@ -157,6 +159,7 @@ class NWTNSession:
         agent_output_fn: Optional[Callable[[str, int], Awaitable[str]]] = None,
         context_monitor=None,
         feedback_publisher=None,
+        trace_logger: Optional["NWTNTraceLogger"] = None,
     ) -> RunResult:
         """
         Drive the NWTN checkpoint loop until convergence or max_rounds.
@@ -187,7 +190,15 @@ class NWTNSession:
         context_resets_triggered = 0
         feedback_rounds_completed = 0
 
+        # Set team members for trace logging
+        if trace_logger is not None:
+            trace_logger.set_team(self.team_members)
+
         for round_num in range(1, max_rounds + 1):
+            # Start round trace
+            if trace_logger is not None:
+                trace_logger.start_round(round_num)
+
             # Step 1: Scan agent outputs for convergence signals if fn provided
             if agent_output_fn is not None:
                 for agent_id in self.team_members:
@@ -196,10 +207,18 @@ class NWTNSession:
                         self._adapter.scan_agent_convergence(
                             self.session_id, agent_id, output, round_num
                         )
+                        # Record agent output for trace
+                        if trace_logger is not None:
+                            trace_logger.record_agent_output(agent_id, round_num, output)
                         # Record tokens for context pressure monitoring
                         if context_monitor is not None:
                             token_count = len(output.split()) * 4  # Rough estimate: 4 chars per token
                             context_monitor.record_tokens(agent_id, round_num, token_count)
+                            # Record context pressure for trace
+                            if trace_logger is not None:
+                                trace_logger.record_context_pressure(
+                                    round_num, agent_id, token_count, level="OK"
+                                )
                     except Exception as e:
                         logger.warning(
                             f"NWTNSession [{self.session_id}] agent_output_fn error for {agent_id}: {e}"
@@ -231,6 +250,11 @@ class NWTNSession:
                             # Reset the agent's context
                             context_monitor.reset_agent_context(agent_id)
                             context_resets_triggered += 1
+                            # Record context reset in trace
+                            if trace_logger is not None:
+                                trace_logger.record_context_pressure(
+                                    round_num, agent_id, 0, level="RESET", reset_triggered=True
+                                )
                             logger.info(
                                 f"NWTNSession [{self.session_id}] context reset for agent={agent_id} "
                                 f"(total_resets={context_resets_triggered})"
@@ -258,6 +282,13 @@ class NWTNSession:
                         )
                         if feedback_count > 0:
                             feedback_rounds_completed += 1
+                            # Record feedback in trace
+                            if trace_logger is not None:
+                                trace_logger.record_feedback(
+                                    round_num,
+                                    feedback_count,
+                                    list(self.team_members),
+                                )
                             logger.info(
                                 "NWTNSession [%s] published %d feedback messages (round=%d)",
                                 self.session_id,
@@ -278,6 +309,10 @@ class NWTNSession:
             if self._adapter.is_session_converged(self.session_id):
                 self._converged = True
                 self._rounds_completed = round_num
+                # Record convergence in trace
+                if trace_logger is not None:
+                    trace_logger.record_convergence(round_num, [], converged=True)
+                    trace_logger.end_round(round_num)
                 logger.info(
                     f"NWTNSession [{self.session_id}] round {round_num}/{max_rounds} — CONVERGED"
                 )
@@ -291,11 +326,27 @@ class NWTNSession:
                 f"NWTNSession [{self.session_id}] round {round_num}/{max_rounds} — pending: {pending}"
             )
             self._rounds_completed = round_num
+
+            # Record convergence status in trace (not converged yet)
+            if trace_logger is not None:
+                trace_logger.record_convergence(round_num, pending, converged=False)
+                trace_logger.end_round(round_num)
         else:
             # Completed max_rounds without convergence
             self._rounds_completed = max_rounds
 
         elapsed_seconds = time.perf_counter() - start_time
+
+        # Finalize trace logging
+        if trace_logger is not None:
+            trace_logger.finalize(
+                converged=self._converged,
+                rounds_completed=self._rounds_completed,
+                context_resets_triggered=context_resets_triggered,
+                feedback_rounds_completed=feedback_rounds_completed,
+                elapsed_seconds=elapsed_seconds,
+                final_status=self._state.status,
+            )
 
         return RunResult(
             session_id=self.session_id,
@@ -306,6 +357,7 @@ class NWTNSession:
             elapsed_seconds=elapsed_seconds,
             context_resets_triggered=context_resets_triggered,
             feedback_rounds_completed=feedback_rounds_completed,
+            trace_path=str(trace_logger._session_dir) if trace_logger else None,
         )
 
     def status(self) -> dict:

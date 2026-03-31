@@ -298,3 +298,6 @@ NWTN_CHECKPOINTS/
 
 # Codebase vector index
 .codebase_index/
+
+# NWTN execution traces (Meta-Harness optimization data)
+.nwtn_traces/
