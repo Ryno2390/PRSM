@@ -134,6 +134,13 @@ from .context_manager import (
 # Note: Convenience functions are archived as HybridNWTNManager is not currently used
 # The current NWTN pipeline uses EnhancedNWTNOrchestrator instead
 
+# Meta-Harness optimization components
+from .harness_optimizer import (
+    HarnessOptimizer,
+    OptimizationHistory,
+    SessionOutcome,
+    ParetoPoint,
+)
 
 # Export all components
 __all__ = [
@@ -186,6 +193,12 @@ __all__ = [
     "ContextManager",
     "ContextUsage",
     "get_context_manager",
+    
+    # Meta-Harness optimization
+    "HarnessOptimizer",
+    "OptimizationHistory",
+    "SessionOutcome",
+    "ParetoPoint",
 
     # Note: Bayesian search, integration, and convenience functions are archived
     
