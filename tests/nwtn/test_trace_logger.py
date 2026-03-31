@@ -26,6 +26,7 @@ from prsm.compute.nwtn.trace_logger import (
     NWTNTraceLogger,
     RoundTrace,
     SessionMeta,
+    create_trace_logger,
 )
 
 
@@ -638,3 +639,149 @@ async def test_trace_logger_with_session_integration(temp_traces_dir):
     assert (session_dir / "session_meta.json").exists()
     assert (session_dir / "rounds" / "round_001.json").exists()
     assert (session_dir / "rounds" / "round_002.json").exists()
+
+
+# ============================================================================
+# Test: HarnessConfig Expansion (FEAT-20260331-002)
+# ============================================================================
+
+
+def test_harness_config_defaults():
+    """Verify default field values for expanded HarnessConfig."""
+    config = HarnessConfig()
+    assert config.quality_threshold == 0.35
+    assert config.kl_epsilon == 0.1
+    assert config.similarity_threshold == 0.85
+    assert config.max_rounds == 20
+    assert config.round_poll_interval == 5.0
+    assert config.context_pressure_warning_pct == 0.70
+    assert config.context_pressure_critical_pct == 0.85
+    assert config.context_pressure_hard_limit_pct == 0.95
+    assert config.feedback_quality_threshold == 0.80
+    assert config.config_version == "1.0"
+    assert config.extra == {}
+
+
+def test_harness_config_roundtrip():
+    """HarnessConfig.from_dict(config.to_dict()) produces identical values."""
+    config = HarnessConfig(
+        quality_threshold=0.5,
+        kl_epsilon=0.05,
+        similarity_threshold=0.9,
+        max_rounds=30,
+        round_poll_interval=10.0,
+        context_pressure_warning_pct=0.6,
+        context_pressure_critical_pct=0.75,
+        context_pressure_hard_limit_pct=0.90,
+        feedback_quality_threshold=0.85,
+        config_version="2.0",
+        extra={"custom": "value"},
+    )
+    restored = HarnessConfig.from_dict(config.to_dict())
+    assert restored.quality_threshold == 0.5
+    assert restored.kl_epsilon == 0.05
+    assert restored.similarity_threshold == 0.9
+    assert restored.max_rounds == 30
+    assert restored.round_poll_interval == 10.0
+    assert restored.context_pressure_warning_pct == 0.6
+    assert restored.context_pressure_critical_pct == 0.75
+    assert restored.context_pressure_hard_limit_pct == 0.90
+    assert restored.feedback_quality_threshold == 0.85
+    assert restored.config_version == "2.0"
+    assert restored.extra == {"custom": "value"}
+
+
+def test_harness_config_from_components_no_components():
+    """from_components() works with all None args."""
+    config = HarnessConfig.from_components(
+        pipeline=None,
+        context_monitor=None,
+        max_rounds=15,
+        round_poll_interval=2.5,
+    )
+    assert config.max_rounds == 15
+    assert config.round_poll_interval == 2.5
+    # All other fields should be defaults
+    assert config.quality_threshold == 0.35
+    assert config.kl_epsilon == 0.1
+    assert config.similarity_threshold == 0.85
+
+
+def test_harness_config_from_dict_ignores_unknown_keys():
+    """Extra keys in dict don't raise errors."""
+    config = HarnessConfig.from_dict({
+        "quality_threshold": 0.42,
+        "unknown_key": "should_be_ignored",
+        "another_unknown": 123,
+    })
+    assert config.quality_threshold == 0.42
+    # Should not raise, and unknown keys should be ignored
+
+
+def test_create_trace_logger_writes_config(temp_traces_dir):
+    """create_trace_logger(..., harness_config=HarnessConfig(...)) writes harness_config.json."""
+    config = HarnessConfig(quality_threshold=0.5, max_rounds=10)
+    tl = create_trace_logger(
+        session_id="test-create",
+        goal="Test create_trace_logger",
+        traces_dir=temp_traces_dir,
+        harness_config=config,
+    )
+
+    config_path = temp_traces_dir / "test-create" / "harness_config.json"
+    assert config_path.exists()
+
+    with open(config_path) as f:
+        loaded = json.load(f)
+
+    assert loaded["quality_threshold"] == 0.5
+    assert loaded["max_rounds"] == 10
+
+
+@pytest.mark.asyncio
+async def test_session_run_writes_default_config_when_trace_logger_provided(temp_traces_dir):
+    """When trace_logger is provided but harness_config is None, harness_config.json is still written."""
+    from prsm.compute.nwtn.session import NWTNSession
+    from prsm.compute.nwtn.trace_logger import NWTNTraceLogger
+
+    # Mock the adapter and state
+    mock_adapter = MagicMock()
+    mock_adapter.is_session_converged.return_value = True  # Immediate convergence
+    mock_adapter.convergence_summary.return_value = {"pending_agents": []}
+    mock_adapter.advance_bsc_round = AsyncMock()
+
+    mock_state = MagicMock()
+    mock_state.session_id = "test-default-config"
+    mock_state.goal = "Test default config"
+    mock_state.status = "completed"
+    mock_state.team_members = ["agent-1"]
+    mock_state.scribe_running = False
+
+    session = NWTNSession(adapter=mock_adapter, session_state=mock_state)
+
+    # Create trace logger without providing harness_config
+    trace_logger = NWTNTraceLogger(
+        session_id="test-default-config",
+        goal="Test default config",
+        traces_dir=temp_traces_dir,
+    )
+
+    # Run with trace_logger but no harness_config
+    result = await session.run(
+        max_rounds=5,
+        round_poll_interval=0.01,
+        trace_logger=trace_logger,
+    )
+
+    assert result.session_id == "test-default-config"
+
+    # Verify harness_config.json was written with default values
+    config_path = temp_traces_dir / "test-default-config" / "harness_config.json"
+    assert config_path.exists()
+
+    with open(config_path) as f:
+        loaded = json.load(f)
+
+    assert loaded["max_rounds"] == 5
+    assert loaded["round_poll_interval"] == 0.01
+    assert loaded["quality_threshold"] == 0.35  # default
