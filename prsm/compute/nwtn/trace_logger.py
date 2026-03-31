@@ -58,14 +58,80 @@ class RoundTrace:
 
 @dataclass
 class HarnessConfig:
-    """Snapshot of the harness hyperparameters used for this session."""
+    """
+    Snapshot of all tunable NWTN harness hyperparameters for one session.
+    A Meta-Harness optimizer reads this to understand what config was used
+    and proposes modifications to improve performance.
+    """
+    # BSC Pipeline
     quality_threshold: float = 0.35
+    kl_epsilon: float = 0.1
+    similarity_threshold: float = 0.85
+
+    # Session loop
     max_rounds: int = 20
     round_poll_interval: float = 5.0
+
+    # Context pressure thresholds (fractions of context window)
     context_pressure_warning_pct: float = 0.70
     context_pressure_critical_pct: float = 0.85
     context_pressure_hard_limit_pct: float = 0.95
-    extra: Dict[str, Any] = field(default_factory=dict)  # any additional params
+
+    # Feedback
+    feedback_quality_threshold: float = 0.80
+
+    # Metadata
+    config_version: str = "1.0"
+    extra: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_components(
+        cls,
+        pipeline=None,
+        context_monitor=None,
+        max_rounds: int = 20,
+        round_poll_interval: float = 5.0,
+        **extra,
+    ) -> "HarnessConfig":
+        """Build a HarnessConfig by reading live component values."""
+        config = cls(max_rounds=max_rounds, round_poll_interval=round_poll_interval)
+        if pipeline is not None:
+            try:
+                config.quality_threshold = pipeline._quality_gate.threshold
+            except AttributeError:
+                pass
+            try:
+                config.kl_epsilon = pipeline._kl_filter.epsilon
+            except AttributeError:
+                pass
+            try:
+                config.similarity_threshold = pipeline._dedup._threshold
+            except AttributeError:
+                pass
+        if context_monitor is not None:
+            try:
+                config.context_pressure_warning_pct = context_monitor.WARNING_THRESHOLD
+                config.context_pressure_critical_pct = context_monitor.CRITICAL_THRESHOLD
+                config.context_pressure_hard_limit_pct = context_monitor.HARD_LIMIT_THRESHOLD
+            except AttributeError:
+                pass
+        if extra:
+            config.extra = dict(extra)
+        return config
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "HarnessConfig":
+        from dataclasses import fields as dc_fields
+        d = dict(d)
+        extra = d.pop("extra", {})
+        known = {f.name for f in dc_fields(cls)}
+        known_d = {k: v for k, v in d.items() if k in known}
+        obj = cls(**known_d)
+        obj.extra = extra
+        return obj
 
 
 @dataclass
@@ -220,3 +286,16 @@ class NWTNTraceLogger:
             self._session_dir,
             rounds_completed,
         )
+
+
+def create_trace_logger(
+    session_id: str,
+    goal: str,
+    traces_dir: Path = None,
+    harness_config: HarnessConfig = None,
+) -> NWTNTraceLogger:
+    """Create and initialize a NWTNTraceLogger. Writes harness_config immediately if provided."""
+    tl = NWTNTraceLogger(session_id=session_id, goal=goal, traces_dir=traces_dir)
+    if harness_config is not None:
+        tl.log_config(harness_config)
+    return tl

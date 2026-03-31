@@ -160,6 +160,7 @@ class NWTNSession:
         context_monitor=None,
         feedback_publisher=None,
         trace_logger: Optional["NWTNTraceLogger"] = None,
+        harness_config=None,  # NEW
     ) -> RunResult:
         """
         Drive the NWTN checkpoint loop until convergence or max_rounds.
@@ -193,6 +194,13 @@ class NWTNSession:
         # Set team members for trace logging
         if trace_logger is not None:
             trace_logger.set_team(self.team_members)
+            if harness_config is None:
+                from prsm.compute.nwtn.trace_logger import HarnessConfig
+                harness_config = HarnessConfig(
+                    max_rounds=max_rounds,
+                    round_poll_interval=round_poll_interval,
+                )
+            trace_logger.log_config(harness_config)
 
         for round_num in range(1, max_rounds + 1):
             # Start round trace
