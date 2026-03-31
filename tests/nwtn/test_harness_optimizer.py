@@ -770,3 +770,218 @@ def test_full_optimization_cycle(temp_traces_dir, sample_harness_config):
     # Propose should use best outcome's config as base
     proposal = optimizer.propose_next_config(history)
     assert proposal.quality_threshold >= 0.35
+
+
+# =============================================================================
+# LLMProposer Tests
+# =============================================================================
+
+def test_llm_proposer_returns_none_without_api_key():
+    """LLMProposer returns None when ANTHROPIC_API_KEY is not set."""
+    from prsm.compute.nwtn.harness_optimizer import LLMProposer
+    
+    proposer = LLMProposer()
+    config = HarnessConfig()
+    meta = SessionMeta(
+        session_id="test",
+        goal="test",
+        started_at="2026-03-31T10:00:00Z",
+        converged=True,
+        rounds_completed=5,
+    )
+    outcome = SessionOutcome(
+        session_id="test",
+        config=config,
+        meta=meta,
+    )
+    history = OptimizationHistory(outcomes=[outcome])
+    
+    # Ensure ANTHROPIC_API_KEY is not set
+    import os
+    original_key = os.environ.pop("ANTHROPIC_API_KEY", None)
+    
+    try:
+        result = proposer.propose(history)
+        assert result is None
+    finally:
+        if original_key:
+            os.environ["ANTHROPIC_API_KEY"] = original_key
+
+
+def test_llm_proposer_returns_none_on_invalid_json():
+    """LLMProposer returns None when LLM returns invalid JSON."""
+    from prsm.compute.nwtn.harness_optimizer import LLMProposer
+    from unittest.mock import MagicMock, patch
+    
+    proposer = LLMProposer()
+    config = HarnessConfig()
+    meta = SessionMeta(
+        session_id="test",
+        goal="test",
+        started_at="2026-03-31T10:00:00Z",
+        converged=True,
+        rounds_completed=5,
+    )
+    outcome = SessionOutcome(
+        session_id="test",
+        config=config,
+        meta=meta,
+    )
+    history = OptimizationHistory(outcomes=[outcome])
+    
+    # Mock client with invalid JSON response
+    mock_client = MagicMock()
+    mock_message = MagicMock()
+    mock_content = MagicMock()
+    mock_content.text = "this is not valid json {{{"
+    mock_message.content = [mock_content]
+    mock_client.messages.create.return_value = mock_message
+    
+    with patch.object(proposer, "_get_client", return_value=mock_client):
+        result = proposer.propose(history)
+    
+    assert result is None
+
+
+def test_llm_proposer_parses_valid_json_response():
+    """LLMProposer parses valid JSON and returns HarnessConfig."""
+    from prsm.compute.nwtn.harness_optimizer import LLMProposer
+    from unittest.mock import MagicMock, patch
+    
+    proposer = LLMProposer()
+    config = HarnessConfig()
+    meta = SessionMeta(
+        session_id="test",
+        goal="test",
+        started_at="2026-03-31T10:00:00Z",
+        converged=True,
+        rounds_completed=5,
+    )
+    outcome = SessionOutcome(
+        session_id="test",
+        config=config,
+        meta=meta,
+    )
+    history = OptimizationHistory(outcomes=[outcome])
+    
+    # Mock client with valid JSON response
+    mock_client = MagicMock()
+    mock_message = MagicMock()
+    mock_content = MagicMock()
+    mock_content.text = '{"quality_threshold": 0.28, "kl_epsilon": 0.08, "similarity_threshold": 0.85, "max_rounds": 20, "round_poll_interval": 5.0, "context_pressure_warning_pct": 0.75, "context_pressure_critical_pct": 0.88, "context_pressure_hard_limit_pct": 0.95, "feedback_quality_threshold": 0.80, "config_version": "1.0", "extra": {}}'
+    mock_message.content = [mock_content]
+    mock_client.messages.create.return_value = mock_message
+    
+    with patch.object(proposer, "_get_client", return_value=mock_client):
+        result = proposer.propose(history)
+    
+    assert result is not None
+    assert result.quality_threshold == 0.28
+    assert result.kl_epsilon == 0.08
+    assert result.similarity_threshold == 0.85
+    assert result.max_rounds == 20
+
+
+def test_llm_proposer_strips_markdown_fences():
+    """LLMProposer strips ```json ... ``` fences from response."""
+    from prsm.compute.nwtn.harness_optimizer import LLMProposer
+    from unittest.mock import MagicMock, patch
+    
+    proposer = LLMProposer()
+    config = HarnessConfig()
+    meta = SessionMeta(
+        session_id="test",
+        goal="test",
+        started_at="2026-03-31T10:00:00Z",
+        converged=True,
+        rounds_completed=5,
+    )
+    outcome = SessionOutcome(
+        session_id="test",
+        config=config,
+        meta=meta,
+    )
+    history = OptimizationHistory(outcomes=[outcome])
+    
+    # Mock client with markdown-fenced JSON response
+    mock_client = MagicMock()
+    mock_message = MagicMock()
+    mock_content = MagicMock()
+    mock_content.text = '''```json
+{"quality_threshold": 0.30, "kl_epsilon": 0.10, "similarity_threshold": 0.80, "max_rounds": 15, "round_poll_interval": 5.0, "context_pressure_warning_pct": 0.70, "context_pressure_critical_pct": 0.85, "context_pressure_hard_limit_pct": 0.95, "feedback_quality_threshold": 0.75, "config_version": "1.0", "extra": {}}
+```'''
+    mock_message.content = [mock_content]
+    mock_client.messages.create.return_value = mock_message
+    
+    with patch.object(proposer, "_get_client", return_value=mock_client):
+        result = proposer.propose(history)
+    
+    assert result is not None
+    assert result.quality_threshold == 0.30
+    assert result.kl_epsilon == 0.10
+
+
+def test_propose_next_config_uses_llm_when_available():
+    """propose_next_config uses LLM proposal when use_llm=True and available."""
+    from prsm.compute.nwtn.harness_optimizer import LLMProposer
+    from unittest.mock import MagicMock, patch
+    
+    optimizer = HarnessOptimizer()
+    config = HarnessConfig(quality_threshold=0.40)
+    meta = SessionMeta(
+        session_id="test",
+        goal="test",
+        started_at="2026-03-31T10:00:00Z",
+        converged=True,
+        rounds_completed=5,
+    )
+    outcome = SessionOutcome(
+        session_id="test",
+        config=config,
+        meta=meta,
+    )
+    history = OptimizationHistory(outcomes=[outcome])
+    
+    # Mock LLMProposer to return a specific config
+    llm_proposer = MagicMock()
+    expected_config = HarnessConfig(quality_threshold=0.25, kl_epsilon=0.05)
+    llm_proposer.propose.return_value = expected_config
+    
+    result = optimizer.propose_next_config(history, use_llm=True, llm_proposer=llm_proposer)
+    
+    assert result.quality_threshold == 0.25
+    assert result.kl_epsilon == 0.05
+    llm_proposer.propose.assert_called_once()
+
+
+def test_propose_next_config_falls_back_to_rules_when_llm_none():
+    """propose_next_config falls back to rule-based when LLM returns None."""
+    from prsm.compute.nwtn.harness_optimizer import LLMProposer
+    from unittest.mock import MagicMock
+    
+    optimizer = HarnessOptimizer()
+    config = HarnessConfig(quality_threshold=0.40)
+    meta = SessionMeta(
+        session_id="test",
+        goal="test",
+        started_at="2026-03-31T10:00:00Z",
+        converged=False,
+        rounds_completed=5,
+    )
+    outcome = SessionOutcome(
+        session_id="test",
+        config=config,
+        meta=meta,
+        avg_chunks_promoted_per_round=1.0,
+        context_reset_rate=0.0,
+    )
+    history = OptimizationHistory(outcomes=[outcome])
+    
+    # Mock LLMProposer to return None
+    llm_proposer = MagicMock()
+    llm_proposer.propose.return_value = None
+    
+    result = optimizer.propose_next_config(history, use_llm=True, llm_proposer=llm_proposer)
+    
+    # Should fall back to rule-based: low convergence → lower quality_threshold
+    assert abs(result.quality_threshold - 0.35) < 1e-9  # 0.40 - 0.05

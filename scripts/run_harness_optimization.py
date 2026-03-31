@@ -32,6 +32,11 @@ def main():
         default=None,
         help="Output directory for proposed config (default: {traces_dir}/proposals)",
     )
+    parser.add_argument(
+        "--use-llm",
+        action="store_true",
+        help="Use LLM proposer (requires ANTHROPIC_API_KEY)",
+    )
     args = parser.parse_args()
 
     traces_dir = args.traces_dir
@@ -61,7 +66,7 @@ def main():
     print("\n" + "=" * 60)
     print("PROPOSED NEXT CONFIG")
     print("=" * 60)
-    proposal = optimizer.propose_next_config(history, goal="Optimize distributed consensus algorithm")
+    proposal = optimizer.propose_next_config(history, goal="Optimize distributed consensus algorithm", use_llm=args.use_llm)
     print(json.dumps(proposal.to_dict(), indent=2))
 
     # 5. Save proposal
