@@ -35,6 +35,101 @@ from .trace_logger import HarnessConfig, SessionMeta
 logger = logging.getLogger(__name__)
 
 
+class LLMProposer:
+    """
+    LLM-based harness proposer that reads trace files and reasons about
+    what config changes would improve performance.
+
+    Uses the Anthropic SDK directly (no PRSM service layer dependency)
+    so it works in standalone scripts and CI without a full PRSM deployment.
+
+    Falls back gracefully if ANTHROPIC_API_KEY is not set.
+    """
+
+    SYSTEM_PROMPT = """You are a hyperparameter optimization expert for NWTN, a multi-agent scientific reasoning system.
+
+You will be given a history of past NWTN sessions, each with a HarnessConfig and outcome metrics.
+Your job is to propose an improved HarnessConfig for the next session.
+
+HarnessConfig fields and their effects:
+- quality_threshold (0.0-1.0): Minimum quality score for a chunk to be promoted to whiteboard. Lower = more ideas promoted, higher = stricter filter.
+- kl_epsilon (0.0-1.0): KL divergence threshold for novelty filter. Lower = accept less novel chunks, higher = require more novelty.
+- similarity_threshold (0.0-1.0): Cosine similarity cutoff for semantic deduplication. Higher = more aggressive dedup.
+- max_rounds (int): Maximum checkpoint rounds before giving up.
+- context_pressure_warning_pct (0.0-1.0): Fraction of context window that triggers WARNING.
+- context_pressure_critical_pct (0.0-1.0): Fraction that triggers context RESET.
+- feedback_quality_threshold (0.0-1.0): Agents below this quality score receive detailed feedback.
+
+Good outcomes: converged=True, few context_resets, moderate chunks_promoted_per_round (1-4), short rounds_completed.
+Bad outcomes: converged=False, many context_resets, very low OR very high chunks_promoted_per_round.
+
+Respond with ONLY a valid JSON object containing the proposed HarnessConfig fields. No explanation, no markdown, just JSON.
+Example: {"quality_threshold": 0.28, "kl_epsilon": 0.08, "similarity_threshold": 0.85, "max_rounds": 20, "round_poll_interval": 5.0, "context_pressure_warning_pct": 0.75, "context_pressure_critical_pct": 0.88, "context_pressure_hard_limit_pct": 0.95, "feedback_quality_threshold": 0.80, "config_version": "1.0", "extra": {}}"""
+
+    def __init__(self, model: str = "claude-haiku-4-5", max_tokens: int = 512):
+        self.model = model
+        self.max_tokens = max_tokens
+        self._client = None
+
+    def _get_client(self):
+        if self._client is not None:
+            return self._client
+        try:
+            import anthropic
+            import os
+            api_key = os.environ.get("ANTHROPIC_API_KEY")
+            if not api_key:
+                return None
+            self._client = anthropic.Anthropic(api_key=api_key)
+            return self._client
+        except ImportError:
+            logger.warning("LLMProposer: anthropic package not installed")
+            return None
+
+    def propose(
+        self,
+        history: "OptimizationHistory",
+        goal: str = "",
+        trace_filesystem_summary: str = "",
+    ) -> Optional["HarnessConfig"]:
+        """
+        Call the LLM with optimization history and return a proposed HarnessConfig.
+        Returns None if LLM is unavailable (caller should fall back to rule-based).
+        """
+        client = self._get_client()
+        if client is None:
+            logger.info("LLMProposer: no Anthropic client available, returning None")
+            return None
+
+        prompt = history.to_prompt_context()
+        if goal:
+            prompt = f"## Session Goal\n{goal}\n\n" + prompt
+        if trace_filesystem_summary:
+            prompt += f"\n\n## Additional trace details\n{trace_filesystem_summary[:2000]}"
+
+        try:
+            message = client.messages.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                system=self.SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = message.content[0].text.strip()
+            # Strip markdown code fences if present
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            config_dict = json.loads(raw)
+            config = HarnessConfig.from_dict(config_dict)
+            logger.info("LLMProposer: proposed config quality_threshold=%.2f kl_epsilon=%.3f",
+                       config.quality_threshold, config.kl_epsilon)
+            return config
+        except Exception as e:
+            logger.warning("LLMProposer: failed to get/parse LLM response: %s", e)
+            return None
+
+
 @dataclass
 class SessionOutcome:
     """Paired (HarnessConfig, SessionMeta) from a completed session."""
@@ -224,11 +319,16 @@ class HarnessOptimizer:
         history: OptimizationHistory,
         goal: str = "",
         current_config: HarnessConfig = None,
+        use_llm: bool = False,
+        llm_proposer: LLMProposer = None,
     ) -> HarnessConfig:
         """
         Propose an improved HarnessConfig based on history.
 
-        Uses a rule-based directional search:
+        If use_llm=True and llm_proposer is provided (or ANTHROPIC_API_KEY is set),
+        uses LLM-based proposal. Falls back to rule-based if LLM is unavailable.
+
+        Rule-based directional search:
         - No history → return default config
         - Low convergence rate → lower quality_threshold (easier to promote)
         - High reset rate → lower context pressure thresholds
@@ -240,6 +340,15 @@ class HarnessOptimizer:
         if not history.outcomes:
             logger.info("HarnessOptimizer: no history, returning default config")
             return current_config or HarnessConfig()
+
+        # Try LLM proposer first if requested
+        if use_llm:
+            proposer = llm_proposer or LLMProposer()
+            llm_result = proposer.propose(history, goal=goal)
+            if llm_result is not None:
+                logger.info("HarnessOptimizer: using LLM-proposed config")
+                return llm_result
+            logger.info("HarnessOptimizer: LLM unavailable, falling back to rule-based proposer")
 
         best = history.best_outcome
         base = HarnessConfig(
