@@ -14,7 +14,11 @@ import logging
 import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
+from unittest.mock import Mock, patch, MagicMock
+try:
+    from unittest.mock import AsyncMock
+except ImportError:
+    AsyncMock = MagicMock  # Python 3.7 fallback
 from decimal import Decimal
 from datetime import datetime
 from collections import defaultdict
@@ -349,6 +353,11 @@ class FakeAsyncPGTransaction:
 def mock_redis():
     """Auto-use fixture to mock Redis connections (session-scoped so module-scoped
     fixtures in test files also get the FakeRedis via patched from_url)."""
+    try:
+        import redis  # noqa: F401
+    except ImportError:
+        yield None
+        return
     fake_redis_instance = FakeRedis()
     
     # Mock redis.asyncio.Redis
@@ -371,6 +380,11 @@ def mock_redis():
 @pytest.fixture(autouse=True)
 def mock_asyncpg():
     """Auto-use fixture to mock asyncpg connections"""
+    try:
+        import asyncpg  # noqa: F401
+    except ImportError:
+        yield None
+        return
     fake_conn = FakeAsyncPGConnection()
     
     async def fake_connect(*args, **kwargs):
@@ -517,7 +531,12 @@ def db_session(test_session):
 @pytest.fixture(autouse=True)
 def mock_http_requests():
     """Auto-use fixture to mock HTTP requests (aiohttp, httpx, requests)"""
-    
+    try:
+        import aiohttp  # noqa: F401
+    except ImportError:
+        yield {}
+        return
+
     # Mock aiohttp ClientSession
     mock_response = AsyncMock()
     mock_response.status = 200
@@ -618,7 +637,12 @@ def mock_asyncio_sleep():
 @pytest.fixture(autouse=True)
 def mock_openai_clients():
     """Auto-use fixture to mock OpenAI and LLM clients"""
-    
+    try:
+        import openai  # noqa: F401
+    except ImportError:
+        yield {}
+        return
+
     # Mock OpenAI response
     mock_completion = MagicMock()
     mock_completion.choices = [MagicMock()]
@@ -964,6 +988,11 @@ def db_factory():
 @pytest.fixture(autouse=True)
 def mock_jwt_handler_init():
     """Auto-use fixture to prevent JWT handler from initializing during test collection"""
+    try:
+        import prsm.core.auth  # noqa: F401
+    except (ImportError, ModuleNotFoundError, AttributeError):
+        yield None
+        return
     # Mock the JWT handler's initialize method to prevent async setup during tests
     # This prevents the JWT handler from trying to connect to real database/redis
     # Individual tests can still call initialize() if needed
@@ -1005,6 +1034,11 @@ async def async_test_client(test_app):
 @pytest.fixture(autouse=True)
 def mock_audit_logger():
     """Auto-use fixture to mock audit logger for all tests"""
+    try:
+        import prsm.core.auth  # noqa: F401
+    except (ImportError, ModuleNotFoundError, AttributeError):
+        yield None
+        return
     # Mock audit logger methods to prevent actual logging during tests
     mock_logger = AsyncMock()
     mock_logger.log_security_event = AsyncMock()
@@ -1021,8 +1055,12 @@ def mock_audit_logger():
 @pytest.fixture(autouse=True)
 def disable_rate_limiting():
     """Auto-use fixture to disable rate limiting during tests"""
+    try:
+        import prsm.interface.api.dependencies as deps
+    except (ImportError, ModuleNotFoundError, AttributeError):
+        yield
+        return
     # Clear the in-memory rate limit storage in dependencies
-    import prsm.interface.api.dependencies as deps
     deps._rate_limit_storage.clear()
     
     # Patch both rate limiting middlewares:

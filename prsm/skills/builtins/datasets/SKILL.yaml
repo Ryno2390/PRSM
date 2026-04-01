@@ -1,0 +1,44 @@
+name: prsm-datasets
+version: 1.0.0
+description: Dataset curation and management on the PRSM network
+author: PRSM Core Team
+capabilities:
+  - dataset_search
+  - dataset_curate
+  - dataset_validate
+  - dataset_publish
+requires:
+  - prsm-network >= 0.2.0
+tools:
+  - name: prsm_search_datasets
+    description: Search the PRSM network for datasets matching criteria
+    parameters:
+      query: {type: string, description: "Search query — keywords, topics, or natural language description of desired data"}
+      domain: {type: string, description: "Domain filter (e.g., 'nlp', 'vision', 'code', 'science')", optional: true}
+      min_quality: {type: number, description: "Minimum quality score from 0.0 to 1.0", optional: true}
+      format: {type: string, description: "Data format filter (e.g., 'parquet', 'jsonl', 'csv')", optional: true}
+      limit: {type: integer, description: "Maximum number of results to return", optional: true}
+
+  - name: prsm_curate_dataset
+    description: Curate a new dataset by combining and filtering sources from the PRSM network
+    parameters:
+      name: {type: string, description: "Name for the curated dataset"}
+      description: {type: string, description: "Human-readable description of the dataset"}
+      sources: {type: array, items: {type: string}, description: "List of source dataset IDs to combine"}
+      filters: {type: object, description: "Filter criteria to apply during curation", optional: true}
+      sampling: {type: object, description: "Sampling strategy (e.g., {method: 'random', size: 10000})", optional: true}
+
+  - name: prsm_validate_dataset
+    description: Run quality validation checks on a dataset
+    parameters:
+      dataset_id: {type: string, description: "ID of the dataset to validate"}
+      checks: {type: array, items: {type: string}, description: "Validation checks to run (e.g., 'schema', 'duplicates', 'quality', 'bias')", optional: true}
+      threshold: {type: number, description: "Minimum acceptable quality score", optional: true}
+
+  - name: prsm_publish_dataset
+    description: Publish a curated dataset to the PRSM network for others to discover and use
+    parameters:
+      dataset_id: {type: string, description: "ID of the dataset to publish"}
+      metadata: {type: object, description: "Publication metadata (license, tags, domain, etc.)"}
+      ftns_price: {type: number, description: "Price in FTNS tokens per access (0 for free)", optional: true}
+      visibility: {type: string, description: "Visibility: 'public', 'unlisted', or 'private'", optional: true}

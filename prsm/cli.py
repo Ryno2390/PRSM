@@ -6548,7 +6548,7 @@ def config_show(output_format: str):
     if cfg.active_hours_start is not None and cfg.active_hours_end is not None:
         table.add_row("active_hours", f"{cfg.active_hours_start:02d}:00 - {cfg.active_hours_end:02d}:00")
     if cfg.active_days:
-        table.add_row("active_days", ", ".join(cfg.active_days))
+        table.add_row("active_days", ", ".join(str(d) for d in cfg.active_days))
     console.print(table)
 
     # Network
@@ -6620,7 +6620,7 @@ def config_set(key: str, value: str):
     # Parse and set new value based on field type
     try:
         # Get the field type from the model
-        field_info = cfg.model_fields.get(key)
+        field_info = type(cfg).model_fields.get(key)
         if field_info:
             field_type = field_info.annotation
             # Handle Optional types
@@ -7173,7 +7173,7 @@ def _install_launchd(dry_run: bool, host: str, port: int) -> None:
         console.print(f"\n[bold]Generated launchd plist:[/bold]\n")
         console.print(plist_content)
         console.print(f"\n[dim]Would write to: {plist_path}[/dim]")
-        console.print("[dim]Would run: launchctl load {plist_path}[/dim]")
+        console.print(f"[dim]Would run: launchctl load {plist_path}[/dim]")
         return
 
     # Write the plist
