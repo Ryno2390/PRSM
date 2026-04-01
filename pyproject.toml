@@ -189,12 +189,37 @@ Repository = "https://github.com/Ryno2390/PRSM.git"
 Issues = "https://github.com/Ryno2390/PRSM/issues"
 Changelog = "https://github.com/Ryno2390/PRSM/blob/main/CHANGELOG.md"
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["prsm*"]
+exclude = [
+    "prsm.compute.nwtn.corpus*",
+    "prsm.compute.nwtn.processed_corpus*",
+    "prsm.compute.nwtn.logs*",
+    "tests*",
+    "examples_and_demos*",
+    "build*",
+    "dist*",
+    "contracts*",
+    "sdks*",
+    "docs*",
+    "scripts*",
+    "planning*",
+    "docker*",
+]
+
 [tool.setuptools]
-packages = {find = {}}
-include-package-data = true
+include-package-data = false
 
 [tool.setuptools.package-data]
-prsm = ["*.py", "*/*.py", "*/*/*.py", "py.typed"]
+prsm = ["*.py", "*/*.py", "*/*/*.py", "py.typed", "skills/*.yaml"]
+
+[tool.setuptools.exclude-package-data]
+"*" = [
+    "corpus/*", "processed_corpus/*", "logs/*",
+    "*.db", "*.sqlite", "*.log", "*.jsonl",
+    "__pycache__/*",
+]
 
 # === Testing Configuration ===
 [tool.pytest.ini_options]
