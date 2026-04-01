@@ -301,3 +301,12 @@ NWTN_CHECKPOINTS/
 
 # NWTN execution traces (Meta-Harness optimization data)
 .nwtn_traces/
+
+# Claude Code local config
+.claude/
+
+# OpenZeppelin build artifacts
+contracts/.openzeppelin/
+
+# JS lock files (managed per-environment)
+sdks/javascript/package-lock.json

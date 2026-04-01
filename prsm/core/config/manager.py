@@ -165,7 +165,7 @@ class ConfigManager:
                     
                     if validation_result.warnings:
                         for warning in validation_result.warnings:
-                            logger.warning(f"Configuration warning: {warning}")
+                            logger.debug(f"Configuration note: {warning}")
                 
                 # Notify subscribers
                 self._notify_subscribers('config_loaded')
