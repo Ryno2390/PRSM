@@ -6914,14 +6914,39 @@ def daemon():
     pass
 
 
+def _get_daemon_node_cmd(host: str, port: int) -> list:
+    """Build the command list for starting a full PRSM node in daemon mode.
+
+    Uses 'prsm node start --no-dashboard' (full P2P node with bootstrap
+    connectivity) instead of 'prsm serve' (API-only). Reads bootstrap
+    nodes from ~/.prsm/config.yaml if available.
+    """
+    cmd = [
+        sys.executable, "-m", "prsm.cli", "node", "start",
+        "--no-dashboard",
+        "--api-port", str(port),
+    ]
+
+    # Read bootstrap nodes from user config
+    try:
+        from prsm.cli_modules.config_schema import PRSMConfig
+        cfg = PRSMConfig.load()
+        if cfg.bootstrap_nodes:
+            cmd.extend(["--bootstrap", ",".join(cfg.bootstrap_nodes)])
+    except Exception:
+        pass  # Config not available — node will use defaults
+
+    return cmd
+
+
 @daemon.command("start")
 @click.option("--host", default="127.0.0.1", help="Host to bind to")
 @click.option("--port", default=8000, help="Port to bind to")
-@click.option("--workers", default=1, help="Number of worker processes")
-def daemon_start(host: str, port: int, workers: int):
-    """Start PRSM node server in the background.
+def daemon_start(host: str, port: int):
+    """Start PRSM node in the background with full P2P connectivity.
 
-    Launches 'prsm serve' as a detached process and writes PID to
+    Launches 'prsm node start --no-dashboard' as a detached process,
+    connecting to bootstrap nodes for peer discovery. Writes PID to
     ~/.prsm/daemon.pid. Logs go to ~/.prsm/logs/daemon.log.
     """
     # Check if already running
@@ -6938,13 +6963,8 @@ def daemon_start(host: str, port: int, workers: int):
     # Ensure log directory exists
     _DAEMON_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    # Build the command
-    cmd = [
-        sys.executable, "-m", "prsm.cli", "serve",
-        "--host", host,
-        "--port", str(port),
-        "--workers", str(workers),
-    ]
+    # Build the command — full node with P2P + bootstrap
+    cmd = _get_daemon_node_cmd(host, port)
 
     # Start the daemon
     import subprocess
@@ -6962,10 +6982,11 @@ def daemon_start(host: str, port: int, workers: int):
         _DAEMON_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
         _DAEMON_PID_FILE.write_text(str(proc.pid))
 
-        console.print(f"[green]✓ PRSM daemon started[/green]")
+        console.print(f"[green]✓ PRSM daemon started (full node)[/green]")
         console.print(f"  PID:      {proc.pid}")
         console.print(f"  Endpoint: http://{host}:{port}")
         console.print(f"  Log:      {_DAEMON_LOG_FILE}")
+        console.print(f"  Mode:     P2P node + API server")
         console.print("\n[dim]Run 'prsm daemon logs --follow' to watch logs.[/dim]")
 
     except Exception as e:
@@ -7144,8 +7165,10 @@ def daemon_install(dry_run: bool, host: str, port: int):
 def _install_launchd(dry_run: bool, host: str, port: int) -> None:
     """Install launchd agent on macOS."""
     plist_path = Path.home() / "Library" / "LaunchAgents" / "ai.prsm.node.plist"
-    python_exe = sys.executable
-    prsm_cli = str(Path(sys.executable).parent / "prsm") if Path(sys.executable).parent.joinpath("prsm").exists() else f"{sys.executable} -m prsm.cli"
+
+    # Build the full node command (same as daemon start)
+    cmd_args = _get_daemon_node_cmd(host, port)
+    program_args = "\n".join(f"        <string>{arg}</string>" for arg in cmd_args)
 
     plist_content = f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -7155,14 +7178,7 @@ def _install_launchd(dry_run: bool, host: str, port: int) -> None:
     <string>ai.prsm.node</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{python_exe}</string>
-        <string>-m</string>
-        <string>prsm.cli</string>
-        <string>serve</string>
-        <string>--host</string>
-        <string>{host}</string>
-        <string>--port</string>
-        <string>{port}</string>
+{program_args}
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -7205,7 +7221,10 @@ def _install_launchd(dry_run: bool, host: str, port: int) -> None:
 def _install_systemd(dry_run: bool, host: str, port: int) -> None:
     """Install systemd user unit on Linux."""
     service_path = Path.home() / ".config" / "systemd" / "user" / "prsm-node.service"
-    python_exe = sys.executable
+
+    # Build the full node command (same as daemon start)
+    cmd_args = _get_daemon_node_cmd(host, port)
+    exec_start = " ".join(cmd_args)
 
     service_content = f'''[Unit]
 Description=PRSM Node Daemon
@@ -7213,7 +7232,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart={python_exe} -m prsm.cli serve --host {host} --port {port}
+ExecStart={exec_start}
 Restart=always
 RestartSec=10
 StandardOutput=append:{_DAEMON_LOG_FILE}
