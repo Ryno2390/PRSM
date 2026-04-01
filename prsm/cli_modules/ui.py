@@ -2,9 +2,12 @@
 
 Shared UI components for all PRSM CLI commands. Uses Rich for rendering
 and click for interactive prompts. No color except semantic status indicators.
+Arrow-key selection menus via simple-term-menu with click.Choice fallback.
 """
+import os
 import random
 import shutil
+import sys
 
 import click
 from rich.console import Console
@@ -17,6 +20,20 @@ from .theme import THEME, ICONS
 from .banner import PRSM_BANNER, PRSM_BANNER_COMPACT, TAGLINES, RULE
 
 console = Console()
+
+# ── Arrow-key menu support ───────────────────────────────────────────
+
+_HAS_TERM_MENU = False
+try:
+    from simple_term_menu import TerminalMenu
+    _HAS_TERM_MENU = True
+except ImportError:
+    pass
+
+
+def _is_interactive_terminal() -> bool:
+    """Check if stdin/stdout support interactive menus."""
+    return sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get("TERM", "") != "dumb"
 
 
 # ── Banner & Headers ──────────────────────────────────────────────────
@@ -94,17 +111,63 @@ def muted(msg: str):
 
 
 def prompt_text(message: str, default=None, **kwargs) -> str:
-    """Clean text prompt — no color noise."""
-    return click.prompt(
-        f"    {ICONS['arrow']} {message}", default=default, **kwargs
-    )
+    """Clean text prompt — no color noise. Shows default hint."""
+    if default is not None and default != "":
+        display = f"    {ICONS['arrow']} {message} [{default}] (Enter for default)"
+    else:
+        display = f"    {ICONS['arrow']} {message}"
+    return click.prompt(display, default=default, **kwargs)
 
 
 def prompt_choice(message: str, choices: list, default: int = 0) -> str:
-    """Selection menu — choices listed, then click.Choice input.
+    """Selection menu with arrow-key navigation.
 
     Each choice is a dict with 'label', 'value', and optional 'hint'.
+    Uses simple-term-menu for arrow-key selection when available,
+    falls back to click.Choice for non-interactive terminals.
     """
+    if _HAS_TERM_MENU and _is_interactive_terminal():
+        return _prompt_choice_interactive(message, choices, default)
+    else:
+        return _prompt_choice_fallback(message, choices, default)
+
+
+def _prompt_choice_interactive(message: str, choices: list, default: int = 0) -> str:
+    """Arrow-key navigable selection menu using simple-term-menu."""
+    console.print(f"\n    {message}", style=THEME.heading)
+    console.print(f"    (↑/↓ arrows to move, Enter to select)", style=THEME.dim)
+    console.print()
+
+    # Build menu entries with hints
+    entries = []
+    for c in choices:
+        label = c["label"]
+        hint = c.get("hint", "")
+        if hint:
+            entries.append(f"  {label}  — {hint}")
+        else:
+            entries.append(f"  {label}")
+
+    menu = TerminalMenu(
+        entries,
+        cursor_index=default,
+        menu_cursor="  ► ",
+        menu_cursor_style=("bold",),
+        menu_highlight_style=("bold",),
+    )
+
+    idx = menu.show()
+    if idx is None:
+        # User pressed Escape/Ctrl-C — use default
+        idx = default
+
+    selected = choices[idx]
+    console.print(f"    {ICONS['arrow']} Selected: {selected['label']}", style=THEME.primary)
+    return selected["value"]
+
+
+def _prompt_choice_fallback(message: str, choices: list, default: int = 0) -> str:
+    """Fallback choice menu using click.Choice (for piped/non-interactive input)."""
     console.print(f"\n    {message}", style=THEME.heading)
     for i, c in enumerate(choices):
         marker = ICONS["check"] if i == default else ICONS["uncheck"]
@@ -132,9 +195,9 @@ def prompt_confirm(message: str, default: bool = True) -> bool:
 def prompt_number(
     message: str, default: int = 50, min_val: int = 0, max_val: int = 100
 ) -> int:
-    """Numeric prompt with range validation."""
+    """Numeric prompt with range validation and default hint."""
     return click.prompt(
-        f"    {ICONS['arrow']} {message}",
+        f"    {ICONS['arrow']} {message} [{default}] (Enter for default)",
         type=click.IntRange(min_val, max_val),
         default=default,
     )
