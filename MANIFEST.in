@@ -1,0 +1,24 @@
+# Include only what's needed for the package
+recursive-include prsm *.py *.yaml *.typed
+
+# Exclude data/build artifacts that bloat the wheel
+prune prsm/compute/nwtn/corpus
+prune prsm/compute/nwtn/processed_corpus
+prune prsm/compute/nwtn/logs
+recursive-exclude prsm __pycache__
+recursive-exclude prsm *.pyc *.pyo *.db *.sqlite *.log *.jsonl
+
+# Exclude non-package directories
+prune build
+prune dist
+prune tests
+prune docs
+prune scripts
+prune contracts
+prune sdks
+prune examples_and_demos
+prune docker
+prune planning
+prune PRSM_ui_mockup
+prune .claude
+prune .git
