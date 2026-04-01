@@ -181,6 +181,8 @@ def _step_welcome(config: PRSMConfig, sys_info: dict, minimal: bool) -> dict:
     step_header(1, 7, "Welcome & System Detection")
     show_banner()
 
+    info("Tip: Press Enter to accept [default] values throughout this wizard.")
+    console.print()
     info("Detecting your system...")
     console.print()
 
@@ -341,8 +343,8 @@ def _step_api_keys(config: PRSMConfig, minimal: bool):
     console.print()
 
     # OpenAI
-    if prompt_confirm("Configure OpenAI API key?", default=False):
-        key = prompt_text("OpenAI API key", default="")
+    if prompt_confirm("Configure OpenAI API key? (for embeddings & semantic search, not your chat model)", default=False):
+        key = prompt_text("OpenAI API key — for embeddings & semantic search (optional)", default="")
         if key and key.startswith("sk-"):
             _save_api_key("OPENAI_API_KEY", key)
             config.has_openai_key = True
@@ -354,8 +356,8 @@ def _step_api_keys(config: PRSMConfig, minimal: bool):
                 config.has_openai_key = True
 
     # Anthropic
-    if prompt_confirm("Configure Anthropic API key?", default=False):
-        key = prompt_text("Anthropic API key", default="")
+    if prompt_confirm("Configure Anthropic API key? (for safety checks & content moderation)", default=False):
+        key = prompt_text("Anthropic API key — for safety checks & content moderation (optional)", default="")
         if key and key.startswith("sk-ant-"):
             _save_api_key("ANTHROPIC_API_KEY", key)
             config.has_anthropic_key = True
@@ -367,7 +369,7 @@ def _step_api_keys(config: PRSMConfig, minimal: bool):
                 config.has_anthropic_key = True
 
     # HuggingFace
-    if prompt_confirm("Configure HuggingFace token?", default=False):
+    if prompt_confirm("Configure HuggingFace token? (for downloading open-source models)", default=False):
         token = prompt_text("HuggingFace token", default="")
         if token and token.startswith("hf_"):
             _save_api_key("HUGGINGFACE_TOKEN", token)
@@ -419,6 +421,11 @@ def _step_network(config: PRSMConfig, minimal: bool):
         config.api_port = 8000
         config.bootstrap_nodes = default_bootstrap
 
+        info("Network requires 2 ports:")
+        muted("1. P2P port — for node-to-node communication")
+        muted("2. API port — for local HTTP API access")
+        console.print()
+
         p2p_ok = _check_port(config.p2p_port)
         api_ok = _check_port(config.api_port)
 
@@ -434,6 +441,12 @@ def _step_network(config: PRSMConfig, minimal: bool):
 
         info(f"Bootstrap nodes: {len(default_bootstrap)} configured")
         return
+
+    # Port context
+    info("Network requires 2 ports:")
+    muted("1. P2P port — for node-to-node communication")
+    muted("2. API port — for local HTTP API access")
+    console.print()
 
     # P2P port
     while True:
@@ -463,7 +476,7 @@ def _step_network(config: PRSMConfig, minimal: bool):
     # Bootstrap nodes
     config.bootstrap_nodes = default_bootstrap
     info(f"Default bootstrap nodes: {len(default_bootstrap)} configured")
-    if prompt_confirm("Add custom bootstrap node?", default=False):
+    if prompt_confirm("Add custom bootstrap node? (advanced)", default=False):
         node = prompt_text("Bootstrap node multiaddr")
         if node:
             config.bootstrap_nodes.append(node)
