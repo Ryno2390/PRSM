@@ -57,30 +57,81 @@ def _make_mock_handler(tool_def: Dict[str, Any]):
 
     Since the actual PRSM network isn't running, returns structured
     JSON that demonstrates the schema works.
+
+    FastMCP requires explicit parameter signatures (no **kwargs) and uses
+    get_type_hints() for Pydantic schema generation. We use exec() to create
+    a real function with the correct signature and annotations.
     """
+    from typing import Optional
+
     tool_name = tool_def["name"]
     skill_name = tool_def["skill"]
     input_schema = tool_def["inputSchema"]
+    properties = input_schema.get("properties", {})
+    required_params = set(input_schema.get("required", []))
 
-    async def handler(**kwargs) -> str:
-        """Mock handler — returns structured JSON showing the schema works."""
-        result = {
-            "tool": tool_name,
-            "skill": skill_name,
-            "status": "mock_response",
-            "message": f"Tool '{tool_name}' from skill '{skill_name}' invoked successfully (mock mode — PRSM network not running)",
-            "input_received": kwargs,
-            "schema": {
-                "properties": list(input_schema.get("properties", {}).keys()),
-                "required": input_schema.get("required", []),
-            },
-            "mock_data": _generate_mock_data(tool_name, kwargs),
-        }
-        return json.dumps(result, indent=2, default=str)
+    # Map JSON schema types to Python type names
+    _type_map = {
+        "string": "str",
+        "integer": "int",
+        "number": "float",
+        "boolean": "bool",
+        "array": "list",
+        "object": "dict",
+    }
 
-    # Set metadata for FastMCP registration
-    handler.__name__ = tool_name.replace("-", "_")
-    handler.__qualname__ = handler.__name__
+    # Build parameter strings: required first, then optional
+    req_parts = []
+    opt_parts = []
+    for param_name, param_def in properties.items():
+        py_type = _type_map.get(param_def.get("type", "string"), "str")
+        safe_name = param_name.replace("-", "_")
+        if param_name in required_params:
+            req_parts.append(f"{safe_name}: {py_type}")
+        else:
+            opt_parts.append(f"{safe_name}: {py_type} = None")
+
+    param_str = ", ".join(req_parts + opt_parts)
+    func_name = tool_name.replace("-", "_")
+
+    # Capture closure variables
+    _tool_name = tool_name
+    _skill_name = skill_name
+    _properties = properties
+    _required_params = required_params
+
+    # Build the function source
+    code = f'''
+async def {func_name}({param_str}) -> str:
+    """Mock handler for {_tool_name}."""
+    import json as _json
+    _locals = locals()
+    received = {{k: v for k, v in _locals.items() if v is not None and not k.startswith("_")}}
+    result = {{
+        "tool": _tool_name,
+        "skill": _skill_name,
+        "status": "mock_response",
+        "message": f"Tool '{_tool_name}' from skill '{_skill_name}' invoked successfully (mock mode — PRSM network not running)",
+        "input_received": received,
+        "schema": {{
+            "properties": list(_properties.keys()),
+            "required": list(_required_params),
+        }},
+        "mock_data": _generate_mock_data(_tool_name, received),
+    }}
+    return _json.dumps(result, indent=2, default=str)
+'''
+
+    # Execute to create the function with proper signature + annotations
+    namespace = {
+        "_tool_name": _tool_name,
+        "_skill_name": _skill_name,
+        "_properties": _properties,
+        "_required_params": _required_params,
+        "_generate_mock_data": _generate_mock_data,
+    }
+    exec(code, namespace)
+    handler = namespace[func_name]
     handler.__doc__ = tool_def.get("description", f"PRSM tool: {tool_name}")
 
     return handler
