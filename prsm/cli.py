@@ -474,8 +474,17 @@ def _get_debug() -> bool:
         return False
 
 
+def _get_version():
+    """Read version from package metadata (single source of truth: pyproject.toml)."""
+    try:
+        from importlib.metadata import version as pkg_version
+        return pkg_version("prsm-network")
+    except Exception:
+        return "0.3.2"  # fallback
+
+
 @click.group()
-@click.version_option(version="0.2.1", prog_name="PRSM")
+@click.version_option(version=_get_version(), prog_name="PRSM")
 @click.pass_context
 def main(ctx):
     """

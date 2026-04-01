@@ -36,7 +36,7 @@ try:
     IPFS_AVAILABLE = True
 except ImportError:
     IPFS_AVAILABLE = False
-    logger.warning("ipfshttpclient not available - running in simulation mode")
+    pass  # ipfshttpclient optional — IPFS runs in simulation mode
 
 
 @dataclass
