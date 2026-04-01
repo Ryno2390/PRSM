@@ -167,7 +167,16 @@ class PeerDiscovery:
     async def start(self) -> None:
         """Start discovery: bootstrap then run maintenance loops."""
         self._running = True
+        self._bootstrap_client = None
         await self.bootstrap()
+
+        # If P2P transport bootstrap failed, try the bootstrap client protocol
+        if self.bootstrap_degraded_mode and self.bootstrap_nodes:
+            connected = await self._try_bootstrap_client()
+            if connected:
+                self.bootstrap_degraded_mode = False
+                self.bootstrap_connected_count = 1
+
         self._tasks.append(asyncio.create_task(self._announce_loop()))
         self._tasks.append(asyncio.create_task(self._maintenance_loop()))
         if self.bootstrap_degraded_mode:
@@ -175,10 +184,77 @@ class PeerDiscovery:
                 "Discovery started in DEGRADED local mode: bootstrap unavailable; "
                 "peer discovery may be delayed until inbound peers or local announcements arrive"
             )
-        logger.info(f"Discovery started with {len(self.bootstrap_nodes)} bootstrap node(s)")
+        else:
+            logger.info(f"Discovery started with {len(self.bootstrap_nodes)} bootstrap node(s)")
+
+    async def _try_bootstrap_client(self) -> bool:
+        """Fall back to the bootstrap client protocol when P2P handshake fails.
+
+        The bootstrap server speaks a simpler register/heartbeat protocol
+        (not the P2P MSG_HANDSHAKE). This method uses BootstrapClient to
+        register with the server and discover peers.
+        """
+        try:
+            from prsm.bootstrap.client import BootstrapClient, BootstrapPeer
+        except ImportError:
+            logger.debug("Bootstrap client not available")
+            return False
+
+        for address in self.bootstrap_nodes:
+            try:
+                logger.info(
+                    "Trying bootstrap client protocol for %s", address
+                )
+                client = BootstrapClient(
+                    bootstrap_url=address,
+                    node_id=self.transport.identity.node_id,
+                    port=getattr(self.transport, 'port', 8000),
+                    capabilities=self._local_capabilities,
+                    version="0.3.2",
+                    connect_timeout=self.bootstrap_connect_timeout,
+                )
+
+                peers = await client.connect()
+                await client.start_heartbeat()
+
+                self._bootstrap_client = client
+                self.bootstrap_success_node = address
+
+                # Feed discovered peers into known_peers
+                for bp in peers:
+                    if bp.peer_id and bp.peer_id != self.transport.identity.node_id:
+                        self.known_peers[bp.peer_id] = PeerInfo(
+                            node_id=bp.peer_id,
+                            address=f"{bp.address}:{bp.port}",
+                            capabilities=bp.capabilities,
+                        )
+
+                logger.info(
+                    "Bootstrap client connected to %s — "
+                    "registered, heartbeat active, %d peer(s) discovered",
+                    address, len(peers),
+                )
+                return True
+
+            except Exception as e:
+                logger.debug(
+                    "Bootstrap client failed for %s: %s", address, e
+                )
+                continue
+
+        return False
 
     async def stop(self) -> None:
         self._running = False
+
+        # Disconnect bootstrap client if active
+        if getattr(self, '_bootstrap_client', None):
+            try:
+                await self._bootstrap_client.disconnect()
+            except Exception:
+                pass
+            self._bootstrap_client = None
+
         for task in self._tasks:
             task.cancel()
             with suppress(asyncio.CancelledError):
@@ -368,6 +444,10 @@ class PeerDiscovery:
             "fallback_succeeded": self._bootstrap_telemetry.get("fallback_succeeded", False),
             "addresses_rejected": self._bootstrap_telemetry.get("addresses_rejected", 0),
             "source_policy": self._bootstrap_telemetry.get("source_policy", "primary_only"),
+            "bootstrap_client_active": (
+                getattr(self, '_bootstrap_client', None) is not None
+                and getattr(self._bootstrap_client, 'is_connected', False)
+            ),
         }
 
     def get_bootstrap_telemetry(self) -> Dict[str, Any]:
