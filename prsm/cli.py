@@ -476,13 +476,34 @@ def _get_debug() -> bool:
 
 @click.group()
 @click.version_option(version="0.2.1", prog_name="PRSM")
-def main():
+@click.pass_context
+def main(ctx):
     """
     PRSM: Protocol for Recursive Scientific Modeling
     
     A decentralized AI framework for scientific discovery.
     """
-    pass
+    # Auto-migrate old node_config.json -> config.yaml for existing users
+    try:
+        from prsm.cli_modules.migration import migrate_if_needed
+        migrate_if_needed()
+    except Exception:
+        pass  # never block CLI startup on migration issues
+
+    # First-run auto-detection: nudge unconfigured users toward setup
+    config_path = Path.home() / ".prsm" / "config.yaml"
+    if not config_path.exists():
+        # Don't nag on setup, help, or version invocations
+        invoked = ctx.invoked_subcommand or ""
+        safe_commands = {"setup", None}  # None = no subcommand (shows help)
+        if invoked not in safe_commands:
+            click.echo("  ◇ PRSM is not configured yet. Run: prsm setup")
+            click.echo()
+
+
+# ── Skills CLI (Phase 4.3) ───────────────────────────────────────────
+from prsm.cli_modules.skills_cli import skills as skills_group  # noqa: E402
+main.add_command(skills_group, "skills")
 
 
 @main.command()
@@ -910,6 +931,16 @@ def db_status() -> None:
         raise SystemExit(1)
 
 
+@main.command()
+@click.option("--dry-run", is_flag=True, help="Walk through setup without saving")
+@click.option("--minimal", is_flag=True, help="Quick setup with smart defaults")
+@click.option("--reset", is_flag=True, help="Reset all settings and re-run setup")
+def setup(dry_run, minimal, reset):
+    """Interactive first-run setup wizard for PRSM."""
+    from prsm.cli_modules.setup_wizard import run_setup_wizard
+    run_setup_wizard(dry_run=dry_run, minimal=minimal, reset=reset)
+
+
 @main.group()
 def node():
     """P2P node management commands"""
@@ -920,6 +951,14 @@ def _run_node_wizard() -> "NodeConfig":
     """Interactive wizard that configures a real PRSM node."""
     from prsm.node.config import NodeConfig, NodeRole
     from prsm.node.compute_provider import detect_resources
+
+    # Deprecation notice pointing to new setup system
+    console.print()
+    console.print("  ╭─────────────────────────────────────────────────────╮", style="yellow")
+    console.print("  │  Tip: Use `prsm setup` for the full setup          │", style="yellow")
+    console.print("  │  experience, or `prsm config` to adjust settings.  │", style="yellow")
+    console.print("  ╰─────────────────────────────────────────────────────╯", style="yellow")
+    console.print()
 
     config = NodeConfig()
 
@@ -1461,6 +1500,14 @@ def _run_interactive_configure(config: "NodeConfig") -> None:
     """Run interactive configuration wizard for resource settings."""
     from prsm.node.config import NodeRole
     from prsm.node.compute_provider import detect_resources
+
+    # Deprecation notice pointing to new config system
+    console.print()
+    console.print("  ╭─────────────────────────────────────────────────────╮", style="yellow")
+    console.print("  │  Tip: Use `prsm setup` for the full setup          │", style="yellow")
+    console.print("  │  experience, or `prsm config` to adjust settings.  │", style="yellow")
+    console.print("  ╰─────────────────────────────────────────────────────╯", style="yellow")
+    console.print()
     
     resources = detect_resources()
     
@@ -6390,6 +6437,881 @@ def agent_team_synthesise(session_id: str, output_format: str):
     console.print(f"  Chain valid:  {icon}")
     console.print(f"  Chain hash:   {entry.chain_hash[:20]}…")
     console.print(f"  Ledger total: {verification.entry_count} entries")
+
+
+@main.group()
+def mcp():
+    """MCP server for AI agent integration."""
+    pass
+
+
+@mcp.command("start")
+@click.option("--host", default="localhost", show_default=True, help="Host to bind the MCP server")
+@click.option("--port", default=9100, show_default=True, help="Port for the MCP server")
+def mcp_start(host: str, port: int):
+    """Start the PRSM MCP server for AI agent integration.
+
+    Exposes all installed PRSM skill tools as MCP-compatible endpoints
+    that AI agents (Hermes, OpenClaw, Claude Desktop) can discover and invoke.
+    """
+    from prsm.cli_modules.mcp_server import is_fastmcp_available, start_mcp_server
+
+    if not is_fastmcp_available():
+        console.print(
+            "✗ fastmcp is required to run the MCP server.\n"
+            "  Install it with:  pip install fastmcp",
+            style="red",
+        )
+        raise SystemExit(1)
+
+    console.print(f"◇ Starting PRSM MCP server on {host}:{port}...", style="bold")
+    console.print(f"  Endpoint: http://{host}:{port}/mcp", style="dim")
+    console.print("  Press Ctrl+C to stop.\n", style="dim")
+    start_mcp_server(host=host, port=port)
+
+
+@mcp.command("config-snippet")
+@click.option("--host", default="localhost", show_default=True, help="Host for the snippet")
+@click.option("--port", default=9100, show_default=True, help="Port for the snippet")
+def mcp_config_snippet(host: str, port: int):
+    """Print a YAML config snippet for Hermes/OpenClaw MCP client setup.
+
+    Add the printed snippet to your AI client's configuration file
+    to connect it to the PRSM MCP server.
+    """
+    from prsm.cli_modules.mcp_server import get_config_snippet
+
+    console.print("Add this to your Hermes or OpenClaw config:\n", style="dim")
+    snippet = get_config_snippet(host=host, port=port)
+    console.print(snippet)
+
+
+# ---------------------------------------------------------------------------
+# config CLI group (Phase 2)
+# ---------------------------------------------------------------------------
+
+@main.group()
+def config():
+    """Configuration management commands."""
+    pass
+
+
+@config.command("show")
+@click.option("--format", "output_format",
+              type=click.Choice(["text", "json"]), default="text",
+              help="Output format: 'text' (human) or 'json' (agent-parseable)")
+def config_show(output_format: str):
+    """Display current PRSM configuration.
+
+    Shows all settings from ~/.prsm/config.yaml grouped by category.
+    Use --format json for machine-readable output.
+    """
+    from prsm.cli_modules.config_schema import PRSMConfig
+
+    cfg = PRSMConfig.load()
+
+    data = {
+        "ok": True,
+        "config_path": str(PRSMConfig.config_path()),
+        "config": cfg.model_dump(),
+    }
+
+    if output_format == "json":
+        _agent_output(data)
+        return
+
+    # Rich table output
+    console.print(f"\n[bold]PRSM Configuration[/bold]", style="cyan")
+    console.print(f"[dim]Source: {PRSMConfig.config_path()}[/dim]\n")
+
+    # Node Identity
+    table = Table(title="Node Identity", show_header=False, box=None)
+    table.add_column("Key", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("display_name", cfg.display_name)
+    table.add_row("node_role", cfg.node_role.value)
+    console.print(table)
+
+    # Resources
+    table = Table(title="Resources", show_header=False, box=None)
+    table.add_column("Key", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("cpu_pct", f"{cfg.cpu_pct}%")
+    table.add_row("memory_pct", f"{cfg.memory_pct}%")
+    table.add_row("gpu_pct", f"{cfg.gpu_pct}%")
+    table.add_row("storage_gb", f"{cfg.storage_gb} GB")
+    table.add_row("max_concurrent_jobs", str(cfg.max_concurrent_jobs))
+    if cfg.upload_mbps_limit > 0:
+        table.add_row("upload_mbps_limit", f"{cfg.upload_mbps_limit} Mbps")
+    else:
+        table.add_row("upload_mbps_limit", "unlimited")
+    if cfg.active_hours_start is not None and cfg.active_hours_end is not None:
+        table.add_row("active_hours", f"{cfg.active_hours_start:02d}:00 - {cfg.active_hours_end:02d}:00")
+    if cfg.active_days:
+        table.add_row("active_days", ", ".join(cfg.active_days))
+    console.print(table)
+
+    # Network
+    table = Table(title="Network", show_header=False, box=None)
+    table.add_column("Key", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("p2p_port", str(cfg.p2p_port))
+    table.add_row("api_port", str(cfg.api_port))
+    if cfg.bootstrap_nodes:
+        table.add_row("bootstrap_nodes", ", ".join(cfg.bootstrap_nodes))
+    else:
+        table.add_row("bootstrap_nodes", "[dim]none configured[/dim]")
+    console.print(table)
+
+    # API Keys
+    table = Table(title="API Keys", show_header=False, box=None)
+    table.add_column("Key", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("has_openai_key", "✓" if cfg.has_openai_key else "✗")
+    table.add_row("has_anthropic_key", "✓" if cfg.has_anthropic_key else "✗")
+    table.add_row("has_huggingface_token", "✓" if cfg.has_huggingface_token else "✗")
+    console.print(table)
+
+    # AI Integration
+    table = Table(title="AI Integration", show_header=False, box=None)
+    table.add_column("Key", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("mcp_server_enabled", "✓" if cfg.mcp_server_enabled else "✗")
+    table.add_row("mcp_server_port", str(cfg.mcp_server_port))
+    console.print(table)
+
+    # FTNS Wallet
+    if cfg.wallet_address:
+        table = Table(title="FTNS Wallet", show_header=False, box=None)
+        table.add_column("Key", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("wallet_address", cfg.wallet_address)
+        console.print(table)
+
+    # Meta
+    console.print(f"\n[dim]setup_completed: {cfg.setup_completed} | setup_version: {cfg.setup_version}[/dim]")
+
+
+@config.command("set")
+@click.argument("key")
+@click.argument("value")
+def config_set(key: str, value: str):
+    """Set a configuration value.
+
+    Updates ~/.prsm/config.yaml with the new value.
+    Example: prsm config set cpu_pct 70
+    """
+    from prsm.cli_modules.config_schema import PRSMConfig, NodeRole
+
+    cfg = PRSMConfig.load()
+
+    # Check if key exists
+    valid_fields = list(cfg.model_dump().keys())
+    if key not in valid_fields:
+        console.print(f"[red]Error: Unknown configuration key '{key}'[/red]")
+        console.print(f"\n[dim]Valid keys:[/dim]")
+        for f in sorted(valid_fields):
+            console.print(f"  • {f}")
+        raise SystemExit(1)
+
+    # Get old value
+    old_value = getattr(cfg, key)
+
+    # Parse and set new value based on field type
+    try:
+        # Get the field type from the model
+        field_info = cfg.model_fields.get(key)
+        if field_info:
+            field_type = field_info.annotation
+            # Handle Optional types
+            if hasattr(field_type, "__origin__") and field_type.__origin__ is type(None) | type(str):
+                # This is Optional[X], extract X
+                import typing
+                args = typing.get_args(field_type)
+                if args:
+                    field_type = args[0]
+
+            # Convert value based on type
+            if field_type == bool or (hasattr(field_type, "__origin__") and field_type.__origin__ is bool):
+                # Boolean parsing
+                if value.lower() in ("true", "1", "yes", "on"):
+                    new_value = True
+                elif value.lower() in ("false", "0", "no", "off"):
+                    new_value = False
+                else:
+                    raise ValueError(f"Cannot convert '{value}' to boolean")
+            elif field_type == int or (isinstance(field_type, type) and issubclass(field_type, int)):
+                new_value = int(value)
+            elif field_type == float or (isinstance(field_type, type) and issubclass(field_type, float)):
+                new_value = float(value)
+            elif field_type == NodeRole:
+                new_value = NodeRole(value.lower())
+            elif field_type == list or (hasattr(field_type, "__origin__") and field_type.__origin__ is list):
+                # Parse comma-separated list
+                new_value = [v.strip() for v in value.split(",") if v.strip()]
+            else:
+                # Default to string
+                new_value = value
+        else:
+            new_value = value
+
+        setattr(cfg, key, new_value)
+
+        # Validate via Pydantic
+        cfg.model_validate(cfg.model_dump())
+
+        # Save
+        cfg.save()
+
+        console.print(f"[green]✓ Updated {key}[/green]")
+        console.print(f"  Before: {old_value!r}")
+        console.print(f"  After:  {new_value!r}")
+
+    except ValueError as e:
+        console.print(f"[red]Error: Invalid value for '{key}': {e}[/red]")
+        raise SystemExit(1)
+    except Exception as e:
+        console.print(f"[red]Error setting configuration: {e}[/red]")
+        raise SystemExit(1)
+
+
+@config.command("reset")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+def config_reset(yes: bool):
+    """Delete the configuration file.
+
+    Removes ~/.prsm/config.yaml. Run 'prsm setup' to reconfigure.
+    """
+    from prsm.cli_modules.config_schema import PRSMConfig
+
+    config_path = PRSMConfig.config_path()
+
+    if not config_path.exists():
+        console.print("[dim]No configuration file to delete.[/dim]")
+        return
+
+    if not yes:
+        if not click.confirm(f"Delete {config_path}?"):
+            console.print("[dim]Cancelled.[/dim]")
+            return
+
+    config_path.unlink()
+    console.print(f"[green]✓ Deleted {config_path}[/green]")
+
+
+@config.command("validate")
+@click.option("--format", "output_format",
+              type=click.Choice(["text", "json"]), default="text",
+              help="Output format: 'text' (human) or 'json' (agent-parseable)")
+def config_validate(output_format: str):
+    """Validate configuration and check port availability.
+
+    Runs Pydantic validation and checks that p2p_port and api_port are available.
+    Exit code: 0 if all pass/warn, 1 if any fail.
+    """
+    from prsm.cli_modules.config_schema import PRSMConfig
+
+    cfg = PRSMConfig.load()
+    checks = []
+    any_fail = False
+
+    # 1. Pydantic validation
+    try:
+        cfg.model_validate(cfg.model_dump())
+        checks.append({
+            "name": "Pydantic validation",
+            "status": "PASS",
+            "details": "All fields valid",
+        })
+    except Exception as e:
+        checks.append({
+            "name": "Pydantic validation",
+            "status": "FAIL",
+            "details": str(e),
+        })
+        any_fail = True
+
+    # 2. P2P port availability
+    p2p_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    p2p_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        p2p_sock.bind(("127.0.0.1", cfg.p2p_port))
+        checks.append({
+            "name": "P2P port availability",
+            "status": "PASS",
+            "details": f"Port {cfg.p2p_port} is available",
+        })
+    except Exception as e:
+        checks.append({
+            "name": "P2P port availability",
+            "status": "WARN",
+            "details": f"Port {cfg.p2p_port} may be in use: {e}",
+        })
+    finally:
+        p2p_sock.close()
+
+    # 3. API port availability
+    api_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    api_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        api_sock.bind(("127.0.0.1", cfg.api_port))
+        checks.append({
+            "name": "API port availability",
+            "status": "PASS",
+            "details": f"Port {cfg.api_port} is available",
+        })
+    except Exception as e:
+        checks.append({
+            "name": "API port availability",
+            "status": "WARN",
+            "details": f"Port {cfg.api_port} may be in use: {e}",
+        })
+    finally:
+        api_sock.close()
+
+    # 4. MCP port availability (if enabled)
+    if cfg.mcp_server_enabled:
+        mcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        mcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            mcp_sock.bind(("127.0.0.1", cfg.mcp_server_port))
+            checks.append({
+                "name": "MCP port availability",
+                "status": "PASS",
+                "details": f"Port {cfg.mcp_server_port} is available",
+            })
+        except Exception as e:
+            checks.append({
+                "name": "MCP port availability",
+                "status": "WARN",
+                "details": f"Port {cfg.mcp_server_port} may be in use: {e}",
+            })
+        finally:
+            mcp_sock.close()
+
+    # 5. Config file exists
+    checks.append({
+        "name": "Config file exists",
+        "status": "PASS" if PRSMConfig.exists() else "WARN",
+        "details": str(PRSMConfig.config_path()) if PRSMConfig.exists() else "Run 'prsm setup' to create",
+    })
+
+    # Output
+    result = {
+        "ok": not any_fail,
+        "config_path": str(PRSMConfig.config_path()),
+        "checks": checks,
+    }
+
+    if output_format == "json":
+        _agent_output(result)
+        raise SystemExit(1 if any_fail else 0)
+
+    # Rich output
+    console.print("\n[bold]Configuration Validation[/bold]\n")
+    table = Table(show_header=True)
+    table.add_column("Check", style="cyan")
+    table.add_column("Status", style="bold")
+    table.add_column("Details", style="dim")
+
+    for check in checks:
+        status = check["status"]
+        icon = {"PASS": "✅", "WARN": "⚠️", "FAIL": "❌"}.get(status, status)
+        status_style = {"PASS": "green", "WARN": "yellow", "FAIL": "red"}.get(status, "white")
+        table.add_row(check["name"], f"[{status_style}]{icon} {status}[/{status_style}]", check["details"])
+
+    console.print(table)
+
+    if any_fail:
+        console.print("\n[red]Validation failed. Fix errors above.[/red]")
+        raise SystemExit(1)
+    else:
+        console.print("\n[green]All checks passed or warned.[/green]")
+
+
+@config.command("path")
+def config_path_cmd():
+    """Print the configuration file path.
+
+    Useful for scripts and automation.
+    """
+    from prsm.cli_modules.config_schema import PRSMConfig
+    console.print(str(PRSMConfig.config_path()))
+
+
+# ---------------------------------------------------------------------------
+# daemon CLI group (Phase 3)
+# ---------------------------------------------------------------------------
+
+# Daemon paths
+_DAEMON_PID_FILE = Path.home() / ".prsm" / "daemon.pid"
+_DAEMON_LOG_FILE = Path.home() / ".prsm" / "logs" / "daemon.log"
+
+def _get_daemon_pid() -> Optional[int]:
+    """Read daemon PID from file, or None if not found."""
+    if _DAEMON_PID_FILE.exists():
+        try:
+            return int(_DAEMON_PID_FILE.read_text().strip())
+        except (ValueError, OSError):
+            return None
+    return None
+
+
+def _is_daemon_running(pid: Optional[int] = None) -> bool:
+    """Check if daemon process is running."""
+    if pid is None:
+        pid = _get_daemon_pid()
+    if pid is None:
+        return False
+
+    # Try psutil first
+    try:
+        import psutil
+        return psutil.pid_exists(pid)
+    except ImportError:
+        # Fallback: check /proc on Unix or use kill -0
+        try:
+            import os
+            os.kill(pid, 0)  # Signal 0 = check if process exists
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+
+
+def _get_daemon_uptime(pid: int) -> str:
+    """Get daemon uptime as human-readable string."""
+    try:
+        import psutil
+        proc = psutil.Process(pid)
+        import datetime
+        start_time = datetime.datetime.fromtimestamp(proc.create_time())
+        now = datetime.datetime.now()
+        delta = now - start_time
+        hours, remainder = divmod(int(delta.total_seconds()), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours > 0:
+            return f"{hours}h {minutes}m {seconds}s"
+        elif minutes > 0:
+            return f"{minutes}m {seconds}s"
+        else:
+            return f"{seconds}s"
+    except (ImportError, Exception):
+        return "unknown (psutil not installed)"
+
+
+@main.group()
+def daemon():
+    """Daemon management commands for background operation."""
+    pass
+
+
+@daemon.command("start")
+@click.option("--host", default="127.0.0.1", help="Host to bind to")
+@click.option("--port", default=8000, help="Port to bind to")
+@click.option("--workers", default=1, help="Number of worker processes")
+def daemon_start(host: str, port: int, workers: int):
+    """Start PRSM node server in the background.
+
+    Launches 'prsm serve' as a detached process and writes PID to
+    ~/.prsm/daemon.pid. Logs go to ~/.prsm/logs/daemon.log.
+    """
+    # Check if already running
+    pid = _get_daemon_pid()
+    if pid and _is_daemon_running(pid):
+        console.print(f"[red]Error: Daemon already running (PID {pid})[/red]")
+        console.print("Run 'prsm daemon stop' first, or 'prsm daemon status' for details.")
+        raise SystemExit(1)
+
+    # Clean up stale PID file
+    if _DAEMON_PID_FILE.exists():
+        _DAEMON_PID_FILE.unlink()
+
+    # Ensure log directory exists
+    _DAEMON_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    # Build the command
+    cmd = [
+        sys.executable, "-m", "prsm.cli", "serve",
+        "--host", host,
+        "--port", str(port),
+        "--workers", str(workers),
+    ]
+
+    # Start the daemon
+    import subprocess
+    log_fh = open(_DAEMON_LOG_FILE, "a")
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=log_fh,
+            stderr=log_fh,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,  # Detach from terminal
+        )
+
+        # Write PID file
+        _DAEMON_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _DAEMON_PID_FILE.write_text(str(proc.pid))
+
+        console.print(f"[green]✓ PRSM daemon started[/green]")
+        console.print(f"  PID:      {proc.pid}")
+        console.print(f"  Endpoint: http://{host}:{port}")
+        console.print(f"  Log:      {_DAEMON_LOG_FILE}")
+        console.print("\n[dim]Run 'prsm daemon logs --follow' to watch logs.[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]Error starting daemon: {e}[/red]")
+        raise SystemExit(1)
+    finally:
+        log_fh.close()
+
+
+@daemon.command("stop")
+@click.option("--timeout", default=10, help="Seconds to wait for graceful shutdown")
+def daemon_stop(timeout: int):
+    """Stop the PRSM daemon.
+
+    Sends SIGTERM and waits up to --timeout seconds before sending SIGKILL.
+    """
+    import signal
+    import time
+
+    pid = _get_daemon_pid()
+    if not pid:
+        console.print("[dim]Daemon is not running (no PID file found).[/dim]")
+        return
+
+    if not _is_daemon_running(pid):
+        # Stale PID file
+        _DAEMON_PID_FILE.unlink()
+        console.print("[dim]Daemon was not running (cleaned up stale PID file).[/dim]")
+        return
+
+    console.print(f"Stopping daemon (PID {pid})...", style="yellow")
+
+    # Send SIGTERM
+    try:
+        import os
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        _DAEMON_PID_FILE.unlink()
+        console.print("[dim]Daemon was not running (cleaned up PID file).[/dim]")
+        return
+    except PermissionError:
+        console.print("[red]Error: Permission denied. Try with sudo or as the daemon owner.[/red]")
+        raise SystemExit(1)
+
+    # Wait for graceful shutdown
+    start = time.time()
+    while time.time() - start < timeout:
+        if not _is_daemon_running(pid):
+            _DAEMON_PID_FILE.unlink()
+            console.print("[green]✓ Daemon stopped gracefully.[/green]")
+            return
+        time.sleep(0.5)
+
+    # Force kill
+    console.print("[yellow]Graceful shutdown timed out. Sending SIGKILL...[/yellow]")
+    try:
+        os.kill(pid, signal.SIGKILL)
+        time.sleep(0.5)
+    except ProcessLookupError:
+        pass
+
+    _DAEMON_PID_FILE.unlink()
+    console.print("[green]✓ Daemon killed.[/green]")
+
+
+@daemon.command("status")
+@click.option("--format", "output_format",
+              type=click.Choice(["text", "json"]), default="text",
+              help="Output format: 'text' (human) or 'json' (agent-parseable)")
+def daemon_status(output_format: str):
+    """Show daemon status.
+
+    Reports running state, PID, and uptime.
+    """
+    pid = _get_daemon_pid()
+    running = pid is not None and _is_daemon_running(pid)
+
+    data = {
+        "ok": True,
+        "running": running,
+        "pid": pid if running else None,
+        "uptime": _get_daemon_uptime(pid) if running else None,
+        "pid_file": str(_DAEMON_PID_FILE),
+        "log_file": str(_DAEMON_LOG_FILE),
+    }
+
+    if output_format == "json":
+        _agent_output(data)
+        return
+
+    # Rich output
+    console.print("\n[bold]PRSM Daemon Status[/bold]\n")
+
+    if running:
+        console.print(f"  Status: [green]● running[/green]")
+        console.print(f"  PID:    {pid}")
+        console.print(f"  Uptime: {_get_daemon_uptime(pid)}")
+    else:
+        if pid and not running:
+            console.print(f"  Status: [yellow]○ stopped[/yellow] (stale PID file found)")
+        else:
+            console.print(f"  Status: [dim]○ stopped[/dim]")
+
+    console.print(f"\n  PID file: {_DAEMON_PID_FILE}")
+    console.print(f"  Log file: {_DAEMON_LOG_FILE}")
+
+
+@daemon.command("logs")
+@click.option("--lines", "-n", default=50, help="Number of lines to show")
+@click.option("--follow", "-f", is_flag=True, help="Follow log output (tail -f style)")
+def daemon_logs(lines: int, follow: bool):
+    """Show daemon logs.
+
+    Prints the last N lines of ~/.prsm/logs/daemon.log.
+    Use --follow to watch logs in real-time.
+    """
+    if not _DAEMON_LOG_FILE.exists():
+        console.print(f"[dim]No log file found at {_DAEMON_LOG_FILE}[/dim]")
+        console.print("Start the daemon first with 'prsm daemon start'.")
+        return
+
+    if follow:
+        # Tail -f implementation
+        console.print(f"Following {_DAEMON_LOG_FILE} (Ctrl+C to stop)...\n")
+        import time
+        with open(_DAEMON_LOG_FILE, "r") as f:
+            # Seek to end
+            f.seek(0, 2)
+            try:
+                while True:
+                    line = f.readline()
+                    if line:
+                        print(line, end="")
+                    else:
+                        time.sleep(0.1)
+            except KeyboardInterrupt:
+                console.print("\n[dim]Stopped following logs.[/dim]")
+    else:
+        # Show last N lines
+        import subprocess
+        result = subprocess.run(
+            ["tail", "-n", str(lines), str(_DAEMON_LOG_FILE)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            print(result.stdout)
+        else:
+            console.print(f"[red]Error reading log file: {result.stderr}[/red]")
+
+
+@daemon.command("install")
+@click.option("--dry-run", is_flag=True, help="Print service file without installing")
+@click.option("--host", default="127.0.0.1", help="Host to bind to")
+@click.option("--port", default=8000, help="Port to bind to")
+def daemon_install(dry_run: bool, host: str, port: int):
+    """Install PRSM daemon as a system service.
+
+    On macOS: installs a launchd agent to ~/Library/LaunchAgents/
+    On Linux: installs a systemd user unit to ~/.config/systemd/user/
+    """
+    import platform
+
+    system = platform.system()
+
+    if system == "Darwin":
+        _install_launchd(dry_run=dry_run, host=host, port=port)
+    elif system == "Linux":
+        _install_systemd(dry_run=dry_run, host=host, port=port)
+    else:
+        console.print(f"[red]Error: Unsupported platform '{system}'[/red]")
+        console.print("Service installation is only supported on macOS and Linux.")
+        raise SystemExit(1)
+
+
+def _install_launchd(dry_run: bool, host: str, port: int) -> None:
+    """Install launchd agent on macOS."""
+    plist_path = Path.home() / "Library" / "LaunchAgents" / "ai.prsm.node.plist"
+    python_exe = sys.executable
+    prsm_cli = str(Path(sys.executable).parent / "prsm") if Path(sys.executable).parent.joinpath("prsm").exists() else f"{sys.executable} -m prsm.cli"
+
+    plist_content = f'''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.prsm.node</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{python_exe}</string>
+        <string>-m</string>
+        <string>prsm.cli</string>
+        <string>serve</string>
+        <string>--host</string>
+        <string>{host}</string>
+        <string>--port</string>
+        <string>{port}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{_DAEMON_LOG_FILE}</string>
+    <key>StandardErrorPath</key>
+    <string>{_DAEMON_LOG_FILE}</string>
+    <key>WorkingDirectory</key>
+    <string>{Path.home()}</string>
+</dict>
+</plist>
+'''
+
+    if dry_run:
+        console.print(f"\n[bold]Generated launchd plist:[/bold]\n")
+        console.print(plist_content)
+        console.print(f"\n[dim]Would write to: {plist_path}[/dim]")
+        console.print("[dim]Would run: launchctl load {plist_path}[/dim]")
+        return
+
+    # Write the plist
+    plist_path.parent.mkdir(parents=True, exist_ok=True)
+    plist_path.write_text(plist_content)
+    console.print(f"[green]✓ Created launchd plist[/green]")
+    console.print(f"  Path: {plist_path}")
+
+    # Load the service
+    import subprocess
+    result = subprocess.run(["launchctl", "load", str(plist_path)], capture_output=True, text=True)
+    if result.returncode == 0:
+        console.print(f"  Loaded: launchctl load {plist_path}")
+        console.print("\n[dim]The daemon will start automatically and restart on login.[/dim]")
+    else:
+        console.print(f"[yellow]Warning: launchctl load failed: {result.stderr}[/yellow]")
+        console.print(f"Try manually: launchctl load {plist_path}")
+
+
+def _install_systemd(dry_run: bool, host: str, port: int) -> None:
+    """Install systemd user unit on Linux."""
+    service_path = Path.home() / ".config" / "systemd" / "user" / "prsm-node.service"
+    python_exe = sys.executable
+
+    service_content = f'''[Unit]
+Description=PRSM Node Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart={python_exe} -m prsm.cli serve --host {host} --port {port}
+Restart=always
+RestartSec=10
+StandardOutput=append:{_DAEMON_LOG_FILE}
+StandardError=append:{_DAEMON_LOG_FILE}
+WorkingDirectory={Path.home()}
+
+[Install]
+WantedBy=default.target
+'''
+
+    if dry_run:
+        console.print(f"\n[bold]Generated systemd unit:[/bold]\n")
+        console.print(service_content)
+        console.print(f"\n[dim]Would write to: {service_path}[/dim]")
+        console.print("[dim]Would run: systemctl --user enable --now prsm-node.service[/dim]")
+        return
+
+    # Write the service file
+    service_path.parent.mkdir(parents=True, exist_ok=True)
+    service_path.write_text(service_content)
+    console.print(f"[green]✓ Created systemd unit[/green]")
+    console.print(f"  Path: {service_path}")
+
+    # Enable the service
+    import subprocess
+    result = subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True)
+    result2 = subprocess.run(["systemctl", "--user", "enable", "--now", "prsm-node.service"], capture_output=True, text=True)
+
+    if result2.returncode == 0:
+        console.print(f"  Enabled: systemctl --user enable --now prsm-node.service")
+        console.print("\n[dim]The daemon will start automatically and restart on boot.[/dim]")
+    else:
+        console.print(f"[yellow]Warning: systemctl enable failed: {result2.stderr}[/yellow]")
+        console.print(f"Try manually: systemctl --user enable --now prsm-node.service")
+
+
+@daemon.command("uninstall")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+def daemon_uninstall(yes: bool):
+    """Remove the PRSM daemon system service.
+
+    Stops and unloads the service, then removes the service file.
+    """
+    import platform
+
+    system = platform.system()
+
+    if system == "Darwin":
+        _uninstall_launchd(yes=yes)
+    elif system == "Linux":
+        _uninstall_systemd(yes=yes)
+    else:
+        console.print(f"[red]Error: Unsupported platform '{system}'[/red]")
+        raise SystemExit(1)
+
+
+def _uninstall_launchd(yes: bool) -> None:
+    """Uninstall launchd agent on macOS."""
+    import subprocess
+
+    plist_path = Path.home() / "Library" / "LaunchAgents" / "ai.prsm.node.plist"
+
+    if not plist_path.exists():
+        console.print("[dim]No launchd service found to uninstall.[/dim]")
+        return
+
+    if not yes:
+        if not click.confirm(f"Unload and remove {plist_path}?"):
+            console.print("[dim]Cancelled.[/dim]")
+            return
+
+    # Unload the service
+    result = subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True, text=True)
+    if result.returncode == 0:
+        console.print("[dim]Unloaded launchd service.[/dim]")
+    else:
+        console.print(f"[dim]launchctl unload returned: {result.stderr}[/dim]")
+
+    # Remove the plist
+    plist_path.unlink()
+    console.print(f"[green]✓ Removed {plist_path}[/green]")
+
+
+def _uninstall_systemd(yes: bool) -> None:
+    """Uninstall systemd user unit on Linux."""
+    import subprocess
+
+    service_path = Path.home() / ".config" / "systemd" / "user" / "prsm-node.service"
+
+    if not service_path.exists():
+        console.print("[dim]No systemd service found to uninstall.[/dim]")
+        return
+
+    if not yes:
+        if not click.confirm(f"Disable and remove {service_path}?"):
+            console.print("[dim]Cancelled.[/dim]")
+            return
+
+    # Disable the service
+    subprocess.run(["systemctl", "--user", "stop", "prsm-node.service"], capture_output=True)
+    subprocess.run(["systemctl", "--user", "disable", "prsm-node.service"], capture_output=True)
+    console.print("[dim]Disabled systemd service.[/dim]")
+
+    # Remove the service file
+    service_path.unlink()
+    subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+    console.print(f"[green]✓ Removed {service_path}[/green]")
 
 
 if __name__ == "__main__":
