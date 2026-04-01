@@ -1,0 +1,38 @@
+name: prsm-network
+version: 1.0.0
+description: Network operations and monitoring on the PRSM network
+author: PRSM Core Team
+capabilities:
+  - network_peers
+  - network_stats
+  - network_health
+  - network_discover
+requires:
+  - prsm-network >= 0.2.0
+tools:
+  - name: prsm_list_peers
+    description: List connected peers on the PRSM network with their capabilities and status
+    parameters:
+      status: {type: string, description: "Filter by peer status: 'active', 'idle', 'offline', 'all'", optional: true}
+      capability: {type: string, description: "Filter by capability: 'compute', 'storage', 'routing'", optional: true}
+      limit: {type: integer, description: "Maximum number of peers to return", optional: true}
+
+  - name: prsm_network_stats
+    description: Get aggregate statistics about the PRSM network
+    parameters:
+      metric: {type: string, description: "Specific metric to retrieve: 'overview', 'compute', 'storage', 'bandwidth', 'tokens'", optional: true}
+      timeframe: {type: string, description: "Time window: '1h', '24h', '7d', '30d'", optional: true}
+
+  - name: prsm_health_check
+    description: Run a health check on the local node and its network connectivity
+    parameters:
+      checks: {type: array, items: {type: string}, description: "Specific checks to run: 'connectivity', 'storage', 'compute', 'latency', 'all'", optional: true}
+      verbose: {type: boolean, description: "Include detailed diagnostic information", optional: true}
+
+  - name: prsm_discover_nodes
+    description: Discover new nodes on the PRSM network and optionally connect to them
+    parameters:
+      capability: {type: string, description: "Discover nodes with specific capability: 'gpu', 'storage', 'relay'", optional: true}
+      region: {type: string, description: "Geographic region filter", optional: true}
+      min_reputation: {type: number, description: "Minimum reputation score (0.0 to 1.0)", optional: true}
+      connect: {type: boolean, description: "Automatically connect to discovered nodes", optional: true}

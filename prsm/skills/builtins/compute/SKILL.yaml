@@ -1,0 +1,41 @@
+name: prsm-compute
+version: 1.0.0
+description: Compute job management on the PRSM network
+author: PRSM Core Team
+capabilities:
+  - compute_submit
+  - compute_status
+  - compute_cancel
+  - compute_queue
+requires:
+  - prsm-network >= 0.2.0
+tools:
+  - name: prsm_submit_job
+    description: Submit a compute job to the PRSM network for distributed execution
+    parameters:
+      name: {type: string, description: "Human-readable job name"}
+      task_type: {type: string, description: "Job type: 'training', 'inference', 'evaluation', 'preprocessing', 'custom'"}
+      model: {type: string, description: "Model identifier or path for the job", optional: true}
+      dataset: {type: string, description: "Dataset ID to use as input", optional: true}
+      config: {type: object, description: "Job configuration (hyperparameters, resource requirements, etc.)"}
+      priority: {type: string, description: "Job priority: 'low', 'normal', 'high'", optional: true}
+      max_ftns: {type: number, description: "Maximum FTNS tokens to spend on this job", optional: true}
+
+  - name: prsm_job_status
+    description: Check the status of a submitted compute job
+    parameters:
+      job_id: {type: string, description: "ID of the job to check"}
+      verbose: {type: boolean, description: "Include detailed progress metrics and logs", optional: true}
+
+  - name: prsm_cancel_job
+    description: Cancel a running or queued compute job
+    parameters:
+      job_id: {type: string, description: "ID of the job to cancel"}
+      reason: {type: string, description: "Reason for cancellation", optional: true}
+
+  - name: prsm_list_queue
+    description: List compute jobs in the queue with their status and resource usage
+    parameters:
+      status: {type: string, description: "Filter by status: 'queued', 'running', 'completed', 'failed', 'all'", optional: true}
+      limit: {type: integer, description: "Maximum number of jobs to return", optional: true}
+      sort_by: {type: string, description: "Sort field: 'submitted', 'priority', 'status', 'cost'", optional: true}
