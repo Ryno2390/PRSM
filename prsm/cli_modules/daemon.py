@@ -130,8 +130,28 @@ def _get_log_size() -> Optional[str]:
 # ---- Node command builder --------------------------------------------------
 
 
+def _load_env_file():
+    """Load ~/.prsm/.env into os.environ so the daemon sees API keys."""
+    env_path = Path.home() / ".prsm" / ".env"
+    if not env_path.exists():
+        return
+    with open(env_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and val:
+                os.environ[key] = val
+
+
 def _get_daemon_node_cmd(host: str, port: int) -> list:
     """Build command for 'prsm node start --no-dashboard' as a subprocess."""
+    # Load .env before the daemon inherits env vars
+    _load_env_file()
+
     cmd = [sys.executable, "-m", "prsm.cli", "node", "start",
            "--no-dashboard", "--api-port", str(port)]
     try:
@@ -158,6 +178,9 @@ def daemon_start(host: str = "127.0.0.1", port: int = 8000):
     if _DAEMON_PID_FILE.exists():
         _DAEMON_PID_FILE.unlink()
 
+    # Load .env so the daemon inherits API keys
+    _load_env_file()
+
     _DAEMON_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = _get_daemon_node_cmd(host, port)
@@ -169,6 +192,7 @@ def daemon_start(host: str = "127.0.0.1", port: int = 8000):
             stderr=log_fh,
             stdin=subprocess.DEVNULL,
             start_new_session=True,
+            env=dict(os.environ),  # pass loaded env vars
         )
         _DAEMON_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
         _DAEMON_PID_FILE.write_text(str(proc.pid))
