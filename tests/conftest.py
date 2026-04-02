@@ -360,13 +360,22 @@ def mock_redis():
         return
     fake_redis_instance = FakeRedis()
     
+    # Guard patch targets that may not exist in test environment (e.g. when CLI conftest stubs prsm.core)
+    # Check if redis_client attribute exists rather than trying to import
+    import sys as _sys
+    _core_mod = _sys.modules.get('prsm.core')
+    _has_redis_client = hasattr(_core_mod, 'redis_client') if _core_mod else False
+
+    redis_patcher = patch('prsm.core.redis_client.get_redis_client', return_value=fake_redis_instance) if _has_redis_client else patch.dict('sys.modules', {})
+    auth_patcher = patch('prsm.core.auth.middleware.get_redis_client', return_value=fake_redis_instance) if _has_redis_client else patch.dict('sys.modules', {})
+
     # Mock redis.asyncio.Redis
     with patch('redis.asyncio.Redis') as mock_async_redis, \
          patch('redis.asyncio.from_url') as mock_async_from_url, \
          patch('redis.Redis') as mock_sync_redis, \
          patch('redis.from_url') as mock_sync_from_url, \
-         patch('prsm.core.redis_client.get_redis_client', return_value=fake_redis_instance) as mock_get_redis, \
-         patch('prsm.core.auth.middleware.get_redis_client', return_value=fake_redis_instance) as mock_auth_redis:
+         redis_patcher as mock_get_redis, \
+         auth_patcher as mock_auth_redis:
         
         # Return fake Redis for all connection methods
         mock_async_redis.return_value = fake_redis_instance

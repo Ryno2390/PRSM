@@ -12,8 +12,14 @@ class TestShowBanner:
         assert len(mock_console) > 0
 
     def test_show_banner_compact(self, mock_console, monkeypatch):
+        import os
         import prsm.cli_modules.ui as _ui_mod
-        monkeypatch.setattr(_ui_mod.shutil, "get_terminal_size", lambda: MagicMock(columns=50))
+        # shutil.get_terminal_size returns an os.terminal_size with .columns attribute
+        monkeypatch.setattr(
+            _ui_mod.shutil,
+            "get_terminal_size",
+            lambda fallback=(80, 24): os.terminal_size((50, 24)),
+        )
         ui.show_banner()
         assert len(mock_console) > 0
 

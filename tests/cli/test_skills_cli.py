@@ -9,7 +9,7 @@ from prsm.cli_modules.skills_cli import skills, _get_registry
 
 @pytest.fixture
 def runner():
-    return CliRunner(mix_stderr=False)
+    return CliRunner()
 
 
 @pytest.fixture
