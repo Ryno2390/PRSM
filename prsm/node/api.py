@@ -145,7 +145,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # Create security configuration
         security_config = APISecurityConfig(
             enable_rate_limiting=True,
-            enable_jwt_auth=True,
+            enable_jwt_auth=False,
             enable_websocket=True,
             enable_openapi=True,
             rate_limit_requests_per_minute=100,
