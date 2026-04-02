@@ -2084,6 +2084,28 @@ def list_compute_jobs(limit: int):
     console.print(table)
 
 
+@compute.command("demo")
+@click.option("--nodes", default=3, type=int, help="Number of nodes to spawn")
+def compute_demo(nodes: int):
+    """Run a multi-node compute + escrow + consensus demonstration.
+
+    Spawns local nodes and demonstrates:
+    1. Escrow creation (FTNS locked before job runs)
+    2. Job offer broadcast via gossip
+    3. Cross-node job acceptance and execution
+    4. Result consensus (multiple providers must agree)
+    5. Payment release to winning provider
+    """
+    import asyncio
+    from prsm.node.multinode_demo import MultiNodeDemo
+
+    async def _run():
+        demo = MultiNodeDemo()
+        await demo.run()
+
+    asyncio.run(_run())
+
+
 # ============================================================================
 # FTNS COMMANDS
 # ============================================================================
