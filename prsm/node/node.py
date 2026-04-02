@@ -48,6 +48,7 @@ from prsm.node.ledger_sync import LedgerSync
 from prsm.node.agent_registry import AgentRegistry
 from prsm.node.agent_collaboration import AgentCollaboration, BidStrategy
 from prsm.economy.tokenomics.staking_manager import StakingManager, StakingConfig, StakeType
+from prsm.economy.ftns_onchain import OnChainFTNSLedger
 
 # BitTorrent integration
 from prsm.core.bittorrent_client import BitTorrentClient, BitTorrentConfig
@@ -494,6 +495,9 @@ class PRSMNode:
         self.agent_registry: Optional[AgentRegistry] = None
         self.agent_collaboration: Optional[AgentCollaboration] = None
         self.staking_manager: Optional[StakingManager] = None
+        # On-chain FTNS ledger (Base mainnet)
+        self.ftns_ledger: Optional[OnChainFTNSLedger] = None
+        
         # BitTorrent components
         self.bt_client: Optional[BitTorrentClient] = None
         self.bt_manifest_store: Optional[TorrentManifestStore] = None
@@ -775,6 +779,11 @@ class PRSMNode:
             timeout_seconds=300.0,
         )
 
+        # ── On-Chain FTNS Ledger (Base mainnet) ────────────────────
+        self.ftns_ledger = OnChainFTNSLedger(
+            node_id=self.identity.node_id,
+        )
+
         # Wire ledger_sync and agent_registry into subsystems
         self.content_uploader.ledger_sync = self.ledger_sync
         if self.compute_provider:
@@ -782,10 +791,11 @@ class PRSMNode:
             # Wire escrow and consensus into compute provider
             self.compute_provider.escrow = self._payment_escrow
             self.compute_provider.consensus = self._result_consensus
-            # Wire ledger_sync broadcast for escrow transactions
-            self._payment_escrow.broadcast_tx = (
-                self.ledger_sync.broadcast_transaction if self.ledger_sync else None
-            )
+            # Wire on-chain FTNS ledger for real blockchain transfers
+            if self.ftns_ledger and self.ftns_ledger._account:
+                self._payment_escrow.broadcast_tx = (
+                    self._on_chain_ftns_transfer
+                )
         self.compute_requester.ledger_sync = self.ledger_sync
         if self.storage_provider:
             self.storage_provider.ledger_sync = self.ledger_sync
@@ -842,6 +852,15 @@ class PRSMNode:
 
         # Ensure IPFS daemon is available (auto-start if possible)
         await self._ensure_ipfs_available()
+
+        # Initialize on-chain FTNS ledger (best-effort)
+        if self.ftns_ledger:
+            ft_initialized = await self.ftns_ledger.initialize()
+            if ft_initialized:
+                logger.info("FTNS on-chain ledger connected to Base mainnet")
+            else:
+                logger.info("FTNS on-chain ledger unavailable — running local mode only")
+                self.ftns_ledger = None
 
         if self.compute_provider:
             await self.compute_provider.start()
@@ -945,6 +964,11 @@ class PRSMNode:
             await self.ledger_sync.stop()
         if hasattr(self, '_escrow_cleanup_task') and self._escrow_cleanup_task:
             self._escrow_cleanup_task.cancel()
+            try:
+                await self._escrow_cleanup_task
+            except asyncio.CancelledError:
+                pass
+
         if self.content_uploader:
             await self.content_uploader.close()
         if self.storage_provider:
@@ -1082,6 +1106,11 @@ class PRSMNode:
             "ledger_sync": self.ledger_sync.get_stats() if self.ledger_sync else None,
             "escrow": self._payment_escrow.get_stats() if hasattr(self, '_payment_escrow') and self._payment_escrow else None,
             "consensus": self._result_consensus.get_stats() if hasattr(self, '_result_consensus') and self._result_consensus else None,
+            "ftns_onchain": (
+                self.ftns_ledger.get_summary()
+                if self.ftns_ledger and self.ftns_ledger._is_initialized
+                else None
+            ),
             "agents": self.agent_registry.get_stats() if self.agent_registry else None,
             "collaboration": self.agent_collaboration.get_stats() if self.agent_collaboration else None,
             "bittorrent": {
