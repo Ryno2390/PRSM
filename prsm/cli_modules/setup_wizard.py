@@ -268,21 +268,21 @@ def _step_account(config: PRSMConfig, api_url: str, minimal: bool) -> bool:
             return True
 
     console.print()
-    console.print("  Choose one:", style="bold white")
-    console.print("    1. Create a new account", style="dim")
-    console.print("    2. Sign in to an existing account", style="dim")
-    console.print("    3. Skip", style="dim")
-    choice = click.prompt(
-        "  Choice",
-        type=click.Choice(["1", "2", "3"]),
-        default="2" if already_logged_in else "1",
+    choice = prompt_choice(
+        "What would you like to do?",
+        [
+            {"label": "Create a new account", "value": "register", "hint": "Set up a fresh PRSM identity"},
+            {"label": "Sign in to an existing account", "value": "login", "hint": "Continue with previous credentials"},
+            {"label": "Skip for now", "value": "skip", "hint": "You can log in later with prsm login"},
+        ],
+        default=1 if already_logged_in else 0,
     )
 
-    if choice == "3":
+    if choice == "skip":
         info("Skipped. Run 'prsm login' later when a server is available.")
         return False
 
-    if choice == "1":
+    if choice == "register":
         return _do_register(api_url, suggested_username)
     else:
         return _do_login(api_url)
