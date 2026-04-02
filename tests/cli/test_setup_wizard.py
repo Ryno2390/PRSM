@@ -159,6 +159,10 @@ class TestRunSetupWizardWithPrompts:
         monkeypatch.setattr(ui, "prompt_number", lambda *a, **kw: kw.get("default", 50))
         monkeypatch.setattr(ui, "prompt_confirm", lambda *a, **kw: True)
 
+        # The account step uses click.prompt directly (not ui wrappers).
+        # Return "3" to skip account creation during tests.
+        monkeypatch.setattr("click.prompt", lambda *a, **kw: kw.get("default", "3"))
+
         # Run and verify config was saved
         run_setup_wizard(dry_run=False, minimal=False)
         assert config_file.exists()
