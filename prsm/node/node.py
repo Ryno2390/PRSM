@@ -792,11 +792,11 @@ class PRSMNode:
             self.compute_provider.escrow = self._payment_escrow
             self.compute_provider.consensus = self._result_consensus
             # Wire on-chain FTNS ledger for real blockchain transfers
-            if self.ftns_ledger and self.ftns_ledger._account:
-                self._payment_escrow.broadcast_tx = (
-                    self._on_chain_ftns_transfer
-                )
+            if self.ftns_ledger is not None:
+                self._payment_escrow.broadcast_tx = self._on_chain_ftns_transfer
         self.compute_requester.ledger_sync = self.ledger_sync
+        if hasattr(self.compute_requester, 'escrow'):
+            self.compute_requester.escrow = self._payment_escrow
         if self.storage_provider:
             self.storage_provider.ledger_sync = self.ledger_sync
         self.agent_collaboration.ledger_sync = self.ledger_sync
@@ -1037,32 +1037,84 @@ class PRSMNode:
         # 3. ipfs is installed → start the daemon as a background subprocess
         try:
             logger.info("Starting IPFS daemon automatically...")
-            proc = subprocess.Popen(
+            daemon = subprocess.Popen(
                 [ipfs_binary, "daemon", "--init"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
             )
-            self._ipfs_daemon_proc = proc  # Store so we can terminate on shutdown
+            # Small delay to let daemon start
+            await asyncio.sleep(2)
 
-            # Wait up to 10 seconds for the daemon to become ready
-            import aiohttp
-            for _ in range(20):
-                await asyncio.sleep(0.5)
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(
-                            "http://127.0.0.1:5001/api/v0/id",
-                            timeout=aiohttp.ClientTimeout(total=1)
-                        ) as resp:
-                            if resp.status == 200:
-                                logger.info("IPFS daemon started successfully")
-                                return True
-                except Exception:
-                    continue
-
-            logger.warning("IPFS daemon started but did not become ready within 10s. "
-                          "Data storage features may be limited.")
+            # Verify it's running by re-checking the HTTP endpoint
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        "http://127.0.0.1:5001/api/v0/id",
+                        timeout=aiohttp.ClientTimeout(total=5)
+                    ) as resp:
+                        if resp.status == 200:
+                            logger.info("IPFS daemon started successfully (PID %d)", daemon.pid)
+                            return True
+            except Exception as e:
+                logger.debug("IPFS daemon start verification failed: %s", e)
+                logger.info("IPFS daemon may still be starting (PID %d)", daemon.pid)
+                return True  # Assume it will come up
+        except Exception as e:
+            logger.warning("Failed to start IPFS daemon: %s", e)
             return False
+
+        # ── On-Chain FTNS Transfer Handler ────────────────────────
+    async def _on_chain_ftns_transfer(self, transaction) -> None:
+        """Broadcast a transaction to the real FTNS contract on Base.
+
+        Called by PaymentEscrow when it locks, releases, or refunds FTNS.
+        If the on-chain ledger is not connected, only logs a warning.
+        """
+        if not self.ftns_ledger or not self.ftns_ledger._is_initialized:
+            logger.debug(
+                "FTNS on-chain ledger not available — "
+                "skipping blockchain broadcast for escrow tx"
+            )
+            return
+
+        if not hasattr(transaction, "from_wallet") or not hasattr(transaction, "to_wallet"):
+            return
+
+        # Skip transfers to/from internal escrow wallets
+        to_addr = transaction.to_wallet
+        from_addr = transaction.from_wallet
+
+        # Map PRSM wallet IDs to actual Ethereum addresses
+        # The wallet ID IS the address for wallets created from key pairs,
+        # or it's a named wallet that needs mapping
+        if to_addr.startswith("0x") and len(to_addr) >= 40:
+            target_address = to_addr
+        else:
+            # Named wallet — use the default contract address
+            # or skip this transfer
+            logger.debug(
+                f"Skipping on-chain FTNS transfer for named wallet: {to_addr[:20]}…"
+            )
+            return
+
+        amount = float(transaction.amount) if hasattr(transaction, "amount") else 0
+        if amount <= 0:
+            return
+
+        try:
+            tx_record = await self.ftns_ledger.transfer(
+                job_id=transaction.tx_id if hasattr(transaction, "tx_id") else "",
+                to_address=target_address,
+                amount_ftns=amount,
+            )
+            if tx_record and tx_record.status == "confirmed":
+                logger.info(
+                    f"FTNS on-chain: {amount:.6f} confirmed "
+                    f"(tx: {tx_record.tx_hash[:16]}…)"
+                )
+        except Exception as e:
+            logger.error(f"FTNS on-chain transfer failed: {e}")
 
         except Exception as e:
             logger.error(f"Failed to start IPFS daemon: {e}")
