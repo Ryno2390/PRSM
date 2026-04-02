@@ -2084,6 +2084,112 @@ def list_compute_jobs(limit: int):
     console.print(table)
 
 
+@compute.command("run")
+@click.option('--prompt', required=True, help='Prompt to process')
+def compute_run(prompt: str):
+    """Submit a compute job to your running node via P2P.
+
+    This creates an escrow, submits a job offer to the network,
+    waits for a provider to execute it, then pays them.
+    """
+    import asyncio
+    import os
+    import signal as _sig
+
+    async def _run():
+        from prsm.node.config import NodeConfig
+        from prsm.node.node import PRSMNode
+        from prsm.node.compute_provider import JobType
+
+        cfg = NodeConfig.load()
+        node = PRSMNode(config=cfg)
+        await node.initialize()
+        await node.start()
+
+        # Give it time to connect
+        console.print(f"\n  [dim]Node initialized. Waiting for peers...[/dim]", style="dim")
+        await asyncio.sleep(3)
+
+        # Check peer count
+        peers = node.transport.peer_count if node.transport else 0
+        console.print(f"  Peers: {peers}", style="dim")
+
+        if peers == 0:
+            console.print("  [yellow]No peers connected. Running job locally on your node.[/yellow]")
+            console.print("  Job will be processed via self-compute.", style="dim")
+
+        # Submit job through the compute requester with escrow
+        budget = 10.0
+        escrow = await node._payment_escrow.create_escrow(
+            job_id="local-job",
+            amount=budget,
+            requester_id=node.identity.node_id,
+        )
+
+        if not escrow:
+            console.print("  [red]Insufficient balance for job.[/red]")
+            return None
+
+        console.print(f"  [green]✓ Escrow created: {budget:.6f} FTNS locked[/green]", style="dim")
+
+        # Submit the job
+        job = await node.compute_requester.submit_job(
+            job_type=JobType.INFERENCE,
+            payload={"prompt": prompt, "model": "nwtn"},
+            ftns_budget=budget,
+        )
+
+        console.print(f"  [bold]Job submitted: {job.job_id}[/bold]")
+        console.print(f"  Waiting for result...", style="dim")
+
+        try:
+            result = await node.compute_requester.get_result(job.job_id, timeout=120.0)
+            if result:
+                console.print(f"  [bold green]✓ Result:[/bold green]")
+                if isinstance(result, dict):
+                    for k, v in result.items():
+                        if isinstance(v, str) and len(v) > 200:
+                            v = v[:200] + "..."
+                        console.print(f"    {k}: {v}")
+                else:
+                    console.print(f"    {result}")
+
+                # Release escrow
+                tx = await node.compute_provider.escrow.release_escrow(
+                    job_id=job.job_id,
+                    provider_id=node.identity.node_id,  # Self-compute pays ourselves
+                    consensus_reached=True,
+                )
+                if tx:
+                    console.print(f"  [green]✓ Payment processed[/green]", style="dim")
+            else:
+                console.print("  [yellow]No result received (timeout or no provider)[/yellow]")
+                await node.compute_provider.escrow.refund_escrow(
+                    job_id=job.job_id, reason="No result"
+                )
+        except Exception as e:
+            console.print(f"  [red]Error: {e}[/red]")
+            await node.compute_provider.escrow.refund_escrow(
+                job_id=job.job_id, reason=str(e)
+            )
+
+        await node.stop()
+
+    # Handle Ctrl+C
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, loop.stop)
+        except NotImplementedError:
+            pass
+
+    try:
+        loop.run_until_complete(_run())
+    finally:
+        loop.close()
+
+
 @main.command("demo")
 @click.option("--nodes", default=3, type=int, help="Number of nodes to spawn")
 def compute_demo(nodes: int):

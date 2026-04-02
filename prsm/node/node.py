@@ -763,10 +763,25 @@ class PRSMNode:
         # Create FTNS adapter for teacher rewards/charges
         self._ftns_adapter = _NodeFTNSAdapter(self.ledger, self.identity.node_id)
 
+        # ── Payment Escrow & Result Consensus ─────────────────────
+        from prsm.node.payment_escrow import PaymentEscrow
+        from prsm.node.result_consensus import ResultConsensus
+        self._payment_escrow = PaymentEscrow(
+            ledger=self.ledger,
+            node_id=self.identity.node_id,
+        )
+        self._result_consensus = ResultConsensus(
+            epsilon=0.01,
+            timeout_seconds=300.0,
+        )
+
         # Wire ledger_sync and agent_registry into subsystems
         self.content_uploader.ledger_sync = self.ledger_sync
         if self.compute_provider:
             self.compute_provider.ledger_sync = self.ledger_sync
+            # Wire escrow and consensus into compute provider
+            self.compute_provider.escrow = self._payment_escrow
+            self.compute_provider.consensus = self._result_consensus
         self.compute_requester.ledger_sync = self.ledger_sync
         if self.storage_provider:
             self.storage_provider.ledger_sync = self.ledger_sync
@@ -840,6 +855,8 @@ class PRSMNode:
             self.content_provider.start()
         if self.ledger_sync:
             self.ledger_sync.start()
+        if self._payment_escrow:
+            self._escrow_cleanup_task = asyncio.create_task(self._payment_escrow.periodic_cleanup())
         if self.agent_registry:
             self.agent_registry.start()
         if self.agent_collaboration:
@@ -922,6 +939,8 @@ class PRSMNode:
             await self.bt_client.shutdown()
         if self.ledger_sync:
             await self.ledger_sync.stop()
+        if hasattr(self, '_escrow_cleanup_task') and self._escrow_cleanup_task:
+            self._escrow_cleanup_task.cancel()
         if self.content_uploader:
             await self.content_uploader.close()
         if self.storage_provider:
@@ -1057,6 +1076,8 @@ class PRSMNode:
             "content_index": self.content_index.get_stats() if self.content_index else None,
             "content_provider": self.content_provider.get_stats() if self.content_provider else None,
             "ledger_sync": self.ledger_sync.get_stats() if self.ledger_sync else None,
+            "escrow": self._payment_escrow.get_stats() if hasattr(self, '_payment_escrow') and self._payment_escrow else None,
+            "consensus": self._result_consensus.get_stats() if hasattr(self, '_result_consensus') and self._result_consensus else None,
             "agents": self.agent_registry.get_stats() if self.agent_registry else None,
             "collaboration": self.agent_collaboration.get_stats() if self.agent_collaboration else None,
             "bittorrent": {
