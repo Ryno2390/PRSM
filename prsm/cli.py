@@ -2120,6 +2120,9 @@ def list_compute_jobs(limit: int, api_url: str):
                     job.get('created_at', 'N/A')[:19]
                 )
             console.print(table)
+        elif response.status_code == 401:
+            console.print("🔑 Not authenticated. Please log in first.", style="yellow")
+            console.print("   Run:  prsm login", style="dim")
         else:
             console.print(f"❌ Failed to list jobs: {response.status_code}", style="red")
     except httpx.ConnectError:
