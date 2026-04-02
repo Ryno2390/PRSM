@@ -42,6 +42,7 @@ class PRSMConfig(BaseModel):
     # API Keys (stored separately in .env but tracked here)
     has_openai_key: bool = False
     has_anthropic_key: bool = False
+    has_openrouter_key: bool = False
     has_huggingface_token: bool = False
 
     # FTNS Wallet
