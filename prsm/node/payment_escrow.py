@@ -111,7 +111,6 @@ class PaymentEscrow:
                 from_wallet=requester,
                 to_wallet=escrow_wallet,
                 amount=amount,
-                tx_type=TransactionType.COMPUTE_PAYMENT,
                 description=f"Escrow for job {job_id[:8]}",
             )
             escrow.tx_lock = tx.tx_id
