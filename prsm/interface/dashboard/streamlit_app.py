@@ -5,11 +5,10 @@ import base64
 from pathlib import Path
 
 # --- Configuration ---
-PRSM_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-MOCKUP_DIR = PRSM_ROOT / "PRSM_ui_mockup"
-
-# Force current working directory to PRSM root so relative file access works
-os.chdir(str(PRSM_ROOT))
+# The UI mockup ships inside the prsm package at prsm/ui_mockup/.
+# This works for both editable installs and pipx installs.
+MOCKUP_DIR = Path(__file__).resolve().parent.parent / "ui_mockup"
+assert MOCKUP_DIR.exists(), f"Mockup dir not found: {MOCKUP_DIR}"
 
 st.set_page_config(
     page_title="PRSM | Dashboard",
