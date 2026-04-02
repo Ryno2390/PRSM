@@ -862,6 +862,9 @@ class PRSMNode:
                 logger.info("FTNS on-chain ledger unavailable — running local mode only")
                 self.ftns_ledger = None
 
+        # Seed welcome grant if the node has no balance
+        await self._seed_welcome_grant()
+
         if self.compute_provider:
             await self.compute_provider.start()
         await self.compute_requester.start()
@@ -1064,7 +1067,26 @@ class PRSMNode:
             logger.warning("Failed to start IPFS daemon: %s", e)
             return False
 
-        # ── On-Chain FTNS Transfer Handler ────────────────────────
+    async def _seed_welcome_grant(self) -> None:
+        """Give the node an initial FTNS balance if it has none."""
+        try:
+            balance = await self.ledger.get_balance(self.identity.node_id)
+            # If balance is 0 (local ledger cleared, not on-chain balance),
+            # give the node 100 FTNS to start with
+            if balance <= 0:
+                await self.ledger.credit(
+                    wallet_id=self.identity.node_id,
+                    amount=100.0,
+                    tx_type=TransactionType.WELCOME_GRANT,
+                    description="Welcome grant for new node",
+                )
+                logger.info(
+                    f"Seeded welcome grant: 100 FTNS to {self.identity.node_id[:12]}..."
+                )
+        except Exception as e:
+            logger.debug(f"Welcome grant check failed: {e}")
+
+    # ── On-Chain FTNS Transfer Handler ────────────────────────
     async def _on_chain_ftns_transfer(self, transaction) -> None:
         """Broadcast a transaction to the real FTNS contract on Base.
 
