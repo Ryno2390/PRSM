@@ -101,11 +101,22 @@ class DemoNodeWrapper:
             balance = await self.ledger.get_balance(self.identity.node_id)
             console.print(f"    Balance:   {balance:.2f} FTNS")
 
-        # Gossip (local mode - no network, direct calls between providers)
+        # Gossip protocol (needs a transport — use a dummy one for local demo)
+        class _GossipTransport:
+            """Minimal shim so gossip protocol doesn't crash."""
+            peers: Dict[str, Any] = {}
+            peer_count: int = 0
+            async def send_to_peer(self, peer_id, msg) -> None: pass
+            def on_message(self, msg_type, handler) -> None: pass
+            def _on_goosip(self, msg, peer): pass
+
+        self.transport = _GossipTransport()
         self.gossip = GossipProtocol(
-            node_id=self.identity.node_id,
-            ttl=10,
+            transport=self.transport,
+            fanout=3,
+            default_ttl=10,
         )
+        self.gossip._running = True  # Mark as started (no background task needed)
 
         # Compute provider
         self.provider = ComputeProvider(
