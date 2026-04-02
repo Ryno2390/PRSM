@@ -316,13 +316,14 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         prompt = body.get("prompt", "")
         model = body.get("model", "nwtn")
         timeout = float(body.get("timeout", 120.0))
+        budget = float(body.get("budget", 0.0))
 
         from prsm.node.compute_provider import JobType
 
         job = await node.compute_requester.submit_job(
             job_type=JobType.INFERENCE,
             payload={"prompt": prompt, "model": model},
-            ftns_budget=0.0,
+            ftns_budget=budget,
         )
 
         # Wait for the result
