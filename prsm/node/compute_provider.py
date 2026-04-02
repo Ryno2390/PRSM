@@ -25,8 +25,8 @@ if TYPE_CHECKING:
 
 from prsm.node.config import is_active_now
 from prsm.node.gossip import (
-    GOSSIP_JOB_ACCEPT,
     GOSSIP_JOB_OFFER,
+    GOSSIP_JOB_ACCEPT,
     GOSSIP_JOB_RESULT,
     GossipProtocol,
 )
@@ -34,6 +34,8 @@ from prsm.node.identity import NodeIdentity
 from prsm.node.local_ledger import LocalLedger, TransactionType
 from prsm.node.transport import P2PMessage, WebSocketTransport
 from prsm.compute.nwtn.backends.config import detect_available_backends
+from prsm.node.payment_escrow import PaymentEscrow
+from prsm.node.result_consensus import ResultConsensus
 
 logger = logging.getLogger(__name__)
 
@@ -117,8 +119,8 @@ def detect_resources() -> SystemResources:
 class ComputeProvider:
     """Accepts and executes compute jobs from the PRSM network.
 
-    Listens for job_offer gossip, evaluates against available resources,
-    and executes accepted jobs in sandboxed subprocesses.
+    Supports both single-node mode (self-compute) and multi-node mode
+    with consensus-verified results and escrowed payments.
     """
 
     def __init__(
@@ -150,6 +152,10 @@ class ComputeProvider:
         self.allow_self_compute = True  # Execute own jobs when no peers (single-node mode)
         self.ledger_sync = None  # Set by node.py after construction
         self.orchestrator = None  # NWTN orchestrator, set by node.py after construction
+
+        # Cross-node infrastructure
+        self.escrow: Optional[PaymentEscrow] = None
+        self.consensus: Optional[ResultConsensus] = None
 
     @property
     def available_capacity(self) -> Dict[str, Any]:
