@@ -283,9 +283,33 @@ def _step_account(config: PRSMConfig, api_url: str, minimal: bool) -> bool:
         return False
 
     if choice == "register":
-        return _do_register(api_url, suggested_username)
+        success_registered = False
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            if attempt > 0:
+                console.print()
+                console.print(f"  [yellow]Attempt {attempt + 1}/{max_attempts} — previous registration failed.[/yellow]")
+            success_registered = _do_register(api_url, suggested_username)
+            if success_registered:
+                break
+            if attempt < max_attempts - 1:
+                if not prompt_confirm("Try again with different credentials?", default=True):
+                    break
+        return success_registered
     else:
-        return _do_login(api_url)
+        success_logged = False
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            if attempt > 0:
+                console.print()
+                console.print(f"  [yellow]Attempt {attempt + 1}/{max_attempts} — previous login failed.[/yellow]")
+            success_logged = _do_login(api_url)
+            if success_logged:
+                break
+            if attempt < max_attempts - 1:
+                if not prompt_confirm("Try again?", default=True):
+                    break
+        return success_logged
 
 
 def _derive_username(display_name: str) -> str:
