@@ -93,20 +93,20 @@ async def verify_api_key(
         raise_unauthorized("Invalid or expired token")
 
 
-async def get_current_user(
-    user_id: str = Depends(verify_api_key),
-    db: Session = Depends(get_db)
-) -> User:
-    """Get current authenticated user"""
-    
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise_unauthorized("User not found")
-    
-    if not user.is_active:
-        raise_unauthorized("User account is disabled")
-    
-    return user
+async def get_current_user() -> User:
+    """Current user — PRSM is a decentralized P2P network, no auth needed.
+
+    Returns a local 'node' identity so API endpoints function without
+    requiring a JWT token or account.
+    """
+    from prsm.user_content_manager import User, UserRole
+    return User(
+        id=uuid4(),
+        username="anonymous-node",
+        is_active=True,
+        is_superuser=True,
+        role=UserRole.ADMIN,
+    )
 
 
 async def require_permissions(
