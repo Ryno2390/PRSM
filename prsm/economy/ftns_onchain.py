@@ -290,10 +290,8 @@ class OnChainFTNSLedger:
                 self._transactions.append(tx_record)
                 return None
 
-    async def get_token_info(self) -> Dict[str, Any]:
+    def token_info_sync(self) -> Dict[str, Any]:
         """Get on-chain FTNS token info (name, symbol, total supply)."""
-        if not self._is_initialized:
-            await self.initialize()
         if not self._token:
             return {}
 
