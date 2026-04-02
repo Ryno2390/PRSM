@@ -226,9 +226,200 @@ def _step_welcome(config: PRSMConfig, sys_info: dict, minimal: bool) -> dict:
     return sys_info
 
 
+def _step_account(config: PRSMConfig, api_url: str, minimal: bool) -> bool:
+    """Step 2: Account — register or log in.
+
+    Uses the node display name from step 1 as the default username.
+    Offers to generate a random password for new accounts so the user
+    doesn't need to think about one.
+    """
+    step_header(2, 8, "Account")
+
+    if minimal:
+        info("Account setup skipped in minimal mode.")
+        info("Run 'prsm login' or 'prsm register' to create/sign in to an account.")
+        return False
+
+    # Check if the API is reachable
+    import httpx
+    api_ok = False
+    try:
+        resp = httpx.get(f"{api_url}/api/v1/health", timeout=3)
+        api_ok = resp.status_code < 500
+    except Exception:
+        pass
+
+    if not api_ok:
+        info("PRSM API server is not running locally.")
+        info("Account setup requires a running server at {api_url}.".format(api_url=api_url))
+        info("You can create an account later with 'prsm register' or 'prsm login'.")
+        return False
+
+    # Derive a clean username from the display name set in step 1
+    suggested_username = _derive_username(config.display_name or "prsm-node")
+
+    # Check if the user already has saved credentials
+    already_logged_in = _credentials_exist()
+    if already_logged_in:
+        console.print()
+        console.print("  You already have saved credentials.", style="yellow")
+        if not prompt_confirm("Overwrite with new login / registration?", default=False):
+            info("Keeping existing credentials.")
+            return True
+
+    console.print()
+    console.print("  Choose one:", style="bold white")
+    console.print("    1. Create a new account", style="dim")
+    console.print("    2. Sign in to an existing account", style="dim")
+    console.print("    3. Skip", style="dim")
+    choice = click.prompt(
+        "  Choice",
+        type=click.Choice(["1", "2", "3"]),
+        default="2" if already_logged_in else "1",
+    )
+
+    if choice == "3":
+        info("Skipped. Run 'prsm login' later when a server is available.")
+        return False
+
+    if choice == "1":
+        return _do_register(api_url, suggested_username)
+    else:
+        return _do_login(api_url)
+
+
+def _derive_username(display_name: str) -> str:
+    """Derive a clean API username from the node display name.
+
+    Strips 'prsm-' prefix, lowercases, removes non-alphanumeric chars,
+    ensures at least 3 chars.
+    """
+    import re
+    name = display_name.lower()
+    if name.startswith("prsm-"):
+        name = name[5:]
+    # Remove anything not alphanumeric or underscore
+    name = re.sub(r'[^a-z0-9_]', '', name)
+    if len(name) < 3:
+        name = name + "user"
+    return name[:50]  # API max is 50
+
+
+def _credentials_exist() -> bool:
+    """Check if credentials are already saved locally."""
+    creds_file = Path.home() / ".prsm" / "credentials.json"
+    return creds_file.exists()
+
+
+def _generate_password(length: int = 16) -> str:
+    """Generate a random password using only alphanumeric chars."""
+    import secrets
+    alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+
+def _do_register(api_url: str, suggested_username: str) -> bool:
+    """Walk through new-user registration with the API."""
+    import httpx
+
+    console.print()
+    info("Creating a new account at {api_url}.".format(api_url=api_url))
+    email = click.prompt("  Email")
+    username = click.prompt("  Username", default=suggested_username)
+    password = click.prompt(
+        "  Choose a password (press Enter for auto-generated)",
+        default="",
+        hide_input=True,
+        confirmation_prompt=True,
+    )
+    if not password:
+        password = _generate_password()
+        console.print()
+        console.print(f"  [bold]Your password:[/bold] ")
+        console.print(f"    {password}", style="bold yellow")
+        console.print()
+        console.print("  [bold]Save this password somewhere safe — you'll need it to log in.[/bold]", style="yellow")
+        console.print()
+        if not prompt_confirm("Continue with this password?"):
+            return False
+
+    try:
+        resp = httpx.post(
+            f"{api_url}/api/v1/auth/register",
+            json={"email": email, "username": username, "password": password, "confirm_password": password},
+            timeout=15,
+        )
+    except httpx.ConnectError:
+        error(f"Cannot connect to {api_url}")
+        return False
+
+    if resp.status_code == 201:
+        data = resp.json()
+        _save_credentials(data.get("access_token"), data.get("refresh_token"), api_url, username)
+        success(f"Account created as '{username}'. Logged in.")
+        return True
+    else:
+        detail = ""
+        try:
+            detail = resp.json().get("detail", resp.text[:120])
+        except Exception:
+            detail = resp.text[:120]
+        error(f"Registration failed ({resp.status_code}): {detail}")
+        return False
+
+
+def _do_login(api_url: str) -> bool:
+    """Walk through login with existing credentials."""
+    import httpx
+
+    console.print()
+    info("Logging in at {api_url}.".format(api_url=api_url))
+    username = click.prompt("  Username")
+    password = click.prompt("  Password", hide_input=True)
+
+    try:
+        resp = httpx.post(
+            f"{api_url}/api/v1/auth/login",
+            json={"username": username, "password": password},
+            timeout=10,
+        )
+    except httpx.ConnectError:
+        error(f"Cannot connect to {api_url}")
+        return False
+
+    if resp.status_code == 200:
+        data = resp.json()
+        _save_credentials(data["access_token"], data["refresh_token"], api_url, username)
+        expires_min = data.get("expires_in", 1800) // 60
+        success(f"Logged in as '{username}' (token expires in {expires_min} min).")
+        return True
+    else:
+        detail = ""
+        try:
+            detail = resp.json().get("detail", resp.text[:120])
+        except Exception:
+            detail = resp.text[:120]
+        error(f"Login failed ({resp.status_code}): {detail}")
+        return False
+
+
+def _save_credentials(access_token: str, refresh_token: str, api_url: str, username: str) -> None:
+    """Save auth credentials to ~/.prsm/credentials.json (chmod 600)."""
+    import json
+    CREDENTIALS_FILE = Path.home() / ".prsm" / "credentials.json"
+    CREDENTIALS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CREDENTIALS_FILE.write_text(json.dumps({
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "api_url": api_url,
+        "username": username,
+    }, indent=2))
+    CREDENTIALS_FILE.chmod(0o600)
+
+
 def _step_role(config: PRSMConfig, minimal: bool):
-    """Step 2: Intent / Role Selection."""
-    step_header(2, 7, "Role Selection")
+    """Step 3: Intent / Role Selection."""
+    step_header(3, 8, "Role Selection")
 
     if minimal:
         config.node_role = NodeRole.FULL
@@ -265,8 +456,8 @@ def _step_role(config: PRSMConfig, minimal: bool):
 
 
 def _step_resources(config: PRSMConfig, sys_info: dict, minimal: bool):
-    """Step 3: Resource Allocation."""
-    step_header(3, 7, "Resource Allocation")
+    """Step 4: Resource Allocation."""
+    step_header(4, 8, "Resource Allocation")
 
     if config.node_role == NodeRole.CONSUMER:
         info("Resource allocation skipped (consumer-only mode).")
@@ -330,8 +521,8 @@ def _step_resources(config: PRSMConfig, sys_info: dict, minimal: bool):
 
 
 def _step_api_keys(config: PRSMConfig, minimal: bool):
-    """Step 4: API Keys & Wallet."""
-    step_header(4, 7, "API Keys & Wallet")
+    """Step 5: API Keys & Wallet."""
+    step_header(5, 8, "API Keys & Wallet")
 
     if minimal:
         info("API key setup skipped in minimal mode.")
@@ -408,8 +599,8 @@ def _step_api_keys(config: PRSMConfig, minimal: bool):
 
 
 def _step_network(config: PRSMConfig, minimal: bool):
-    """Step 5: Network Configuration."""
-    step_header(5, 7, "Network Configuration")
+    """Step 6: Network Configuration."""
+    step_header(6, 8, "Network Configuration")
 
     default_bootstrap = [
         "/dns4/bootstrap1.prsm.network/tcp/9001/p2p/QmPRSM1",
@@ -484,8 +675,8 @@ def _step_network(config: PRSMConfig, minimal: bool):
 
 
 def _step_ai_integration(config: PRSMConfig, minimal: bool):
-    """Step 6: AI Integration (MCP Server)."""
-    step_header(6, 7, "AI Integration")
+    """Step 7: AI Integration (MCP Server)."""
+    step_header(7, 8, "AI Integration")
 
     if minimal:
         config.mcp_server_enabled = True
@@ -529,8 +720,8 @@ def _step_ai_integration(config: PRSMConfig, minimal: bool):
 
 
 def _step_review(config: PRSMConfig, dry_run: bool) -> bool:
-    """Step 7: Review & Launch. Returns True if user confirms."""
-    step_header(7, 7, "Review & Launch")
+    """Step 8: Review & Launch. Returns True if user confirms."""
+    step_header(8, 8, "Review & Launch")
 
     # Build summary
     items = {
@@ -627,8 +818,10 @@ def run_setup_wizard(dry_run: bool = False, minimal: bool = False, reset: bool =
         # Detect system
         sys_info = _detect_system()
 
-        # Run steps
+        # Run steps (8 steps total)
+        api_url = "http://127.0.0.1:8000"
         _step_welcome(config, sys_info, minimal)
+        _step_account(config, api_url, minimal)
         _step_role(config, minimal)
         _step_resources(config, sys_info, minimal)
         _step_api_keys(config, minimal)
