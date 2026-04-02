@@ -103,6 +103,7 @@ class ComputeRequester:
         self.submitted_jobs: Dict[str, SubmittedJob] = {}
         self._running = False
         self.ledger_sync = None  # Set by node.py after construction
+        self.escrow: Optional["PaymentEscrow"] = None  # Set by node.py after construction
 
     async def start(self) -> None:
         """Register gossip handlers."""
@@ -155,25 +156,15 @@ class ComputeRequester:
         self,
         job_type: JobType,
         payload: Dict[str, Any],
-        ftns_budget: float,
+        ftns_budget: float = 0.0,
         target_peers: Optional[List[str]] = None,
+        use_escrow: bool = True,
     ) -> SubmittedJob:
-        """Submit a compute job to the network.
-
-        Args:
-            job_type: Type of job to submit.
-            payload: Job payload/parameters.
-            ftns_budget: Maximum FTNS to spend on this job.
-            target_peers: Optional list of specific peer IDs to target.
-                         If None and smart_routing is enabled, will route to capable peers.
-
-        Returns:
-            SubmittedJob that can be awaited for results via get_result().
-        """
-        # Check balance
-        balance = await self.ledger.get_balance(self.identity.node_id)
-        if balance < ftns_budget:
-            raise ValueError(f"Insufficient FTNS balance: {balance:.2f} < {ftns_budget:.2f}")
+        """Submit a compute job to the network, optionally with escrow."""
+        if ftns_budget > 0:
+            balance = await self.ledger.get_balance(self.identity.node_id)
+            if balance < ftns_budget:
+                raise ValueError(f"Insufficient FTNS balance: {balance:.2f} < {ftns_budget:.2f}")
 
         job = SubmittedJob(
             job_id=uuid.uuid4().hex,
@@ -182,6 +173,30 @@ class ComputeRequester:
             ftns_budget=ftns_budget,
         )
         self.submitted_jobs[job.job_id] = job
+
+        # Create escrow for the job (Phase 1: on-chain FTNS economy)
+        if use_escrow and self.escrow is not None and ftns_budget > 0:
+            escrow_entry = await self.escrow.create_escrow(
+                job_id=job.job_id,
+                amount=ftns_budget,
+                requester_id=self.identity.node_id,
+            )
+            if escrow_entry:
+                job.escrow_id = escrow_entry.escrow_id
+                logger.info(
+                    f"Escrow created for {job.job_id[:8]}: "
+                    f"{ftns_budget:.6f} FTNS locked"
+                )
+            else:
+                logger.warning(
+                    f"Escrow creation failed for {job.job_id[:8]} — "
+                    f"proceeding without escrow"
+                )
+        elif ftns_budget > 0 and self.escrow is None:
+            logger.debug(
+                f"No escrow available for {job.job_id[:8]} — "
+                f"running without on-chain escrow"
+            )
 
         # Determine target peers for smart routing
         routing_targets = target_peers
@@ -193,7 +208,8 @@ class ComputeRequester:
                 routing_targets = capable_peers
                 routing_mode = "targeted"
                 logger.info(
-                    f"Smart routing: targeting {len(capable_peers)} capable peers for {job_type.value}"
+                    f"Smart routing: targeting {len(capable_peers)} "
+                    f"capable peers for {job_type.value}"
                 )
             else:
                 logger.info(
