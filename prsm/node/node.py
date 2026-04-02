@@ -782,6 +782,10 @@ class PRSMNode:
             # Wire escrow and consensus into compute provider
             self.compute_provider.escrow = self._payment_escrow
             self.compute_provider.consensus = self._result_consensus
+            # Wire ledger_sync broadcast for escrow transactions
+            self._payment_escrow.broadcast_tx = (
+                self.ledger_sync.broadcast_transaction if self.ledger_sync else None
+            )
         self.compute_requester.ledger_sync = self.ledger_sync
         if self.storage_provider:
             self.storage_provider.ledger_sync = self.ledger_sync

@@ -154,8 +154,15 @@ class ComputeProvider:
         self.orchestrator = None  # NWTN orchestrator, set by node.py after construction
 
         # Cross-node infrastructure
-        self.escrow: Optional[PaymentEscrow] = None
-        self.consensus: Optional[ResultConsensus] = None
+        self.escrow = PaymentEscrow(
+            ledger=self.ledger,
+            node_id=self.identity.node_id,
+        )
+        self.consensus = ResultConsensus(
+            epsilon=0.01,
+            timeout_seconds=300.0,
+        )
+        self._escrow_task: Optional[asyncio.Task] = None
 
     @property
     def available_capacity(self) -> Dict[str, Any]:
@@ -321,6 +328,25 @@ class ComputeProvider:
             })
 
             logger.error(f"Job {job.job_id[:8]} failed: {e}")
+
+        else:
+            # Job completed successfully — release escrow
+            if self.escrow:
+                escrow_entry = self.escrow.get_escrow(job.job_id)
+                if escrow_entry and escrow_entry.status.value == "pending":
+                    tx = await self.escrow.release_escrow(
+                        job_id=job.job_id,
+                        provider_id=self.identity.node_id,
+                        consensus_reached=True,
+                    )
+                    if tx:
+                        logger.info(
+                            f"Escrow released for {job.job_id[:8]}: "
+                            f"{escrow_entry.amount} FTNS -> {self.identity.node_id[:12]}"
+                        )
+                elif not escrow_entry:
+                    # No escrow — self-compute or legacy mode, just charge local ledger
+                    pass
 
         finally:
             # Move from active to completed

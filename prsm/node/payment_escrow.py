@@ -60,9 +60,15 @@ class PaymentEscrow:
     - Disputed results can trigger partial refunds
     """
 
-    def __init__(self, ledger: LocalLedger, node_id: str):
+    def __init__(
+        self,
+        ledger: LocalLedger,
+        node_id: str,
+        broadcast_transaction: Optional[Callable] = None,
+    ):
         self.ledger = ledger
         self.node_id = node_id
+        self.broadcast_tx = broadcast_transaction  # async func(tx)
         self._escrows: Dict[str, EscrowEntry] = {}
         self._tasks: List[asyncio.Task] = []
         self._running = False
@@ -113,6 +119,12 @@ class PaymentEscrow:
                 f"Escrow created: {escrow.escrow_id[:8]}... "
                 f"locked {amount:.6f} FTNS for job {job_id[:8]}..."
             )
+            # Broadcast escrow creation to network
+            if self.broadcast_tx:
+                try:
+                    await self.broadcast_tx(tx)
+                except Exception:
+                    pass
             return escrow
         except ValueError as e:
             logger.warning(f"Escrow transfer failed: {e}")
@@ -164,6 +176,13 @@ class PaymentEscrow:
             escrow.tx_release = tx.tx_id
             escrow.status = EscrowStatus.RELEASED
             escrow.completed_at = time.time()
+
+            # Broadcast payment release to network
+            if self.broadcast_tx:
+                try:
+                    await self.broadcast_tx(tx)
+                except Exception:
+                    pass
 
             # Refund remainder to requester if partial
             remainder = escrow_balance - amount
