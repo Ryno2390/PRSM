@@ -306,7 +306,7 @@ class MultiNodeDemo:
         requester = self.nodes[0]
 
         for r in results:
-            await requester.consensus.submit_result(
+            requester.consensus.submit_result(
                 job_id=job_id,
                 provider_id=r["provider_id"],
                 result=r["result"],
