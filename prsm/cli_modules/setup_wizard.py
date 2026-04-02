@@ -342,6 +342,34 @@ def _step_api_keys(config: PRSMConfig, minimal: bool):
     info("Keys are stored in ~/.prsm/.env (never in config.yaml).")
     console.print()
 
+    # OpenRouter
+    console.print()
+    if prompt_confirm("Configure OpenRouter API key? (primary LLM access — supports 200+ models including Claude, Gemini, Llama)", default=True):
+        key = prompt_text("OpenRouter API key (starts with 'sk-or-v1-')", default="")
+        if key and key.startswith("sk-or-v1-"):
+            _save_api_key("OPENROUTER_API_KEY", key)
+            config.has_openrouter_key = True
+            success("OpenRouter key saved.")
+            # Ask which model to use
+            console.print()
+            info("OpenRouter supports 200+ models. Which would you like to use?")
+            console.print("  [dim]Popular choices (leave blank for default):[/dim]")
+            console.print("  [dim]  google/gemini-2.0-flash-lite-001  (fast, cheap)[/dim]")
+            console.print("  [dim]  google/gemini-flash-1.5-8b         (free tier)[/dim]")
+            console.print("  [dim]  anthropic/claude-3-5-sonnet        (quality)[/dim]")
+            console.print("  [dim]  meta-llama/llama-3.3-70b-instruct  (open-weight)[/dim]")
+            model = prompt_text("OpenRouter model (leave blank for google/gemini-2.0-flash-lite-001)", default="")
+            if model:
+                _save_api_key("OPENROUTER_DEFAULT_MODEL", model)
+                info(f"Model set to: {model}")
+            else:
+                info("Using default model: google/gemini-2.0-flash-lite-001")
+        elif key:
+            warning("Key doesn't look like an OpenRouter key (should start with 'sk-or-v1-').")
+            if prompt_confirm("Save anyway?", default=False):
+                _save_api_key("OPENROUTER_API_KEY", key)
+                config.has_openrouter_key = True
+
     # OpenAI
     if prompt_confirm("Configure OpenAI API key? (for embeddings & semantic search, not your chat model)", default=False):
         key = prompt_text("OpenAI API key — for embeddings & semantic search (optional)", default="")
