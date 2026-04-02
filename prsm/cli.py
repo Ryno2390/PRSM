@@ -934,6 +934,122 @@ def db_downgrade(revision: str) -> None:
         raise SystemExit(1)
 
 
+# ---------------------------------------------------------------------------
+# Version management — update command
+# ---------------------------------------------------------------------------
+
+
+def _is_installed_via_pipx() -> bool:
+    """Check if prsm-network was installed via pipx."""
+    import subprocess as _sub
+    result = _sub.run(
+        ["pipx", "list", "--json"], capture_output=True, text=True, timeout=10
+    )
+    if result.returncode != 0:
+        return False
+    import json
+    try:
+        data = json.loads(result.stdout)
+        return "prsm-network" in data.get("venvs", {})
+    except (json.JSONDecodeError, KeyError):
+        return False
+
+
+def _run_pipx_upgrade() -> None:
+    """Upgrade prsm-network via pipx."""
+    import subprocess as _sub
+    console.print("[dim]Detected pipx installation. Upgrading via pipx...[/dim]")
+    result = _sub.run(
+        ["pipx", "upgrade", "prsm-network"],
+        capture_output=True, text=True, timeout=120
+    )
+    if result.returncode == 0:
+        console.print("[green]✓ PRSM upgraded successfully.[/green]")
+        if result.stdout.strip():
+            console.print(f"[dim]{result.stdout.strip()}[/dim]")
+    else:
+        console.print(f"[red]Upgrade failed:[/red]")
+        console.print(f"[dim]{result.stderr or result.stdout}[/dim]")
+        raise SystemExit(1)
+
+
+def _run_pip_upgrade() -> None:
+    """Upgrade prsm-network via pip."""
+    import subprocess as _sub
+    console.print("[dim]Detected pip installation. Upgrading via pip...[/dim]")
+    result = _sub.run(
+        [sys.executable, "-m", "pip", "install", "--upgrade", "prsm-network"],
+        capture_output=True, text=True, timeout=120
+    )
+    if result.returncode == 0:
+        console.print("[green]✓ PRSM upgraded successfully.[/green]")
+    else:
+        console.print(f"[red]Upgrade failed:[/red]")
+        console.print(f"[dim]{result.stderr or result.stdout}[/dim]")
+        raise SystemExit(1)
+
+
+@main.command()
+@click.option("--dry-run", is_flag=True, help="Show what would be updated without installing")
+def update(dry_run: bool):
+    """Check for and install PRSM updates.
+
+    Automatically detects how PRSM was installed (pipx vs pip) and
+    upgrades accordingly.
+    """
+    import importlib.metadata
+    from packaging.version import Version as _V
+    from packaging.version import InvalidVersion
+
+    # Get installed version
+    try:
+        current_ver = importlib.metadata.version("prsm-network")
+    except importlib.metadata.PackageNotFoundError:
+        console.print("[red]PRSM is not installed as a package.[/red]")
+        console.print("Install with:  pip install prsm-network")
+        raise SystemExit(1)
+
+    # Fetch latest from PyPI
+    try:
+        import httpx
+        resp = httpx.get("https://pypi.org/pypi/prsm-network/json", timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        latest_ver = data["info"]["version"]
+    except Exception as e:
+        console.print(f"[red]Could not check for updates: {e}[/red]")
+        raise SystemExit(1)
+
+    try:
+        current = _V(current_ver)
+        latest = _V(latest_ver)
+    except InvalidVersion:
+        console.print(f"[yellow]Cannot compare versions: installed={current_ver}, latest={latest_ver}[/yellow]")
+        raise SystemExit(1)
+
+    if current >= latest:
+        console.print(f"[green]✓ PRSM is up to date (v{current_ver})[/green]")
+        return
+
+    console.print(f"Update available: v{current_ver} → v{latest_ver}")
+
+    if dry_run:
+        console.print("[dim]Dry run — no changes will be made.[/dim]")
+        return
+
+    # Detect install method and upgrade
+    is_pipx = _is_installed_via_pipx()
+    if is_pipx:
+        _run_pipx_upgrade()
+    else:
+        _run_pip_upgrade()
+
+
+# ---------------------------------------------------------------------------
+# Database management
+# ---------------------------------------------------------------------------
+
+
 @main.command()
 def db_status() -> None:
     """Show current database migration revision and pending migrations."""
