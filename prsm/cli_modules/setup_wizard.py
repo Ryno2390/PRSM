@@ -484,8 +484,8 @@ def _step_network(config: PRSMConfig, minimal: bool):
 
 
 def _step_ai_integration(config: PRSMConfig, minimal: bool):
-    """Step 6: AI Integration (MCP Server)."""
-    step_header(6, 7, "AI Integration")
+    """Step 5: AI Integration (MCP Server)."""
+    step_header(5, 7, "AI Integration")
 
     if minimal:
         config.mcp_server_enabled = True

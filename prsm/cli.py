@@ -1970,165 +1970,118 @@ def compute():
 @click.option('--model', default='nwtn', help='Model to use (default: nwtn)')
 @click.option('--max-tokens', default=1000, type=int, help='Maximum tokens in response')
 @click.option('--budget', type=float, help='Maximum FTNS to spend')
-@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
-def submit(prompt: str, model: str, max_tokens: int, budget: float, api_url: str):
-    """Submit a compute job to the PRSM network."""
-    import httpx
-    
-    console.print(f"🚀 Submitting compute job...", style="bold blue")
-    console.print(f"   Model: {model}")
-    console.print(f"   Max tokens: {max_tokens}")
-    if budget:
-        console.print(f"   Budget: {budget} FTNS")
-    
-    try:
-        response = httpx.post(
-            f"{api_url}/api/v1/compute/jobs",
-            json={
-                "prompt": prompt,
-                "model": model,
-                "max_tokens": max_tokens,
-                "budget": budget
-            },
-            timeout=30.0
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            console.print(f"✅ Job submitted successfully!", style="bold green")
-            console.print(f"   Job ID: {data.get('job_id')}")
-            console.print(f"   Status: {data.get('status')}")
-            console.print(f"   Estimated cost: {data.get('estimated_cost', 0):.4f} FTNS")
-        else:
-            console.print(f"❌ Failed to submit job: {response.status_code}", style="red")
-            console.print(f"   {response.text}")
-    except httpx.ConnectError:
-        console.print("❌ Cannot connect to PRSM server", style="red")
-        console.print("   Make sure the server is running: prsm serve")
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
+def submit(prompt: str, model: str, max_tokens: int, budget: Optional[float]):
+    """Submit a compute job to the local node."""
+    from prsm.compute.jobs_store import create_job
+
+    job = create_job(prompt=prompt, model=model, max_tokens=max_tokens, budget=budget)
+
+    console.print(f"[bold green]✅ Job submitted[/bold green]")
+    console.print(f"   Job ID:  {job['job_id']}")
+    console.print(f"   Model:   {job['model']}")
+    console.print(f"   Status:  {job['status']}")
+    if job.get('budget'):
+        console.print(f"   Budget:  {job['budget']} FTNS")
+    console.print()
+    console.print("  Jobs are processed by your local P2P node.", style="dim")
+    console.print("  Check status with:  prsm compute status " + job['job_id'], style="dim")
 
 
 @compute.command()
-@click.argument('job-id')
-@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
-def status(job_id: str, api_url: str):
+@click.argument('job_id')
+def status(job_id: str):
     """Get status of a compute job."""
-    import httpx
-    
-    try:
-        response = httpx.get(f"{api_url}/api/v1/compute/jobs/{job_id}", timeout=10.0)
-        
-        if response.status_code == 200:
-            data = response.json()
-            table = Table(title=f"Job Status: {job_id}")
-            table.add_column("Property", style="cyan")
-            table.add_column("Value", style="green")
-            table.add_row("Job ID", data.get('job_id', 'N/A'))
-            table.add_row("Status", data.get('status', 'N/A'))
-            table.add_row("Progress", f"{data.get('progress', 0) * 100:.1f}%")
-            table.add_row("Model", data.get('model', 'N/A'))
-            if data.get('result'):
-                table.add_row("Result", "Available")
-            console.print(table)
-        elif response.status_code == 404:
-            console.print(f"❌ Job not found: {job_id}", style="red")
-        else:
-            console.print(f"❌ Failed to get job status: {response.status_code}", style="red")
-    except httpx.ConnectError:
-        console.print("❌ Cannot connect to PRSM server", style="red")
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
+    from prsm.compute.jobs_store import get_job
+
+    job = get_job(job_id)
+    if not job:
+        console.print(f"[red]Job not found: {job_id}[/red]")
+        raise SystemExit(1)
+
+    console.print(f"\n[bold]Job Status: {job_id}[/bold]\n")
+    table = Table(show_header=False)
+    table.add_column("Key", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("Status", job.get("status", "unknown"))
+    table.add_row("Model", job.get("model", "—"))
+    table.add_row("Prompt", (job.get("prompt", "") or "")[:80])
+    if job.get("result"):
+        table.add_row("Result", str(job["result"])[:120])
+    if job.get("error"):
+        table.add_row("Error", job["error"])
+    if job.get("budget"):
+        table.add_row("Budget", f"{job['budget']} FTNS")
+    console.print(table)
 
 
 @compute.command()
-@click.argument('job-id')
-@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
-def result(job_id: str, api_url: str):
+@click.argument('job_id')
+def result(job_id: str):
     """Get result of a completed compute job."""
-    import httpx
-    
-    try:
-        response = httpx.get(f"{api_url}/api/v1/compute/jobs/{job_id}/result", timeout=10.0)
-        
-        if response.status_code == 200:
-            data = response.json()
-            console.print("📄 Job Result:", style="bold green")
-            console.print(data.get('content', 'No content'))
-            console.print()
-            console.print(f"💰 Cost: {data.get('ftns_cost', 0):.4f} FTNS")
-            console.print(f"⏱️  Execution time: {data.get('execution_time', 0):.2f}s")
-        elif response.status_code == 404:
-            console.print(f"❌ Job not found or not complete: {job_id}", style="red")
-        else:
-            console.print(f"❌ Failed to get result: {response.status_code}", style="red")
-    except httpx.ConnectError:
-        console.print("❌ Cannot connect to PRSM server", style="red")
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
+    from prsm.compute.jobs_store import get_job
+
+    job = get_job(job_id)
+    if not job:
+        console.print(f"[red]Job not found: {job_id}[/red]")
+        raise SystemExit(1)
+
+    if job.get("status") == "completed" and job.get("result"):
+        console.print("[bold green]📄 Job Result:[/bold green]")
+        console.print(job["result"])
+    else:
+        console.print(f"[yellow]Job is {job.get('status', 'unknown')} — no result yet.[/yellow]")
+        if job.get("error"):
+            console.print(f"[red]Error: {job['error']}[/red]")
 
 
 @compute.command()
-@click.argument('job-id')
-@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
-def cancel(job_id: str, api_url: str):
+@click.argument('job_id')
+def cancel(job_id: str):
     """Cancel a running compute job."""
-    import httpx
-    
-    try:
-        response = httpx.post(f"{api_url}/api/v1/compute/jobs/{job_id}/cancel", timeout=10.0)
-        
-        if response.status_code == 200:
-            console.print(f"✅ Job {job_id} cancelled", style="green")
-        else:
-            console.print(f"❌ Failed to cancel job: {response.status_code}", style="red")
-    except httpx.ConnectError:
-        console.print("❌ Cannot connect to PRSM server", style="red")
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
+    from prsm.compute.jobs_store import update_job, get_job
+
+    job = get_job(job_id)
+    if not job:
+        console.print(f"[red]Job not found: {job_id}[/red]")
+        raise SystemExit(1)
+
+    if job.get("status") in ("completed", "failed"):
+        console.print(f"[yellow]Job is already {job['status']} — cannot cancel.[/yellow]")
+        return
+
+    update_job(job_id, status="cancelled")
+    console.print(f"[green]✅ Job {job_id} cancelled[/green]")
 
 
 @compute.command("list")
 @click.option('--limit', default=10, type=int, help='Maximum number of jobs to list')
-@click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
-def list_compute_jobs(limit: int, api_url: str):
+def list_compute_jobs(limit: int):
     """List recent compute jobs."""
-    import httpx
-    
-    try:
-        response = httpx.get(f"{api_url}/api/v1/compute/jobs?limit={limit}", timeout=10.0)
-        
-        if response.status_code == 200:
-            data = response.json()
-            jobs = data.get('jobs', [])
-            
-            if not jobs:
-                console.print("No jobs found.", style="dim")
-                return
-            
-            table = Table(title="Recent Compute Jobs")
-            table.add_column("Job ID", style="cyan")
-            table.add_column("Status", style="magenta")
-            table.add_column("Model", style="blue")
-            table.add_column("Created", style="green")
-            
-            for job in jobs:
-                table.add_row(
-                    job.get('job_id', 'N/A')[:16] + "...",
-                    job.get('status', 'N/A'),
-                    job.get('model', 'N/A'),
-                    job.get('created_at', 'N/A')[:19]
-                )
-            console.print(table)
-        elif response.status_code == 401:
-            console.print("🔑 Not authenticated. Please log in first.", style="yellow")
-            console.print("   Run:  prsm login", style="dim")
-        else:
-            console.print(f"❌ Failed to list jobs: {response.status_code}", style="red")
-    except httpx.ConnectError:
-        console.print("❌ Cannot connect to PRSM server", style="red")
-    except Exception as e:
-        console.print(f"❌ Error: {e}", style="red")
+    from prsm.compute.jobs_store import list_jobs as _list
+
+    jobs = _list(limit=limit)
+    if not jobs:
+        console.print("No compute jobs yet.", style="dim")
+        console.print("Submit one with:  prsm compute submit --prompt 'your question'", style="dim")
+        return
+
+    table = Table(title="Recent Compute Jobs")
+    table.add_column("Job ID", style="cyan")
+    table.add_column("Status", style="magenta")
+    table.add_column("Model", style="blue")
+    table.add_column("Created", style="green")
+    for job in jobs:
+        created = job.get("created_at", "?")
+        if isinstance(created, (int, float)):
+            import datetime
+            created = datetime.datetime.fromtimestamp(created).isoformat()[:19]
+        table.add_row(
+            (job.get("job_id") or "?")[:16],
+            job.get("status", "?"),
+            job.get("model", "—"),
+            str(created)[:19],
+        )
+    console.print(table)
 
 
 # ============================================================================
