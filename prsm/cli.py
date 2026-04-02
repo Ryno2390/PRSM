@@ -2084,10 +2084,10 @@ def list_compute_jobs(limit: int):
     console.print(table)
 
 
-@compute.command("demo")
+@main.command("demo")
 @click.option("--nodes", default=3, type=int, help="Number of nodes to spawn")
 def compute_demo(nodes: int):
-    """Run a multi-node compute + escrow + consensus demonstration.
+    """Run a multi-node P2P demonstration.
 
     Spawns local nodes and demonstrates:
     1. Escrow creation (FTNS locked before job runs)
