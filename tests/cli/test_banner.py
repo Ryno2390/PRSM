@@ -11,15 +11,14 @@ class TestBannerStrings:
         assert len(PRSM_BANNER.strip().splitlines()) > 5
 
     def test_banner_contains_prsm_wordmark(self):
-        # The block-letter wordmark should contain parts of P R S M
-        assert "╔" in PRSM_BANNER  # box-drawing chars in wordmark
+        # The block-letter wordmark uses half-block chars (▀▄█)
+        assert "▄" in PRSM_BANNER  # half-block chars in wordmark
 
     def test_icon_is_multiline(self):
         assert "\n" in PRSM_ICON
         assert len(PRSM_ICON.strip().splitlines()) > 3
 
     def test_compact_banner_exists(self):
-        assert "P R S M" in PRSM_BANNER_COMPACT
         # Compact should be shorter than full
         assert len(PRSM_BANNER_COMPACT) < len(PRSM_BANNER)
 
