@@ -2086,108 +2086,43 @@ def list_compute_jobs(limit: int):
 
 @compute.command("run")
 @click.option('--prompt', required=True, help='Prompt to process')
-def compute_run(prompt: str):
-    """Submit a compute job to your running node via P2P.
+@click.option('--api-url', default='http://127.0.0.1:8000', help='Local node API URL')
+def compute_run(prompt: str, api_url: str):
+    """Run a compute job on your local node via its management API.
 
-    This creates an escrow, submits a job offer to the network,
-    waits for a provider to execute it, then pays them.
+    Requires a running daemon (`prsm daemon start`).
     """
-    import asyncio
-    import os
-    import signal as _sig
+    import httpx
 
-    async def _run():
-        from prsm.node.config import NodeConfig
-        from prsm.node.node import PRSMNode
-        from prsm.node.compute_provider import JobType
-
-        cfg = NodeConfig.load()
-        node = PRSMNode(config=cfg)
-        await node.initialize()
-        await node.start()
-
-        # Give it time to connect
-        console.print(f"\n  [dim]Node initialized. Waiting for peers...[/dim]", style="dim")
-        await asyncio.sleep(3)
-
-        # Check peer count
-        peers = node.transport.peer_count if node.transport else 0
-        console.print(f"  Peers: {peers}", style="dim")
-
-        if peers == 0:
-            console.print("  [yellow]No peers connected. Running job locally on your node.[/yellow]")
-            console.print("  Job will be processed via self-compute.", style="dim")
-
-        # Submit job through the compute requester with escrow
-        budget = 10.0
-        escrow = await node._payment_escrow.create_escrow(
-            job_id="local-job",
-            amount=budget,
-            requester_id=node.identity.node_id,
-        )
-
-        if not escrow:
-            console.print("  [red]Insufficient balance for job.[/red]")
-            return None
-
-        console.print(f"  [green]✓ Escrow created: {budget:.6f} FTNS locked[/green]", style="dim")
-
-        # Submit the job
-        job = await node.compute_requester.submit_job(
-            job_type=JobType.INFERENCE,
-            payload={"prompt": prompt, "model": "nwtn"},
-            ftns_budget=budget,
-        )
-
-        console.print(f"  [bold]Job submitted: {job.job_id}[/bold]")
-        console.print(f"  Waiting for result...", style="dim")
-
-        try:
-            result = await node.compute_requester.get_result(job.job_id, timeout=120.0)
-            if result:
-                console.print(f"  [bold green]✓ Result:[/bold green]")
-                if isinstance(result, dict):
-                    for k, v in result.items():
-                        if isinstance(v, str) and len(v) > 200:
-                            v = v[:200] + "..."
-                        console.print(f"    {k}: {v}")
-                else:
-                    console.print(f"    {result}")
-
-                # Release escrow
-                tx = await node.compute_provider.escrow.release_escrow(
-                    job_id=job.job_id,
-                    provider_id=node.identity.node_id,  # Self-compute pays ourselves
-                    consensus_reached=True,
-                )
-                if tx:
-                    console.print(f"  [green]✓ Payment processed[/green]", style="dim")
-            else:
-                console.print("  [yellow]No result received (timeout or no provider)[/yellow]")
-                await node.compute_provider.escrow.refund_escrow(
-                    job_id=job.job_id, reason="No result"
-                )
-        except Exception as e:
-            console.print(f"  [red]Error: {e}[/red]")
-            await node.compute_provider.escrow.refund_escrow(
-                job_id=job.job_id, reason=str(e)
-            )
-
-        await node.stop()
-
-    # Handle Ctrl+C
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, loop.stop)
-        except NotImplementedError:
-            pass
+    console.print(f"[dim]Submitting job to node at {api_url}...[/dim]")
 
     try:
-        loop.run_until_complete(_run())
-    finally:
-        loop.close()
+        # Use the node's local management API (FastAPI)
+        resp = httpx.post(
+            f"{api_url}/api/compute/query",
+            json={"prompt": prompt},
+            timeout=120.0,
+        )
+    except httpx.ConnectError:
+        console.print(f"[red]Cannot connect to node at {api_url}[/red]")
+        console.print("  [dim]Start your daemon first: prsm daemon start[/dim]")
+        raise SystemExit(1)
+
+    if resp.status_code == 200:
+        data = resp.json()
+        console.print(f"[bold green]Result:[/bold green]")
+        text = data.get("response", data.get("result", str(data)))
+        console.print(f"  {text}")
+        cost = data.get("ftns_charged", data.get("ftns_cost"))
+        if cost is not None:
+            console.print(f"  [dim]Cost: {cost:.6f} FTNS[/dim]")
+    else:
+        console.print(f"[red]Request failed: HTTP {resp.status_code}[/red]")
+        if resp.text:
+            console.print(f"  [dim]{resp.text[:300]}[/dim]")
+        console.print("  [dim]Your daemon may not have the compute API endpoint.[/dim]")
+        console.print("  [dim]Make sure your daemon is running: prsm daemon status[/dim]")
+        raise SystemExit(1)
 
 
 @main.command("demo")
