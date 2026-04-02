@@ -1144,11 +1144,10 @@ class PRSMNode:
                 "bootstrap_telemetry": self.discovery.get_bootstrap_telemetry() if self.discovery else {},
             },
             "ftns_balance": balance,
-            "dag_stats": (
-                await self.ledger.get_stats_async()
-                if hasattr(self.ledger, 'get_stats_async')
-                else self.ledger.get_stats() if hasattr(self.ledger, 'get_stats') else None
-            ),
+            "dag_stats": {
+                "note": "DAG ledger in async mode",
+                "mode": "dag" if hasattr(self.ledger, '_dag') else "sql"
+            },
             "compute": self.compute_provider.get_stats() if self.compute_provider else None,
             "compute_requester": self.compute_requester.get_stats() if self.compute_requester else None,
             "storage": self.storage_provider.get_stats() if self.storage_provider else None,
