@@ -1,215 +1,129 @@
-# Getting Started with PRSM
+# PRSM Getting Started Guide
 
-This guide takes you from zero to a running PRSM node in about five minutes. By the end you'll have a local node contributing to the decentralized AI network, earning FTNS tokens, and ready to accept compute jobs.
+> PRSM — Decentralized AI infrastructure.
 
----
+## Quick Install
 
-## Prerequisites
+```
+$ pip install prsm-network
 
-| Requirement | Details |
-|---|---|
-| **Python** | 3.10 or later (`python3 --version` to check) |
-| **pip** | Recent version (`pip install --upgrade pip`) |
-| **OS** | macOS, Linux, or Windows (WSL recommended) |
-| **IPFS** *(optional)* | For decentralized storage features. Not required to start. |
-
-If you plan to contribute GPU compute, you'll also need CUDA-compatible drivers installed.
-
----
-
-## Install PRSM
-
-### From PyPI (recommended)
-
-```bash
-pip install prsm-network
+# Check it works
+$ prsm --version
+0.3.2
 ```
 
-### From source
+## First Run: Setup Wizard
 
-```bash
-git clone https://github.com/Ryno2390/PRSM.git
-cd PRSM
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
+The first time you interact with PRSM, run the interactive setup:
+
+```
+$ prsm setup
 ```
 
-Verify the install:
+This walks you through:
+- System detection (CPU cores, RAM, GPUs, disk space)
+- Role selection (Contribute, Consume, or Both)
+- Resource allocation (CPU%, RAM%, storage pledge)
+- Network config (ports, bootstrap nodes)
+- AI assistant integration (MCP server for Hermes / OpenClaw / Claude)
 
-```bash
-prsm --version
+### Quick Setup (Smart Defaults)
+
+```
+$ prsm setup --minimal
 ```
 
----
+### Dry Run (Preview Without Saving)
 
-## First Run: The Setup Wizard
-
-Run the interactive setup wizard to configure your node:
-
-```bash
-prsm setup
 ```
-
-The wizard walks you through **7 steps**. Each step has sensible defaults — press Enter to accept them if you're unsure.
-
-### Step 1: Welcome & System Detection
-
-The wizard detects your hardware (CPU cores, RAM, GPU, disk space) and shows what it found. This information is used to suggest resource limits in later steps.
-
-### Step 2: Role Selection
-
-Choose how your node participates in the network:
-
-| Role | Description |
-|---|---|
-| **Full** *(default)* | Contribute compute and storage, consume services, earn FTNS |
-| **Contributor** | Contribute resources only — optimized for headless/server deployments |
-| **Consumer** | Use the network without contributing resources |
-
-### Step 3: Resource Allocation
-
-Set how much of your machine PRSM can use:
-
-- **CPU %** — Percentage of CPU cores (default: 50%, range: 10–90%)
-- **Memory %** — Percentage of RAM (default: 50%, range: 10–90%)
-- **GPU %** — Percentage of GPU memory, if available (default: 80%)
-- **Storage** — Disk space in GB for cached data and artifacts (default: 10 GB)
-- **Max concurrent jobs** — How many jobs can run at once (default: 3)
-- **Bandwidth limit** — Upload speed cap in Mbps (default: unlimited)
-- **Active hours/days** — Schedule when your node is active (optional)
-
-### Step 4: API Keys & Wallet
-
-Optionally provide API keys for AI providers and your FTNS wallet:
-
-- **OpenAI API key** — For GPT model inference
-- **Anthropic API key** — For Claude model inference
-- **HuggingFace token** — For model/dataset access
-- **FTNS wallet address** — Your Base mainnet wallet for token earnings
-
-Keys are stored in `~/.prsm/.env`, not in the main config file. You can skip all of these and add them later.
-
-### Step 5: Network Configuration
-
-Configure how your node connects to the P2P network:
-
-- **P2P port** — Port for peer connections (default: 9001)
-- **API port** — Port for the local management API (default: 8000)
-- **Bootstrap nodes** — Initial peers to connect to. The default bootstrap server (`wss://bootstrap1.prsm-network.com:8765`) is pre-configured.
-
-### Step 6: AI Integration
-
-Enable the MCP (Model Context Protocol) server so AI assistants can use your node's capabilities:
-
-- **MCP server** — Enable/disable (default: enabled)
-- **MCP port** — Port for the MCP server (default: 9100)
-
-See the [AI Integration Guide](ai-integration.md) for details on connecting AI clients.
-
-### Step 7: Review & Launch
-
-The wizard displays a summary of all your settings. Confirm to save the configuration to `~/.prsm/config.yaml` and optionally launch the node immediately.
-
----
+$ prsm setup --dry-run
+```
 
 ## Starting Your Node
 
-After setup, start your node:
+### Background Daemon (Recommended)
 
-```bash
-# Interactive mode — shows a live dashboard
-prsm start
-
-# Daemon mode — runs in the background
-prsm start --daemon
+```
+$ prsm daemon start              # start in background
+$ prsm daemon status             # check status
+$ prsm daemon logs -f            # follow logs live
+$ prsm daemon stop               # stop gracefully
 ```
 
-The live dashboard displays:
-- Your node identity and peer ID
-- FTNS balance (new nodes receive a **100 FTNS welcome grant**)
-- Connected peers
-- Active compute jobs
-- Resource utilization
+### Foreground (Interactive)
 
-A local management API starts at `http://localhost:8000` (or your configured API port).
+```
+$ prsm node start                 # full node with live dashboard
+$ prsm node start --no-dashboard  # full node, static console view
+```
+
+### Auto-Start on Boot
+
+```
+$ prsm daemon install             # install launchd (macOS) or systemd (Linux)
+$ prsm daemon uninstall           # remove service
+```
+
+## Configuration
+
+```
+$ prsm config show                # display all settings (human-readable)
+$ prsm config show --format json  # machine-readable
+$ prsm config set cpu_pct 60     # change a single setting
+$ prsm config get p2p_port        # get one value
+$ prsm config path               # path to config file (~/.prsm/config.yaml)
+$ prsm config validate           # check config validity
+$ prsm config export             # export current config as YAML
+$ prsm config import file.yaml   # load a config file
+$ prsm config reset              # reset to defaults (confirms first)
+```
+
+### Key Settings
+
+Setting | Range | Default | Description
+--- | --- | --- | ---
+`cpu_pct` | 10-90 | 50 | CPU allocation for compute jobs
+`memory_pct` | 10-90 | 50 | RAM allocation
+`gpu_pct` | 0-100 | 80 | GPU allocation (0 = disabled)
+`storage_gb` | 1+ | 10.0 | Storage pledge in GB
+`max_concurrent_jobs` | 1-20 | 3 | Max parallel compute jobs
+`p2p_port` | 1024-65535 | 9001 | P2P network port
+`api_port` | 1024-65535 | 8000 | REST API port
+`mcp_server_enabled` | true/false | true | Enable MCP server for AI assistants
+`mcp_server_port` | 1024-65535 | 9100 | MCP server port
+`node_role` | full/contributor/consumer | full | Node role
+
+## Daemon Management
+
+```
+$ prsm daemon start               # start as background process
+$ prsm daemon stop                # stop (SIGTERM then SIGKILL after 10s)
+$ prsm daemon restart             # stop + start
+$ prsm daemon status              # show status (running/stopped, PID, uptime)
+$ prsm daemon status --format json
+$ prsm daemon logs -n 100         # show last 100 lines
+$ prsm daemon logs -f             # follow (tail -f style)
+$ prsm daemon install             # install system service
+$ prsm daemon install --dry-run   # print service file without installing
+$ prsm daemon uninstall           # remove system service
+```
+
+## Skill Packages
+
+PRSM ships with built-in skill packages that any AI can ingest:
+
+```
+$ prsm skills list              # list installed skills
+$ prsm skills search <query>    # search the network for skills
+$ prsm skills install <pkg>     # install a skill package
+$ prsm skills remove <pkg>      # remove a skill package
+$ prsm skills info <pkg>        # show detailed skill info
+```
 
 ---
 
-## Checking Status
+## What's Next?
 
-### From the CLI
-
-```bash
-prsm status
-```
-
-This shows your node's current state: identity, role, connected peers, active jobs, FTNS balance, and resource usage.
-
-### From the API
-
-```bash
-# Health check
-curl http://localhost:8000/health
-
-# Full status
-curl http://localhost:8000/status
-
-# FTNS balance
-curl http://localhost:8000/balance
-```
-
----
-
-## Adjusting Configuration
-
-View your current config:
-
-```bash
-prsm config show
-```
-
-Change individual settings:
-
-```bash
-prsm config set cpu_pct 70
-prsm config set display_name "my-research-node"
-prsm config set max_concurrent_jobs 5
-```
-
-Read a single value:
-
-```bash
-prsm config get cpu_pct
-```
-
-See the [Configuration Reference](configuration.md) for all available settings and the full set of `prsm config` commands.
-
----
-
-## Next Steps
-
-**Explore skills** — PRSM ships with built-in skill packages for datasets, compute, and network operations:
-
-```bash
-prsm skills list
-prsm skills info prsm-datasets
-```
-
-**Connect an AI assistant** — Expose your node's tools to Claude, Hermes, or other MCP-compatible agents:
-
-```bash
-prsm mcp start
-prsm mcp config-snippet
-```
-
-See the [AI Integration Guide](ai-integration.md) for setup instructions.
-
-**Submit a compute job** — Try running a benchmark:
-
-```bash
-curl -s -X POST http://localhost:8000/compute/submit \
-  -H 'Content-Type: application/json' \
-  -d '{"job_type": "benchmark", "payload": {"iterations": 100000}, "ftns_budget": 1.0}'
-```
-
-**Read the config reference** — Fine-tune resource limits, scheduling, and network settings in the [Configuration Reference](configuration.md).
+- See `docs/configuration.md` for the full configuration reference
+- See `docs/ai-integration.md` for connecting AI assistants via MCP
+- Join the community: `prsm node start` connects you to the bootstrap network
