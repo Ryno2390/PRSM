@@ -521,7 +521,19 @@ main.add_command(skills_group, "skills")
 @click.option("--reload", is_flag=True, help="Enable auto-reload")
 @click.option("--workers", default=1, help="Number of worker processes")
 def serve(host: str, port: int, reload: bool, workers: int):
-    """Start the PRSM API server"""
+    """Start the PRSM API server.
+
+    DEPRECATED: Use `prsm node start` for full P2P connectivity,
+    or `prsm daemon start` for background operation.
+    """
+    console.print()
+    console.print("  prsm serve is deprecated.", style="yellow")
+    console.print("  Use one of these instead:", style="yellow")
+    console.print("    prsm node start         -- Full P2P node with dashboard", style="dim")
+    console.print("    prsm node start --no-dashboard  -- Full P2P, static output", style="dim")
+    console.print("    prsm daemon start       -- Background daemon mode", style="dim")
+    console.print()
+
     console.print(f"🚀 Starting PRSM server on {host}:{port}", style="bold green")
     _init_config()
 
@@ -714,9 +726,20 @@ def query(query: str, context: int, user_id: str, api_url: str):
 
 @main.command()
 def init():
-    """Initialize PRSM configuration and database"""
+    """Initialize PRSM configuration and database.
+
+    DEPRECATED: Use `prsm setup` for the full interactive setup experience.
+    """
+    console.print()
+    console.print("  prsm init is deprecated.", style="yellow")
+    console.print("  Use one of these instead:", style="yellow")
+    console.print("    prsm setup              -- Interactive setup wizard", style="dim")
+    console.print("    prsm setup --minimal    -- Quick setup with defaults", style="dim")
+    console.print("    prsm daemon start       -- Start the daemon directly", style="dim")
+    console.print()
+
     console.print("🔧 Initializing PRSM...", style="bold blue")
-    
+
     # Check if .env exists
     env_file = Path(".env")
     if not env_file.exists():
@@ -727,12 +750,12 @@ def init():
         else:
             console.print("❌ No .env.example found", style="red")
             return
-    
+
     console.print("✅ Configuration ready")
     console.print("Next steps:")
     console.print("1. Edit .env with your configuration")
     console.print("2. Run: prsm db-upgrade")
-    console.print("3. Run: prsm serve")
+    console.print("3. Run: prsm daemon start")
 
 
 @main.command()
@@ -957,106 +980,38 @@ def node():
 
 
 def _run_node_wizard() -> "NodeConfig":
-    """Interactive wizard that configures a real PRSM node."""
-    from prsm.node.config import NodeConfig, NodeRole
-    from prsm.node.compute_provider import detect_resources
+    """Deprecated: redirects to the new `prsm setup` wizard.
 
-    # Deprecation notice pointing to new setup system
+    Kept for backward compatibility with `prsm node start --wizard`.
+    Saves a minimal NodeConfig so the existing node start flow continues
+    to work with any CLI overrides (ports, resources, etc.).
+    """
+    from prsm.node.config import NodeConfig
+
     console.print()
-    console.print("  ╭─────────────────────────────────────────────────────╮", style="yellow")
-    console.print("  │  Tip: Use `prsm setup` for the full setup          │", style="yellow")
-    console.print("  │  experience, or `prsm config` to adjust settings.  │", style="yellow")
-    console.print("  ╰─────────────────────────────────────────────────────╯", style="yellow")
-    console.print()
+    console.print("  prsm node start --wizard is deprecated.")
+    console.print("  Redirecting to the new setup wizard.", style="yellow")
+    console.print("  Tip: Run `prsm setup` directly for the full experience.", style="dim")
 
-    config = NodeConfig()
+    # Run the new setup wizard
+    from prsm.cli_modules.setup_wizard import run_setup_wizard
+    run_setup_wizard(minimal=False)
 
-    console.print("=" * 60, style="bold magenta")
-    console.print("  PRSM Node Setup Wizard", style="bold magenta")
-    console.print("=" * 60, style="bold magenta")
-    console.print()
+    # Also try to run migration so the legacy NodeConfig picks up the
+    # settings written by the new wizard (~/.prsm/config.yaml → node_config.json).
+    try:
+        from prsm.cli_modules.migration import migrate_if_needed
+        migrate_if_needed()
+    except Exception:
+        pass
 
-    # 1. Display name
-    name = click.prompt("  Node display name", default="prsm-node")
-    config.display_name = name
-
-    # 2. Role selection
-    console.print()
-    console.print("  Node roles:", style="bold")
-    console.print("    full    - Compute + storage + routing (recommended)")
-    console.print("    compute - Compute jobs only")
-    console.print("    storage - Storage contribution only")
-    role_str = click.prompt(
-        "  Choose your node role",
-        type=click.Choice(["full", "compute", "storage"]),
-        default="full",
-    )
-    config.roles = [NodeRole(role_str)]
-
-    # 3. Resource detection
-    console.print()
-    console.print("  Detecting system resources...", style="dim")
-    resources = detect_resources()
-    console.print(f"    CPUs: {resources.cpu_count}", style="green")
-    console.print(f"    RAM:  {resources.memory_total_gb:.1f} GB", style="green")
-    if resources.gpu_available:
-        console.print(f"    GPU:  {resources.gpu_name} ({resources.gpu_memory_gb:.1f} GB)", style="green")
-    else:
-        console.print("    GPU:  not detected", style="dim")
-
-    if NodeRole(role_str) in (NodeRole.FULL, NodeRole.COMPUTE):
-        cpu_pct = click.prompt("  CPU allocation for compute jobs (%)", default=50, type=int)
-        config.cpu_allocation_pct = max(10, min(90, cpu_pct))
-        mem_pct = click.prompt("  Memory allocation for compute jobs (%)", default=50, type=int)
-        config.memory_allocation_pct = max(10, min(90, mem_pct))
-
-    # 4. IPFS detection
-    if NodeRole(role_str) in (NodeRole.FULL, NodeRole.STORAGE):
-        console.print()
-        console.print("  Checking for IPFS daemon...", style="dim")
-        ipfs_ok = False
-        try:
-            import subprocess
-            result = subprocess.run(
-                ["ipfs", "id"], capture_output=True, timeout=5
-            )
-            ipfs_ok = result.returncode == 0
-        except Exception:
-            pass
-
-        if ipfs_ok:
-            console.print("    IPFS daemon detected!", style="green")
-            gb = click.prompt("  Storage to pledge (GB)", default=10.0, type=float)
-            config.storage_gb = gb
-        else:
-            console.print("    IPFS not detected. Storage features will be disabled.", style="yellow")
-            console.print("    Install: https://docs.ipfs.tech/install/", style="dim")
-
-    # 5. Network configuration
-    console.print()
-    p2p_port = click.prompt("  P2P port", default=9001, type=int)
-    config.p2p_port = p2p_port
-    api_port = click.prompt("  API port", default=8000, type=int)
-    config.api_port = api_port
-
-    bootstrap = click.prompt(
-        "  Bootstrap node (host:port, or empty for none)",
-        default="wss://bootstrap.prsm-network.com",
-    )
-    if bootstrap.strip():
-        config.bootstrap_nodes = [b.strip() for b in bootstrap.split(",")]
-    else:
-        config.bootstrap_nodes = []
-
-    # Save config
-    config.save()
-    console.print()
-    console.print("  Configuration saved to ~/.prsm/node_config.json", style="green")
-    return config
+    # Return a loaded NodeConfig so the caller (node start) continues normally
+    return NodeConfig.load()
 
 
 @node.command()
 @click.option("--wizard", is_flag=True, help="Run interactive setup wizard")
+@click.option("--background", "-b", is_flag=True, help="Start as background daemon")
 @click.option("--p2p-port", default=None, type=int, help="P2P listen port (default: 9001)")
 @click.option("--api-port", default=None, type=int, help="API listen port (default: 8000)")
 @click.option("--bootstrap", default=None, help="Bootstrap node address (host:port)")
@@ -1065,10 +1020,23 @@ def _run_node_wizard() -> "NodeConfig":
 @click.option("--memory", default=None, type=int, help="RAM allocation % (10-90)")
 @click.option("--storage", default=None, type=float, help="Storage to pledge in GB")
 @click.option("--jobs", default=None, type=int, help="Max concurrent compute jobs")
-def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str, no_dashboard: bool,
+def start(wizard: bool, background: bool, p2p_port: int, api_port: int, bootstrap: str, no_dashboard: bool,
           cpu: Optional[int], memory: Optional[int], storage: Optional[float], jobs: Optional[int]):
-    """Start a PRSM network node with real P2P connectivity."""
+    """Start a PRSM network node with real P2P connectivity.
+
+    Runs in the foreground by default. Use --background to run as a
+    background daemon (equivalent to 'prsm daemon start').
+    """
     from prsm.node.config import NodeConfig
+
+    host = "127.0.0.1"
+    port = 8000
+
+    # Background mode — route to daemon
+    if background:
+        from prsm.cli_modules.daemon import daemon_start as _dstart
+        _dstart(host=host, port=api_port or 8000)
+        return
 
     if wizard:
         config = _run_node_wizard()
@@ -1234,6 +1202,61 @@ def start(wizard: bool, p2p_port: int, api_port: int, bootstrap: str, no_dashboa
         console.print("\nNode stopped.", style="bold")
 
 
+@node.command("stop")
+@click.option("--timeout", default=10, help="Seconds to wait for graceful shutdown")
+def node_stop(timeout: int):
+    """Stop the background node daemon."""
+    from prsm.cli_modules.daemon import daemon_stop as _stop
+    _stop(timeout=timeout)
+
+
+@node.command("restart")
+@click.option("--host", default="127.0.0.1", help="Host to bind to")
+@click.option("--port", default=8000, help="Port to bind to")
+@click.option("--timeout", default=10, help="Seconds to wait for graceful shutdown")
+def node_restart(host: str, port: int, timeout: int):
+    """Restart the background node daemon."""
+    from prsm.cli_modules.daemon import daemon_restart as _restart
+    _restart(host=host, port=port, timeout=timeout)
+
+
+@node.command("status")
+@click.option("--format", "output_format",
+              type=click.Choice(["text", "json"]), default="text",
+              help="Output format")
+def node_status(output_format: str):
+    """Show background node daemon status."""
+    from prsm.cli_modules.daemon import daemon_status as _status
+    _status(output_format=output_format)
+
+
+@node.command("logs")
+@click.option("--lines", "-n", default=50, help="Number of lines to show")
+@click.option("--follow", "-f", is_flag=True, help="Follow log output (tail -f)")
+def node_logs(lines: int, follow: bool):
+    """Show background node daemon logs."""
+    from prsm.cli_modules.daemon import daemon_logs as _logs
+    _logs(lines=lines, follow=follow)
+
+
+@node.command("install")
+@click.option("--dry-run", is_flag=True, help="Print service file without installing")
+@click.option("--host", default="127.0.0.1", help="Host to bind to")
+@click.option("--port", default=8000, help="Port to bind to")
+def node_install(dry_run: bool, host: str, port: int):
+    """Install node as a system service (launchd / systemd)."""
+    from prsm.cli_modules.daemon import daemon_service_install as _install
+    _install(dry_run=dry_run, host=host, port=port)
+
+
+@node.command("uninstall")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+def node_uninstall(yes: bool):
+    """Remove the node system service."""
+    from prsm.cli_modules.daemon import daemon_service_uninstall as _uninstall
+    _uninstall(yes=yes)
+
+
 @node.command()
 def peers():
     """List connected peers"""
@@ -1245,7 +1268,7 @@ def peers():
     identity = load_node_identity(config.identity_path)
 
     if not identity:
-        console.print("No node identity found. Run 'prsm node start --wizard' first.", style="yellow")
+        console.print("No node identity found. Run 'prsm setup' first.", style="yellow")
         return
 
     console.print(f"Node ID: {identity.node_id}", style="bold cyan")
@@ -1301,8 +1324,8 @@ def info(output_format: str):
 
     if not identity:
         if output_format == "json":
-            _agent_error("No node identity found. Run: prsm node start --wizard")
-        console.print("No node identity found. Run 'prsm node start --wizard' first.", style="yellow")
+            _agent_error("No node identity found. Run: prsm setup")
+        console.print("No node identity found. Run 'prsm setup' first.", style="yellow")
         return
 
     data = {
@@ -1359,8 +1382,27 @@ def configure(show: bool, cpu: Optional[int], memory: Optional[int], storage: Op
     
     config = NodeConfig.load()
     
-    # Handle --show flag
+    # Handle --show flag — redirect to new prsm config system
     if show:
+        # Try the new PRSMConfig system first, fall back to legacy display
+        try:
+            from prsm.cli_modules.config_schema import PRSMConfig
+            cfg = PRSMConfig.load()
+            console.print()
+            console.print("  PRSM Configuration", style="bold cyan")
+            console.print("  [dim]Note: Also run `prsm config show` for the full display", style="dim")
+            console.print(f"  Role:      {cfg.node_role.value}  (new config)")
+            console.print(f"  CPU:       {cfg.cpu_pct}%")
+            console.print(f"  Memory:    {cfg.memory_pct}%")
+            console.print(f"  Storage:   {cfg.storage_gb} GB")
+            console.print(f"  P2P Port:  {cfg.p2p_port}")
+            console.print(f"  API Port:  {cfg.api_port}")
+            console.print(f"  MCP:       {'enabled' if cfg.mcp_server_enabled else 'disabled'}")
+            console.print(f"  Config:    {PRSMConfig.config_path()}")
+            console.print()
+            return
+        except Exception:
+            pass
         _show_configuration(config)
         return
     
@@ -1506,100 +1548,45 @@ def _show_configuration(config: "NodeConfig") -> None:
 
 
 def _run_interactive_configure(config: "NodeConfig") -> None:
-    """Run interactive configuration wizard for resource settings."""
-    from prsm.node.config import NodeRole
-    from prsm.node.compute_provider import detect_resources
+    """Deprecated: redirects to the new `prsm config` system.
 
-    # Deprecation notice pointing to new config system
+    Runs the legacy config wizard to update the old NodeConfig (kept for
+    backward compat), then also runs the new PRSMConfig wizard so both
+    configs stay in sync.
+    """
     console.print()
-    console.print("  ╭─────────────────────────────────────────────────────╮", style="yellow")
-    console.print("  │  Tip: Use `prsm setup` for the full setup          │", style="yellow")
-    console.print("  │  experience, or `prsm config` to adjust settings.  │", style="yellow")
-    console.print("  ╰─────────────────────────────────────────────────────╯", style="yellow")
+    console.print("  NOTE: prsm node configure (interactive) is deprecated.", style="yellow")
+    console.print("  Tip: Use `prsm config` for the full experience.", style="dim")
     console.print()
-    
+
+    # Run the legacy interactive prompts to update NodeConfig
     resources = detect_resources()
-    
+    console.print("  System: {} cores, {:.1f} GB RAM".format(
+        resources.cpu_count, resources.memory_total_gb), style="dim")
     console.print()
-    console.print("=" * 60, style="bold magenta")
-    console.print("  PRSM Node Resource Configuration", style="bold magenta")
-    console.print("=" * 60, style="bold magenta")
-    console.print()
-    
-    # Show current settings
-    console.print("  Current settings:", style="bold")
-    console.print(f"    CPU allocation:    {config.cpu_allocation_pct}%")
-    console.print(f"    Memory allocation: {config.memory_allocation_pct}%")
-    console.print(f"    Storage pledged:   {config.storage_gb} GB")
-    console.print(f"    Max concurrent jobs: {config.max_concurrent_jobs}")
-    console.print(f"    GPU allocation:    {config.gpu_allocation_pct}%")
-    console.print(f"    Upload limit:      {config.upload_mbps_limit} Mbps" if config.upload_mbps_limit > 0 else "    Upload limit:      unlimited")
-    if config.active_hours_start is not None:
-        console.print(f"    Active hours:      {config.active_hours_start:02d}-{config.active_hours_end:02d}")
-    else:
-        console.print(f"    Active hours:      always on")
-    console.print()
-    
-    # Prompt for each setting
-    console.print("  Detected system resources:", style="bold")
-    console.print(f"    CPUs: {resources.cpu_count}")
-    console.print(f"    RAM:  {resources.memory_total_gb:.1f} GB")
-    if resources.gpu_available:
-        console.print(f"    GPU:  {resources.gpu_name} ({resources.gpu_memory_gb:.1f} GB)")
-    console.print()
-    
-    # CPU allocation
+
     cpu = click.prompt("  CPU allocation for compute jobs (%)", default=config.cpu_allocation_pct, type=int)
     config.cpu_allocation_pct = max(10, min(90, cpu))
-    
-    # Memory allocation
     mem = click.prompt("  Memory allocation for compute jobs (%)", default=config.memory_allocation_pct, type=int)
     config.memory_allocation_pct = max(10, min(90, mem))
-    
-    # Storage
     storage = click.prompt("  Storage to pledge (GB)", default=config.storage_gb, type=float)
     config.storage_gb = storage
-    
-    # Max concurrent jobs
     jobs = click.prompt("  Max concurrent compute jobs", default=config.max_concurrent_jobs, type=int)
     config.max_concurrent_jobs = max(1, jobs)
-    
-    # GPU allocation (if GPU available)
     if resources.gpu_available:
         gpu = click.prompt("  GPU allocation %", default=config.gpu_allocation_pct, type=int)
         config.gpu_allocation_pct = max(10, min(100, gpu))
-    
-    # Upload limit
-    upload_default = str(config.upload_mbps_limit) if config.upload_mbps_limit > 0 else "0"
-    upload_str = click.prompt("  Upload bandwidth limit in Mbps (0=unlimited)", default=upload_default)
-    config.upload_mbps_limit = float(upload_str)
-    
-    # Active hours
-    current_hours = f"{config.active_hours_start:02d}-{config.active_hours_end:02d}" if config.active_hours_start is not None else "off"
-    hours_input = click.prompt("  Active hours (e.g., '22-8' or 'off' for always on)", default=current_hours)
-    if hours_input.lower() != "off":
-        start, end = parse_active_hours(hours_input)
-        config.active_hours_start = start
-        config.active_hours_end = end
-    else:
-        config.active_hours_start = None
-        config.active_hours_end = None
-    
-    # Active days
-    day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-    current_days = "weekdays" if config.active_days == [0, 1, 2, 3, 4] else \
-                   "weekends" if config.active_days == [5, 6] else \
-                   ",".join(day_names[d] for d in config.active_days) if config.active_days else "everyday"
-    days_input = click.prompt("  Active days (e.g., 'weekdays', 'weekends', 'mon,wed,fri', or 'everyday')", default=current_days)
-    if days_input.lower() not in ("everyday", ""):
-        config.active_days = parse_active_days(days_input)
-    else:
-        config.active_days = []
-    
-    # Save configuration
+
     config.save()
-    console.print()
-    console.print(f"  ✅ Configuration saved to {config.config_path}", style="bold green")
+    console.print(f"\n  ✅ Saved to {config.config_path}", style="green")
+
+    # Also sync to the new config system
+    try:
+        from prsm.cli_modules.config_schema import PRSMConfig
+        from prsm.cli_modules.migration import migrate_if_needed
+        migrate_if_needed()
+    except Exception:
+        pass
 
 
 @main.group()
@@ -6495,6 +6482,41 @@ def mcp_config_snippet(host: str, port: int):
     console.print(snippet)
 
 
+@mcp.command("status")
+@click.option("--format", "output_format",
+              type=click.Choice(["text", "json"]), default="text",
+              help="Output format")
+def mcp_status_cmd(output_format: str):
+    """Show MCP server status.
+
+    Reports whether the MCP server is running based on config and
+    daemon process state.
+    """
+    from prsm.cli_modules.config_schema import PRSMConfig
+
+    cfg = PRSMConfig.load()
+    enabled = cfg.mcp_server_enabled
+    port = cfg.mcp_server_port
+
+    data = {
+        "ok": True,
+        "mcp_enabled": enabled,
+        "mcp_port": port,
+        "config_path": str(PRSMConfig.config_path()),
+    }
+
+    if output_format == "json":
+        _agent_output(data)
+        return
+
+    if enabled:
+        console.print(f"\n  {ICONS['success']} MCP Server: enabled (:{port})")
+        console.print(f"  Config:  {PRSMConfig.config_path()}", style=THEME.dim)
+    else:
+        console.print(f"\n  {ICONS['info']} MCP Server: disabled")
+        console.print(f"  Enable:  prsm config set mcp_server_enabled true", style=THEME.dim)
+
+
 # ---------------------------------------------------------------------------
 # config CLI group (Phase 2)
 # ---------------------------------------------------------------------------
@@ -6848,294 +6870,155 @@ def config_path_cmd():
     console.print(str(PRSMConfig.config_path()))
 
 
-# ---------------------------------------------------------------------------
-# daemon CLI group (Phase 3)
-# ---------------------------------------------------------------------------
+@config.command("get")
+@click.argument("key")
+def config_get(key: str):
+    """Get a single config value printed to stdout.
 
-# Daemon paths
-_DAEMON_PID_FILE = Path.home() / ".prsm" / "daemon.pid"
-_DAEMON_LOG_FILE = Path.home() / ".prsm" / "logs" / "daemon.log"
+    Useful for shell scripts: VALUE=$(prsm config get cpu_pct)
+    """
+    from prsm.cli_modules.config_schema import PRSMConfig
+    import enum
 
-def _get_daemon_pid() -> Optional[int]:
-    """Read daemon PID from file, or None if not found."""
-    if _DAEMON_PID_FILE.exists():
-        try:
-            return int(_DAEMON_PID_FILE.read_text().strip())
-        except (ValueError, OSError):
-            return None
-    return None
+    cfg = PRSMConfig.load()
+    if not hasattr(cfg, key):
+        console.print(f"[red]Unknown config key: {key}[/red]")
+        console.print(f"Available keys: {', '.join(sorted(k for k in cfg.model_fields if not k.startswith('_')))}")
+        raise SystemExit(1)
+
+    val = getattr(cfg, key)
+    if isinstance(val, enum.Enum):
+        print(val.value)
+    elif isinstance(val, list):
+        print(",".join(str(v) for v in val))
+    elif val is None:
+        print("")
+    else:
+        print(val)
 
 
-def _is_daemon_running(pid: Optional[int] = None) -> bool:
-    """Check if daemon process is running."""
-    if pid is None:
-        pid = _get_daemon_pid()
-    if pid is None:
-        return False
+@config.command("export")
+def config_export():
+    """Export current configuration as YAML to stdout.
 
-    # Try psutil first
+    Useful for backups or transferring config between nodes.
+    """
+    from prsm.cli_modules.config_schema import PRSMConfig
+    import yaml
+
+    cfg = PRSMConfig.load()
+    data = cfg.model_dump(mode='json')
+    yaml.safe_dump(data, sys.stdout, default_flow_style=False, sort_keys=False)
+
+
+@config.command("import")
+@click.argument("filepath", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+def config_import(filepath: Path, yes: bool):
+    """Import configuration from a YAML file.
+
+    Overwrites the current config at ~/.prsm/config.yaml.
+    """
+    from prsm.cli_modules.config_schema import PRSMConfig
+    import yaml
+
+    if not yes:
+        if not click.confirm(f"Import config from {filepath}? This will overwrite current settings."):
+            console.print("[dim]Cancelled.[/dim]")
+            return
+
     try:
-        import psutil
-        return psutil.pid_exists(pid)
-    except ImportError:
-        # Fallback: check /proc on Unix or use kill -0
-        try:
-            import os
-            os.kill(pid, 0)  # Signal 0 = check if process exists
-            return True
-        except (OSError, ProcessLookupError):
-            return False
+        data = yaml.safe_load(filepath.read_text()) or {}
+        cfg = PRSMConfig(**data)
+        cfg.save()
+        console.print(f"[green]{ICONS['success']} Config imported from {filepath}[/green]")
+        console.print(f"  Saved to {PRSMConfig.config_path()}")
+    except Exception as e:
+        console.print(f"[red]{ICONS['error']} Import failed: {e}[/red]")
+        raise SystemExit(1)
 
 
-def _get_daemon_uptime(pid: int) -> str:
-    """Get daemon uptime as human-readable string."""
-    try:
-        import psutil
-        proc = psutil.Process(pid)
-        import datetime
-        start_time = datetime.datetime.fromtimestamp(proc.create_time())
-        now = datetime.datetime.now()
-        delta = now - start_time
-        hours, remainder = divmod(int(delta.total_seconds()), 3600)
-        minutes, seconds = divmod(remainder, 60)
-        if hours > 0:
-            return f"{hours}h {minutes}m {seconds}s"
-        elif minutes > 0:
-            return f"{minutes}m {seconds}s"
-        else:
-            return f"{seconds}s"
-    except (ImportError, Exception):
-        return "unknown (psutil not installed)"
+@config.command("wizard")
+def config_wizard():
+    """Re-enter the full interactive setup wizard.
 
+    Alias for `prsm setup`.
+    """
+    from prsm.cli_modules.setup_wizard import run_setup_wizard
+    run_setup_wizard()
+
+
+# ---------------------------------------------------------------------------
+# daemon CLI group — deprecated, delegates to `prsm node`
+# ---------------------------------------------------------------------------
 
 @main.group()
 def daemon():
-    """Daemon management commands for background operation."""
-    pass
+    """DEPRECATED: use `prsm node` instead.
 
-
-def _get_daemon_node_cmd(host: str, port: int) -> list:
-    """Build the command list for starting a full PRSM node in daemon mode.
-
-    Uses 'prsm node start --no-dashboard' (full P2P node with bootstrap
-    connectivity) instead of 'prsm serve' (API-only). Reads bootstrap
-    nodes from ~/.prsm/config.yaml if available.
+    All daemon commands are now available under `prsm node`:
+      prsm node start --background   # start in background
+      prsm node stop                 # stop background node
+      prsm node restart              # restart background node
+      prsm node status               # show status
+      prsm node logs -f              # follow logs
+      prsm node install              # system service
     """
-    cmd = [
-        sys.executable, "-m", "prsm.cli", "node", "start",
-        "--no-dashboard",
-        "--api-port", str(port),
-    ]
-
-    # Read bootstrap nodes from user config
-    try:
-        from prsm.cli_modules.config_schema import PRSMConfig
-        cfg = PRSMConfig.load()
-        if cfg.bootstrap_nodes:
-            cmd.extend(["--bootstrap", ",".join(cfg.bootstrap_nodes)])
-    except Exception:
-        pass  # Config not available — node will use defaults
-
-    return cmd
+    console.print()
+    console.print("  prsm daemon is deprecated.", style="yellow")
+    console.print("  Use `prsm node` commands instead:", style="yellow")
+    console.print("    prsm node start --background  -- Start in background", style="dim")
+    console.print("    prsm node stop                -- Stop background node", style="dim")
+    console.print("    prsm node restart             -- Restart background node", style="dim")
+    console.print("    prsm node status              -- Show node status", style="dim")
+    console.print("    prsm node logs -f             -- Follow logs live", style="dim")
+    console.print()
 
 
 @daemon.command("start")
 @click.option("--host", default="127.0.0.1", help="Host to bind to")
 @click.option("--port", default=8000, help="Port to bind to")
 def daemon_start(host: str, port: int):
-    """Start PRSM node in the background with full P2P connectivity.
-
-    Launches 'prsm node start --no-dashboard' as a detached process,
-    connecting to bootstrap nodes for peer discovery. Writes PID to
-    ~/.prsm/daemon.pid. Logs go to ~/.prsm/logs/daemon.log.
-    """
-    # Check if already running
-    pid = _get_daemon_pid()
-    if pid and _is_daemon_running(pid):
-        console.print(f"[red]Error: Daemon already running (PID {pid})[/red]")
-        console.print("Run 'prsm daemon stop' first, or 'prsm daemon status' for details.")
-        raise SystemExit(1)
-
-    # Clean up stale PID file
-    if _DAEMON_PID_FILE.exists():
-        _DAEMON_PID_FILE.unlink()
-
-    # Ensure log directory exists
-    _DAEMON_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-    # Build the command — full node with P2P + bootstrap
-    cmd = _get_daemon_node_cmd(host, port)
-
-    # Start the daemon
-    import subprocess
-    log_fh = open(_DAEMON_LOG_FILE, "a")
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=log_fh,
-            stderr=log_fh,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,  # Detach from terminal
-        )
-
-        # Write PID file
-        _DAEMON_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _DAEMON_PID_FILE.write_text(str(proc.pid))
-
-        console.print(f"[green]✓ PRSM daemon started (full node)[/green]")
-        console.print(f"  PID:      {proc.pid}")
-        console.print(f"  Endpoint: http://{host}:{port}")
-        console.print(f"  Log:      {_DAEMON_LOG_FILE}")
-        console.print(f"  Mode:     P2P node + API server")
-        console.print("\n[dim]Run 'prsm daemon logs --follow' to watch logs.[/dim]")
-
-    except Exception as e:
-        console.print(f"[red]Error starting daemon: {e}[/red]")
-        raise SystemExit(1)
-    finally:
-        log_fh.close()
+    """DEPRECATED: use `prsm node start --background`."""
+    from prsm.cli_modules.daemon import daemon_start as _start
+    _start(host=host, port=port)
 
 
 @daemon.command("stop")
 @click.option("--timeout", default=10, help="Seconds to wait for graceful shutdown")
 def daemon_stop(timeout: int):
-    """Stop the PRSM daemon.
+    """DEPRECATED: use `prsm node stop`."""
+    from prsm.cli_modules.daemon import daemon_stop as _stop
+    _stop(timeout=timeout)
 
-    Sends SIGTERM and waits up to --timeout seconds before sending SIGKILL.
-    """
-    import signal
-    import time
 
-    pid = _get_daemon_pid()
-    if not pid:
-        console.print("[dim]Daemon is not running (no PID file found).[/dim]")
-        return
-
-    if not _is_daemon_running(pid):
-        # Stale PID file
-        _DAEMON_PID_FILE.unlink()
-        console.print("[dim]Daemon was not running (cleaned up stale PID file).[/dim]")
-        return
-
-    console.print(f"Stopping daemon (PID {pid})...", style="yellow")
-
-    # Send SIGTERM
-    try:
-        import os
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        _DAEMON_PID_FILE.unlink()
-        console.print("[dim]Daemon was not running (cleaned up PID file).[/dim]")
-        return
-    except PermissionError:
-        console.print("[red]Error: Permission denied. Try with sudo or as the daemon owner.[/red]")
-        raise SystemExit(1)
-
-    # Wait for graceful shutdown
-    start = time.time()
-    while time.time() - start < timeout:
-        if not _is_daemon_running(pid):
-            _DAEMON_PID_FILE.unlink()
-            console.print("[green]✓ Daemon stopped gracefully.[/green]")
-            return
-        time.sleep(0.5)
-
-    # Force kill
-    console.print("[yellow]Graceful shutdown timed out. Sending SIGKILL...[/yellow]")
-    try:
-        os.kill(pid, signal.SIGKILL)
-        time.sleep(0.5)
-    except ProcessLookupError:
-        pass
-
-    _DAEMON_PID_FILE.unlink()
-    console.print("[green]✓ Daemon killed.[/green]")
+@daemon.command("restart")
+@click.option("--host", default="127.0.0.1", help="Host to bind to")
+@click.option("--port", default=8000, help="Port to bind to")
+@click.option("--timeout", default=10, help="Seconds to wait for graceful shutdown")
+def daemon_restart(host: str, port: int, timeout: int):
+    """DEPRECATED: use `prsm node restart`."""
+    from prsm.cli_modules.daemon import daemon_restart as _restart
+    _restart(host=host, port=port, timeout=timeout)
 
 
 @daemon.command("status")
 @click.option("--format", "output_format",
               type=click.Choice(["text", "json"]), default="text",
-              help="Output format: 'text' (human) or 'json' (agent-parseable)")
+              help="Output format")
 def daemon_status(output_format: str):
-    """Show daemon status.
-
-    Reports running state, PID, and uptime.
-    """
-    pid = _get_daemon_pid()
-    running = pid is not None and _is_daemon_running(pid)
-
-    data = {
-        "ok": True,
-        "running": running,
-        "pid": pid if running else None,
-        "uptime": _get_daemon_uptime(pid) if running else None,
-        "pid_file": str(_DAEMON_PID_FILE),
-        "log_file": str(_DAEMON_LOG_FILE),
-    }
-
-    if output_format == "json":
-        _agent_output(data)
-        return
-
-    # Rich output
-    console.print("\n[bold]PRSM Daemon Status[/bold]\n")
-
-    if running:
-        console.print(f"  Status: [green]● running[/green]")
-        console.print(f"  PID:    {pid}")
-        console.print(f"  Uptime: {_get_daemon_uptime(pid)}")
-    else:
-        if pid and not running:
-            console.print(f"  Status: [yellow]○ stopped[/yellow] (stale PID file found)")
-        else:
-            console.print(f"  Status: [dim]○ stopped[/dim]")
-
-    console.print(f"\n  PID file: {_DAEMON_PID_FILE}")
-    console.print(f"  Log file: {_DAEMON_LOG_FILE}")
+    """DEPRECATED: use `prsm node status`."""
+    from prsm.cli_modules.daemon import daemon_status as _status
+    _status(output_format=output_format)
 
 
 @daemon.command("logs")
 @click.option("--lines", "-n", default=50, help="Number of lines to show")
-@click.option("--follow", "-f", is_flag=True, help="Follow log output (tail -f style)")
+@click.option("--follow", "-f", is_flag=True, help="Follow log output (tail -f)")
 def daemon_logs(lines: int, follow: bool):
-    """Show daemon logs.
-
-    Prints the last N lines of ~/.prsm/logs/daemon.log.
-    Use --follow to watch logs in real-time.
-    """
-    if not _DAEMON_LOG_FILE.exists():
-        console.print(f"[dim]No log file found at {_DAEMON_LOG_FILE}[/dim]")
-        console.print("Start the daemon first with 'prsm daemon start'.")
-        return
-
-    if follow:
-        # Tail -f implementation
-        console.print(f"Following {_DAEMON_LOG_FILE} (Ctrl+C to stop)...\n")
-        import time
-        with open(_DAEMON_LOG_FILE, "r") as f:
-            # Seek to end
-            f.seek(0, 2)
-            try:
-                while True:
-                    line = f.readline()
-                    if line:
-                        print(line, end="")
-                    else:
-                        time.sleep(0.1)
-            except KeyboardInterrupt:
-                console.print("\n[dim]Stopped following logs.[/dim]")
-    else:
-        # Show last N lines
-        import subprocess
-        result = subprocess.run(
-            ["tail", "-n", str(lines), str(_DAEMON_LOG_FILE)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0:
-            print(result.stdout)
-        else:
-            console.print(f"[red]Error reading log file: {result.stderr}[/red]")
+    """DEPRECATED: use `prsm node logs`."""
+    from prsm.cli_modules.daemon import daemon_logs as _logs
+    _logs(lines=lines, follow=follow)
 
 
 @daemon.command("install")
@@ -7143,203 +7026,17 @@ def daemon_logs(lines: int, follow: bool):
 @click.option("--host", default="127.0.0.1", help="Host to bind to")
 @click.option("--port", default=8000, help="Port to bind to")
 def daemon_install(dry_run: bool, host: str, port: int):
-    """Install PRSM daemon as a system service.
-
-    On macOS: installs a launchd agent to ~/Library/LaunchAgents/
-    On Linux: installs a systemd user unit to ~/.config/systemd/user/
-    """
-    import platform
-
-    system = platform.system()
-
-    if system == "Darwin":
-        _install_launchd(dry_run=dry_run, host=host, port=port)
-    elif system == "Linux":
-        _install_systemd(dry_run=dry_run, host=host, port=port)
-    else:
-        console.print(f"[red]Error: Unsupported platform '{system}'[/red]")
-        console.print("Service installation is only supported on macOS and Linux.")
-        raise SystemExit(1)
-
-
-def _install_launchd(dry_run: bool, host: str, port: int) -> None:
-    """Install launchd agent on macOS."""
-    plist_path = Path.home() / "Library" / "LaunchAgents" / "ai.prsm.node.plist"
-
-    # Build the full node command (same as daemon start)
-    cmd_args = _get_daemon_node_cmd(host, port)
-    program_args = "\n".join(f"        <string>{arg}</string>" for arg in cmd_args)
-
-    plist_content = f'''<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>ai.prsm.node</string>
-    <key>ProgramArguments</key>
-    <array>
-{program_args}
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>{_DAEMON_LOG_FILE}</string>
-    <key>StandardErrorPath</key>
-    <string>{_DAEMON_LOG_FILE}</string>
-    <key>WorkingDirectory</key>
-    <string>{Path.home()}</string>
-</dict>
-</plist>
-'''
-
-    if dry_run:
-        console.print(f"\n[bold]Generated launchd plist:[/bold]\n")
-        console.print(plist_content)
-        console.print(f"\n[dim]Would write to: {plist_path}[/dim]")
-        console.print(f"[dim]Would run: launchctl load {plist_path}[/dim]")
-        return
-
-    # Write the plist
-    plist_path.parent.mkdir(parents=True, exist_ok=True)
-    plist_path.write_text(plist_content)
-    console.print(f"[green]✓ Created launchd plist[/green]")
-    console.print(f"  Path: {plist_path}")
-
-    # Load the service
-    import subprocess
-    result = subprocess.run(["launchctl", "load", str(plist_path)], capture_output=True, text=True)
-    if result.returncode == 0:
-        console.print(f"  Loaded: launchctl load {plist_path}")
-        console.print("\n[dim]The daemon will start automatically and restart on login.[/dim]")
-    else:
-        console.print(f"[yellow]Warning: launchctl load failed: {result.stderr}[/yellow]")
-        console.print(f"Try manually: launchctl load {plist_path}")
-
-
-def _install_systemd(dry_run: bool, host: str, port: int) -> None:
-    """Install systemd user unit on Linux."""
-    service_path = Path.home() / ".config" / "systemd" / "user" / "prsm-node.service"
-
-    # Build the full node command (same as daemon start)
-    cmd_args = _get_daemon_node_cmd(host, port)
-    exec_start = " ".join(cmd_args)
-
-    service_content = f'''[Unit]
-Description=PRSM Node Daemon
-After=network.target
-
-[Service]
-Type=simple
-ExecStart={exec_start}
-Restart=always
-RestartSec=10
-StandardOutput=append:{_DAEMON_LOG_FILE}
-StandardError=append:{_DAEMON_LOG_FILE}
-WorkingDirectory={Path.home()}
-
-[Install]
-WantedBy=default.target
-'''
-
-    if dry_run:
-        console.print(f"\n[bold]Generated systemd unit:[/bold]\n")
-        console.print(service_content)
-        console.print(f"\n[dim]Would write to: {service_path}[/dim]")
-        console.print("[dim]Would run: systemctl --user enable --now prsm-node.service[/dim]")
-        return
-
-    # Write the service file
-    service_path.parent.mkdir(parents=True, exist_ok=True)
-    service_path.write_text(service_content)
-    console.print(f"[green]✓ Created systemd unit[/green]")
-    console.print(f"  Path: {service_path}")
-
-    # Enable the service
-    import subprocess
-    result = subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True)
-    result2 = subprocess.run(["systemctl", "--user", "enable", "--now", "prsm-node.service"], capture_output=True, text=True)
-
-    if result2.returncode == 0:
-        console.print(f"  Enabled: systemctl --user enable --now prsm-node.service")
-        console.print("\n[dim]The daemon will start automatically and restart on boot.[/dim]")
-    else:
-        console.print(f"[yellow]Warning: systemctl enable failed: {result2.stderr}[/yellow]")
-        console.print(f"Try manually: systemctl --user enable --now prsm-node.service")
+    """DEPRECATED: use `prsm node install`."""
+    from prsm.cli_modules.daemon import daemon_service_install as _install
+    _install(dry_run=dry_run, host=host, port=port)
 
 
 @daemon.command("uninstall")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 def daemon_uninstall(yes: bool):
-    """Remove the PRSM daemon system service.
-
-    Stops and unloads the service, then removes the service file.
-    """
-    import platform
-
-    system = platform.system()
-
-    if system == "Darwin":
-        _uninstall_launchd(yes=yes)
-    elif system == "Linux":
-        _uninstall_systemd(yes=yes)
-    else:
-        console.print(f"[red]Error: Unsupported platform '{system}'[/red]")
-        raise SystemExit(1)
-
-
-def _uninstall_launchd(yes: bool) -> None:
-    """Uninstall launchd agent on macOS."""
-    import subprocess
-
-    plist_path = Path.home() / "Library" / "LaunchAgents" / "ai.prsm.node.plist"
-
-    if not plist_path.exists():
-        console.print("[dim]No launchd service found to uninstall.[/dim]")
-        return
-
-    if not yes:
-        if not click.confirm(f"Unload and remove {plist_path}?"):
-            console.print("[dim]Cancelled.[/dim]")
-            return
-
-    # Unload the service
-    result = subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True, text=True)
-    if result.returncode == 0:
-        console.print("[dim]Unloaded launchd service.[/dim]")
-    else:
-        console.print(f"[dim]launchctl unload returned: {result.stderr}[/dim]")
-
-    # Remove the plist
-    plist_path.unlink()
-    console.print(f"[green]✓ Removed {plist_path}[/green]")
-
-
-def _uninstall_systemd(yes: bool) -> None:
-    """Uninstall systemd user unit on Linux."""
-    import subprocess
-
-    service_path = Path.home() / ".config" / "systemd" / "user" / "prsm-node.service"
-
-    if not service_path.exists():
-        console.print("[dim]No systemd service found to uninstall.[/dim]")
-        return
-
-    if not yes:
-        if not click.confirm(f"Disable and remove {service_path}?"):
-            console.print("[dim]Cancelled.[/dim]")
-            return
-
-    # Disable the service
-    subprocess.run(["systemctl", "--user", "stop", "prsm-node.service"], capture_output=True)
-    subprocess.run(["systemctl", "--user", "disable", "prsm-node.service"], capture_output=True)
-    console.print("[dim]Disabled systemd service.[/dim]")
-
-    # Remove the service file
-    service_path.unlink()
-    subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
-    console.print(f"[green]✓ Removed {service_path}[/green]")
+    """DEPRECATED: use `prsm node uninstall`."""
+    from prsm.cli_modules.daemon import daemon_service_uninstall as _uninstall
+    _uninstall(yes=yes)
 
 
 if __name__ == "__main__":
