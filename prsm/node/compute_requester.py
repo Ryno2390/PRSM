@@ -28,6 +28,7 @@ from prsm.node.gossip import (
 from prsm.node.identity import NodeIdentity, verify_signature
 from prsm.node.local_ledger import LocalLedger, TransactionType
 from prsm.node.transport import WebSocketTransport
+from prsm.node.payment_escrow import PaymentEscrow
 
 if TYPE_CHECKING:
     from prsm.node.discovery import PeerDiscovery
