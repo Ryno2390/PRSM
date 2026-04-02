@@ -89,7 +89,7 @@ _ERC20_ABI = [
 # Your FTNS contract address
 FTNS_CONTRACT_ADDRESS = os.getenv(
     "FTNS_CONTRACT_ADDRESS",
-    "0x5276D27bB70F5b20F1458e78030A7c2405CBe6e5",  # Your deployed FTNS on Base
+    "0x5276a3756C85f2E9e46f6D34386167a209aa16e5",  # Your deployed FTNS on Base
 )
 BASE_RPC_URL = os.getenv(
     "BASE_RPC_URL",
