@@ -370,15 +370,15 @@ class MultiNodeDemo:
                 balance = await node.get_balance()
                 console.print(f"  {node.display_name:25s} {balance:10.6f} FTNS")
 
-            # Submit a benchmark job
-            console.print(f"\n[bold cyan]Submitting Benchmark Job:[/bold cyan]")
+            # Submit an embedding job (deterministic results for consensus)
+            console.print(f"\n[bold cyan]Submitting Embedding Job:[/bold cyan]")
             requester = self.nodes[0]
             budget = 10.0
 
             job_id = await self.submit_job_with_escrow(
                 requester=requester,
-                job_type=JobType.BENCHMARK,
-                payload={"job_type": "benchmark", "iterations": 100000},
+                job_type=JobType.EMBEDDING,
+                payload={"job_type": "embedding", "text": "PRSM is a decentralized compute network"},
                 budget=budget,
             )
 
@@ -389,7 +389,7 @@ class MultiNodeDemo:
             # Broadcast to providers
             await self.broadcast_job_offer(
                 job_id=job_id,
-                payload={"job_type": "benchmark", "iterations": 100000},
+                payload={"job_type": "embedding", "text": "PRSM is a decentralized compute network"},
                 budget=budget,
             )
 
