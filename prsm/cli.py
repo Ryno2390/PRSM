@@ -811,7 +811,45 @@ def login(username: str, password: str, api_url: str) -> None:
             style="dim"
         )
     elif response.status_code == 401:
-        console.print("❌ Invalid username or password", style="red")
+        console.print()
+        console.print("  Login failed — this account may not exist yet.", style="yellow")
+        console.print()
+        choice = click.prompt(
+            "  Would you like to [1] register a new account, [2] try again, or [3] quit",
+            type=click.Choice(["1", "2", "3"]),
+            default="1",
+        )
+        if choice == "1":
+            from prsm.cli_modules.setup_wizard import _do_register, _save_credentials, _derive_username
+            default_uname = _derive_username(username)
+            ok = _do_register(api_url, default_uname)
+            if ok:
+                console.print("[bold green]✅ Registration successful. Try your command again.[/bold green]")
+            raise SystemExit(0 if ok else 1)
+        elif choice == "2":
+            password2 = click.prompt("  Password", hide_input=True)
+            try:
+                resp2 = httpx.post(
+                    f"{api_url}/api/v1/auth/login",
+                    json={"username": username, "password": password2},
+                    timeout=10.0,
+                )
+            except httpx.ConnectError:
+                console.print(f"❌ Cannot connect to {api_url}", style="red")
+                raise SystemExit(1)
+            if resp2.status_code == 200:
+                data2 = resp2.json()
+                _save_credentials(data2["access_token"], data2["refresh_token"], api_url, username)
+                expires_min = data2.get("expires_in", 1800) // 60
+                console.print(f"✅ Logged in as '{username}' (token expires in {expires_min} min)", style="bold green")
+                console.print(f"   Credentials saved to {_CREDENTIALS_FILE}", style="dim")
+                return
+            elif resp2.status_code == 401:
+                console.print("❌ Invalid username or password", style="red")
+                raise SystemExit(1)
+            else:
+                console.print(f"❌ Login failed: HTTP {resp2.status_code}", style="red")
+                raise SystemExit(1)
         raise SystemExit(1)
     else:
         console.print(
