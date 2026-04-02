@@ -2086,19 +2086,21 @@ def list_compute_jobs(limit: int):
 
 @compute.command("run")
 @click.option('--prompt', required=True, help='Prompt to process')
+@click.option('--budget', default=0.0, type=float, help='FTNS budget for the job')
 @click.option('--api', default='http://127.0.0.1:8000', help='Node API URL')
-def compute_run(prompt: str, api: str):
+def compute_run(prompt: str, budget: float, api: str):
     """Submit a compute job to your running daemon.
 
     Requires a running daemon (`prsm daemon start`).
     The daemon handles the job locally and returns the result.
+    If a budget is provided, real FTNS is locked in escrow on-chain.
     """
     import httpx
 
     try:
         resp = httpx.post(
             f"{api}/compute/query",
-            json={"prompt": prompt},
+            json={"prompt": prompt, "budget": budget},
             timeout=120.0,
         )
     except httpx.ConnectError:
@@ -2117,6 +2119,8 @@ def compute_run(prompt: str, api: str):
         job_id = data.get("job_id")
         if job_id:
             console.print(f"  [dim]Job ID: {job_id}[/dim]")
+        if budget > 0:
+            console.print(f"  [dim]Escrow: {budget:.6f} FTNS locked[/dim]")
     elif resp.status_code == 404:
         console.print(f"[red]API endpoint not found on daemon[/red]")
         console.print("  [dim]Your daemon version may not support this endpoint.[/dim]")
