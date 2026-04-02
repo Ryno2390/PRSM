@@ -2086,42 +2086,46 @@ def list_compute_jobs(limit: int):
 
 @compute.command("run")
 @click.option('--prompt', required=True, help='Prompt to process')
-@click.option('--api-url', default='http://127.0.0.1:8000', help='Local node API URL')
-def compute_run(prompt: str, api_url: str):
-    """Run a compute job on your local node via its management API.
+@click.option('--api', default='http://127.0.0.1:8000', help='Node API URL')
+def compute_run(prompt: str, api: str):
+    """Submit a compute job to your running daemon.
 
     Requires a running daemon (`prsm daemon start`).
+    The daemon handles the job locally and returns the result.
     """
     import httpx
 
-    console.print(f"[dim]Submitting job to node at {api_url}...[/dim]")
-
     try:
-        # Use the node's local management API (FastAPI)
         resp = httpx.post(
-            f"{api_url}/api/compute/query",
+            f"{api}/compute/query",
             json={"prompt": prompt},
             timeout=120.0,
         )
     except httpx.ConnectError:
-        console.print(f"[red]Cannot connect to node at {api_url}[/red]")
-        console.print("  [dim]Start your daemon first: prsm daemon start[/dim]")
+        console.print(f"[red]Cannot connect to node API at {api}[/red]")
+        console.print("  [dim]Start your daemon first: prsm node start --background[/dim]")
         raise SystemExit(1)
 
     if resp.status_code == 200:
         data = resp.json()
         console.print(f"[bold green]Result:[/bold green]")
-        text = data.get("response", data.get("result", str(data)))
+        text = data.get("response", str(data.get("result", data)))
         console.print(f"  {text}")
         cost = data.get("ftns_charged", data.get("ftns_cost"))
         if cost is not None:
             console.print(f"  [dim]Cost: {cost:.6f} FTNS[/dim]")
+        job_id = data.get("job_id")
+        if job_id:
+            console.print(f"  [dim]Job ID: {job_id}[/dim]")
+    elif resp.status_code == 404:
+        console.print(f"[red]API endpoint not found on daemon[/red]")
+        console.print("  [dim]Your daemon version may not support this endpoint.[/dim]")
+        console.print("  [dim]Upgrade: pipx upgrade prsm-network[/dim]")
+        raise SystemExit(1)
     else:
         console.print(f"[red]Request failed: HTTP {resp.status_code}[/red]")
         if resp.text:
             console.print(f"  [dim]{resp.text[:300]}[/dim]")
-        console.print("  [dim]Your daemon may not have the compute API endpoint.[/dim]")
-        console.print("  [dim]Make sure your daemon is running: prsm daemon status[/dim]")
         raise SystemExit(1)
 
 

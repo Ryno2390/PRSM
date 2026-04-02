@@ -303,6 +303,42 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "completed_at": job.completed_at,
         }
 
+    @app.post("/compute/query")
+    async def compute_query(body: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Submit a compute job and wait for the result (blocking).
+
+        POST body: {"prompt": "...", "model": "nwtn", "timeout": 120}
+        Returns: {"job_id", "response", "result"}
+        """
+        if not node.compute_requester or not node.compute_provider:
+            raise HTTPException(status_code=503, detail="Compute not initialized")
+
+        prompt = body.get("prompt", "")
+        model = body.get("model", "nwtn")
+        timeout = float(body.get("timeout", 120.0))
+
+        from prsm.node.compute_provider import JobType
+
+        job = await node.compute_requester.submit_job(
+            job_type=JobType.INFERENCE,
+            payload={"prompt": prompt, "model": model},
+            ftns_budget=0.0,
+        )
+
+        # Wait for the result
+        result = await node.compute_requester.get_result(job.job_id, timeout=timeout)
+
+        if result is None:
+            raise HTTPException(
+                status_code=504, detail="Compute timed out or no provider accepted"
+            )
+
+        return {
+            "job_id": job.job_id,
+            "response": result.get("response", result.get("text", str(result))),
+            "result": result,
+        }
+
     @app.post("/content/upload")
     async def upload_content(req: ContentUploadRequest) -> Dict[str, Any]:
         """Upload text content to IPFS with provenance tracking."""
