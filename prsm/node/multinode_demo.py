@@ -108,6 +108,8 @@ class DemoNodeWrapper:
             peer_count: int = 0
             async def send_to_peer(self, peer_id: str, msg: Any) -> None: pass
             def on_message(self, msg_type: str, handler) -> None: pass
+            async def gossip(self, msg: Any, fanout: int = 3) -> int:
+                return 0  # No peers in local demo
 
         self.transport = _GossipTransport()
         self.gossip = GossipProtocol(
