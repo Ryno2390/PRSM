@@ -1,43 +1,21 @@
-# AI Integration Guide
+# PRSM AI Integration
 
-PRSM exposes its capabilities to AI assistants through the **Model Context Protocol (MCP)**. This means tools like Claude Desktop, Hermes, OpenClaw, and any MCP-compatible agent can discover and invoke PRSM operations — searching datasets, submitting compute jobs, monitoring the network — without custom integration code.
+PRSM exposes an MCP (Model Context Protocol) server so AI assistants (Hermes,
+OpenClaw, Claude, etc.) can interact with your node natively.
 
----
+## How It Works
 
-## Overview
-
-When you enable the MCP server (`mcp_server_enabled: true` in your config, which is the default), PRSM runs a **FastMCP** server alongside your node. This server advertises all installed skill tools as MCP-compatible endpoints that AI agents can call.
-
-The flow looks like this:
+When your node is running (via `prsm daemon start` or `prsm node start`), an
+MCP server is automatically started on `localhost:9100` (configurable). This
+server exposes all installed PRSM skill packages as callable tools.
 
 ```
-AI Assistant  →  MCP Protocol  →  PRSM MCP Server  →  PRSM Network
-   (Claude)       (HTTP)            (localhost:9100)     (P2P)
+AI Assistant ← MCP (streamable-http) → PRSM MCP Server → PRSM Node
 ```
 
----
+## Connecting an AI Assistant
 
-## Setup
-
-### 1. Start the MCP server
-
-The MCP server starts automatically with your node if `mcp_server_enabled` is `true`. You can also start it standalone:
-
-```bash
-prsm mcp start
-```
-
-By default it listens on `localhost:9100`.
-
-### 2. Get the config snippet
-
-Generate the configuration your AI client needs:
-
-```bash
-prsm mcp config-snippet
-```
-
-This prints:
+Add the MCP server to your assistant's config:
 
 ```yaml
 mcp_servers:
@@ -46,150 +24,61 @@ mcp_servers:
     url: http://localhost:9100/mcp
 ```
 
-### 3. Add to your AI client
+Once connected, the AI can call PRSM tools directly. For example:
+- "Search the PRSM network for code training datasets"
+- "Submit a fine-tuning compute job with 50 epochs"
+- "Show me my connected peers"
 
-**Claude Desktop** — Add the snippet to your Claude Desktop MCP configuration file (usually `~/.claude/mcp_servers.yaml` or via Settings → MCP Servers).
+## Configuring the MCP Server
 
-**Hermes** — Add the snippet to your Hermes config under the `mcp_servers` section.
-
-**OpenClaw** — Add the snippet to your OpenClaw agent configuration.
-
-**Any MCP client** — Use the streamable-http transport pointed at `http://localhost:9100/mcp`.
-
-Once configured, the AI assistant will discover PRSM's tools automatically and can use them in conversation.
-
-### 4. Install FastMCP (if needed)
-
-The MCP server requires the `fastmcp` package:
-
-```bash
-pip install fastmcp
+```
+prsm config get mcp_server_enabled     # check if enabled
+prsm config get mcp_server_port        # check port
+prsm config set mcp_server_enabled false   # disable
+prsm config set mcp_server_port 9200       # change port
 ```
 
-This is an optional dependency — the rest of PRSM works without it.
-
----
-
-## Available Skill Packages
-
-PRSM ships with three built-in skill packages. Each package provides a set of tools that the MCP server exposes to AI agents.
-
-### prsm-datasets
-
-Dataset curation and management on the PRSM network.
-
-| Tool | Description |
-|---|---|
-| `prsm_search_datasets` | Search for datasets by keywords, domain, quality score, or format |
-| `prsm_curate_dataset` | Combine and filter dataset sources into a new curated dataset |
-| `prsm_validate_dataset` | Run quality checks (schema, duplicates, bias, quality scoring) |
-| `prsm_publish_dataset` | Publish a dataset to the network with metadata and pricing |
-
-### prsm-compute
-
-Compute job management on the PRSM network.
-
-| Tool | Description |
-|---|---|
-| `prsm_submit_job` | Submit a compute job (training, inference, evaluation, preprocessing) |
-| `prsm_job_status` | Check the status and progress of a submitted job |
-| `prsm_cancel_job` | Cancel a running or queued job |
-| `prsm_list_queue` | List jobs in the queue with status and resource usage |
-
-### prsm-network
-
-Network operations and monitoring.
-
-| Tool | Description |
-|---|---|
-| `prsm_list_peers` | List connected peers with their capabilities and status |
-| `prsm_network_stats` | Get aggregate network statistics (compute, storage, bandwidth, tokens) |
-| `prsm_health_check` | Run health checks on your node and its connectivity |
-| `prsm_discover_nodes` | Discover new nodes by capability, region, or reputation |
-
----
-
-## Example Workflows
-
-These examples show how an AI assistant might use PRSM tools in conversation.
-
-### Search for code generation datasets
-
-**You:** "Search PRSM for code generation datasets with quality above 0.8"
-
-The assistant calls `prsm_search_datasets`:
-
-```json
-{
-  "query": "code generation",
-  "domain": "code",
-  "min_quality": 0.8,
-  "format": "jsonl",
-  "limit": 10
-}
+After changing ports, restart the daemon:
+```
+prsm daemon restart
 ```
 
-**Result:** A list of matching datasets with IDs, names, quality scores, sizes, and descriptions. The assistant can then help you curate, validate, or download them.
+## Skill Packages
 
-### Submit a compute job for model fine-tuning
+Skills are the unit of capability on the PRSM network. Each package defines
+tools, prompts, and workflows that an AI can use.
 
-**You:** "Submit a fine-tuning job for CodeLlama on the dataset we found"
+### Built-in Skills
 
-The assistant calls `prsm_submit_job`:
+PRSM ships with 3 built-in skill packages:
 
-```json
-{
-  "name": "codellama-finetune-run1",
-  "task_type": "training",
-  "model": "codellama/CodeLlama-7b-hf",
-  "dataset": "dataset-abc123",
-  "config": {
-    "epochs": 3,
-    "batch_size": 8,
-    "learning_rate": 2e-5,
-    "gpu_required": true
-  },
-  "priority": "normal",
-  "max_ftns": 50.0
-}
+| Package | Tools | Description |
+|---------|-------|-------------|
+| `prsm-datasets` | search, curate, validate, publish | Dataset discovery and management |
+| `prsm-compute` | submit, status, cancel, queue | Compute job lifecycle |
+| `prsm-network` | peers, stats, health, discover | Network operations |
+
+### Skill Package Structure
+
+```
+prsm-skill-name/
+├── SKILL.yaml       # manifest (name, version, capabilities, tool defs)
+├── README.md        # human docs
+├── tools.json       # MCP tool definitions
+├── prompts/         # system prompts for AI agents
+│   └── agent.md
+├── workflows/       # multi-step workflow definitions
+│   └── process.yaml
+└── examples/        # usage examples
+    └── example.md
 ```
 
-**Result:** A job ID and submission confirmation. The assistant can then check progress with `prsm_job_status` and report back when the job completes.
-
-### Check network health and peer status
-
-**You:** "How's the PRSM network doing? Any issues with my node?"
-
-The assistant calls `prsm_health_check` and `prsm_network_stats`:
-
-```json
-// Health check
-{
-  "checks": ["connectivity", "storage", "compute", "latency"],
-  "verbose": true
-}
-
-// Network stats
-{
-  "metric": "overview",
-  "timeframe": "24h"
-}
-```
-
-**Result:** A summary of your node's health (all checks passing, latency to peers, resource usage) plus network-wide stats (total peers, aggregate compute capacity, jobs processed in the last 24 hours).
-
----
-
-## Creating Custom Skill Packages
-
-You can extend PRSM with custom skill packages. Each package is a directory containing a `SKILL.yaml` manifest that declares the package's tools.
-
-### SKILL.yaml format
+### Skill Manifest Format
 
 ```yaml
-name: my-custom-skill
+name: prsm-example
 version: 1.0.0
-description: What this skill package does
+description: Example skill description
 author: Your Name
 capabilities:
   - capability_one
@@ -197,114 +86,52 @@ capabilities:
 requires:
   - prsm-network >= 0.2.0
 tools:
-  - name: my_tool_name
-    description: What this tool does — shown to AI agents
+  - name: prsm_example_tool
+    description: "Does something useful on the PRSM network"
     parameters:
-      param_one:
-        type: string
-        description: "What this parameter is for"
-      param_two:
-        type: integer
-        description: "Optional numeric parameter"
-        optional: true
-      param_three:
-        type: object
-        description: "Complex configuration object"
-        optional: true
+      query: {type: string, description: "Search query"}
+      limit: {type: number, description: "Max results", optional: true}
 ```
 
-### Field reference
-
-| Field | Required | Description |
-|---|---|---|
-| `name` | yes | Unique package identifier (convention: `prsm-*` for official, anything else for community) |
-| `version` | yes | Semantic version |
-| `description` | yes | One-line description of the package |
-| `author` | yes | Package author |
-| `capabilities` | yes | List of capability identifiers this package provides |
-| `requires` | no | Dependency list (package name + version constraint) |
-| `tools` | yes | List of tool definitions (see below) |
-
-### Tool definition
-
-Each tool has:
-
-| Field | Required | Description |
-|---|---|---|
-| `name` | yes | Tool identifier (snake_case, must be unique across all skills) |
-| `description` | yes | What the tool does — this is shown to AI agents, so make it clear |
-| `parameters` | yes | Map of parameter name → schema (type, description, optional flag) |
-
-### Parameter types
-
-Supported types: `string`, `integer`, `number`, `boolean`, `array`, `object`.
-
-### Installing custom skills
-
-Place your skill directory (containing `SKILL.yaml`) in the skills search path, then verify:
-
-```bash
-prsm skills list
-```
-
-Your custom skill should appear alongside the built-in packages.
-
----
-
-## Skills CLI Commands
-
-Manage and inspect skill packages from the command line.
-
-### List installed skills
-
-```bash
-prsm skills list
-```
+### Managing Skills
 
 ```
-Installed Skills:
-  prsm-datasets  v1.0.0  Dataset curation and management (4 tools)
-  prsm-compute   v1.0.0  Compute job management (4 tools)
-  prsm-network   v1.0.0  Network operations and monitoring (4 tools)
+prsm skills list              # list installed skills
+prsm skills search <query>    # search network for skills
+prsm skills install <package> # install from network
+prsm skills remove <package>  # uninstall
+prsm skills info <package>    # show details
+prsm skills export <package>  # export as MCP manifest
 ```
 
-### Get skill details
+## Example MCP Interaction
 
-```bash
-prsm skills info prsm-datasets
-```
+Once connected, an AI assistant can:
 
-Shows the full skill manifest: description, version, capabilities, and all tools with their parameters.
+1. **Search datasets:**
+   AI calls `prsm_search_datasets(query="python code", min_quality=0.8)`
+   PRSM queries the network → returns matching datasets
 
-### Search for skills
+2. **Submit a compute job:**
+   AI calls `prsm_submit_job(model="transformer", epochs=100)`
+   PRSM queues the job → returns job ID and estimated cost
 
-```bash
-prsm skills search "compute"
-```
+3. **Monitor progress:**
+   AI calls `prsm_job_status(job_id="abc123")`
+   PRSM returns current status and progress
 
-Searches skill names and descriptions.
+4. **Check network health:**
+   AI calls `prsm_network_health()`
+   PRSM returns peer count, uptime, resource usage
 
-### Export a skill manifest
+## For Skill Authors
 
-```bash
-prsm skills export prsm-datasets > my-datasets-skill.yaml
-```
+To create a custom skill package:
 
-Exports the SKILL.yaml for inspection or modification.
+1. Create a directory with a `SKILL.yaml` following the format above
+2. Add tool definitions in `tools.json`
+3. Include system prompts in `prompts/`
+4. Install it: `prsm skills install ./my-skill/`
 
----
-
-## Troubleshooting
-
-**"fastmcp is required to run the PRSM MCP server"** — Install it with `pip install fastmcp`.
-
-**AI client can't connect** — Verify the MCP server is running (`prsm status`) and the port matches your client config. Check that `mcp_server_enabled` is `true`.
-
-**Tools not appearing in AI client** — Restart the MCP server after installing new skills. Some clients cache tool lists and may need to be restarted too.
-
-**Port conflict** — Change the MCP port:
-
-```bash
-prsm config set mcp_server_port 9200
-prsm mcp start
-```
+The skill will be automatically discovered by the MCP server and exposed to
+any connected AI assistant.
