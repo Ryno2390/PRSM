@@ -1141,18 +1141,21 @@ class PRSMNode:
         if not hasattr(transaction, "from_wallet") or not hasattr(transaction, "to_wallet"):
             return
 
-        # Skip transfers to/from internal escrow wallets
         to_addr = transaction.to_wallet
-        from_addr = transaction.from_wallet
+        target_address = None
 
-        # Map PRSM wallet IDs to actual Ethereum addresses
-        # The wallet ID IS the address for wallets created from key pairs,
-        # or it's a named wallet that needs mapping
+        # 1. Check if it's a direct ETH address
         if to_addr.startswith("0x") and len(to_addr) >= 40:
             target_address = to_addr
+        # 2. Check if it's the node's own ID (self-payment / self-compute)
+        # If so, map it to the on-chain wallet address
+        elif to_addr == self.identity.node_id and self.ftns_ledger._connected_address:
+            target_address = self.ftns_ledger._connected_address
+            logger.info(
+                f"Bridging local payment to on-chain: "
+                f"{self.identity.node_id[:12]}... -> {target_address}"
+            )
         else:
-            # Named wallet — use the default contract address
-            # or skip this transfer
             logger.debug(
                 f"Skipping on-chain FTNS transfer for named wallet: {to_addr[:20]}…"
             )
