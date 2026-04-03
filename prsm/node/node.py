@@ -789,6 +789,21 @@ class PRSMNode:
         self.db_initialized = False
         self._broadcast_sent = set()
 
+        # ── Batch Settlement (gas-efficient on-chain broadcasting) ──
+        from prsm.economy.batch_settlement import BatchSettlementManager, SettlementMode
+        self._batch_settlement = BatchSettlementManager(
+            ftns_ledger=self.ftns_ledger,
+            node_id=self.identity.node_id,
+            connected_address=(
+                self.ftns_ledger._connected_address
+                if hasattr(self.ftns_ledger, '_connected_address')
+                else None
+            ),
+            mode=SettlementMode.PERIODIC,
+            flush_interval=600.0,     # 10 minutes
+            flush_threshold=1.0,      # or when pending ≥ 1.0 FTNS
+        )
+
         # Wire ledger_sync and agent_registry into subsystems
         self.content_uploader.ledger_sync = self.ledger_sync
         if self.compute_provider:
@@ -796,7 +811,7 @@ class PRSMNode:
             # Wire escrow and consensus into compute provider
             self.compute_provider.escrow = self._payment_escrow
             self.compute_provider.consensus = self._result_consensus
-            # Wire on-chain FTNS ledger for real blockchain transfers
+            # Wire batch settlement as the on-chain broadcast handler
             if self.ftns_ledger is not None:
                 self._payment_escrow.broadcast_tx = self._on_chain_ftns_transfer
         self.compute_requester.ledger_sync = self.ledger_sync
@@ -899,6 +914,11 @@ class PRSMNode:
             self.ledger_sync.start()
         if self._payment_escrow:
             self._escrow_cleanup_task = asyncio.create_task(self._payment_escrow.periodic_cleanup())
+        if hasattr(self, '_batch_settlement') and self._batch_settlement:
+            # Update connected_address now that ftns_ledger may have initialized
+            if self.ftns_ledger and hasattr(self.ftns_ledger, '_connected_address'):
+                self._batch_settlement._connected_address = self.ftns_ledger._connected_address
+            self._batch_settlement.start()
         if self.agent_registry:
             self.agent_registry.start()
         if self.agent_collaboration:
@@ -1146,15 +1166,29 @@ class PRSMNode:
 
     # ── On-Chain FTNS Transfer Handler ────────────────────────
     async def _on_chain_ftns_transfer(self, transaction) -> None:
-        """Broadcast a transaction to the real FTNS contract on Base.
+        """Queue a transaction for batch settlement on Base mainnet.
 
         KEY SAFETY: This must only be called AFTER the local ledger
         transaction has successfully committed. Never broadcast before
         local commit — otherwise we burn gas on transactions that get
         rolled back by TOCTOU/ConcurrentModification failures.
 
-        Deduplication: tracks (tx_id, to_wallet) pairs to prevent
-        re-broadcasting the same transaction due to retries or races.
+        Transactions are queued in BatchSettlementManager and flushed
+        periodically (default: every 10 min or when pending >= 1.0 FTNS).
+        This saves gas by netting opposing transfers and batching commits.
+        """
+        # Route through batch settlement if available
+        if hasattr(self, '_batch_settlement') and self._batch_settlement:
+            await self._batch_settlement.enqueue(transaction)
+            return
+
+        # Legacy fallback: direct on-chain transfer (no batch settlement)
+        await self._direct_on_chain_transfer(transaction)
+
+    async def _direct_on_chain_transfer(self, transaction) -> None:
+        """Direct on-chain transfer (legacy fallback, no batching).
+
+        Used when batch settlement is not initialized.
         """
         if not self.ftns_ledger or not self.ftns_ledger._is_initialized:
             return
@@ -1193,9 +1227,6 @@ class PRSMNode:
         if amount <= 0:
             return
 
-        # ftns_ledger.transfer() already acquires self._lock internally,
-        # so we must NOT acquire it here — asyncio.Lock is not reentrant
-        # and double-acquisition causes a deadlock.
         try:
             tx_record = await self.ftns_ledger.transfer(
                 job_id=tx_key[0],
@@ -1252,6 +1283,7 @@ class PRSMNode:
             "ledger_sync": self.ledger_sync.get_stats() if self.ledger_sync else None,
             "escrow": self._payment_escrow.get_stats() if hasattr(self, '_payment_escrow') and self._payment_escrow else None,
             "consensus": self._result_consensus.get_stats() if hasattr(self, '_result_consensus') and self._result_consensus else None,
+            "batch_settlement": self._batch_settlement.get_stats() if hasattr(self, '_batch_settlement') and self._batch_settlement else None,
             "ftns_onchain": (
                 self.ftns_ledger.get_summary()
                 if self.ftns_ledger and self.ftns_ledger._is_initialized

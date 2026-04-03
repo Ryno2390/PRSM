@@ -480,7 +480,7 @@ def _get_version():
         from importlib.metadata import version as pkg_version
         return pkg_version("prsm-network")
     except Exception:
-        return "0.21.0"  # fallback
+        return "0.22.0"  # fallback
 
 
 @click.group()
@@ -2373,6 +2373,159 @@ def history(limit: int, search: Optional[str], api_url: str) -> None:
             (tx.get("description") or "")[:36],
             tx.get("status", "?"),
             str(tx.get("timestamp", ""))[:19],
+        )
+    console.print(table)
+
+
+# ============================================================================
+# SETTLEMENT COMMANDS (under ftns group)
+# ============================================================================
+
+@ftns.group()
+def settle():
+    """On-chain batch settlement commands."""
+    pass
+
+
+@settle.command("status")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def settle_status(api_url: str) -> None:
+    """Show batch settlement queue status."""
+    import httpx
+    from rich.console import Console
+    from rich.table import Table
+    console = Console()
+    url = api_url or _get_api_url()
+    try:
+        resp = httpx.get(f"{url}/settlement/stats", timeout=10)
+        data = resp.json()
+    except Exception as e:
+        console.print(f"  [red]Error:[/red] {e}")
+        return
+
+    table = Table(title="Batch Settlement Status", show_header=True)
+    table.add_column("Property", style="bold")
+    table.add_column("Value")
+    table.add_row("Mode", str(data.get("mode", "unknown")))
+    table.add_row("Queue Size", str(data.get("queue_size", 0)))
+    table.add_row("Pending FTNS", f"{data.get('pending_amount', 0):.6f}")
+    table.add_row("Flush Interval", f"{data.get('flush_interval', 0)}s")
+    table.add_row("Flush Threshold", f"{data.get('flush_threshold', 0)} FTNS")
+    table.add_row("Total Settled", str(data.get("total_settled", 0)))
+    table.add_row("Gas Txs Saved", str(data.get("gas_txs_saved", 0)))
+    ago = data.get("last_flush_ago")
+    table.add_row("Last Flush", f"{ago:.0f}s ago" if ago else "never")
+    console.print(table)
+
+
+@settle.command("pending")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def settle_pending(api_url: str) -> None:
+    """List pending un-settled transfers."""
+    import httpx
+    from rich.console import Console
+    from rich.table import Table
+    console = Console()
+    url = api_url or _get_api_url()
+    try:
+        resp = httpx.get(f"{url}/settlement/pending", timeout=10)
+        data = resp.json()
+    except Exception as e:
+        console.print(f"  [red]Error:[/red] {e}")
+        return
+
+    pending = data.get("pending", [])
+    if not pending:
+        console.print("  No pending transfers.")
+        return
+
+    table = Table(title=f"Pending Transfers ({len(pending)})", show_header=True)
+    table.add_column("TX ID")
+    table.add_column("To")
+    table.add_column("Amount")
+    table.add_column("Age")
+    for p in pending:
+        table.add_row(
+            str(p.get("tx_id", "")),
+            str(p.get("to", "")),
+            f"{p.get('amount', 0):.6f}",
+            f"{p.get('age_seconds', 0):.0f}s",
+        )
+    console.print(table)
+
+
+@settle.command("flush")
+@click.option("--api-url", default=None, help="PRSM API URL")
+def settle_flush(api_url: str) -> None:
+    """Manually trigger batch settlement (flush all pending transfers on-chain)."""
+    import httpx
+    from rich.console import Console
+    console = Console()
+    url = api_url or _get_api_url()
+    console.print("  Flushing settlement queue...")
+    try:
+        resp = httpx.post(f"{url}/settlement/flush", timeout=120)
+        data = resp.json()
+    except Exception as e:
+        console.print(f"  [red]Error:[/red] {e}")
+        return
+
+    settled = data.get("settled_count", 0)
+    net = data.get("net_transfers", 0)
+    amount = data.get("total_amount", 0)
+    duration = data.get("duration_seconds", 0)
+    hashes = data.get("tx_hashes", [])
+    errors = data.get("errors", [])
+
+    if settled == 0:
+        console.print("  Nothing to settle.")
+        return
+
+    console.print(f"  Settled {settled} transfers → {net} on-chain txs")
+    console.print(f"  Total: {amount:.6f} FTNS in {duration:.1f}s")
+    if hashes:
+        for h in hashes:
+            console.print(f"  TX: {h}")
+    if errors:
+        for e in errors:
+            console.print(f"  [red]Error:[/red] {e}")
+
+
+@settle.command("history")
+@click.option("--api-url", default=None, help="PRSM API URL")
+@click.option("--limit", default=10, help="Number of records")
+def settle_history(api_url: str, limit: int) -> None:
+    """Show recent settlement history."""
+    import httpx
+    from rich.console import Console
+    from rich.table import Table
+    console = Console()
+    url = api_url or _get_api_url()
+    try:
+        resp = httpx.get(f"{url}/settlement/history", params={"limit": limit}, timeout=10)
+        data = resp.json()
+    except Exception as e:
+        console.print(f"  [red]Error:[/red] {e}")
+        return
+
+    history = data.get("history", [])
+    if not history:
+        console.print("  No settlement history.")
+        return
+
+    table = Table(title="Settlement History", show_header=True)
+    table.add_column("Settled")
+    table.add_column("Net TXs")
+    table.add_column("Amount")
+    table.add_column("Duration")
+    table.add_column("Errors")
+    for h in history:
+        table.add_row(
+            str(h.get("settled_count", 0)),
+            str(h.get("net_transfers", 0)),
+            f"{h.get('total_amount', 0):.6f}",
+            f"{h.get('duration_seconds', 0):.1f}s",
+            str(len(h.get("errors", []))),
         )
     console.print(table)
 

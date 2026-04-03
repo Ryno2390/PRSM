@@ -131,7 +131,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     app = FastAPI(
         title="PRSM Node API",
         description="Management API for a PRSM network node",
-        version="0.21.0",
+        version="0.22.0",
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
@@ -791,6 +791,48 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     async def health() -> Dict[str, str]:
         """Simple health check."""
         return {"status": "ok", "node_id": node.identity.node_id if node.identity else "unknown"}
+
+    # ── Batch Settlement Endpoints ─────────────────────────────────
+
+    @app.get("/settlement/stats")
+    async def settlement_stats() -> Dict[str, Any]:
+        """Get batch settlement queue stats."""
+        if not hasattr(node, '_batch_settlement') or not node._batch_settlement:
+            return {"enabled": False}
+        stats = node._batch_settlement.get_stats()
+        stats["enabled"] = True
+        return stats
+
+    @app.get("/settlement/pending")
+    async def settlement_pending() -> Dict[str, Any]:
+        """List pending (un-settled) on-chain transfers."""
+        if not hasattr(node, '_batch_settlement') or not node._batch_settlement:
+            return {"pending": [], "count": 0}
+        pending = node._batch_settlement.get_pending()
+        return {"pending": pending, "count": len(pending)}
+
+    @app.post("/settlement/flush")
+    async def settlement_flush() -> Dict[str, Any]:
+        """Manually trigger batch settlement (flush all pending transfers)."""
+        if not hasattr(node, '_batch_settlement') or not node._batch_settlement:
+            raise HTTPException(status_code=503, detail="Batch settlement not initialized")
+        result = await node._batch_settlement.flush()
+        return {
+            "settled_count": result.settled_count,
+            "total_amount": result.total_amount,
+            "net_transfers": result.net_transfers,
+            "tx_hashes": result.tx_hashes,
+            "errors": result.errors,
+            "duration_seconds": result.duration_seconds,
+        }
+
+    @app.get("/settlement/history")
+    async def settlement_history(limit: int = 10) -> Dict[str, Any]:
+        """Get recent settlement history."""
+        if not hasattr(node, '_batch_settlement') or not node._batch_settlement:
+            return {"history": [], "count": 0}
+        history = node._batch_settlement.get_history(limit=limit)
+        return {"history": history, "count": len(history)}
 
 
     # ── Staking Endpoints ─────────────────────────────────────────
