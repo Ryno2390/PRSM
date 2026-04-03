@@ -27,6 +27,8 @@ from prsm.node.config import is_active_now
 from prsm.node.gossip import (
     GOSSIP_JOB_OFFER,
     GOSSIP_JOB_ACCEPT,
+    GOSSIP_JOB_CONFIRM,
+    GOSSIP_JOB_CANCEL,
     GOSSIP_JOB_RESULT,
     GossipProtocol,
 )
@@ -148,6 +150,7 @@ class ComputeProvider:
         self.resources = detect_resources()
         self.active_jobs: Dict[str, ComputeJob] = {}
         self.completed_jobs: Dict[str, ComputeJob] = {}
+        self._max_completed_jobs = 500  # Prevent unbounded memory growth
         self._running = False
         self.allow_self_compute = True  # Execute own jobs when no peers (single-node mode)
         self.ledger_sync = None  # Set by node.py after construction
@@ -184,6 +187,10 @@ class ComputeProvider:
         """Register gossip handlers and start provider."""
         self._running = True
         self.gossip.subscribe(GOSSIP_JOB_OFFER, self._on_job_offer)
+        self.gossip.subscribe(GOSSIP_JOB_CONFIRM, self._on_job_confirm)
+        self.gossip.subscribe(GOSSIP_JOB_CANCEL, self._on_job_cancel)
+        # Jobs waiting for confirm before execution
+        self._pending_confirm: Dict[str, ComputeJob] = {}
         logger.info(
             f"Compute provider started: {self.resources.cpu_count} CPUs, "
             f"{self.resources.memory_total_gb}GB RAM, "
@@ -194,7 +201,16 @@ class ComputeProvider:
         self._running = False
 
     async def _on_job_offer(self, subtype: str, data: Dict[str, Any], origin: str) -> None:
-        """Evaluate a job offer and accept if we have capacity."""
+        """Evaluate a job offer and accept if we have capacity.
+
+        In multi-node mode, acceptance is a two-phase handshake:
+          1. Provider publishes GOSSIP_JOB_ACCEPT (this method)
+          2. Requester picks the winning provider and publishes GOSSIP_JOB_CONFIRM
+          3. Provider starts execution only after receiving the confirm
+
+        In single-node mode (no peers), the provider executes immediately
+        since there's no competing provider.
+        """
         if not self._running:
             return
 
@@ -207,18 +223,30 @@ class ComputeProvider:
         job_type_str = data.get("job_type", "")
         ftns_budget = data.get("ftns_budget", 0.0)
         requester_id = data.get("requester_id", origin)
+        target_peers = data.get("target_peers", [])
+
+        # Enforce target_peers: if the offer specifies target peers,
+        # only accept if we're in the list.
+        if target_peers and self.identity.node_id not in target_peers:
+            logger.debug(
+                f"Declining job {job_id[:8]}: not in target_peers list"
+            )
+            return
 
         # In network mode (peers connected), don't accept own jobs to avoid
         # double-counting.  In local mode (no peers), execute our own jobs
         # so a single-node setup is functional out of the box.
+        is_single_node = not self.transport or self.transport.peer_count == 0
         if requester_id == self.identity.node_id:
             if not self.allow_self_compute:
                 return
-            if self.transport and self.transport.peer_count > 0:
+            if not is_single_node:
                 return
 
         # Check if we already have this job
         if job_id in self.active_jobs or job_id in self.completed_jobs:
+            return
+        if hasattr(self, '_pending_confirm') and job_id in self._pending_confirm:
             return
 
         # Check capacity
@@ -235,12 +263,11 @@ class ComputeProvider:
         if job_type == JobType.TRAINING:
             try:
                 from prsm.compute.distillation.backends.pytorch_backend import PyTorchDistillationBackend
-                # PyTorchDistillationBackend import successful - we have training capability
             except ImportError:
                 logger.debug("Declining TRAINING job - no distillation backend available")
                 return
 
-        # Accept the job
+        # Build the job object
         job = ComputeJob(
             job_id=job_id,
             job_type=job_type,
@@ -250,7 +277,6 @@ class ComputeProvider:
             status=JobStatus.ACCEPTED,
             accepted_by=self.identity.node_id,
         )
-        self.active_jobs[job_id] = job
 
         # Announce acceptance
         await self.gossip.publish(GOSSIP_JOB_ACCEPT, {
@@ -260,10 +286,68 @@ class ComputeProvider:
             "capacity": self.available_capacity,
         })
 
-        logger.info(f"Accepted job {job_id[:8]} ({job_type.value}) from {requester_id[:8]}")
+        if is_single_node:
+            # Single-node: no competing providers, execute immediately
+            self.active_jobs[job_id] = job
+            logger.info(
+                f"Accepted job {job_id[:8]} ({job_type.value}) "
+                f"from {requester_id[:8]} [single-node, executing]"
+            )
+            asyncio.create_task(self._execute_job(job))
+        else:
+            # Multi-node: wait for GOSSIP_JOB_CONFIRM before executing
+            if hasattr(self, '_pending_confirm'):
+                self._pending_confirm[job_id] = job
+            else:
+                self._pending_confirm = {job_id: job}
+            logger.info(
+                f"Accepted job {job_id[:8]} ({job_type.value}) "
+                f"from {requester_id[:8]} [awaiting confirm]"
+            )
 
-        # Execute the job
-        asyncio.create_task(self._execute_job(job))
+    async def _on_job_confirm(self, subtype: str, data: Dict[str, Any], origin: str) -> None:
+        """Handle job confirmation from the requester.
+
+        The requester picks the winning provider and broadcasts
+        GOSSIP_JOB_CONFIRM.  If we're the chosen provider, execute.
+        If not, discard the pending job.
+        """
+        job_id = data.get("job_id", "")
+        confirmed_provider = data.get("provider_id", "")
+
+        pending = getattr(self, '_pending_confirm', {})
+        job = pending.pop(job_id, None)
+        if not job:
+            return
+
+        if confirmed_provider == self.identity.node_id:
+            # We won — start executing
+            self.active_jobs[job_id] = job
+            logger.info(f"Job {job_id[:8]} confirmed — executing")
+            asyncio.create_task(self._execute_job(job))
+        else:
+            # Another provider was chosen — drop the job
+            logger.info(
+                f"Job {job_id[:8]} assigned to {confirmed_provider[:8]}, "
+                f"dropping"
+            )
+
+    async def _on_job_cancel(self, subtype: str, data: Dict[str, Any], origin: str) -> None:
+        """Handle job cancellation from the requester."""
+        job_id = data.get("job_id", "")
+
+        # Remove from pending confirm queue
+        pending = getattr(self, '_pending_confirm', {})
+        pending.pop(job_id, None)
+
+        # If the job is active, mark it cancelled (can't stop mid-execution
+        # in async, but we can prevent result publishing)
+        active = self.active_jobs.pop(job_id, None)
+        if active:
+            active.status = JobStatus.FAILED
+            active.error = "Cancelled by requester"
+            self.completed_jobs[job_id] = active
+            logger.info(f"Job {job_id[:8]} cancelled by requester")
 
     async def _execute_job(self, job: ComputeJob) -> None:
         """Execute a compute job and publish the result."""
@@ -288,20 +372,13 @@ class ComputeProvider:
             result_bytes = json.dumps(result, sort_keys=True).encode()
             job.result_signature = self.identity.sign(result_bytes)
 
-            # Record earnings
-            tx = await self.ledger.credit(
-                wallet_id=self.identity.node_id,
-                amount=job.ftns_budget,
-                tx_type=TransactionType.COMPUTE_EARNING,
-                description=f"Compute job {job.job_id[:8]} ({job.job_type.value})",
-            )
-
-            # Broadcast earning via ledger sync
-            if self.ledger_sync:
-                try:
-                    await self.ledger_sync.broadcast_transaction(tx)
-                except Exception:
-                    pass
+            # NOTE: Provider does NOT self-credit FTNS here.  Payment flows
+            # through the escrow system on the requester side:
+            #   1. Requester locks escrow before broadcasting the offer.
+            #   2. On receiving the result, the requester releases escrow
+            #      to the provider (or refunds on failure).
+            # Self-crediting would cause double-payment and ledger divergence
+            # across nodes.
 
             # Publish result
             await self.gossip.publish(GOSSIP_JOB_RESULT, {
@@ -313,7 +390,7 @@ class ComputeProvider:
                 "public_key": self.identity.public_key_b64,
             })
 
-            logger.info(f"Job {job.job_id[:8]} completed, earned {job.ftns_budget} FTNS")
+            logger.info(f"Job {job.job_id[:8]} completed, result published")
 
         except Exception as e:
             job.status = JobStatus.FAILED
@@ -339,6 +416,13 @@ class ComputeProvider:
             # Move from active to completed
             self.active_jobs.pop(job.job_id, None)
             self.completed_jobs[job.job_id] = job
+
+            # Evict oldest completed jobs to prevent memory leak
+            if len(self.completed_jobs) > self._max_completed_jobs:
+                excess = len(self.completed_jobs) - self._max_completed_jobs
+                oldest_keys = list(self.completed_jobs.keys())[:excess]
+                for k in oldest_keys:
+                    del self.completed_jobs[k]
 
     # ── Job type implementations ─────────────────────────────────
 

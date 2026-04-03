@@ -131,7 +131,7 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
     app = FastAPI(
         title="PRSM Node API",
         description="Management API for a PRSM network node",
-        version="0.22.0",
+        version="0.23.0",
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
@@ -353,15 +353,21 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         )
         if has_peers:
             try:
+                # Dynamic timeout: allow enough time for remote inference
+                # API timeout is the user-facing limit; gossip gets most of it
+                gossip_timeout = max(timeout * 0.8, 30.0)
+
                 # Submit via gossip for multi-node federation
+                # Pass our job_id so escrow and gossip track the same ID
                 submitted = await node.compute_requester.submit_job(
                     job_type=JobType.INFERENCE,
                     payload={"prompt": prompt, "model": model},
                     ftns_budget=budget,
                     use_escrow=False,  # escrow already created above
+                    job_id=job_id,     # propagate API job_id
                 )
                 result = await node.compute_requester.get_result(
-                    submitted.job_id, timeout=10.0
+                    submitted.job_id, timeout=gossip_timeout
                 )
                 if result:
                     job_id = submitted.job_id

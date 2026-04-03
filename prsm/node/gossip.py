@@ -34,6 +34,8 @@ _BOUNDED_GOSSIP_LABELS = {
 # Gossip subtypes for the compute/storage marketplace
 GOSSIP_JOB_OFFER = "job_offer"
 GOSSIP_JOB_ACCEPT = "job_accept"
+GOSSIP_JOB_CONFIRM = "job_confirm"          # Requester confirms which provider won
+GOSSIP_JOB_CANCEL = "job_cancel"            # Cancel a job (timeout, requester abort)
 GOSSIP_JOB_RESULT = "job_result"
 GOSSIP_PAYMENT_CONFIRM = "payment_confirm"
 GOSSIP_ESCROW_CREATE = "escrow_create"       # FTNS locked for a job

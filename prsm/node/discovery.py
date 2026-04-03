@@ -120,8 +120,11 @@ class PeerDiscovery:
         local_backends: Optional[List[str]] = None,
         local_gpu_available: bool = False,
     ):
+        # Default bootstrap node — the live PRSM bootstrap server
+        _DEFAULT_BOOTSTRAP = ["wss://bootstrap1.prsm-network.com:8765"]
+
         self.transport = transport
-        self.bootstrap_nodes = bootstrap_nodes or []
+        self.bootstrap_nodes = bootstrap_nodes if bootstrap_nodes is not None else _DEFAULT_BOOTSTRAP
         self.bootstrap_connect_timeout = max(1.0, float(bootstrap_connect_timeout))
         self.bootstrap_retry_attempts = max(1, int(bootstrap_retry_attempts))
         self.bootstrap_fallback_enabled = bootstrap_fallback_enabled
@@ -210,7 +213,7 @@ class PeerDiscovery:
                     node_id=self.transport.identity.node_id,
                     port=getattr(self.transport, 'port', 8000),
                     capabilities=self._local_capabilities,
-                    version="0.22.0",
+                    version="0.23.0",
                     connect_timeout=self.bootstrap_connect_timeout,
                 )
 
