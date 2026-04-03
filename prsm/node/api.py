@@ -318,32 +318,43 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         timeout = float(body.get("timeout", 120.0))
         budget = float(body.get("budget", 0.0))
 
-        from prsm.node.compute_provider import JobType
+        from prsm.node.compute_provider import JobType, ComputeJob
 
-        job = await node.compute_requester.submit_job(
-            job_type=JobType.INFERENCE,
-            payload={"prompt": prompt, "model": model},
-            ftns_budget=budget,
-        )
-
-        # Try to get result via gossip (multi-node mode)
-        result = await node.compute_requester.get_result(job.job_id, timeout=30.0)
-
-        # Fallback: self-compute when no peers available (single-node mode)
-        if result is None and node.compute_provider.allow_self_compute:
-            from prsm.node.compute_provider import ComputeJob
-
-            self_job = ComputeJob(
-                job_id=job.job_id,
+        # Create escrow if budget provided
+        if budget > 0:
+            job = await node.compute_requester.submit_job(
                 job_type=JobType.INFERENCE,
                 payload={"prompt": prompt, "model": model},
-                requester_id=node.identity.node_id,
                 ftns_budget=budget,
             )
+            job_id = job.job_id
+        else:
+            # No budget, use simple self-compute
+            job_id = None
+
+        # In single-node mode, skip gossip and execute directly
+        self_job = ComputeJob(
+            job_id=job_id or "direct-" + __import__('uuid').uuid4().hex,
+            job_type=JobType.INFERENCE,
+            payload={"prompt": prompt, "model": model},
+            requester_id=node.identity.node_id,
+            ftns_budget=budget,
+        )
+        
+        # Try gossip first if peers are available (10s timeout)
+        result = None
+        if node.transport and node.transport.peer_count > 0:
+            if job_id:
+                result = await node.compute_requester.get_result(job_id, timeout=10.0)
+        
+        # Fallback: direct self-compute
+        if result is None and node.compute_provider.allow_self_compute:
+            logger.info(f"compute_query: executing self-compute for {self_job.job_id[:8]}")
             await node.compute_provider._execute_job(self_job)
-            result = node.compute_provider.completed_jobs.get(job.job_id)
-            if result:
-                result = result.result
+            completed = node.compute_provider.completed_jobs.get(self_job.job_id)
+            if completed:
+                result = completed.result
+            job_id = self_job.job_id
 
         if result is None:
             raise HTTPException(
