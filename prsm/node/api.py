@@ -326,8 +326,24 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             ftns_budget=budget,
         )
 
-        # Wait for the result
-        result = await node.compute_requester.get_result(job.job_id, timeout=timeout)
+        # Try to get result via gossip (multi-node mode)
+        result = await node.compute_requester.get_result(job.job_id, timeout=30.0)
+
+        # Fallback: self-compute when no peers available (single-node mode)
+        if result is None and node.compute_provider.allow_self_compute:
+            from prsm.node.compute_provider import ComputeJob
+
+            self_job = ComputeJob(
+                job_id=job.job_id,
+                job_type=JobType.INFERENCE,
+                payload={"prompt": prompt, "model": model},
+                requester_id=node.identity.node_id,
+                ftns_budget=budget,
+            )
+            await node.compute_provider._execute_job(self_job)
+            result = node.compute_provider.completed_jobs.get(job.job_id)
+            if result:
+                result = result.result
 
         if result is None:
             raise HTTPException(
