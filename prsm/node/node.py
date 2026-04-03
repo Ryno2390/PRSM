@@ -1071,7 +1071,7 @@ class PRSMNode:
         """Give the node an initial FTNS balance if it has none."""
         try:
             balance = await self.ledger.get_balance(self.identity.node_id)
-            # If balance is 0 (local ledger cleared, not on-chain balance),
+            # If balance is 0 (local ledger cleared on restart),
             # give the node 100 FTNS to start with
             if balance <= 0:
                 await self.ledger.credit(
@@ -1083,8 +1083,10 @@ class PRSMNode:
                 logger.info(
                     f"Seeded welcome grant: 100 FTNS to {self.identity.node_id[:12]}..."
                 )
+            else:
+                logger.debug(f"Node already has balance: {balance:.6f}, skipping welcome grant")
         except Exception as e:
-            logger.debug(f"Welcome grant check failed: {e}")
+            logger.warning(f"Welcome grant failed: {e}")
 
     # ── On-Chain FTNS Transfer Handler ────────────────────────
     async def _on_chain_ftns_transfer(self, transaction) -> None:
