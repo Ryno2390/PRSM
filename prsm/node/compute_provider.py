@@ -330,23 +330,10 @@ class ComputeProvider:
             logger.error(f"Job {job.job_id[:8]} failed: {e}")
 
         else:
-            # Job completed successfully — release escrow
-            if self.escrow:
-                escrow_entry = self.escrow.get_escrow(job.job_id)
-                if escrow_entry and escrow_entry.status.value == "pending":
-                    tx = await self.escrow.release_escrow(
-                        job_id=job.job_id,
-                        provider_id=self.identity.node_id,
-                        consensus_reached=True,
-                    )
-                    if tx:
-                        logger.info(
-                            f"Escrow released for {job.job_id[:8]}: "
-                            f"{escrow_entry.amount} FTNS -> {self.identity.node_id[:12]}"
-                        )
-                elif not escrow_entry:
-                    # No escrow — self-compute or legacy mode, just charge local ledger
-                    pass
+            # Job completed successfully — escrow is released by the API
+            # endpoint (compute_query) after returning the result.
+            # This avoids a race with the concurrent API escrow release.
+            pass
 
         finally:
             # Move from active to completed
