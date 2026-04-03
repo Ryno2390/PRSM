@@ -334,9 +334,22 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 status_code=504, detail="Compute timed out or no provider accepted"
             )
 
-        # Escrow is released by the compute provider during execution.
-        # No need to release here — doing so would cause a concurrent
-        # modification error with the provider's own release call.
+        # Release escrow for API-submitted jobs.
+        # The compute_provider._execute_job path handles escrow release for
+        # gossip-submitted jobs, but /compute/query self-executes locally
+        # without going through the gossip provider path, so we must release here.
+        if budget > 0 and hasattr(node, '_payment_escrow') and node._payment_escrow:
+            try:
+                await node._payment_escrow.release_escrow(
+                    job_id=job.job_id,
+                    provider_id=node.identity.node_id,
+                    consensus_reached=True,
+                )
+                logger.info(
+                    f"api: escrow released {budget:.6f} FTNS for {job.job_id[:8]}"
+                )
+            except Exception as e:
+                logger.warning(f"api: escrow release for {job.job_id[:8]} failed: {e}")
 
         return {
             "job_id": job.job_id,
