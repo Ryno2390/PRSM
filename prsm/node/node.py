@@ -1135,27 +1135,35 @@ class PRSMNode:
     async def _on_chain_ftns_transfer(self, transaction) -> None:
         """Broadcast a transaction to the real FTNS contract on Base.
 
-        Called by PaymentEscrow when it locks, releases, or refunds FTNS.
-        If the on-chain ledger is not connected, only logs a warning.
+        KEY SAFETY: This must only be called AFTER the local ledger
+        transaction has successfully committed. Never broadcast before
+        local commit — otherwise we burn gas on transactions that get
+        rolled back by TOCTOU/ConcurrentModification failures.
+
+        Deduplication: tracks (tx_id, to_wallet) pairs to prevent
+        re-broadcasting the same transaction due to retries or races.
         """
         if not self.ftns_ledger or not self.ftns_ledger._is_initialized:
-            logger.debug(
-                "FTNS on-chain ledger not available — "
-                "skipping blockchain broadcast for escrow tx"
-            )
             return
-
         if not hasattr(transaction, "from_wallet") or not hasattr(transaction, "to_wallet"):
             return
 
+        # Dedup: skip if we've already broadcast this transaction
+        tx_key = (transaction.tx_id if hasattr(transaction, "tx_id") else "",
+                  transaction.to_wallet if hasattr(transaction, "to_wallet") else "")
+        if not hasattr(self, "_broadcast_sent"):
+            self._broadcast_sent = set()
+        if tx_key in self._broadcast_sent:
+            logger.debug(
+                f"Skipping duplicate FTNS broadcast for {tx_key[0][:12]}…"
+            )
+            return
+        self._broadcast_sent.add(tx_key)
+
         to_addr = transaction.to_wallet
         target_address = None
-
-        # 1. Check if it's a direct ETH address
         if to_addr.startswith("0x") and len(to_addr) >= 40:
             target_address = to_addr
-        # 2. Check if it's the node's own ID (self-payment / self-compute)
-        # If so, map it to the on-chain wallet address
         elif to_addr == self.identity.node_id and self.ftns_ledger._connected_address:
             target_address = self.ftns_ledger._connected_address
             logger.info(
@@ -1172,23 +1180,26 @@ class PRSMNode:
         if amount <= 0:
             return
 
-        try:
-            tx_record = await self.ftns_ledger.transfer(
-                job_id=transaction.tx_id if hasattr(transaction, "tx_id") else "",
-                to_address=target_address,
-                amount_ftns=amount,
-            )
-            if tx_record and tx_record.status == "confirmed":
-                logger.info(
-                    f"FTNS on-chain: {amount:.6f} confirmed "
-                    f"(tx: {tx_record.tx_hash[:16]}…)"
+        # Serialize blockchain calls to prevent nonce conflicts
+        async with self.ftns_ledger._lock:
+            try:
+                tx_record = await self.ftns_ledger.transfer(
+                    job_id=tx_key[0],
+                    to_address=target_address,
+                    amount_ftns=amount,
                 )
-        except Exception as e:
-            logger.error(f"FTNS on-chain transfer failed: {e}")
-
-        except Exception as e:
-            logger.error(f"Failed to start IPFS daemon: {e}")
-            return False
+                if tx_record and tx_record.status == "confirmed":
+                    logger.info(
+                        f"FTNS on-chain: {amount:.6f} confirmed "
+                        f"(tx: {tx_record.tx_hash[:16]}…)"
+                    )
+                elif tx_record and tx_record.status == "rejected":
+                    logger.warning(
+                        f"FTNS on-chain transfer rejected: "
+                        f"tx={tx_record.tx_hash[:16] if tx_record.tx_hash else 'N/A'}..."
+                    )
+            except Exception as e:
+                logger.error(f"FTNS on-chain transfer failed: {e}")
 
     async def get_status(self) -> Dict[str, Any]:
         """Comprehensive node status."""

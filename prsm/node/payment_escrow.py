@@ -175,15 +175,9 @@ class PaymentEscrow:
             escrow.status = EscrowStatus.RELEASED
             escrow.completed_at = time.time()
 
-            # Broadcast payment release to network
-            if self.broadcast_tx:
-                try:
-                    await self.broadcast_tx(tx)
-                except Exception:
-                    pass
-
             # Refund remainder to requester if partial
             remainder = escrow_balance - amount
+            refund_tx = None
             if remainder > 0:
                 refund_tx = await self.ledger.transfer(
                     from_wallet=escrow_wallet,
@@ -194,6 +188,16 @@ class PaymentEscrow:
                 logger.info(
                     f"Refunded {remainder:.6f} FTNS to requester {escrow.requester_id[:12]}..."
                 )
+
+            # Broadcast to on-chain FTNS only AFTER local ledger
+            # transfers have fully committed (no TOCTOU rollback risk).
+            if self.broadcast_tx:
+                try:
+                    await self.broadcast_tx(tx)
+                    if refund_tx:
+                        await self.broadcast_tx(refund_tx)
+                except Exception:
+                    pass
 
             logger.info(
                 f"Escrow released: {amount:.6f} FTNS -> {provider_id[:12]}... "
