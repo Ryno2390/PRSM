@@ -334,6 +334,22 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
                 status_code=504, detail="Compute timed out or no provider accepted"
             )
 
+        # Release escrow payment to the provider (self-compute or remote)
+        if node.compute_provider and node.compute_provider.escrow:
+            try:
+                provider_id = result.get("provider_id", node.identity.node_id)
+                tx = await node.compute_provider.escrow.release_escrow(
+                    job_id=job.job_id,
+                    provider_id=provider_id,
+                    consensus_reached=True,
+                )
+                if tx:
+                    logger.info(
+                        f"compute_query: escrow released {budget:.6f} FTNS → {provider_id[:12]}..."
+                    )
+            except Exception as e:
+                logger.warning(f"compute_query: escrow release failed: {e}")
+
         return {
             "job_id": job.job_id,
             "response": result.get("response", result.get("text", str(result))),
