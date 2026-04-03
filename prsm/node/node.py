@@ -1068,8 +1068,28 @@ class PRSMNode:
             return False
 
     async def _seed_welcome_grant(self) -> None:
-        """Give the node an initial FTNS balance if it has none."""
+        """Reconcile wallet_balances from dag_transactions on every startup."""
         try:
+            # ── Step 1: Rebuild wallet_balances cache from dag_transactions ──
+            if hasattr(self.ledger, "_db"):
+                await self.ledger._db.execute(
+                    """INSERT OR REPLACE INTO wallet_balances (wallet_id, balance, version, last_updated)
+                       SELECT to_wallet, SUM(amount), 1, MAX(timestamp)
+                       FROM dag_transactions
+                       WHERE to_wallet IS NOT NULL
+                       GROUP BY to_wallet"""
+                )
+                await self.ledger._db.commit()
+                # Reset the in-memory version cache so it matches the DB
+                if hasattr(self.ledger, "_balance_version_cache"):
+                    self.ledger._balance_version_cache.clear()
+                    cursor = await self.ledger._db.execute(
+                        "SELECT wallet_id, version FROM wallet_balances"
+                    )
+                    async for row in cursor:
+                        self.ledger._balance_version_cache[row[0]] = row[1]
+
+            # ── Step 2: Check balance and grant if needed ──
             balance = await self.ledger.get_balance(self.identity.node_id)
             if balance <= 0:
                 await self.ledger.credit(
@@ -1078,17 +1098,12 @@ class PRSMNode:
                     tx_type=TransactionType.WELCOME_GRANT,
                     description="Welcome grant for new node",
                 )
-                # Ensure the wallet_balances cache table is also updated.
-                # This is separate from dag_transactions and can get out of sync on restart.
+                # Also prime wallet_balances for the fresh grant
                 if hasattr(self.ledger, "_db"):
                     await self.ledger._db.execute(
                         """INSERT INTO wallet_balances (wallet_id, balance, version, last_updated)
                            VALUES (?, ?, 1, ?)
-                           ON CONFLICT(wallet_id) DO UPDATE SET
-                               balance = excluded.balance,
-                               version = CASE WHEN excluded.balance > balance
-                                   THEN version + 1 ELSE version END,
-                               last_updated = excluded.last_updated""",
+                           ON CONFLICT(wallet_id) DO UPDATE SET balance = excluded.balance""",
                         (self.identity.node_id, 100.0, time.time()),
                     )
                     await self.ledger._db.commit()
@@ -1096,9 +1111,9 @@ class PRSMNode:
                         self.ledger._balance_version_cache[self.identity.node_id] = 1
                 logger.info(f"Seeded welcome grant: 100 FTNS to {self.identity.node_id[:12]}...")
             else:
-                logger.debug(f"Node already has balance: {balance:.6f}, skipping welcome grant")
+                logger.debug(f"Node already has balance: {balance:.6f}")
         except Exception as e:
-            logger.warning(f"Welcome grant failed: {e}")
+            logger.warning(f"Welcome-grant reconciliation failed: {e}")
 
     # ── On-Chain FTNS Transfer Handler ────────────────────────
     async def _on_chain_ftns_transfer(self, transaction) -> None:
