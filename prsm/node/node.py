@@ -786,6 +786,8 @@ class PRSMNode:
         self.ftns_ledger = OnChainFTNSLedger(
             node_id=self.identity.node_id,
         )
+        self.db_initialized = False
+        self._broadcast_sent = set()
 
         # Wire ledger_sync and agent_registry into subsystems
         self.content_uploader.ledger_sync = self.ledger_sync
@@ -864,6 +866,17 @@ class PRSMNode:
             else:
                 logger.info("FTNS on-chain ledger unavailable — running local mode only")
                 self.ftns_ledger = None
+
+        # Initialize SQLAlchemy database for NWTN features (best-effort)
+        if not self.db_initialized:
+            try:
+                from prsm.core.database import init_database
+                await init_database()
+                self.db_initialized = True
+                logger.info("SQLAlchemy database tables initialized")
+            except Exception as e:
+                logger.warning(f"SQLAlchemy DB init failed: {e} — NWTN features unavailable")
+                self.db_initialized = False
 
         # Seed welcome grant if the node has no balance
         await self._seed_welcome_grant()
