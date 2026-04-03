@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from prsm.node.compute_provider import JobStatus, JobType
 from prsm.node.gossip import (
     GOSSIP_JOB_ACCEPT,
+    GOSSIP_JOB_CANCEL,
+    GOSSIP_JOB_CONFIRM,
     GOSSIP_JOB_OFFER,
     GOSSIP_JOB_RESULT,
     GOSSIP_PAYMENT_CONFIRM,
@@ -160,15 +162,21 @@ class ComputeRequester:
         ftns_budget: float = 0.0,
         target_peers: Optional[List[str]] = None,
         use_escrow: bool = True,
+        job_id: Optional[str] = None,
     ) -> SubmittedJob:
-        """Submit a compute job to the network, optionally with escrow."""
+        """Submit a compute job to the network, optionally with escrow.
+
+        Args:
+            job_id: Optional pre-assigned job ID (e.g. from API escrow).
+                    If None, a new UUID is generated.
+        """
         if ftns_budget > 0:
             balance = await self.ledger.get_balance(self.identity.node_id)
             if balance < ftns_budget:
                 raise ValueError(f"Insufficient FTNS balance: {balance:.2f} < {ftns_budget:.2f}")
 
         job = SubmittedJob(
-            job_id=uuid.uuid4().hex,
+            job_id=job_id or uuid.uuid4().hex,
             job_type=job_type,
             payload=payload,
             ftns_budget=ftns_budget,
@@ -256,20 +264,35 @@ class ComputeRequester:
     # ── Gossip handlers ──────────────────────────────────────────
 
     async def _on_job_accept(self, subtype: str, data: Dict[str, Any], origin: str) -> None:
-        """Handle a provider accepting our job."""
+        """Handle a provider accepting our job.
+
+        First-accept-wins: the first provider to accept is confirmed via
+        GOSSIP_JOB_CONFIRM.  Other providers that accepted should see the
+        confirm message (with a different provider_id) and drop the job.
+        """
         job_id = data.get("job_id", "")
         job = self.submitted_jobs.get(job_id)
         if not job:
             return
 
-        # First accept wins
+        # First accept wins — ignore subsequent accepts
         if job.status != JobStatus.PENDING:
             return
 
+        provider_id = data.get("provider_id", origin)
         job.status = JobStatus.ACCEPTED
-        job.provider_id = data.get("provider_id", origin)
+        job.provider_id = provider_id
         job.provider_public_key = data.get("public_key", "")
-        logger.info(f"Job {job_id[:8]} accepted by provider {job.provider_id[:8]}")
+
+        # Confirm this provider so it starts execution;
+        # other providers that accepted will see the confirm and drop the job.
+        await self.gossip.publish(GOSSIP_JOB_CONFIRM, {
+            "job_id": job_id,
+            "provider_id": provider_id,
+            "requester_id": self.identity.node_id,
+        })
+
+        logger.info(f"Job {job_id[:8]} confirmed provider {provider_id[:8]}")
 
     async def _on_job_result(self, subtype: str, data: Dict[str, Any], origin: str) -> None:
         """Handle a job result from a provider."""
@@ -289,7 +312,7 @@ class ComputeRequester:
             logger.warning(f"Job {job_id[:8]} failed: {job.error}")
             return
 
-        # Verify result signature if we have the provider's public key
+        # Verify result signature — required for payment
         result = data.get("result", {})
         signature = data.get("signature", "")
         pub_key = data.get("public_key", job.provider_public_key or "")
@@ -299,14 +322,24 @@ class ComputeRequester:
             result_bytes = json.dumps(result, sort_keys=True).encode()
             verified = verify_signature(pub_key, result_bytes, signature)
 
+        if not verified and provider_id != self.identity.node_id:
+            # Reject unsigned/unverified results from remote providers.
+            # Self-compute results (same node) are trusted without signature.
+            logger.warning(
+                f"Job {job_id[:8]}: rejecting unverified result from "
+                f"{provider_id[:8]} (missing or invalid signature)"
+            )
+            return
+
         job.status = JobStatus.COMPLETED
         job.result = result
         job.result_verified = verified
         job.completed_at = time.time()
 
-        # Record payment
+        # Record payment — only for remote providers.
+        # Self-compute payment is handled by the API escrow release.
         try:
-            if provider_id != self.identity.node_id:
+            if provider_id != self.identity.node_id and job.ftns_budget > 0:
                 tx = await self.ledger.transfer(
                     from_wallet=self.identity.node_id,
                     to_wallet=provider_id,
