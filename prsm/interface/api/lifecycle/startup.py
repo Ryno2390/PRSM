@@ -247,7 +247,7 @@ async def _init_observability() -> None:
 
         config = MetricsConfig(
             service_name="prsm-api",
-            service_version=getattr(settings, 'version', '0.21.0'),
+            service_version=getattr(settings, 'version', '0.22.0'),
             environment=getattr(settings, 'environment', 'production'),
             collection_interval=30,
             enable_prometheus=True,

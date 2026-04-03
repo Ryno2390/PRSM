@@ -51,7 +51,7 @@ class BootstrapClient:
             node_id="my-node-id",
             port=8000,
             capabilities=["compute", "storage"],
-            version="0.21.0",
+            version="0.22.0",
         )
         peers = await client.connect()
         # peers is a list of BootstrapPeer objects
