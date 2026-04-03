@@ -2,14 +2,14 @@
 
 PRSM is a peer-to-peer collaboration framework for neuro-symbolic AI research. It combines three pillars — a compute network for AI orchestration, decentralized storage for scientific artifacts, and a token economy (FTNS) that incentivizes contributions. The goal is to make scientific AI development open, reproducible, and collectively owned.
 
-**Current version: 0.24.0** | [www.prsm-network.com](https://www.prsm-network.com)
+**Current version: 0.25.0** | [www.prsm-network.com](https://www.prsm-network.com)
 
 [![PyPI version](https://badge.fury.io/py/prsm-network.svg)](https://badge.fury.io/py/prsm-network)
 [![CI](https://github.com/Ryno2390/PRSM/actions/workflows/ci.yml/badge.svg)](https://github.com/Ryno2390/PRSM/actions/workflows/ci.yml)
 [![Security Audit](https://github.com/Ryno2390/PRSM/actions/workflows/security-audit.yml/badge.svg)](https://github.com/Ryno2390/PRSM/actions/workflows/security-audit.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **What's live today:** Bootstrap server at `wss://bootstrap1.prsm-network.com:8765` · Real AI inference via Anthropic + OpenAI · FTNS token on Base mainnet ([`0x5276a3756C85f2E9e46f6D34386167a209aa16e5`](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5)) · Python/JS/Go SDKs · Content economy with royalty distribution · Multi-party escrow for batch settlements · Vector search (pgvector/Qdrant) · 1,400+ tests passing
+> **What's live today:** Bootstrap server at `wss://bootstrap1.prsm-network.com:8765` · Real AI inference via Anthropic + OpenAI · FTNS token on Base mainnet ([`0x5276a3756C85f2E9e46f6D34386167a209aa16e5`](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5)) · Python/JS/Go SDKs · Content economy with royalty distribution · Multi-party escrow for batch settlements · Vector search (pgvector/Qdrant) · L2-style settler staking with multi-sig approval · 1,400+ tests passing
 
 ---
 

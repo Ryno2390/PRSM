@@ -2,6 +2,46 @@
 
 All notable changes to PRSM are documented here.
 
+## [0.25.0] - 2026-04-03
+
+### Added - Phase 6: Governance & Staking (L2-Style)
+
+**Settler Registry:**
+- `SettlerRegistry` - L2-style staking for batch settlement security
+  - **The Bond**: 10K FTNS minimum stake to become a settler
+  - **The Multi-Sig**: 3-of-N signatures required for batch approval
+  - **The Challenge**: Public ledger export for fraud detection
+  - Governance-based slashing for proven misconduct
+
+**Security Model:**
+- Settlers stake FTNS as "skin in the game" for settlement rights
+- Multi-signature approval prevents single-point-of-failure
+- Ledger export enables community audit and fraud proofs
+- Slashing via governance vote for fraudulent batch submissions
+
+**API Endpoints:**
+- `POST /settler/register` - Register as settler with bond
+- `GET /settler/{settler_id}` - Get settler details
+- `GET /settler/list/active` - List active settlers
+- `POST /settler/unbond` - Initiate unbonding (30-day lock)
+- `POST /settler/batch/sign` - Sign pending batch
+- `GET /settler/batch/pending` - List batches awaiting approval
+- `GET /settler/ledger/export` - Export ledger for audit
+- `POST /settler/slash/propose` - Propose settler slashing
+- `GET /settler/stats` - Registry statistics
+
+**Integration:**
+- Wired `SettlerRegistry` to `PRSMNode` for batch approval workflow
+- Callback triggers settlement when multi-sig threshold reached
+- Settlers can unbond after 30-day lock period
+
+**Tests:**
+- `tests/node/test_settler_registry.py` - Unit tests for settler lifecycle
+- `scripts/test_settler_integration.py` - End-to-end integration test
+
+### Changed
+- Updated version from 0.24.0 to 0.25.0 across 8 files
+
 ## [0.24.0] - 2026-04-03
 
 ### Added - Phase 4: Storage Provider + IPFS Content Economy

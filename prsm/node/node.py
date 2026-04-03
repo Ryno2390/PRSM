@@ -869,6 +869,31 @@ class PRSMNode:
             flush_interval=600.0,     # 10 minutes
             flush_threshold=1.0,      # or when pending ≥ 1.0 FTNS
         )
+        
+        # ── Settler Registry (Phase 6: L2-style staking for batch security) ──
+        from prsm.node.settler_registry import SettlerRegistry
+        self._settler_registry = SettlerRegistry(
+            min_settler_bond=10_000.0,    # 10K FTNS to become a settler
+            settlement_threshold=3,        # 3-of-N multi-sig for batch approval
+            max_settlers=10,
+            ftns_service=_StakingFTNSAdapter(self.ledger, self.identity.node_id),
+            staking_manager=self.staking_manager,
+        )
+        
+        # Wire: When batch gets multi-sig approval, trigger settlement
+        async def _on_batch_approved(batch):
+            """Callback when batch reaches multi-sig threshold."""
+            logger.info(
+                "Batch approved via multi-sig, executing settlement",
+                batch_id=batch.batch_id,
+                signatures=len(batch.signatures),
+            )
+            # The batch settlement manager handles the actual on-chain tx
+            result = await self._batch_settlement.flush()
+            batch.settled = True
+            batch.settlement_tx = result.tx_hashes[0] if result.tx_hashes else None
+        
+        self._settler_registry.on_settlement_ready(_on_batch_approved)
 
         # Wire ledger_sync and agent_registry into subsystems
         self.content_uploader.ledger_sync = self.ledger_sync
