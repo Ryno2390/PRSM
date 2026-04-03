@@ -188,6 +188,7 @@ class ContentUploader:
         transport: Optional[WebSocketTransport] = None,
         content_index: Optional[Any] = None,
         ledger_sync: Optional[Any] = None,
+        content_economy: Optional[Any] = None,
         sharding_threshold: int = DEFAULT_SHARDING_THRESHOLD,
         sharding_config: Optional[ShardingConfig] = None,
         embedding_fn: Optional[Callable] = None,
@@ -200,6 +201,7 @@ class ContentUploader:
         self.transport = transport
         self.content_index = content_index  # For looking up parent content creators
         self.ledger_sync = ledger_sync      # For broadcasting transactions
+        self.content_economy = content_economy  # For replication tracking (Phase 4)
 
         # Sharding configuration
         self.sharding_threshold = sharding_threshold
@@ -423,6 +425,14 @@ class ContentUploader:
                 "requester_id": self.identity.node_id,
                 "replicas_needed": replicas,
             })
+
+        # Track replication status via ContentEconomy (Phase 4)
+        if self.content_economy:
+            await self.content_economy.track_content_upload(
+                cid=cid,
+                size_bytes=size_bytes,
+                replicas_requested=replicas,
+            )
 
         dup_msg = f", near_dup={near_dup_cid[:12]}... ({near_dup_sim:.3f})" if near_dup_cid else ""
         logger.info(

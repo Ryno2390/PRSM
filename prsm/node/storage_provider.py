@@ -102,6 +102,7 @@ class StorageProvider:
         reward_interval: float = 3600.0,  # 1 hour
         challenge_config: Optional[ChallengeConfig] = None,
         config: Optional["NodeConfig"] = None,
+        content_economy: Optional[Any] = None,  # Phase 4: Replication tracking
     ):
         self.identity = identity
         self.gossip = gossip
@@ -110,6 +111,7 @@ class StorageProvider:
         self.pledged_gb = pledged_gb
         self.reward_interval = reward_interval
         self.config = config  # NodeConfig for scheduling checks
+        self.content_economy = content_economy  # Phase 4: Update replication status on challenges
         
         # Bandwidth limits (0 = unlimited)
         self.upload_mbps_limit: float = 0.0
@@ -529,6 +531,14 @@ class StorageProvider:
                             content.successful_challenges += 1
                             content.last_verified = time.time()
                             logger.debug(f"Self-challenge passed for {cid[:16]}...")
+                            
+                            # Update ContentEconomy replication status (Phase 4)
+                            if self.content_economy:
+                                await self.content_economy.update_replication_status(
+                                    cid=cid,
+                                    provider_id=self.identity.node_id,
+                                    has_content=True,
+                                )
                         else:
                             proofs_failed += 1
                             content.failed_challenges += 1
@@ -559,6 +569,14 @@ class StorageProvider:
                                 f"removing from tracking"
                             )
                             del self.pinned_content[cid]
+                            
+                            # Update ContentEconomy replication status (Phase 4)
+                            if self.content_economy:
+                                await self.content_economy.update_replication_status(
+                                    cid=cid,
+                                    provider_id=self.identity.node_id,
+                                    has_content=False,
+                                )
                             
             except Exception as e:
                 logger.error(f"Error during self-challenge for {cid[:16]}...: {e}")
