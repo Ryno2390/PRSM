@@ -348,6 +348,7 @@ class ContentProvider:
         content_discovery: Optional[ContentDiscovery] = None,
         default_timeout: float = DEFAULT_REQUEST_TIMEOUT,
         bandwidth_limiter: Optional[Any] = None,
+        content_economy: Optional[Any] = None,  # Phase 4: Payment processing
     ):
         self.identity = identity
         self.transport = transport
@@ -361,6 +362,9 @@ class ContentProvider:
         # Bandwidth limiter for throttling content serving
         # This is typically the BandwidthLimiter from StorageProvider
         self.bandwidth_limiter = bandwidth_limiter
+        
+        # Content economy for payment processing (Phase 4)
+        self.content_economy = content_economy
         
         # Local content we can serve (cid -> metadata)
         self._local_content: Dict[str, Dict[str, Any]] = {}
@@ -545,6 +549,27 @@ class ContentProvider:
                 )
             
             await self._send_response(peer.peer_id, response)
+            
+            # Process payment for content access (Phase 4)
+            if self.content_economy:
+                try:
+                    payment = await self.content_economy.process_content_access(
+                        cid=cid,
+                        accessor_id=peer.peer_id,
+                        content_metadata={
+                            "royalty_rate": content_info.get("royalty_rate", 0.01),
+                            "creator_id": content_info.get("creator_id", ""),
+                            "parent_cids": content_info.get("parent_cids", []),
+                        },
+                    )
+                    if payment.status.value == "completed":
+                        logger.debug(
+                            f"Payment processed for {cid[:12]}... "
+                            f"({payment.amount} FTNS from {peer.peer_id[:8]})"
+                        )
+                except Exception as e:
+                    # Log but don't fail the transfer - payment issues handled separately
+                    logger.warning(f"Payment processing failed for {cid[:12]}...: {e}")
             
             self._telemetry["requests_served"] += 1
             self._telemetry["bytes_served"] += size

@@ -244,6 +244,14 @@ def _include_service_routers(app: FastAPI) -> None:
     except Exception as e:
         logger.warning(f"Content router not loaded: {e}")
 
+    # Phase 4: Content Economy routes
+    try:
+        from prsm.api.content_economy_routes import router as content_economy_router
+        app.include_router(content_economy_router, tags=["Content Economy"])
+        logger.debug("Content Economy router registered")
+    except Exception as e:
+        logger.warning(f"Content Economy router not loaded: {e}")
+
     try:
         from prsm.interface.api.analytics_api import router as analytics_router
         app.include_router(analytics_router, tags=["Analytics"])

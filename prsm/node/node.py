@@ -49,6 +49,7 @@ from prsm.node.agent_registry import AgentRegistry
 from prsm.node.agent_collaboration import AgentCollaboration, BidStrategy
 from prsm.economy.tokenomics.staking_manager import StakingManager, StakingConfig, StakeType
 from prsm.economy.ftns_onchain import OnChainFTNSLedger
+from prsm.node.content_economy import ContentEconomy, RoyaltyModel
 
 # BitTorrent integration
 from prsm.core.bittorrent_client import BitTorrentClient, BitTorrentConfig
@@ -497,6 +498,8 @@ class PRSMNode:
         self.staking_manager: Optional[StakingManager] = None
         # On-chain FTNS ledger (Base mainnet)
         self.ftns_ledger: Optional[OnChainFTNSLedger] = None
+        # Content economy manager (Phase 4)
+        self.content_economy: Optional[ContentEconomy] = None
         
         # BitTorrent components
         self.bt_client: Optional[BitTorrentClient] = None
@@ -786,6 +789,69 @@ class PRSMNode:
         self.ftns_ledger = OnChainFTNSLedger(
             node_id=self.identity.node_id,
         )
+        
+        # ── Content Economy (Phase 4) ──────────────────────────────────────
+        # Determine royalty model from config
+        royalty_model = RoyaltyModel.PHASE4
+        if getattr(self.config, 'royalty_model', 'phase4') == 'legacy':
+            royalty_model = RoyaltyModel.LEGACY
+        
+        # Initialize vector store backend (optional)
+        _vector_store = None
+        vector_backend = getattr(self.config, 'vector_backend', 'memory')
+        if vector_backend and vector_backend != 'disabled':
+            try:
+                from prsm.node.vector_store_backend import create_vector_store
+                _vector_store = create_vector_store(
+                    backend=vector_backend,
+                    postgres_host=getattr(self.config, 'postgres_host', 'localhost'),
+                    postgres_port=getattr(self.config, 'postgres_port', 5432),
+                    postgres_database=getattr(self.config, 'postgres_database', 'prsm'),
+                    postgres_user=getattr(self.config, 'postgres_user', 'prsm'),
+                    postgres_password=getattr(self.config, 'postgres_password', ''),
+                )
+                await _vector_store.initialize()
+                logger.info(f"Vector store initialized: {vector_backend}")
+            except Exception as e:
+                logger.warning(f"Vector store initialization failed: {e}")
+                _vector_store = None
+        
+        self.content_economy = ContentEconomy(
+            identity=self.identity,
+            ledger=self.ledger,
+            gossip=self.gossip,
+            content_index=self.content_index,
+            ftns_ledger=self.ftns_ledger,
+            royalty_model=royalty_model,
+            min_replicas=getattr(self.config, 'min_replicas', 3),
+            vector_store=_vector_store,
+            embedding_fn=_embedding_fn if '_embedding_fn' in dir() else None,
+        )
+        
+        # Register content economy with API routes
+        try:
+            from prsm.api.content_economy_routes import set_content_economy
+            set_content_economy(self.content_economy)
+        except ImportError:
+            pass  # API routes not available
+        
+        # Wire ContentEconomy to StorageProvider for replication tracking (Phase 4)
+        if self.storage_provider:
+            self.storage_provider.content_economy = self.content_economy
+        
+        # Initialize multi-party escrow for batch settlements (Phase 4)
+        from prsm.node.multi_party_escrow import MultiPartyEscrow, EscrowConfig
+        self._mp_escrow = MultiPartyEscrow(
+            ftns_ledger=self.ftns_ledger,
+            config=EscrowConfig(
+                min_batch_size=getattr(self.config, 'escrow_min_batch_size', 5),
+                min_batch_value=getattr(self.config, 'escrow_min_batch_value', 0.1),
+                settlement_interval=getattr(self.config, 'escrow_settlement_interval', 300.0),
+            ),
+        )
+        if self.content_economy:
+            self.content_economy.set_escrow(self._mp_escrow)
+        
         self.db_initialized = False
         self._broadcast_sent = set()
 
@@ -806,6 +872,9 @@ class PRSMNode:
 
         # Wire ledger_sync and agent_registry into subsystems
         self.content_uploader.ledger_sync = self.ledger_sync
+        # Wire content_economy into content_uploader for replication tracking
+        if self.content_economy:
+            self.content_uploader.content_economy = self.content_economy
         if self.compute_provider:
             self.compute_provider.ledger_sync = self.ledger_sync
             # Wire escrow and consensus into compute provider
@@ -910,6 +979,15 @@ class PRSMNode:
             self.content_uploader.start()
         if self.content_provider:
             self.content_provider.start()
+        # Wire content_economy into content_provider for payment processing (Phase 4)
+        if self.content_economy and self.content_provider:
+            self.content_provider.content_economy = self.content_economy
+        # Start content economy (Phase 4)
+        if self.content_economy:
+            await self.content_economy.start()
+        # Start multi-party escrow (Phase 4)
+        if hasattr(self, '_mp_escrow') and self._mp_escrow:
+            self._mp_escrow.start()
         if self.ledger_sync:
             self.ledger_sync.start()
         if self._payment_escrow:
@@ -992,6 +1070,12 @@ class PRSMNode:
 
         if self.agent_collaboration:
             await self.agent_collaboration.stop()
+        # Stop content economy (Phase 4)
+        if self.content_economy:
+            await self.content_economy.stop()
+        # Stop multi-party escrow (Phase 4)
+        if hasattr(self, '_mp_escrow') and self._mp_escrow:
+            self._mp_escrow.stop()
         # Stop BitTorrent components
         if self.bt_requester:
             await self.bt_requester.stop()
