@@ -1071,14 +1071,18 @@ class PRSMNode:
             return False
 
     async def _seed_welcome_grant(self) -> None:
-        """Reconcile wallet_balances from dag_transactions on every startup."""
+        """Rebuild wallet_balances cache from dag_transactions on startup.
+
+        wallet_balances is just a performance cache — the source of truth
+        is dag_transactions. We rebuild it from scratch once per startup
+        to avoid any stale version counters from previous buggy runs.
+        """
         try:
-            # ── Step 1: Rebuild wallet_balances cache from dag_transactions ──
-            # Only INSERT wallets that don't already have a balance entry.
-            # Never overwrite existing entries — that would reset the TOCTOU
-            # version counter and trigger false ConcurrentModificationError
-            # alerts on subsequent operations (like escrow releases).
+            # ── Step 1: Nuke and rebuild wallet_balances from truth ─────
             if hasattr(self.ledger, "_db"):
+                # Delete all rows first (safe — cache only)
+                await self.ledger._db.execute("DELETE FROM wallet_balances")
+                # Rebuild from dag_transactions
                 await self.ledger._db.execute(
                     """INSERT INTO wallet_balances (wallet_id, balance, version, last_updated)
                        SELECT w.wallet_id,
@@ -1086,19 +1090,17 @@ class PRSMNode:
                               COALESCE((SELECT SUM(amount) FROM dag_transactions WHERE from_wallet = w.wallet_id), 0),
                               1,
                               COALESCE((SELECT MAX(timestamp) FROM dag_transactions WHERE to_wallet = w.wallet_id OR from_wallet = w.wallet_id), 0)
-                       FROM wallets w
-                       WHERE w.wallet_id NOT IN (SELECT wallet_id FROM wallet_balances)"""
+                       FROM wallets w"""
                 )
                 await self.ledger._db.commit()
-                # Seed the in-memory version cache for newly-inserted wallets
+                # Reset the in-memory version cache
                 if hasattr(self.ledger, "_balance_version_cache"):
+                    self.ledger._balance_version_cache.clear()
                     cursor = await self.ledger._db.execute(
                         "SELECT wallet_id, version FROM wallet_balances"
                     )
-                    loaded = {}
                     async for row in cursor:
-                        loaded[row[0]] = row[1]
-                    self.ledger._balance_version_cache.update(loaded)
+                        self.ledger._balance_version_cache[row[0]] = row[1]
 
             # ── Step 2: Check balance and grant if needed ──
             balance = await self.ledger.get_balance(self.identity.node_id)
