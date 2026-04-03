@@ -320,66 +320,98 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
 
         from prsm.node.compute_provider import JobType, ComputeJob
 
-        # Create escrow if budget provided
-        if budget > 0:
-            job = await node.compute_requester.submit_job(
+        import uuid as _uuid
+
+        job_id = "compute-" + _uuid.uuid4().hex
+        escrow_entry = None
+
+        # --- Phase 1: Lock escrow (no gossip broadcast) ---
+        if budget > 0 and hasattr(node, '_payment_escrow') and node._payment_escrow:
+            escrow_entry = await node._payment_escrow.create_escrow(
+                job_id=job_id,
+                amount=budget,
+                requester_id=node.identity.node_id,
+            )
+            if escrow_entry:
+                logger.info(
+                    f"compute_query: escrow locked {budget:.6f} FTNS "
+                    f"for {job_id[:8]}"
+                )
+            else:
+                logger.warning(
+                    f"compute_query: escrow creation failed for {job_id[:8]}"
+                )
+
+        # --- Phase 2: Route the job ---
+        result = None
+
+        # Try gossip-based peers first (only if we have real peers)
+        has_peers = (
+            node.transport
+            and hasattr(node.transport, 'peer_count')
+            and node.transport.peer_count > 0
+        )
+        if has_peers:
+            try:
+                # Submit via gossip for multi-node federation
+                submitted = await node.compute_requester.submit_job(
+                    job_type=JobType.INFERENCE,
+                    payload={"prompt": prompt, "model": model},
+                    ftns_budget=budget,
+                    use_escrow=False,  # escrow already created above
+                )
+                result = await node.compute_requester.get_result(
+                    submitted.job_id, timeout=10.0
+                )
+                if result:
+                    job_id = submitted.job_id
+            except Exception as e:
+                logger.warning(f"compute_query: gossip routing failed: {e}")
+
+        # Fallback: direct self-compute (single-node mode)
+        if result is None and node.compute_provider.allow_self_compute:
+            self_job = ComputeJob(
+                job_id=job_id,
                 job_type=JobType.INFERENCE,
                 payload={"prompt": prompt, "model": model},
+                requester_id=node.identity.node_id,
                 ftns_budget=budget,
             )
-            job_id = job.job_id
-        else:
-            # No budget, use simple self-compute
-            job_id = None
-
-        # In single-node mode, skip gossip and execute directly
-        self_job = ComputeJob(
-            job_id=job_id or "direct-" + __import__('uuid').uuid4().hex,
-            job_type=JobType.INFERENCE,
-            payload={"prompt": prompt, "model": model},
-            requester_id=node.identity.node_id,
-            ftns_budget=budget,
-        )
-        
-        # Try gossip first if peers are available (10s timeout)
-        result = None
-        if node.transport and node.transport.peer_count > 0:
-            if job_id:
-                result = await node.compute_requester.get_result(job_id, timeout=10.0)
-        
-        # Fallback: direct self-compute
-        if result is None and node.compute_provider.allow_self_compute:
-            logger.info(f"compute_query: executing self-compute for {self_job.job_id[:8]}")
+            logger.info(
+                f"compute_query: self-compute for {job_id[:8]}"
+            )
             await node.compute_provider._execute_job(self_job)
-            completed = node.compute_provider.completed_jobs.get(self_job.job_id)
+            completed = node.compute_provider.completed_jobs.get(job_id)
             if completed:
                 result = completed.result
-            job_id = self_job.job_id
 
         if result is None:
+            # Refund escrow on failure
+            if escrow_entry and node._payment_escrow:
+                try:
+                    await node._payment_escrow.refund_escrow(job_id)
+                except Exception:
+                    pass
             raise HTTPException(
                 status_code=504, detail="Compute timed out or no provider accepted"
             )
 
-        # Release escrow for API-submitted jobs.
-        # The compute_provider._execute_job path handles escrow release for
-        # gossip-submitted jobs, but /compute/query self-executes locally
-        # without going through the gossip provider path, so we must release here.
-        if budget > 0 and hasattr(node, '_payment_escrow') and node._payment_escrow:
+        # --- Phase 3: Release escrow to provider ---
+        if budget > 0 and escrow_entry and node._payment_escrow:
             try:
                 await node._payment_escrow.release_escrow(
-                    job_id=job.job_id,
+                    job_id=job_id,
                     provider_id=node.identity.node_id,
                     consensus_reached=True,
                 )
                 logger.info(
-                    f"api: escrow released {budget:.6f} FTNS for {job.job_id[:8]}"
+                    f"api: escrow released {budget:.6f} FTNS for {job_id[:8]}"
                 )
             except Exception as e:
-                logger.warning(f"api: escrow release for {job.job_id[:8]} failed: {e}")
+                logger.warning(f"api: escrow release for {job_id[:8]} failed: {e}")
 
         return {
-            "job_id": job.job_id,
+            "job_id": job_id,
             "response": result.get("response", result.get("text", str(result))),
             "result": result,
         }

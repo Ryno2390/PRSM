@@ -367,7 +367,7 @@ class ComputeProvider:
         prompt = job.payload.get("prompt", "")
         model = job.payload.get("model", "local")
 
-        # Use NWTN orchestrator if wired
+        # Use NWTN orchestrator if wired — with timeout to avoid hanging
         if self.orchestrator is not None:
             try:
                 from prsm.core.models import UserInput
@@ -376,7 +376,10 @@ class ComputeProvider:
                     prompt=prompt,
                     context_allocation=100,
                 )
-                response = await self.orchestrator.process_query(user_input)
+                response = await asyncio.wait_for(
+                    self.orchestrator.process_query(user_input),
+                    timeout=10.0,
+                )
                 return {
                     "model": model,
                     "prompt": prompt[:200],
@@ -389,6 +392,11 @@ class ComputeProvider:
                     "provider_node": self.identity.node_id,
                     "source": "nwtn_orchestrator",
                 }
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"NWTN orchestrator timed out after 10s, "
+                    f"falling back to mock for {job.job_id[:8]}"
+                )
             except Exception as e:
                 logger.warning(f"NWTN inference failed, falling back to mock: {e}")
 
