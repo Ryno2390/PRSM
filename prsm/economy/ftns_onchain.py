@@ -243,7 +243,15 @@ class OnChainFTNSLedger:
         async with self._lock:
             try:
                 amount_wei = int(amount_ftns * (10 ** self._decimals))
-                nonce = self.w3.eth.get_transaction_count(self._connected_address)
+
+                # All web3 calls are synchronous and block the event loop.
+                # Run them in a thread to keep the API responsive.
+                import asyncio
+                loop = asyncio.get_running_loop()
+
+                nonce = await loop.run_in_executor(
+                    None, self.w3.eth.get_transaction_count, self._connected_address
+                )
 
                 # Build tx
                 tx = {
@@ -259,7 +267,9 @@ class OnChainFTNSLedger:
                 }
 
                 signed = self.w3.eth.account.sign_transaction(tx, self._account.key)
-                tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+                tx_hash = await loop.run_in_executor(
+                    None, self.w3.eth.send_raw_transaction, signed.raw_transaction
+                )
 
                 tx_record.tx_hash = tx_hash.hex()
                 tx_record.status = "pending"
@@ -270,8 +280,11 @@ class OnChainFTNSLedger:
                     f"(tx: {tx_record.tx_hash[:16]}…)"
                 )
 
-                # Wait for confirmation
-                receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+                # Wait for confirmation in a thread (can take 2-30s on Base)
+                receipt = await loop.run_in_executor(
+                    None,
+                    lambda: self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60),
+                )
                 if receipt["status"] == 1:
                     tx_record.status = "confirmed"
                     tx_record.block_number = receipt["blockNumber"]

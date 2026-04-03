@@ -1193,26 +1193,27 @@ class PRSMNode:
         if amount <= 0:
             return
 
-        # Serialize blockchain calls to prevent nonce conflicts
-        async with self.ftns_ledger._lock:
-            try:
-                tx_record = await self.ftns_ledger.transfer(
-                    job_id=tx_key[0],
-                    to_address=target_address,
-                    amount_ftns=amount,
+        # ftns_ledger.transfer() already acquires self._lock internally,
+        # so we must NOT acquire it here — asyncio.Lock is not reentrant
+        # and double-acquisition causes a deadlock.
+        try:
+            tx_record = await self.ftns_ledger.transfer(
+                job_id=tx_key[0],
+                to_address=target_address,
+                amount_ftns=amount,
+            )
+            if tx_record and tx_record.status == "confirmed":
+                logger.info(
+                    f"FTNS on-chain: {amount:.6f} confirmed "
+                    f"(tx: {tx_record.tx_hash[:16]}…)"
                 )
-                if tx_record and tx_record.status == "confirmed":
-                    logger.info(
-                        f"FTNS on-chain: {amount:.6f} confirmed "
-                        f"(tx: {tx_record.tx_hash[:16]}…)"
-                    )
-                elif tx_record and tx_record.status == "rejected":
-                    logger.warning(
-                        f"FTNS on-chain transfer rejected: "
-                        f"tx={tx_record.tx_hash[:16] if tx_record.tx_hash else 'N/A'}..."
-                    )
-            except Exception as e:
-                logger.error(f"FTNS on-chain transfer failed: {e}")
+            elif tx_record and tx_record.status == "rejected":
+                logger.warning(
+                    f"FTNS on-chain transfer rejected: "
+                    f"tx={tx_record.tx_hash[:16] if tx_record.tx_hash else 'N/A'}..."
+                )
+        except Exception as e:
+            logger.error(f"FTNS on-chain transfer failed: {e}")
 
     async def get_status(self) -> Dict[str, Any]:
         """Comprehensive node status."""
