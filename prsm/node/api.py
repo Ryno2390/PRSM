@@ -1269,6 +1269,210 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             logger.error(f"Error cancelling unstake: {e}")
             raise HTTPException(status_code=500, detail=f"Cancellation failed: {str(e)}")
 
+    # ── Settler Registry (Phase 6: L2-style staking for batch security) ──
+
+    @app.post("/settler/register", tags=["settler", "phase6"])
+    async def register_settler(
+        settler_id: str,
+        address: str,
+        bond_amount: float,
+    ) -> Dict[str, Any]:
+        """
+        Register as a batch settler with staked bond.
+        
+        Settlers stake FTNS to earn the right to approve batch settlements.
+        Requires minimum bond (default: 10K FTNS).
+        
+        Args:
+            settler_id: Unique identifier (e.g., node ID)
+            address: Ethereum address for on-chain operations
+            bond_amount: FTNS to stake as bond
+        """
+        if not hasattr(node, "_settler_registry") or not node._settler_registry:
+            raise HTTPException(503, "Settler registry not initialized")
+        
+        try:
+            settler = await node._settler_registry.register_settler(
+                settler_id=settler_id,
+                address=address,
+                bond_amount=bond_amount,
+            )
+            return {
+                "settler_id": settler.settler_id,
+                "address": settler.address,
+                "bond_amount": settler.bond_amount,
+                "status": settler.status.value,
+                "staked_at": settler.staked_at.isoformat(),
+            }
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/settler/{settler_id}", tags=["settler"])
+    async def get_settler(settler_id: str) -> Dict[str, Any]:
+        """Get details of a specific settler."""
+        if not hasattr(node, "_settler_registry") or not node._settler_registry:
+            raise HTTPException(503, "Settler registry not initialized")
+        
+        settler = node._settler_registry.get_settler(settler_id)
+        if not settler:
+            raise HTTPException(404, f"Settler {settler_id} not found")
+        
+        return {
+            "settler_id": settler.settler_id,
+            "address": settler.address,
+            "bond_amount": settler.bond_amount,
+            "status": settler.status.value,
+            "can_settle": settler.can_settle,
+            "total_settled": settler.total_settled,
+            "slashed_amount": settler.slashed_amount,
+        }
+
+    @app.get("/settler/list/active", tags=["settler"])
+    async def list_active_settlers() -> List[Dict[str, Any]]:
+        """List all active settlers."""
+        if not hasattr(node, "_settler_registry") or not node._settler_registry:
+            raise HTTPException(503, "Settler registry not initialized")
+        
+        return [
+            {
+                "settler_id": s.settler_id,
+                "address": s.address,
+                "bond_amount": s.bond_amount,
+                "total_settled": s.total_settled,
+            }
+            for s in node._settler_registry.list_active_settlers()
+        ]
+
+    @app.post("/settler/unbond", tags=["settler"])
+    async def unbond_settler(settler_id: str) -> Dict[str, Any]:
+        """Initiate unbonding for a settler (30-day lock period)."""
+        if not hasattr(node, "_settler_registry") or not node._settler_registry:
+            raise HTTPException(503, "Settler registry not initialized")
+        
+        try:
+            unbond_at = await node._settler_registry.unbond_settler(settler_id)
+            return {
+                "settler_id": settler_id,
+                "status": "unbonding",
+                "unbond_at": unbond_at.isoformat() if unbond_at else None,
+            }
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/settler/batch/sign", tags=["settler"])
+    async def sign_batch(
+        batch_id: str,
+        settler_id: str,
+        signature: str,
+    ) -> Dict[str, Any]:
+        """
+        Sign a pending batch for multi-sig approval.
+        
+        When signature threshold (default: 3) is reached,
+        the batch is approved for on-chain settlement.
+        """
+        if not hasattr(node, "_settler_registry") or not node._settler_registry:
+            raise HTTPException(503, "Settler registry not initialized")
+        
+        try:
+            sig = await node._settler_registry.sign_batch(
+                batch_id=batch_id,
+                settler_id=settler_id,
+                signature=signature,
+            )
+            batch = node._settler_registry.get_pending_batch(batch_id)
+            return {
+                "batch_id": batch_id,
+                "settler_id": settler_id,
+                "signed_at": sig.signed_at.isoformat(),
+                "signature_count": batch.signature_count if batch else 1,
+                "threshold": node._settler_registry.settlement_threshold,
+                "approved": node._settler_registry.is_batch_approved(batch_id),
+            }
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/settler/batch/pending", tags=["settler"])
+    async def list_pending_batches() -> List[Dict[str, Any]]:
+        """List all batches awaiting multi-sig approval."""
+        if not hasattr(node, "_settler_registry") or not node._settler_registry:
+            raise HTTPException(503, "Settler registry not initialized")
+        
+        return [
+            {
+                "batch_id": b.batch_id,
+                "batch_hash": b.batch_hash,
+                "transfer_count": len(b.transfers),
+                "total_amount": b.total_amount,
+                "signature_count": b.signature_count,
+                "approved": b.signature_count >= node._settler_registry.settlement_threshold,
+                "created_at": b.created_at.isoformat(),
+            }
+            for b in node._settler_registry.list_pending_batches()
+            if not b.settled
+        ]
+
+    @app.get("/settler/ledger/export", tags=["settler"])
+    async def export_ledger() -> Dict[str, Any]:
+        """
+        Export local ledger state for public audit (Challenge system).
+        
+        Enables anyone to compare local state against on-chain settlement.
+        """
+        if not hasattr(node, "_settler_registry") or not node._settler_registry:
+            raise HTTPException(503, "Settler registry not initialized")
+        
+        # Gather ledger data
+        ledger_data = {}
+        if hasattr(node, "ledger"):
+            ledger_data = {
+                "balances": dict(node.ledger._balances) if hasattr(node.ledger, "_balances") else {},
+                "total_supply": node.ledger.total_supply if hasattr(node.ledger, "total_supply") else 0,
+            }
+        
+        return await node._settler_registry.export_ledger(ledger_data)
+
+    @app.post("/settler/slash/propose", tags=["settler"])
+    async def propose_slash(
+        settler_id: str,
+        slash_amount: float,
+        reason: str,
+        proposer_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Propose to slash a settler's bond.
+        
+        Creates a governance proposal that must be approved before execution.
+        """
+        if not hasattr(node, "_settler_registry") or not node._settler_registry:
+            raise HTTPException(503, "Settler registry not initialized")
+        
+        try:
+            proposal = await node._settler_registry.propose_slash(
+                settler_id=settler_id,
+                slash_amount=slash_amount,
+                reason=reason,
+                evidence={},
+                proposer_id=proposer_id,
+            )
+            return {
+                "proposal_id": proposal.proposal_id,
+                "settler_id": settler_id,
+                "slash_amount": slash_amount,
+                "reason": reason,
+                "status": "pending_vote",
+            }
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.get("/settler/stats", tags=["settler"])
+    async def get_settler_stats() -> Dict[str, Any]:
+        """Get settler registry statistics."""
+        if not hasattr(node, "_settler_registry") or not node._settler_registry:
+            raise HTTPException(503, "Settler registry not initialized")
+        
+        return node._settler_registry.get_stats()
+
 
     # ── Storage endpoints ────────────────────────────────────────
 
