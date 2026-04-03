@@ -1072,12 +1072,15 @@ class PRSMNode:
         try:
             # ── Step 1: Rebuild wallet_balances cache from dag_transactions ──
             if hasattr(self.ledger, "_db"):
+                # Only update wallets that already exist in the wallets table (FK constraint)
                 await self.ledger._db.execute(
                     """INSERT OR REPLACE INTO wallet_balances (wallet_id, balance, version, last_updated)
-                       SELECT to_wallet, SUM(amount), 1, MAX(timestamp)
-                       FROM dag_transactions
-                       WHERE to_wallet IS NOT NULL
-                       GROUP BY to_wallet"""
+                       SELECT w.wallet_id,
+                              COALESCE((SELECT SUM(amount) FROM dag_transactions WHERE to_wallet = w.wallet_id), 0) -
+                              COALESCE((SELECT SUM(amount) FROM dag_transactions WHERE from_wallet = w.wallet_id), 0),
+                              1,
+                              COALESCE((SELECT MAX(timestamp) FROM dag_transactions WHERE to_wallet = w.wallet_id OR from_wallet = w.wallet_id), 0)
+                       FROM wallets w"""
                 )
                 await self.ledger._db.commit()
                 # Reset the in-memory version cache so it matches the DB
@@ -1100,6 +1103,9 @@ class PRSMNode:
                 )
                 # Also prime wallet_balances for the fresh grant
                 if hasattr(self.ledger, "_db"):
+                    # Ensure wallet exists first
+                    if not await self.ledger.wallet_exists(self.identity.node_id):
+                        await self.ledger.create_wallet(self.identity.node_id, "node")
                     await self.ledger._db.execute(
                         """INSERT INTO wallet_balances (wallet_id, balance, version, last_updated)
                            VALUES (?, ?, 1, ?)
