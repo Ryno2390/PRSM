@@ -480,7 +480,7 @@ def _get_version():
         from importlib.metadata import version as pkg_version
         return pkg_version("prsm-network")
     except Exception:
-        return "0.3.2"  # fallback
+        return "0.19.0"  # fallback
 
 
 @click.group()
