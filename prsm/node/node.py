@@ -1071,8 +1071,6 @@ class PRSMNode:
         """Give the node an initial FTNS balance if it has none."""
         try:
             balance = await self.ledger.get_balance(self.identity.node_id)
-            # If balance is 0 (local ledger cleared on restart),
-            # give the node 100 FTNS to start with
             if balance <= 0:
                 await self.ledger.credit(
                     wallet_id=self.identity.node_id,
@@ -1080,9 +1078,23 @@ class PRSMNode:
                     tx_type=TransactionType.WELCOME_GRANT,
                     description="Welcome grant for new node",
                 )
-                logger.info(
-                    f"Seeded welcome grant: 100 FTNS to {self.identity.node_id[:12]}..."
-                )
+                # Ensure the wallet_balances cache table is also updated.
+                # This is separate from dag_transactions and can get out of sync on restart.
+                if hasattr(self.ledger, "_db"):
+                    await self.ledger._db.execute(
+                        """INSERT INTO wallet_balances (wallet_id, balance, version, last_updated)
+                           VALUES (?, ?, 1, ?)
+                           ON CONFLICT(wallet_id) DO UPDATE SET
+                               balance = excluded.balance,
+                               version = CASE WHEN excluded.balance > balance
+                                   THEN version + 1 ELSE version END,
+                               last_updated = excluded.last_updated""",
+                        (self.identity.node_id, 100.0, time.time()),
+                    )
+                    await self.ledger._db.commit()
+                    if hasattr(self.ledger, "_balance_version_cache"):
+                        self.ledger._balance_version_cache[self.identity.node_id] = 1
+                logger.info(f"Seeded welcome grant: 100 FTNS to {self.identity.node_id[:12]}...")
             else:
                 logger.debug(f"Node already has balance: {balance:.6f}, skipping welcome grant")
         except Exception as e:
