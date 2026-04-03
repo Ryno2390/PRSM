@@ -168,7 +168,6 @@ class PaymentEscrow:
                 from_wallet=escrow_wallet,
                 to_wallet=provider_id,
                 amount=amount,
-                tx_type=TransactionType.COMPUTE_PAYMENT,
                 description=f"Payment for job {job_id[:8]} (consensus={'yes' if consensus_reached else 'partial'})",
             )
             escrow.provider_winner = provider_id
@@ -190,7 +189,6 @@ class PaymentEscrow:
                     from_wallet=escrow_wallet,
                     to_wallet=escrow.requester_id,
                     amount=remainder,
-                    tx_type=TransactionType.TRANSFER,
                     description=f"Escrow refund for job {job_id[:8]}",
                 )
                 logger.info(
@@ -226,7 +224,6 @@ class PaymentEscrow:
                     from_wallet=escrow_wallet,
                     to_wallet=escrow.requester_id,
                     amount=balance,
-                    tx_type=TransactionType.TRANSFER,
                     description=f"Escrow refund: {reason}",
                 )
                 logger.info(
