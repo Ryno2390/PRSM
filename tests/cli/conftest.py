@@ -107,7 +107,7 @@ def _ensure_prsm_stub():
         mod.__path__ = [str(prsm_root)]
         mod.__file__ = str(prsm_root / "__init__.py")
         mod._cli_test_stub = True
-        mod.__version__ = "0.19.0"
+        mod.__version__ = "0.20.0"
         sys.modules["prsm"] = mod
 
         # Also stub prsm.core and prsm.core.config to avoid transitive imports
