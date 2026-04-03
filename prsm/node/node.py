@@ -524,7 +524,10 @@ class PRSMNode:
 
         # ── Local Ledger (DAG-based or legacy) ─────────────────────
         if self.config.ledger_type == "dag":
-            self.ledger = DAGLedger(str(self.config.ledger_path))
+            self.ledger = DAGLedger(
+                str(self.config.ledger_path),
+                verify_signatures=False,
+            )
         else:
             self.ledger = LocalLedger(str(self.config.ledger_path))
         await self.ledger.initialize()
