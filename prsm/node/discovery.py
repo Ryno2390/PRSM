@@ -210,7 +210,7 @@ class PeerDiscovery:
                     node_id=self.transport.identity.node_id,
                     port=getattr(self.transport, 'port', 8000),
                     capabilities=self._local_capabilities,
-                    version="0.3.2",
+                    version="0.19.0",
                     connect_timeout=self.bootstrap_connect_timeout,
                 )
 
