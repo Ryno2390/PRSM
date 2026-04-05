@@ -299,22 +299,40 @@ class MultiPartyEscrow:
                 batch.tx_hash = result.get("tx_hash")
                 batch.gas_used = result.get("gas_used")
                 batch.settled_at = time.time()
-                
-                # Clear settled creators from pending
-                for creator_id in creators_to_settle:
-                    del self._pending[creator_id]
-                
-                # Update stats
-                self._total_settled += batch.total_amount
+
+                # Determine which creators to clear from pending.
+                # For partial settlements (individual transfer fallback),
+                # only remove creators whose transfers actually succeeded.
+                if result.get("partial"):
+                    settled_ids = set(result.get("settled_creators", []))
+                    failed_ids = result.get("failed_creators", [])
+                    settled_amount = 0.0
+                    for creator_id in settled_ids:
+                        if creator_id in self._pending:
+                            settled_amount += self._pending[creator_id].total_amount
+                            del self._pending[creator_id]
+                    if failed_ids:
+                        logger.warning(
+                            f"Batch {batch_id}: {len(failed_ids)} creators failed "
+                            f"settlement, keeping in pending for retry"
+                        )
+                    self._total_settled += settled_amount
+                else:
+                    # Atomic settlement (batch/multicall/simulation) — all or nothing
+                    for creator_id in creators_to_settle:
+                        if creator_id in self._pending:
+                            del self._pending[creator_id]
+                    self._total_settled += batch.total_amount
+
                 if batch.gas_used:
                     self._total_gas_used += batch.gas_used
-                
+
                 logger.info(
                     f"Batch {batch_id} settled on-chain: "
                     f"{batch.tx_hash[:16] if batch.tx_hash else 'N/A'}... "
                     f"(gas: {batch.gas_used})"
                 )
-                
+
             else:
                 batch.error = result.get("error", "Unknown error")
                 logger.error(f"Batch {batch_id} settlement failed: {batch.error}")
@@ -356,79 +374,87 @@ class MultiPartyEscrow:
                 "gas_used": 0,
             }
         
-        # Build recipients and amounts
+        # Build recipients, amounts, and map addresses back to creator_ids
         recipients = []
         amounts = []
-        
+        address_to_creator: Dict[str, str] = {}
+
         for creator_id, acc in batch.creators.items():
             # Skip creators without on-chain address
             if not acc.onchain_address:
                 if self.config.require_onchain_address:
                     logger.debug(f"Skipping {creator_id[:8]}: no on-chain address")
                     continue
-                # In production, would need address resolution or skip
-            
+
             if acc.onchain_address:
                 recipients.append(acc.onchain_address)
                 amounts.append(acc.total_amount)
-        
+                address_to_creator[acc.onchain_address] = creator_id
+
         if not recipients:
             return {"success": False, "error": "No valid recipients"}
-        
+
         try:
             # Check if FTNS contract has batch transfer method
             if hasattr(self.ftns_ledger, "transfer_batch"):
-                # Use batch transfer (most gas efficient)
+                # Use batch transfer (most gas efficient) — atomic, all or nothing
                 result = await self.ftns_ledger.transfer_batch(
                     recipients=recipients,
                     amounts=amounts,
                 )
                 return result
-            
+
             elif hasattr(self.ftns_ledger, "multicall"):
-                # Use multicall pattern
+                # Use multicall pattern — atomic, all or nothing
                 calls = []
                 for recipient, amount in zip(recipients, amounts):
                     calls.append({
                         "method": "transfer",
                         "args": [recipient, int(amount * 1e18)],  # Convert to wei
                     })
-                
+
                 result = await self.ftns_ledger.multicall(calls)
                 return result
-            
+
             else:
                 # Fallback: individual transfers
-                # This is less gas efficient but works with any contract
+                # Non-atomic — track per-creator success to avoid data loss
                 tx_hashes = []
                 total_gas = 0
-                
+                settled_creators = []
+                failed_creators = []
+
                 for recipient, amount in zip(recipients, amounts):
+                    creator_id = address_to_creator.get(recipient, "")
                     result = await self.ftns_ledger.transfer(
                         recipient=recipient,
                         amount=amount,
                     )
-                    
+
                     if result.get("success"):
                         tx_hashes.append(result.get("tx_hash"))
                         total_gas += result.get("gas_used", 0)
+                        settled_creators.append(creator_id)
                     else:
-                        # Log failure but continue
                         logger.warning(
                             f"Individual transfer failed for {recipient[:10]}...: "
                             f"{result.get('error')}"
                         )
-                
+                        failed_creators.append(creator_id)
+
                 if tx_hashes:
                     return {
                         "success": True,
                         "tx_hash": tx_hashes[0],  # Primary tx
                         "gas_used": total_gas,
                         "additional_txs": tx_hashes[1:],
+                        "settled_creators": settled_creators,
+                        "failed_creators": failed_creators,
+                        "partial": len(failed_creators) > 0,
                     }
                 else:
                     return {"success": False, "error": "All transfers failed"}
-                    
+
         except Exception as e:
             logger.error(f"On-chain settlement error: {e}")
             return {"success": False, "error": str(e)}

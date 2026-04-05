@@ -1344,6 +1344,31 @@ class DAGLedger:
             description=description,
         )
     
+    async def debit(
+        self,
+        wallet_id: str,
+        amount: float,
+        tx_type: TransactionType,
+        description: str = "",
+        signature: Optional[str] = None,
+        public_key: Optional[str] = None,
+    ) -> DAGTransaction:
+        """Debit FTNS from a wallet (payment to system/network)."""
+        balance = await self.get_balance(wallet_id)
+        if balance < amount:
+            raise ValueError(
+                f"Insufficient balance: {balance:.6f} < {amount:.6f}"
+            )
+        return await self.submit_transaction(
+            tx_type=tx_type,
+            amount=amount,
+            from_wallet=wallet_id,
+            to_wallet="system",
+            description=description,
+            signature=signature,
+            public_key=public_key,
+        )
+
     async def issue_welcome_grant(self, wallet_id: str, amount: float = 100.0) -> DAGTransaction:
         cursor = await self._db.execute(
             "SELECT 1 FROM dag_transactions WHERE to_wallet = ? AND tx_type = ?",
@@ -1351,7 +1376,7 @@ class DAGLedger:
         )
         if await cursor.fetchone() is not None:
             raise ValueError(f"Wallet {wallet_id} already received a welcome grant")
-            
+
         return await self.credit(
             wallet_id=wallet_id,
             amount=amount,
