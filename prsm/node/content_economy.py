@@ -258,8 +258,12 @@ class ContentEconomy:
         self._pending_payments[payment_id] = payment
         
         try:
-            # Step 1: Lock FTNS in escrow
-            if self.ftns_ledger and accessor_id == self.identity.node_id:
+            # Step 1: Lock FTNS in escrow (on-chain) or debit local ledger
+            if (
+                self.ftns_ledger
+                and accessor_id == self.identity.node_id
+                and hasattr(self.ftns_ledger, "lock_escrow")
+            ):
                 # On-chain escrow for our own accesses
                 escrow_result = await self.ftns_ledger.lock_escrow(
                     amount=float(total_amount),

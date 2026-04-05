@@ -102,6 +102,10 @@ class NodeConfig:
     # FTNS
     welcome_grant: float = 100.0
 
+    # Content Economy (Phase 4)
+    min_replicas: int = 3
+    royalty_model: str = "phase4"  # "phase4" or "legacy"
+
     # Discovery tuning
     target_peers: int = 8
     announce_interval: float = 60.0
