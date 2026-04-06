@@ -945,6 +945,21 @@ class PRSMNode:
         
         self._settler_registry.on_settlement_ready(_on_batch_approved)
 
+        # ── Agent Forge (Ring 5) ──────────────────────────────────────
+        try:
+            from prsm.compute.nwtn.agent_forge.forge import AgentForge
+
+            self.agent_forge = AgentForge(
+                backend_registry=getattr(self, '_backend_registry', None),
+                pricing_engine=self.pricing_engine,
+                swarm_coordinator=self.swarm_coordinator,
+                agent_dispatcher=self.agent_dispatcher,
+            )
+            logger.info("Agent forge (Ring 5) initialized")
+        except (ImportError, AttributeError):
+            self.agent_forge = None
+            logger.debug("Agent forge not available")
+
         # Wire ledger_sync and agent_registry into subsystems
         self.content_uploader.ledger_sync = self.ledger_sync
         # Wire content_economy into content_uploader for replication tracking
