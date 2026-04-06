@@ -135,7 +135,7 @@ class AgentExecutor:
                 separators=(",", ":"),
             ).encode()
         ).hexdigest()
-        result["provider_signature"] = self.identity.sign(result_hash)
+        result["provider_signature"] = self.identity.sign(result_hash.encode() if isinstance(result_hash, str) else result_hash)
 
         # 6. Optionally publish via gossip
         if publish_result:
@@ -167,6 +167,6 @@ class AgentExecutor:
                 separators=(",", ":"),
             ).encode()
         ).hexdigest()
-        result["provider_signature"] = self.identity.sign(result_hash)
+        result["provider_signature"] = self.identity.sign(result_hash.encode() if isinstance(result_hash, str) else result_hash)
 
         return result
