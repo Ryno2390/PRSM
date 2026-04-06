@@ -139,3 +139,23 @@ class TestDispatchRecord:
         assert record.status == DispatchStatus.BIDDING
         record.status = DispatchStatus.COMPLETED
         assert record.status == DispatchStatus.COMPLETED
+
+
+class TestGossipAgentDispatch:
+    def test_dispatch_constant(self):
+        from prsm.node.gossip import GOSSIP_AGENT_DISPATCH
+        assert GOSSIP_AGENT_DISPATCH == "agent_dispatch"
+
+    def test_accept_constant(self):
+        from prsm.node.gossip import GOSSIP_AGENT_ACCEPT
+        assert GOSSIP_AGENT_ACCEPT == "agent_accept"
+
+    def test_agent_result_constant(self):
+        from prsm.node.gossip import GOSSIP_AGENT_RESULT
+        assert GOSSIP_AGENT_RESULT == "agent_result"
+
+    def test_retention_policies(self):
+        from prsm.node.gossip import GOSSIP_RETENTION_SECONDS
+        assert GOSSIP_RETENTION_SECONDS.get("agent_dispatch") == 3600
+        assert GOSSIP_RETENTION_SECONDS.get("agent_accept") == 3600
+        assert GOSSIP_RETENTION_SECONDS.get("agent_result") == 3600
