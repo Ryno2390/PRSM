@@ -973,6 +973,20 @@ class PRSMNode:
             self.confidential_executor = None
             logger.debug("Confidential compute not available")
 
+        # ── Model Sharding (Ring 8) ───────────────────────────────────
+        try:
+            from prsm.compute.model_sharding.executor import TensorParallelExecutor
+            from prsm.compute.model_sharding.models import PipelineConfig
+
+            self.tensor_executor = TensorParallelExecutor(
+                confidential_executor=self.confidential_executor,
+                pipeline_config=PipelineConfig(),
+            )
+            logger.info("Model sharding (Ring 8) initialized")
+        except ImportError:
+            self.tensor_executor = None
+            logger.debug("Model sharding not available")
+
         # Wire ledger_sync and agent_registry into subsystems
         self.content_uploader.ledger_sync = self.ledger_sync
         # Wire content_economy into content_uploader for replication tracking
