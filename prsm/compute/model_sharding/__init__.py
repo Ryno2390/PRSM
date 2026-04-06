@@ -14,6 +14,8 @@ from prsm.compute.model_sharding.models import (
 )
 from prsm.compute.model_sharding.sharder import ModelSharder
 from prsm.compute.model_sharding.randomizer import PipelineRandomizer
+from prsm.compute.model_sharding.executor import TensorParallelExecutor
+from prsm.compute.model_sharding.collision_detector import CollisionDetector
 
 __all__ = [
     "PipelineStakeTier",
@@ -22,4 +24,6 @@ __all__ = [
     "PipelineConfig",
     "ModelSharder",
     "PipelineRandomizer",
+    "TensorParallelExecutor",
+    "CollisionDetector",
 ]
