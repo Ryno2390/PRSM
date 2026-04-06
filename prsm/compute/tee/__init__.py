@@ -15,6 +15,8 @@ from prsm.compute.tee.models import (
     PrivacyLevel,
 )
 from prsm.compute.tee.dp_noise import DPNoiseInjector
+from prsm.compute.tee.runtime import TEERuntime, SoftwareTEERuntime
+from prsm.compute.tee.confidential_executor import ConfidentialExecutor
 
 __all__ = [
     "TEEType",
@@ -23,4 +25,7 @@ __all__ = [
     "ConfidentialResult",
     "PrivacyLevel",
     "DPNoiseInjector",
+    "TEERuntime",
+    "SoftwareTEERuntime",
+    "ConfidentialExecutor",
 ]

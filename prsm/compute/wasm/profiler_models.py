@@ -53,6 +53,10 @@ class HardwareProfile:
     download_mbps: float = 0.0
     thermal_class: ThermalClass = ThermalClass.SUSTAINED
 
+    # TEE (Ring 7)
+    tee_available: bool = False
+    tee_type: str = ""  # "sgx", "tdx", "sev", "trustzone", "secure_enclave", ""
+
     @property
     def compute_tier(self) -> ComputeTier:
         return ComputeTier.from_tflops(self.tflops_fp32)
@@ -73,6 +77,8 @@ class HardwareProfile:
             "download_mbps": self.download_mbps,
             "thermal_class": self.thermal_class.value,
             "compute_tier": self.compute_tier.value,
+            "tee_available": self.tee_available,
+            "tee_type": self.tee_type,
         }
 
     @classmethod
@@ -94,4 +100,6 @@ class HardwareProfile:
             upload_mbps=d.get("upload_mbps", 0.0),
             download_mbps=d.get("download_mbps", 0.0),
             thermal_class=thermal,
+            tee_available=d.get("tee_available", False),
+            tee_type=d.get("tee_type", ""),
         )
