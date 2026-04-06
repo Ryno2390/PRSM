@@ -12,10 +12,14 @@ from prsm.compute.agents.models import (
     DispatchStatus,
     DispatchRecord,
 )
+from prsm.compute.agents.dispatcher import AgentDispatcher
+from prsm.compute.agents.executor import AgentExecutor
 
 __all__ = [
     "AgentManifest",
     "MobileAgent",
     "DispatchStatus",
     "DispatchRecord",
+    "AgentDispatcher",
+    "AgentExecutor",
 ]
