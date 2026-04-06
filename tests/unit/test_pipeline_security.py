@@ -73,3 +73,111 @@ class TestPipelineRandomizer:
         for a in assignments:
             assert "node_id" in a
             assert "shard_index" in a
+
+
+# ── TensorParallelExecutor tests ─────────────────────────────────────
+
+import json
+import numpy as np
+from prsm.compute.model_sharding.executor import TensorParallelExecutor
+from prsm.compute.model_sharding.collision_detector import CollisionDetector
+from prsm.compute.model_sharding.models import ShardedModel, ModelShard, PipelineConfig
+
+
+class TestTensorParallelExecutor:
+    @pytest.mark.asyncio
+    async def test_execute_parallel_produces_result(self):
+        executor = TensorParallelExecutor()
+
+        # Create a simple sharded model (2 shards of a 4x4 matrix)
+        tensor = np.random.randn(4, 4)
+        shard1_data = tensor[:2].tobytes()
+        shard2_data = tensor[2:].tobytes()
+
+        model = ShardedModel(
+            model_id="test-model",
+            model_name="TestModel",
+            total_shards=2,
+            shards=[
+                ModelShard(
+                    shard_id="s0", model_id="test-model", shard_index=0,
+                    total_shards=2, tensor_data=shard1_data,
+                    tensor_shape=(2, 4), size_bytes=len(shard1_data), checksum="abc",
+                ),
+                ModelShard(
+                    shard_id="s1", model_id="test-model", shard_index=1,
+                    total_shards=2, tensor_data=shard2_data,
+                    tensor_shape=(2, 4), size_bytes=len(shard2_data), checksum="def",
+                ),
+            ],
+        )
+
+        assignments = [
+            {"node_id": "node-a", "shard_index": 0},
+            {"node_id": "node-b", "shard_index": 1},
+        ]
+
+        result = await executor.execute_parallel(model, b"", assignments)
+
+        assert result["status"] == "success"
+        assert result["shards_executed"] == 2
+        assert result["aggregated_output"] is not None
+
+    def test_all_reduce_averages(self):
+        a = np.array([2.0, 4.0, 6.0])
+        b = np.array([4.0, 6.0, 8.0])
+        result = TensorParallelExecutor.all_reduce([a, b])
+        np.testing.assert_array_almost_equal(result, [3.0, 5.0, 7.0])
+
+
+# ── CollisionDetector tests ──────────────────────────────────────────
+
+
+class TestCollisionDetector:
+    def test_matching_outputs_pass(self):
+        detector = CollisionDetector(dp_epsilon=8.0)
+        a = json.dumps([1.0, 2.0, 3.0]).encode()
+        b = json.dumps([1.0, 2.0, 3.0]).encode()
+        match, div = detector.compare_pipelines(a, b)
+        assert match is True
+        assert div < 0.01
+
+    def test_divergent_outputs_detected(self):
+        detector = CollisionDetector(dp_epsilon=8.0, tolerance_multiplier=1.0)
+        a = json.dumps([1.0, 2.0, 3.0]).encode()
+        b = json.dumps([100.0, 200.0, 300.0]).encode()
+        match, div = detector.compare_pipelines(a, b)
+        assert match is False
+        assert div > 0.5
+
+    def test_dp_noise_within_tolerance(self):
+        detector = CollisionDetector(dp_epsilon=8.0, tolerance_multiplier=5.0)
+        base = [1.0, 2.0, 3.0]
+        noisy = [1.01, 2.01, 3.01]  # Tiny noise
+        a = json.dumps(base).encode()
+        b = json.dumps(noisy).encode()
+        match, div = detector.compare_pipelines(a, b)
+        assert match is True
+
+    def test_detect_collision_all_match(self):
+        detector = CollisionDetector()
+        outputs = [
+            json.dumps([1.0, 2.0]).encode(),
+            json.dumps([1.0, 2.0]).encode(),
+            json.dumps([1.0, 2.0]).encode(),
+        ]
+        report = detector.detect_collision(outputs)
+        assert report["match"] is True
+        assert report["comparisons"] == 3
+        assert len(report["flagged_indices"]) == 0
+
+    def test_detect_collision_flags_divergent(self):
+        detector = CollisionDetector(dp_epsilon=8.0, tolerance_multiplier=1.0)
+        outputs = [
+            json.dumps([1.0, 2.0]).encode(),
+            json.dumps([1.0, 2.0]).encode(),
+            json.dumps([999.0, 999.0]).encode(),  # Divergent
+        ]
+        report = detector.detect_collision(outputs)
+        assert report["match"] is False
+        assert 2 in report["flagged_indices"]
