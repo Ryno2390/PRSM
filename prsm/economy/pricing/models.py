@@ -95,6 +95,11 @@ class ProsumerTier(Enum):
     def yield_boost(self) -> Decimal:
         return self.value[1]
 
+    @property
+    def label(self) -> str:
+        """Human-readable tier label."""
+        return self.name.capitalize()
+
     @classmethod
     def from_stake(cls, amount: int) -> "ProsumerTier":
         """Return the highest tier the given stake qualifies for."""

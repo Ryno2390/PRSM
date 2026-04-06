@@ -69,3 +69,33 @@ class TestSettlerSignatureVerification:
             b"test message",
             "aW52YWxpZC1zaWduYXR1cmU=",
         )
+
+
+from click.testing import CliRunner
+
+
+class TestCLICommands:
+    def test_node_benchmark_command_exists(self):
+        from prsm.cli import main
+        runner = CliRunner()
+        result = runner.invoke(main, ["node", "benchmark", "--help"])
+        assert result.exit_code == 0
+        assert "hardware" in result.output.lower() or "benchmark" in result.output.lower()
+
+    def test_ftns_yield_estimate_command_exists(self):
+        from prsm.cli import main
+        runner = CliRunner()
+        result = runner.invoke(main, ["ftns", "yield-estimate", "--help"])
+        assert result.exit_code == 0
+
+    def test_agent_forge_command_exists(self):
+        from prsm.cli import main
+        runner = CliRunner()
+        result = runner.invoke(main, ["agent", "forge", "--help"])
+        assert result.exit_code == 0
+
+    def test_compute_quote_command_exists(self):
+        from prsm.cli import main
+        runner = CliRunner()
+        result = runner.invoke(main, ["compute", "quote", "--help"])
+        assert result.exit_code == 0
