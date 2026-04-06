@@ -1705,6 +1705,23 @@ def _run_interactive_configure(config: "NodeConfig") -> None:
         pass
 
 
+@node.command()
+def benchmark():
+    """Run hardware profiler and display compute tier classification."""
+    from prsm.compute.wasm.profiler import HardwareProfiler
+    profiler = HardwareProfiler()
+    profile = profiler.detect()
+    click.echo(f"Hardware Profile:")
+    click.echo(f"  CPU: {profile.cpu_cores} cores @ {profile.cpu_freq_mhz:.0f} MHz")
+    click.echo(f"  GPU: {profile.gpu_name or 'None detected'}")
+    if profile.gpu_vram_gb > 0:
+        click.echo(f"  VRAM: {profile.gpu_vram_gb:.1f} GB")
+    click.echo(f"  RAM: {profile.ram_total_gb:.1f} GB total, {profile.ram_available_gb:.1f} GB available")
+    click.echo(f"  TFLOPS: {profile.tflops_fp32:.2f} FP32")
+    click.echo(f"  Compute Tier: {profile.compute_tier.value.upper()}")
+    click.echo(f"  Thermal: {profile.thermal_class.value}")
+
+
 @main.group()
 def teacher():
     """Teacher model management commands"""
@@ -2133,6 +2150,28 @@ def compute_run(prompt: str, budget: float, api: str):
         raise SystemExit(1)
 
 
+@compute.command("quote")
+@click.argument("query")
+@click.option("--shards", default=3, help="Estimated number of data shards")
+@click.option("--tier", default="t2", help="Hardware tier (t1-t4)")
+def compute_quote(query, shards, tier):
+    """Get a cost estimate for a compute query."""
+    from prsm.economy.pricing.engine import PricingEngine
+
+    engine = PricingEngine()
+    quote = engine.quote_swarm_job(
+        shard_count=shards,
+        hardware_tier=tier,
+        estimated_pcu_per_shard=50.0,
+    )
+
+    click.echo(f"Cost Quote for: {query}")
+    click.echo(f"  Compute: {quote.compute_cost} FTNS")
+    click.echo(f"  Data: {quote.data_cost} FTNS")
+    click.echo(f"  Network Fee: {quote.network_fee} FTNS")
+    click.echo(f"  Total: {quote.total} FTNS")
+
+
 @main.command("demo")
 @click.option("--nodes", default=3, type=int, help="Number of nodes to spawn")
 def compute_demo(nodes: int):
@@ -2375,6 +2414,35 @@ def history(limit: int, search: Optional[str], api_url: str) -> None:
             str(tx.get("timestamp", ""))[:19],
         )
     console.print(table)
+
+
+@ftns.command("yield-estimate")
+@click.option("--hours", default=8, help="Hours per day available for compute")
+@click.option("--stake", default=0, type=float, help="FTNS staked")
+def ftns_yield_estimate(hours, stake):
+    """Estimate daily/monthly FTNS earnings based on your hardware."""
+    from prsm.compute.wasm.profiler import HardwareProfiler
+    from prsm.economy.pricing.engine import PricingEngine
+    from prsm.economy.pricing.models import ProsumerTier
+
+    profiler = HardwareProfiler()
+    profile = profiler.detect()
+    tier = ProsumerTier.from_stake(stake)
+    engine = PricingEngine()
+
+    estimate = engine.yield_estimate(
+        hardware_tier=profile.compute_tier.value,
+        tflops=profile.tflops_fp32,
+        hours_per_day=hours,
+        prosumer_tier=tier,
+    )
+
+    click.echo(f"Yield Estimate:")
+    click.echo(f"  Hardware: {profile.compute_tier.value.upper()} ({profile.tflops_fp32:.1f} TFLOPS)")
+    click.echo(f"  Stake: {stake:.0f} FTNS ({tier.label})")
+    click.echo(f"  Yield Boost: {estimate['yield_boost']}x")
+    click.echo(f"  Daily: {float(estimate['daily_ftns']):.2f} FTNS")
+    click.echo(f"  Monthly: {float(estimate['monthly_ftns']):.2f} FTNS")
 
 
 # ============================================================================
@@ -2804,6 +2872,37 @@ def history(limit: int, api_url: str):
         console.print("❌ Cannot connect to PRSM server", style="red")
     except Exception as e:
         console.print(f"❌ Error: {e}", style="red")
+
+
+# ============================================================================
+# AGENT COMMANDS
+# ============================================================================
+
+@main.group()
+def agent():
+    """Manage PRSM mobile agents."""
+    pass
+
+
+@agent.command("forge")
+@click.argument("query")
+@click.option("--budget", default=10.0, help="FTNS budget")
+def agent_forge_cmd(query, budget):
+    """Decompose a query and show the execution plan."""
+    import asyncio
+    from prsm.compute.nwtn.agent_forge.forge import AgentForge
+
+    async def _run():
+        forge = AgentForge()
+        decomp = await forge.decompose(query)
+        click.echo(f"Query: {query}")
+        click.echo(f"Route: {decomp.recommended_route.value}")
+        click.echo(f"Datasets: {decomp.required_datasets or 'None (direct LLM)'}")
+        click.echo(f"Operations: {decomp.operations or 'None'}")
+        click.echo(f"Hardware: {decomp.min_hardware_tier}")
+        click.echo(f"Complexity: {decomp.estimated_complexity:.1f}")
+
+    asyncio.run(_run())
 
 
 # ============================================================================
