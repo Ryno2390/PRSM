@@ -153,3 +153,13 @@ class TestHardwareProfiler:
         restored = HardwareProfile.from_dict(d)
         assert restored.cpu_cores == profile.cpu_cores
         assert restored.compute_tier == profile.compute_tier
+
+
+class TestGossipHardwareProfile:
+    def test_gossip_constant_exists(self):
+        from prsm.node.gossip import GOSSIP_HARDWARE_PROFILE
+        assert GOSSIP_HARDWARE_PROFILE == "hardware_profile"
+
+    def test_gossip_retention_is_24h(self):
+        from prsm.node.gossip import GOSSIP_RETENTION_SECONDS
+        assert GOSSIP_RETENTION_SECONDS.get("hardware_profile") == 86400
