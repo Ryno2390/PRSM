@@ -86,7 +86,7 @@ class AgentDispatcher:
         Returns a MobileAgent with this node as origin and a fresh signature.
         """
         agent_id = str(uuid.uuid4())
-        signature = self.identity.sign(agent_id)
+        signature = self.identity.sign(agent_id.encode())
 
         agent = MobileAgent(
             agent_id=agent_id,
