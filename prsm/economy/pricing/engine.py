@@ -152,6 +152,7 @@ class PricingEngine:
             "tflops": tflops,
             "hours_per_day": hours_per_day,
             "prosumer_tier": prosumer_tier.name,
+            "yield_boost": str(prosumer_tier.yield_boost),
             "daily_pcu": daily_pcu,
             "daily_ftns": str(daily_ftns),
             "monthly_ftns": str(monthly_ftns),
