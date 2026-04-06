@@ -807,6 +807,18 @@ class PRSMNode:
             self.agent_executor = None
             logger.debug("Mobile agent dispatch not available")
 
+        # ── Swarm Compute (Ring 3) ────────────────────────────────────
+        try:
+            from prsm.compute.swarm.coordinator import SwarmCoordinator
+
+            self.swarm_coordinator = SwarmCoordinator(
+                dispatcher=self.agent_dispatcher,
+            )
+            logger.info("Swarm compute (Ring 3) initialized")
+        except (ImportError, AttributeError):
+            self.swarm_coordinator = None
+            logger.debug("Swarm compute not available")
+
         # ── On-Chain FTNS Ledger (Base mainnet) ────────────────────
         self.ftns_ledger = OnChainFTNSLedger(
             node_id=self.identity.node_id,
