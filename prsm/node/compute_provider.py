@@ -47,6 +47,7 @@ class JobType(str, Enum):
     EMBEDDING = "embedding"
     BENCHMARK = "benchmark"
     TRAINING = "training"       # NEW: distributed model training job
+    WASM_EXECUTE = "wasm_execute"
 
 
 class JobStatus(str, Enum):
@@ -361,6 +362,8 @@ class ComputeProvider:
                 result = await self._run_embedding(job)
             elif job.job_type == JobType.TRAINING:
                 result = await self._run_training(job.payload)
+            elif job.job_type == JobType.WASM_EXECUTE:
+                result = await self._run_wasm(job)
             else:
                 raise ValueError(f"Unsupported job type: {job.job_type}")
 
@@ -591,6 +594,40 @@ class ComputeProvider:
                 "source": "local_distillation",
                 "status": "failed",
             }
+
+    async def _run_wasm(self, job: ComputeJob) -> Dict[str, Any]:
+        """Execute a WASM module in a sandboxed runtime."""
+        import base64
+        from prsm.compute.wasm.runtime import WasmtimeRuntime
+        from prsm.compute.wasm.models import ResourceLimits, ExecutionStatus
+
+        payload = job.payload
+        wasm_bytes = base64.b64decode(payload.get("wasm_bytes_b64", ""))
+        input_data = base64.b64decode(payload.get("input_data_b64", ""))
+
+        limits = ResourceLimits(
+            max_memory_bytes=payload.get("max_memory_bytes", 256 * 1024 * 1024),
+            max_execution_seconds=payload.get("max_execution_seconds", 30),
+            max_output_bytes=payload.get("max_output_bytes", 10 * 1024 * 1024),
+        )
+
+        runtime = WasmtimeRuntime()
+        if not runtime.available:
+            raise RuntimeError(
+                "WASM runtime not available. Install with: pip install prsm-network[wasm]"
+            )
+
+        module = runtime.load(wasm_bytes)
+        result = runtime.execute(module, input_data, limits)
+
+        return {
+            "execution_status": result.status.value,
+            "output_b64": base64.b64encode(result.output).decode(),
+            "execution_time_seconds": result.execution_time_seconds,
+            "memory_used_bytes": result.memory_used_bytes,
+            "pcu": result.pcu(),
+            "error": result.error,
+        }
 
     def get_stats(self) -> Dict[str, Any]:
         """Return provider statistics."""
