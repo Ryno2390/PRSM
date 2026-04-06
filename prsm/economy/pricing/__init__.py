@@ -14,6 +14,7 @@ from prsm.economy.pricing.models import (
     DataAccessFee,
     NETWORK_FEE_RATE,
 )
+from prsm.economy.pricing.engine import PricingEngine
 
 __all__ = [
     "PCURate",
@@ -22,4 +23,5 @@ __all__ = [
     "ProsumerTier",
     "DataAccessFee",
     "NETWORK_FEE_RATE",
+    "PricingEngine",
 ]
