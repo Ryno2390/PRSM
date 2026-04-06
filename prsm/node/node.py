@@ -819,6 +819,22 @@ class PRSMNode:
             self.swarm_coordinator = None
             logger.debug("Swarm compute not available")
 
+        # ── Economy Engine (Ring 4) ───────────────────────────────────
+        try:
+            from prsm.economy.pricing.engine import PricingEngine
+            from prsm.economy.prosumer import ProsumerManager
+
+            self.pricing_engine = PricingEngine()
+            self.prosumer_manager = ProsumerManager(
+                node_id=self.identity.node_id,
+                ledger=self.ledger,
+            )
+            logger.info("Economy engine (Ring 4) initialized")
+        except ImportError:
+            self.pricing_engine = None
+            self.prosumer_manager = None
+            logger.debug("Economy engine not available")
+
         # ── On-Chain FTNS Ledger (Base mainnet) ────────────────────
         self.ftns_ledger = OnChainFTNSLedger(
             node_id=self.identity.node_id,
