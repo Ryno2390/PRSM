@@ -143,6 +143,10 @@ vectorstore = [
     "pinecone-client>=3.0.0",
 ]
 
+wasm = [
+    "wasmtime>=22.0.0",
+]
+
 gpu = [
     # GPU monitoring and detection (optional - for GPU-equipped systems)
     "nvidia-ml-py3>=12.0.0",

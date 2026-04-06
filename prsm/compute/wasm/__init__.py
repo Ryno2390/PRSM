@@ -12,10 +12,13 @@ from prsm.compute.wasm.models import (
     ExecutionStatus,
     WASMModule,
 )
+from prsm.compute.wasm.runtime import WASMRuntime, WasmtimeRuntime
 
 __all__ = [
     "ResourceLimits",
     "ExecutionResult",
     "ExecutionStatus",
     "WASMModule",
+    "WASMRuntime",
+    "WasmtimeRuntime",
 ]

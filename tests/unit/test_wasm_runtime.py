@@ -110,3 +110,89 @@ class TestWASMModule:
                 wasm_bytes=big_bytes,
                 entry_point="main",
             )
+
+
+# ---------------------------------------------------------------------------
+# Runtime interface & Wasmtime execution tests
+# ---------------------------------------------------------------------------
+
+from prsm.compute.wasm.runtime import WASMRuntime, WasmtimeRuntime
+
+
+class TestWASMRuntimeInterface:
+    def test_wasmtime_implements_interface(self):
+        runtime = WasmtimeRuntime()
+        assert isinstance(runtime, WASMRuntime)
+
+    def test_runtime_name(self):
+        runtime = WasmtimeRuntime()
+        assert runtime.name == "wasmtime"
+
+    def test_runtime_available(self):
+        runtime = WasmtimeRuntime()
+        assert isinstance(runtime.available, bool)
+
+
+# Minimal valid WASM module that exports "run" returning i32(42)
+MINIMAL_WASM = bytes([
+    0x00, 0x61, 0x73, 0x6d,  # magic
+    0x01, 0x00, 0x00, 0x00,  # version 1
+    0x01, 0x05, 0x01,        # type section: 1 type
+    0x60, 0x00, 0x01, 0x7f,  # func () -> i32
+    0x03, 0x02, 0x01, 0x00,  # function section: func 0 has type 0
+    0x07, 0x07, 0x01,        # export section: 1 export
+    0x03, 0x72, 0x75, 0x6e,  # export name "run"
+    0x00, 0x00,              # export kind=func, index=0
+    0x0a, 0x06, 0x01,        # code section: 1 body
+    0x04, 0x00,              # body size=4, 0 locals
+    0x41, 0x2a,              # i32.const 42
+    0x0b,                    # end
+])
+
+
+@pytest.mark.skipif(
+    not WasmtimeRuntime().available,
+    reason="wasmtime not installed",
+)
+class TestWasmtimeExecution:
+    def test_load_valid_module(self):
+        runtime = WasmtimeRuntime()
+        module = runtime.load(MINIMAL_WASM)
+        assert module is not None
+
+    def test_load_invalid_bytes_raises(self):
+        runtime = WasmtimeRuntime()
+        with pytest.raises(ValueError, match="Failed to compile"):
+            runtime.load(b"\x00asm\x01\x00\x00\x00\xff\xff")
+
+    def test_execute_returns_result(self):
+        runtime = WasmtimeRuntime()
+        module = runtime.load(MINIMAL_WASM)
+        result = runtime.execute(
+            module=module,
+            input_data=b"",
+            resource_limits=ResourceLimits(),
+        )
+        assert result.status == ExecutionStatus.SUCCESS
+        assert result.execution_time_seconds >= 0
+        assert result.memory_used_bytes >= 0
+
+    def test_execute_respects_memory_limit(self):
+        runtime = WasmtimeRuntime()
+        module = runtime.load(MINIMAL_WASM)
+        result = runtime.execute(
+            module=module,
+            input_data=b"",
+            resource_limits=ResourceLimits(max_memory_bytes=1 * 1024 * 1024),
+        )
+        assert result.status == ExecutionStatus.SUCCESS
+
+    def test_execute_with_input_data(self):
+        runtime = WasmtimeRuntime()
+        module = runtime.load(MINIMAL_WASM)
+        result = runtime.execute(
+            module=module,
+            input_data=b'{"query": "test"}',
+            resource_limits=ResourceLimits(),
+        )
+        assert result.status == ExecutionStatus.SUCCESS
