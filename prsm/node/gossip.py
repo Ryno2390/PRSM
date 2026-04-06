@@ -54,6 +54,7 @@ GOSSIP_PROVENANCE_QUERY = "provenance_query"
 GOSSIP_PROVENANCE_RESPONSE = "provenance_response"
 GOSSIP_CAPABILITY_ANNOUNCE = "capability_announce"
 GOSSIP_HARDWARE_PROFILE = "hardware_profile"
+GOSSIP_TEE_CAPABILITY = "tee_capability"
 
 # Gossip subtypes for mobile agent dispatch (Ring 2)
 GOSSIP_AGENT_DISPATCH = "agent_dispatch"
@@ -108,6 +109,7 @@ GOSSIP_RETENTION_SECONDS: Dict[str, float] = {
     "agent_deregister": 86400,
     "capability_announce": 86400,
     "hardware_profile": 86400,  # 24 hours
+    "tee_capability": 86400,  # 24 hours
     # Mobile agent dispatch (Ring 2): 1 hour retention
     "agent_dispatch": 3600,
     "agent_accept": 3600,

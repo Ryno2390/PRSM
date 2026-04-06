@@ -8,6 +8,7 @@ for WASM job scheduling.
 """
 
 import logging
+import os
 import platform
 import shutil
 import subprocess
@@ -44,6 +45,7 @@ class HardwareProfiler:
         gpu_name, gpu_vram_gb, tflops_fp32, tflops_fp16, gpu_api = self._detect_gpu()
         storage_available_gb = self._detect_storage()
         thermal_class = self._detect_thermal_class()
+        tee_available, tee_type = self._detect_tee()
 
         # If no GPU was detected, estimate TFLOPS from CPU
         if tflops_fp32 == 0.0:
@@ -61,6 +63,8 @@ class HardwareProfiler:
             gpu_api=gpu_api,
             storage_available_gb=storage_available_gb,
             thermal_class=thermal_class,
+            tee_available=tee_available,
+            tee_type=tee_type,
         )
 
     def _detect_cpu(self) -> Tuple[int, float]:
@@ -231,6 +235,17 @@ class HardwareProfiler:
 
         # Desktop or unknown - assume sustained
         return ThermalClass.SUSTAINED
+
+    def _detect_tee(self) -> Tuple[bool, str]:
+        """Detect trusted execution environment support."""
+        # Check Linux SGX driver
+        if os.path.exists("/dev/sgx_enclave") or os.path.exists("/dev/sgx/enclave"):
+            return True, "sgx"
+        # Check Apple Secure Enclave
+        if platform.system() == "Darwin":
+            if os.path.exists("/System/Library/PrivateFrameworks/LocalAuthentication.framework"):
+                return True, "secure_enclave"
+        return False, ""
 
     def _estimate_cpu_tflops(self, cores: int, freq_mhz: float) -> float:
         """Rough CPU TFLOPS estimate when no GPU is available.
