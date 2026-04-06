@@ -1,7 +1,9 @@
-"""Tests for Ring 8 model sharding data models."""
+"""Tests for Ring 8 model sharding data models and sharder."""
 
+import hashlib
 import time
 
+import numpy as np
 import pytest
 
 from prsm.compute.model_sharding.models import (
@@ -10,6 +12,7 @@ from prsm.compute.model_sharding.models import (
     PipelineStakeTier,
     ShardedModel,
 )
+from prsm.compute.model_sharding.sharder import ModelSharder
 
 
 # ── PipelineStakeTier ──────────────────────────────────────────────
@@ -164,3 +167,58 @@ class TestPipelineConfig:
         assert config.stake_tier == PipelineStakeTier.CRITICAL
         assert config.enable_diversified_pipeline is True
         assert config.max_latency_ms == 2000
+
+
+# ── ModelSharder ───────────────────────────────────────────────────
+
+
+class TestModelSharder:
+    def test_shard_tensor_splits_correctly(self):
+        tensor = np.arange(12).reshape(4, 3)
+        shards = ModelSharder.shard_tensor(tensor, 2)
+        assert len(shards) == 2
+        # Largest dim is axis 0 (size 4), so each shard has 2 rows
+        assert shards[0].shape == (2, 3)
+        assert shards[1].shape == (2, 3)
+
+    def test_reassemble_tensor_recovers_original(self):
+        tensor = np.random.rand(8, 4)
+        shards = ModelSharder.shard_tensor(tensor, 4)
+        reassembled = ModelSharder.reassemble_tensor(shards, axis=0)
+        np.testing.assert_array_equal(reassembled, tensor)
+
+    def test_shard_tensor_uneven_split(self):
+        tensor = np.arange(10)
+        shards = ModelSharder.shard_tensor(tensor, 3)
+        assert len(shards) == 3
+        total_elements = sum(s.size for s in shards)
+        assert total_elements == 10
+
+    def test_shard_model_creates_correct_shards(self):
+        weights = {
+            "layer1": np.random.rand(8, 4),
+            "layer2": np.random.rand(6, 3),
+        }
+        model = ModelSharder.shard_model("m1", "test-model", weights, 4)
+        assert model.model_id == "m1"
+        assert model.model_name == "test-model"
+        assert model.total_shards == 4
+        # 2 layers x 4 shards each = 8 shard objects
+        assert len(model.shards) == 8
+
+    def test_each_shard_has_checksum(self):
+        weights = {"w": np.random.rand(4, 4)}
+        model = ModelSharder.shard_model("m1", "test", weights, 2)
+        for shard in model.shards:
+            assert shard.checksum != ""
+            assert len(shard.checksum) == 64  # SHA-256 hex length
+            # Verify checksum matches data
+            expected = hashlib.sha256(shard.tensor_data).hexdigest()
+            assert shard.checksum == expected
+
+    def test_shard_model_size_bytes(self):
+        weights = {"w": np.zeros((4, 4), dtype=np.float64)}
+        model = ModelSharder.shard_model("m1", "test", weights, 2)
+        for shard in model.shards:
+            assert shard.size_bytes > 0
+            assert shard.size_bytes == len(shard.tensor_data)

@@ -12,10 +12,14 @@ from prsm.compute.model_sharding.models import (
     ShardedModel,
     PipelineConfig,
 )
+from prsm.compute.model_sharding.sharder import ModelSharder
+from prsm.compute.model_sharding.randomizer import PipelineRandomizer
 
 __all__ = [
     "PipelineStakeTier",
     "ModelShard",
     "ShardedModel",
     "PipelineConfig",
+    "ModelSharder",
+    "PipelineRandomizer",
 ]
