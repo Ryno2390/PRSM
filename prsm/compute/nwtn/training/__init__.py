@@ -13,6 +13,7 @@ from prsm.compute.nwtn.training.models import (
     DeploymentStatus,
 )
 from prsm.compute.nwtn.training.pipeline import TrainingPipeline
+from prsm.compute.nwtn.training.model_service import NWTNModelService
 
 __all__ = [
     "TrainingConfig",
@@ -20,4 +21,5 @@ __all__ = [
     "ModelCard",
     "DeploymentStatus",
     "TrainingPipeline",
+    "NWTNModelService",
 ]

@@ -150,3 +150,57 @@ class TestTrainingPipeline:
         pipeline.ingest_traces([self._make_trace(), self._make_trace()])
         stats = pipeline.get_corpus_stats()
         assert stats["total_traces"] == 2
+
+
+from prsm.compute.nwtn.training.model_service import NWTNModelService
+import numpy as np
+
+
+class TestNWTNModelService:
+    def test_register_model(self):
+        service = NWTNModelService()
+        card = ModelCard(model_id="nwtn-v1", model_name="NWTN", base_model="llama")
+        model_id = service.register_model(card)
+        assert model_id == "nwtn-v1"
+        assert card.status == DeploymentStatus.REGISTERED
+
+    def test_deploy_model_with_sharding(self):
+        service = NWTNModelService()
+        card = ModelCard(model_id="nwtn-v1", model_name="NWTN", base_model="llama")
+        service.register_model(card)
+        weights = {"layer1": np.random.randn(16, 8)}
+        deployment = service.deploy_model("nwtn-v1", weight_tensors=weights, n_shards=4)
+        assert deployment["n_shards"] == 4
+        assert len(deployment["shard_ids"]) == 4
+        assert card.status == DeploymentStatus.DEPLOYED
+
+    def test_get_model_status(self):
+        service = NWTNModelService()
+        card = ModelCard(model_id="nwtn-v1", model_name="NWTN", base_model="llama")
+        service.register_model(card)
+        status = service.get_model_status("nwtn-v1")
+        assert status is not None
+        assert status["model_name"] == "NWTN"
+
+    def test_list_models(self):
+        service = NWTNModelService()
+        service.register_model(ModelCard(model_id="m1", model_name="M1", base_model="a"))
+        service.register_model(ModelCard(model_id="m2", model_name="M2", base_model="b"))
+        models = service.list_models()
+        assert len(models) == 2
+
+    def test_retire_model(self):
+        service = NWTNModelService()
+        card = ModelCard(model_id="nwtn-v1", model_name="NWTN", base_model="llama")
+        service.register_model(card)
+        assert service.retire_model("nwtn-v1")
+        assert card.status == DeploymentStatus.RETIRED
+
+    def test_get_nonexistent_model(self):
+        service = NWTNModelService()
+        assert service.get_model_status("nonexistent") is None
+
+    def test_deploy_unregistered_fails(self):
+        service = NWTNModelService()
+        with pytest.raises(ValueError, match="not registered"):
+            service.deploy_model("nonexistent")
