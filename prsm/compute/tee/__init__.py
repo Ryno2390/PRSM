@@ -14,6 +14,7 @@ from prsm.compute.tee.models import (
     ConfidentialResult,
     PrivacyLevel,
 )
+from prsm.compute.tee.dp_noise import DPNoiseInjector
 
 __all__ = [
     "TEEType",
@@ -21,4 +22,5 @@ __all__ = [
     "DPConfig",
     "ConfidentialResult",
     "PrivacyLevel",
+    "DPNoiseInjector",
 ]
