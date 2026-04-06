@@ -23,7 +23,7 @@ Architectural Components:
 8. Recursive Self-Improvement - Continuous evolution
 """
 
-__version__ = "0.26.0"
+__version__ = "0.27.0"
 __author__ = "PRSM Team"
 __email__ = "team@prsm.org"
 __description__ = "Protocol for Recursive Scientific Modeling - A decentralized AI framework for scientific discovery"
