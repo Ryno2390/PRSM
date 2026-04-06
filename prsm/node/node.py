@@ -785,6 +785,28 @@ class PRSMNode:
             timeout_seconds=300.0,
         )
 
+        # ── Mobile Agent Dispatch (Ring 2) ────────────────────────────
+        try:
+            from prsm.compute.agents.dispatcher import AgentDispatcher
+            from prsm.compute.agents.executor import AgentExecutor
+
+            self.agent_dispatcher = AgentDispatcher(
+                identity=self.identity,
+                gossip=self.gossip,
+                transport=self.transport,
+                escrow=self._payment_escrow,
+            )
+
+            self.agent_executor = AgentExecutor(
+                identity=self.identity,
+                gossip=self.gossip,
+            )
+            logger.info("Mobile agent dispatch (Ring 2) initialized")
+        except ImportError:
+            self.agent_dispatcher = None
+            self.agent_executor = None
+            logger.debug("Mobile agent dispatch not available")
+
         # ── On-Chain FTNS Ledger (Base mainnet) ────────────────────
         self.ftns_ledger = OnChainFTNSLedger(
             node_id=self.identity.node_id,
