@@ -43,6 +43,40 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# ── Dynamic Gas Pricing (Ring 6) ──────────────────────────────────
+DEFAULT_GAS_GWEI = 5
+MAX_GAS_GWEI = 50
+
+
+class RPCFailover:
+    """Rotates through RPC endpoints on failure."""
+
+    def __init__(self, urls: list):
+        self._urls = urls if urls else ["https://mainnet.base.org"]
+        self._index = 0
+
+    @property
+    def current_url(self) -> str:
+        return self._urls[self._index % len(self._urls)]
+
+    def mark_failed(self) -> None:
+        self._index = (self._index + 1) % len(self._urls)
+
+    def mark_success(self) -> None:
+        pass
+
+
+def estimate_gas_price(w3, multiplier: float = 1.2, max_gwei: int = MAX_GAS_GWEI) -> int:
+    """Get dynamic gas price from network, with fallback and cap. Returns wei."""
+    try:
+        network_gas = w3.eth.gas_price
+        adjusted = int(network_gas * multiplier)
+        cap = max_gwei * 1_000_000_000
+        return min(adjusted, cap)
+    except Exception:
+        return DEFAULT_GAS_GWEI * 1_000_000_000
+
+
 # ── Minimal ERC20 ABI ──────────────────────────────────────────────
 _ERC20_ABI = [
     {
@@ -257,7 +291,7 @@ class OnChainFTNSLedger:
                 tx = {
                     "chainId": self.chain_id,
                     "nonce": nonce,
-                    "gasPrice": self.w3.to_wei("5", "gwei"),  # 5 gwei for Base
+                    "gasPrice": estimate_gas_price(self.w3),
                     "gas": 100000,
                     "to": self.contract_address,
                     "value": 0,

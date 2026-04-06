@@ -112,6 +112,13 @@ class NodeConfig:
     wasm_max_execution_seconds: int = 30
     wasm_max_module_size: int = 5 * 1024 * 1024  # 5 MB
 
+    # On-chain resilience (Ring 6)
+    base_rpc_urls: List[str] = field(default_factory=lambda: [
+        "https://mainnet.base.org",
+    ])
+    gas_price_multiplier: float = 1.2
+    max_gas_gwei: int = 50
+
     # Discovery tuning
     target_peers: int = 8
     announce_interval: float = 60.0

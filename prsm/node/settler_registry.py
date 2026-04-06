@@ -35,6 +35,17 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
+def verify_settler_signature(public_key_b64: str, message: bytes, signature_b64: str) -> bool:
+    """Verify a settler's Ed25519 signature."""
+    if not signature_b64:
+        return False
+    try:
+        from prsm.node.identity import verify_signature
+        return verify_signature(public_key_b64, message, signature_b64)
+    except Exception:
+        return False
+
+
 # === Configuration ===
 
 DEFAULT_MIN_SETTLER_BOND = 10_000.0       # 10K FTNS to become a settler
@@ -426,10 +437,13 @@ class SettlerRegistry:
             if settler_id in batch.signer_ids:
                 raise ValueError(f"Settler {settler_id} already signed this batch")
             
-            # Verify signature matches batch hash (simplified)
-            # In production: verify ECDSA signature
-            expected_msg = f"PRSM:{batch.batch_hash}:{settler_id}"
-            # For now, accept any non-empty signature
+            # Verify signature if settler has a public key registered
+            settler = self._settlers.get(settler_id)
+            if settler and getattr(settler, 'public_key_b64', None):
+                expected_msg = f"PRSM:{batch.batch_hash}:{settler_id}".encode()
+                if not verify_settler_signature(settler.public_key_b64, expected_msg, signature):
+                    raise ValueError(f"Invalid signature from settler {settler_id}")
+            # If no public key registered, accept signature (backward compatibility)
             
             batch_sig = BatchSignature(
                 settler_id=settler_id,
