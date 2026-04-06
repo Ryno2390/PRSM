@@ -987,6 +987,18 @@ class PRSMNode:
             self.tensor_executor = None
             logger.debug("Model sharding not available")
 
+        # ── NWTN Model Service (Ring 9) ───────────────────────────────
+        try:
+            from prsm.compute.nwtn.training.model_service import NWTNModelService
+
+            self.nwtn_model_service = NWTNModelService(
+                tensor_executor=self.tensor_executor,
+            )
+            logger.info("NWTN model service (Ring 9) initialized")
+        except ImportError:
+            self.nwtn_model_service = None
+            logger.debug("NWTN model service not available")
+
         # Wire ledger_sync and agent_registry into subsystems
         self.content_uploader.ledger_sync = self.ledger_sync
         # Wire content_economy into content_uploader for replication tracking
