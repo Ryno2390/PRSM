@@ -13,6 +13,12 @@ from prsm.compute.wasm.models import (
     WASMModule,
 )
 from prsm.compute.wasm.runtime import WASMRuntime, WasmtimeRuntime
+from prsm.compute.wasm.profiler_models import (
+    HardwareProfile,
+    ComputeTier,
+    ThermalClass,
+)
+from prsm.compute.wasm.profiler import HardwareProfiler
 
 __all__ = [
     "ResourceLimits",
@@ -21,4 +27,8 @@ __all__ = [
     "WASMModule",
     "WASMRuntime",
     "WasmtimeRuntime",
+    "HardwareProfile",
+    "ComputeTier",
+    "ThermalClass",
+    "HardwareProfiler",
 ]

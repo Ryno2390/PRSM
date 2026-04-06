@@ -106,6 +106,12 @@ class NodeConfig:
     min_replicas: int = 3
     royalty_model: str = "phase4"  # "phase4" or "legacy"
 
+    # WASM Runtime (Ring 1)
+    wasm_enabled: bool = True
+    wasm_max_memory_bytes: int = 256 * 1024 * 1024  # 256 MB default sandbox
+    wasm_max_execution_seconds: int = 30
+    wasm_max_module_size: int = 5 * 1024 * 1024  # 5 MB
+
     # Discovery tuning
     target_peers: int = 8
     announce_interval: float = 60.0
