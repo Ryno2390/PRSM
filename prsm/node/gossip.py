@@ -55,6 +55,11 @@ GOSSIP_PROVENANCE_RESPONSE = "provenance_response"
 GOSSIP_CAPABILITY_ANNOUNCE = "capability_announce"
 GOSSIP_HARDWARE_PROFILE = "hardware_profile"
 
+# Gossip subtypes for mobile agent dispatch (Ring 2)
+GOSSIP_AGENT_DISPATCH = "agent_dispatch"
+GOSSIP_AGENT_ACCEPT = "agent_accept"
+GOSSIP_AGENT_RESULT = "agent_result"
+
 # Gossip subtypes for agent collaboration protocols
 GOSSIP_TASK_ASSIGN = "agent_task_assign"
 GOSSIP_TASK_COMPLETE = "agent_task_complete"
@@ -103,6 +108,10 @@ GOSSIP_RETENTION_SECONDS: Dict[str, float] = {
     "agent_deregister": 86400,
     "capability_announce": 86400,
     "hardware_profile": 86400,  # 24 hours
+    # Mobile agent dispatch (Ring 2): 1 hour retention
+    "agent_dispatch": 3600,
+    "agent_accept": 3600,
+    "agent_result": 3600,
     # FTNS transactions: 24 hour retention for audit trail
     "ftns_transaction": 86400,
     # BitTorrent messages: 24 hour retention for announces, 1 hour for withdrawals
