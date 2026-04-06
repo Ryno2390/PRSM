@@ -960,6 +960,19 @@ class PRSMNode:
             self.agent_forge = None
             logger.debug("Agent forge not available")
 
+        # ── Confidential Compute (Ring 7) ─────────────────────────────
+        try:
+            from prsm.compute.tee.confidential_executor import ConfidentialExecutor
+            from prsm.compute.tee.models import PrivacyLevel
+
+            self.confidential_executor = ConfidentialExecutor(
+                privacy_level=PrivacyLevel.STANDARD,
+            )
+            logger.info("Confidential compute (Ring 7) initialized")
+        except ImportError:
+            self.confidential_executor = None
+            logger.debug("Confidential compute not available")
+
         # Wire ledger_sync and agent_registry into subsystems
         self.content_uploader.ledger_sync = self.ledger_sync
         # Wire content_economy into content_uploader for replication tracking
