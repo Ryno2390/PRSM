@@ -15,7 +15,7 @@ This Go SDK now includes comprehensive support for:
 ## 🚀 Quick Start
 
 ```bash
-go get github.com/PRSM-AI/prsm-go-sdk
+go get github.com/Ryno2390/PRSM/sdks/go
 ```
 
 ```go
@@ -27,8 +27,8 @@ import (
     "log"
     "os"
     
-    "github.com/PRSM-AI/prsm-go-sdk/client"
-    "github.com/PRSM-AI/prsm-go-sdk/types"
+    "github.com/Ryno2390/PRSM/sdks/go/client"
+    "github.com/Ryno2390/PRSM/sdks/go/types"
 )
 
 func main() {
@@ -70,7 +70,7 @@ func main() {
 ## 📦 Installation
 
 ```bash
-go get github.com/PRSM-AI/prsm-go-sdk
+go get github.com/Ryno2390/PRSM/sdks/go
 ```
 
 ## 🔧 Configuration
@@ -587,7 +587,7 @@ We welcome contributions! Please see our [Contributing Guide](../../CONTRIBUTING
 
 ```bash
 # Clone repository
-git clone https://github.com/PRSM-AI/PRSM.git
+git clone https://github.com/Ryno2390/PRSM.git
 cd PRSM/sdks/go
 
 # Install dependencies
@@ -609,4 +609,4 @@ This SDK is licensed under the MIT License. See [LICENSE](../../LICENSE) for det
 - 📧 Email: sdk-support@prsm.ai
 - 💬 Discord: [PRSM Community](https://discord.gg/prsm)
 - 📖 Documentation: [docs.prsm.ai](https://docs.prsm.ai)
-- 🐛 Issues: [GitHub Issues](https://github.com/PRSM-AI/PRSM/issues)
+- 🐛 Issues: [GitHub Issues](https://github.com/Ryno2390/PRSM/issues)

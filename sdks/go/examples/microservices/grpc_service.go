@@ -20,8 +20,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/PRSM-AI/prsm-go-sdk/client"
-	"github.com/PRSM-AI/prsm-go-sdk/compute"
+	"github.com/Ryno2390/PRSM/sdks/go/client"
+	"github.com/Ryno2390/PRSM/sdks/go/compute"
 )
 
 // AIServiceServer implements the gRPC AI service

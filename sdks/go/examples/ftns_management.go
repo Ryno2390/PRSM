@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/PRSM-AI/prsm-go-sdk/client"
+	"github.com/Ryno2390/PRSM/sdks/go/client"
 )
 
 func main() {
