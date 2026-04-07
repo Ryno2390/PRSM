@@ -378,7 +378,51 @@ async def run_server():
 
 
 def main():
-    """Entry point for the MCP server."""
+    """Entry point for the MCP server.
+
+    CRITICAL: MCP stdio protocol requires that ONLY JSON-RPC messages
+    go to stdout. All logging and print output must go to stderr.
+    We capture stdout during PRSM imports to prevent structlog noise
+    from corrupting the JSON-RPC stream.
+    """
+    import io
+    import sys
+
+    # Temporarily redirect stdout to stderr during imports
+    # (structlog prints to stdout on module load)
+    real_stdout = sys.stdout
+    sys.stdout = sys.stderr
+
+    # Suppress all logging to stderr
+    logging.basicConfig(
+        level=logging.WARNING,
+        stream=sys.stderr,
+        format="%(name)s: %(message)s",
+    )
+    for name in [
+        "prsm", "prsm.core", "prsm.compute", "prsm.data", "prsm.economy",
+        "prsm.node", "structlog", "httpx", "aiohttp",
+    ]:
+        logging.getLogger(name).setLevel(logging.ERROR)
+
+    # Force-import ALL PRSM modules while stdout is captured
+    # This ensures structlog's noisy output goes to stderr, not stdout
+    _imports = [
+        "prsm", "prsm.core", "prsm.core.config", "prsm.core.models",
+        "prsm.compute.wasm.profiler", "prsm.compute.wasm.profiler_models",
+        "prsm.compute.tee.platform_detect", "prsm.compute.tee.models",
+        "prsm.economy.pricing", "prsm.economy.pricing.engine",
+        "prsm.compute.nwtn.agent_forge",
+    ]
+    for mod in _imports:
+        try:
+            __import__(mod)
+        except Exception:
+            pass
+
+    # Restore stdout for MCP protocol
+    sys.stdout = real_stdout
+
     asyncio.run(run_server())
 
 
