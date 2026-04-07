@@ -1,0 +1,60 @@
+# PRSM 2-Node Demo Network
+# Usage: docker-compose -f docker/docker-compose.demo.yml up
+#
+# This starts two PRSM nodes that connect to each other:
+#   Node A: API on :8000, P2P on :9001 (bootstrap)
+#   Node B: API on :8001, P2P on :9002 (connects to A)
+
+version: "3.8"
+
+services:
+  node-a:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: prsm-node-a
+    environment:
+      - PRSM_DISPLAY_NAME=NodeA-Demo
+      - PRSM_P2P_PORT=9001
+      - PRSM_API_PORT=8000
+      - PRSM_DATA_DIR=/data/prsm
+      - PRSM_WELCOME_GRANT=1000
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+    ports:
+      - "8000:8000"
+      - "9001:9001"
+    volumes:
+      - node-a-data:/data/prsm
+    command: ["prsm", "node", "start", "--no-dashboard"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  node-b:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: prsm-node-b
+    environment:
+      - PRSM_DISPLAY_NAME=NodeB-Demo
+      - PRSM_P2P_PORT=9002
+      - PRSM_API_PORT=8001
+      - PRSM_DATA_DIR=/data/prsm
+      - PRSM_BOOTSTRAP_NODES=ws://node-a:9001
+      - PRSM_WELCOME_GRANT=1000
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+    ports:
+      - "8001:8001"
+      - "9002:9002"
+    volumes:
+      - node-b-data:/data/prsm
+    command: ["prsm", "node", "start", "--no-dashboard"]
+    depends_on:
+      node-a:
+        condition: service_healthy
+
+volumes:
+  node-a-data:
+  node-b-data:

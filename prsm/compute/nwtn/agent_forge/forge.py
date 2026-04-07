@@ -78,6 +78,13 @@ class AgentForge:
         self.template_wasm = template_wasm or b""
         self.traces: List[AgentTrace] = []
 
+        self._tracer = None
+        try:
+            from prsm.observability import ForgeTracer
+            self._tracer = ForgeTracer()
+        except ImportError:
+            pass
+
     # ------------------------------------------------------------------
     # LLM call helper (supports both BackendRegistry and individual backends)
     # ------------------------------------------------------------------
@@ -243,18 +250,36 @@ class AgentForge:
         """End-to-end: decompose -> plan -> execute -> trace."""
         start = time.time()
 
+        root_span = None
+        if self._tracer:
+            root_span = self._tracer.start_trace("forge.run", {"query": query[:100], "budget": budget_ftns})
+
         decomposition = await self.decompose(query)
+
+        if self._tracer and root_span:
+            decompose_span = self._tracer.start_span(root_span, "forge.decompose", {"route": decomposition.recommended_route.value})
+            decompose_span.finish()
 
         # Generate agent instructions from decomposition
         from prsm.compute.agents.instruction_set import instructions_from_decomposition
         agent_instructions = instructions_from_decomposition(decomposition.to_dict())
 
         task_plan, cost_quote = await self.plan(decomposition, shard_cids)
+
+        if self._tracer and root_span:
+            plan_span = self._tracer.start_span(root_span, "forge.plan", {"shards": len(task_plan.target_shard_cids)})
+            plan_span.finish()
+
         try:
             result = await self.execute(task_plan, budget_ftns) or {}
         except Exception as exc:
             logger.warning("Forge execute failed (%s) — recording partial trace", exc)
             result = {"status": "error", "error": str(exc), "route": task_plan.route.value}
+
+        if self._tracer and root_span:
+            exec_span = self._tracer.start_span(root_span, "forge.execute", {"route": task_plan.route.value, "status": result.get("status", "?")})
+            exec_span.finish()
+            root_span.finish()
 
         # Ensure route is always present in result
         if "route" not in result:
