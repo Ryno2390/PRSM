@@ -2,6 +2,33 @@
 
 All notable changes to PRSM are documented here.
 
+## [0.35.1] - 2026-04-07
+
+### Added — Phase 1: Sovereign-Edge AI (Rings 1-6)
+- **Ring 1 (The Sandbox):** WASM runtime with Wasmtime sandbox, hardware profiler with TFLOPS/thermal detection
+- **Ring 2 (The Courier):** Mobile agent dispatch with gossip-based bidding, escrow settlement
+- **Ring 3 (The Swarm):** Semantic vector sharding, parallel map-reduce across data shards
+- **Ring 4 (The Economy):** Hybrid pricing (PCU menu + data market), prosumer staking tiers, yield estimation
+- **Ring 5 (The Brain):** LLM-powered agent forge with task decomposition, 5 MCP tools for external LLMs
+- **Ring 6 (The Polish):** Dynamic gas pricing, RPC failover, settler signature verification, CLI commands
+
+### Added — Phase 2: Confidential Compute (Rings 7-10)
+- **Ring 7 (The Vault):** TEE runtime abstraction, differential privacy noise injection (configurable ε)
+- **Ring 8 (The Shield):** Tensor-parallel model sharding, randomized pipeline assignment, collision detection
+- **Ring 9 (The Mind):** NWTN training pipeline with JSONL export, model registry and deployment service
+- **Ring 10 (The Fortress):** Integrity verification, privacy budget tracking, hash-chained audit log
+
+### Added — Pricing Infrastructure
+- Revenue split engine (80% data owner / 15% compute / 5% treasury)
+- Data listing marketplace with stake-based access control
+- Spot market arbitrage with automatic price adjustment
+
+### Added — End-to-End Pipeline
+- `/compute/forge` API endpoint wiring full Ring 1-10 pipeline
+- `prsm compute run --query` CLI for forge-powered queries
+- Live verified with NVIDIA Nemotron 120B via OpenRouter
+- 367 tests across 33 test files, all passing
+
 ## [0.25.0] - 2026-04-03
 
 ### Added - Phase 6: Governance & Staking (L2-Style)
