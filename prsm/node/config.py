@@ -102,6 +102,11 @@ class NodeConfig:
     # FTNS
     welcome_grant: float = 100.0
 
+    # TLS (production)
+    tls_enabled: bool = False
+    tls_cert_path: str = ""
+    tls_key_path: str = ""
+
     # Content Economy (Phase 4)
     min_replicas: int = 3
     royalty_model: str = "phase4"  # "phase4" or "legacy"
