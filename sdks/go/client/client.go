@@ -6,16 +6,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/PRSM-AI/prsm-go-sdk/auth"
+	"github.com/PRSM-AI/prsm-go-sdk/compute"
+	"github.com/PRSM-AI/prsm-go-sdk/content"
+	"github.com/PRSM-AI/prsm-go-sdk/forge"
 	"github.com/PRSM-AI/prsm-go-sdk/ftns"
 	"github.com/PRSM-AI/prsm-go-sdk/governance"
 	"github.com/PRSM-AI/prsm-go-sdk/marketplace"
 	"github.com/PRSM-AI/prsm-go-sdk/nwtn"
 	"github.com/PRSM-AI/prsm-go-sdk/seal"
+	"github.com/PRSM-AI/prsm-go-sdk/settler"
 	"github.com/PRSM-AI/prsm-go-sdk/tools"
 	"github.com/PRSM-AI/prsm-go-sdk/types"
 	"github.com/PRSM-AI/prsm-go-sdk/websocket"
@@ -42,6 +47,12 @@ type Client struct {
 	SEAL        *seal.Manager
 	Governance  *governance.Manager
 	WebSocket   *websocket.Manager
+
+	// Ring 1-10 Managers
+	Compute        *compute.Manager
+	Forge          *forge.Manager
+	Settler        *settler.Manager
+	ContentEconomy *content.Manager
 }
 
 // Config holds configuration for the PRSM client
@@ -98,6 +109,12 @@ func NewWithConfig(config *Config) *Client {
 	client.NWTN = nwtn.New(client)
 	client.SEAL = seal.New(client)
 	client.Governance = governance.New(client)
+
+	// Initialize Ring 1-10 managers
+	client.Compute = compute.NewManager(client)
+	client.Forge = forge.NewManager(client)
+	client.Settler = settler.NewManager(client)
+	client.ContentEconomy = content.NewManager(client)
 
 	// Initialize WebSocket manager
 	wsConfig := &websocket.Config{
@@ -295,6 +312,80 @@ func (c *Client) makeRequest(ctx context.Context, method, endpoint string, reqBo
 // MakeRequest implements the HTTPClient interface for managers
 func (c *Client) MakeRequest(ctx context.Context, method, endpoint string, reqBody interface{}, respBody interface{}) error {
 	return c.makeRequest(ctx, method, endpoint, reqBody, respBody)
+}
+
+// DoRequest makes an HTTP request and returns the raw response body
+func (c *Client) DoRequest(ctx context.Context, method, path string, body map[string]interface{}) ([]byte, error) {
+	// Rate limiting
+	if err := c.rateLimiter.Wait(ctx); err != nil {
+		return nil, errors.Wrap(err, "rate limit error")
+	}
+
+	var bodyReader *bytes.Reader
+	if body != nil {
+		jsonBody, err := json.Marshal(body)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to marshal request body")
+		}
+		bodyReader = bytes.NewReader(jsonBody)
+	}
+
+	reqURL, err := url.JoinPath(c.baseURL, path)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to construct request URL")
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		if bodyReader != nil {
+			bodyReader.Seek(0, 0)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, method, reqURL, bodyReader)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create request")
+		}
+
+		headers, err := c.Auth.GetHeaders()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get auth headers")
+		}
+
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		defer resp.Body.Close()
+
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			lastErr = err
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return respBody, nil
+		}
+
+		lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+		if resp.StatusCode < 500 {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	return nil, lastErr
 }
 
 // getAuthHeaders returns authentication headers for WebSocket

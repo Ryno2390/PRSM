@@ -3,10 +3,10 @@ PRSM SDK Data Models
 Pydantic models for PRSM API requests and responses
 """
 
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List, Union, Literal
 from datetime import datetime
 from enum import Enum
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ModelProvider(str, Enum):
@@ -138,3 +138,23 @@ class ToolExecutionResponse(BaseModel):
     success: bool = Field(..., description="Execution success status")
     error: Optional[str] = Field(None, description="Error message if failed")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+
+class StreamingResponse(BaseModel):
+    """Streaming response for real-time query results"""
+    type: Literal["partial", "final", "error"] = Field(..., description="Response type")
+    content: str = Field(..., description="Response content")
+    session_id: str = Field(..., description="Session identifier")
+    is_final: bool = Field(False, description="Whether this is the final response")
+    confidence_score: Optional[float] = Field(None, ge=0.0, le=1.0, description="Confidence score")
+    context_used: Optional[int] = Field(None, ge=0, description="Context tokens used")
+    ftns_charged: Optional[float] = Field(None, ge=0.0, description="FTNS charged")
+    error_code: Optional[str] = Field(None, description="Error code if type is error")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+    @model_validator(mode='after')
+    def validate_response(self) -> 'StreamingResponse':
+        # Final responses must have content
+        if self.type == "final" and self.is_final and not self.content:
+            raise ValueError("Final streaming response must have content")
+        return self

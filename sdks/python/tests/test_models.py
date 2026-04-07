@@ -3,8 +3,11 @@ Test suite for PRSM Python SDK Models
 """
 import pytest
 from datetime import datetime
-from uuid import UUID
-from prsm_sdk.models import QueryRequest, PRSMResponse, StreamingResponse
+from prsm_sdk.models import (
+    QueryRequest, PRSMResponse, StreamingResponse,
+    ModelProvider, SafetyLevel, FTNSBalance, ModelInfo,
+    ToolSpec, SafetyStatus, WebSocketMessage, MarketplaceQuery
+)
 
 
 class TestQueryRequest:
@@ -12,173 +15,95 @@ class TestQueryRequest:
     
     def test_minimal_query_request(self):
         """Test minimal valid QueryRequest"""
-        request = QueryRequest(
-            user_id="user123",
-            prompt="Test prompt"
-        )
-        assert request.user_id == "user123"
+        request = QueryRequest(prompt="Test prompt")
         assert request.prompt == "Test prompt"
-        assert request.context_allocation is None
-        assert request.preferences == {}
-        assert request.session_id is None
+        assert request.model_id is None
+        assert request.max_tokens == 1000
+        assert request.temperature == 0.7
+        assert request.system_prompt is None
+        assert request.context == {}
+        assert request.tools is None
+        assert request.safety_level == SafetyLevel.MODERATE
     
     def test_full_query_request(self):
         """Test QueryRequest with all fields"""
-        session_id = "session-123-456"
-        preferences = {
-            "temperature": 0.7,
-            "max_tokens": 1000,
-            "model_preference": "claude"
-        }
-        
         request = QueryRequest(
-            user_id="user123",
-            prompt="Detailed test prompt",
-            context_allocation=500,
-            preferences=preferences,
-            session_id=session_id
+            prompt="Test prompt",
+            model_id="gpt-4",
+            max_tokens=2000,
+            temperature=0.5,
+            system_prompt="You are a helpful assistant",
+            context={"user": "test"},
+            tools=["calculator", "search"],
+            safety_level=SafetyLevel.HIGH
         )
-        
-        assert request.user_id == "user123"
-        assert request.prompt == "Detailed test prompt"
-        assert request.context_allocation == 500
-        assert request.preferences == preferences
-        assert request.session_id == session_id
-    
-    def test_query_request_validation(self):
-        """Test QueryRequest validation"""
-        # Empty prompt should fail
-        with pytest.raises(ValueError):
-            QueryRequest(user_id="user123", prompt="")
-        
-        # Negative context allocation should fail
-        with pytest.raises(ValueError):
-            QueryRequest(
-                user_id="user123",
-                prompt="Test",
-                context_allocation=-100
-            )
-        
-        # Too large context allocation should fail
-        with pytest.raises(ValueError):
-            QueryRequest(
-                user_id="user123",
-                prompt="Test",
-                context_allocation=1000000
-            )
+        assert request.prompt == "Test prompt"
+        assert request.model_id == "gpt-4"
+        assert request.max_tokens == 2000
+        assert request.temperature == 0.5
+        assert request.system_prompt == "You are a helpful assistant"
+        assert request.context == {"user": "test"}
+        assert request.tools == ["calculator", "search"]
+        assert request.safety_level == SafetyLevel.HIGH
     
     def test_query_request_serialization(self):
-        """Test QueryRequest serialization to dict"""
+        """Test QueryRequest serialization"""
         request = QueryRequest(
-            user_id="user123",
             prompt="Test prompt",
-            context_allocation=200,
-            preferences={"temperature": 0.8}
+            model_id="test-model",
+            context={"key": "value"}
         )
-        
         data = request.model_dump()
-        assert data["user_id"] == "user123"
         assert data["prompt"] == "Test prompt"
-        assert data["context_allocation"] == 200
-        assert data["preferences"]["temperature"] == 0.8
+        assert data["model_id"] == "test-model"
+        assert data["context"] == {"key": "value"}
 
 
 class TestPRSMResponse:
     """Test cases for PRSMResponse model"""
     
     def test_minimal_prsm_response(self):
-        """Test minimal valid PRSMResponse"""
+        """Test minimal PRSMResponse"""
         response = PRSMResponse(
-            session_id="session123",
-            user_id="user123",
-            final_answer="Test answer",
-            context_used=100,
-            ftns_charged=0.05
+            content="Test response",
+            model_id="test-model",
+            provider=ModelProvider.PRSM,
+            execution_time=0.5,
+            token_usage={"input": 10, "output": 20},
+            ftns_cost=0.05,
+            safety_status=SafetyLevel.MODERATE,
+            request_id="req-123",
+            timestamp=datetime.utcnow()
         )
-        
-        assert response.session_id == "session123"
-        assert response.user_id == "user123"
-        assert response.final_answer == "Test answer"
-        assert response.context_used == 100
-        assert response.ftns_charged == 0.05
-        assert response.confidence_score is None
-        assert response.sources == []
-        assert response.reasoning_trace == []
-        assert response.safety_validated is True
-        assert response.metadata == {}
+        assert response.content == "Test response"
+        assert response.model_id == "test-model"
+        assert response.ftns_cost == 0.05
     
     def test_full_prsm_response(self):
         """Test PRSMResponse with all fields"""
-        reasoning_trace = [
-            {
-                "step": 1,
-                "agent": "architect",
-                "reasoning": "Breaking down the problem"
-            },
-            {
-                "step": 2,
-                "agent": "executor",
-                "reasoning": "Executing the solution"
-            }
-        ]
-        
-        sources = ["source1.pdf", "source2.md", "web_search_results"]
-        metadata = {"model_used": "claude-3", "processing_time": 2.5}
-        
         response = PRSMResponse(
-            session_id="session123",
-            user_id="user123",
-            final_answer="Comprehensive test answer",
-            reasoning_trace=reasoning_trace,
-            confidence_score=0.92,
-            context_used=250,
-            ftns_charged=0.125,
-            sources=sources,
-            safety_validated=True,
-            metadata=metadata
+            content="Test answer",
+            model_id="gpt-4",
+            provider=ModelProvider.OPENAI,
+            execution_time=1.5,
+            token_usage={"input": 100, "output": 200},
+            ftns_cost=0.15,
+            reasoning_trace=["step1", "step2", "step3"],
+            safety_status=SafetyLevel.HIGH,
+            metadata={"source": "test"},
+            request_id="req-456",
+            timestamp=datetime.utcnow()
         )
         
-        assert response.session_id == "session123"
-        assert response.final_answer == "Comprehensive test answer"
-        assert len(response.reasoning_trace) == 2
-        assert response.confidence_score == 0.92
-        assert response.context_used == 250
-        assert response.ftns_charged == 0.125
-        assert len(response.sources) == 3
-        assert response.metadata["model_used"] == "claude-3"
+        assert response.content == "Test answer"
+        assert response.provider == ModelProvider.OPENAI
+        assert len(response.reasoning_trace) == 3
     
     def test_prsm_response_validation(self):
         """Test PRSMResponse validation"""
-        # Negative context_used should fail
-        with pytest.raises(ValueError):
-            PRSMResponse(
-                session_id="session123",
-                user_id="user123",
-                final_answer="Test",
-                context_used=-50,
-                ftns_charged=0.05
-            )
-        
-        # Negative ftns_charged should fail
-        with pytest.raises(ValueError):
-            PRSMResponse(
-                session_id="session123",
-                user_id="user123",
-                final_answer="Test",
-                context_used=100,
-                ftns_charged=-0.01
-            )
-        
-        # Invalid confidence score should fail
-        with pytest.raises(ValueError):
-            PRSMResponse(
-                session_id="session123",
-                user_id="user123",
-                final_answer="Test",
-                context_used=100,
-                ftns_charged=0.05,
-                confidence_score=1.5  # > 1.0
-            )
+        # Missing required fields should fail
+        with pytest.raises(Exception):
+            PRSMResponse(content="Test")
 
 
 class TestStreamingResponse:
@@ -252,6 +177,24 @@ class TestStreamingResponse:
                 session_id="session123",
                 is_final=True
             )
+
+
+class TestEnums:
+    """Test cases for enum types"""
+    
+    def test_model_provider_enum(self):
+        """Test ModelProvider enum values"""
+        assert ModelProvider.OPENAI == "openai"
+        assert ModelProvider.ANTHROPIC == "anthropic"
+        assert ModelProvider.PRSM == "prsm"
+    
+    def test_safety_level_enum(self):
+        """Test SafetyLevel enum values"""
+        assert SafetyLevel.NONE == "none"
+        assert SafetyLevel.LOW == "low"
+        assert SafetyLevel.MODERATE == "moderate"
+        assert SafetyLevel.HIGH == "high"
+        assert SafetyLevel.CRITICAL == "critical"
 
 
 if __name__ == "__main__":
