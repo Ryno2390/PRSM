@@ -27,6 +27,10 @@ import { FTNSManager, FTNSManagerConfig } from './ftns';
 import { MarketplaceManager, MarketplaceManagerConfig } from './marketplace';
 import { ToolsManager, ToolsManagerConfig } from './tools';
 import { WebSocketManager, WebSocketManagerConfig } from './websocket';
+import { ComputeManager, ComputeManagerConfig } from './compute';
+import { ForgeManager, ForgeManagerConfig } from './forge';
+import { SettlerManager, SettlerManagerConfig } from './settler';
+import { ContentEconomyManager, ContentEconomyManagerConfig } from './content-economy';
 import {
   PRSMError,
   NetworkError,
@@ -562,6 +566,12 @@ export class PRSMClient extends EventEmitter {
   public readonly tools: ToolsManager;
   public readonly websocket: WebSocketManager;
 
+  // Ring 1-10 managers
+  public readonly compute: ComputeManager;
+  public readonly forge: ForgeManager;
+  public readonly settler: SettlerManager;
+  public readonly contentEconomy: ContentEconomyManager;
+
   constructor(config: PRSMClientConfig) {
     super();
 
@@ -644,6 +654,12 @@ export class PRSMClient extends EventEmitter {
       debug: this.debug,
     };
     this.websocket = new WebSocketManager(websocketConfig);
+
+    // Initialize Ring 1-10 managers
+    this.compute = new ComputeManager(this);
+    this.forge = new ForgeManager(this);
+    this.settler = new SettlerManager(this);
+    this.contentEconomy = new ContentEconomyManager(this);
 
     // Initialize API modules
     this.nwtn = new NWTNApi(this);

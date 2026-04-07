@@ -248,6 +248,47 @@ export { WebSocketManager, type WebSocketManagerConfig, WebSocketState, MessageT
 export { StorageManager, type StorageManagerConfig } from './storage';
 export { GovernanceManager, type GovernanceManagerConfig } from './governance';
 
+// Ring 1-10 SDK exports
+export { ComputeManager, type ComputeManagerConfig, JobStatus, JobPriority } from './compute';
+export type {
+  JobRequest,
+  JobResponse,
+  JobResult,
+  JobInfo,
+  JobListResponse,
+} from './compute';
+
+export { ForgeManager, type ForgeManagerConfig, ExecutionRoute, ThermalRequirement, HardwareTier } from './forge';
+export type {
+  TaskDecomposition,
+  TaskPlan,
+  CostQuote,
+  ForgeResult,
+  ForgeRequest,
+  HardwareProfile,
+} from './forge';
+
+export { SettlerManager, type SettlerManagerConfig, SettlerStatus } from './settler';
+export type {
+  SettlerInfo,
+  SettlerRegistration,
+  BatchSignature,
+  BatchInfo,
+  SlashProposal,
+} from './settler';
+
+export { ContentEconomyManager, type ContentEconomyManagerConfig, ContentStatus } from './content-economy';
+export type {
+  DataListing,
+  ContentAccessRequest,
+  ContentAccessResponse,
+  SemanticSearchRequest,
+  SemanticSearchResult,
+  ReplicationStatus,
+  RoyaltyInfo,
+  ContentEconomyStats,
+} from './content-economy';
+
 // Import for use in convenience functions below
 import { FTNSManager } from './ftns';
 import { ToolsManager } from './tools';
