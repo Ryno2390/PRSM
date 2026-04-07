@@ -14,6 +14,12 @@ from prsm.compute.agents.models import (
 )
 from prsm.compute.agents.dispatcher import AgentDispatcher
 from prsm.compute.agents.executor import AgentExecutor
+from prsm.compute.agents.instruction_set import (
+    AgentOp,
+    AgentInstruction,
+    InstructionManifest,
+    instructions_from_decomposition,
+)
 
 __all__ = [
     "AgentManifest",
@@ -22,4 +28,8 @@ __all__ = [
     "DispatchRecord",
     "AgentDispatcher",
     "AgentExecutor",
+    "AgentOp",
+    "AgentInstruction",
+    "InstructionManifest",
+    "instructions_from_decomposition",
 ]
