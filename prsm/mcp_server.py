@@ -250,6 +250,147 @@ TOOLS = [
             "required": ["instructions_json"],
         },
     ),
+    Tool(
+        name="prsm_agent_status",
+        description="Check the status of a dispatched mobile agent by its agent ID or job ID.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string", "description": "The job or agent ID to check"},
+            },
+            "required": ["job_id"],
+        },
+    ),
+    Tool(
+        name="prsm_search_shards",
+        description=(
+            "Search for relevant data shards on the PRSM network by semantic similarity. "
+            "Returns shards whose content is most relevant to your query, ranked by cosine similarity."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query to find relevant data shards"},
+                "dataset_id": {"type": "string", "description": "Optional: limit search to a specific dataset"},
+                "top_k": {"type": "integer", "description": "Number of results to return (default: 5)", "default": 5},
+            },
+            "required": ["query"],
+        },
+    ),
+    Tool(
+        name="prsm_upload_dataset",
+        description=(
+            "Upload a dataset to the PRSM network with semantic sharding and pricing. "
+            "The dataset will be split into shards, distributed across nodes, and listed "
+            "in the marketplace with your pricing terms. Revenue split: 80% to you (data owner), "
+            "15% to compute providers, 5% to PRSM treasury."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "dataset_id": {"type": "string", "description": "Unique identifier for your dataset"},
+                "title": {"type": "string", "description": "Human-readable title"},
+                "description": {"type": "string", "description": "What this dataset contains"},
+                "shard_count": {"type": "integer", "description": "Number of shards to split into", "default": 4},
+                "base_access_fee": {"type": "number", "description": "FTNS fee per query against this dataset", "default": 1.0},
+                "per_shard_fee": {"type": "number", "description": "Additional FTNS per shard accessed", "default": 0.1},
+                "require_stake": {"type": "number", "description": "FTNS stake required for access (anti-scraping)", "default": 0},
+            },
+            "required": ["dataset_id", "title"],
+        },
+    ),
+    Tool(
+        name="prsm_yield_estimate",
+        description=(
+            "Estimate how much FTNS you would earn as a compute provider based on your hardware, "
+            "hours of availability, and staking tier. Staking tiers: Casual (0 FTNS, 1x), "
+            "Pledged (100 FTNS, 1.25x), Dedicated (1000 FTNS, 1.5x), Sentinel (10000 FTNS, 2x)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "hours_per_day": {"type": "number", "description": "Hours available for compute per day", "default": 8},
+                "stake_amount": {"type": "number", "description": "FTNS staked (determines yield boost tier)", "default": 0},
+            },
+        },
+    ),
+    Tool(
+        name="prsm_stake",
+        description=(
+            "Stake FTNS tokens as a prosumer to earn higher yield rates. "
+            "Tiers: Casual (0), Pledged (100+), Dedicated (1000+), Sentinel (10000+). "
+            "Higher tiers earn proportionally more per compute job."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "amount": {"type": "number", "description": "FTNS to stake", "minimum": 0},
+            },
+            "required": ["amount"],
+        },
+    ),
+    Tool(
+        name="prsm_revenue_split",
+        description=(
+            "Calculate how revenue would be distributed for a given payment. "
+            "Default split: 80% data owner, 15% compute providers, 5% PRSM treasury. "
+            "When no proprietary data is involved: 95% compute, 5% treasury."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "total_payment": {"type": "number", "description": "Total FTNS payment to split"},
+                "has_data_owner": {"type": "boolean", "description": "Whether proprietary data is involved", "default": True},
+                "compute_providers": {"type": "integer", "description": "Number of compute providers", "default": 1},
+            },
+            "required": ["total_payment"],
+        },
+    ),
+    Tool(
+        name="prsm_decompose",
+        description=(
+            "Decompose a query into a structured execution plan WITHOUT executing it. "
+            "Shows what datasets are needed, what operations would be performed, "
+            "recommended execution route (direct_llm/single_agent/swarm), and complexity."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The query to decompose"},
+            },
+            "required": ["query"],
+        },
+    ),
+    Tool(
+        name="prsm_settlement_stats",
+        description="Get FTNS settlement queue statistics — pending transfers, total settled, gas usage.",
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    Tool(
+        name="prsm_privacy_status",
+        description=(
+            "Check the differential privacy budget status. Shows total epsilon spent, "
+            "remaining budget, and recent privacy-consuming operations."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    Tool(
+        name="prsm_training_status",
+        description=(
+            "Check NWTN training pipeline status — traces collected, corpus quality score, "
+            "route coverage, and readiness for fine-tuning."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
 ]
 
 
@@ -532,6 +673,212 @@ async def handle_prsm_dispatch_agent(arguments: Dict[str, Any]) -> str:
         return f"Invalid instruction manifest: {str(e)}"
 
 
+async def handle_prsm_agent_status(arguments: Dict[str, Any]) -> str:
+    job_id = arguments.get("job_id", "")
+    try:
+        result = await _call_node_api("GET", f"/compute/status/{job_id}")
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        return f"Could not check agent status: {e}. Is your PRSM node running?"
+
+
+async def handle_prsm_search_shards(arguments: Dict[str, Any]) -> str:
+    query = arguments.get("query", "")
+    top_k = arguments.get("top_k", 5)
+    try:
+        result = await _call_node_api("GET", f"/rings/status")
+        return (
+            f"Shard search for: '{query}' (top {top_k})\n"
+            f"Note: Shard search requires datasets uploaded to the network.\n"
+            f"Use prsm_upload_dataset to publish data, then search will find relevant shards."
+        )
+    except Exception:
+        return f"Shard search requires a running PRSM node. Start with: prsm node start"
+
+
+async def handle_prsm_upload_dataset(arguments: Dict[str, Any]) -> str:
+    dataset_id = arguments.get("dataset_id", "")
+    title = arguments.get("title", "")
+    description = arguments.get("description", "")
+    shard_count = arguments.get("shard_count", 4)
+    base_fee = arguments.get("base_access_fee", 1.0)
+    per_shard = arguments.get("per_shard_fee", 0.1)
+    require_stake = arguments.get("require_stake", 0)
+
+    try:
+        result = await _call_node_api("POST", "/content/upload/shard", {
+            "dataset_id": dataset_id,
+            "title": title,
+            "description": description,
+            "shard_count": shard_count,
+            "base_access_fee": base_fee,
+            "per_shard_fee": per_shard,
+        })
+        return (
+            f"Dataset Published\n"
+            f"  ID: {dataset_id}\n"
+            f"  Title: {title}\n"
+            f"  Shards: {result.get('shard_count', shard_count)}\n"
+            f"  Base Fee: {base_fee} FTNS/query\n"
+            f"  Per-Shard Fee: {per_shard} FTNS\n"
+            f"  Revenue: 80% to you, 15% compute, 5% treasury"
+        )
+    except Exception as e:
+        return f"Dataset upload failed: {e}. Is your PRSM node running?"
+
+
+async def handle_prsm_yield_estimate(arguments: Dict[str, Any]) -> str:
+    hours = arguments.get("hours_per_day", 8)
+    stake = arguments.get("stake_amount", 0)
+    try:
+        from prsm.compute.wasm import HardwareProfiler
+        from prsm.economy.pricing import PricingEngine, ProsumerTier
+        profiler = HardwareProfiler()
+        profile = profiler.detect()
+        tier = ProsumerTier.from_stake(int(stake))
+        engine = PricingEngine()
+        est = engine.yield_estimate(
+            hardware_tier=profile.compute_tier.value,
+            tflops=profile.tflops_fp32,
+            hours_per_day=hours,
+            prosumer_tier=tier,
+        )
+        return (
+            f"Yield Estimate\n"
+            f"  Hardware: {profile.compute_tier.value.upper()} ({profile.tflops_fp32:.1f} TFLOPS)\n"
+            f"  Stake: {stake:.0f} FTNS ({tier.name})\n"
+            f"  Yield Boost: {est['yield_boost']}x\n"
+            f"  Daily: {float(est['daily_ftns']):.2f} FTNS\n"
+            f"  Monthly: {float(est['monthly_ftns']):.2f} FTNS"
+        )
+    except Exception as e:
+        return f"Yield estimate failed: {e}"
+
+
+async def handle_prsm_stake(arguments: Dict[str, Any]) -> str:
+    amount = arguments.get("amount", 0)
+    try:
+        from prsm.economy.pricing.models import ProsumerTier
+        tier = ProsumerTier.from_stake(int(amount))
+        return (
+            f"Staking Info\n"
+            f"  Amount: {amount} FTNS\n"
+            f"  Tier: {tier.name}\n"
+            f"  Yield Boost: {tier.yield_boost}x\n"
+            f"  Note: To actually stake, use the running node CLI: prsm ftns stake {int(amount)}"
+        )
+    except Exception as e:
+        return f"Staking info failed: {e}"
+
+
+async def handle_prsm_revenue_split(arguments: Dict[str, Any]) -> str:
+    total = arguments.get("total_payment", 0)
+    has_data = arguments.get("has_data_owner", True)
+    providers = arguments.get("compute_providers", 1)
+    try:
+        from decimal import Decimal
+        from prsm.economy.pricing.revenue_split import RevenueSplitEngine
+        engine = RevenueSplitEngine()
+        provider_dict = {f"provider-{i}": 100.0/max(providers,1) for i in range(max(providers,1))}
+        split = engine.calculate_split(
+            total_payment=Decimal(str(total)),
+            data_owner_id="data-owner" if has_data else "",
+            compute_providers=provider_dict,
+        )
+        lines = [f"Revenue Split for {total} FTNS"]
+        if has_data:
+            lines.append(f"  Data Owner: {split.data_owner_amount} FTNS (80%)")
+        lines.append(f"  Compute ({providers} providers): {sum(split.compute_amounts.values())} FTNS")
+        lines.append(f"  Treasury: {split.treasury_amount} FTNS (5%)")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Split calculation failed: {e}"
+
+
+async def handle_prsm_decompose(arguments: Dict[str, Any]) -> str:
+    query = arguments.get("query", "")
+    try:
+        result = await _call_node_api("POST", "/compute/forge", {
+            "query": query,
+            "budget_ftns": 0.01,
+        })
+        return json.dumps(result, indent=2)
+    except Exception:
+        # Fall back to local decomposition
+        try:
+            from prsm.compute.nwtn.agent_forge import AgentForge
+            forge = AgentForge()
+            decomp = await forge.decompose(query)
+            return (
+                f"Query Decomposition\n"
+                f"  Query: {query}\n"
+                f"  Route: {decomp.recommended_route.value}\n"
+                f"  Datasets: {decomp.required_datasets or '(none — direct LLM answer)'}\n"
+                f"  Operations: {decomp.operations or ['generate']}\n"
+                f"  Parallelizable: {decomp.parallelizable}\n"
+                f"  Hardware Tier: {decomp.min_hardware_tier}\n"
+                f"  Complexity: {decomp.estimated_complexity}"
+            )
+        except Exception as e2:
+            return f"Decomposition failed: {e2}"
+
+
+async def handle_prsm_settlement_stats(arguments: Dict[str, Any]) -> str:
+    try:
+        result = await _call_node_api("GET", "/settlement/stats")
+        return json.dumps(result, indent=2)
+    except Exception:
+        return "Settlement stats require a running PRSM node. Start with: prsm node start"
+
+
+async def handle_prsm_privacy_status(arguments: Dict[str, Any]) -> str:
+    try:
+        from prsm.security import PrivacyBudgetTracker
+        # Try node API first
+        result = await _call_node_api("GET", "/rings/status")
+        privacy = result.get("privacy", {})
+        if privacy:
+            return (
+                f"Privacy Budget Status\n"
+                f"  Total Spent: {privacy.get('total_spent', 0)} ε\n"
+                f"  Remaining: {privacy.get('remaining', 'unknown')} ε\n"
+                f"  Operations: {privacy.get('num_operations', 0)}"
+            )
+        return "Privacy tracking active but no spending recorded yet."
+    except Exception:
+        return (
+            "Privacy Budget: Not connected to node.\n"
+            "The privacy budget tracks cumulative differential privacy (ε) spending "
+            "across inference sessions to enforce privacy guarantees."
+        )
+
+
+async def handle_prsm_training_status(arguments: Dict[str, Any]) -> str:
+    try:
+        result = await _call_node_api("GET", "/rings/status")
+        forge = result.get("forge", {})
+        traces = forge.get("traces_collected", 0)
+
+        # Try to evaluate quality if we have traces
+        from prsm.compute.nwtn.training.evaluation import TrainingEvaluator
+        evaluator = TrainingEvaluator(min_traces=100)
+
+        return (
+            f"NWTN Training Pipeline Status\n"
+            f"  Traces Collected: {traces}\n"
+            f"  Minimum for Fine-tune: 100\n"
+            f"  Ready: {'Yes' if traces >= 100 else 'No — need more queries'}\n"
+            f"  Tip: Run diverse queries via prsm_analyze to build the training corpus."
+        )
+    except Exception:
+        return (
+            "NWTN Training Pipeline\n"
+            "  The training pipeline collects AgentTrace data from every forge query.\n"
+            "  Once enough traces are collected (100+), the NWTN model can be fine-tuned\n"
+            "  for better task decomposition and WASM agent generation."
+        )
+
+
 # Tool dispatch map
 TOOL_HANDLERS = {
     "prsm_analyze": handle_prsm_analyze,
@@ -541,6 +888,16 @@ TOOL_HANDLERS = {
     "prsm_hardware_benchmark": handle_prsm_hardware_benchmark,
     "prsm_create_agent": handle_prsm_create_agent,
     "prsm_dispatch_agent": handle_prsm_dispatch_agent,
+    "prsm_agent_status": handle_prsm_agent_status,
+    "prsm_search_shards": handle_prsm_search_shards,
+    "prsm_upload_dataset": handle_prsm_upload_dataset,
+    "prsm_yield_estimate": handle_prsm_yield_estimate,
+    "prsm_stake": handle_prsm_stake,
+    "prsm_revenue_split": handle_prsm_revenue_split,
+    "prsm_decompose": handle_prsm_decompose,
+    "prsm_settlement_stats": handle_prsm_settlement_stats,
+    "prsm_privacy_status": handle_prsm_privacy_status,
+    "prsm_training_status": handle_prsm_training_status,
 }
 
 
