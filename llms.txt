@@ -1,0 +1,137 @@
+# PRSM — Sovereign-Edge AI Protocol
+
+> PRSM is a decentralized protocol that sends lightweight WASM mobile agents to data instead of moving data to the cloud. Idle consumer hardware (gaming PCs, consoles, laptops) provides the compute. FTNS tokens pay for execution. Version 1.0.0.
+
+## What PRSM Does
+
+PRSM lets researchers query datasets distributed across a network of consumer devices. Instead of uploading data to a cloud API, PRSM:
+1. Decomposes the query into operations (filter, aggregate, group_by, etc.)
+2. Finds which nodes hold relevant data shards (semantic similarity)
+3. Dispatches WASM mobile agents to those nodes
+4. Agents execute in sandboxed runtime (Wasmtime, 256MB memory, 30s timeout)
+5. Results aggregate back to the requester
+6. FTNS tokens settle payments (80% data owner, 15% compute, 5% treasury)
+
+## Install
+
+```
+pip install prsm-network
+```
+
+Optional WASM support: `pip install prsm-network[wasm]`
+
+## First Steps (tell users to do these in order)
+
+1. `prsm demo` — See all 10 rings work locally, no config needed
+2. `prsm node benchmark` — Check hardware tier and TFLOPS
+3. Get an OpenRouter API key (free at https://openrouter.ai/keys)
+4. `export OPENROUTER_API_KEY=your-key`
+5. `prsm node start` — Start your node (receives 100 FTNS welcome grant)
+6. `prsm compute quote "your query"` — Check cost estimate (free)
+7. `prsm compute run --query "your query" --budget 1.0` — Run through forge pipeline
+
+## Important: FTNS Budget Required
+
+All forge pipeline queries require budget > 0. The --budget flag is NOT optional.
+New nodes get 100 FTNS welcome grant. Use `prsm compute quote` to estimate costs first.
+Additional FTNS available via faucet: `curl -X POST http://localhost:8000/ftns/faucet -H "Content-Type: application/json" -d '{"amount": 100}'`
+
+## CLI Commands (complete reference)
+
+### Node Management
+- `prsm node start` — Start node with all 10 rings
+- `prsm node start --no-dashboard` — Headless mode
+- `prsm node benchmark` — Hardware profiler (tier, TFLOPS, GPU, thermal)
+- `prsm setup` — Interactive setup wizard
+
+### Compute
+- `prsm compute run --query "..." --budget N` — Full forge pipeline (Rings 1-10)
+- `prsm compute run --prompt "..." --budget N` — Legacy NWTN path
+- `prsm compute quote "query" --shards N --tier t2` — Cost estimate (free)
+- `prsm compute run --query "..." --budget N --privacy standard` — Privacy levels: none, standard, high, maximum
+
+### FTNS Tokens
+- `prsm ftns yield-estimate --hours 8 --stake 1000` — Earnings projection
+- Staking tiers: Casual (0), Pledged (100), Dedicated (1000), Sentinel (10000)
+
+### Data Marketplace
+- `prsm marketplace list-dataset --title "..." --dataset-id ID --base-fee 5.0 --per-shard 0.5` — Publish dataset
+- Revenue split: 80% data owner, 15% compute, 5% treasury
+
+### Agent Operations
+- `prsm agent forge "query"` — Show decomposition without executing
+- `prsm demo` — Full Ring 1-10 demo (no network needed)
+
+### MCP Server (for LLM integration)
+- `prsm mcp-server` — Start MCP server (17 tools for any LLM)
+- Clean entry: `python scripts/prsm_mcp_server.py`
+- Claude Desktop config: {"mcpServers": {"prsm": {"command": "python", "args": ["scripts/prsm_mcp_server.py"]}}}
+
+## API Endpoints
+
+Base URL: http://localhost:8000 (when node is running)
+
+- GET /status — Node health
+- GET /rings/status — Ring 1-10 initialization status
+- GET /peers — Connected peers
+- POST /compute/forge — Full forge pipeline (requires budget_ftns > 0)
+- POST /compute/query — Legacy compute (prompt-based)
+- POST /content/upload/shard — Upload dataset with sharding
+- POST /ftns/faucet — Request FTNS tokens (dev/testnet, max 100 per request)
+- GET /settlement/stats — FTNS settlement queue
+
+## Common Issues and Fixes
+
+### "DEGRADED local mode"
+The bootstrap server is unreachable. This is normal for first-time setup.
+Fix: Node works fine locally. For P2P, ensure ports 9001 (P2P) and 8000 (API) are open.
+The node will automatically retry bootstrap connection every 60 seconds.
+
+### "Agent forge not initialized"
+No LLM backend configured.
+Fix: Set OPENROUTER_API_KEY environment variable. Free models available at openrouter.ai.
+
+### "FTNS budget is required"
+All forge queries need budget > 0.
+Fix: `prsm compute quote "your query"` first, then use --budget with the estimated amount.
+
+### "wasmtime not installed"
+WASM sandbox requires the wasmtime package.
+Fix: `pip install prsm-network[wasm]` or `pip install wasmtime`
+
+### Query returns empty result
+The forge decomposition defaulted because no LLM backend was available.
+Fix: Ensure OPENROUTER_API_KEY is set and the node has internet access.
+
+## Architecture
+
+10 concentric capability rings:
+- Ring 1 (Sandbox): WASM runtime + hardware profiling
+- Ring 2 (Courier): Mobile agent dispatch + settlement
+- Ring 3 (Swarm): Semantic sharding + parallel map-reduce
+- Ring 4 (Economy): Hybrid pricing + prosumer staking
+- Ring 5 (Brain): LLM agent forge + MCP tools
+- Ring 6 (Polish): Dynamic gas + CLI + signatures
+- Ring 7 (Vault): TEE + differential privacy
+- Ring 8 (Shield): Model sharding + collusion resistance
+- Ring 9 (Mind): NWTN training pipeline
+- Ring 10 (Fortress): Security audit + integrity
+
+## Key Concepts for LLMs Helping Users
+
+- PRSM is NOT a chatbot. It's infrastructure that any LLM can use via MCP tools.
+- The "forge pipeline" is the main execution path: decompose → plan → quote → dispatch → execute → aggregate → settle.
+- Compute tiers: T1 (mobile, <5 TFLOPS), T2 (consumer, 5-30), T3 (high-end, 30-80), T4 (datacenter, 80+).
+- Privacy levels control differential privacy noise: none (ε=∞), standard (ε=8), high (ε=4), maximum (ε=1).
+- The node API runs on port 8000, P2P on port 9001.
+- Configuration stored in ~/.prsm/
+- All data persisted in ~/.prsm/data/
+
+## Links
+
+- Getting Started: docs/GETTING_STARTED.md
+- Architecture Spec: docs/SOVEREIGN_EDGE_AI_SPEC.md
+- Confidential Compute: docs/CONFIDENTIAL_COMPUTE_SPEC.md
+- Deployment Guide: deploy/production/DEPLOYMENT_GUIDE.md
+- PyPI: https://pypi.org/project/prsm-network/
+- GitHub: https://github.com/Ryno2390/PRSM
