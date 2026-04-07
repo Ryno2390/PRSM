@@ -2218,6 +2218,13 @@ def compute_quote(query, shards, tier):
 
 
 @main.command("demo")
+def demo():
+    """Run the PRSM Ring 1-10 demo (no network required)."""
+    from prsm.demo import main as demo_main
+    demo_main()
+
+
+@main.command("demo-multinode")
 @click.option("--nodes", default=3, type=int, help="Number of nodes to spawn")
 def compute_demo(nodes: int):
     """Run a multi-node P2P demonstration.
