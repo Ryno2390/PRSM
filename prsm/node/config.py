@@ -150,6 +150,12 @@ class NodeConfig:
     # Ledger sync tuning
     reconciliation_interval: float = 300.0     # 5 minutes
 
+    def __post_init__(self):
+        # Allow override via PRSM_BOOTSTRAP_NODES env var
+        env_bootstrap = os.environ.get("PRSM_BOOTSTRAP_NODES", "")
+        if env_bootstrap:
+            self.bootstrap_nodes = [s.strip() for s in env_bootstrap.split(",") if s.strip()]
+
     @property
     def identity_path(self) -> Path:
         return Path(self.data_dir) / "identity.json"

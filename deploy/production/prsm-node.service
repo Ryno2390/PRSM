@@ -1,0 +1,29 @@
+[Unit]
+Description=PRSM Network Node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=prsm
+Group=prsm
+WorkingDirectory=/opt/prsm
+EnvironmentFile=/opt/prsm/.env
+ExecStart=/opt/prsm/venv/bin/prsm node start --no-dashboard
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=8G
+
+# Security
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/prsm/data /opt/prsm/logs
+
+[Install]
+WantedBy=multi-user.target
