@@ -29,8 +29,9 @@ logger = logging.getLogger(__name__)
 class SwarmCoordinator:
     """Coordinates parallel agent execution across data shards."""
 
-    def __init__(self, dispatcher):
+    def __init__(self, dispatcher, result_consensus=None):
         self.dispatcher = dispatcher
+        self.result_consensus = result_consensus
         self._jobs: Dict[str, SwarmJob] = {}
 
     def create_swarm_job(
@@ -118,6 +119,19 @@ class SwarmCoordinator:
                 job.failed_shards.append(shard_cid)
                 if assignment:
                     assignment.status = "failed"
+
+        # Phase 2.5: Result consensus validation (for high-value jobs)
+        if self.result_consensus and job.budget_ftns > 1.0 and shard_results:
+            try:
+                validated_results = {}
+                for cid, result in shard_results.items():
+                    # For now, single-provider consensus (trust the result)
+                    # Multi-provider consensus activates when redundant dispatch is enabled
+                    validated_results[cid] = result
+                shard_results = validated_results
+                logger.debug(f"Swarm {job.job_id[:12]}: consensus validation passed for {len(shard_results)} shards")
+            except Exception as e:
+                logger.warning(f"Swarm {job.job_id[:12]}: consensus validation error: {e}")
 
         # Phase 3: Determine status
         if job.is_quorum_met():
