@@ -2241,15 +2241,17 @@ def demo():
 def mcp_server_cmd():
     """Start the PRSM MCP server for LLM tool access.
 
-    This exposes PRSM tools (analyze, quote, datasets, status, benchmark)
-    to any MCP-compatible LLM (Claude, Gemini, etc.) via stdio.
+    Exposes 17 PRSM tools to any MCP-compatible LLM (Claude, Gemini, etc.)
+    via stdio protocol.
 
     Configure in Claude Desktop (~/.claude/claude_desktop_config.json):
 
-        {"mcpServers": {"prsm": {"command": "prsm", "args": ["mcp-server"]}}}
+        {"mcpServers": {"prsm": {"command": "python", "args": ["-m", "prsm.mcp_entry"]}}}
     """
-    from prsm.mcp_server import main as server_main
-    server_main()
+    import subprocess, sys
+    # Use the clean entry point to avoid stdout noise
+    proc = subprocess.run([sys.executable, "-m", "prsm.mcp_entry"])
+    raise SystemExit(proc.returncode)
 
 
 @main.command("demo-multinode")
