@@ -1026,6 +1026,19 @@ class PRSMNode:
             self.pipeline_audit_log = None
             logger.debug("Security hardening not available")
 
+        # ── Local Discovery (mDNS fallback) ───────────────────────────
+        try:
+            from prsm.node.mdns_discovery import MDNSDiscovery
+
+            self.mdns_discovery = MDNSDiscovery(
+                node_id=self.identity.node_id,
+                p2p_port=self.config.p2p_port,
+                display_name=self.config.display_name,
+            )
+            logger.info("mDNS local discovery available")
+        except ImportError:
+            self.mdns_discovery = None
+
         # Wire ledger_sync and agent_registry into subsystems
         self.content_uploader.ledger_sync = self.ledger_sync
         # Wire content_economy into content_uploader for replication tracking
@@ -1177,6 +1190,10 @@ class PRSMNode:
                 "Limited features: remote peer discovery and cross-node collaboration may be unavailable "
                 "until peers connect or bootstrap targets recover."
             )
+            # Try local mDNS discovery as fallback
+            if hasattr(self, 'mdns_discovery') and self.mdns_discovery:
+                self.mdns_discovery.start()
+                logger.info("Started mDNS local discovery as bootstrap fallback")
         elif bootstrap_status.get("success_node"):
             logger.info(
                 "Node startup bootstrap path: connected via %s",
