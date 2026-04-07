@@ -2102,46 +2102,91 @@ def list_compute_jobs(limit: int):
 
 
 @compute.command("run")
-@click.option('--prompt', required=True, help='Prompt to process')
-@click.option('--budget', default=0.0, type=float, help='FTNS budget for the job')
+@click.option('--prompt', default=None, help='Prompt to process (legacy NWTN path)')
+@click.option('--query', default=None, help='Query for full forge pipeline (Rings 1-10)')
+@click.option('--budget', default=10.0, type=float, help='FTNS budget for the job')
+@click.option('--privacy', default='standard', type=click.Choice(['none', 'standard', 'high', 'maximum']), help='Privacy level for confidential compute')
 @click.option('--api', default='http://127.0.0.1:8000', help='Node API URL')
-def compute_run(prompt: str, budget: float, api: str):
+def compute_run(prompt: str, query: str, budget: float, privacy: str, api: str):
     """Submit a compute job to your running daemon.
 
-    Requires a running daemon (`prsm daemon start`).
-    The daemon handles the job locally and returns the result.
-    If a budget is provided, real FTNS is locked in escrow on-chain.
+    Two modes:
+
+      --prompt: Legacy path — routes directly to NWTN orchestrator.
+
+      --query:  Full forge pipeline (Rings 1-10) — decomposes query via LLM,
+                dispatches WASM mobile agents to edge nodes, aggregates results,
+                settles FTNS payments, applies differential privacy.
+
+    Requires a running daemon (`prsm node start`).
     """
     import httpx
 
+    if not prompt and not query:
+        console.print("[red]Either --prompt or --query is required[/red]")
+        raise SystemExit(1)
+
+    # Determine which path to use
+    if query:
+        # Full forge pipeline (Rings 1-10)
+        endpoint = f"{api}/compute/forge"
+        payload = {
+            "query": query,
+            "budget_ftns": budget,
+            "privacy_level": privacy,
+        }
+        console.print(f"[bold]Forge Pipeline[/bold] (Rings 1-10)")
+        console.print(f"  Query: {query}")
+        console.print(f"  Budget: {budget:.2f} FTNS")
+        console.print(f"  Privacy: {privacy}")
+        console.print()
+    else:
+        # Legacy NWTN path
+        endpoint = f"{api}/compute/query"
+        payload = {"prompt": prompt, "budget": budget}
+
     try:
-        resp = httpx.post(
-            f"{api}/compute/query",
-            json={"prompt": prompt, "budget": budget},
-            timeout=120.0,
-        )
+        resp = httpx.post(endpoint, json=payload, timeout=120.0)
     except httpx.ConnectError:
         console.print(f"[red]Cannot connect to node API at {api}[/red]")
-        console.print("  [dim]Start your daemon first: prsm node start --background[/dim]")
+        console.print("  [dim]Start your daemon first: prsm node start[/dim]")
         raise SystemExit(1)
 
     if resp.status_code == 200:
         data = resp.json()
-        console.print(f"[bold green]Result:[/bold green]")
-        text = data.get("response", str(data.get("result", data)))
-        console.print(f"  {text}")
-        cost = data.get("ftns_charged", data.get("ftns_cost"))
-        if cost is not None:
-            console.print(f"  [dim]Cost: {cost:.6f} FTNS[/dim]")
-        job_id = data.get("job_id")
-        if job_id:
-            console.print(f"  [dim]Job ID: {job_id}[/dim]")
-        if budget > 0:
-            console.print(f"  [dim]Escrow: {budget:.6f} FTNS locked[/dim]")
+
+        if query:
+            # Forge result display
+            route = data.get("route", "unknown")
+            console.print(f"[bold green]Result[/bold green] (route: {route}):")
+            console.print(f"  {data.get('response', str(data.get('result', data)))}")
+            console.print()
+            console.print(f"  [dim]Job ID: {data.get('job_id', '?')}[/dim]")
+            console.print(f"  [dim]Route: {route}[/dim]")
+            console.print(f"  [dim]Budget: {data.get('budget_ftns', 0):.2f} FTNS[/dim]")
+            traces = data.get("traces_collected", 0)
+            if traces:
+                console.print(f"  [dim]Training traces collected: {traces}[/dim]")
+        else:
+            # Legacy result display
+            console.print(f"[bold green]Result:[/bold green]")
+            text = data.get("response", str(data.get("result", data)))
+            console.print(f"  {text}")
+            cost = data.get("ftns_charged", data.get("ftns_cost"))
+            if cost is not None:
+                console.print(f"  [dim]Cost: {cost:.6f} FTNS[/dim]")
+            job_id = data.get("job_id")
+            if job_id:
+                console.print(f"  [dim]Job ID: {job_id}[/dim]")
+
+    elif resp.status_code == 503:
+        console.print(f"[red]Service not available[/red]")
+        detail = resp.json().get("detail", "") if resp.headers.get("content-type", "").startswith("application/json") else resp.text
+        console.print(f"  [dim]{detail[:300]}[/dim]")
+        raise SystemExit(1)
     elif resp.status_code == 404:
         console.print(f"[red]API endpoint not found on daemon[/red]")
-        console.print("  [dim]Your daemon version may not support this endpoint.[/dim]")
-        console.print("  [dim]Upgrade: pipx upgrade prsm-network[/dim]")
+        console.print("  [dim]Upgrade: pip install --upgrade prsm-network[/dim]")
         raise SystemExit(1)
     else:
         console.print(f"[red]Request failed: HTTP {resp.status_code}[/red]")
