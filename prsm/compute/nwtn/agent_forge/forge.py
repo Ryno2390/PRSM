@@ -79,6 +79,29 @@ class AgentForge:
         self.traces: List[AgentTrace] = []
 
     # ------------------------------------------------------------------
+    # LLM call helper (supports both BackendRegistry and individual backends)
+    # ------------------------------------------------------------------
+
+    async def _call_llm(self, prompt: str, system_prompt: str = None, **kwargs):
+        """Call the LLM backend, handling both registry and single backend."""
+        backend = self.backend_registry
+        if backend is None:
+            raise RuntimeError("No backend available")
+
+        # BackendRegistry has execute_with_fallback
+        if hasattr(backend, "execute_with_fallback"):
+            return await backend.execute_with_fallback(
+                prompt=prompt, system_prompt=system_prompt, **kwargs,
+            )
+        # Individual backend (e.g., OpenRouterBackend) has generate
+        elif hasattr(backend, "generate"):
+            return await backend.generate(
+                prompt=prompt, system_prompt=system_prompt, **kwargs,
+            )
+        else:
+            raise RuntimeError(f"Backend {type(backend).__name__} has no generate method")
+
+    # ------------------------------------------------------------------
     # decompose
     # ------------------------------------------------------------------
 
@@ -89,7 +112,7 @@ class AgentForge:
             return TaskDecomposition(query=query, **_DEFAULT_DECOMPOSITION_FIELDS)
 
         try:
-            result = await self.backend_registry.execute_with_fallback(
+            result = await self._call_llm(
                 prompt=query,
                 system_prompt=DECOMPOSE_SYSTEM_PROMPT,
             )
@@ -165,11 +188,9 @@ class AgentForge:
         # -- DIRECT_LLM -----------------------------------------------------
         if route == ExecutionRoute.DIRECT_LLM:
             if self.backend_registry is None:
-                return {"answer": "(no backend available)", "route": "direct_llm"}
-            result = await self.backend_registry.execute_with_fallback(
-                prompt=plan.decomposition.query,
-            )
-            return {"answer": result.content, "route": "direct_llm"}
+                return {"response": "(no backend available)", "route": "direct_llm", "status": "error"}
+            result = await self._call_llm(prompt=plan.decomposition.query)
+            return {"response": result.content, "route": "direct_llm", "status": "success"}
 
         # -- SINGLE_AGENT ---------------------------------------------------
         if route == ExecutionRoute.SINGLE_AGENT:
@@ -224,7 +245,17 @@ class AgentForge:
 
         decomposition = await self.decompose(query)
         task_plan, cost_quote = await self.plan(decomposition, shard_cids)
-        result = await self.execute(task_plan, budget_ftns) or {}
+        try:
+            result = await self.execute(task_plan, budget_ftns) or {}
+        except Exception as exc:
+            logger.warning("Forge execute failed (%s) — recording partial trace", exc)
+            result = {"status": "error", "error": str(exc), "route": task_plan.route.value}
+
+        # Ensure route is always present in result
+        if "route" not in result:
+            result["route"] = task_plan.route.value
+        if "status" not in result:
+            result["status"] = "unknown"
 
         elapsed = time.time() - start
 
