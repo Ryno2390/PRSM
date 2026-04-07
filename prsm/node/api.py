@@ -487,6 +487,17 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         shard_cids = body.get("shard_cids", None)
         privacy_level_str = body.get("privacy_level", "standard")
 
+        # Enforce minimum budget — PRSM requires FTNS for execution
+        if budget_ftns <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "FTNS budget is required for query execution. "
+                    "Set budget_ftns to at least 0.01 FTNS. "
+                    "Use GET /compute/quote or the prsm_quote MCP tool to estimate costs first."
+                ),
+            )
+
         # Lock escrow if budget > 0
         job_id = "forge-" + _uuid.uuid4().hex[:12]
         escrow_entry = None

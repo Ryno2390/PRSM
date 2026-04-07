@@ -45,6 +45,11 @@ This shows your compute tier (T1-T4), GPU detection, TFLOPS, and thermal classif
 
 ### 4. Run Your First Query
 
+> **FTNS Tokens Required:** PRSM's distributed compute network requires FTNS tokens
+> to pay compute providers and data owners. Every query requires a non-zero budget.
+> New nodes receive a welcome grant of 100 FTNS on first start. Use `prsm compute quote`
+> to estimate costs before committing.
+
 **Start your node:**
 ```bash
 prsm node start
@@ -52,14 +57,14 @@ prsm node start
 
 In another terminal:
 
-**Simple query (direct LLM):**
-```bash
-prsm compute run --query "What is the capital of France?" --budget 0.01
-```
-
-**Get a cost estimate first:**
+**Get a cost estimate first (free, no tokens spent):**
 ```bash
 prsm compute quote "EV adoption trends" --shards 5 --tier t2
+```
+
+**Then run with a budget:**
+```bash
+prsm compute run --query "What is the capital of France?" --budget 0.01
 ```
 
 **Check yield estimate (what would I earn as a provider?):**

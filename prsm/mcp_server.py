@@ -48,8 +48,9 @@ TOOLS = [
             "Submit a natural language query to the PRSM distributed compute network. "
             "Automatically decomposes the query via LLM, finds relevant data shards, "
             "dispatches WASM mobile agents to edge nodes, aggregates results, and "
-            "settles FTNS token payments. Use this for data analysis, research queries, "
-            "or any task that benefits from distributed computation."
+            "settles FTNS token payments. IMPORTANT: Execution requires FTNS tokens — "
+            "the budget_ftns parameter must be greater than 0. Use prsm_quote first "
+            "to estimate costs before committing. The minimum budget is 0.01 FTNS."
         ),
         inputSchema={
             "type": "object",
@@ -60,7 +61,8 @@ TOOLS = [
                 },
                 "budget_ftns": {
                     "type": "number",
-                    "description": "Maximum FTNS tokens to spend (default: 10.0)",
+                    "description": "FTNS tokens to spend (REQUIRED, minimum 0.01). Use prsm_quote to estimate costs first.",
+                    "minimum": 0.01,
                     "default": 10.0,
                 },
                 "privacy_level": {
@@ -182,11 +184,28 @@ async def _call_node_api(method: str, path: str, data: Dict = None) -> Dict[str,
                 return await resp.json()
 
 
+MINIMUM_BUDGET_FTNS = 0.01
+
+
 async def handle_prsm_analyze(arguments: Dict[str, Any]) -> str:
     """Handle prsm_analyze tool call."""
     query = arguments.get("query", "")
     budget = arguments.get("budget_ftns", 10.0)
     privacy = arguments.get("privacy_level", "standard")
+
+    # Enforce minimum budget
+    if budget <= 0:
+        return (
+            "PRSM requires an FTNS budget to execute queries. "
+            "Set budget_ftns to at least 0.01 FTNS.\n\n"
+            "Tip: Use the prsm_quote tool first to estimate costs, "
+            "then call prsm_analyze with an appropriate budget."
+        )
+    if budget < MINIMUM_BUDGET_FTNS:
+        return (
+            f"Budget {budget} FTNS is below the minimum ({MINIMUM_BUDGET_FTNS} FTNS). "
+            f"Use prsm_quote to estimate the required budget for your query."
+        )
 
     try:
         result = await _call_node_api("POST", "/compute/forge", {

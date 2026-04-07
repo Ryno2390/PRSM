@@ -83,9 +83,22 @@ class TestToolHandlers:
     @pytest.mark.asyncio
     async def test_analyze_handler_no_node(self):
         """Analyze should gracefully handle no running node."""
-        result = await handle_prsm_analyze({"query": "test"})
+        result = await handle_prsm_analyze({"query": "test", "budget_ftns": 1.0})
         # Should either return a result or a helpful error
         assert len(result) > 0
+
+    @pytest.mark.asyncio
+    async def test_analyze_rejects_zero_budget(self):
+        """Analyze must reject zero budget with helpful message."""
+        result = await handle_prsm_analyze({"query": "test", "budget_ftns": 0})
+        assert "FTNS" in result
+        assert "budget" in result.lower() or "prsm_quote" in result
+
+    @pytest.mark.asyncio
+    async def test_analyze_rejects_negative_budget(self):
+        """Analyze must reject negative budget."""
+        result = await handle_prsm_analyze({"query": "test", "budget_ftns": -5.0})
+        assert "FTNS" in result
 
     @pytest.mark.asyncio
     async def test_node_status_no_node(self):
@@ -102,3 +115,12 @@ class TestCLICommand:
         result = runner.invoke(main, ["mcp-server", "--help"])
         assert result.exit_code == 0
         assert "MCP" in result.output or "mcp" in result.output
+
+    def test_compute_run_rejects_zero_budget_query(self):
+        """CLI should reject --query with --budget 0."""
+        from click.testing import CliRunner
+        from prsm.cli import main
+        runner = CliRunner()
+        result = runner.invoke(main, ["compute", "run", "--query", "test", "--budget", "0"])
+        assert result.exit_code != 0
+        assert "FTNS" in result.output or "budget" in result.output.lower()
