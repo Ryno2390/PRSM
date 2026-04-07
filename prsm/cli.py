@@ -2224,6 +2224,21 @@ def demo():
     demo_main()
 
 
+@main.command("mcp-server")
+def mcp_server_cmd():
+    """Start the PRSM MCP server for LLM tool access.
+
+    This exposes PRSM tools (analyze, quote, datasets, status, benchmark)
+    to any MCP-compatible LLM (Claude, Gemini, etc.) via stdio.
+
+    Configure in Claude Desktop (~/.claude/claude_desktop_config.json):
+
+        {"mcpServers": {"prsm": {"command": "prsm", "args": ["mcp-server"]}}}
+    """
+    from prsm.mcp_server import main as server_main
+    server_main()
+
+
 @main.command("demo-multinode")
 @click.option("--nodes", default=3, type=int, help="Number of nodes to spawn")
 def compute_demo(nodes: int):
