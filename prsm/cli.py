@@ -2128,6 +2128,19 @@ def compute_run(prompt: str, query: str, budget: float, privacy: str, api: str):
 
     # Determine which path to use
     if query:
+        # Enforce minimum budget for forge pipeline
+        if budget <= 0:
+            console.print("[red]FTNS budget is required for forge pipeline execution.[/red]")
+            console.print("  PRSM's distributed compute network requires FTNS tokens to pay")
+            console.print("  compute providers and data owners for their resources.")
+            console.print()
+            console.print("  [dim]Get a cost estimate first:[/dim]")
+            console.print(f'    prsm compute quote "{query}"')
+            console.print()
+            console.print("  [dim]Then run with a budget:[/dim]")
+            console.print(f'    prsm compute run --query "{query}" --budget 1.0')
+            raise SystemExit(1)
+
         # Full forge pipeline (Rings 1-10)
         endpoint = f"{api}/compute/forge"
         payload = {
