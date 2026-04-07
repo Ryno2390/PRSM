@@ -72,7 +72,7 @@ class TestRing5Smoke:
 
         assert result is not None
         assert result["result"]["route"] == "direct_llm"
-        assert "Paris" in result["result"].get("answer", "")
+        assert "Paris" in result["result"].get("response", "")
 
     def test_mcp_tools_defined(self):
         tools = get_forge_tools()
