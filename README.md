@@ -2,14 +2,31 @@
 
 PRSM is a peer-to-peer collaboration framework for neuro-symbolic AI research. It combines three pillars — a compute network for AI orchestration, decentralized storage for scientific artifacts, and a token economy (FTNS) that incentivizes contributions. The goal is to make scientific AI development open, reproducible, and collectively owned.
 
-**Current version: 0.25.0** | [www.prsm-network.com](https://www.prsm-network.com)
+**Current version: 0.35.1** | [www.prsm-network.com](https://www.prsm-network.com)
 
 [![PyPI version](https://badge.fury.io/py/prsm-network.svg)](https://badge.fury.io/py/prsm-network)
 [![CI](https://github.com/Ryno2390/PRSM/actions/workflows/ci.yml/badge.svg)](https://github.com/Ryno2390/PRSM/actions/workflows/ci.yml)
 [![Security Audit](https://github.com/Ryno2390/PRSM/actions/workflows/security-audit.yml/badge.svg)](https://github.com/Ryno2390/PRSM/actions/workflows/security-audit.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **What's live today:** Bootstrap server at `wss://bootstrap1.prsm-network.com:8765` · Real AI inference via Anthropic + OpenAI · FTNS token on Base mainnet ([`0x5276a3756C85f2E9e46f6D34386167a209aa16e5`](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5)) · Python/JS/Go SDKs · Content economy with royalty distribution · Multi-party escrow for batch settlements · Vector search (pgvector/Qdrant) · L2-style settler staking with multi-sig approval · 1,400+ tests passing
+> **What's live today:** Bootstrap server at `wss://bootstrap1.prsm-network.com:8765` · Real AI inference via Anthropic + OpenAI · FTNS token on Base mainnet ([`0x5276a3756C85f2E9e46f6D34386167a209aa16e5`](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5)) · Python/JS/Go SDKs · Content economy with royalty distribution · Multi-party escrow for batch settlements · Vector search (pgvector/Qdrant) · L2-style settler staking with multi-sig approval · 10-ring architecture (Sandbox through Fortress) · 367+ tests passing
+
+### 10-Ring Architecture
+
+PRSM v0.35+ is organized as ten concentric capability rings:
+
+| Ring | Name | Purpose |
+|------|------|---------|
+| 1 | **The Sandbox** | WASM runtime isolation, hardware profiling (TFLOPS/thermal) |
+| 2 | **The Courier** | Mobile agent dispatch, gossip-based bidding, escrow settlement |
+| 3 | **The Swarm** | Semantic vector sharding, parallel map-reduce across data shards |
+| 4 | **The Economy** | Hybrid pricing (PCU + data market), prosumer staking tiers |
+| 5 | **The Brain** | LLM agent forge, task decomposition, MCP tool integration |
+| 6 | **The Polish** | Dynamic gas pricing, RPC failover, settler verification |
+| 7 | **The Vault** | TEE runtime abstraction, differential privacy (configurable epsilon) |
+| 8 | **The Shield** | Tensor-parallel model sharding, randomized pipeline assignment |
+| 9 | **The Mind** | NWTN training pipeline, model registry, JSONL export |
+| 10 | **The Fortress** | Integrity verification, privacy budgets, hash-chained audit log |
 
 ---
 
