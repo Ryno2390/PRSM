@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRSM-AI/prsm-go-sdk/types"
+	"github.com/Ryno2390/PRSM/sdks/go/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

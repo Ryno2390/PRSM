@@ -1,4 +1,4 @@
-module github.com/PRSM-AI/prsm-go-sdk
+module github.com/Ryno2390/PRSM/sdks/go
 
 go 1.24.0
 
