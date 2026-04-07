@@ -1,28 +1,66 @@
 # PRSM Implementation Status
 
-[![Status](https://img.shields.io/badge/status-Beta%20v0.2.2-blue.svg)](#current-implementation-status)
-[![Tests](https://img.shields.io/badge/tests-3987%20passing-brightgreen.svg)](#test-suite-status)
-[![Completion](https://img.shields.io/badge/code--complete-99%25-brightgreen.svg)](#)
-[![Updated](https://img.shields.io/badge/updated-2026--03--28-green.svg)](#)
+[![Status](https://img.shields.io/badge/status-Beta%20v0.36.0-blue.svg)](#current-implementation-status)
+[![Tests](https://img.shields.io/badge/Ring%20tests-371%20passing-brightgreen.svg)](#ring-test-suite)
+[![Rings](https://img.shields.io/badge/rings-10%2F10%20complete-brightgreen.svg)](#sovereign-edge-ai-rings-1-10)
+[![Updated](https://img.shields.io/badge/updated-2026--04--07-green.svg)](#)
 
 ---
 
 ## Executive Summary
 
-As of March 28, 2026 (commit `b435ece`), PRSM has completed all ten development phases.
-**The codebase is 99%+ complete for all code-only work.**
+As of April 7, 2026, PRSM has completed **two major development arcs**:
+
+1. **Original Phases 1-10** (completed March 28, 2026): Core protocol infrastructure — P2P networking, FTNS economy, NWTN orchestrator, marketplace, SDKs.
+2. **Sovereign-Edge AI Rings 1-10** (completed April 7, 2026): The pivot from cloud-first to edge-compute architecture — WASM sandboxes, mobile agents, swarm compute, hybrid pricing, confidential compute, model sharding.
 
 A developer cloning this repo today can:
 - Run `prsm node start`, join the live bootstrap network, and execute real queries
-- Earn and spend FTNS tokens in testnet mode
+- Submit queries via `prsm compute run --query "..."` through the full Ring 1-10 forge pipeline
+- Earn and spend FTNS tokens with real on-chain settlement on Base mainnet
+- Publish datasets with pricing: `prsm marketplace list-dataset --title "..." --base-fee 5.0`
+- Check hardware tier and yield: `prsm node benchmark` and `prsm ftns yield-estimate`
 - Build on the Python, JavaScript/TypeScript, or Go SDK
 - Deploy a production node using `docker/docker-compose.bootstrap.yml`
-- Follow `docs/OPERATOR_GUIDE.md` end-to-end with no additional code changes required
 
-**SDKs published, FTNS token deployed.** Remaining work is operational infrastructure — external accounts, credentials, and deployed services.
-No further code phases are planned. The infrastructure roadmap is documented below.
+**Architecture specs:** `docs/SOVEREIGN_EDGE_AI_SPEC.md` (Phase 1) and `docs/CONFIDENTIAL_COMPUTE_SPEC.md` (Phase 2).
 
 ---
+
+## Sovereign-Edge AI Rings 1-10
+
+| Ring | Name | Status | Tests | Key Delivery |
+|------|------|--------|-------|-------------|
+| 1 | The Sandbox | ✅ Complete | 45 | WASM runtime (Wasmtime), hardware profiler, compute tiers T1-T4 |
+| 2 | The Courier | ✅ Complete | 32 | Mobile agent dispatch, gossip-based bidding, escrow settlement |
+| 3 | The Swarm | ✅ Complete | 27 | Semantic vector sharding, parallel map-reduce, quorum-based aggregation |
+| 4 | The Economy | ✅ Complete | 60 | PCU pricing menu, prosumer staking tiers, yield estimation, data marketplace |
+| 5 | The Brain | ✅ Complete | 23 | LLM agent forge, task decomposition, 5 MCP tools, AgentTrace collection |
+| 6 | The Polish | ✅ Complete | 17 | Dynamic gas pricing, RPC failover, settler signature verification, CLI |
+| 7 | The Vault | ✅ Complete | 44 | TEE runtime abstraction, differential privacy noise injection |
+| 8 | The Shield | ✅ Complete | 38 | Tensor-parallel model sharding, randomized pipelines, collision detection |
+| 9 | The Mind | ✅ Complete | 26 | NWTN training pipeline, model registry, sharded deployment service |
+| 10 | The Fortress | ✅ Complete | 20 | Integrity verification, privacy budget tracking, hash-chained audit log |
+| — | Pricing | ✅ Complete | 19 | Revenue splits (80/15/5), data listings, spot arbitrage |
+| — | E2E Pipeline | ✅ Complete | 40 | `/compute/forge` API, CLI `--query`, cross-node verification |
+| **Total** | | | **371** | |
+
+### End-to-End Flow
+
+```
+Researcher: prsm compute run --query "EV adoption trends in NC"
+  → Ring 5: AgentForge decomposes via LLM
+  → Ring 3: Finds semantic shards by embedding similarity
+  → Ring 4: Quotes cost (compute + data + network fee)
+  → Ring 3: Fans out parallel agents to shard-holding nodes
+  → Ring 2: Each agent dispatched via gossip bidding
+  → Ring 1: Executed in WASM sandbox on provider hardware
+  → Ring 7: DP noise applied to intermediate activations
+  → Ring 3: Results aggregated when quorum met
+  → Ring 4: FTNS settled (80% data owner / 15% compute / 5% treasury)
+  → Ring 9: AgentTrace saved for future NWTN fine-tuning
+  → Result returned to researcher
+```
 
 ---
 
@@ -259,23 +297,24 @@ Key results:
 
 ---
 
-## Test Suite Status
+## Ring Test Suite
 
 | Metric | Value |
 |--------|-------|
-| Total collected | 3,987 |
-| Passing | ~3,938 |
-| Skipped (infrastructure-gated) | ~45 |
-| xfailed | 4 |
+| Ring 1-10 tests | 371 |
+| Passing | 371 |
 | Failing | 0 |
+| Test files | 33 |
+| Cross-node E2E | 32 (two connected nodes) |
+| Live LLM verified | Yes (NVIDIA Nemotron 120B via OpenRouter) |
 
-**Known flaky test:** `test_performance_integration.py::TestScalabilityPerformance::test_memory_usage_under_load`
-— fails in full-suite runs because psutil measures system-wide memory. Passes in isolation.
-Do not fix by loosening threshold — accept as a known environment-specific flake.
+**Pre-existing test suite:** ~3,987 tests from the original 10 phases remain in `tests/`. Three legacy integration tests have broken imports (`tests.fixtures.nwtn_mocks`) — these predate the Ring architecture and are not related to Ring 1-10 work.
 
 ---
 
 ## Production Readiness by Subsystem
+
+### Original Infrastructure (Phases 1-10)
 
 | Subsystem | Status | Notes |
 |-----------|--------|-------|
@@ -297,6 +336,26 @@ Do not fix by loosening threshold — accept as a known environment-specific fla
 | OpenTelemetry Tracing | ✅ Ready | Console/Jaeger/OTLP via `OTEL_EXPORTER` env var |
 | Secrets Management | ✅ Ready | Centralized `SecretsManager` with required validation |
 | Alembic Migrations | ✅ Ready | 3 migrations covering all ORM tables |
+
+### Sovereign-Edge AI (Rings 1-10)
+
+| Subsystem | Status | Notes |
+|-----------|--------|-------|
+| WASM Sandbox | ✅ Ready | Wasmtime runtime, fuel-limited, memory-capped |
+| Hardware Profiler | ✅ Ready | TFLOPS, GPU, thermal, TEE detection |
+| Mobile Agent Dispatch | ✅ Ready | Gossip bidding, WebSocket binary transfer, escrow |
+| Semantic Sharding | ✅ Ready | Centroid-based clustering, cosine similarity search |
+| Swarm Map-Reduce | ✅ Ready | Parallel fan-out, quorum-based aggregation |
+| Hybrid Pricing | ✅ Ready | PCU menu, data market, spot arbitrage, 80/15/5 splits |
+| Prosumer Staking | ✅ Ready | 4 tiers (Casual→Sentinel), yield estimation |
+| Agent Forge | ✅ Ready | LLM decomposition, routing, MCP tools |
+| Confidential Compute | ✅ Ready | TEE abstraction, DP noise (configurable ε) |
+| Model Sharding | ✅ Ready | Tensor parallelism, randomized pipelines |
+| Collision Detection | ✅ Ready | DP-noise-aware output comparison |
+| Training Pipeline | ✅ Ready | AgentTrace → JSONL export → model card |
+| Security Audit | ✅ Ready | Integrity verification, privacy budget, audit chain |
+| Data Listing Marketplace | ✅ Ready | Publish, search, stake-based access control |
+| CLI Commands | ✅ Ready | benchmark, yield-estimate, forge, quote, list-dataset |
 | Python SDK | ✅ Published | `pip install prsm-python-sdk` — live on PyPI v0.2.0 |
 | JavaScript/TypeScript SDK | ✅ Published | `npm install prsm-sdk` — live on npm v0.2.0 |
 | Go SDK | ✅ Published | `go get github.com/Ryno2390/PRSM/sdks/go@v0.2.0` — live on pkg.go.dev |
