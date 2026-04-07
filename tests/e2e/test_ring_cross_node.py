@@ -498,11 +498,229 @@ async def test_cross_node_gossip_delivery(node_a, node_b):
         assert received["data"]["message"] == "hello from node A"
 
 
+# ── Ring 7: Confidential Compute ──────────────────────────────────────────
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+@pytest.mark.timeout(120)
+async def test_ring7_confidential_executor_initialized(node_a, node_b):
+    """Ring 7: Both nodes have ConfidentialExecutor."""
+    assert node_a.confidential_executor is not None, "Node A missing confidential_executor"
+    assert node_b.confidential_executor is not None, "Node B missing confidential_executor"
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+@pytest.mark.timeout(120)
+async def test_ring7_dp_noise_injection():
+    """Ring 7: DP noise injector works correctly."""
+    import numpy as np
+    from prsm.compute.tee.dp_noise import DPNoiseInjector
+    from prsm.compute.tee.models import DPConfig
+
+    injector = DPNoiseInjector(DPConfig(epsilon=8.0))
+    original = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    noisy = injector.inject(original)
+
+    assert noisy.shape == original.shape
+    assert not np.array_equal(noisy, original)
+    assert injector.epsilon_spent == 8.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+@pytest.mark.timeout(120)
+async def test_ring7_tee_detection(node_a):
+    """Ring 7: Hardware profiler detects TEE capability."""
+    from prsm.compute.wasm.profiler import HardwareProfiler
+
+    profiler = HardwareProfiler()
+    profile = profiler.detect()
+    assert isinstance(profile.tee_available, bool)
+    assert isinstance(profile.tee_type, str)
+
+
+# ── Ring 8: Model Sharding ────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+@pytest.mark.timeout(120)
+async def test_ring8_tensor_executor_initialized(node_a, node_b):
+    """Ring 8: Both nodes have TensorParallelExecutor."""
+    assert node_a.tensor_executor is not None, "Node A missing tensor_executor"
+    assert node_b.tensor_executor is not None, "Node B missing tensor_executor"
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+@pytest.mark.timeout(120)
+async def test_ring8_model_shard_and_verify():
+    """Ring 8: Model can be sharded and integrity verified."""
+    import numpy as np
+    from prsm.compute.model_sharding import ModelSharder
+    from prsm.security import IntegrityVerifier
+
+    sharder = ModelSharder()
+    weights = {"layer1": np.random.randn(16, 8)}
+    model = sharder.shard_model("test-model", "TestModel", weights, n_shards=4)
+
+    assert model.total_shards == 4
+    assert model.total_size_bytes > 0
+
+    # Verify integrity of each shard
+    verifier = IntegrityVerifier()
+    for shard in model.shards:
+        assert verifier.verify_shard(shard.tensor_data, shard.checksum), \
+            f"Shard {shard.shard_id} integrity check failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+@pytest.mark.timeout(120)
+async def test_ring8_collision_detection():
+    """Ring 8: Collision detector identifies divergent outputs."""
+    import json
+    from prsm.compute.model_sharding.collision_detector import CollisionDetector
+
+    detector = CollisionDetector(dp_epsilon=8.0, tolerance_multiplier=1.0)
+
+    good = json.dumps([1.0, 2.0, 3.0]).encode()
+    bad = json.dumps([999.0, 999.0, 999.0]).encode()
+
+    report = detector.detect_collision([good, good, bad])
+    assert report["match"] is False
+    assert 2 in report["flagged_indices"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+@pytest.mark.timeout(120)
+async def test_ring8_pipeline_randomizer():
+    """Ring 8: Pipeline randomizer enforces pool size and produces unique assignments."""
+    from prsm.compute.model_sharding import PipelineRandomizer
+
+    randomizer = PipelineRandomizer(min_pool_size=5)
+    nodes = [{"node_id": f"node-{i}", "tee_available": True} for i in range(10)]
+
+    assignments = randomizer.assign_pipeline(4, nodes)
+    assert len(assignments) == 4
+    node_ids = [a["node_id"] for a in assignments]
+    assert len(set(node_ids)) == 4  # All unique
+
+
+# ── Ring 9: NWTN Model Service ────────────────────────────────────────────
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+@pytest.mark.timeout(120)
+async def test_ring9_model_service_initialized(node_a, node_b):
+    """Ring 9: Both nodes have NWTNModelService."""
+    assert node_a.nwtn_model_service is not None, "Node A missing nwtn_model_service"
+    assert node_b.nwtn_model_service is not None, "Node B missing nwtn_model_service"
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+@pytest.mark.timeout(120)
+async def test_ring9_training_pipeline():
+    """Ring 9: Training pipeline can ingest traces and export JSONL."""
+    import json
+    from prsm.compute.nwtn.training import TrainingPipeline, TrainingConfig
+
+    pipeline = TrainingPipeline(TrainingConfig(min_corpus_size=2))
+    traces = [
+        {
+            "query": f"test query {i}",
+            "decomposition": {"operations": ["filter"], "estimated_complexity": 0.5},
+            "plan": {"route": "swarm"},
+            "execution_result": {"status": "success"},
+            "execution_metrics": {"pcu": 1.0},
+        }
+        for i in range(5)
+    ]
+    count = pipeline.ingest_traces(traces)
+    assert count == 5
+
+    valid, errors = pipeline.validate_corpus()
+    assert valid, f"Validation errors: {errors}"
+
+    jsonl = pipeline.export_dataset()
+    lines = jsonl.strip().split("\n")
+    assert len(lines) == 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+@pytest.mark.timeout(120)
+async def test_ring9_model_deploy_lifecycle():
+    """Ring 9: Model can be registered, deployed with sharding, and retired."""
+    import numpy as np
+    from prsm.compute.nwtn.training import ModelCard, DeploymentStatus
+    from prsm.compute.nwtn.training.model_service import NWTNModelService
+
+    service = NWTNModelService()
+    card = ModelCard(model_id="nwtn-e2e", model_name="NWTN-E2E", base_model="llama-3.1")
+    service.register_model(card)
+    assert card.status == DeploymentStatus.REGISTERED
+
+    weights = {"attn": np.random.randn(16, 8)}
+    deployment = service.deploy_model("nwtn-e2e", weight_tensors=weights, n_shards=4)
+    assert deployment["n_shards"] == 4
+    assert card.status == DeploymentStatus.DEPLOYED
+
+    service.retire_model("nwtn-e2e")
+    assert card.status == DeploymentStatus.RETIRED
+
+
+# ── Ring 10: Security Hardening ───────────────────────────────────────────
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+@pytest.mark.timeout(120)
+async def test_ring10_security_modules_initialized(node_a, node_b):
+    """Ring 10: Both nodes have security modules."""
+    assert node_a.integrity_verifier is not None, "Node A missing integrity_verifier"
+    assert node_a.privacy_budget is not None, "Node A missing privacy_budget"
+    assert node_a.pipeline_audit_log is not None, "Node A missing pipeline_audit_log"
+    assert node_b.integrity_verifier is not None, "Node B missing integrity_verifier"
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+@pytest.mark.timeout(120)
+async def test_ring10_privacy_budget_enforcement():
+    """Ring 10: Privacy budget tracker enforces limits."""
+    from prsm.security import PrivacyBudgetTracker
+
+    tracker = PrivacyBudgetTracker(max_epsilon=20.0)
+    assert tracker.record_spend(8.0, "inference-1", "nwtn")
+    assert tracker.record_spend(8.0, "inference-2", "nwtn")
+    assert not tracker.record_spend(8.0, "inference-3", "nwtn")  # Would exceed
+    assert tracker.remaining == 4.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.e2e
+@pytest.mark.timeout(120)
+async def test_ring10_audit_log_chain():
+    """Ring 10: Audit log maintains hash chain integrity."""
+    from prsm.security import PipelineAuditLog
+
+    log = PipelineAuditLog()
+    for i in range(5):
+        log.record(f"model-{i}", 4, [{"node_id": f"n{j}"} for j in range(4)], 20)
+
+    assert log.verify_chain()
+    assert log.entry_count == 5
+
+
+# ── Cross-Node Full Stack ─────────────────────────────────────────────────
+
 @pytest.mark.asyncio
 @pytest.mark.e2e
 @pytest.mark.timeout(120)
 async def test_cross_node_all_rings_initialized(node_a, node_b):
-    """Verify all Ring 1-6 components are initialized on both nodes."""
+    """Verify all Ring 1-10 components are initialized on both nodes."""
     for name, node in [("Node A", node_a), ("Node B", node_b)]:
         # Ring 2
         assert node.agent_dispatcher is not None, f"{name} missing agent_dispatcher"
@@ -514,3 +732,13 @@ async def test_cross_node_all_rings_initialized(node_a, node_b):
         assert node.prosumer_manager is not None, f"{name} missing prosumer_manager"
         # Ring 5
         assert node.agent_forge is not None, f"{name} missing agent_forge"
+        # Ring 7
+        assert node.confidential_executor is not None, f"{name} missing confidential_executor"
+        # Ring 8
+        assert node.tensor_executor is not None, f"{name} missing tensor_executor"
+        # Ring 9
+        assert node.nwtn_model_service is not None, f"{name} missing nwtn_model_service"
+        # Ring 10
+        assert node.integrity_verifier is not None, f"{name} missing integrity_verifier"
+        assert node.privacy_budget is not None, f"{name} missing privacy_budget"
+        assert node.pipeline_audit_log is not None, f"{name} missing pipeline_audit_log"
