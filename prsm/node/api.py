@@ -193,6 +193,13 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         
         return status
 
+    @app.get("/rings/status", tags=["status"])
+    async def rings_status() -> Dict[str, Any]:
+        """Get Ring 1-10 initialization and health status."""
+        from prsm.observability.dashboard_metrics import DashboardMetrics
+        metrics = DashboardMetrics(node=node)
+        return metrics.get_summary()
+
     @app.get("/peers")
     async def get_peers() -> Dict[str, Any]:
         """List connected and known peers."""
