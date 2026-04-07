@@ -1629,6 +1629,9 @@ class PRSMNode:
                 port=self.config.api_port,
                 log_level="warning",
             )
+            if self.config.tls_enabled and self.config.tls_cert_path:
+                config.ssl_certfile = self.config.tls_cert_path
+                config.ssl_keyfile = self.config.tls_key_path
             server = uvicorn.Server(config)
             await server.serve()
         except asyncio.CancelledError:

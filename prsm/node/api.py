@@ -2928,6 +2928,45 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "permissions": user.get("permissions", []),
         }
 
+    # ── FTNS Faucet (development / testnet) ──────────────────────────────
+
+    @app.post("/ftns/faucet", tags=["ftns"])
+    async def ftns_faucet(body: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Request FTNS tokens from the faucet (development/testnet only).
+
+        Limited to 100 FTNS per request, max 1000 FTNS total per node.
+        Disabled in production (set PRSM_FAUCET_ENABLED=0).
+        """
+        import os
+        if os.environ.get("PRSM_FAUCET_ENABLED", "1") == "0":
+            raise HTTPException(status_code=403, detail="Faucet disabled in production")
+
+        amount = min(float(body.get("amount", 100)), 100)  # Max 100 per request
+        wallet_id = body.get("wallet_id", node.identity.node_id)
+
+        try:
+            balance = await node.ledger.get_balance(wallet_id)
+            if balance >= 1000:
+                raise HTTPException(status_code=429, detail=f"Wallet already has {balance:.0f} FTNS (max 1000 from faucet)")
+
+            from prsm.node.local_ledger import TransactionType
+            await node.ledger.credit(
+                wallet_id=wallet_id,
+                amount=amount,
+                tx_type=TransactionType.WELCOME_GRANT,
+                description=f"Faucet grant: {amount} FTNS",
+            )
+            new_balance = await node.ledger.get_balance(wallet_id)
+            return {
+                "granted": amount,
+                "new_balance": new_balance,
+                "wallet_id": wallet_id,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
     # ── Web Dashboard (served at /, /static, /api/) ──────────────────────────────
 
     from pathlib import Path as _Path
