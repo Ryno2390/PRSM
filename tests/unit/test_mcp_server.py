@@ -14,12 +14,22 @@ from prsm.mcp_server import (
     handle_prsm_node_status,
     handle_prsm_create_agent,
     handle_prsm_dispatch_agent,
+    handle_prsm_agent_status,
+    handle_prsm_search_shards,
+    handle_prsm_upload_dataset,
+    handle_prsm_yield_estimate,
+    handle_prsm_stake,
+    handle_prsm_revenue_split,
+    handle_prsm_decompose,
+    handle_prsm_settlement_stats,
+    handle_prsm_privacy_status,
+    handle_prsm_training_status,
 )
 
 
 class TestMCPToolDefinitions:
-    def test_seven_tools_defined(self):
-        assert len(TOOLS) == 7
+    def test_seventeen_tools_defined(self):
+        assert len(TOOLS) == 17
 
     def test_tool_names(self):
         names = [t.name for t in TOOLS]
@@ -30,6 +40,16 @@ class TestMCPToolDefinitions:
         assert "prsm_hardware_benchmark" in names
         assert "prsm_create_agent" in names
         assert "prsm_dispatch_agent" in names
+        assert "prsm_agent_status" in names
+        assert "prsm_search_shards" in names
+        assert "prsm_upload_dataset" in names
+        assert "prsm_yield_estimate" in names
+        assert "prsm_stake" in names
+        assert "prsm_revenue_split" in names
+        assert "prsm_decompose" in names
+        assert "prsm_settlement_stats" in names
+        assert "prsm_privacy_status" in names
+        assert "prsm_training_status" in names
 
     def test_all_tools_have_descriptions(self):
         for tool in TOOLS:
@@ -197,3 +217,51 @@ class TestAgentCreationTools:
         })
         # Will fail to connect to node but should validate the manifest
         assert "1 operations" in result or "dispatch failed" in result
+
+
+class TestFullToolSuite:
+    @pytest.mark.asyncio
+    async def test_yield_estimate_handler(self):
+        from prsm.mcp_server import handle_prsm_yield_estimate
+        result = await handle_prsm_yield_estimate({"hours_per_day": 8, "stake_amount": 1000})
+        assert "Yield" in result
+        assert "FTNS" in result
+
+    @pytest.mark.asyncio
+    async def test_revenue_split_handler(self):
+        from prsm.mcp_server import handle_prsm_revenue_split
+        result = await handle_prsm_revenue_split({"total_payment": 100, "has_data_owner": True})
+        assert "Data Owner" in result
+        assert "80%" in result
+
+    @pytest.mark.asyncio
+    async def test_revenue_split_without_data(self):
+        from prsm.mcp_server import handle_prsm_revenue_split
+        result = await handle_prsm_revenue_split({"total_payment": 100, "has_data_owner": False})
+        assert "Compute" in result
+        assert "Data Owner" not in result
+
+    @pytest.mark.asyncio
+    async def test_stake_handler(self):
+        from prsm.mcp_server import handle_prsm_stake
+        result = await handle_prsm_stake({"amount": 1000})
+        assert "DEDICATED" in result
+        assert "1.5" in result
+
+    @pytest.mark.asyncio
+    async def test_decompose_handler(self):
+        from prsm.mcp_server import handle_prsm_decompose
+        result = await handle_prsm_decompose({"query": "Count vehicles in NC"})
+        assert "Decomposition" in result or "decomposition" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_privacy_status_handler(self):
+        from prsm.mcp_server import handle_prsm_privacy_status
+        result = await handle_prsm_privacy_status({})
+        assert "privacy" in result.lower() or "Privacy" in result
+
+    @pytest.mark.asyncio
+    async def test_training_status_handler(self):
+        from prsm.mcp_server import handle_prsm_training_status
+        result = await handle_prsm_training_status({})
+        assert "Training" in result or "training" in result
