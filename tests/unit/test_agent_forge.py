@@ -172,7 +172,7 @@ class TestExecute:
         plan = TaskPlan(decomposition=td, route=ExecutionRoute.DIRECT_LLM)
         result = await forge.execute(plan)
         assert result["route"] == "direct_llm"
-        assert result["answer"] == "The answer is 4"
+        assert result["response"] == "The answer is 4"
 
 
 class TestTraces:
