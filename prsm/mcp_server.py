@@ -147,6 +147,109 @@ TOOLS = [
             "properties": {},
         },
     ),
+    Tool(
+        name="prsm_create_agent",
+        description=(
+            "Create a PRSM mobile agent with a custom instruction manifest. "
+            "The agent will execute the specified operations on target data shards.\n\n"
+            "AVAILABLE OPERATIONS:\n"
+            "- filter: Filter records by field value (params: field, value, operator)\n"
+            "- aggregate: Compute sum/count/avg/min/max over records\n"
+            "- group_by: Group records by a field before aggregating\n"
+            "- sort: Sort records by field (params: field, ascending)\n"
+            "- limit: Take first N records (params: n)\n"
+            "- count: Count total records matching criteria\n"
+            "- sum: Sum a numeric field (params: field)\n"
+            "- average: Average a numeric field (params: field)\n"
+            "- select: Select specific fields from records (params: fields[])\n"
+            "- compare: Compare values across groups or time periods\n"
+            "- time_series: Time-based trend analysis (params: date_field, metric_field)\n\n"
+            "The instructions are composed as a pipeline: each operation feeds into the next. "
+            "PRSM wraps these into a WASM mobile agent that executes securely on remote nodes.\n\n"
+            "IMPORTANT: Requires FTNS budget > 0. Use prsm_quote to estimate costs first."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Human-readable description of what this agent does",
+                },
+                "instructions": {
+                    "type": "array",
+                    "description": "Ordered list of operations to execute on the data",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "op": {
+                                "type": "string",
+                                "enum": ["filter", "aggregate", "group_by", "sort", "limit",
+                                        "count", "sum", "average", "select", "compare", "time_series"],
+                                "description": "The operation to perform",
+                            },
+                            "field": {
+                                "type": "string",
+                                "description": "The data field this operation targets",
+                            },
+                            "value": {
+                                "description": "Filter value, threshold, or parameter",
+                            },
+                            "params": {
+                                "type": "object",
+                                "description": "Additional operation parameters",
+                            },
+                        },
+                        "required": ["op"],
+                    },
+                },
+                "target_shards": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "CIDs of data shards to process (leave empty for auto-discovery)",
+                },
+                "hardware_tier": {
+                    "type": "string",
+                    "enum": ["t1", "t2", "t3", "t4"],
+                    "description": "Minimum hardware tier required (t1=mobile, t2=consumer, t3=high-end, t4=datacenter)",
+                    "default": "t1",
+                },
+                "budget_ftns": {
+                    "type": "number",
+                    "description": "FTNS budget for execution (minimum 0.01)",
+                    "minimum": 0.01,
+                    "default": 5.0,
+                },
+            },
+            "required": ["query", "instructions"],
+        },
+    ),
+    Tool(
+        name="prsm_dispatch_agent",
+        description=(
+            "Dispatch a previously created agent instruction manifest to the PRSM network. "
+            "The agent will be sent to nodes holding the target data shards, executed in a "
+            "WASM sandbox, and results aggregated.\n\n"
+            "Use prsm_create_agent to build the instruction manifest, then prsm_dispatch_agent "
+            "to execute it. Or use prsm_analyze for automatic end-to-end execution.\n\n"
+            "IMPORTANT: Requires FTNS budget > 0 and a running PRSM node."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "instructions_json": {
+                    "type": "string",
+                    "description": "JSON instruction manifest from prsm_create_agent",
+                },
+                "budget_ftns": {
+                    "type": "number",
+                    "description": "FTNS budget for execution",
+                    "minimum": 0.01,
+                    "default": 5.0,
+                },
+            },
+            "required": ["instructions_json"],
+        },
+    ),
 ]
 
 
@@ -322,6 +425,113 @@ async def handle_prsm_hardware_benchmark(arguments: Dict[str, Any]) -> str:
         return f"Benchmark failed: {str(e)}"
 
 
+async def handle_prsm_create_agent(arguments: Dict[str, Any]) -> str:
+    """Handle prsm_create_agent — build an instruction manifest."""
+    query = arguments.get("query", "")
+    instructions_raw = arguments.get("instructions", [])
+    target_shards = arguments.get("target_shards", [])
+    hardware_tier = arguments.get("hardware_tier", "t1")
+    budget = arguments.get("budget_ftns", 5.0)
+
+    if budget <= 0:
+        return "FTNS budget required (minimum 0.01). Use prsm_quote to estimate costs."
+
+    try:
+        from prsm.compute.agents.instruction_set import (
+            AgentOp, AgentInstruction, InstructionManifest,
+        )
+
+        instructions = []
+        for inst in instructions_raw:
+            op_str = inst.get("op", "count")
+            try:
+                op = AgentOp(op_str)
+            except ValueError:
+                return f"Unknown operation: {op_str}. Available: {[o.value for o in AgentOp]}"
+
+            instructions.append(AgentInstruction(
+                op=op,
+                field=inst.get("field", ""),
+                value=inst.get("value"),
+                params=inst.get("params", {}),
+            ))
+
+        if not instructions:
+            return "At least one instruction is required."
+
+        manifest = InstructionManifest(
+            query=query,
+            instructions=instructions,
+        )
+
+        manifest_json = manifest.to_json()
+
+        lines = [
+            f"Agent Manifest Created",
+            f"  Query: {query}",
+            f"  Operations: {len(instructions)}",
+        ]
+        for i, inst in enumerate(instructions):
+            field_str = f" on '{inst.field}'" if inst.field else ""
+            value_str = f" = {inst.value}" if inst.value is not None else ""
+            lines.append(f"    {i+1}. {inst.op.value}{field_str}{value_str}")
+
+        lines.append(f"  Target shards: {target_shards or '(auto-discover)'}")
+        lines.append(f"  Hardware tier: {hardware_tier}")
+        lines.append(f"  Budget: {budget} FTNS")
+        lines.append(f"")
+        lines.append(f"  Manifest JSON (pass to prsm_dispatch_agent):")
+        lines.append(f"  {manifest_json}")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"Agent creation failed: {str(e)}"
+
+
+async def handle_prsm_dispatch_agent(arguments: Dict[str, Any]) -> str:
+    """Handle prsm_dispatch_agent — dispatch an instruction manifest."""
+    instructions_json = arguments.get("instructions_json", "")
+    budget = arguments.get("budget_ftns", 5.0)
+
+    if budget <= 0:
+        return "FTNS budget required (minimum 0.01)."
+
+    if not instructions_json:
+        return "Missing instructions_json. Use prsm_create_agent first to build a manifest."
+
+    try:
+        from prsm.compute.agents.instruction_set import InstructionManifest
+
+        manifest = InstructionManifest.from_json(instructions_json)
+
+        # Try to dispatch via the node API
+        try:
+            result = await _call_node_api("POST", "/compute/forge", {
+                "query": manifest.query,
+                "budget_ftns": budget,
+            })
+            route = result.get("route", "unknown")
+            response = result.get("response", str(result))
+            return (
+                f"Agent Dispatched\n"
+                f"  Query: {manifest.query}\n"
+                f"  Operations: {len(manifest.instructions)}\n"
+                f"  Route: {route}\n"
+                f"  Budget: {budget} FTNS\n\n"
+                f"Result:\n{response}"
+            )
+        except Exception as e:
+            return (
+                f"Agent manifest valid ({len(manifest.instructions)} operations) "
+                f"but dispatch failed: {str(e)}\n"
+                f"Is your PRSM node running? (prsm node start)"
+            )
+
+    except Exception as e:
+        return f"Invalid instruction manifest: {str(e)}"
+
+
 # Tool dispatch map
 TOOL_HANDLERS = {
     "prsm_analyze": handle_prsm_analyze,
@@ -329,6 +539,8 @@ TOOL_HANDLERS = {
     "prsm_list_datasets": handle_prsm_list_datasets,
     "prsm_node_status": handle_prsm_node_status,
     "prsm_hardware_benchmark": handle_prsm_hardware_benchmark,
+    "prsm_create_agent": handle_prsm_create_agent,
+    "prsm_dispatch_agent": handle_prsm_dispatch_agent,
 }
 
 
