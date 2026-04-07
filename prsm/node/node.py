@@ -999,6 +999,20 @@ class PRSMNode:
             self.nwtn_model_service = None
             logger.debug("NWTN model service not available")
 
+        # ── Security Hardening (Ring 10) ──────────────────────────────
+        try:
+            from prsm.security import IntegrityVerifier, PrivacyBudgetTracker, PipelineAuditLog
+
+            self.integrity_verifier = IntegrityVerifier()
+            self.privacy_budget = PrivacyBudgetTracker(max_epsilon=100.0)
+            self.pipeline_audit_log = PipelineAuditLog()
+            logger.info("Security hardening (Ring 10) initialized")
+        except ImportError:
+            self.integrity_verifier = None
+            self.privacy_budget = None
+            self.pipeline_audit_log = None
+            logger.debug("Security hardening not available")
+
         # Wire ledger_sync and agent_registry into subsystems
         self.content_uploader.ledger_sync = self.ledger_sync
         # Wire content_economy into content_uploader for replication tracking
