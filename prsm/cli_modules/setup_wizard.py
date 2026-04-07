@@ -575,6 +575,7 @@ def _step_review(config: PRSMConfig, dry_run: bool) -> bool:
         "MCP Server": f"{'enabled' if config.mcp_server_enabled else 'disabled'}"
                       + (f" (:{config.mcp_server_port})" if config.mcp_server_enabled else ""),
         "FTNS Wallet": config.wallet_address or "Not configured",
+        "OpenRouter Key": "✓ configured" if config.has_openrouter_key else "—",
         "OpenAI Key": "✓ configured" if config.has_openai_key else "—",
         "Anthropic Key": "✓ configured" if config.has_anthropic_key else "—",
         "HuggingFace": "✓ configured" if config.has_huggingface_token else "—",
