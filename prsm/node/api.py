@@ -345,7 +345,28 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # --- Phase 2: Route the job ---
         result = None
 
-        # Try gossip-based peers first (only if we have real peers)
+        # Try Agent Forge first (Rings 1-10 pipeline) if available
+        if hasattr(node, 'agent_forge') and node.agent_forge is not None:
+            try:
+                forge_result = await node.agent_forge.run(
+                    query=prompt,
+                    budget_ftns=budget,
+                )
+                if forge_result and forge_result.get("status") == "success":
+                    # Extract response from forge result
+                    route = forge_result.get("route", "unknown")
+                    if route == "direct_llm":
+                        result = {"response": forge_result.get("response", ""), "route": route}
+                    elif route == "swarm":
+                        output = forge_result.get("aggregated_output", {})
+                        result = {"response": str(output), "route": route}
+                    else:
+                        result = {"response": str(forge_result), "route": route}
+                    result["forge_result"] = forge_result
+            except Exception as e:
+                logger.debug(f"compute_query: forge path failed, falling back: {e}")
+
+        # Try gossip-based peers if forge didn't produce a result
         has_peers = (
             node.transport
             and hasattr(node.transport, 'peer_count')
@@ -421,6 +442,119 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "response": result.get("response", result.get("text", str(result))),
             "result": result,
         }
+
+    @app.post("/compute/forge")
+    async def compute_forge(body: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Submit a query through the full Ring 1-10 Agent Forge pipeline.
+
+        This is the end-to-end sovereign-edge AI path:
+        1. AgentForge decomposes the query via LLM
+        2. Finds relevant data shards (if any)
+        3. Quotes costs via PricingEngine
+        4. Routes to appropriate execution path:
+           - DIRECT_LLM: simple queries answered by LLM directly
+           - SINGLE_AGENT: dispatch WASM agent to one node
+           - SWARM: fan out agents across multiple nodes
+        5. Collects and aggregates results
+        6. Settles FTNS payments
+        7. Returns the answer
+
+        POST body: {
+            "query": "...",
+            "budget_ftns": 10.0,
+            "shard_cids": ["QmA", "QmB"],  // optional
+            "privacy_level": "standard"     // none, standard, high, maximum
+        }
+        """
+        if not hasattr(node, 'agent_forge') or node.agent_forge is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Agent forge not initialized. Check LLM backend configuration."
+            )
+
+        query = body.get("query", "")
+        if not query:
+            raise HTTPException(status_code=400, detail="Missing 'query' field")
+
+        budget_ftns = float(body.get("budget_ftns", 10.0))
+        shard_cids = body.get("shard_cids", None)
+        privacy_level_str = body.get("privacy_level", "standard")
+
+        # Lock escrow if budget > 0
+        job_id = "forge-" + _uuid.uuid4().hex[:12]
+        escrow_entry = None
+        if budget_ftns > 0 and hasattr(node, '_payment_escrow') and node._payment_escrow:
+            escrow_entry = await node._payment_escrow.create_escrow(
+                job_id=job_id,
+                amount=budget_ftns,
+                requester_id=node.identity.node_id,
+            )
+
+        try:
+            # Run the full forge pipeline
+            result = await node.agent_forge.run(
+                query=query,
+                budget_ftns=budget_ftns,
+                shard_cids=shard_cids,
+            )
+
+            if result is None:
+                raise HTTPException(status_code=500, detail="Forge pipeline returned no result")
+
+            # Track privacy budget if confidential compute is active
+            if (
+                hasattr(node, 'privacy_budget')
+                and node.privacy_budget
+                and privacy_level_str != "none"
+            ):
+                epsilon_map = {"standard": 8.0, "high": 4.0, "maximum": 1.0}
+                epsilon = epsilon_map.get(privacy_level_str, 8.0)
+                node.privacy_budget.record_spend(epsilon, "forge_query", job_id)
+
+            # Release escrow on success
+            if escrow_entry and node._payment_escrow and result.get("status") == "success":
+                try:
+                    await node._payment_escrow.release_escrow(
+                        job_id=job_id,
+                        provider_id=node.identity.node_id,
+                    )
+                except Exception as e:
+                    logger.warning(f"Forge escrow release failed: {e}")
+
+            # Extract response text based on route
+            route = result.get("route", "unknown")
+            if route == "direct_llm":
+                response_text = result.get("response", str(result))
+            elif route == "swarm":
+                output = result.get("aggregated_output", {})
+                response_text = str(output.get("shard_outputs", output))
+            elif route == "single_agent":
+                agent_result = result.get("result", {})
+                response_text = str(agent_result)
+            else:
+                response_text = str(result)
+
+            return {
+                "job_id": job_id,
+                "query": query,
+                "route": route,
+                "response": response_text,
+                "result": result,
+                "budget_ftns": budget_ftns,
+                "traces_collected": len(node.agent_forge.traces),
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            # Refund escrow on failure
+            if escrow_entry and node._payment_escrow:
+                try:
+                    await node._payment_escrow.refund_escrow(job_id, str(e))
+                except Exception:
+                    pass
+            logger.error(f"Forge pipeline error: {e}")
+            raise HTTPException(status_code=500, detail=f"Forge pipeline error: {str(e)}")
 
     @app.post("/content/upload")
     async def upload_content(req: ContentUploadRequest) -> Dict[str, Any]:
