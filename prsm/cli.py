@@ -3979,6 +3979,39 @@ def publish(name: str, description: str, resource_type: str, price: float, quali
         raise SystemExit(1)
 
 
+@marketplace.command("list-dataset")
+@click.option("--title", required=True, help="Dataset title")
+@click.option("--dataset-id", required=True, help="Dataset identifier")
+@click.option("--base-fee", default=1.0, type=float, help="Base access fee in FTNS")
+@click.option("--per-shard", default=0.1, type=float, help="Per-shard fee in FTNS")
+@click.option("--shards", default=1, type=int, help="Number of shards")
+@click.option("--require-stake", default=0, type=float, help="Required stake for access")
+def marketplace_list_dataset(title, dataset_id, base_fee, per_shard, shards, require_stake):
+    """Publish a dataset with pricing to the PRSM marketplace."""
+    from decimal import Decimal
+    from prsm.economy.pricing.data_listing import DataListing
+
+    listing = DataListing(
+        dataset_id=dataset_id,
+        title=title,
+        base_access_fee=Decimal(str(base_fee)),
+        per_shard_fee=Decimal(str(per_shard)),
+        shard_count=shards,
+        requires_stake=Decimal(str(require_stake)),
+    )
+
+    click.echo(f"Dataset Listed:")
+    click.echo(f"  Title: {title}")
+    click.echo(f"  ID: {listing.listing_id}")
+    click.echo(f"  Base Fee: {base_fee} FTNS")
+    click.echo(f"  Per-Shard Fee: {per_shard} FTNS")
+    click.echo(f"  Shards: {shards}")
+    if require_stake > 0:
+        click.echo(f"  Required Stake: {require_stake} FTNS")
+    total = listing.base_access_fee + listing.per_shard_fee * Decimal(str(shards))
+    click.echo(f"  Total per query: {total} FTNS")
+
+
 # ============================================================================
 # TORRENT COMMANDS (Phase 1)
 # ============================================================================

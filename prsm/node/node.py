@@ -829,10 +829,22 @@ class PRSMNode:
                 node_id=self.identity.node_id,
                 ledger=self.ledger,
             )
+
+            from prsm.economy.pricing.revenue_split import RevenueSplitEngine
+            from prsm.economy.pricing.data_listing import DataListingManager
+            from prsm.economy.pricing.spot_arbitrage import SpotArbitrage
+
+            self.revenue_split = RevenueSplitEngine()
+            self.data_listing_manager = DataListingManager()
+            self.spot_arbitrage = SpotArbitrage(pricing_engine=self.pricing_engine)
+
             logger.info("Economy engine (Ring 4) initialized")
         except ImportError:
             self.pricing_engine = None
             self.prosumer_manager = None
+            self.revenue_split = None
+            self.data_listing_manager = None
+            self.spot_arbitrage = None
             logger.debug("Economy engine not available")
 
         # ── On-Chain FTNS Ledger (Base mainnet) ────────────────────
