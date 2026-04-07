@@ -2960,4 +2960,10 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
         # Apply middleware
         api_hardening.apply_middleware()
 
+    # API key auth for protected endpoints
+    from prsm.api.auth_middleware import get_node_auth_middleware, NodeAuthMiddleware
+    auth_mw = get_node_auth_middleware(app)
+    if auth_mw:
+        app.add_middleware(NodeAuthMiddleware, api_key_hash=auth_mw._api_key_hash)
+
     return app
