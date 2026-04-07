@@ -244,6 +244,11 @@ class AgentForge:
         start = time.time()
 
         decomposition = await self.decompose(query)
+
+        # Generate agent instructions from decomposition
+        from prsm.compute.agents.instruction_set import instructions_from_decomposition
+        agent_instructions = instructions_from_decomposition(decomposition.to_dict())
+
         task_plan, cost_quote = await self.plan(decomposition, shard_cids)
         try:
             result = await self.execute(task_plan, budget_ftns) or {}
@@ -278,5 +283,6 @@ class AgentForge:
             "plan": task_plan.to_dict(),
             "cost_quote": cost_quote.to_dict() if cost_quote and hasattr(cost_quote, "to_dict") else None,
             "result": result,
+            "instructions": agent_instructions.to_json(),
             "trace_id": len(self.traces) - 1,
         }
