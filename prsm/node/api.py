@@ -583,6 +583,89 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "parent_cids": result.parent_cids,
         }
 
+    @app.post("/content/upload/shard")
+    async def upload_shard_dataset(body: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Upload a dataset with semantic sharding.
+
+        POST body: {
+            "dataset_id": "nada-nc-2025",
+            "title": "NADA NC Vehicle Registrations 2025",
+            "content_b64": "<base64-encoded content>",
+            "shard_count": 4,
+            "royalty_rate": 0.05,
+            "base_access_fee": 5.0,
+            "per_shard_fee": 0.5,
+        }
+        """
+        import base64
+        from prsm.data.shard_models import SemanticShard, SemanticShardManifest
+
+        dataset_id = body.get("dataset_id", "")
+        title = body.get("title", dataset_id)
+        content_b64 = body.get("content_b64", "")
+        shard_count = int(body.get("shard_count", 4))
+        royalty_rate = float(body.get("royalty_rate", 0.01))
+
+        if not dataset_id:
+            raise HTTPException(status_code=400, detail="Missing dataset_id")
+
+        # Decode content
+        try:
+            content = base64.b64decode(content_b64) if content_b64 else b""
+        except Exception:
+            content = b""
+
+        # Create semantic shards
+        chunk_size = max(len(content) // max(shard_count, 1), 1024)
+        shards = []
+        for i in range(shard_count):
+            start = i * chunk_size
+            end = min(start + chunk_size, len(content))
+            chunk = content[start:end] if content else b""
+
+            shard = SemanticShard(
+                shard_id=f"{dataset_id}-shard-{i:04d}",
+                parent_dataset=dataset_id,
+                cid=f"Qm{dataset_id}-{i:04d}",  # Placeholder until IPFS upload
+                centroid=[float(i) / max(shard_count, 1)],
+                record_count=len(chunk),
+                size_bytes=len(chunk),
+                keywords=[title, f"shard-{i}"],
+            )
+            shards.append(shard)
+
+        manifest = SemanticShardManifest(
+            dataset_id=dataset_id,
+            total_records=len(content),
+            total_size_bytes=len(content),
+            shards=shards,
+        )
+
+        # Register with data listing manager if available
+        if hasattr(node, 'data_listing_manager') and node.data_listing_manager:
+            from prsm.economy.pricing.data_listing import DataListing
+            from decimal import Decimal
+            listing = DataListing(
+                dataset_id=dataset_id,
+                owner_id=node.identity.node_id,
+                title=title,
+                shard_count=shard_count,
+                total_size_bytes=len(content),
+                base_access_fee=Decimal(str(body.get("base_access_fee", 0))),
+                per_shard_fee=Decimal(str(body.get("per_shard_fee", 0))),
+            )
+            node.data_listing_manager.publish(listing)
+
+        return {
+            "dataset_id": dataset_id,
+            "title": title,
+            "shard_count": len(shards),
+            "total_size_bytes": len(content),
+            "manifest": manifest.to_dict() if hasattr(manifest, 'to_dict') else str(manifest),
+            "shards": [s.to_dict() for s in shards],
+            "listing_registered": hasattr(node, 'data_listing_manager') and node.data_listing_manager is not None,
+        }
+
     @app.get("/content/search")
     async def search_content(q: str = "", limit: int = 20) -> Dict[str, Any]:
         """Search the network content index by keyword."""
