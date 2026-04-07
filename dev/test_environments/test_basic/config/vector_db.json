@@ -1,6 +1,0 @@
-{
-  "data_path": "/Users/ryneschultz/Documents/GitHub/PRSM/test_environments/test_basic/data/vector_db",
-  "collection_name": "prsm_test_test_basic",
-  "embedding_dimension": 1536,
-  "metric": "cosine"
-}

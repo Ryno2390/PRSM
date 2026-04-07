@@ -1,3 +1,6 @@
+# Archive (pre-v1.0 files moved during repo cleanup)
+archive/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
