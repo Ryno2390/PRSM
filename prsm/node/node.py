@@ -813,6 +813,7 @@ class PRSMNode:
 
             self.swarm_coordinator = SwarmCoordinator(
                 dispatcher=self.agent_dispatcher,
+                result_consensus=getattr(self, '_result_consensus', None),
             )
             logger.info("Swarm compute (Ring 3) initialized")
         except (ImportError, AttributeError):
