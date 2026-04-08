@@ -6,7 +6,9 @@ package main
 import "C"
 import (
 	"context"
+	"encoding/json"
 	"log"
+	"strings"
 	"unsafe"
 
 	"github.com/Ryno2390/PRSM/libp2p/internal"
@@ -27,7 +29,9 @@ func PrsmStart(ed25519Key *C.char, listenPort C.int, bootstrapAddrs *C.char, uds
 
 	keyBytes := C.GoBytes(unsafe.Pointer(ed25519Key), 64)
 
-	p2pHost, err := internal.CreateHost(keyBytes, int(listenPort))
+	// Build NAT options and create host.
+	natOpts := internal.NATOptions(true, true)
+	p2pHost, err := internal.CreateHost(keyBytes, int(listenPort), natOpts...)
 	if err != nil {
 		log.Printf("PrsmStart: failed to create host: %v", err)
 		return C.int(0)
@@ -61,6 +65,24 @@ func PrsmStart(ed25519Key *C.char, listenPort C.int, bootstrapAddrs *C.char, uds
 
 	streamMgr := internal.NewStreamManager(ctx, p2pHost, udsWriter)
 
+	// Parse bootstrap addresses and initialise DHT (non-fatal on failure).
+	bootstrapList := []string{}
+	if bs := C.GoString(bootstrapAddrs); bs != "" {
+		for _, a := range strings.Split(bs, ",") {
+			a = strings.TrimSpace(a)
+			if a != "" {
+				bootstrapList = append(bootstrapList, a)
+			}
+		}
+	}
+
+	var dhtMgr *internal.DHTManager
+	dhtMgr, err = internal.NewDHTManager(ctx, p2pHost, "auto", bootstrapList)
+	if err != nil {
+		log.Printf("PrsmStart: DHT initialisation failed (non-fatal): %v", err)
+		dhtMgr = nil
+	}
+
 	host := &internal.Host{
 		ListenPort: int(listenPort),
 		PeerID:     p2pHost.ID().String(),
@@ -70,6 +92,7 @@ func PrsmStart(ed25519Key *C.char, listenPort C.int, bootstrapAddrs *C.char, uds
 		UDS:        udsWriter,
 		PubSub:     pubsubMgr,
 		Streams:    streamMgr,
+		DHT:        dhtMgr,
 	}
 
 	handle := internal.Register(host)
@@ -92,6 +115,11 @@ func PrsmStop(handle C.int) C.int {
 		return C.int(-1)
 	}
 
+	if h.DHT != nil {
+		if err := h.DHT.Close(); err != nil {
+			log.Printf("PrsmStop: error closing DHT: %v", err)
+		}
+	}
 	if h.UDS != nil {
 		h.UDS.Close()
 	}
@@ -284,6 +312,149 @@ func PrsmSend(handle C.int, peerIDStr *C.char, proto *C.char, data *C.char, data
 		return C.int(-1)
 	}
 	return C.int(0)
+}
+
+// PrsmDHTProvide announces to the DHT that this node provides the content
+// identified by key. Returns 0 on success, -1 on error.
+//
+//export PrsmDHTProvide
+func PrsmDHTProvide(handle C.int, key *C.char) C.int {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PrsmDHTProvide: recovered from panic: %v", r)
+		}
+	}()
+
+	h := internal.Get(int(handle))
+	if h == nil {
+		log.Printf("PrsmDHTProvide: handle %d not found", int(handle))
+		return C.int(-1)
+	}
+	if h.DHT == nil {
+		log.Printf("PrsmDHTProvide: DHT not initialised on handle %d", int(handle))
+		return C.int(-1)
+	}
+	if err := h.DHT.Provide(C.GoString(key)); err != nil {
+		log.Printf("PrsmDHTProvide: %v", err)
+		return C.int(-1)
+	}
+	return C.int(0)
+}
+
+// peerAddrInfoJSON is the JSON representation used by PrsmDHTFindProviders and PrsmPeerList.
+type peerAddrInfoJSON struct {
+	PeerID string   `json:"peer_id"`
+	Addrs  []string `json:"addrs"`
+}
+
+// PrsmDHTFindProviders searches the DHT for up to limit peers that provide key.
+// Returns a JSON array of {"peer_id":"…","addrs":["…"]} objects as a C string.
+// The caller must free the result with PrsmFree. Returns nil on error.
+//
+//export PrsmDHTFindProviders
+func PrsmDHTFindProviders(handle C.int, key *C.char, limit C.int) *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PrsmDHTFindProviders: recovered from panic: %v", r)
+		}
+	}()
+
+	h := internal.Get(int(handle))
+	if h == nil {
+		log.Printf("PrsmDHTFindProviders: handle %d not found", int(handle))
+		return nil
+	}
+	if h.DHT == nil {
+		log.Printf("PrsmDHTFindProviders: DHT not initialised on handle %d", int(handle))
+		return nil
+	}
+
+	providers, err := h.DHT.FindProviders(C.GoString(key), int(limit))
+	if err != nil {
+		log.Printf("PrsmDHTFindProviders: %v", err)
+		return nil
+	}
+
+	items := make([]peerAddrInfoJSON, 0, len(providers))
+	for _, pi := range providers {
+		addrs := make([]string, 0, len(pi.Addrs))
+		for _, a := range pi.Addrs {
+			addrs = append(addrs, a.String())
+		}
+		items = append(items, peerAddrInfoJSON{PeerID: pi.ID.String(), Addrs: addrs})
+	}
+
+	b, err := json.Marshal(items)
+	if err != nil {
+		log.Printf("PrsmDHTFindProviders: JSON marshal error: %v", err)
+		return nil
+	}
+	return C.CString(string(b))
+}
+
+// PrsmGetNATStatus returns "public" if the host has at least one non-localhost
+// address, or "private" otherwise. The caller must free the result with PrsmFree.
+//
+//export PrsmGetNATStatus
+func PrsmGetNATStatus(handle C.int) *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PrsmGetNATStatus: recovered from panic: %v", r)
+		}
+	}()
+
+	h := internal.Get(int(handle))
+	if h == nil {
+		log.Printf("PrsmGetNATStatus: handle %d not found", int(handle))
+		return C.CString("unknown")
+	}
+
+	for _, addr := range h.P2PHost.Addrs() {
+		addrStr := addr.String()
+		// Heuristic: if the address is not loopback it is considered public.
+		if !strings.HasPrefix(addrStr, "/ip4/127.") &&
+			!strings.HasPrefix(addrStr, "/ip6/::1") {
+			return C.CString("public")
+		}
+	}
+	return C.CString("private")
+}
+
+// PrsmPeerList returns a JSON array of {"peer_id":"…","addrs":["…"]} objects
+// for all currently connected peers. The caller must free the result with PrsmFree.
+// Returns nil on error or if the handle is not found.
+//
+//export PrsmPeerList
+func PrsmPeerList(handle C.int) *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PrsmPeerList: recovered from panic: %v", r)
+		}
+	}()
+
+	h := internal.Get(int(handle))
+	if h == nil {
+		log.Printf("PrsmPeerList: handle %d not found", int(handle))
+		return nil
+	}
+
+	peers := h.P2PHost.Network().Peers()
+	items := make([]peerAddrInfoJSON, 0, len(peers))
+	for _, pid := range peers {
+		conns := h.P2PHost.Network().ConnsToPeer(pid)
+		addrs := make([]string, 0, len(conns))
+		for _, c := range conns {
+			addrs = append(addrs, c.RemoteMultiaddr().String())
+		}
+		items = append(items, peerAddrInfoJSON{PeerID: pid.String(), Addrs: addrs})
+	}
+
+	b, err := json.Marshal(items)
+	if err != nil {
+		log.Printf("PrsmPeerList: JSON marshal error: %v", err)
+		return nil
+	}
+	return C.CString(string(b))
 }
 
 // main is required for c-shared build mode.
