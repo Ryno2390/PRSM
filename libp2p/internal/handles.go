@@ -16,6 +16,8 @@ type Host struct {
 	Cancel     context.CancelFunc
 	P2PHost    libp2phost.Host
 	UDS        *UDSWriter
+	PubSub     *PubSubManager
+	Streams    *StreamManager
 }
 
 var (
