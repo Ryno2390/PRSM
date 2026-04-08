@@ -61,6 +61,10 @@ func PrsmPeerCount(handle C.int) C.int {
 		}
 	}()
 
+	h := internal.Get(int(handle))
+	if h == nil {
+		return C.int(-1)
+	}
 	// Placeholder — real peer count will be returned in Task 2.
 	return C.int(0)
 }
