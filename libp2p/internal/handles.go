@@ -18,6 +18,7 @@ type Host struct {
 	UDS        *UDSWriter
 	PubSub     *PubSubManager
 	Streams    *StreamManager
+	DHT        *DHTManager
 }
 
 var (
