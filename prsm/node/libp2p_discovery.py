@@ -339,12 +339,12 @@ class Libp2pDiscovery:
             return
 
         new_startup = data.get("startup_timestamp", 0.0)
-        new_caps = set(data.get("capabilities", []))
+        new_caps = {c.lower() for c in data.get("capabilities", [])}
 
         existing = self._capability_index.get(node_id)
         if existing is not None:
             old_startup = existing.startup_timestamp
-            old_caps = set(existing.capabilities)
+            old_caps = {c.lower() for c in existing.capabilities}
 
             # Reset reliability only on restart or capability change
             if new_startup > old_startup or new_caps != old_caps:
