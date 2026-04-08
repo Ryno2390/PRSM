@@ -62,6 +62,10 @@ class MockLibp2pTransport:
     def sign(self, msg):
         pass
 
+    async def connect_to_peer(self, address: str):
+        """Stub — no real connection needed in tests."""
+        return None
+
 
 class MockNetwork:
     """Routes messages between MockLibp2pTransport instances."""
@@ -114,3 +118,170 @@ def make_test_node(node_id: str, network: MockNetwork):
     gossip = MockGossip(node_id, network)
     _gossip_registry[node_id] = gossip
     return transport, gossip
+
+
+# ── Test classes ──────────────────────────────────────────────────────────────
+
+
+class TestComputeJobLifecycle:
+
+    @pytest.mark.asyncio
+    async def test_job_offer_accept_confirm_result_payment(self):
+        _gossip_registry.clear()
+        network = MockNetwork()
+        req_transport, req_gossip = make_test_node("requester", network)
+        prov_transport, prov_gossip = make_test_node("provider", network)
+
+        messages_received = {"requester": [], "provider": []}
+
+        async def on_job_offer(subtype, data, sender):
+            messages_received["provider"].append(("job_offer", data))
+            await prov_gossip.publish("job_accept", {
+                "job_id": data["job_id"],
+                "provider_id": "provider",
+            })
+
+        prov_gossip.subscribe("job_offer", on_job_offer)
+
+        async def on_job_accept(subtype, data, sender):
+            messages_received["requester"].append(("job_accept", data))
+            await req_gossip.publish("job_confirm", {
+                "job_id": data["job_id"],
+                "provider_id": data["provider_id"],
+                "requester_id": "requester",
+            })
+
+        req_gossip.subscribe("job_accept", on_job_accept)
+
+        async def on_job_confirm(subtype, data, sender):
+            messages_received["provider"].append(("job_confirm", data))
+            await prov_gossip.publish("job_result", {
+                "job_id": data["job_id"],
+                "provider_id": "provider",
+                "status": "completed",
+                "result": {"output": "42"},
+            })
+
+        prov_gossip.subscribe("job_confirm", on_job_confirm)
+
+        result_received = asyncio.Event()
+
+        async def on_job_result(subtype, data, sender):
+            messages_received["requester"].append(("job_result", data))
+            result_received.set()
+
+        req_gossip.subscribe("job_result", on_job_result)
+
+        await req_gossip.publish("job_offer", {
+            "job_id": "test_job_001",
+            "job_type": "inference",
+            "requester_id": "requester",
+            "payload": {"prompt": "What is 6*7?"},
+            "ftns_budget": 1.0,
+        })
+
+        await asyncio.wait_for(result_received.wait(), timeout=5.0)
+
+        assert len(messages_received["provider"]) == 2
+        assert messages_received["provider"][0][0] == "job_offer"
+        assert messages_received["provider"][1][0] == "job_confirm"
+        assert len(messages_received["requester"]) == 2
+        assert messages_received["requester"][0][0] == "job_accept"
+        assert messages_received["requester"][1][0] == "job_result"
+        assert messages_received["requester"][1][1]["result"]["output"] == "42"
+
+
+class TestCapabilityDiscovery:
+
+    @pytest.mark.asyncio
+    async def test_capability_index_populated(self):
+        from prsm.node.libp2p_discovery import Libp2pDiscovery
+
+        _gossip_registry.clear()
+        network = MockNetwork()
+        t_a, g_a = make_test_node("node_a", network)
+        t_b, g_b = make_test_node("node_b", network)
+
+        disc_a = Libp2pDiscovery(transport=t_a, gossip=g_a)
+        disc_b = Libp2pDiscovery(transport=t_b, gossip=g_b)
+
+        await disc_a.start()
+        await disc_b.start()
+
+        disc_a.set_local_capabilities(
+            capabilities=["compute", "inference", "gpu"],
+            backends=["local"],
+            gpu_available=True,
+        )
+        await disc_a.announce_capabilities()
+
+        disc_b.set_local_capabilities(
+            capabilities=["storage", "pinning"],
+            backends=[],
+            gpu_available=False,
+        )
+        await disc_b.announce_capabilities()
+
+        await asyncio.sleep(0.01)
+
+        gpu_peers = disc_b.find_peers_with_gpu()
+        assert len(gpu_peers) == 1
+        assert gpu_peers[0].node_id == "node_a"
+
+        storage_peers = disc_a.find_peers_with_capability("storage")
+        assert len(storage_peers) == 1
+        assert storage_peers[0].node_id == "node_b"
+
+        assert all(p.node_id != "node_a" for p in disc_a.find_peers_with_capability("storage"))
+
+
+class TestReliabilityTracking:
+
+    @pytest.mark.asyncio
+    async def test_reliability_degrades_and_resets(self):
+        from prsm.node.libp2p_discovery import Libp2pDiscovery
+
+        _gossip_registry.clear()
+        network = MockNetwork()
+        t_req, g_req = make_test_node("requester", network)
+        t_prov, g_prov = make_test_node("provider", network)
+
+        disc = Libp2pDiscovery(transport=t_req, gossip=g_req)
+        await disc.start()
+
+        await disc._on_capability("capability_announce", {
+            "node_id": "provider",
+            "capabilities": ["compute", "gpu"],
+            "supported_backends": ["local"],
+            "gpu_available": True,
+            "startup_timestamp": 1000.0,
+        }, "provider")
+
+        disc.record_job_success("provider")
+        disc.record_job_success("provider")
+        disc.record_job_failure("provider")
+
+        peer = disc._capability_index["provider"]
+        assert abs(peer.reliability_score - 0.6667) < 0.01
+
+        # Same startup_timestamp — no reset, counters accumulate
+        await disc._on_capability("capability_announce", {
+            "node_id": "provider",
+            "capabilities": ["compute", "gpu"],
+            "supported_backends": ["local"],
+            "gpu_available": True,
+            "startup_timestamp": 1000.0,
+        }, "provider")
+        assert peer.job_failure_count == 1
+
+        # New startup_timestamp — counters reset
+        await disc._on_capability("capability_announce", {
+            "node_id": "provider",
+            "capabilities": ["compute", "gpu"],
+            "supported_backends": ["local"],
+            "gpu_available": True,
+            "startup_timestamp": 2000.0,
+        }, "provider")
+        assert peer.job_failure_count == 0
+        assert peer.job_success_count == 0
+        assert peer.reliability_score == 1.0
