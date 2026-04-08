@@ -47,7 +47,7 @@ class KeyReconstructionError(StorageError):
 class PlacementError(StorageError):
     """Raised when content cannot be placed on enough distinct nodes."""
 
-    def __init__(self, reason: str, min_nodes_needed: int) -> None:
+    def __init__(self, reason: str, min_nodes_needed: int = 0) -> None:
         self.reason = reason
         self.min_nodes_needed = min_nodes_needed
         super().__init__(
