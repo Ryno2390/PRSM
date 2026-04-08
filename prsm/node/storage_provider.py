@@ -45,6 +45,11 @@ from prsm.node.storage_proofs import (
     DEFAULT_CHALLENGE_TIMEOUT_MINUTES,
 )
 
+try:
+    from prsm.node.libp2p_transport import Libp2pTransportError
+except ImportError:
+    Libp2pTransportError = OSError  # type: ignore[misc,assignment]
+
 logger = logging.getLogger(__name__)
 
 # Reward rate: FTNS per GB per epoch (1 hour)
@@ -103,10 +108,14 @@ class StorageProvider:
         challenge_config: Optional[ChallengeConfig] = None,
         config: Optional["NodeConfig"] = None,
         content_economy: Optional[Any] = None,  # Phase 4: Replication tracking
+        transport: Optional[Any] = None,
+        discovery: Optional[Any] = None,
     ):
         self.identity = identity
         self.gossip = gossip
         self.ledger = ledger
+        self.transport = transport
+        self.discovery = discovery
         self.ipfs_api_url = ipfs_api_url
         self.pledged_gb = pledged_gb
         self.reward_interval = reward_interval
@@ -151,6 +160,9 @@ class StorageProvider:
         # Provider reputation tracking (for remote providers we challenge)
         self._provider_reputation: Dict[str, float] = {}  # provider_id -> reputation score (0.0-1.0)
 
+        # Deduplication for incoming storage challenges
+        self._seen_challenge_ids: Dict[str, float] = {}
+
     @property
     def used_bytes(self) -> int:
         return sum(p.size_bytes for p in self.pinned_content.values())
@@ -185,7 +197,10 @@ class StorageProvider:
             # Subscribe to challenge-related gossip messages
             self.gossip.subscribe("storage_challenge", self._on_storage_challenge)
             self.gossip.subscribe("storage_proof_response", self._on_storage_proof_response)
-            
+
+            # Register unified direct message handler
+            self._register_direct_handler()
+
             # Start background tasks
             self._tasks.append(asyncio.create_task(self._reward_loop()))
             
@@ -353,12 +368,56 @@ class StorageProvider:
                 "metadata": {},
             })
 
+            # Announce via DHT
+            if self.discovery:
+                try:
+                    await self.discovery.provide_content(cid)
+                except Exception as exc:
+                    logger.debug("DHT provide_content failed for %s: %s", cid[:12], exc)
+
             logger.info(f"Pinned content {cid[:12]}... for {requester_id[:8]}")
+
+    # ── Cleanup helpers ─────────────────────────────────────────────
+
+    def _cleanup_seen_challenges(self) -> None:
+        """Evict stale entries from the challenge deduplication set."""
+        cutoff = time.time() - 600
+        for cid in list(self._seen_challenge_ids.keys()):
+            if self._seen_challenge_ids.get(cid, 0) < cutoff:
+                self._seen_challenge_ids.pop(cid, None)
+
+    # ── Direct message handling ──────────────────────────────────
+
+    def _register_direct_handler(self) -> None:
+        """Register unified handler for all direct P2P messages."""
+        if self.transport is not None:
+            self.transport.on_message(MSG_DIRECT, self._on_direct_message)
+
+    async def _on_direct_message(self, msg: P2PMessage, peer: PeerConnection) -> None:
+        """Dispatch incoming direct messages by subtype."""
+        subtype = msg.payload.get("subtype", "")
+        if subtype == "content_request":
+            await self._on_direct_content_request(msg, peer)
+        elif subtype == "storage_challenge":
+            await self._on_storage_challenge(subtype, msg.payload, msg.sender_id)
+        elif subtype == "storage_proof_response":
+            await self._on_storage_proof_response(subtype, msg.payload, msg.sender_id)
 
     # ── Content serving ────────────────────────────────────────────
 
     def register_content_handler(self, transport: WebSocketTransport) -> None:
-        """Register to handle direct content_request messages for pinned CIDs."""
+        """Register to handle direct content_request messages for pinned CIDs.
+
+        .. deprecated::
+            Use the ``transport`` constructor parameter instead.
+            This method is kept for backward compatibility.
+        """
+        import warnings
+        warnings.warn(
+            "register_content_handler is deprecated; pass transport= to the constructor",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._transport = transport
         transport.on_message(MSG_DIRECT, self._on_direct_content_request)
         logger.info("Storage provider registered for content serving")
@@ -479,7 +538,10 @@ class StorageProvider:
             try:
                 # Process expired challenges
                 await self._process_expired_challenges()
-                
+
+                # Evict stale dedup entries
+                self._cleanup_seen_challenges()
+
             except Exception as e:
                 logger.error(f"Challenge cleanup loop error: {e}")
 
@@ -651,12 +713,28 @@ class StorageProvider:
             status=ChallengeStatus.PENDING,
         )
         
-        # Broadcast the challenge via gossip
-        await self.gossip.publish("storage_challenge", {
+        # Send challenge via direct P2P with gossip fallback
+        challenge_payload = {
+            "subtype": "storage_challenge",
             "challenge": challenge.to_dict(),
             "challenger_id": self.identity.node_id,
             "target_provider_id": provider_id,
-        })
+        }
+        if self.transport is not None:
+            msg = P2PMessage(
+                msg_type=MSG_DIRECT,
+                sender_id=self.identity.node_id,
+                payload=challenge_payload,
+            )
+            try:
+                sent = await self.transport.send_to_peer(provider_id, msg)
+                if not sent:
+                    raise ConnectionError("direct send failed")
+            except (ConnectionError, Libp2pTransportError, OSError) as exc:
+                logger.debug("Direct challenge to %s failed (%s), falling back to gossip", provider_id[:8], exc)
+                await self.gossip.publish("storage_challenge", challenge_payload)
+        else:
+            await self.gossip.publish("storage_challenge", challenge_payload)
         
         logger.info(
             f"Issued challenge {challenge.challenge_id[:16]}... to provider "
@@ -672,12 +750,20 @@ class StorageProvider:
         origin: str,
     ) -> None:
         """Handle an incoming storage challenge from another node.
-        
+
         This is called when another node challenges us to prove storage.
         """
+        # Deduplication guard
+        challenge_id = data.get("challenge", {}).get("challenge_id", "")
+        if challenge_id in self._seen_challenge_ids:
+            logger.debug("Dropping duplicate challenge %s", challenge_id[:16])
+            return
+        if challenge_id:
+            self._seen_challenge_ids[challenge_id] = time.time()
+
         if not self._running or not self._storage_prover:
             return
-            
+
         # Check if this challenge is for us
         target_provider_id = data.get("target_provider_id", "")
         if target_provider_id != self.identity.node_id:
@@ -697,12 +783,29 @@ class StorageProvider:
             proof = await self._storage_prover.answer_challenge(challenge)
             
             if proof:
-                # Send the proof response via gossip
-                await self.gossip.publish("storage_proof_response", {
+                # Send the proof response via direct P2P with gossip fallback
+                challenger_id = data.get("challenger_id", origin)
+                proof_payload = {
+                    "subtype": "storage_proof_response",
                     "proof": proof.to_dict(),
                     "challenge_id": challenge.challenge_id,
                     "provider_id": self.identity.node_id,
-                })
+                }
+                if self.transport is not None:
+                    proof_msg = P2PMessage(
+                        msg_type=MSG_DIRECT,
+                        sender_id=self.identity.node_id,
+                        payload=proof_payload,
+                    )
+                    try:
+                        sent = await self.transport.send_to_peer(challenger_id, proof_msg)
+                        if not sent:
+                            raise ConnectionError("direct send failed")
+                    except (ConnectionError, Libp2pTransportError, OSError) as exc:
+                        logger.debug("Direct proof to %s failed (%s), falling back to gossip", challenger_id[:8], exc)
+                        await self.gossip.publish("storage_proof_response", proof_payload)
+                else:
+                    await self.gossip.publish("storage_proof_response", proof_payload)
                 
                 # Update our tracking
                 self.pinned_content[cid].last_challenge_time = time.time()
