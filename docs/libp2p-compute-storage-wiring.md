@@ -204,6 +204,17 @@ Similarly, the verifier side deduplicates proof responses by `challenge_id` befo
 
 **Cleanup:** A periodic task (piggyback on the existing `_challenge_cleanup_loop`) evicts entries from `_seen_challenge_ids` older than 10 minutes (2x the challenge deadline). This prevents unbounded memory growth.
 
+**Iteration safety:** The cleanup loop must iterate over a snapshot of keys, not the live dict view. If an `await` yields control mid-iteration and a new challenge arrives, modifying the dict during iteration raises `RuntimeError`.
+
+```python
+async def _cleanup_seen_challenges(self) -> None:
+    cutoff = time.time() - 600  # 10 minutes
+    # Snapshot keys to avoid RuntimeError from concurrent modification
+    for cid in list(self._seen_challenge_ids.keys()):
+        if self._seen_challenge_ids.get(cid, 0) < cutoff:
+            self._seen_challenge_ids.pop(cid, None)
+```
+
 ### 3.7 What Stays on Gossip
 
 - `GOSSIP_JOB_CONFIRM` — broadcast so all competing providers know they lost
@@ -255,6 +266,59 @@ This runs once at startup. Additionally, a periodic re-announcement task (every 
 self._capability_announce_task = asyncio.create_task(
     self._periodic_capability_announce()
 )
+```
+
+**Important: Heartbeat vs. state-change distinction.** The periodic re-announcement is a *heartbeat* — it refreshes the peer's presence in the discovery index but must NOT reset reliability counters on the receiver side (see Component 5.4). To distinguish the two cases, the `capability_announce` payload includes:
+
+- `startup_timestamp: float` — set once at node boot, never changes during the node's lifetime.
+- `capabilities: List[str]` — the current capability set.
+
+The receiver (`_on_capability`) only resets failure counters when **either** the `startup_timestamp` is newer than the previously recorded value (indicating a node restart) **or** the capability list has changed (indicating a reconfiguration). Periodic heartbeats that carry the same `startup_timestamp` and same capabilities only update `last_seen` — they do not touch reliability scores.
+
+```python
+async def _on_capability(self, subtype, data, sender_id):
+    node_id = data.get("node_id", sender_id)
+    new_startup = data.get("startup_timestamp", 0.0)
+    new_caps = set(data.get("capabilities", []))
+    
+    existing = self._capability_index.get(node_id)
+    if existing is not None:
+        old_startup = getattr(existing, "startup_timestamp", 0.0)
+        old_caps = set(existing.capabilities)
+        
+        # Only reset reliability on restart or capability change
+        if new_startup > old_startup or new_caps != old_caps:
+            existing.job_success_count = 0
+            existing.job_failure_count = 0
+            existing.last_failure_time = 0.0
+            existing.startup_timestamp = new_startup
+        
+        # Always refresh presence
+        existing.capabilities = data.get("capabilities", existing.capabilities)
+        existing.supported_backends = data.get("supported_backends", existing.supported_backends)
+        existing.gpu_available = data.get("gpu_available", existing.gpu_available)
+        existing.last_seen = time.time()
+        existing.last_capability_update = time.time()
+    else:
+        # New peer — create entry (reliability starts at 1.0 by default)
+        self._capability_index[node_id] = PeerInfo(
+            node_id=node_id,
+            startup_timestamp=new_startup,
+            # ... remaining fields as before
+        )
+```
+
+The `announce_capabilities()` method includes `startup_timestamp` in the payload:
+
+```python
+async def announce_capabilities(self) -> int:
+    return await self.gossip.publish("capability_announce", {
+        "node_id": self.transport.identity.node_id,
+        "capabilities": self._local_capabilities,
+        "supported_backends": self._local_backends,
+        "gpu_available": self._local_gpu_available,
+        "startup_timestamp": self._startup_timestamp,  # Set once in __init__
+    })
 ```
 
 ### 4.2 DHT Content Provide on Pin
@@ -368,7 +432,7 @@ return [p.node_id for p in peers]
 
 - **No banning:** Transient failures happen. A peer with 2 out of 10 failures (80% reliability) is still useful.
 - **Consecutive failure threshold:** If a peer has 3+ consecutive failures (tracked via `last_failure_time` proximity), it is excluded from `target_peers` but still receives broadcast job offers (giving it a chance to self-recover).
-- **Re-announcement resets:** When a peer re-announces capabilities via `capability_announce`, its failure counters reset. This allows a node operator who fixed a hardware issue to immediately rejoin the capable pool.
+- **Re-announcement resets (conditional):** Failure counters reset only when a `capability_announce` carries a newer `startup_timestamp` or a changed capability list (see Component 4.1). Periodic heartbeat re-announcements with the same timestamp and capabilities do NOT reset counters — this prevents a perpetually failing node from wiping its penalty every 5 minutes.
 
 ### 5.5 Scope Boundary
 
@@ -381,6 +445,18 @@ This is local bookkeeping only — no new gossip messages or protocols. Each nod
 **File:** `tests/integration/test_libp2p_compute_storage.py`
 
 Tests use a `MockLibp2pTransport` that routes messages between two in-process nodes without requiring the Go shared library. The mock implements the same public API as `Libp2pTransport` and delivers messages through the same `_dispatch` / handler mechanism.
+
+**Serialization fidelity:** The mock transport must serialize payloads to JSON bytes and deserialize them back before delivery — mirroring what the real Go FFI bridge does. This catches `TypeError` from non-JSON-serializable types (e.g., raw `bytes` in a storage proof, custom tuples, or `datetime` objects) that would silently pass if the mock handed Python dicts around directly.
+
+```python
+class MockLibp2pTransport:
+    async def _deliver(self, target_node, msg: P2PMessage) -> None:
+        # Serialize through JSON to catch FFI boundary issues
+        wire_bytes = json.dumps(msg.to_dict()).encode("utf-8")
+        reconstructed = json.loads(wire_bytes.decode("utf-8"))
+        wire_msg = P2PMessage.from_dict(reconstructed)
+        await target_node.transport._dispatch(wire_msg.to_dict())
+```
 
 ### Test 1: Compute Job Lifecycle
 
@@ -414,8 +490,8 @@ The mock transport tests (Tests 1-5) verify the state machine logic. For real FF
 |------|--------|
 | `prsm/node/storage_provider.py` | Add `transport` + `discovery` constructor params; direct P2P for challenges/proofs with scoped exception fallback; unified direct message dispatcher; challenge deduplication via `_seen_challenge_ids`; DHT provide on pin |
 | `prsm/node/compute_requester.py` | Add `discovery` constructor param; capability-based peer lookup with reliability sorting; record job success/failure |
-| `prsm/node/discovery.py` | Add `job_success_count`, `job_failure_count`, `last_failure_time` fields and `reliability_score` property to `PeerInfo` |
-| `prsm/node/libp2p_discovery.py` | Add `record_job_success()`, `record_job_failure()` methods; reset counters on `_on_capability` re-announcement |
+| `prsm/node/discovery.py` | Add `job_success_count`, `job_failure_count`, `last_failure_time`, `startup_timestamp` fields and `reliability_score` property to `PeerInfo` |
+| `prsm/node/libp2p_discovery.py` | Add `_startup_timestamp` to `__init__`; add `startup_timestamp` to `announce_capabilities()` payload; conditional reliability reset in `_on_capability`; add `record_job_success()`, `record_job_failure()` methods |
 | `prsm/node/node.py` | Pass `transport`/`discovery` to providers; capability announcement at startup; periodic re-announcement task; remove standalone `register_content_handler()` |
 | `tests/integration/test_libp2p_compute_storage.py` | New file: 5 integration tests with mock transport harness |
 
