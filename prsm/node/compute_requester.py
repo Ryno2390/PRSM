@@ -153,6 +153,9 @@ class ComputeRequester:
             backend_peer_ids = {p.node_id for p in backend_peers}
             capable_peers = [p for p in capable_peers if p.node_id in backend_peer_ids] or capable_peers
 
+        # Sort by reliability — unreliable peers fall to the bottom
+        capable_peers.sort(key=lambda p: p.reliability_score, reverse=True)
+
         return [p.node_id for p in capable_peers]
 
     async def submit_job(
@@ -310,6 +313,9 @@ class ComputeRequester:
             job.completed_at = time.time()
             job._result_event.set()
             logger.warning(f"Job {job_id[:8]} failed: {job.error}")
+            # Record failure in discovery for reliability tracking
+            if self.discovery:
+                self.discovery.record_job_failure(provider_id)
             return
 
         # Verify result signature — required for payment
@@ -335,6 +341,10 @@ class ComputeRequester:
         job.result = result
         job.result_verified = verified
         job.completed_at = time.time()
+
+        # Record success in discovery for reliability tracking
+        if self.discovery:
+            self.discovery.record_job_success(provider_id)
 
         # Record payment — only for remote providers.
         # Self-compute payment is handled by the API escrow release.
