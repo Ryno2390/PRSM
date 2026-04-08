@@ -123,7 +123,11 @@ The FFI boundary is split into two communication channels to avoid GIL contentio
 
 **Data plane (Unix Domain Socket):** Used for high-frequency incoming messages — GossipSub deliveries and direct stream data. Go writes length-prefixed framed messages to a UDS. Python reads them via `asyncio` socket reader — zero FFI involvement on the hot path, no GIL thrashing.
 
-`PrsmStart` accepts a `uds_path` parameter. Go opens a Unix socket at that path and writes incoming messages as framed packets:
+`PrsmStart` accepts a `uds_path` parameter. Go opens a Unix socket at that path and writes incoming messages as framed packets.
+
+**UDS cleanup:** Go's `internal/uds.go` must unlink any existing socket file at `uds_path` before binding (handles crash recovery — if the node was killed via SIGKILL, the stale socket file persists). Python's `Libp2pTransport.stop()` explicitly deletes the socket file after closing the reader. Belt and suspenders — both sides clean up.
+
+Frame format:
 
 ```
 [4 bytes: payload length (big-endian uint32)]
@@ -169,6 +173,8 @@ This prevents use-after-free when Go reclaims the buffer after the callback retu
 ### Identity
 
 The Go host derives its libp2p identity from the same Ed25519 private key that the Python node already uses. The key is passed as raw bytes to `PrsmStart`. This means the node's libp2p peer ID is deterministically derived from its existing PRSM identity — no new key management.
+
+**Key format constraint:** libp2p uses a Protobuf-encoded wrapper around Ed25519 keys internally. The Go side must accept raw 64-byte Ed25519 private keys (as Python's `cryptography` library produces) and convert them to libp2p's `crypto.PrivKey` using `crypto.UnmarshalEd25519PrivateKey(raw_bytes)`. If this conversion is wrong, the libp2p peer ID will differ from PRSM's `node_id` (which is `SHA256(public_key)[:32]`), silently breaking authentication. The implementation must include a startup assertion that verifies the derived peer ID matches the expected PRSM node ID.
 
 ### Build
 
@@ -257,7 +263,14 @@ The adapter loads the shared library at construction time:
 self._lib = ctypes.CDLL("libp2p/build/libprsm_p2p.so")
 ```
 
-Platform detection selects `.so`, `.dylib`, or `.dll` automatically.
+Platform detection selects `.so`, `.dylib`, or `.dll` automatically. If the expected binary is missing or incompatible (wrong architecture, stale version), `start()` raises `Libp2pTransportError` with a clear message directing the user to build locally:
+
+```
+Libp2pTransportError: libprsm_p2p shared library not found for darwin/arm64.
+Run 'make' in the libp2p/ directory to build from source (requires Go 1.22+).
+```
+
+This handles developers on platforms without pre-built binaries (Windows, non-standard Linux distros with different GLIBC versions).
 
 ### Message Delivery (UDS Reader)
 
@@ -342,6 +355,7 @@ Examples:
 ### What the Wrapper Still Does
 
 - **Callback registry** — maps topic → list of Python callbacks
+- **Lazy subscription** — `PrsmSubscribe` is only called when the first Python callback registers for a subtype, not eagerly for all subtypes. This avoids GossipSub mesh overhead for topics no consumer cares about. With 30+ PRSM gossip subtypes, a node that only does compute (not storage or BitTorrent) should not join meshes for storage/torrent topics.
 - **Message envelope** — wraps `data` dict with `sender_id`, `timestamp`, `subtype` before publishing
 - **Ledger persistence** — optionally logs messages to the DAG ledger (audit trail)
 - **Telemetry** — tracks publish/receive counts per subtype
@@ -517,6 +531,12 @@ These files are NOT modified:
 ---
 
 ## Testing Strategy
+
+**Milestone 0 — "Hello World" FFI bridge:**
+- Go library compiles and loads from Python via ctypes
+- `PrsmStart` initializes a host and returns a valid handle
+- Ed25519 key passed from Python produces the expected libp2p peer ID
+- This validates the entire build pipeline and key derivation before building the full data plane
 
 **Unit tests (mock FFI):**
 - `Libp2pTransport` adapter: start/stop, send, receive, peer tracking
