@@ -264,10 +264,10 @@ class TensorFlowDistillationBackend(DistillationBackend):
                 logger.info("teacher_model_loaded_from_local_path", path=teacher_model_path)
                 return teacher_model
 
-            # Check if it's an IPFS CID
+            # Check if it's a content store ID
             if teacher_model_path.startswith("ipfs://"):
-                cid = teacher_model_path.replace("ipfs://", "")
-                teacher_model = await self._load_teacher_from_ipfs(cid)
+                content_id = teacher_model_path.replace("ipfs://", "")
+                teacher_model = await self._load_teacher_from_ipfs(content_id)
                 if teacher_model is not None:
                     return teacher_model
 
@@ -295,20 +295,26 @@ class TensorFlowDistillationBackend(DistillationBackend):
             logger.error("teacher_model_loading_error", error=str(e))
             return None
 
-    async def _load_teacher_from_ipfs(self, cid: str) -> Any:
-        """Load teacher model from IPFS."""
+    async def _load_teacher_from_ipfs(self, content_id: str) -> Any:
+        """Load teacher model from ContentStore."""
         try:
-            from prsm.core.ipfs_client import get_ipfs_client
+            from prsm.storage import get_content_store, ContentHash
+            from prsm.storage.exceptions import StorageError
 
-            ipfs_client = get_ipfs_client()
-            if ipfs_client is None:
-                logger.warning("ipfs_client_not_available")
+            store = get_content_store()
+            if store is None:
+                logger.warning("content_store_not_available")
                 return None
 
-            # Retrieve model bytes from IPFS
-            model_bytes = await ipfs_client.cat(cid)
+            # Retrieve model bytes from ContentStore
+            try:
+                model_bytes = await store.retrieve_local(ContentHash.from_hex(content_id))
+            except (StorageError, OSError) as exc:
+                logger.warning("content_store_model_retrieval_failed", content_id=content_id, error=str(exc))
+                return None
+
             if model_bytes is None:
-                logger.warning("ipfs_model_retrieval_failed", cid=cid)
+                logger.warning("content_store_model_retrieval_failed", content_id=content_id)
                 return None
 
             # Extract to temp directory
@@ -324,18 +330,18 @@ class TensorFlowDistillationBackend(DistillationBackend):
                         zip_ref.extractall(tmpdir)
 
                     teacher_model = tf.saved_model.load(tmpdir)
-                    logger.info("teacher_model_loaded_from_ipfs", cid=cid)
+                    logger.info("teacher_model_loaded_from_content_store", content_id=content_id)
                     return teacher_model
                 except zipfile.BadZipFile:
                     # Try as raw saved_model format
                     model_path = Path(tmpdir) / "saved_model.pb"
                     model_path.write_bytes(model_bytes)
                     teacher_model = tf.saved_model.load(tmpdir)
-                    logger.info("teacher_model_loaded_from_ipfs_raw", cid=cid)
+                    logger.info("teacher_model_loaded_from_content_store_raw", content_id=content_id)
                     return teacher_model
 
         except Exception as e:
-            logger.error("ipfs_teacher_load_failed", cid=cid, error=str(e))
+            logger.error("content_store_teacher_load_failed", content_id=content_id, error=str(e))
             return None
 
     async def _load_teacher_from_huggingface(self, model_id: str) -> Any:

@@ -16,7 +16,7 @@ from .clearing_engine import ChronosEngine
 from .wallet_manager import MultiSigWalletManager
 from .exchange_router import ExchangeRouter
 from .models import AssetType, SwapRequest, SwapType, TransactionStatus
-from prsm.core.ipfs_client import IPFSClient
+from prsm.storage import get_content_store
 from ..auth import get_current_user
 
 
@@ -25,8 +25,7 @@ logger = logging.getLogger(__name__)
 # Initialize CHRONOS components
 wallet_manager = MultiSigWalletManager()
 exchange_router = ExchangeRouter()
-ipfs_client = IPFSClient()  # This would be properly configured
-chronos_engine = ChronosEngine(wallet_manager, exchange_router, ipfs_client)
+chronos_engine = ChronosEngine(wallet_manager, exchange_router, get_content_store())
 
 router = APIRouter(prefix="/chronos", tags=["CHRONOS Clearing Protocol"])
 

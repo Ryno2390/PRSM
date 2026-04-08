@@ -102,7 +102,7 @@ class StorageProvider:
         identity: NodeIdentity,
         gossip: GossipProtocol,
         ledger: LocalLedger,
-        ipfs_api_url: str = "http://127.0.0.1:5001",
+        ipfs_api_url: str = "",  # Deprecated: IPFS replaced by ContentStore
         pledged_gb: float = 10.0,
         reward_interval: float = 3600.0,  # 1 hour
         challenge_config: Optional[ChallengeConfig] = None,
@@ -182,13 +182,13 @@ class StorageProvider:
         # Check IPFS availability
         self.ipfs_available = await self._check_ipfs()
         if self.ipfs_available:
-            logger.info(f"IPFS detected at {self.ipfs_api_url}, storage provider active ({self.pledged_gb}GB pledged)")
-            
+            logger.info(f"ContentStore active, storage provider active ({self.pledged_gb}GB pledged)")
+
             # Initialize the storage prover for answering challenges
             self._storage_prover = StorageProver(
                 identity=self.identity,
                 ipfs_client=None,
-                ipfs_api_url=self.ipfs_api_url,
+                ipfs_api_url="",
             )
             
             # Register gossip handlers
@@ -214,9 +214,8 @@ class StorageProvider:
                 )
         else:
             logger.warning(
-                f"IPFS not available at {self.ipfs_api_url} — "
-                "storage features disabled. Install Kubo (https://docs.ipfs.tech/install/) "
-                "and run 'ipfs daemon' to enable."
+                "ContentStore not available — "
+                "storage features disabled. Ensure ContentStore is initialized."
             )
 
     async def stop(self) -> None:
@@ -236,82 +235,59 @@ class StorageProvider:
             self._storage_prover = None
 
     async def _check_ipfs(self) -> bool:
-        """Check if IPFS daemon is running."""
+        """Check if ContentStore is available (replaces IPFS daemon check)."""
+        # TODO: full ContentStore integration
         try:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.ipfs_api_url}/api/v0/id",
-                    timeout=aiohttp.ClientTimeout(total=5),
-                ) as resp:
-                    return resp.status == 200
+            from prsm.storage import get_content_store, init_content_store
+            store = get_content_store()
+            if store is None:
+                store = init_content_store()
+            return store is not None
         except Exception:
             return False
 
     async def _get_ipfs_session(self) -> Any:
-        """Get or create aiohttp session for IPFS API."""
-        if self._ipfs_session is None or self._ipfs_session.closed:
-            import aiohttp
-            self._ipfs_session = aiohttp.ClientSession()
-        return self._ipfs_session
+        """Deprecated: returns None (IPFS HTTP session no longer used)."""
+        return None
 
     async def pin_content(self, cid: str) -> bool:
-        """Pin content on IPFS."""
+        """Store/pin content in ContentStore."""
+        # TODO: full ContentStore integration
         if not self.ipfs_available:
             return False
         try:
-            session = await self._get_ipfs_session()
-            import aiohttp
-            async with session.post(
-                f"{self.ipfs_api_url}/api/v0/pin/add",
-                params={"arg": cid},
-                timeout=aiohttp.ClientTimeout(total=60),
-            ) as resp:
-                if resp.status == 200:
-                    # Get content size
-                    size = await self._get_content_size(cid)
-                    self.pinned_content[cid] = PinnedContent(
-                        cid=cid,
-                        size_bytes=size,
-                    )
-                    return True
+            from prsm.storage import get_content_store, ContentHash
+            from prsm.storage.exceptions import StorageError
+            store = get_content_store()
+            if store is None:
                 return False
+            # Record as pinned (content assumed already stored)
+            exists = await store.exists_local(ContentHash.from_hex(cid))
+            if exists:
+                size = await self._get_content_size(cid)
+                self.pinned_content[cid] = PinnedContent(cid=cid, size_bytes=size)
+                return True
+            return False
         except Exception as e:
             logger.error(f"Failed to pin {cid}: {e}")
             return False
 
     async def _get_content_size(self, cid: str) -> int:
-        """Get the size of pinned content."""
-        try:
-            session = await self._get_ipfs_session()
-            import aiohttp
-            async with session.post(
-                f"{self.ipfs_api_url}/api/v0/object/stat",
-                params={"arg": cid},
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return data.get("CumulativeSize", 0)
-        except Exception:
-            pass
+        """Get the size of stored content from ContentStore."""
+        # TODO: full ContentStore integration
         return 0
 
     async def verify_pin(self, cid: str) -> bool:
-        """Verify that content is still pinned."""
+        """Verify that content exists in ContentStore."""
+        # TODO: full ContentStore integration
         if not self.ipfs_available:
             return False
         try:
-            session = await self._get_ipfs_session()
-            import aiohttp
-            async with session.post(
-                f"{self.ipfs_api_url}/api/v0/pin/ls",
-                params={"arg": cid, "type": "all"},
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return cid in data.get("Keys", {})
+            from prsm.storage import get_content_store, ContentHash
+            store = get_content_store()
+            if store is None:
+                return False
+            return await store.exists_local(ContentHash.from_hex(cid))
         except Exception:
             pass
         return False

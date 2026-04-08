@@ -41,7 +41,8 @@ from prsm.core.config import get_settings
 from prsm.core.database import FTNSQueries
 from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork
 from ..federation.model_registry import ModelRegistry
-from prsm.core.ipfs_client import PRSMIPFSOperations, PRSMIPFSClient
+from prsm.storage import get_content_store, ContentHash
+from prsm.storage.exceptions import StorageError
 from prsm.economy.governance.proposals import ProposalManager
 
 from .models import (
@@ -109,13 +110,11 @@ class DistillationOrchestrator:
         self,
         circuit_breaker: Optional[CircuitBreakerNetwork] = None,
         model_registry: Optional[ModelRegistry] = None,
-        ipfs_client: Optional[PRSMIPFSClient] = None,
         proposal_manager: Optional[ProposalManager] = None
     ):
         # Core services
         self.circuit_breaker = circuit_breaker or CircuitBreakerNetwork()
         self.model_registry = model_registry or ModelRegistry()
-        self.ipfs_client = ipfs_client or PRSMIPFSClient()
         self.proposal_manager = proposal_manager or ProposalManager()
         
         # Distillation components

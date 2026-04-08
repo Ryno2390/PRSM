@@ -203,7 +203,7 @@ def _register_health_endpoint(app: FastAPI) -> None:
         """
         from prsm.core.database import db_manager
         from prsm.core.redis_client import redis_manager
-        from prsm.core.ipfs_client import get_ipfs_client
+        from prsm.storage import get_content_store
         from prsm.core.vector_db import get_vector_db_manager
 
         # Errors that indicate a service simply isn't present rather than
@@ -305,35 +305,22 @@ def _register_health_endpoint(app: FastAPI) -> None:
                 health_status["components"]["redis"] = {"status": "unhealthy", "error": err}
                 has_configured_failure = True
 
-        # IPFS
+        # Content Store (replaces IPFS)
         try:
-            ipfs_client = get_ipfs_client()
-            ipfs_healthy_nodes = await ipfs_client.health_check()
-            total_nodes = len(ipfs_client.nodes)
-            if ipfs_healthy_nodes > 0:
-                health_status["components"]["ipfs"] = {
+            store = get_content_store()
+            if store is not None:
+                health_status["components"]["storage"] = {
                     "status": "healthy",
-                    "connected": ipfs_client.connected,
-                    "healthy_nodes": f"{ipfs_healthy_nodes}/{total_nodes}",
-                    "primary_node": ipfs_client.primary_node.url if ipfs_client.primary_node else None
+                    "backend": "ContentStore",
                 }
-            elif total_nodes == 0 or not getattr(ipfs_client, 'connected', False):
-                # No nodes configured or never connected
-                health_status["components"]["ipfs"] = {"status": "not_configured"}
             else:
-                health_status["components"]["ipfs"] = {
-                    "status": "unhealthy",
-                    "connected": ipfs_client.connected,
-                    "healthy_nodes": f"0/{total_nodes}",
-                    "primary_node": ipfs_client.primary_node.url if ipfs_client.primary_node else None
-                }
-                has_configured_failure = True
+                health_status["components"]["storage"] = {"status": "not_configured"}
         except Exception as e:
             err = str(e)
             if _is_not_configured(err):
-                health_status["components"]["ipfs"] = {"status": "not_configured"}
+                health_status["components"]["storage"] = {"status": "not_configured"}
             else:
-                health_status["components"]["ipfs"] = {"status": "unhealthy", "error": err}
+                health_status["components"]["storage"] = {"status": "unhealthy", "error": err}
                 has_configured_failure = True
 
         # Vector Database

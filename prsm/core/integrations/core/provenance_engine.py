@@ -24,7 +24,7 @@ from ..models.integration_models import (
     ImportRequest, ImportResult
 )
 from prsm.core.models import ProvenanceRecord, FTNSTransaction, RoyaltyPayment
-from prsm.core.ipfs_client import get_ipfs_client
+from prsm.storage import get_content_store
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 
 
@@ -564,10 +564,15 @@ class ProvenanceEngine:
             print(f"❌ Failed to calculate usage rewards for {content_id}: {e}")
     
     async def _store_provenance_ipfs(self, provenance: ProvenanceMetadata) -> Optional[str]:
-        """Store provenance record in IPFS for immutability"""
+        """Store provenance record in ContentStore for immutability"""
+        import json as _json
+        from prsm.storage.exceptions import StorageError
         try:
-            ipfs_client = get_ipfs_client()
-            
+            store = get_content_store()
+            if store is None:
+                print("⚠️ ContentStore not available, provenance record not persisted")
+                return None
+
             # Create provenance document
             provenance_doc = {
                 "provenance_id": str(provenance.provenance_id),
@@ -578,14 +583,17 @@ class ProvenanceEngine:
                 "platform_source": provenance.platform_source.value,
                 "checksum": self._calculate_provenance_checksum(provenance)
             }
-            
-            # Store in IPFS
-            cid = await ipfs_client.store_json(provenance_doc)
-            print(f"📦 Stored provenance record in IPFS: {cid}")
-            return cid
-            
-        except Exception as e:
-            print(f"⚠️ Failed to store provenance in IPFS: {e}")
+
+            # Store in ContentStore
+            stored_hash = await store.store_local(
+                _json.dumps(provenance_doc).encode()
+            )
+            content_id = stored_hash.hex()
+            print(f"Stored provenance record in ContentStore: {content_id}")
+            return content_id
+
+        except (StorageError, OSError) as e:
+            print(f"Failed to store provenance in ContentStore: {e}")
             return None
     
     def _calculate_provenance_checksum(self, provenance: ProvenanceMetadata) -> str:

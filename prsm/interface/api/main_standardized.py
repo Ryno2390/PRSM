@@ -34,19 +34,19 @@ async def lifespan(app: FastAPI):
         from prsm.core.database import init_database
         from prsm.core.redis_client import init_redis
         from prsm.core.vector_db import init_vector_databases
-        from prsm.core.ipfs_client import init_ipfs
-        
+        from prsm.storage import init_content_store
+
         await init_database()
         logger.info("✅ Database connections established")
-        
+
         await init_redis()
         logger.info("✅ Redis caching initialized")
-        
+
         await init_vector_databases()
         logger.info("✅ Vector databases initialized")
-        
-        await init_ipfs()
-        logger.info("✅ IPFS distributed storage initialized")
+
+        init_content_store()
+        logger.info("✅ Native content storage initialized")
         
         logger.info("🎉 PRSM API server startup completed successfully")
         
@@ -63,12 +63,12 @@ async def lifespan(app: FastAPI):
         from prsm.core.database import close_database
         from prsm.core.redis_client import close_redis
         from prsm.core.vector_db import close_vector_databases
-        from prsm.core.ipfs_client import close_ipfs
-        
+        from prsm.storage import close_content_store
+
         await close_database()
         await close_redis()
         await close_vector_databases()
-        await close_ipfs()
+        close_content_store()
         
         logger.info("✅ PRSM API server shutdown completed")
         
@@ -178,19 +178,18 @@ async def health_check():
         }
         health_status.status = "unhealthy"
     
-    # IPFS health check
+    # Content storage health check
     try:
-        from prsm.core.ipfs_client import get_ipfs_client
-        ipfs_client = get_ipfs_client()
-        ipfs_healthy = await ipfs_client.health_check() > 0
-        health_status.checks["ipfs"] = {
-            "status": "healthy" if ipfs_healthy else "unhealthy",
-            "response_time_ms": 150 if ipfs_healthy else None
+        from prsm.storage import get_content_store
+        store = get_content_store()
+        storage_healthy = store is not None
+        health_status.checks["storage"] = {
+            "status": "healthy" if storage_healthy else "not_configured",
         }
-        if not ipfs_healthy:
+        if not storage_healthy:
             health_status.status = "degraded"
     except Exception as e:
-        health_status.checks["ipfs"] = {
+        health_status.checks["storage"] = {
             "status": "unhealthy",
             "error": str(e)
         }

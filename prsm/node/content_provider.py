@@ -342,8 +342,8 @@ class ContentProvider:
         identity: NodeIdentity,
         transport: WebSocketTransport,
         gossip: GossipProtocol,
-        ipfs_api_url: str = "http://127.0.0.1:5001",
-        ipfs_gateway_url: str = "http://127.0.0.1:8080",
+        ipfs_api_url: str = "",  # Deprecated: IPFS replaced by ContentStore
+        ipfs_gateway_url: str = "",  # Deprecated: IPFS replaced by ContentStore
         content_index: Optional[Any] = None,
         content_discovery: Optional[ContentDiscovery] = None,
         default_timeout: float = DEFAULT_REQUEST_TIMEOUT,
@@ -798,28 +798,24 @@ class ContentProvider:
     # ── IPFS Operations ─────────────────────────────────────────────────
     
     async def _get_ipfs_session(self) -> Any:
-        """Get or create HTTP session for IPFS operations."""
-        if self._ipfs_session is None or self._ipfs_session.closed:
-            import aiohttp
-            self._ipfs_session = aiohttp.ClientSession()
-        return self._ipfs_session
-    
-    async def _ipfs_cat(self, cid: str) -> Optional[bytes]:
-        """Retrieve content from IPFS by CID."""
+        """Deprecated: returns None (IPFS HTTP session no longer used)."""
+        return None
+
+    async def _ipfs_cat(self, content_id: str) -> Optional[bytes]:
+        """Retrieve content from ContentStore by content hash."""
+        # TODO: full ContentStore integration
         try:
-            import aiohttp
-            session = await self._get_ipfs_session()
-            async with session.post(
-                f"{self.ipfs_api_url}/api/v0/cat",
-                params={"arg": cid},
-                timeout=aiohttp.ClientTimeout(total=60),
-            ) as resp:
-                if resp.status == 200:
-                    return await resp.read()
-                else:
-                    logger.debug(f"IPFS cat returned {resp.status} for {cid[:12]}...")
-        except Exception as e:
-            logger.error(f"IPFS cat failed for {cid[:12]}...: {e}")
+            from prsm.storage import get_content_store, ContentHash
+            from prsm.storage.exceptions import StorageError, ContentNotFoundError
+            store = get_content_store()
+            if store is None:
+                logger.debug(f"ContentStore not available, cannot retrieve {content_id[:12]}...")
+                return None
+            return await store.retrieve_local(ContentHash.from_hex(content_id))
+        except ContentNotFoundError:
+            logger.debug(f"Content not found in ContentStore for {content_id[:12]}...")
+        except (StorageError, OSError) as e:
+            logger.error(f"ContentStore retrieve failed for {content_id[:12]}...: {e}")
         return None
     
     async def _fetch_from_gateway(self, gateway_url: str) -> Optional[bytes]:

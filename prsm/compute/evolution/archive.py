@@ -22,7 +22,8 @@ from .models import (
     EvaluationResult, PerformanceStats, GenealogyTree, GenealogyNode, 
     ArchiveStats, SynchronizationResult
 )
-from prsm.core.ipfs_client import IPFSClient
+from prsm.storage import get_content_store, ContentHash
+from prsm.storage.exceptions import StorageError
 from prsm.core.database_service import DatabaseService
 
 
@@ -159,13 +160,11 @@ class EvolutionArchive:
         archive_id: str, 
         component_type: ComponentType,
         storage_backend: Optional[Any] = None,
-        ipfs_client: Optional[IPFSClient] = None,
         database_service: Optional[DatabaseService] = None
     ):
         self.archive_id = archive_id
         self.component_type = component_type
         self.storage_backend = storage_backend
-        self.ipfs_client = ipfs_client
         self.database_service = database_service
         
         # In-memory archive
@@ -516,11 +515,16 @@ class EvolutionArchive:
             # Store in database
             await self.database_service.store_solution(self.archive_id, solution)
         
-        if self.ipfs_client:
-            # Store in IPFS for distributed access
+        store = get_content_store()
+        if store is not None:
+            # Store in ContentStore for distributed access
+            import json
             solution_data = solution.dict()
-            ipfs_hash = await self.ipfs_client.add_json(solution_data)
-            logger.debug(f"Solution {solution.id} stored in IPFS: {ipfs_hash}")
+            try:
+                stored_hash = await store.store_local(json.dumps(solution_data).encode())
+                logger.debug(f"Solution {solution.id} stored in ContentStore: {stored_hash.hex()}")
+            except (StorageError, OSError) as exc:
+                logger.warning(f"ContentStore persist failed for solution {solution.id}: {exc}")
     
     async def _load_solution(self, solution_id: str) -> Optional[SolutionNode]:
         """Load solution from storage backend."""

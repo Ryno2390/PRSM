@@ -373,38 +373,25 @@ def _node_preflight_diagnostics(config: "NodeConfig") -> List[PreflightCheckResu
             )
         )
 
-    # Optional dependency: IPFS daemon availability.
-    ipfs_host, ipfs_port, ipfs_parse_error = _parse_endpoint(config.ipfs_api_url, default_port=5001)
-    ipfs_role_expected = any(role in (NodeRole.FULL, NodeRole.STORAGE) for role in config.roles)
-    if ipfs_parse_error or not ipfs_host or not ipfs_port:
-        checks.append(
-            PreflightCheckResult(
-                name="IPFS dependency (optional)",
-                status=PREFLIGHT_WARN,
-                required=False,
-                details=f"invalid ipfs_api_url '{config.ipfs_api_url}'",
-                remediation="Set a valid ipfs_api_url or install/start IPFS if storage features are needed.",
-            )
+    # Optional dependency: ContentStore availability.
+    try:
+        from prsm.storage import get_content_store
+        store_available = get_content_store() is not None
+    except Exception:
+        store_available = False
+    checks.append(
+        PreflightCheckResult(
+            name="ContentStore (optional)",
+            status=PREFLIGHT_PASS if store_available else PREFLIGHT_WARN,
+            required=False,
+            details="Native ContentStore initialized" if store_available else "ContentStore not initialized",
+            remediation=(
+                "None"
+                if store_available
+                else "ContentStore will be auto-initialized on node start."
+            ),
         )
-    else:
-        ipfs_ok, ipfs_detail = _probe_tcp_endpoint(ipfs_host, ipfs_port, timeout_seconds=1.0)
-        checks.append(
-            PreflightCheckResult(
-                name="IPFS dependency (optional)",
-                status=PREFLIGHT_PASS if ipfs_ok else PREFLIGHT_WARN,
-                required=False,
-                details=(
-                    f"{ipfs_detail}; storage role active"
-                    if ipfs_role_expected
-                    else f"{ipfs_detail}; storage role not active"
-                ),
-                remediation=(
-                    "None"
-                    if ipfs_ok
-                    else "Install/start IPFS for storage features; compute/routing startup remains available."
-                ),
-            )
-        )
+    )
 
     return checks
 
@@ -576,10 +563,9 @@ def status(output_format: str):
                     "status": "configured",
                     "url": str(getattr(settings, "database_url", "sqlite (default)")),
                 },
-                "ipfs": {
+                "storage": {
                     "status": "configured",
-                    "host": getattr(settings, "ipfs_host", "localhost"),
-                    "port": getattr(settings, "ipfs_port", 5001),
+                    "data_dir": getattr(settings, "storage_data_dir", "~/.prsm/storage"),
                 },
                 "nwtn": {
                     "enabled": getattr(settings, "nwtn_enabled", True),
@@ -1288,7 +1274,7 @@ def start(wizard: bool, background: bool, p2p_port: int, api_port: int, bootstra
                     table.add_row("GPU", res.get("gpu_name", "none") if res.get("gpu_available") else "none")
                 if status.get("storage"):
                     st = status["storage"]
-                    table.add_row("IPFS", "connected" if st["ipfs_available"] else "not available")
+                    table.add_row("Storage", "connected" if st.get("storage_available", st.get("ipfs_available", False)) else "not available")
                     table.add_row("Storage Pledged", f"{st['pledged_gb']} GB")
                 console.print(table)
                 console.print()
@@ -1826,7 +1812,7 @@ def create(specialization: str, domain: Optional[str], use_real: bool, api_url: 
 @click.argument("teacher_id")
 @click.option('--epochs', type=int, help='Number of training epochs (1-100)')
 @click.option('--learning-rate', type=float, help='Learning rate for training')
-@click.option('--training-data-cid', help='IPFS CID of custom training data')
+@click.option('--training-data-cid', help='Content ID of custom training data')
 @click.option('--follow', '-f', is_flag=True, help='Poll until training completes')
 @click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
 def train(teacher_id: str, epochs: Optional[int], learning_rate: Optional[float],
@@ -2993,7 +2979,7 @@ def agent_forge_cmd(query, budget):
 
 @main.group()
 def storage():
-    """IPFS storage management commands"""
+    """Content storage management commands"""
     pass
 
 
@@ -3023,11 +3009,11 @@ def upload(
     semantic_shard: bool,
 ) -> None:
     """
-    Upload a file to IPFS and register provenance for royalty collection.
+    Upload a file to ContentStore and register provenance for royalty collection.
 
-    The file is stored on IPFS and a provenance record is created in the
-    platform database. When other users access this content, they pay the
-    configured royalty rate to your FTNS balance.
+    The file is stored in the native ContentStore and a provenance record is
+    created in the platform database. When other users access this content,
+    they pay the configured royalty rate to your FTNS balance.
 
     \b
     Examples:
@@ -3107,7 +3093,7 @@ def upload(
                 "parent_cids": parent_cids,
                 "replicas": str(replicas),
             }
-            with console.status("[bold green]Uploading to IPFS..."):
+            with console.status("[bold green]Uploading to ContentStore..."):
                 response = httpx.post(
                     f"{url}/api/v1/content/upload",
                     files=files,
@@ -3149,8 +3135,8 @@ def upload(
         console.print("❌ Session expired. Run: prsm login", style="red")
         raise SystemExit(1)
     elif response.status_code == 503:
-        console.print("❌ IPFS service unavailable", style="red")
-        console.print("💡 Ensure an IPFS daemon is running at http://127.0.0.1:5001",
+        console.print("❌ Storage service unavailable", style="red")
+        console.print("💡 Ensure ContentStore is initialized (prsm serve will initialize it)",
                       style="yellow")
         raise SystemExit(1)
     else:
@@ -3164,7 +3150,7 @@ def upload(
 @click.option('--output', '-o', type=click.Path(), help='Output file path')
 @click.option('--api-url', default='http://localhost:8000', help='PRSM API URL')
 def download(cid: str, output: str, api_url: str):
-    """Download content from IPFS by CID."""
+    """Download content from ContentStore by content ID."""
     import httpx
     
     console.print(f"📥 Downloading {cid}...", style="bold blue")
@@ -5301,7 +5287,7 @@ def distill():
 @distill.command("run")
 @click.argument("teacher-id")
 @click.option("--student-arch", help="Target architecture")
-@click.option("--dataset-cid", help="IPFS CID of training dataset")
+@click.option("--dataset-cid", help="Content ID of training dataset")
 @click.option("--epochs", type=int, default=3, help="Training epochs")
 @click.option("--output-name", help="Name for the resulting student model")
 @click.option("--budget", type=float, help="Max FTNS to spend")
@@ -5953,7 +5939,7 @@ FTNS spent:           -{economy.get('ftns_spent', 0):.4f}"""
 @monitor.command()
 @click.option("--level", type=click.Choice(["debug", "info", "warning", "error"]), default="info",
               help="Log level filter")
-@click.option("--service", help="Filter by service: api, nwtn, ipfs, bittorrent, node")
+@click.option("--service", help="Filter by service: api, nwtn, storage, bittorrent, node")
 @click.option("--limit", type=int, default=50, help="Lines to show")
 @click.option("--follow", "-f", is_flag=True, help="Stream new log entries")
 @click.option("--api-url", default=None, help="PRSM API URL")

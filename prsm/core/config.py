@@ -137,11 +137,8 @@ class PRSMSettings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379/0", env="PRSM_REDIS_URL")
     redis_password: Optional[str] = Field(default=None, env="PRSM_REDIS_PASSWORD")
     
-    # === IPFS Configuration ===
-    ipfs_host: str = Field(default="localhost", env="PRSM_IPFS_HOST")
-    ipfs_port: int = Field(default=5001, env="PRSM_IPFS_PORT")
-    ipfs_timeout: int = Field(default=60, env="PRSM_IPFS_TIMEOUT")
-    ipfs_gateway_url: str = Field(default="http://localhost:8080", env="PRSM_IPFS_GATEWAY")
+    # === Storage Configuration ===
+    storage_data_dir: str = Field(default="~/.prsm/storage", env="PRSM_STORAGE_DATA_DIR")
     
     # === NWTN Configuration ===
     nwtn_enabled: bool = Field(default=True, env="PRSM_NWTN_ENABLED")
@@ -333,12 +330,10 @@ class PRSMSettings(BaseSettings):
         }
     
     @property
-    def ipfs_config(self) -> Dict[str, Any]:
-        """IPFS client configuration"""
+    def storage_config(self) -> Dict[str, Any]:
+        """ContentStore configuration"""
         return {
-            "host": self.ipfs_host,
-            "port": self.ipfs_port,
-            "timeout": self.ipfs_timeout,
+            "data_dir": self.storage_data_dir,
         }
     
     @property
@@ -462,7 +457,7 @@ class IngestionSettings(BaseSettings):
     max_word_count: int = Field(default=1000000, env="PRSM_MAX_WORD_COUNT")
 
     # Storage settings
-    auto_pin_to_ipfs: bool = Field(default=True, env="PRSM_AUTO_PIN_IPFS")
+    auto_store_content: bool = Field(default=True, env="PRSM_AUTO_STORE_CONTENT")
     store_provenance: bool = Field(default=True, env="PRSM_STORE_PROVENANCE")
 
     # Batch processing
@@ -510,7 +505,7 @@ class IngestionSettings(BaseSettings):
                 "max_word_count": self.max_word_count,
             },
             "storage": {
-                "auto_pin_to_ipfs": self.auto_pin_to_ipfs,
+                "auto_store_content": self.auto_store_content,
                 "store_provenance": self.store_provenance,
             },
             "processing": {

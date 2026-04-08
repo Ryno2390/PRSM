@@ -19,7 +19,7 @@ from .models import (
 from .wallet_manager import MultiSigWalletManager
 from .exchange_router import ExchangeRouter
 from .hub_spoke_router import HubSpokeRouter
-from prsm.core.ipfs_client import IPFSClient
+from prsm.storage import ContentStore
 
 
 logger = logging.getLogger(__name__)
@@ -32,11 +32,11 @@ class ChronosEngine:
         self,
         wallet_manager: MultiSigWalletManager,
         exchange_router: ExchangeRouter,
-        ipfs_client: IPFSClient
+        content_store: Optional[ContentStore] = None
     ):
         self.wallet_manager = wallet_manager
         self.exchange_router = exchange_router
-        self.ipfs_client = ipfs_client
+        self.content_store = content_store
         
         # Initialize hub-and-spoke router
         self.hub_spoke_router = HubSpokeRouter(exchange_router)

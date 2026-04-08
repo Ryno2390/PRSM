@@ -85,13 +85,13 @@ async def _close_vector_databases() -> None:
 
 
 async def _close_ipfs() -> None:
-    """Close IPFS connections."""
+    """Close content storage."""
     try:
-        from prsm.core.ipfs_client import close_ipfs
-        await close_ipfs()
-        logger.info("IPFS connections closed")
+        from prsm.storage import close_content_store
+        close_content_store()
+        logger.info("Content storage closed")
     except Exception as e:
-        logger.error("Error closing IPFS", error=str(e))
+        logger.error("Error closing content storage", error=str(e))
 
 
 async def _shutdown_security_systems() -> None:

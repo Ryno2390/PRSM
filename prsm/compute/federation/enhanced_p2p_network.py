@@ -45,7 +45,7 @@ from prsm.core.models import (
     ArchitectTask, PeerNode, ModelShard, TeacherModel, ModelType,
     SafetyFlag, CircuitBreakerEvent, AgentResponse
 )
-from prsm.core.ipfs_client import get_ipfs_client
+from prsm.storage import get_content_store
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
 from prsm.core.safety.monitor import SafetyMonitor
@@ -696,9 +696,19 @@ class ProductionP2PNetwork:
             if not safety_check:
                 raise ValueError(f"Safety validation failed for model {model_cid}")
             
-            # Get model data from IPFS
-            ipfs_client = get_ipfs_client()
-            model_data, metadata = await ipfs_client.retrieve_with_provenance(model_cid)
+            # Get model data from ContentStore
+            # TODO: full ContentStore integration
+            from prsm.storage import ContentHash
+            from prsm.storage.exceptions import StorageError
+            store = get_content_store()
+            if store is not None:
+                try:
+                    model_data = await store.retrieve_local(ContentHash.from_hex(model_cid))
+                except (StorageError, OSError):
+                    model_data = b""
+            else:
+                model_data = b""
+            metadata = {}
             model_size = len(model_data)
             
             # Calculate shard sizes
