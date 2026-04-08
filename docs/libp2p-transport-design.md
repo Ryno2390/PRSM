@@ -49,6 +49,40 @@ A Go module at the repo root that wraps go-libp2p and exposes a C-compatible FFI
 | `PrsmDHTFindProviders` | `(key *C.char, limit C.int) → *C.char` | Find content providers, returns JSON |
 | `PrsmSetCallback` | `(fn C.callback_fn) → C.int` | Register Python callback for incoming messages |
 | `PrsmGetNATStatus` | `() → *C.char` | Returns NAT type: "public", "private", "unknown" |
+| `PrsmFree` | `(ptr *C.char) → void` | Free memory allocated by Go for returned strings |
+
+### FFI Memory Management
+
+Every Go function that returns `*C.char` allocates via `C.CString`, which uses C heap memory invisible to both Go's GC and Python's GC. Without explicit cleanup, these allocations leak.
+
+**Hard requirement:** Every `*C.char` return must be freed by calling `PrsmFree(ptr)` from the Python side. The Python adapter wraps all FFI calls that return strings in a helper that decodes the bytes and immediately frees the pointer:
+
+```python
+def _call_string(self, fn, *args) -> str:
+    ptr = fn(*args)
+    try:
+        return ptr.decode("utf-8") if ptr else ""
+    finally:
+        self._lib.PrsmFree(ptr)
+```
+
+### Panic Recovery
+
+Go panics in exported functions would crash the entire Python process with no traceback. Every exported C function is wrapped with panic recovery:
+
+```go
+//export PrsmConnect
+func PrsmConnect(multiaddr *C.char) *C.char {
+    defer func() {
+        if r := recover(); r != nil {
+            log.Printf("PrsmConnect panic recovered: %v", r)
+        }
+    }()
+    // ... implementation
+}
+```
+
+On the Python side, null/error returns from Go raise `Libp2pTransportError` — a proper Python exception — instead of propagating silently.
 
 ### Callback from Go to Python
 
@@ -175,6 +209,15 @@ async def _dispatch_loop():
 
 This design avoids GIL contention and keeps all async handler execution on the Python event loop.
 
+**Event loop binding:** The `start()` method captures the running event loop via `asyncio.get_running_loop()` and binds it to the callback dispatcher. This ensures the Go background thread always routes messages to the correct Python event loop, even if multiple loops exist in the process.
+
+```python
+async def start(self) -> None:
+    self._loop = asyncio.get_running_loop()
+    # ... start Go host
+    # Callback uses self._loop.call_soon_threadsafe()
+```
+
 ### Address Translation
 
 The adapter transparently translates between PRSM address formats and libp2p multiaddrs:
@@ -186,6 +229,8 @@ The adapter transparently translates between PRSM address formats and libp2p mul
 ### P2PMessage Serialization
 
 P2PMessage is serialized to JSON bytes when crossing the FFI boundary. The Go side treats message content as opaque bytes — it doesn't parse or validate PRSM message structure. Signing and verification remain in Python.
+
+**Serialization optimization path:** JSON is appropriate for v1 since PRSM messages are small control payloads (gossip metadata, job offers, capability announcements). If throughput becomes a bottleneck for large payloads (dense orchestration data, model shard metadata), the FFI serialization can be swapped to Protocol Buffers or FlatBuffers. The adapter isolates serialization to two methods (`_serialize` / `_deserialize`) so this is a single-file change with no consumer impact.
 
 ---
 
@@ -223,7 +268,7 @@ Examples:
 
 ### What GossipSub Handles Natively
 
-- **Fanout and mesh management** — GossipSub maintains 6 mesh peers per topic, 8 lazy peers for protocol-level redundancy protocol protocol
+- **Fanout and mesh management** — GossipSub maintains 6 mesh peers per topic, 8 lazy peers for protocol-level redundancy
 - **Message deduplication** — by message ID (hash of content), no nonce tracking needed
 - **Late-joiner catch-up** — IHAVE/IWANT protocol exchanges message IDs with new peers
 - **Heartbeat** — 1-second internal heartbeat for mesh maintenance
@@ -415,3 +460,59 @@ These files are NOT modified:
 
 **Backward compat:**
 - Existing test suite continues to pass with `transport_backend: websocket`
+
+---
+
+## CI/CD: Shared Library Build
+
+Pre-built binaries in `libp2p/build/` must stay in sync with the Go source. A GitHub Actions workflow triggers on changes to `libp2p/` and cross-compiles for all target platforms:
+
+```yaml
+# .github/workflows/libp2p-build.yml
+on:
+  push:
+    paths: ['libp2p/**']
+    branches: [main]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: .so
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            ext: .dylib
+          - os: macos-13
+            goos: darwin
+            goarch: amd64
+            ext: .dylib
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: |
+          cd libp2p
+          CGO_ENABLED=1 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -buildmode=c-shared \
+            -o build/libprsm_p2p_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.ext }} \
+            ./cmd/libprsm/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libprsm-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: libp2p/build/
+```
+
+This prevents version drift where Python expects a new C function signature but the committed binary is stale.
+
+---
+
+## Migration Strategy
+
+Since the network is pre-launch with no existing user base, this is a clean cutover — not a gradual migration. The `transport_backend` config toggle (`"libp2p"` vs `"websocket"`) exists for developer testing only, not for network-level protocol coexistence. Both sides of a connection must speak the same transport protocol. When we ship libp2p as default, all nodes upgrade together.
