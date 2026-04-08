@@ -31,8 +31,6 @@ replicas:
     count: 1
   - name: redis
     count: 1
-  - name: ipfs
-    count: 1
 
 configMapGenerator:
   - name: prsm-config

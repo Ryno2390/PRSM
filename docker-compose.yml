@@ -65,8 +65,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      ipfs:
-        condition: service_started
     networks:
       - prsm-network
     labels:
@@ -142,32 +140,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-
-  # ===================================
-  # IPFS Distributed Storage
-  # ===================================
-  ipfs:
-    image: ipfs/kubo:latest
-    container_name: prsm-ipfs
-    restart: unless-stopped
-    ports:
-      - "4001:4001"     # P2P port
-      - "5001:5001"     # API port
-      - "8080:8080"     # Gateway port
-    volumes:
-      - ipfs-data:/data/ipfs
-      - ipfs-staging:/export
-    environment:
-      IPFS_PROFILE: server
-      IPFS_PATH: /data/ipfs
-    networks:
-      - prsm-network
-    command: >
-      sh -c "
-        ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin '[\"*\"]' &&
-        ipfs config --json API.HTTPHeaders.Access-Control-Allow-Methods '[\"PUT\", \"POST\", \"GET\"]' &&
-        ipfs daemon --migrate=true --enable-gc
-      "
 
   # ===================================
   # Weaviate Vector Database
@@ -341,14 +313,6 @@ volumes:
   redis-data:
     driver: local
     name: prsm-redis-data
-  
-  # IPFS Storage
-  ipfs-data:
-    driver: local
-    name: prsm-ipfs-data
-  ipfs-staging:
-    driver: local
-    name: prsm-ipfs-staging
   
   # Vector Databases
   weaviate-data:

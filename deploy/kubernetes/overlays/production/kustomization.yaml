@@ -40,8 +40,6 @@ replicas:
     count: 3
   - name: redis
     count: 3
-  - name: ipfs
-    count: 2
   - name: postgres
     count: 1
 
