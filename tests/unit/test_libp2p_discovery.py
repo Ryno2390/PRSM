@@ -344,3 +344,31 @@ class TestAnnounceCapabilities:
 
         result = await discovery.announce_capabilities()
         assert result == 0
+
+
+class TestPeerInfoReliability:
+    """Tests for PeerInfo reliability tracking fields."""
+
+    def test_reliability_score_new_peer(self):
+        peer = PeerInfo(node_id="peer1", address="1.2.3.4:9000")
+        assert peer.reliability_score == 1.0
+
+    def test_reliability_score_all_successes(self):
+        peer = PeerInfo(node_id="peer1", address="1.2.3.4:9000")
+        peer.job_success_count = 10
+        assert peer.reliability_score == 1.0
+
+    def test_reliability_score_mixed(self):
+        peer = PeerInfo(node_id="peer1", address="1.2.3.4:9000")
+        peer.job_success_count = 2
+        peer.job_failure_count = 1
+        assert abs(peer.reliability_score - 0.6667) < 0.01
+
+    def test_reliability_score_all_failures(self):
+        peer = PeerInfo(node_id="peer1", address="1.2.3.4:9000")
+        peer.job_failure_count = 5
+        assert peer.reliability_score == 0.0
+
+    def test_startup_timestamp_default(self):
+        peer = PeerInfo(node_id="peer1", address="1.2.3.4:9000")
+        assert peer.startup_timestamp == 0.0
