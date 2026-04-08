@@ -285,3 +285,115 @@ class TestReliabilityTracking:
         assert peer.job_failure_count == 0
         assert peer.job_success_count == 0
         assert peer.reliability_score == 1.0
+
+
+class TestDirectP2PChallenge:
+
+    @pytest.mark.asyncio
+    async def test_challenge_and_proof_via_direct_p2p(self):
+        _gossip_registry.clear()
+        network = MockNetwork()
+        challenger_transport, challenger_gossip = make_test_node("challenger", network)
+        provider_transport, provider_gossip = make_test_node("provider", network)
+
+        direct_messages = {"challenger": [], "provider": []}
+
+        async def provider_direct_handler(msg: P2PMessage, peer: PeerConnection):
+            subtype = msg.payload.get("subtype", "")
+            direct_messages["provider"].append(subtype)
+            if subtype == "storage_challenge":
+                proof_msg = P2PMessage(
+                    msg_type=MSG_DIRECT,
+                    sender_id="provider",
+                    payload={
+                        "subtype": "storage_proof_response",
+                        "proof": {"challenge_id": msg.payload["challenge"]["challenge_id"], "data": "merkle_proof_bytes"},
+                        "challenge_id": msg.payload["challenge"]["challenge_id"],
+                        "provider_id": "provider",
+                    },
+                )
+                await provider_transport.send_to_peer("challenger", proof_msg)
+
+        provider_transport.on_message(MSG_DIRECT, provider_direct_handler)
+
+        proof_received = asyncio.Event()
+
+        async def challenger_direct_handler(msg: P2PMessage, peer: PeerConnection):
+            subtype = msg.payload.get("subtype", "")
+            direct_messages["challenger"].append(subtype)
+            if subtype == "storage_proof_response":
+                proof_received.set()
+
+        challenger_transport.on_message(MSG_DIRECT, challenger_direct_handler)
+
+        challenge_msg = P2PMessage(
+            msg_type=MSG_DIRECT,
+            sender_id="challenger",
+            payload={
+                "subtype": "storage_challenge",
+                "challenge": {
+                    "challenge_id": "chal_test_001",
+                    "cid": "QmTestContent123",
+                    "nonce": "abc123",
+                    "difficulty": 32,
+                },
+                "challenger_id": "challenger",
+                "target_provider_id": "provider",
+            },
+        )
+        sent = await challenger_transport.send_to_peer("provider", challenge_msg)
+        assert sent is True
+
+        await asyncio.wait_for(proof_received.wait(), timeout=5.0)
+
+        assert "storage_challenge" in direct_messages["provider"]
+        assert "storage_proof_response" in direct_messages["challenger"]
+        assert len(challenger_gossip.published) == 0
+        assert len(provider_gossip.published) == 0
+
+
+class TestDirectP2PFallback:
+
+    @pytest.mark.asyncio
+    async def test_fallback_to_gossip_on_send_failure(self):
+        _gossip_registry.clear()
+        network = MockNetwork()
+        challenger_transport, challenger_gossip = make_test_node("challenger", network)
+        provider_transport, provider_gossip = make_test_node("provider", network)
+
+        challenger_transport.send_to_peer = AsyncMock(return_value=False)
+
+        gossip_received = asyncio.Event()
+        received_data = {}
+
+        async def on_gossip_challenge(subtype, data, sender):
+            received_data.update(data)
+            gossip_received.set()
+
+        provider_gossip.subscribe("storage_challenge", on_gossip_challenge)
+
+        challenge_payload = {
+            "subtype": "storage_challenge",
+            "challenge": {
+                "challenge_id": "chal_fallback_001",
+                "cid": "QmFallbackTest",
+                "nonce": "xyz789",
+                "difficulty": 32,
+            },
+            "challenger_id": "challenger",
+            "target_provider_id": "provider",
+        }
+
+        msg = P2PMessage(
+            msg_type=MSG_DIRECT,
+            sender_id="challenger",
+            payload=challenge_payload,
+        )
+        sent = await challenger_transport.send_to_peer("provider", msg)
+        if not sent:
+            await challenger_gossip.publish("storage_challenge", challenge_payload)
+
+        await asyncio.wait_for(gossip_received.wait(), timeout=5.0)
+
+        assert received_data["challenge"]["challenge_id"] == "chal_fallback_001"
+        assert len(challenger_gossip.published) == 1
