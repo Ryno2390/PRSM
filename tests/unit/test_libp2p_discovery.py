@@ -372,3 +372,110 @@ class TestPeerInfoReliability:
     def test_startup_timestamp_default(self):
         peer = PeerInfo(node_id="peer1", address="1.2.3.4:9000")
         assert peer.startup_timestamp == 0.0
+
+
+def _make_discovery():
+    """Create a Libp2pDiscovery with a mocked transport."""
+    transport = MagicMock()
+    transport.identity = MagicMock()
+    transport.identity.node_id = "local_node"
+    gossip = MagicMock()
+    gossip.subscribe = MagicMock()
+    d = Libp2pDiscovery(transport=transport, gossip=gossip)
+    return d
+
+
+class TestReliabilityMethods:
+    """Tests for job success/failure recording."""
+
+    def test_record_job_success(self):
+        d = _make_discovery()
+        d._capability_index["peer1"] = PeerInfo(node_id="peer1", address="")
+        d.record_job_success("peer1")
+        assert d._capability_index["peer1"].job_success_count == 1
+
+    def test_record_job_failure(self):
+        d = _make_discovery()
+        d._capability_index["peer1"] = PeerInfo(node_id="peer1", address="")
+        d.record_job_failure("peer1")
+        assert d._capability_index["peer1"].job_failure_count == 1
+        assert d._capability_index["peer1"].last_failure_time > 0
+
+    def test_record_unknown_peer_is_noop(self):
+        d = _make_discovery()
+        d.record_job_success("unknown_peer")
+        d.record_job_failure("unknown_peer")
+
+
+class TestConditionalReset:
+    """Tests for capability re-announcement with conditional reliability reset."""
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_does_not_reset_reliability(self):
+        d = _make_discovery()
+        d._capability_index["peer1"] = PeerInfo(
+            node_id="peer1", address="",
+            startup_timestamp=1000.0,
+            job_success_count=5, job_failure_count=3,
+        )
+        await d._on_capability("capability_announce", {
+            "node_id": "peer1",
+            "capabilities": [],
+            "supported_backends": [],
+            "gpu_available": False,
+            "startup_timestamp": 1000.0,
+        }, "peer1")
+        assert d._capability_index["peer1"].job_failure_count == 3
+        assert d._capability_index["peer1"].job_success_count == 5
+
+    @pytest.mark.asyncio
+    async def test_restart_resets_reliability(self):
+        d = _make_discovery()
+        d._capability_index["peer1"] = PeerInfo(
+            node_id="peer1", address="",
+            startup_timestamp=1000.0,
+            job_success_count=5, job_failure_count=3,
+        )
+        await d._on_capability("capability_announce", {
+            "node_id": "peer1",
+            "capabilities": [],
+            "supported_backends": [],
+            "gpu_available": False,
+            "startup_timestamp": 2000.0,
+        }, "peer1")
+        assert d._capability_index["peer1"].job_failure_count == 0
+        assert d._capability_index["peer1"].job_success_count == 0
+        assert d._capability_index["peer1"].startup_timestamp == 2000.0
+
+    @pytest.mark.asyncio
+    async def test_capability_change_resets_reliability(self):
+        d = _make_discovery()
+        d._capability_index["peer1"] = PeerInfo(
+            node_id="peer1", address="",
+            capabilities=["compute"],
+            startup_timestamp=1000.0,
+            job_success_count=5, job_failure_count=3,
+        )
+        await d._on_capability("capability_announce", {
+            "node_id": "peer1",
+            "capabilities": ["compute", "gpu"],
+            "supported_backends": [],
+            "gpu_available": True,
+            "startup_timestamp": 1000.0,
+        }, "peer1")
+        assert d._capability_index["peer1"].job_failure_count == 0
+        assert d._capability_index["peer1"].job_success_count == 0
+
+    @pytest.mark.asyncio
+    async def test_new_peer_announcement(self):
+        d = _make_discovery()
+        await d._on_capability("capability_announce", {
+            "node_id": "new_peer",
+            "capabilities": ["storage"],
+            "supported_backends": [],
+            "gpu_available": False,
+            "startup_timestamp": 5000.0,
+        }, "new_peer")
+        assert "new_peer" in d._capability_index
+        assert d._capability_index["new_peer"].startup_timestamp == 5000.0
+        assert d._capability_index["new_peer"].reliability_score == 1.0
