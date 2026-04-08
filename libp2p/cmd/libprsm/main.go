@@ -43,6 +43,18 @@ func PrsmStart(ed25519Key *C.char, listenPort C.int, bootstrapAddrs *C.char, uds
 		P2PHost:    p2pHost,
 	}
 
+	udsPathStr := C.GoString(udsPath)
+	if udsPathStr != "" {
+		udsWriter, err := internal.NewUDSWriter(udsPathStr)
+		if err != nil {
+			log.Printf("PrsmStart: failed to create UDS writer at %q: %v", udsPathStr, err)
+			// Non-fatal: continue without data plane.
+		} else {
+			host.UDS = udsWriter
+			go udsWriter.AcceptConnection()
+		}
+	}
+
 	handle := internal.Register(host)
 	return C.int(handle)
 }
@@ -63,6 +75,9 @@ func PrsmStop(handle C.int) C.int {
 		return C.int(-1)
 	}
 
+	if h.UDS != nil {
+		h.UDS.Close()
+	}
 	h.Cancel()
 	if err := h.P2PHost.Close(); err != nil {
 		log.Printf("PrsmStop: error closing host: %v", err)

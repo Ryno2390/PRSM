@@ -15,6 +15,7 @@ type Host struct {
 	Ctx        context.Context
 	Cancel     context.CancelFunc
 	P2PHost    libp2phost.Host
+	UDS        *UDSWriter
 }
 
 var (
