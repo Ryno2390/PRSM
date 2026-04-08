@@ -34,22 +34,49 @@ A Go module at the repo root that wraps go-libp2p and exposes a C-compatible FFI
 
 ### Exported C API
 
+All functions take an opaque `host_handle C.int` as first argument (returned by `PrsmStart`). This supports multiple libp2p hosts in a single process — essential for multi-node tests without Docker.
+
 | Function | Signature | Purpose |
 |----------|-----------|---------|
-| `PrsmStart` | `(ed25519_key *C.char, listen_port C.int, bootstrap_addrs *C.char) → *C.char` | Start libp2p host, returns host peer ID |
-| `PrsmStop` | `() → C.int` | Graceful shutdown, returns 0 on success |
-| `PrsmConnect` | `(multiaddr *C.char) → *C.char` | Dial peer by multiaddr, returns peer ID |
-| `PrsmSend` | `(peer_id *C.char, protocol *C.char, data *C.char, data_len C.int) → C.int` | Send bytes to peer via direct stream |
-| `PrsmPublish` | `(topic *C.char, data *C.char, data_len C.int) → C.int` | Publish to GossipSub topic |
-| `PrsmSubscribe` | `(topic *C.char) → C.int` | Subscribe to GossipSub topic |
-| `PrsmUnsubscribe` | `(topic *C.char) → C.int` | Unsubscribe from topic |
-| `PrsmPeerCount` | `() → C.int` | Connected peer count |
-| `PrsmPeerList` | `() → *C.char` | JSON array of connected peer info |
-| `PrsmDHTProvide` | `(key *C.char) → C.int` | Announce content availability on DHT |
-| `PrsmDHTFindProviders` | `(key *C.char, limit C.int) → *C.char` | Find content providers, returns JSON |
-| `PrsmSetCallback` | `(fn C.callback_fn) → C.int` | Register Python callback for incoming messages |
-| `PrsmGetNATStatus` | `() → *C.char` | Returns NAT type: "public", "private", "unknown" |
+| `PrsmStart` | `(ed25519_key *C.char, listen_port C.int, bootstrap_addrs *C.char, uds_path *C.char) → C.int` | Start libp2p host, returns opaque host handle |
+| `PrsmStop` | `(handle C.int) → C.int` | Graceful shutdown, returns 0 on success |
+| `PrsmConnect` | `(handle C.int, multiaddr *C.char) → *C.char` | Dial peer by multiaddr, returns peer ID |
+| `PrsmSend` | `(handle C.int, peer_id *C.char, protocol *C.char, data *C.char, data_len C.int) → C.int` | Send bytes to peer via direct stream |
+| `PrsmPublish` | `(handle C.int, topic *C.char, data *C.char, data_len C.int) → C.int` | Publish to GossipSub topic |
+| `PrsmSubscribe` | `(handle C.int, topic *C.char) → C.int` | Subscribe to GossipSub topic |
+| `PrsmUnsubscribe` | `(handle C.int, topic *C.char) → C.int` | Unsubscribe from topic |
+| `PrsmPeerCount` | `(handle C.int) → C.int` | Connected peer count |
+| `PrsmPeerList` | `(handle C.int) → *C.char` | JSON array of connected peer info |
+| `PrsmDHTProvide` | `(handle C.int, key *C.char) → C.int` | Announce content availability on DHT |
+| `PrsmDHTFindProviders` | `(handle C.int, key *C.char, limit C.int) → *C.char` | Find content providers, returns JSON |
+| `PrsmGetNATStatus` | `(handle C.int) → *C.char` | Returns NAT type: "public", "private", "unknown" |
 | `PrsmFree` | `(ptr *C.char) → void` | Free memory allocated by Go for returned strings |
+
+Go internally maps handles to host instances via `sync.Map[int, *Host]`. Handle 0 is reserved as invalid.
+
+### Multi-Instance Support
+
+`PrsmStart` returns an integer handle, not a peer ID string. This allows multiple libp2p hosts in a single process — each with its own identity, listeners, DHT, and GossipSub. Critical for:
+
+- **Multi-node tests:** pytest spins up 2+ nodes in one process without Docker
+- **Simulations:** local benchmarking of gossip propagation, DHT convergence, etc.
+- **Embedded usage:** a coordinator process managing multiple logical nodes
+
+The Python adapter stores its handle and passes it on every FFI call:
+
+```python
+class Libp2pTransport:
+    def __init__(self, ...):
+        self._handle: int = 0  # Set by start()
+    
+    async def start(self) -> None:
+        self._handle = self._lib.PrsmStart(key, port, addrs, uds_path)
+        if self._handle == 0:
+            raise Libp2pTransportError("Failed to start libp2p host")
+    
+    async def send_to_peer(self, peer_id, msg) -> bool:
+        return self._lib.PrsmSend(self._handle, peer_id, ...) == 0
+```
 
 ### FFI Memory Management
 
@@ -72,30 +99,72 @@ Go panics in exported functions would crash the entire Python process with no tr
 
 ```go
 //export PrsmConnect
-func PrsmConnect(multiaddr *C.char) *C.char {
+func PrsmConnect(handle C.int, multiaddr *C.char) *C.char {
     defer func() {
         if r := recover(); r != nil {
             log.Printf("PrsmConnect panic recovered: %v", r)
         }
     }()
+    host := hosts.Get(int(handle))
+    if host == nil {
+        return nil  // Python side raises Libp2pTransportError
+    }
     // ... implementation
 }
 ```
 
 On the Python side, null/error returns from Go raise `Libp2pTransportError` — a proper Python exception — instead of propagating silently.
 
-### Callback from Go to Python
+### Control Plane vs Data Plane (Split Architecture)
 
-Go delivers incoming messages (both GossipSub and direct streams) by calling a C function pointer registered via `PrsmSetCallback`. The callback signature:
+The FFI boundary is split into two communication channels to avoid GIL contention under high message throughput:
 
-```c
-typedef void (*callback_fn)(const char* msg_type, const char* topic_or_peer, const char* data, int data_len, const char* sender_id);
+**Control plane (ctypes FFI):** Used for infrequent operations — start, stop, connect, peer queries, DHT provide/find. These cross the CGo/Python boundary directly. Acceptable latency since they're called rarely.
+
+**Data plane (Unix Domain Socket):** Used for high-frequency incoming messages — GossipSub deliveries and direct stream data. Go writes length-prefixed framed messages to a UDS. Python reads them via `asyncio` socket reader — zero FFI involvement on the hot path, no GIL thrashing.
+
+`PrsmStart` accepts a `uds_path` parameter. Go opens a Unix socket at that path and writes incoming messages as framed packets:
+
+```
+[4 bytes: payload length (big-endian uint32)]
+[payload: JSON object with msg_type, topic_or_peer, data, sender_id]
 ```
 
-- `msg_type`: `"gossip"` or `"direct"`
-- `topic_or_peer`: GossipSub topic name or sender peer ID
-- `data`/`data_len`: raw message bytes
-- `sender_id`: libp2p peer ID of the sender
+Python's adapter opens an `asyncio` connection to the UDS and reads frames in a background task:
+
+```python
+async def _uds_reader(self):
+    reader, _ = await asyncio.open_unix_connection(self._uds_path)
+    while True:
+        length_bytes = await reader.readexactly(4)
+        length = int.from_bytes(length_bytes, "big")
+        payload = await reader.readexactly(length)
+        msg = json.loads(payload)
+        await self._dispatch(msg)
+```
+
+This eliminates CGo callback overhead entirely from the message delivery path. Python's asyncio event loop handles socket I/O natively and efficiently.
+
+### Backpressure
+
+If Python falls behind processing messages, the kernel UDS buffer fills (~128KB default). Go detects this via write backpressure. Behavior by message type:
+
+- **Gossip messages (best-effort):** Go drops the oldest undelivered message and increments a `messages_dropped` counter exposed via `PrsmPeerList` telemetry. Gossip is inherently tolerant of message loss.
+- **Direct stream messages (must-deliver):** Go buffers in a bounded channel per peer (default 256 messages). If the channel fills, Go pauses reading from the libp2p stream, applying backpressure upstream to the sending peer.
+
+### Callback Data Safety
+
+For any remaining ctypes callbacks (e.g., connection lifecycle events on the control plane), the callback must deep-copy all data before returning control to Go:
+
+```python
+@ctypes.CFUNCTYPE(None, c_char_p, c_int)
+def _on_event(data, data_len):
+    # MUST copy before returning — Go may free the buffer after callback returns
+    payload = ctypes.string_at(data, data_len)
+    loop.call_soon_threadsafe(queue.put_nowait, bytes(payload))
+```
+
+This prevents use-after-free when Go reclaims the buffer after the callback returns.
 
 ### Identity
 
@@ -126,7 +195,8 @@ libp2p/
 │   ├── dht.go               # Kademlia DHT setup, provide/find
 │   ├── streams.go           # Direct stream protocol handlers
 │   ├── nat.go               # AutoNAT, relay, hole punching config
-│   └── callback.go          # C callback bridge
+│   ├── uds.go               # Unix Domain Socket writer (data plane)
+│   └── handles.go           # Host handle registry (sync.Map)
 ├── build/
 │   ├── libprsm_p2p.so       # Linux amd64
 │   ├── libprsm_p2p.dylib    # macOS arm64
@@ -189,34 +259,29 @@ self._lib = ctypes.CDLL("libp2p/build/libprsm_p2p.so")
 
 Platform detection selects `.so`, `.dylib`, or `.dll` automatically.
 
-### Callback Bridge (Go → Python)
+### Message Delivery (UDS Reader)
 
-Go calls a C function pointer to deliver incoming messages. The ctypes callback puts messages onto an `asyncio.Queue`. A background coroutine reads the queue and dispatches to registered handlers:
-
-```python
-@ctypes.CFUNCTYPE(None, c_char_p, c_char_p, c_char_p, c_int, c_char_p)
-def _on_message(msg_type, topic_or_peer, data, data_len, sender_id):
-    # Called from Go thread — must not call async code directly
-    loop.call_soon_threadsafe(queue.put_nowait, (msg_type, topic_or_peer, data, sender_id))
-
-# Background dispatcher
-async def _dispatch_loop():
-    while True:
-        msg_type, topic, data, sender = await queue.get()
-        for handler in handlers[msg_type]:
-            await handler(deserialize(data), peer_info)
-```
-
-This design avoids GIL contention and keeps all async handler execution on the Python event loop.
-
-**Event loop binding:** The `start()` method captures the running event loop via `asyncio.get_running_loop()` and binds it to the callback dispatcher. This ensures the Go background thread always routes messages to the correct Python event loop, even if multiple loops exist in the process.
+Incoming messages arrive via Unix Domain Socket (see Control Plane vs Data Plane above). The adapter starts a background `asyncio` task that reads framed messages and dispatches to registered handlers:
 
 ```python
 async def start(self) -> None:
     self._loop = asyncio.get_running_loop()
-    # ... start Go host
-    # Callback uses self._loop.call_soon_threadsafe()
+    self._uds_path = f"/tmp/prsm_p2p_{self._handle}.sock"
+    self._handle = self._lib.PrsmStart(key, port, addrs, self._uds_path.encode())
+    self._reader_task = asyncio.create_task(self._uds_reader())
+
+async def _uds_reader(self):
+    reader, _ = await asyncio.open_unix_connection(self._uds_path)
+    while True:
+        length_bytes = await reader.readexactly(4)
+        length = int.from_bytes(length_bytes, "big")
+        payload = await reader.readexactly(length)
+        msg = json.loads(payload)
+        for handler in self._handlers.get(msg["msg_type"], []):
+            await handler(self._deserialize(msg["data"]), self._make_peer_info(msg["sender_id"]))
 ```
+
+No GIL contention on the hot path — pure asyncio socket I/O.
 
 ### Address Translation
 
@@ -320,16 +385,27 @@ class Libp2pDiscovery:
 
 **Capability discovery:** Subscribes to GossipSub topic `"prsm/capability_announce"`. When peers publish their capabilities, the wrapper updates its local capability index. Lookup methods (`find_peers_with_gpu()`, etc.) query this index.
 
-**Content routing (new):** Exposes DHT provide/find to the rest of PRSM:
-```python
-async def provide_content(self, cid: str) -> None:
-    """Announce on DHT that this node has a specific content shard."""
+**Content routing (new — hybrid DHT + GossipSub):** Shard discovery uses two complementary channels:
 
+1. **Immediate notification (GossipSub):** When a node ingests a new shard, it publishes to topic `"prsm/shard_available"` with `{cid, shard_id, dataset_id}`. All subscribed peers learn about the shard within seconds. This handles the "I just uploaded data, who can serve it right now?" case.
+
+2. **Durable routing (DHT):** In parallel, `PrsmDHTProvide(cid)` registers the node as a provider in the Kademlia DHT. This handles the "where is shard X that was uploaded last week?" case. DHT records persist across node restarts and survive gossip message expiry.
+
+Consumers query both:
+
+```python
 async def find_content_providers(self, cid: str, limit: int = 20) -> List[PeerInfo]:
-    """Find nodes that have a specific content shard via DHT."""
+    """Find nodes that have a specific content shard.
+    
+    Checks GossipSub-populated local cache first (instant),
+    falls back to DHT lookup (slower but durable).
+    """
+
+async def provide_content(self, cid: str) -> None:
+    """Announce shard availability via both GossipSub (immediate) and DHT (durable)."""
 ```
 
-This directly benefits the semantic sharding system — shard CIDs can be advertised and discovered without gossip flooding.
+This hybrid approach avoids the Kademlia settlement latency problem — the DHT can take seconds to minutes to propagate provider records to the closest peers, but GossipSub delivers to mesh peers within milliseconds.
 
 **NAT status:** Exposes `PrsmGetNATStatus()` for observability. The node dashboard can show whether the node is publicly reachable or operating behind NAT with relay.
 
