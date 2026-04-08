@@ -45,6 +45,18 @@ class PeerInfo:
     gpu_available: bool = False
     last_seen: float = field(default_factory=time.time)
     last_capability_update: float = field(default_factory=time.time)
+    job_success_count: int = 0
+    job_failure_count: int = 0
+    last_failure_time: float = 0.0
+    startup_timestamp: float = 0.0
+
+    @property
+    def reliability_score(self) -> float:
+        """Compute reliability as success ratio. New peers get benefit of the doubt (1.0)."""
+        total = self.job_success_count + self.job_failure_count
+        if total == 0:
+            return 1.0
+        return self.job_success_count / total
 
 
 def validate_bootstrap_address(address: str) -> Tuple[bool, str]:
