@@ -97,7 +97,7 @@ class TaskPlan:
 
     decomposition: TaskDecomposition
     route: ExecutionRoute
-    target_shard_cids: List[str] = field(default_factory=list)
+    target_shard_content_ids: List[str] = field(default_factory=list)
     estimated_pcu: float = 0.0
     thermal_requirement: ThermalRequirement = ThermalRequirement.ANY
 
@@ -105,7 +105,7 @@ class TaskPlan:
         return {
             "decomposition": self.decomposition.to_dict(),
             "route": self.route.value,
-            "target_shard_cids": self.target_shard_cids,
+            "target_shard_content_ids": self.target_shard_content_ids,
             "estimated_pcu": self.estimated_pcu,
             "thermal_requirement": self.thermal_requirement.value,
         }

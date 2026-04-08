@@ -43,7 +43,7 @@ class MapReduceStrategy:
 
 @dataclass
 class ShardAssignment:
-    shard_cid: str
+    shard_content_id: str
     agent_id: str = ""
     provider_id: str = ""
     status: str = "dispatched"
@@ -59,7 +59,7 @@ class ShardAssignment:
 class SwarmJob:
     job_id: str
     query: str
-    shard_cids: List[str]
+    shard_content_ids: List[str]
     wasm_binary: bytes
     agent_manifest: AgentManifest
     budget_ftns: float
@@ -74,13 +74,13 @@ class SwarmJob:
 
     @property
     def budget_per_shard(self) -> float:
-        if not self.shard_cids:
+        if not self.shard_content_ids:
             return 0.0
-        return self.budget_ftns / len(self.shard_cids)
+        return self.budget_ftns / len(self.shard_content_ids)
 
     @property
     def quorum_count(self) -> int:
-        return math.ceil(len(self.shard_cids) * self.strategy.quorum_pct)
+        return math.ceil(len(self.shard_content_ids) * self.strategy.quorum_pct)
 
     def is_quorum_met(self) -> bool:
         return len(self.completed_shards) >= self.quorum_count

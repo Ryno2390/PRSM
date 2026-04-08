@@ -62,8 +62,8 @@ class InfoNode:
     tags: Set[str] = field(default_factory=set)
     metadata: Dict[str, Any] = field(default_factory=dict)
     
-    # IPFS integration
-    ipfs_hash: Optional[str] = None
+    # Content storage integration
+    content_id: Optional[str] = None
     content_url: Optional[str] = None
     
     # Network metrics
@@ -97,7 +97,7 @@ class InfoNode:
             "description": self.description,
             "tags": list(self.tags),
             "metadata": self.metadata,
-            "ipfs_hash": self.ipfs_hash,
+            "content_id": self.content_id,
             "content_url": self.content_url,
             "connections": self.connections,
             "centrality_score": self.centrality_score,
@@ -132,7 +132,7 @@ class InfoEdge:
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     # Evidence and provenance
-    evidence: List[str] = field(default_factory=list)  # IPFS hashes of supporting evidence
+    evidence: List[str] = field(default_factory=list)  # content IDs of supporting evidence
     citations: List[str] = field(default_factory=list)
     
     # FTNS rewards for relationship discovery
@@ -229,9 +229,8 @@ class ResearchOpportunity:
 @dataclass
 class ContentAnalysis:
     """Analysis results for content processed through Information Space."""
-    
+
     content_id: str = ""
-    ipfs_hash: str = ""
     
     # Extracted metadata
     title: str = ""
@@ -264,7 +263,6 @@ class ContentAnalysis:
         """Convert analysis to dictionary."""
         return {
             "content_id": self.content_id,
-            "ipfs_hash": self.ipfs_hash,
             "title": self.title,
             "authors": self.authors,
             "abstract": self.abstract,

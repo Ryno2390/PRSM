@@ -72,7 +72,7 @@ class TrainingStrategy(str, Enum):
 class SyntheticTask(PRSMBaseModel):
     """Task for generating synthetic reasoning data"""
     task_id: UUID = Field(default_factory=uuid4)
-    seed_data_cid: str
+    seed_data_content_id: str
     domain: str
     target_sample_count: int
     validation_level: str = "neuro_symbolic"
@@ -86,7 +86,7 @@ class SyntheticDataShard(PRSMBaseModel):
     task_id: UUID
     generator_node_id: str
     content_hash: str
-    ipfs_cid: str
+    content_id: str
     verification_score: float
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -94,8 +94,8 @@ class SyntheticDataShard(PRSMBaseModel):
 class DataLineageRecord(TimestampMixin):
     """Tracks the lineage between real seed data and synthetic descendants"""
     lineage_id: UUID = Field(default_factory=uuid4)
-    original_cid: str
-    synthetic_cid: str
+    original_content_id: str
+    synthetic_content_id: str
     contribution_ratio: float = 1.0  # Weight for royalty splitting
     derivation_type: str = "distillation_expansion"
 
@@ -135,7 +135,7 @@ class DistillationRequest(PRSMBaseModel):
     training_strategy: TrainingStrategy = TrainingStrategy.PROGRESSIVE
     backend: Optional[str] = Field(default=None, description="Training backend (pytorch, tensorflow, transformers)")
     augmentation_techniques: List[str] = Field(default_factory=list)
-    custom_training_data: Optional[str] = Field(default=None, description="IPFS CID for custom training data")
+    custom_training_data: Optional[str] = Field(default=None, description="content ID for custom training data")
     
     # Performance requirements
     max_inference_latency: Optional[str] = Field(default=None, description="Maximum acceptable latency (e.g., '100ms')")

@@ -238,7 +238,7 @@ class TeamTask(TimestampMixin):
     actual_hours: Optional[float] = None
     
     # Results
-    output_artifacts: List[str] = Field(default_factory=list)  # IPFS CIDs
+    output_artifacts: List[str] = Field(default_factory=list)  # content IDs
     output_models: List[str] = Field(default_factory=list)     # Model IDs
     performance_metrics: Dict[str, float] = Field(default_factory=dict)
     

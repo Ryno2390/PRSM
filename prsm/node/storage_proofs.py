@@ -66,10 +66,10 @@ class ChallengeStatus(str, Enum):
 @dataclass
 class StorageChallenge:
     """Challenge for storage provider to prove possession of content.
-    
+
     Attributes:
         challenge_id: Unique identifier for this challenge
-        cid: Content ID being challenged
+        shard_hash: Content hash being challenged
         nonce: Random nonce for this challenge (prevents replay)
         difficulty: Number of bytes to prove possession of
         deadline: When the challenge expires
@@ -78,7 +78,7 @@ class StorageChallenge:
         proof_type: Type of proof expected (merkle, range, full)
     """
     challenge_id: str
-    cid: str
+    shard_hash: str
     nonce: str
     difficulty: int
     deadline: datetime
@@ -90,7 +90,7 @@ class StorageChallenge:
         """Serialize challenge for transmission."""
         return {
             "challenge_id": self.challenge_id,
-            "cid": self.cid,
+            "shard_hash": self.shard_hash,
             "nonce": self.nonce,
             "difficulty": self.difficulty,
             "deadline": self.deadline.isoformat(),
@@ -104,7 +104,7 @@ class StorageChallenge:
         """Deserialize challenge from transmission."""
         return cls(
             challenge_id=data["challenge_id"],
-            cid=data["cid"],
+            shard_hash=data["shard_hash"],
             nonce=data["nonce"],
             difficulty=data["difficulty"],
             deadline=datetime.fromisoformat(data["deadline"]),
@@ -191,11 +191,11 @@ class MerkleProof:
 @dataclass
 class StorageProof:
     """Proof of storage from a provider.
-    
+
     Attributes:
         challenge_id: ID of the challenge being answered
         provider_id: ID of the storage provider
-        cid: Content ID
+        shard_hash: Content hash
         proof_type: Type of proof (merkle, range, full)
         proof_data: Actual proof data (serialized)
         timestamp: When proof was generated
@@ -204,7 +204,7 @@ class StorageProof:
     """
     challenge_id: str
     provider_id: str
-    cid: str
+    shard_hash: str
     proof_type: ProofType
     proof_data: bytes
     timestamp: datetime
@@ -216,7 +216,7 @@ class StorageProof:
         return {
             "challenge_id": self.challenge_id,
             "provider_id": self.provider_id,
-            "cid": self.cid,
+            "shard_hash": self.shard_hash,
             "proof_type": self.proof_type.value,
             "proof_data": self.proof_data.hex(),
             "timestamp": self.timestamp.isoformat(),
@@ -230,7 +230,7 @@ class StorageProof:
         return cls(
             challenge_id=data["challenge_id"],
             provider_id=data["provider_id"],
-            cid=data["cid"],
+            shard_hash=data["shard_hash"],
             proof_type=ProofType(data["proof_type"]),
             proof_data=bytes.fromhex(data["proof_data"]),
             timestamp=datetime.fromisoformat(data["timestamp"]),
@@ -477,18 +477,15 @@ class StorageProofVerifier:
     
     def __init__(
         self,
-        ipfs_client: Optional[Any] = None,
         challenge_timeout_minutes: int = DEFAULT_CHALLENGE_TIMEOUT_MINUTES,
         max_pending_challenges: int = MAX_PENDING_CHALLENGES,
     ):
         """Initialize the proof verifier.
-        
+
         Args:
-            ipfs_client: IPFS client for content retrieval (optional)
             challenge_timeout_minutes: Minutes until challenge expires
             max_pending_challenges: Maximum pending challenges per provider
         """
-        self.ipfs_client = ipfs_client
         self.challenge_timeout_minutes = challenge_timeout_minutes
         self.max_pending_challenges = max_pending_challenges
         
@@ -506,34 +503,34 @@ class StorageProofVerifier:
     
     def generate_challenge(
         self,
-        cid: str,
+        shard_hash: str,
         challenger_id: str,
         difficulty: int = DEFAULT_CHALLENGE_DIFFICULTY,
         proof_type: ProofType = ProofType.MERKLE,
     ) -> StorageChallenge:
         """Generate a new storage challenge.
-        
+
         Args:
-            cid: Content ID to challenge
+            shard_hash: Content hash to challenge
             challenger_id: ID of the node issuing the challenge
             difficulty: Number of bytes to prove
             proof_type: Type of proof expected
-            
+
         Returns:
             StorageChallenge for the provider to answer
         """
         # Generate unique challenge ID
         challenge_id = f"challenge_{secrets.token_hex(16)}"
-        
+
         # Generate random nonce
         nonce = secrets.token_hex(32)
-        
+
         # Set deadline
         deadline = datetime.now(timezone.utc) + timedelta(minutes=self.challenge_timeout_minutes)
-        
+
         challenge = StorageChallenge(
             challenge_id=challenge_id,
-            cid=cid,
+            shard_hash=shard_hash,
             nonce=nonce,
             difficulty=difficulty,
             deadline=deadline,
@@ -601,8 +598,8 @@ class StorageProofVerifier:
             return False, "Challenge has expired"
         
         # Verify challenge matches
-        if challenge.cid != proof.cid:
-            return False, "CID mismatch"
+        if challenge.shard_hash != proof.shard_hash:
+            return False, "shard_hash mismatch"
         
         if challenge.challenger_id != proof.provider_id:
             # Note: In production, we'd verify the provider is authorized
@@ -646,7 +643,7 @@ class StorageProofVerifier:
             Bytes that were signed
         """
         # Sign the challenge ID, CID, and proof data hash
-        data = f"{proof.challenge_id}:{proof.cid}:{proof.proof_data.hex()}:{proof.timestamp.isoformat()}"
+        data = f"{proof.challenge_id}:{proof.shard_hash}:{proof.proof_data.hex()}:{proof.timestamp.isoformat()}"
         return data.encode()
     
     def _verify_merkle_proof(
@@ -786,12 +783,12 @@ class StorageProofVerifier:
             Number of challenges removed
         """
         expired_ids = [
-            cid for cid, record in self._pending_challenges.items()
+            challenge_id for challenge_id, record in self._pending_challenges.items()
             if record.challenge.is_expired()
         ]
-        
-        for cid in expired_ids:
-            self._pending_challenges[cid].status = ChallengeStatus.EXPIRED
+
+        for challenge_id in expired_ids:
+            self._pending_challenges[challenge_id].status = ChallengeStatus.EXPIRED
         
         return len(expired_ids)
     
@@ -857,28 +854,17 @@ class StorageProver:
     def __init__(
         self,
         identity: NodeIdentity,
-        ipfs_client: Optional[Any] = None,
-        ipfs_api_url: str = "http://127.0.0.1:5001",
+        content_client: Optional[Any] = None,
     ):
         """Initialize the storage prover.
-        
+
         Args:
             identity: Node identity for signing proofs
-            ipfs_client: IPFS client for content retrieval (optional)
-            ipfs_api_url: IPFS API URL for direct calls
+            content_client: Content storage client for retrieval (optional)
         """
         self.identity = identity
-        self.ipfs_client = ipfs_client
-        self.ipfs_api_url = ipfs_api_url
+        self.content_client = content_client
         self._merkle = MerkleProofGenerator()
-        self._ipfs_session = None
-    
-    async def _get_ipfs_session(self) -> Any:
-        """Get or create aiohttp session for IPFS API."""
-        if self._ipfs_session is None or self._ipfs_session.closed:
-            import aiohttp
-            self._ipfs_session = aiohttp.ClientSession()
-        return self._ipfs_session
     
     async def answer_challenge(
         self,
@@ -902,9 +888,9 @@ class StorageProver:
         try:
             # Get content if not provided
             if content is None:
-                content = await self._get_content(challenge.cid)
+                content = await self._get_content(challenge.shard_hash)
                 if content is None:
-                    logger.error(f"Failed to retrieve content {challenge.cid}")
+                    logger.error(f"Failed to retrieve content {challenge.shard_hash}")
                     return None
             
             # Generate proof based on type
@@ -925,7 +911,7 @@ class StorageProver:
             proof = StorageProof(
                 challenge_id=challenge.challenge_id,
                 provider_id=self.identity.node_id,
-                cid=challenge.cid,
+                shard_hash=challenge.shard_hash,
                 proof_type=challenge.proof_type,
                 proof_data=proof_data["proof_data"],
                 timestamp=datetime.now(timezone.utc),
@@ -942,36 +928,24 @@ class StorageProver:
             logger.error(f"Failed to answer challenge: {e}")
             return None
     
-    async def _get_content(self, cid: str) -> Optional[bytes]:
-        """Retrieve content from IPFS.
-        
+    async def _get_content(self, shard_hash: str) -> Optional[bytes]:
+        """Retrieve content from storage.
+
         Args:
-            cid: Content ID to retrieve
-            
+            shard_hash: Content hash to retrieve
+
         Returns:
             Content bytes if successful, None otherwise
         """
         try:
-            # Try using IPFS client if available
-            if self.ipfs_client and hasattr(self.ipfs_client, 'get_content'):
-                return await self.ipfs_client.get_content(cid)
-            
-            # Fall back to direct API call
-            session = await self._get_ipfs_session()
-            import aiohttp
-            
-            async with session.post(
-                f"{self.ipfs_api_url}/api/v0/cat",
-                params={"arg": cid},
-                timeout=aiohttp.ClientTimeout(total=60),
-            ) as resp:
-                if resp.status == 200:
-                    return await resp.read()
-            
+            # Try using content client if available
+            if self.content_client and hasattr(self.content_client, 'get_content'):
+                return await self.content_client.get_content(shard_hash)
+
             return None
-            
+
         except Exception as e:
-            logger.error(f"Failed to get content {cid}: {e}")
+            logger.error(f"Failed to get content {shard_hash}: {e}")
             return None
     
     async def _generate_merkle_proof(
@@ -1062,7 +1036,7 @@ class StorageProver:
             Base64-encoded signature
         """
         # Get the data to sign
-        signed_data = f"{proof.challenge_id}:{proof.cid}:{proof.proof_data.hex()}:{proof.timestamp.isoformat()}"
+        signed_data = f"{proof.challenge_id}:{proof.shard_hash}:{proof.proof_data.hex()}:{proof.timestamp.isoformat()}"
         
         # Sign with node's private key
         signature = self.identity.sign(signed_data.encode())
@@ -1070,10 +1044,8 @@ class StorageProver:
         return signature
     
     async def close(self) -> None:
-        """Close the IPFS session."""
-        if self._ipfs_session:
-            await self._ipfs_session.close()
-            self._ipfs_session = None
+        """Close any open sessions."""
+        pass
 
 
 # =============================================================================
@@ -1162,7 +1134,7 @@ class StorageRewardIntegration:
                         wallet_id=provider_id,
                         amount=reward,
                         tx_type="storage_reward",
-                        description=f"Storage proof reward for {proof.cid[:16]}",
+                        description=f"Storage proof reward for {proof.shard_hash[:16]}",
                     )
                 else:
                     logger.warning("FTNS service does not support minting/credit")
@@ -1235,28 +1207,28 @@ class StorageRewardIntegration:
         
         logger.warning(f"Challenge {challenge.challenge_id} expired for provider {provider_id}")
     
-    def track_storage(self, provider_id: str, cid: str, size_bytes: int) -> None:
+    def track_storage(self, provider_id: str, content_id: str, size_bytes: int) -> None:
         """Track content stored by a provider.
-        
+
         Args:
             provider_id: Provider ID
-            cid: Content ID
+            content_id: Content identifier
             size_bytes: Size in bytes
         """
         if provider_id not in self._provider_storage:
             self._provider_storage[provider_id] = {}
-        
-        self._provider_storage[provider_id][cid] = size_bytes
-    
-    def untrack_storage(self, provider_id: str, cid: str) -> None:
+
+        self._provider_storage[provider_id][content_id] = size_bytes
+
+    def untrack_storage(self, provider_id: str, content_id: str) -> None:
         """Stop tracking content for a provider.
-        
+
         Args:
             provider_id: Provider ID
-            cid: Content ID
+            content_id: Content identifier
         """
         if provider_id in self._provider_storage:
-            self._provider_storage[provider_id].pop(cid, None)
+            self._provider_storage[provider_id].pop(content_id, None)
     
     def get_provider_storage_gb(self, provider_id: str) -> float:
         """Get total storage provided by a provider in GB.
@@ -1315,22 +1287,22 @@ class StorageRewardIntegration:
 # =============================================================================
 
 def create_storage_challenge(
-    cid: str,
+    shard_hash: str,
     challenger_id: str,
     difficulty: int = DEFAULT_CHALLENGE_DIFFICULTY,
 ) -> StorageChallenge:
     """Create a new storage challenge.
-    
+
     Args:
-        cid: Content ID to challenge
+        shard_hash: Content hash to challenge
         challenger_id: ID of the challenger
         difficulty: Challenge difficulty in bytes
-        
+
     Returns:
         StorageChallenge
     """
     verifier = StorageProofVerifier()
-    return verifier.generate_challenge(cid, challenger_id, difficulty)
+    return verifier.generate_challenge(shard_hash, challenger_id, difficulty)
 
 
 async def verify_storage_proof(
