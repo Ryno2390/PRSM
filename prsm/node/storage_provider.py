@@ -414,12 +414,13 @@ class StorageProvider:
         """
         import warnings
         warnings.warn(
-            "register_content_handler is deprecated; pass transport= to the constructor",
+            "register_content_handler() is deprecated. Pass transport= to StorageProvider constructor.",
             DeprecationWarning,
             stacklevel=2,
         )
-        self._transport = transport
-        transport.on_message(MSG_DIRECT, self._on_direct_content_request)
+        if self.transport is None:
+            self.transport = transport
+        self._register_direct_handler()
         logger.info("Storage provider registered for content serving")
 
     async def _on_direct_content_request(self, msg: P2PMessage, peer: PeerConnection) -> None:
@@ -449,7 +450,7 @@ class StorageProvider:
                 "size_bytes": self.pinned_content[cid].size_bytes,
             },
         )
-        await self._transport.send_to_peer(peer.peer_id, response)
+        await self.transport.send_to_peer(peer.peer_id, response)
 
     # ── Reward loop ──────────────────────────────────────────────
 
