@@ -1,15 +1,20 @@
 package internal
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
+
+	libp2phost "github.com/libp2p/go-libp2p/core/host"
 )
 
-// Host is a placeholder struct representing a libp2p host.
-// Real libp2p integration will be added in Task 2.
+// Host wraps a libp2p host with its lifecycle context and registry metadata.
 type Host struct {
 	ListenPort int
 	PeerID     string
+	Ctx        context.Context
+	Cancel     context.CancelFunc
+	P2PHost    libp2phost.Host
 }
 
 var (
