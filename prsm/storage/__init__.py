@@ -36,9 +36,7 @@ from prsm.storage.exceptions import (
     StorageError,
 )
 
-# ContentStore will be added in a later task; expose a sentinel so importers
-# can reference the name without an ImportError.
-ContentStore = None  # type: ignore[assignment]
+from prsm.storage.content_store import ContentStore
 
 __all__ = [
     # Models
