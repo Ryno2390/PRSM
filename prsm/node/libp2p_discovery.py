@@ -60,6 +60,7 @@ class Libp2pDiscovery:
         self._local_capabilities: List[str] = []
         self._local_backends: List[str] = []
         self._local_gpu_available: bool = False
+        self._startup_timestamp: float = time.time()
 
         # Bootstrap status tracking
         self._bootstrap_status: Dict[str, Any] = {
@@ -206,8 +207,22 @@ class Libp2pDiscovery:
                 "capabilities": self._local_capabilities,
                 "supported_backends": self._local_backends,
                 "gpu_available": self._local_gpu_available,
+                "startup_timestamp": self._startup_timestamp,
             },
         )
+
+    def record_job_success(self, node_id: str) -> None:
+        """Record a successful job completion for a peer."""
+        peer = self._capability_index.get(node_id)
+        if peer:
+            peer.job_success_count += 1
+
+    def record_job_failure(self, node_id: str) -> None:
+        """Record a job failure/timeout for a peer."""
+        peer = self._capability_index.get(node_id)
+        if peer:
+            peer.job_failure_count += 1
+            peer.last_failure_time = time.time()
 
     # ── Content routing (dual: GossipSub + DHT) ──────────────────
 
@@ -314,13 +329,30 @@ class Libp2pDiscovery:
     async def _on_capability(
         self, subtype: str, data: Dict[str, Any], sender_id: str
     ) -> None:
-        """Update capability index from a ``capability_announce`` message."""
+        """Update capability index from a ``capability_announce`` message.
+
+        Resets reliability counters only on restart (new startup_timestamp)
+        or capability change. Periodic heartbeats only refresh last_seen.
+        """
         node_id = data.get("node_id", sender_id)
         if not node_id:
             return
 
+        new_startup = data.get("startup_timestamp", 0.0)
+        new_caps = set(data.get("capabilities", []))
+
         existing = self._capability_index.get(node_id)
         if existing is not None:
+            old_startup = existing.startup_timestamp
+            old_caps = set(existing.capabilities)
+
+            # Reset reliability only on restart or capability change
+            if new_startup > old_startup or new_caps != old_caps:
+                existing.job_success_count = 0
+                existing.job_failure_count = 0
+                existing.last_failure_time = 0.0
+                existing.startup_timestamp = new_startup
+
             existing.capabilities = data.get("capabilities", existing.capabilities)
             existing.supported_backends = data.get(
                 "supported_backends", existing.supported_backends
@@ -339,6 +371,7 @@ class Libp2pDiscovery:
                 gpu_available=data.get("gpu_available", False),
                 last_seen=time.time(),
                 last_capability_update=time.time(),
+                startup_timestamp=new_startup,
             )
 
     async def _on_shard_available(
