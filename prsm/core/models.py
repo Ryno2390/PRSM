@@ -478,7 +478,7 @@ class TeacherModel(TimestampMixin):
     curriculum_ids: List[UUID] = Field(default_factory=list)
     student_models: List[UUID] = Field(default_factory=list)
     rlvr_score: Optional[float] = None
-    ipfs_cid: Optional[str] = None
+    content_id: Optional[str] = None
     version: str = "1.0.0"
     active: bool = True
 
@@ -594,7 +594,7 @@ class FTNSTransaction(TimestampMixin):
     status: str = Field(default="pending")  # "pending", "processing", "confirmed", "failed", "cancelled"
     fee: Optional[Decimal] = None
     context_units: Optional[int] = None  # For context-based charges
-    ipfs_cid: Optional[str] = None  # For provenance-based rewards
+    content_id: Optional[str] = None  # For provenance-based rewards
     block_hash: Optional[str] = None  # For distributed ledger integration
     metadata: Dict[str, Any] = Field(default_factory=dict)
     
@@ -649,7 +649,7 @@ class ContextUsage(TimestampMixin):
 class ProvenanceRecord(TimestampMixin):
     """Track content usage for royalty payments"""
     record_id: UUID = Field(default_factory=uuid4)
-    content_cid: str
+    content_id: str
     uploader_id: str
     access_count: int = Field(default=0)
     last_accessed: Optional[datetime] = None
@@ -672,7 +672,7 @@ class PeerNode(TimestampMixin):
 class ModelShard(TimestampMixin):
     """Distributed model shard information"""
     shard_id: UUID = Field(default_factory=uuid4)
-    model_cid: str
+    model_content_id: str
     shard_index: int
     total_shards: int
     hosted_by: List[str] = Field(default_factory=list)  # Node IDs

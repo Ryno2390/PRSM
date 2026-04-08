@@ -95,7 +95,7 @@ class Settlement(BaseModel):
     fees: Dict[str, Decimal]  # Fee breakdown by type
     total_fees: Decimal
     net_amount: Decimal  # Final amount after fees
-    settlement_hash: str  # IPFS provenance hash
+    settlement_hash: str  # provenance content hash
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
     class Config:

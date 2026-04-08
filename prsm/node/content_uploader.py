@@ -30,12 +30,6 @@ try:
 except ImportError:
     _HAS_NUMPY = False
 
-from prsm.core.ipfs_sharding import (
-    ContentSharder,
-    ShardingConfig,
-    ShardManifest,
-    ShardingError,
-)
 from prsm.node.gossip import (
     GOSSIP_CONTENT_ACCESS,
     GOSSIP_CONTENT_ADVERTISE,
@@ -85,7 +79,7 @@ class _SemanticIndex:
     DUPLICATE_THRESHOLD: float = 0.99
 
     def __init__(self, persist_path: Optional[Path] = None) -> None:
-        # cid → (normalised_embedding, creator_id)
+        # content_id → (normalised_embedding, creator_id)
         self._index: Dict[str, Tuple] = {}
         self._persist_path = persist_path
         if persist_path and persist_path.exists():
@@ -94,18 +88,18 @@ class _SemanticIndex:
     def __len__(self) -> int:
         return len(self._index)
 
-    def store(self, cid: str, embedding: "np.ndarray", creator_id: str) -> None:
-        """Normalise and store an embedding keyed by CID."""
+    def store(self, content_id: str, embedding: "np.ndarray", creator_id: str) -> None:
+        """Normalise and store an embedding keyed by content ID."""
         if not _HAS_NUMPY:
             return
         norm = float(np.linalg.norm(embedding))
         normalised = embedding / norm if norm > 0 else embedding
-        self._index[cid] = (normalised, creator_id)
+        self._index[content_id] = (normalised, creator_id)
         if self._persist_path:
             self._save()
 
     def find_nearest(self, embedding: "np.ndarray") -> Optional[Tuple[str, float, str]]:
-        """Return (cid, cosine_similarity, creator_id) for the closest stored
+        """Return (content_id, cosine_similarity, creator_id) for the closest stored
         embedding, or None if the index is empty."""
         if not _HAS_NUMPY or not self._index:
             return None
@@ -113,18 +107,18 @@ class _SemanticIndex:
         if norm == 0:
             return None
         query = embedding / norm
-        best_cid, best_sim, best_creator = None, -1.0, ""
-        for cid, (stored, creator) in self._index.items():
+        best_content_id, best_sim, best_creator = None, -1.0, ""
+        for content_id, (stored, creator) in self._index.items():
             sim = float(np.dot(query, stored))
             if sim > best_sim:
-                best_sim, best_cid, best_creator = sim, cid, creator
-        return (best_cid, best_sim, best_creator)
+                best_sim, best_content_id, best_creator = sim, content_id, creator
+        return (best_content_id, best_sim, best_creator)
 
     def _save(self) -> None:
         try:
             data = {
-                cid: {"embedding": emb.tolist(), "creator_id": creator}
-                for cid, (emb, creator) in self._index.items()
+                content_id: {"embedding": emb.tolist(), "creator_id": creator}
+                for content_id, (emb, creator) in self._index.items()
             }
             with open(self._persist_path, "w") as fh:
                 json.dump(data, fh)
@@ -136,8 +130,8 @@ class _SemanticIndex:
             with open(self._persist_path) as fh:
                 data = json.load(fh)
             self._index = {
-                cid: (np.array(entry["embedding"], dtype=np.float32), entry["creator_id"])
-                for cid, entry in data.items()
+                content_id: (np.array(entry["embedding"], dtype=np.float32), entry["creator_id"])
+                for content_id, entry in data.items()
             }
             logger.info(f"Loaded semantic index: {len(self._index)} entries")
         except Exception as exc:
@@ -147,7 +141,7 @@ class _SemanticIndex:
 @dataclass
 class UploadedContent:
     """Tracks content uploaded by this node."""
-    cid: str
+    content_id: str
     filename: str
     size_bytes: int
     content_hash: str       # SHA-256 of raw content
@@ -155,17 +149,17 @@ class UploadedContent:
     created_at: float = field(default_factory=time.time)
     provenance_signature: str = ""
     royalty_rate: float = DEFAULT_ROYALTY_RATE
-    parent_cids: List[str] = field(default_factory=list)
+    parent_content_ids: List[str] = field(default_factory=list)
     access_count: int = 0
     total_royalties: float = 0.0
     # Sharding metadata
     is_sharded: bool = False
-    manifest_cid: Optional[str] = None  # CID of the shard manifest if sharded
+    manifest_content_id: Optional[str] = None  # content ID of the shard manifest if sharded
     total_shards: int = 0
     # Semantic fingerprint metadata
-    embedding_id: Optional[str] = None          # "emb:<cid>" when an embedding was generated
-    near_duplicate_of: Optional[str] = None     # CID of most-similar existing content
-    near_duplicate_similarity: Optional[float] = None  # Cosine similarity to that CID
+    embedding_id: Optional[str] = None          # "emb:<content_id>" when an embedding was generated
+    near_duplicate_of: Optional[str] = None     # content ID of most-similar existing content
+    near_duplicate_similarity: Optional[float] = None  # Cosine similarity to that content ID
 
 
 class ContentUploader:
@@ -184,20 +178,17 @@ class ContentUploader:
         identity: NodeIdentity,
         gossip: GossipProtocol,
         ledger: LocalLedger,
-        ipfs_api_url: str = "http://127.0.0.1:5001",
         transport: Optional[WebSocketTransport] = None,
         content_index: Optional[Any] = None,
         ledger_sync: Optional[Any] = None,
         content_economy: Optional[Any] = None,
         sharding_threshold: int = DEFAULT_SHARDING_THRESHOLD,
-        sharding_config: Optional[ShardingConfig] = None,
         embedding_fn: Optional[Callable] = None,
         semantic_index_path: Optional[Path] = None,
     ):
         self.identity = identity
         self.gossip = gossip
         self.ledger = ledger
-        self.ipfs_api_url = ipfs_api_url
         self.transport = transport
         self.content_index = content_index  # For looking up parent content creators
         self.ledger_sync = ledger_sync      # For broadcasting transactions
@@ -205,8 +196,6 @@ class ContentUploader:
 
         # Sharding configuration
         self.sharding_threshold = sharding_threshold
-        self.sharding_config = sharding_config or ShardingConfig()
-        self._content_sharder: Optional[ContentSharder] = None
 
         # Semantic deduplication
         # embedding_fn: async (text: str) -> np.ndarray  — optional, skipped if None
@@ -214,32 +203,15 @@ class ContentUploader:
         self._semantic_index = _SemanticIndex(persist_path=semantic_index_path)
 
         self.uploaded_content: Dict[str, UploadedContent] = {}
-        self._ipfs_session = None
 
         # Pending content retrieval requests: request_id → asyncio.Future[dict]
         self._pending_requests: Dict[str, asyncio.Future] = {}
 
-        # Manifest tracking: manifest_cid -> ShardManifest
-        self.shard_manifests: Dict[str, ShardManifest] = {}
-
-    async def _get_ipfs_session(self) -> Any:
-        if self._ipfs_session is None or self._ipfs_session.closed:
-            import aiohttp
-            self._ipfs_session = aiohttp.ClientSession()
-        return self._ipfs_session
-
-    async def _get_content_sharder(self) -> ContentSharder:
-        """Get or create the ContentSharder instance."""
-        if self._content_sharder is None:
-            # Create a minimal IPFS client wrapper for the sharder
-            ipfs_client = _IPFSClientWrapper(self)
-            self._content_sharder = ContentSharder(ipfs_client, self.sharding_config)
-        return self._content_sharder
+        # Manifest tracking: manifest_content_id -> manifest data
+        self.shard_manifests: Dict[str, Any] = {}
 
     async def close(self) -> None:
-        if self._ipfs_session:
-            await self._ipfs_session.close()
-            self._ipfs_session = None
+        pass
 
     async def _get_embedding(self, content: bytes) -> "Optional[np.ndarray]":
         """Attempt to generate a semantic embedding for content.
@@ -270,10 +242,10 @@ class ContentUploader:
         metadata: Optional[Dict[str, Any]] = None,
         replicas: int = 3,
         royalty_rate: Optional[float] = None,
-        parent_cids: Optional[List[str]] = None,
+        parent_content_ids: Optional[List[str]] = None,
         force_shard: bool = False,
     ) -> Optional[UploadedContent]:
-        """Upload content to IPFS and register provenance.
+        """Upload content to storage and register provenance.
 
         Args:
             content: Raw bytes to upload
@@ -281,11 +253,11 @@ class ContentUploader:
             metadata: Optional metadata dict
             replicas: Number of storage replicas to request
             royalty_rate: FTNS earned per access (clamped to 0.001–0.1, default 0.01)
-            parent_cids: CIDs of source material this content derives from
+            parent_content_ids: content IDs of source material this content derives from
             force_shard: If True, force sharding regardless of file size
 
         Returns:
-            UploadedContent with CID and provenance info, or None on failure
+            UploadedContent with content ID and provenance info, or None on failure
         """
         # Clamp royalty rate to bounds
         rate = royalty_rate if royalty_rate is not None else DEFAULT_ROYALTY_RATE
@@ -293,7 +265,7 @@ class ContentUploader:
 
         content_hash = hashlib.sha256(content).hexdigest()
         size_bytes = len(content)
-        parents = parent_cids or []
+        parents = parent_content_ids or []
 
         # ── Semantic deduplication ────────────────────────────────────────────
         # Generate an embedding and check for near-duplicates *before* committing
@@ -341,7 +313,7 @@ class ContentUploader:
                 metadata=metadata,
                 replicas=replicas,
                 royalty_rate=rate,
-                parent_cids=parents,
+                parent_content_ids=parents,
                 content_hash=content_hash,
                 embedding=embedding,
                 near_dup_cid=near_dup_cid,
@@ -358,7 +330,7 @@ class ContentUploader:
 
         # Create provenance record
         provenance_data = {
-            "cid": cid,
+            "content_id": cid,
             "content_hash": content_hash,
             "creator_id": self.identity.node_id,
             "creator_public_key": self.identity.public_key_b64,
@@ -367,7 +339,7 @@ class ContentUploader:
             "created_at": time.time(),
             "metadata": metadata or {},
             "royalty_rate": rate,
-            "parent_cids": parents,
+            "parent_content_ids": parents,
             "is_sharded": False,
             "embedding_id": embedding_id,
             "near_duplicate_of": near_dup_cid,
@@ -376,14 +348,14 @@ class ContentUploader:
         provenance_signature = self.identity.sign(provenance_bytes)
 
         uploaded = UploadedContent(
-            cid=cid,
+            content_id=cid,
             filename=filename,
             size_bytes=size_bytes,
             content_hash=content_hash,
             creator_id=self.identity.node_id,
             provenance_signature=provenance_signature,
             royalty_rate=rate,
-            parent_cids=parents,
+            parent_content_ids=parents,
             is_sharded=False,
             embedding_id=embedding_id,
             near_duplicate_of=near_dup_cid,
@@ -404,7 +376,7 @@ class ContentUploader:
 
         # Advertise content availability to the network
         await self.gossip.publish(GOSSIP_CONTENT_ADVERTISE, {
-            "cid": cid,
+            "content_id": cid,
             "filename": filename,
             "size_bytes": size_bytes,
             "content_hash": content_hash,
@@ -413,14 +385,14 @@ class ContentUploader:
             "created_at": provenance_data["created_at"],
             "metadata": metadata or {},
             "royalty_rate": rate,
-            "parent_cids": parents,
+            "parent_content_ids": parents,
             "embedding_id": embedding_id,
         })
 
         # Request storage replication
         if replicas > 0:
             await self.gossip.publish(GOSSIP_STORAGE_REQUEST, {
-                "cid": cid,
+                "content_id": cid,
                 "size_bytes": size_bytes,
                 "requester_id": self.identity.node_id,
                 "replicas_needed": replicas,
@@ -429,7 +401,7 @@ class ContentUploader:
         # Track replication status via ContentEconomy (Phase 4)
         if self.content_economy:
             await self.content_economy.track_content_upload(
-                cid=cid,
+                content_id=cid,
                 size_bytes=size_bytes,
                 replicas_requested=replicas,
             )
@@ -448,7 +420,7 @@ class ContentUploader:
         metadata: Optional[Dict[str, Any]],
         replicas: int,
         royalty_rate: float,
-        parent_cids: List[str],
+        parent_content_ids: List[str],
         content_hash: str,
         embedding: "Optional[np.ndarray]" = None,
         near_dup_cid: Optional[str] = None,
@@ -482,7 +454,7 @@ class ContentUploader:
                 metadata={
                     "filename": filename,
                     "uploader_metadata": metadata or {},
-                    "parent_cids": parent_cids,
+                    "parent_content_ids": parent_content_ids,
                 },
             )
 
@@ -492,10 +464,10 @@ class ContentUploader:
             size_bytes = len(content)
 
             # Create provenance record for the sharded content
-            # The manifest CID serves as the primary identifier for sharded content
+            # The manifest content ID serves as the primary identifier for sharded content
             embedding_id = f"emb:{manifest_cid}" if embedding is not None else None
             provenance_data = {
-                "cid": manifest_cid,  # Use manifest CID as the primary CID
+                "content_id": manifest_cid,  # Use manifest content ID as the primary identifier
                 "content_hash": content_hash,
                 "creator_id": self.identity.node_id,
                 "creator_public_key": self.identity.public_key_b64,
@@ -504,7 +476,7 @@ class ContentUploader:
                 "created_at": time.time(),
                 "metadata": metadata or {},
                 "royalty_rate": royalty_rate,
-                "parent_cids": parent_cids,
+                "parent_content_ids": parent_content_ids,
                 "is_sharded": True,
                 "total_shards": manifest.total_shards,
                 "shard_size": manifest.shard_size,
@@ -515,16 +487,16 @@ class ContentUploader:
             provenance_signature = self.identity.sign(provenance_bytes)
 
             uploaded = UploadedContent(
-                cid=manifest_cid,  # Use manifest CID as primary identifier
+                content_id=manifest_cid,  # Use manifest content ID as primary identifier
                 filename=filename,
                 size_bytes=size_bytes,
                 content_hash=content_hash,
                 creator_id=self.identity.node_id,
                 provenance_signature=provenance_signature,
                 royalty_rate=royalty_rate,
-                parent_cids=parent_cids,
+                parent_content_ids=parent_content_ids,
                 is_sharded=True,
-                manifest_cid=manifest_cid,
+                manifest_content_id=manifest_cid,
                 total_shards=manifest.total_shards,
                 embedding_id=embedding_id,
                 near_duplicate_of=near_dup_cid,
@@ -554,7 +526,7 @@ class ContentUploader:
                 "created_at": provenance_data["created_at"],
                 "metadata": metadata or {},
                 "royalty_rate": royalty_rate,
-                "parent_cids": parent_cids,
+                "parent_content_ids": parent_content_ids,
                 "is_sharded": True,
                 "total_shards": manifest.total_shards,
                 "embedding_id": embedding_id,
@@ -564,7 +536,7 @@ class ContentUploader:
             if replicas > 0:
                 # Request replication for the manifest
                 await self.gossip.publish(GOSSIP_STORAGE_REQUEST, {
-                    "cid": manifest_cid,
+                    "content_id": manifest_cid,
                     "size_bytes": len(manifest.to_json()),
                     "requester_id": self.identity.node_id,
                     "replicas_needed": replicas,
@@ -573,7 +545,7 @@ class ContentUploader:
                 # Request replication for each shard
                 for shard_info in manifest.shards:
                     await self.gossip.publish(GOSSIP_STORAGE_REQUEST, {
-                        "cid": shard_info.cid,
+                        "content_id": shard_info.content_id,
                         "size_bytes": shard_info.size,
                         "requester_id": self.identity.node_id,
                         "replicas_needed": replicas,
@@ -582,7 +554,7 @@ class ContentUploader:
             logger.info(
                 f"Uploaded {filename} ({size_bytes} bytes) with sharding -> "
                 f"manifest={manifest_cid}, shards={manifest.total_shards}, "
-                f"royalty={royalty_rate} FTNS/access, parents={len(parent_cids)}"
+                f"royalty={royalty_rate} FTNS/access, parents={len(parent_content_ids)}"
             )
             return uploaded
 
@@ -597,7 +569,7 @@ class ContentUploader:
 
             size_bytes = len(content)
             provenance_data = {
-                "cid": cid,
+                "content_id": cid,
                 "content_hash": content_hash,
                 "creator_id": self.identity.node_id,
                 "creator_public_key": self.identity.public_key_b64,
@@ -606,7 +578,7 @@ class ContentUploader:
                 "created_at": time.time(),
                 "metadata": metadata or {},
                 "royalty_rate": royalty_rate,
-                "parent_cids": parent_cids,
+                "parent_content_ids": parent_content_ids,
                 "is_sharded": False,
                 "sharding_failed": True,
             }
@@ -614,14 +586,14 @@ class ContentUploader:
             provenance_signature = self.identity.sign(provenance_bytes)
 
             uploaded = UploadedContent(
-                cid=cid,
+                content_id=cid,
                 filename=filename,
                 size_bytes=size_bytes,
                 content_hash=content_hash,
                 creator_id=self.identity.node_id,
                 provenance_signature=provenance_signature,
                 royalty_rate=royalty_rate,
-                parent_cids=parent_cids,
+                parent_content_ids=parent_content_ids,
                 is_sharded=False,
             )
             self.uploaded_content[cid] = uploaded
@@ -633,7 +605,7 @@ class ContentUploader:
                 "signature": provenance_signature,
             })
             await self.gossip.publish(GOSSIP_CONTENT_ADVERTISE, {
-                "cid": cid,
+                "content_id": cid,
                 "filename": filename,
                 "size_bytes": size_bytes,
                 "content_hash": content_hash,
@@ -642,11 +614,11 @@ class ContentUploader:
                 "created_at": provenance_data["created_at"],
                 "metadata": metadata or {},
                 "royalty_rate": royalty_rate,
-                "parent_cids": parent_cids,
+                "parent_content_ids": parent_content_ids,
             })
             if replicas > 0:
                 await self.gossip.publish(GOSSIP_STORAGE_REQUEST, {
-                    "cid": cid,
+                    "content_id": cid,
                     "size_bytes": size_bytes,
                     "requester_id": self.identity.node_id,
                     "replicas_needed": replicas,
@@ -665,11 +637,11 @@ class ContentUploader:
         metadata: Optional[Dict[str, Any]] = None,
         replicas: int = 3,
         royalty_rate: Optional[float] = None,
-        parent_cids: Optional[List[str]] = None,
+        parent_content_ids: Optional[List[str]] = None,
     ) -> Optional[UploadedContent]:
-        """Upload JSON-serializable data to IPFS."""
+        """Upload JSON-serializable data to content storage."""
         content = json.dumps(data, indent=2).encode()
-        return await self.upload(content, filename, metadata, replicas, royalty_rate, parent_cids)
+        return await self.upload(content, filename, metadata, replicas, royalty_rate, parent_content_ids)
 
     async def upload_text(
         self,
@@ -678,10 +650,10 @@ class ContentUploader:
         metadata: Optional[Dict[str, Any]] = None,
         replicas: int = 3,
         royalty_rate: Optional[float] = None,
-        parent_cids: Optional[List[str]] = None,
+        parent_content_ids: Optional[List[str]] = None,
     ) -> Optional[UploadedContent]:
-        """Upload text content to IPFS."""
-        return await self.upload(text.encode("utf-8"), filename, metadata, replicas, royalty_rate, parent_cids)
+        """Upload text content to content storage."""
+        return await self.upload(text.encode("utf-8"), filename, metadata, replicas, royalty_rate, parent_content_ids)
 
     async def record_access(self, cid: str, accessor_id: str) -> None:
         """Record that content was accessed, distributing royalties.
@@ -702,7 +674,7 @@ class ContentUploader:
         content.access_count += 1
         total_royalty = content.royalty_rate
 
-        if content.parent_cids and self.content_index:
+        if content.parent_content_ids and self.content_index:
             # Multi-level provenance: split royalties
             await self._distribute_multilevel_royalty(content, total_royalty, accessor_id)
         else:
@@ -734,7 +706,7 @@ class ContentUploader:
         self, content: UploadedContent, total_royalty: float, accessor_id: str
     ) -> None:
         """Split royalty among derivative creator, source creators, and network."""
-        cid = content.cid
+        cid = content.content_id
         derivative_share = total_royalty * DERIVATIVE_CREATOR_SHARE
         source_pool = total_royalty * SOURCE_CREATOR_SHARE
         network_fee = total_royalty * NETWORK_FEE_SHARE
@@ -762,7 +734,7 @@ class ContentUploader:
         )
 
         # Credit source material creators (split evenly among parents)
-        parent_creators = self._resolve_parent_creators(content.parent_cids)
+        parent_creators = self._resolve_parent_creators(content.parent_content_ids)
         if parent_creators:
             per_parent = source_pool / len(parent_creators)
             for parent_creator_id in parent_creators:
@@ -822,12 +794,12 @@ class ContentUploader:
         except Exception as e:
             logger.error(f"Network fee credit failed: {e}")
 
-    def _resolve_parent_creators(self, parent_cids: List[str]) -> List[str]:
-        """Look up the creator node IDs for parent CIDs via the content index."""
+    def _resolve_parent_creators(self, parent_content_ids: List[str]) -> List[str]:
+        """Look up the creator node IDs for parent content IDs via the content index."""
         creators = []
         if not self.content_index:
             return creators
-        for pcid in parent_cids:
+        for pcid in parent_content_ids:
             record = self.content_index.lookup(pcid)
             if record and record.creator_id:
                 creators.append(record.creator_id)
@@ -911,7 +883,7 @@ class ContentUploader:
             "accessor_id": msg.sender_id,
             "creator_id": content_info.creator_id,
             "royalty_rate": content_info.royalty_rate,
-            "parent_cids": content_info.parent_cids,
+            "parent_content_ids": content_info.parent_content_ids,
             "timestamp": time.time(),
         })
 
@@ -1093,41 +1065,41 @@ class ContentUploader:
         if origin == self.identity.node_id:
             return  # Already processed locally
 
-        cid = data.get("cid", "")
+        content_id = data.get("content_id", "")
         accessor_id = data.get("accessor_id", "")
         creator_id = data.get("creator_id", "")
         royalty_rate = data.get("royalty_rate", DEFAULT_ROYALTY_RATE)
-        parent_cids = data.get("parent_cids", [])
+        parent_content_ids = data.get("parent_content_ids", [])
 
-        if not cid or not accessor_id:
+        if not content_id or not accessor_id:
             return
 
         # Case 1: We are the direct creator and have a local record
-        if creator_id == self.identity.node_id and cid in self.uploaded_content:
-            await self.record_access(cid, accessor_id)
+        if creator_id == self.identity.node_id and content_id in self.uploaded_content:
+            await self.record_access(content_id, accessor_id)
             return
 
         # Case 2: We are a source creator for a derivative work
-        if parent_cids:
-            my_parent_cids = [
-                pcid for pcid in parent_cids
+        if parent_content_ids:
+            my_parent_content_ids = [
+                pcid for pcid in parent_content_ids
                 if pcid in self.uploaded_content
             ]
-            if my_parent_cids:
+            if my_parent_content_ids:
                 source_pool = royalty_rate * SOURCE_CREATOR_SHARE
                 # Count total parents to split evenly
-                per_parent = source_pool / len(parent_cids)
-                source_royalty = per_parent * len(my_parent_cids)
+                per_parent = source_pool / len(parent_content_ids)
+                source_royalty = per_parent * len(my_parent_content_ids)
                 try:
                     await self.ledger.credit(
                         wallet_id=self.identity.node_id,
                         amount=source_royalty,
                         tx_type=TransactionType.CONTENT_ROYALTY,
-                        description=f"Source royalty for derivative {cid[:12]}... ({len(my_parent_cids)} parent(s))",
+                        description=f"Source royalty for derivative {content_id[:12]}... ({len(my_parent_content_ids)} parent(s))",
                     )
-                    for pcid in my_parent_cids:
+                    for pcid in my_parent_content_ids:
                         self.uploaded_content[pcid].total_royalties += per_parent
-                    logger.info(f"Source royalty earned: {source_royalty:.4f} FTNS for derivative {cid[:12]}...")
+                    logger.info(f"Source royalty earned: {source_royalty:.4f} FTNS for derivative {content_id[:12]}...")
                 except Exception as e:
                     logger.error(f"Source royalty credit failed: {e}")
 
@@ -1136,8 +1108,8 @@ class ContentUploader:
                     from_user=accessor_id,
                     to_user=self.identity.node_id,
                     amount=source_royalty,
-                    cid=cid,
-                    description=f"Source royalty (gossip) for derivative {cid[:12]}...",
+                    content_id=content_id,
+                    description=f"Source royalty (gossip) for derivative {content_id[:12]}...",
                 )
 
     async def _send_direct(self, peer_id: str, payload: Dict[str, Any]) -> None:
@@ -1207,18 +1179,18 @@ class ContentUploader:
         try:
             from prsm.core.database import ProvenanceQueries
             record = {
-                "cid": uploaded.cid,
+                "content_id": uploaded.content_id,
                 "filename": uploaded.filename,
                 "size_bytes": uploaded.size_bytes,
                 "content_hash": uploaded.content_hash,
                 "creator_id": uploaded.creator_id,
                 "provenance_signature": uploaded.provenance_signature,
                 "royalty_rate": uploaded.royalty_rate,
-                "parent_cids": uploaded.parent_cids,
+                "parent_content_ids": uploaded.parent_content_ids,
                 "access_count": uploaded.access_count,
                 "total_royalties": uploaded.total_royalties,
                 "is_sharded": uploaded.is_sharded,
-                "manifest_cid": uploaded.manifest_cid,
+                "manifest_content_id": uploaded.manifest_content_id,
                 "total_shards": uploaded.total_shards,
                 "embedding_id": uploaded.embedding_id,
                 "near_duplicate_of": uploaded.near_duplicate_of,
@@ -1227,10 +1199,10 @@ class ContentUploader:
             }
             success = await ProvenanceQueries.upsert_provenance(record)
             if success:
-                logger.debug(f"Provenance persisted to DB: {uploaded.cid[:12]}...")
+                logger.debug(f"Provenance persisted to DB: {uploaded.content_id[:12]}...")
         except Exception as e:
             logger.warning(
-                f"Provenance DB persist failed for {uploaded.cid[:12]}... "
+                f"Provenance DB persist failed for {uploaded.content_id[:12]}... "
                 f"(in-memory record intact): {e}"
             )
 
@@ -1339,10 +1311,10 @@ class ContentUploader:
             records = await ProvenanceQueries.load_all_for_node(self.identity.node_id)
             loaded = 0
             for rec in records:
-                if rec["cid"] in self.uploaded_content:
+                if rec["content_id"] in self.uploaded_content:
                     continue  # In-memory record takes precedence
-                self.uploaded_content[rec["cid"]] = UploadedContent(
-                    cid=rec["cid"],
+                self.uploaded_content[rec["content_id"]] = UploadedContent(
+                    content_id=rec["content_id"],
                     filename=rec["filename"],
                     size_bytes=rec["size_bytes"],
                     content_hash=rec["content_hash"],
@@ -1350,11 +1322,11 @@ class ContentUploader:
                     created_at=rec["created_at"],
                     provenance_signature=rec["provenance_signature"],
                     royalty_rate=rec["royalty_rate"],
-                    parent_cids=rec["parent_cids"],
+                    parent_content_ids=rec["parent_content_ids"],
                     access_count=rec["access_count"],
                     total_royalties=rec["total_royalties"],
                     is_sharded=rec["is_sharded"],
-                    manifest_cid=rec["manifest_cid"],
+                    manifest_content_id=rec["manifest_content_id"],
                     total_shards=rec["total_shards"],
                     embedding_id=rec["embedding_id"],
                     near_duplicate_of=rec["near_duplicate_of"],

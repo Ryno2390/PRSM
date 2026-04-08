@@ -115,7 +115,7 @@ class ContributorTier(str, Enum):
 
 class ContributionType(str, Enum):
     """Types of contributions that can be verified"""
-    STORAGE = "storage"             # IPFS storage provision
+    STORAGE = "storage"             # Content storage provision
     COMPUTE = "compute"             # Computational work provision  
     DATA = "data"                   # Dataset contribution
     GOVERNANCE = "governance"       # Voting and proposal participation
@@ -316,7 +316,7 @@ class FTNSProvenanceRecord(Base):
     
     # Primary identification
     record_id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    content_cid = Column(String(255), nullable=False, index=True)
+    content_id = Column(String(255), nullable=False, index=True)
     content_type = Column(String(50), nullable=False)  # model, dataset, research, code
     
     # Creator information
@@ -358,7 +358,7 @@ class FTNSProvenanceRecord(Base):
         CheckConstraint('access_count >= 0', name='positive_access_count'),
         CheckConstraint('royalty_rate >= 0 AND royalty_rate <= 1', name='valid_royalty_rate'),
         CheckConstraint('quality_score >= 0 AND quality_score <= 5', name='valid_quality_score'),
-        Index('idx_provenance_content_creator', 'content_cid', 'creator_wallet_id'),
+        Index('idx_provenance_content_creator', 'content_id', 'creator_wallet_id'),
         Index('idx_provenance_impact', 'impact_score'),
     )
 
@@ -784,7 +784,7 @@ class FTNSContributionProof(Base):
     # Proof data and metadata
     proof_data = Column(JSONB, nullable=False, default=dict)
     blockchain_hash = Column(String(255), nullable=True)  # For on-chain verification
-    ipfs_hash = Column(String(255), nullable=True)        # For IPFS storage proofs
+    content_id = Column(String(255), nullable=True)       # For content storage proofs
     
     # Validation details
     validation_criteria = Column(JSONB, nullable=True, default=dict)

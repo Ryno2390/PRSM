@@ -75,7 +75,7 @@ class PaymentStatus(str, Enum):
 class ContentAccessPayment:
     """Tracks a single content access payment."""
     payment_id: str
-    cid: str
+    content_id: str
     accessor_id: str
     creator_id: str
     amount: Decimal
@@ -90,8 +90,8 @@ class ContentAccessPayment:
 
 @dataclass
 class ReplicationStatus:
-    """Tracks replication status for a CID."""
-    cid: str
+    """Tracks replication status for a content ID."""
+    content_id: str
     min_replicas: int
     current_replicas: int
     providers: Set[str] = field(default_factory=set)
@@ -104,7 +104,7 @@ class ReplicationStatus:
 class ProviderBid:
     """A bid from a storage provider for content retrieval."""
     provider_id: str
-    cid: str
+    content_id: str
     price_ftns: Decimal
     estimated_latency_ms: float
     available_bandwidth_mbps: float
@@ -117,7 +117,7 @@ class ProviderBid:
 class RetrievalRequest:
     """A content retrieval request with bidding."""
     request_id: str
-    cid: str
+    content_id: str
     requester_id: str
     max_price_ftns: Decimal
     min_replicas_required: int = 1
@@ -212,51 +212,51 @@ class ContentEconomy:
     
     async def process_content_access(
         self,
-        cid: str,
+        content_id: str,
         accessor_id: str,
         content_metadata: Dict[str, Any],
     ) -> ContentAccessPayment:
         """Process FTNS payment for content access.
-        
+
         Flow:
         1. Calculate total payment based on royalty_rate
         2. Lock FTNS in escrow (on-chain if available)
         3. Resolve provenance chain (original + derivatives)
         4. Distribute royalties according to model
         5. Record payment completion
-        
+
         Args:
-            cid: Content identifier
+            content_id: Content identifier
             accessor_id: Node/user accessing the content
-            content_metadata: Metadata including royalty_rate, creator_id, parent_cids
-            
+            content_metadata: Metadata including royalty_rate, creator_id, parent_content_ids
+
         Returns:
             ContentAccessPayment with status and distribution details
         """
         payment_id = f"pay-{uuid.uuid4().hex[:12]}"
-        
+
         # Get royalty rate from metadata or default
         royalty_rate = content_metadata.get("royalty_rate", 0.01)
         creator_id = content_metadata.get("creator_id", "")
-        parent_cids = content_metadata.get("parent_cids", [])
-        
+        parent_content_ids = content_metadata.get("parent_content_ids", [])
+
         # Calculate total payment amount
         # For Phase4: base access fee is the royalty_rate
         # For Legacy: royalty_rate is already the per-access fee
         total_amount = Decimal(str(royalty_rate))
-        
+
         payment = ContentAccessPayment(
             payment_id=payment_id,
-            cid=cid,
+            content_id=content_id,
             accessor_id=accessor_id,
             creator_id=creator_id,
             amount=total_amount,
             royalty_model=self.royalty_model,
             status=PaymentStatus.PENDING,
         )
-        
+
         self._pending_payments[payment_id] = payment
-        
+
         try:
             # Step 1: Lock FTNS in escrow (on-chain) or debit local ledger
             if (
@@ -267,7 +267,7 @@ class ContentEconomy:
                 # On-chain escrow for our own accesses
                 escrow_result = await self.ftns_ledger.lock_escrow(
                     amount=float(total_amount),
-                    purpose=f"content_access:{cid}",
+                    purpose=f"content_access:{content_id}",
                 )
                 if escrow_result.get("success"):
                     payment.escrow_tx_hash = escrow_result.get("tx_hash")
@@ -278,7 +278,7 @@ class ContentEconomy:
                         wallet_id=accessor_id,
                         amount=float(total_amount),
                         tx_type=TransactionType.COMPUTE_PAYMENT,
-                        description=f"Content access: {cid[:12]}...",
+                        description=f"Content access: {content_id[:12]}...",
                     )
             else:
                 # Local ledger for cross-node or non-on-chain payments
@@ -287,15 +287,15 @@ class ContentEconomy:
                         wallet_id=accessor_id,
                         amount=float(total_amount),
                         tx_type=TransactionType.COMPUTE_PAYMENT,
-                        description=f"Content access: {cid[:12]}...",
+                        description=f"Content access: {content_id[:12]}...",
                     )
                 # Remote accessors pay via their own node - we just track
-            
+
             # Step 2: Distribute royalties
             distributions = await self._distribute_royalties(
                 payment=payment,
                 creator_id=creator_id,
-                parent_cids=parent_cids,
+                parent_content_ids=parent_content_ids,
             )
             payment.royalty_distributions = distributions
             
@@ -314,7 +314,7 @@ class ContentEconomy:
             
             logger.info(
                 f"Content access payment completed: {payment_id} "
-                f"({total_amount} FTNS for {cid[:12]}... by {accessor_id[:8]})"
+                f"({total_amount} FTNS for {content_id[:12]}... by {accessor_id[:8]})"
             )
             
         except Exception as e:
@@ -340,16 +340,16 @@ class ContentEconomy:
         self,
         payment: ContentAccessPayment,
         creator_id: str,
-        parent_cids: List[str],
+        parent_content_ids: List[str],
     ) -> List[Dict[str, Any]]:
         """Distribute royalties according to the configured model.
-        
+
         Phase4 Model:
         - 8% to original creator (first in chain)
         - 1% to each derivative creator (up to MAX_ROYALTY_CHAIN_DEPTH)
         - 2% network fee
         - Remaining to direct creator
-        
+
         Legacy Model:
         - 70% to derivative creator
         - 25% split among source creators
@@ -357,14 +357,14 @@ class ContentEconomy:
         """
         distributions = []
         total_amount = payment.amount
-        
+
         if self.royalty_model == RoyaltyModel.PHASE4:
             # Resolve provenance chain
             provenance_chain = await self._resolve_provenance_chain(
-                cid=payment.cid,
-                parent_cids=parent_cids,
+                content_id=payment.content_id,
+                parent_content_ids=parent_content_ids,
             )
-            
+
             # Original creator gets 8%
             if provenance_chain.original_creator:
                 original_share = total_amount * Decimal(str(ORIGINAL_CREATOR_ROYALTY_RATE))
@@ -372,15 +372,15 @@ class ContentEconomy:
                     "recipient_id": provenance_chain.original_creator,
                     "amount": float(original_share),
                     "type": "original_creator",
-                    "cid": provenance_chain.original_cid,
+                    "content_id": provenance_chain.original_content_id,
                 })
                 await self._credit_royalty(
                     recipient_id=provenance_chain.original_creator,
                     amount=float(original_share),
-                    cid=payment.cid,
-                    description=f"Original creator royalty (8%): {payment.cid[:12]}...",
+                    content_id=payment.content_id,
+                    description=f"Original creator royalty (8%): {payment.content_id[:12]}...",
                 )
-            
+
             # Derivative creators get 1% each
             for i, derivative in enumerate(provenance_chain.derivative_creators[:MAX_ROYALTY_CHAIN_DEPTH]):
                 derivative_share = total_amount * Decimal(str(DERIVATIVE_CREATOR_ROYALTY_RATE))
@@ -389,15 +389,15 @@ class ContentEconomy:
                     "amount": float(derivative_share),
                     "type": "derivative_creator",
                     "depth": derivative["depth"],
-                    "cid": derivative["cid"],
+                    "content_id": derivative["content_id"],
                 })
                 await self._credit_royalty(
                     recipient_id=derivative["creator_id"],
                     amount=float(derivative_share),
-                    cid=payment.cid,
-                    description=f"Derivative royalty (1%, depth={derivative['depth']}): {payment.cid[:12]}...",
+                    content_id=payment.content_id,
+                    description=f"Derivative royalty (1%, depth={derivative['depth']}): {payment.content_id[:12]}...",
                 )
-            
+
             # Network fee
             network_fee = total_amount * Decimal(str(NETWORK_FEE_RATE))
             distributions.append({
@@ -409,9 +409,9 @@ class ContentEconomy:
                 wallet_id="system",
                 amount=float(network_fee),
                 tx_type=TransactionType.CONTENT_ROYALTY,
-                description=f"Network fee: {payment.cid[:12]}...",
+                description=f"Network fee: {payment.content_id[:12]}...",
             )
-            
+
             # Direct creator gets remainder
             distributed = sum(d["amount"] for d in distributions)
             remainder = float(total_amount) - distributed
@@ -424,17 +424,17 @@ class ContentEconomy:
                 await self._credit_royalty(
                     recipient_id=creator_id,
                     amount=remainder,
-                    cid=payment.cid,
-                    description=f"Direct creator royalty: {payment.cid[:12]}...",
+                    content_id=payment.content_id,
+                    description=f"Direct creator royalty: {payment.content_id[:12]}...",
                 )
-                
+
         else:  # Legacy model
-            if parent_cids:
+            if parent_content_ids:
                 # Derivative work - split royalties
                 derivative_share = total_amount * Decimal(str(LEGACY_DERIVATIVE_SHARE))
                 source_pool = total_amount * Decimal(str(LEGACY_SOURCE_SHARE))
                 network_fee = total_amount * Decimal(str(LEGACY_NETWORK_SHARE))
-                
+
                 # Credit derivative creator (this node)
                 distributions.append({
                     "recipient_id": creator_id,
@@ -444,12 +444,12 @@ class ContentEconomy:
                 await self._credit_royalty(
                     recipient_id=creator_id,
                     amount=float(derivative_share),
-                    cid=payment.cid,
-                    description=f"Derivative royalty (70%): {payment.cid[:12]}...",
+                    content_id=payment.content_id,
+                    description=f"Derivative royalty (70%): {payment.content_id[:12]}...",
                 )
-                
+
                 # Split source pool among parent creators
-                parent_creators = await self._resolve_parent_creators(parent_cids)
+                parent_creators = await self._resolve_parent_creators(parent_content_ids)
                 if parent_creators:
                     per_parent = float(source_pool) / len(parent_creators)
                     for parent_creator_id in parent_creators:
@@ -461,8 +461,8 @@ class ContentEconomy:
                         await self._credit_royalty(
                             recipient_id=parent_creator_id,
                             amount=per_parent,
-                            cid=payment.cid,
-                            description=f"Source royalty: {payment.cid[:12]}...",
+                            content_id=payment.content_id,
+                            description=f"Source royalty: {payment.content_id[:12]}...",
                         )
                 else:
                     # No resolvable parents - derivative creator gets source pool too
@@ -474,10 +474,10 @@ class ContentEconomy:
                     await self._credit_royalty(
                         recipient_id=creator_id,
                         amount=float(source_pool),
-                        cid=payment.cid,
-                        description=f"Unclaimed source pool: {payment.cid[:12]}...",
+                        content_id=payment.content_id,
+                        description=f"Unclaimed source pool: {payment.content_id[:12]}...",
                     )
-                
+
                 # Network fee
                 distributions.append({
                     "recipient_id": "system",
@@ -488,7 +488,7 @@ class ContentEconomy:
                     wallet_id="system",
                     amount=float(network_fee),
                     tx_type=TransactionType.CONTENT_ROYALTY,
-                    description=f"Network fee: {payment.cid[:12]}...",
+                    description=f"Network fee: {payment.content_id[:12]}...",
                 )
             else:
                 # Original work - full royalty to creator
@@ -500,10 +500,10 @@ class ContentEconomy:
                 await self._credit_royalty(
                     recipient_id=creator_id,
                     amount=float(total_amount),
-                    cid=payment.cid,
-                    description=f"Content royalty: {payment.cid[:12]}...",
+                    content_id=payment.content_id,
+                    description=f"Content royalty: {payment.content_id[:12]}...",
                 )
-        
+
         # Accumulate to escrow for batch on-chain settlement (Phase 4)
         if self._escrow:
             try:
@@ -513,7 +513,7 @@ class ContentEconomy:
                         await self._escrow.accumulate(
                             creator_id=dist["recipient_id"],
                             amount=dist["amount"],
-                            source_cid=payment.cid,
+                            source_content_id=payment.content_id,
                             accessor_id=payment.accessor_id,
                         )
             except Exception as e:
@@ -525,7 +525,7 @@ class ContentEconomy:
         self,
         recipient_id: str,
         amount: float,
-        cid: str,
+        content_id: str,
         description: str,
     ) -> None:
         """Credit royalty to a recipient via local ledger and optionally on-chain."""
@@ -546,15 +546,15 @@ class ContentEconomy:
     
     async def _resolve_provenance_chain(
         self,
-        cid: str,
-        parent_cids: List[str],
+        content_id: str,
+        parent_content_ids: List[str],
     ) -> "ProvenanceChain":
         """Resolve the full provenance chain for royalty distribution."""
         chain = ProvenanceChain()
-        
+
         # Track original creator (deepest ancestor)
         visited: Set[str] = set()
-        
+
         async def trace_ancestors(current_cid: str, depth: int) -> None:
             if current_cid in visited or depth > MAX_ROYALTY_CHAIN_DEPTH:
                 return
@@ -564,19 +564,19 @@ class ContentEconomy:
             if not record:
                 return
             
-            if depth == 0 and not parent_cids:
+            if depth == 0 and not parent_content_ids:
                 # This is the content itself - the direct creator
                 chain.direct_creator = record.creator_id
-            
-            if record.parent_cids:
-                for parent_cid in record.parent_cids:
+
+            if record.parent_content_ids:
+                for parent_cid in record.parent_content_ids:
                     parent_record = self.content_index.lookup(parent_cid)
                     if parent_record:
                         if depth == 0:
                             # First level parent - derivative relationship
                             chain.derivative_creators.append({
                                 "creator_id": record.creator_id,
-                                "cid": current_cid,
+                                "content_id": current_cid,
                                 "depth": depth + 1,
                             })
                         await trace_ancestors(parent_cid, depth + 1)
@@ -584,25 +584,25 @@ class ContentEconomy:
                 # No parents = original creator
                 if chain.original_creator is None:
                     chain.original_creator = record.creator_id
-                    chain.original_cid = current_cid
-        
+                    chain.original_content_id = current_cid
+
         # Start tracing from parents
-        for parent_cid in parent_cids:
+        for parent_cid in parent_content_ids:
             await trace_ancestors(parent_cid, 0)
-        
+
         # If no parents found, this is original content
         if not chain.original_creator:
-            record = self.content_index.lookup(cid)
+            record = self.content_index.lookup(content_id)
             if record:
                 chain.original_creator = record.creator_id
-                chain.original_cid = cid
-        
+                chain.original_content_id = content_id
+
         return chain
-    
-    async def _resolve_parent_creators(self, parent_cids: List[str]) -> List[str]:
-        """Resolve creator IDs for parent CIDs."""
+
+    async def _resolve_parent_creators(self, parent_content_ids: List[str]) -> List[str]:
+        """Resolve creator IDs for parent content IDs."""
         creators = []
-        for parent_cid in parent_cids:
+        for parent_cid in parent_content_ids:
             record = self.content_index.lookup(parent_cid)
             if record and record.creator_id and record.creator_id not in creators:
                 creators.append(record.creator_id)
@@ -612,48 +612,48 @@ class ContentEconomy:
     
     async def track_content_upload(
         self,
-        cid: str,
+        content_id: str,
         size_bytes: int,
         replicas_requested: int,
     ) -> ReplicationStatus:
         """Start tracking replication status for newly uploaded content."""
         status = ReplicationStatus(
-            cid=cid,
+            content_id=content_id,
             min_replicas=max(self.min_replicas, replicas_requested),
             current_replicas=1,  # We have it locally
             providers={self.identity.node_id},
         )
-        self._replication_status[cid] = status
-        
+        self._replication_status[content_id] = status
+
         logger.info(
-            f"Tracking replication for {cid[:12]}... "
+            f"Tracking replication for {content_id[:12]}... "
             f"(min={status.min_replicas}, current={status.current_replicas})"
         )
-        
+
         return status
-    
+
     async def update_replication_status(
         self,
-        cid: str,
+        content_id: str,
         provider_id: str,
         has_content: bool,
     ) -> None:
         """Update replication status when a provider announces or removes content."""
-        status = self._replication_status.get(cid)
+        status = self._replication_status.get(content_id)
         if not status:
             # Auto-create tracking for known content
-            record = self.content_index.lookup(cid)
+            record = self.content_index.lookup(content_id)
             if record:
                 status = ReplicationStatus(
-                    cid=cid,
+                    content_id=content_id,
                     min_replicas=self.min_replicas,
                     current_replicas=len(record.providers),
                     providers=record.providers.copy(),
                 )
-                self._replication_status[cid] = status
+                self._replication_status[content_id] = status
             else:
                 return
-        
+
         if has_content:
             if provider_id not in status.providers:
                 status.providers.add(provider_id)
@@ -662,51 +662,51 @@ class ContentEconomy:
         else:
             status.providers.discard(provider_id)
             status.current_replicas = len(status.providers)
-        
+
         # Check if we need more replicas
-        await self._check_replication_needs(cid, status)
-    
+        await self._check_replication_needs(content_id, status)
+
     async def _check_replication_needs(
         self,
-        cid: str,
+        content_id: str,
         status: ReplicationStatus,
     ) -> None:
         """Request additional replicas if below minimum."""
         if status.current_replicas >= status.min_replicas:
             return
-        
+
         needed = status.min_replicas - status.current_replicas
         if needed <= 0 or status.pending_requests >= needed:
             return
-        
+
         # Request additional storage via gossip
         status.pending_requests += needed
-        
+
         await self.gossip.publish("storage_request", {
-            "cid": cid,
+            "content_id": content_id,
             "size_bytes": 0,  # Would need to look up
             "requester_id": self.identity.node_id,
             "replicas_needed": needed,
             "priority": "high" if status.current_replicas == 0 else "normal",
         })
-        
+
         logger.info(
-            f"Requested {needed} additional replicas for {cid[:12]}... "
+            f"Requested {needed} additional replicas for {content_id[:12]}... "
             f"(current={status.current_replicas}, min={status.min_replicas})"
         )
-    
+
     async def _replication_monitor_loop(self) -> None:
         """Periodically check replication status and request more replicas if needed."""
         while self._running:
             await asyncio.sleep(self.replication_check_interval)
-            
+
             try:
-                for cid, status in list(self._replication_status.items()):
+                for content_id, status in list(self._replication_status.items()):
                     # Decay pending requests over time
                     if status.pending_requests > 0:
                         status.pending_requests = max(0, status.pending_requests - 1)
-                    
-                    await self._check_replication_needs(cid, status)
+
+                    await self._check_replication_needs(content_id, status)
                     
             except Exception as e:
                 logger.error(f"Replication monitor error: {e}")
@@ -715,41 +715,41 @@ class ContentEconomy:
     
     async def request_content_retrieval(
         self,
-        cid: str,
+        content_id: str,
         max_price_ftns: Decimal,
         timeout: float = 30.0,
     ) -> Optional[bytes]:
         """Request content from the network with marketplace bidding.
-        
+
         Flow:
         1. Broadcast retrieval request with max price
         2. Collect bids from providers
         3. Select best provider (price + reputation + latency)
         4. Pay and retrieve content
-        
+
         Args:
-            cid: Content identifier to retrieve
+            content_id: Content identifier to retrieve
             max_price_ftns: Maximum willing to pay
             timeout: Seconds to wait for bids
-            
+
         Returns:
             Content bytes, or None if not available
         """
         request_id = f"ret-{uuid.uuid4().hex[:12]}"
-        
+
         request = RetrievalRequest(
             request_id=request_id,
-            cid=cid,
+            content_id=content_id,
             requester_id=self.identity.node_id,
             max_price_ftns=max_price_ftns,
             bid_deadline=time.time() + min(timeout / 3, 10.0),
         )
         self._retrieval_requests[request_id] = request
-        
+
         # Broadcast retrieval request
         await self.gossip.publish("retrieval_request", {
             "request_id": request_id,
-            "cid": cid,
+            "content_id": content_id,
             "requester_id": self.identity.node_id,
             "max_price_ftns": float(max_price_ftns),
             "deadline": request.bid_deadline,
@@ -775,12 +775,12 @@ class ContentEconomy:
         
         # Process payment
         payment = await self.process_content_access(
-            cid=cid,
+            content_id=content_id,
             accessor_id=self.identity.node_id,
             content_metadata={
                 "royalty_rate": float(selected_bid.price_ftns),
                 "creator_id": selected_bid.provider_id,
-                "parent_cids": [],
+                "parent_content_ids": [],
             },
         )
         
@@ -833,7 +833,7 @@ class ContentEconomy:
         
         bid = ProviderBid(
             provider_id=origin,
-            cid=request.cid,
+            content_id=request.content_id,
             price_ftns=Decimal(str(data.get("price_ftns", 0))),
             estimated_latency_ms=data.get("estimated_latency_ms", 100.0),
             available_bandwidth_mbps=data.get("available_bandwidth_mbps", 100.0),
@@ -874,36 +874,36 @@ class ContentEconomy:
     
     async def index_content_embedding(
         self,
-        cid: str,
+        content_id: str,
         content: bytes,
         metadata: Dict[str, Any],
     ) -> bool:
         """Index content into vector store for semantic search.
-        
+
         Args:
-            cid: Content identifier
+            content_id: Content identifier
             content: Raw content bytes
             metadata: Content metadata (creator_id, royalty_rate, etc.)
-            
+
         Returns:
             True if indexed successfully
         """
         if not self.vector_store or not self.embedding_fn:
             return False
-        
+
         try:
             # Generate embedding
             text = content.decode("utf-8", errors="ignore").strip()
             if len(text) < 50:
                 return False  # Too short for meaningful embedding
-            
+
             embedding = await self.embedding_fn(text[:32_000])
             if embedding is None:
                 return False
-            
+
             # Store in vector DB
             await self.vector_store.upsert(
-                content_cid=cid,
+                content_id=content_id,
                 embedding=embedding,
                 metadata={
                     "creator_id": metadata.get("creator_id", ""),
@@ -913,12 +913,12 @@ class ContentEconomy:
                     **metadata,
                 },
             )
-            
-            logger.debug(f"Indexed embedding for {cid[:12]}...")
+
+            logger.debug(f"Indexed embedding for {content_id[:12]}...")
             return True
-            
+
         except Exception as e:
-            logger.warning(f"Failed to index embedding for {cid[:12]}...: {e}")
+            logger.warning(f"Failed to index embedding for {content_id[:12]}...: {e}")
             return False
     
     async def semantic_search(
@@ -995,6 +995,6 @@ class ContentEconomy:
 class ProvenanceChain:
     """Resolved provenance chain for royalty distribution."""
     original_creator: Optional[str] = None
-    original_cid: Optional[str] = None
+    original_content_id: Optional[str] = None
     derivative_creators: List[Dict[str, Any]] = field(default_factory=list)
     direct_creator: Optional[str] = None

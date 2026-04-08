@@ -6,7 +6,7 @@ Core data structures for WASM-based mobile agents that travel to data
 instead of moving data to compute. Part of Ring 2 (Sovereign-Edge AI).
 
 Classes:
-    AgentManifest  - Declares what an agent needs (CIDs, hardware, limits)
+    AgentManifest  - Declares what an agent needs (content IDs, hardware, limits)
     MobileAgent    - The agent itself (WASM binary + manifest + metadata)
     DispatchStatus - Lifecycle states for agent dispatch
     DispatchRecord - Tracks an agent's journey from origin to target node
@@ -40,7 +40,7 @@ class AgentManifest:
     node before accepting the workload.
     """
 
-    required_cids: List[str] = field(default_factory=list)
+    required_content_ids: List[str] = field(default_factory=list)
     min_hardware_tier: str = "t1"
     output_schema: Optional[Dict[str, Any]] = None
     max_memory_bytes: int = 256 * 1024 * 1024  # 256 MiB
@@ -51,7 +51,7 @@ class AgentManifest:
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to a plain dictionary."""
         return {
-            "required_cids": list(self.required_cids),
+            "required_content_ids": list(self.required_content_ids),
             "min_hardware_tier": self.min_hardware_tier,
             "output_schema": self.output_schema,
             "max_memory_bytes": self.max_memory_bytes,
@@ -64,7 +64,7 @@ class AgentManifest:
     def from_dict(cls, d: Dict[str, Any]) -> AgentManifest:
         """Reconstruct from a dictionary."""
         return cls(
-            required_cids=d.get("required_cids", []),
+            required_content_ids=d.get("required_content_ids", []),
             min_hardware_tier=d.get("min_hardware_tier", "t1"),
             output_schema=d.get("output_schema"),
             max_memory_bytes=d.get("max_memory_bytes", 256 * 1024 * 1024),

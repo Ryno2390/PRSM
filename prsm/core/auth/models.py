@@ -54,10 +54,10 @@ class Permission(str, Enum):
     USER_MANAGE = "user:manage"
     CONFIG_MANAGE = "config:manage"
     
-    # IPFS Operations
-    IPFS_UPLOAD = "ipfs:upload"
-    IPFS_DOWNLOAD = "ipfs:download"
-    IPFS_PIN = "ipfs:pin"
+    # Storage Operations
+    STORAGE_UPLOAD = "storage:upload"
+    STORAGE_DOWNLOAD = "storage:download"
+    STORAGE_PIN = "storage:pin"
     
     # Token Operations
     TOKEN_TRANSFER = "token:transfer"
@@ -72,27 +72,27 @@ ROLE_PERMISSIONS = {
         Permission.MODEL_CREATE, Permission.MODEL_READ, Permission.MODEL_UPDATE, Permission.MODEL_EXECUTE,
         Permission.AGENT_CREATE, Permission.AGENT_READ, Permission.AGENT_UPDATE, Permission.AGENT_EXECUTE,
         Permission.DATA_CREATE, Permission.DATA_READ, Permission.DATA_UPDATE,
-        Permission.IPFS_UPLOAD, Permission.IPFS_DOWNLOAD, Permission.IPFS_PIN,
+        Permission.STORAGE_UPLOAD, Permission.STORAGE_DOWNLOAD, Permission.STORAGE_PIN,
         Permission.TOKEN_TRANSFER
     ],
     UserRole.DEVELOPER: [
         Permission.MODEL_READ, Permission.MODEL_EXECUTE,
         Permission.AGENT_READ, Permission.AGENT_EXECUTE,
         Permission.DATA_READ,
-        Permission.IPFS_DOWNLOAD,
+        Permission.STORAGE_DOWNLOAD,
         Permission.TOKEN_TRANSFER
     ],
     UserRole.ANALYST: [
         Permission.MODEL_READ,
         Permission.AGENT_READ,
         Permission.DATA_READ,
-        Permission.IPFS_DOWNLOAD
+        Permission.STORAGE_DOWNLOAD
     ],
     UserRole.ENTERPRISE: [
         Permission.MODEL_CREATE, Permission.MODEL_READ, Permission.MODEL_UPDATE, Permission.MODEL_EXECUTE,
         Permission.AGENT_CREATE, Permission.AGENT_READ, Permission.AGENT_UPDATE, Permission.AGENT_EXECUTE,
         Permission.DATA_CREATE, Permission.DATA_READ, Permission.DATA_UPDATE,
-        Permission.IPFS_UPLOAD, Permission.IPFS_DOWNLOAD, Permission.IPFS_PIN,
+        Permission.STORAGE_UPLOAD, Permission.STORAGE_DOWNLOAD, Permission.STORAGE_PIN,
         Permission.TOKEN_TRANSFER, Permission.TOKEN_MINT,
         Permission.CONFIG_MANAGE
     ],
@@ -100,7 +100,7 @@ ROLE_PERMISSIONS = {
         Permission.MODEL_READ, Permission.MODEL_EXECUTE,
         Permission.AGENT_READ, Permission.AGENT_EXECUTE,
         Permission.DATA_READ,
-        Permission.IPFS_DOWNLOAD,
+        Permission.STORAGE_DOWNLOAD,
         Permission.TOKEN_TRANSFER
     ],
     UserRole.GUEST: [
