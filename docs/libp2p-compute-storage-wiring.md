@@ -14,9 +14,11 @@ The libp2p transport layer (shipped in v1.2.0) provides drop-in replacements for
 - Message envelope compatibility verification (no changes expected)
 - GossipSub topic registration verification for all ~20 subtypes
 - Convert storage challenges and proof responses to direct P2P via `transport.send_to_peer()`
+- Challenge deduplication to prevent redundant processing from direct+gossip dual delivery
 - Wire `Libp2pDiscovery` capability announcements into node startup
 - Wire DHT `provide_content()` into storage provider pin flow
 - Wire capability-based peer lookup into compute requester
+- Provider reliability tracking for capability mismatch detection
 - Integration tests for full compute and storage lifecycles over libp2p
 
 **Out of scope:**
@@ -88,6 +90,13 @@ await self.gossip.publish("storage_challenge", {
 
 New:
 ```python
+# Import conditionally — only exists for libp2p backend.
+# For WebSocket backend, ConnectionError + OSError cover the same cases.
+try:
+    from prsm.node.libp2p_transport import Libp2pTransportError
+except ImportError:
+    Libp2pTransportError = OSError  # type: ignore[misc,assignment]
+
 msg = P2PMessage(
     msg_type=MSG_DIRECT,
     sender_id=self.identity.node_id,
@@ -102,8 +111,11 @@ try:
     sent = await self.transport.send_to_peer(provider_id, msg)
     if not sent:
         raise ConnectionError("direct send failed")
-except Exception:
-    # Fallback to gossip if direct connection unavailable
+except (ConnectionError, Libp2pTransportError, OSError) as exc:
+    # Fallback to gossip only for transport-level failures.
+    # Serialization or value errors propagate — they indicate bugs,
+    # not transient network issues.
+    logger.debug("Direct challenge to %s failed (%s), falling back to gossip", provider_id[:8], exc)
     await self.gossip.publish("storage_challenge", {
         "challenge": challenge.to_dict(),
         "challenger_id": self.identity.node_id,
@@ -139,7 +151,8 @@ try:
     sent = await self.transport.send_to_peer(challenger_id, msg)
     if not sent:
         raise ConnectionError("direct send failed")
-except Exception:
+except (ConnectionError, Libp2pTransportError, OSError) as exc:
+    logger.debug("Direct proof to %s failed (%s), falling back to gossip", challenger_id[:8], exc)
     await self.gossip.publish("storage_proof_response", {
         "proof": proof.to_dict(),
         "challenge_id": challenge.challenge_id,
@@ -166,9 +179,32 @@ This is registered once at startup via `transport.on_message(MSG_DIRECT, self._o
 
 ### 3.5 Gossip Fallback for Challenges
 
-The gossip subscriptions for `storage_challenge` and `storage_proof_response` are kept as fallback receivers. If a direct send fails and the sender falls back to gossip, the receiver still picks up the message through the gossip subscription. The handler is already idempotent (checks `target_provider_id`), so receiving both direct and gossip copies is safe.
+The gossip subscriptions for `storage_challenge` and `storage_proof_response` are kept as fallback receivers. If a direct send fails and the sender falls back to gossip, the receiver still picks up the message through the gossip subscription.
 
-### 3.6 What Stays on Gossip
+### 3.6 Challenge Deduplication
+
+**Problem:** If a direct stream connection times out on the sender's side but the message actually made it through the socket buffer, the sender triggers the gossip fallback. The receiver processes the direct message, then the gossip copy arrives — wasting compute cycles on redundant proof generation.
+
+**Solution:** Add a `_seen_challenge_ids: Dict[str, float]` to `StorageProvider` that maps `challenge_id → timestamp`. Before processing any challenge (whether from direct or gossip), check this set:
+
+```python
+async def _on_storage_challenge(self, subtype, data, origin):
+    challenge_id = data.get("challenge", {}).get("challenge_id", "")
+    
+    # Deduplicate: drop if we've already seen this challenge
+    if challenge_id in self._seen_challenge_ids:
+        logger.debug("Dropping duplicate challenge %s", challenge_id[:16])
+        return
+    self._seen_challenge_ids[challenge_id] = time.time()
+    
+    # ... rest of existing handler
+```
+
+Similarly, the verifier side deduplicates proof responses by `challenge_id` before verifying — the `_pending_challenges` dict already provides this naturally (a completed challenge is removed from pending, so a duplicate proof finds no pending entry).
+
+**Cleanup:** A periodic task (piggyback on the existing `_challenge_cleanup_loop`) evicts entries from `_seen_challenge_ids` older than 10 minutes (2x the challenge deadline). This prevents unbounded memory growth.
+
+### 3.7 What Stays on Gossip
 
 - `GOSSIP_JOB_CONFIRM` — broadcast so all competing providers know they lost
 - `GOSSIP_PAYMENT_CONFIRM` — broadcast for network-wide ledger consensus
@@ -265,7 +301,82 @@ async def _get_capable_peers(self, job_type: str) -> List[str]:
 
 ---
 
-## Component 5: Integration Tests
+## Component 5: Provider Reliability Tracking
+
+**Problem:** A peer may announce GPU compute capabilities but fail to respond to actual job offers due to hardware misconfiguration, driver issues, or resource exhaustion. The network currently has no way to learn from these failures.
+
+**Solution:** Add lightweight reliability tracking to the discovery layer's `PeerInfo` and the compute requester's peer selection.
+
+### 5.1 PeerInfo Reliability Fields
+
+Add to `PeerInfo` (in `prsm/node/discovery.py`):
+
+```python
+@dataclass
+class PeerInfo:
+    # ... existing fields ...
+    job_success_count: int = 0
+    job_failure_count: int = 0
+    last_failure_time: float = 0.0
+```
+
+A derived `reliability_score` property:
+
+```python
+@property
+def reliability_score(self) -> float:
+    total = self.job_success_count + self.job_failure_count
+    if total == 0:
+        return 1.0  # Benefit of the doubt for new peers
+    return self.job_success_count / total
+```
+
+### 5.2 Updating Reliability on Job Completion/Timeout
+
+In `ComputeRequester`, after receiving a job result (success or timeout):
+
+- **On successful result:** `discovery.record_job_success(provider_id)`
+- **On timeout/failure:** `discovery.record_job_failure(provider_id)`
+
+Add these methods to `Libp2pDiscovery` (and `PeerDiscovery` for WebSocket parity):
+
+```python
+def record_job_success(self, node_id: str) -> None:
+    peer = self._capability_index.get(node_id)
+    if peer:
+        peer.job_success_count += 1
+
+def record_job_failure(self, node_id: str) -> None:
+    peer = self._capability_index.get(node_id)
+    if peer:
+        peer.job_failure_count += 1
+        peer.last_failure_time = time.time()
+```
+
+### 5.3 Peer Selection with Reliability Sorting
+
+In `ComputeRequester._get_capable_peers()`, sort candidates by reliability:
+
+```python
+peers = self.discovery.find_peers_with_capability(required_cap)
+# Sort by reliability score descending — unreliable peers fall to the bottom
+peers.sort(key=lambda p: p.reliability_score, reverse=True)
+return [p.node_id for p in peers]
+```
+
+### 5.4 Degraded Peer Policy
+
+- **No banning:** Transient failures happen. A peer with 2 out of 10 failures (80% reliability) is still useful.
+- **Consecutive failure threshold:** If a peer has 3+ consecutive failures (tracked via `last_failure_time` proximity), it is excluded from `target_peers` but still receives broadcast job offers (giving it a chance to self-recover).
+- **Re-announcement resets:** When a peer re-announces capabilities via `capability_announce`, its failure counters reset. This allows a node operator who fixed a hardware issue to immediately rejoin the capable pool.
+
+### 5.5 Scope Boundary
+
+This is local bookkeeping only — no new gossip messages or protocols. Each node independently tracks the reliability of peers it has interacted with. There is no network-wide reputation consensus (that's a future enhancement, out of scope here).
+
+---
+
+## Component 6: Integration Tests
 
 **File:** `tests/integration/test_libp2p_compute_storage.py`
 
@@ -287,23 +398,32 @@ Two nodes with different capabilities. Both announce capabilities. Each queries 
 
 Challenger issues challenge to provider via direct P2P. `send_to_peer` returns failure (mock simulates connection failure). Challenger falls back to gossip broadcast. Provider receives and answers via gossip fallback. Asserts challenge delivered despite direct connection failure.
 
+### Test 5: Provider Reliability Tracking
+
+Two nodes: requester + provider. Provider announces GPU capability. Requester submits 3 jobs. First 2 succeed (mock provider returns results). Third times out (mock provider doesn't respond). Assert: `reliability_score` is 0.67 (2/3). Submit a 4th job — assert provider is still in `target_peers` (not banned). Simulate 2 more consecutive timeouts — assert provider excluded from `target_peers` but still receives broadcast offers. Provider re-announces capabilities — assert failure counters reset.
+
+### Test Strategy Note
+
+The mock transport tests (Tests 1-5) verify the state machine logic. For real FFI + UDS testing, a separate test file (`tests/integration/test_libp2p_real_ffi.py`) marked with `@pytest.mark.skipif(not libp2p_available())` should exercise the actual Go shared library. This is out of scope for this spec but noted as a follow-up.
+
 ---
 
 ## Files Modified
 
 | File | Change |
 |------|--------|
-| `prsm/node/storage_provider.py` | Add `transport` + `discovery` constructor params; direct P2P for challenges/proofs with gossip fallback; unified direct message dispatcher; DHT provide on pin |
-| `prsm/node/compute_requester.py` | Add `discovery` constructor param; capability-based peer lookup |
+| `prsm/node/storage_provider.py` | Add `transport` + `discovery` constructor params; direct P2P for challenges/proofs with scoped exception fallback; unified direct message dispatcher; challenge deduplication via `_seen_challenge_ids`; DHT provide on pin |
+| `prsm/node/compute_requester.py` | Add `discovery` constructor param; capability-based peer lookup with reliability sorting; record job success/failure |
+| `prsm/node/discovery.py` | Add `job_success_count`, `job_failure_count`, `last_failure_time` fields and `reliability_score` property to `PeerInfo` |
+| `prsm/node/libp2p_discovery.py` | Add `record_job_success()`, `record_job_failure()` methods; reset counters on `_on_capability` re-announcement |
 | `prsm/node/node.py` | Pass `transport`/`discovery` to providers; capability announcement at startup; periodic re-announcement task; remove standalone `register_content_handler()` |
-| `tests/integration/test_libp2p_compute_storage.py` | New file: 4 integration tests with mock transport harness |
+| `tests/integration/test_libp2p_compute_storage.py` | New file: 5 integration tests with mock transport harness |
 
 ## Files NOT Modified
 
 | File | Reason |
 |------|--------|
 | `prsm/node/libp2p_gossip.py` | API already compatible |
-| `prsm/node/libp2p_discovery.py` | API already has all needed methods |
 | `prsm/node/libp2p_transport.py` | No changes needed |
 | `prsm/node/compute_provider.py` | Already uses gossip correctly; no new params needed |
 | `libp2p/` (Go code) | No changes to shared library |
