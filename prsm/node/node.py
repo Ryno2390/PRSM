@@ -18,6 +18,7 @@ from enum import Enum as _Enum
 from typing import Any, Dict, List, Optional
 from decimal import Decimal
 
+from contextlib import suppress
 from pathlib import Path
 
 from prsm.node.config import NodeConfig, NodeRole
@@ -556,6 +557,7 @@ class PRSMNode:
             if role in (NodeRole.FULL, NodeRole.STORAGE):
                 if "storage" not in local_capabilities:
                     local_capabilities.append("storage")
+        self._local_capabilities = local_capabilities
 
         if self.config.transport_backend == "libp2p":
             from prsm.node.libp2p_transport import Libp2pTransport
@@ -633,6 +635,7 @@ class PRSMNode:
             transport=self.transport,
             gossip=self.gossip,
             ledger=self.ledger,
+            discovery=self.discovery,
         )
 
         # ── Storage ──────────────────────────────────────────────
@@ -644,6 +647,8 @@ class PRSMNode:
                 ipfs_api_url=self.config.ipfs_api_url,
                 pledged_gb=self.config.storage_gb,
                 config=self.config,
+                transport=self.transport,
+                discovery=self.discovery,
             )
             # Initialize bandwidth limits from config
             if self.config.upload_mbps_limit > 0 or self.config.download_mbps_limit > 0:
@@ -1159,7 +1164,40 @@ class PRSMNode:
 
         if self.storage_provider:
             await self.storage_provider.start()
-            self.storage_provider.register_content_handler(self.transport)
+
+        # ── Capability Announcement ──────────────────────────────────
+        if hasattr(self.discovery, 'set_local_capabilities'):
+            cap_list = list(self._local_capabilities)
+            backends_list = []
+            gpu_available = False
+            if self.compute_provider:
+                if self.compute_provider.resources.gpu_available:
+                    gpu_available = True
+                    if "gpu" not in cap_list:
+                        cap_list.append("gpu")
+                try:
+                    from prsm.compute.nwtn.backends.config import detect_available_backends
+                    backends_list = [b.value for b in detect_available_backends()]
+                except Exception:
+                    pass
+            self.discovery.set_local_capabilities(
+                capabilities=cap_list,
+                backends=backends_list,
+                gpu_available=gpu_available,
+            )
+            await self.discovery.announce_capabilities()
+
+            async def _periodic_capability_announce():
+                while self._started:
+                    await asyncio.sleep(300)
+                    try:
+                        await self.discovery.announce_capabilities()
+                    except Exception as exc:
+                        logger.debug("Capability re-announcement failed: %s", exc)
+
+            self._capability_announce_task = asyncio.create_task(
+                _periodic_capability_announce()
+            )
 
         if self.content_index:
             self.content_index.start()
@@ -1292,6 +1330,11 @@ class PRSMNode:
             await self.compute_provider.stop()
         if self.compute_requester:
             await self.compute_requester.stop()
+        if hasattr(self, '_capability_announce_task'):
+            self._capability_announce_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._capability_announce_task
+
         if self.discovery:
             await self.discovery.stop()
         if self.gossip:
