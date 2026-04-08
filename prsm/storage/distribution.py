@@ -275,7 +275,7 @@ class DistributionManager:
         Allowed to change: shard_map, manifest_holders, key_share_holders,
             contract_key_share_holders, updated_at, version
         Must NOT change: owner_node_id, epoch, visibility,
-            replication_policy.replication_factor, contract_pubkey
+            replication_policy (any field), contract_pubkey
         """
         if base.owner_node_id != updated.owner_node_id:
             return False
@@ -283,9 +283,13 @@ class DistributionManager:
             return False
         if base.visibility != updated.visibility:
             return False
+        bp = base.replication_policy
+        up = updated.replication_policy
         if (
-            base.replication_policy.replication_factor
-            != updated.replication_policy.replication_factor
+            bp.replication_factor != up.replication_factor
+            or bp.min_asn_diversity != up.min_asn_diversity
+            or bp.owner_excluded != up.owner_excluded
+            or bp.key_shard_separation != up.key_shard_separation
         ):
             return False
         if base.contract_pubkey != updated.contract_pubkey:

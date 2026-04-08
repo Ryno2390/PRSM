@@ -140,23 +140,27 @@ class ShardManifest:
     @classmethod
     def from_json(cls, json_str: str) -> "ShardManifest":
         """Deserialise a manifest from a JSON string."""
+        from prsm.storage.exceptions import ManifestError
+
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError as exc:
-            from prsm.storage.exceptions import ManifestError
             raise ManifestError(f"Invalid manifest JSON: {exc}") from exc
 
-        return cls(
-            content_hash=ContentHash.from_hex(data["content_hash"]),
-            shard_hashes=[ContentHash.from_hex(h) for h in data["shard_hashes"]],
-            total_size=data["total_size"],
-            shard_size=data["shard_size"],
-            algorithm_id=AlgorithmID(data["algorithm_id"]),
-            created_at=data["created_at"],
-            replication_factor=data["replication_factor"],
-            owner_node_id=data["owner_node_id"],
-            visibility=data.get("visibility", "public"),
-        )
+        try:
+            return cls(
+                content_hash=ContentHash.from_hex(data["content_hash"]),
+                shard_hashes=[ContentHash.from_hex(h) for h in data["shard_hashes"]],
+                total_size=data["total_size"],
+                shard_size=data["shard_size"],
+                algorithm_id=AlgorithmID(data["algorithm_id"]),
+                created_at=data["created_at"],
+                replication_factor=data["replication_factor"],
+                owner_node_id=data["owner_node_id"],
+                visibility=data.get("visibility", "public"),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ManifestError(f"Malformed manifest data: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------

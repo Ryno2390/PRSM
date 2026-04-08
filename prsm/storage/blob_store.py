@@ -41,12 +41,15 @@ class BlobStore:
     def _path_for(self, content_hash: ContentHash) -> str:
         """Return the filesystem path for *content_hash*.
 
-        Layout: ``{data_dir}/{first 2 hex chars}/{remaining hex chars}``
+        Layout: ``{data_dir}/{first 2 hex chars of digest}/{full content hash hex}``
+
+        The bucket prefix uses the first 2 hex chars of the **digest** (not the
+        algorithm-prefixed hex) so that SHA-256 blobs spread across 256 buckets
+        instead of all landing in ``01/``.
         """
-        hex_str = content_hash.hex()
-        prefix = hex_str[:2]
-        rest = hex_str[2:]
-        return os.path.join(self.data_dir, prefix, rest)
+        digest_hex = content_hash.digest.hex()
+        prefix = digest_hex[:2]
+        return os.path.join(self.data_dir, prefix, content_hash.hex())
 
     # ------------------------------------------------------------------
     # Public API
