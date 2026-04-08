@@ -180,15 +180,33 @@ More shards means more valuable content, warranting higher key redundancy.
 
 ### Authorization for key-share release
 
-Key-share holders must verify that a requester is authorized before releasing shares. The authorization model uses **signed capability tokens** with the ledger as the source of truth:
+Key-share holders must verify that a requester is authorized before releasing shares. The authorization model depends on content visibility and share type.
+
+**Two categories of shares with different release policies:**
+- **Manifest-key shares** — Used to decrypt the content manifest for retrieval
+- **Contract-key shares** — Used to sign operational descriptor updates during self-healing (see Section 4). These are NEVER released via the public no-ticket path, even for public content.
 
 **Ledger (source of truth) tracks:**
 - Current content owner
 - Access policy (public/private, authorized requesters)
-- Content epoch (incremented on ownership transfer or policy change)
+- Content epoch (incremented on ownership transfer or policy change — NOT on operational repairs)
 - Transfer and revocation history
 
-**Capability token (enforcement mechanism):**
+#### Public content: no-ticket fast path (Phase 1)
+
+For content with `visibility: public` in the ContentDescriptor, manifest-key share holders release shares to any requester without a `RetrievalTicket`. This ensures public content remains retrievable regardless of owner liveness — the core property that content outlives the original uploader.
+
+**Important: manifest encryption is not a confidentiality boundary for public content.** Any node can reconstruct the manifest key. Manifest encryption exists to provide the infrastructure for Phase 2 private content and to prevent casual metadata scraping; it does not protect public content secrecy.
+
+**Holder-side abuse controls (required even for public fast path):**
+- Per-peer rate limiting (configurable, default 10 requests/minute per requester)
+- Request logging with requester node ID and timestamp (audit trail)
+- Per-peer backoff on excessive requests (prevents amplification abuse)
+- Nonce tracking to detect and reject duplicate requests
+
+#### Private content: capability-gated release (Phase 2)
+
+For private content, manifest-key share holders require a signed `RetrievalTicket`:
 
 ```python
 @dataclass
@@ -202,24 +220,37 @@ class RetrievalTicket:
     issuer_signature: bytes      # Signed by content owner or governance
 ```
 
-**Share release flow:**
+**Share release flow (private content):**
 1. Requester obtains a `RetrievalTicket` signed by the content owner (or governance for inherited content)
 2. Requester presents ticket to key-share holder via direct P2P
 3. Holder verifies: signature validity, `requester_node_id` matches sender, `epoch` matches current epoch (from last ledger checkpoint), ticket not expired, nonce not seen before
 4. If valid: release share, log the request (holder-side audit trail)
 5. If invalid: reject, log the attempt
 
-**For public artifacts (Phase 1):** The content owner's node can auto-issue tickets to any requester, since public content has an open retrieval policy. The ticket mechanism still exists to provide audit logging and replay protection, and it becomes the enforcement gate for private artifacts in Phase 2.
+#### Contract-key share release (all visibility modes)
 
-**Ownership transfer flow:**
+Contract-key shares are used exclusively for signing operational descriptor updates during self-healing (Section 4). They are NEVER released via the public no-ticket path, regardless of content visibility. Release requires proof of authorized repair role — see Section 4 "Storage contract key" for the gated release policy.
+
+#### Ownership transfer flow
+
 1. Ledger updates owner and access policy, bumps epoch
 2. Old capabilities expire (short TTL) or are immediately invalid because epoch changed
 3. New owner obtains signing authority for new tickets
 4. Key-share holders reject stale-epoch requests automatically
 5. No re-encryption or re-distribution of key shares needed
+6. Owner may rotate the contract key as part of the transfer (optional; new contract key shares distributed if rotated)
 
 ### Reconstruction flow
 
+**Public content:**
+1. Requester looks up key-share holders from ContentDescriptor (Section 4)
+2. Requests manifest-key shares directly from K holders (no ticket required)
+3. Holders verify `visibility: public` on descriptor, apply rate limiting, release shares
+4. Requester reconstructs AES-256-GCM key via Shamir reconstruction
+5. Decrypts manifest
+6. Key is used in-memory only, never persisted in reconstructed form
+
+**Private content (Phase 2):**
 1. Requester obtains `RetrievalTicket` from content owner (or governance)
 2. Looks up key-share holders from ContentDescriptor (Section 4)
 3. Presents ticket to K holders via direct P2P
@@ -256,22 +287,59 @@ Every stored content item has a `ContentDescriptor` published to the libp2p DHT.
 class ContentDescriptor:
     content_hash: ContentHash            # Root content identifier
     manifest_holders: List[str]          # Node IDs holding encrypted manifest replicas
-    key_share_holders: List[str]         # Node IDs holding Shamir key shares
+    key_share_holders: List[str]         # Node IDs holding manifest-key Shamir shares
+    contract_key_share_holders: List[str] # Node IDs holding contract-key Shamir shares
     shard_map: Dict[str, List[str]]      # shard_hash -> [node_ids holding that shard]
     replication_policy: ReplicationPolicy # Owner-specified policy
-    epoch: int                           # Bumped on ownership transfer or policy change
+    visibility: str                      # "public" or "private"
+    epoch: int                           # Bumped on ownership/policy changes ONLY (not repairs)
+    version: int                         # Monotonic counter, bumped on every update (including repairs)
     owner_node_id: str                   # Current owner
-    owner_signature: bytes               # Signs the descriptor for tamper detection
+    contract_pubkey: bytes               # Public key for verifying operational descriptor updates
+    signature: bytes                     # Signs the descriptor (owner key OR contract key)
+    signer_type: str                     # "owner" or "contract" — indicates which key signed
     created_at: float                    # Original creation timestamp
     updated_at: float                    # Last descriptor update
 ```
 
+**Note on shard_map size:** For content with many shards and frequent re-replication, `shard_map` can grow large. If the serialized descriptor exceeds a DHT record size threshold (implementation-defined), `shard_map` should be extracted to a secondary DHT record keyed by `content_hash + ":shardmap"`, with the primary descriptor holding only a hash of the shard map for integrity verification.
+
+**Two signing authorities:**
+
+| Authority | Signs | When |
+|-----------|-------|------|
+| **Owner key** | Policy changes, ownership transfers, visibility changes, contract key rotation | Owner-initiated actions. Bumps `epoch`. |
+| **Contract key** | Shard redistribution, key-share refresh, descriptor repair | Self-healing operations. Does NOT bump `epoch`. |
+
 **Descriptor lifecycle:**
-- Created after initial shard distribution completes
-- Updated when replication health monitor re-distributes shards or key shares
-- Updated on ownership transfer (new owner, bumped epoch, new signature)
-- Signed by the current owner to prevent tampering
+- Created after initial shard distribution completes (signed by owner key, `signer_type: "owner"`)
+- Updated on self-healing (shard redistribution, key-share refresh) — signed by contract key, `signer_type: "contract"`, `version` incremented, `epoch` unchanged
+- Updated on ownership transfer — signed by new owner key, `signer_type: "owner"`, both `epoch` and `version` incremented, may include rotated `contract_pubkey`
 - Replicated in the DHT for availability (standard DHT replication)
+
+**Descriptor conflict resolution:** When multiple versions of a descriptor exist, prefer the one with the highest `(epoch, version)` pair, verified against a valid signature from the appropriate authority (`owner` for epoch-bumping updates, `contract` for operational updates).
+
+### Storage contract key
+
+At content creation time, the owner generates a **storage contract keypair**. The public key is embedded in the ContentDescriptor (`contract_pubkey`). The private key is split via Shamir's Secret Sharing and distributed to a separate set of holders (the `contract_key_share_holders`) — these may overlap with manifest-key holders but the shares themselves are distinct.
+
+**Contract-key share release policy:**
+- Contract-key shares are NEVER released via the public no-ticket fast path, even for public content
+- Release requires proof of authorized repair role: the requesting node must demonstrate it is performing a replication health monitor action (e.g., present evidence of a detected under-replication event with the affected shard hashes and the new provider assignments)
+- Holders verify the repair evidence before releasing shares
+- All releases are logged with full context (requester, reason, affected shards)
+
+**Trust chain:**
+1. Owner creates content and generates contract keypair
+2. Initial ContentDescriptor is signed by owner key and includes `contract_pubkey`
+3. Owner's signature on the descriptor authorizes that contract public key for operational updates
+4. Future operational updates (self-healing) are signed by the reconstructed contract key
+5. Policy/ownership updates are signed by the owner key and may rotate `contract_pubkey` if needed
+6. Any node verifying a descriptor checks `signer_type` and validates against the appropriate public key
+
+**What the contract key can and cannot do:**
+- CAN: Update `shard_map`, `manifest_holders`, `key_share_holders`, `contract_key_share_holders`, `updated_at`, `version`
+- CANNOT: Change `owner_node_id`, `epoch`, `visibility`, `replication_policy`, `contract_pubkey`
 
 ### Shard placement algorithm
 
@@ -512,13 +580,19 @@ await store.delete(content_hash)
 - Algorithm ID preserved through split/reconstruct cycle
 
 **Authorization:**
-- Valid RetrievalTicket accepted by holder
-- Expired ticket rejected
-- Wrong epoch rejected
-- Wrong requester_node_id rejected
-- Replayed nonce rejected
-- Invalid signature rejected
-- Holder logs all attempts (accepted and rejected)
+- Public content: manifest-key shares released without ticket
+- Public content: contract-key shares NOT released without ticket (even for public)
+- Public content: per-peer rate limiting enforced on no-ticket path
+- Public content: duplicate nonce rejected on no-ticket path
+- Private content (Phase 2): valid RetrievalTicket accepted by holder
+- Private content (Phase 2): expired ticket rejected
+- Private content (Phase 2): wrong epoch rejected
+- Private content (Phase 2): wrong requester_node_id rejected
+- Private content (Phase 2): replayed nonce rejected
+- Private content (Phase 2): invalid signature rejected
+- Contract-key shares: released only with valid repair evidence
+- Contract-key shares: rejected for non-repair requests
+- All share releases logged with requester and context
 
 **Distribution manager:**
 - Owner excluded from shard placement
@@ -532,6 +606,11 @@ await store.delete(content_hash)
 - Fallback to alternate provider on single-provider failure
 - Replication health monitor detects under-replicated content and triggers re-replication
 - ContentDescriptor published to DHT on store, updated on re-distribution
+- ContentDescriptor signed by owner key on creation
+- ContentDescriptor signed by contract key on self-healing repair
+- Contract key cannot modify owner, epoch, visibility, or policy fields
+- Descriptor conflict resolution prefers highest (epoch, version) with valid signature
+- Owner key rotation of contract_pubkey propagates correctly
 
 **Proof of custody:**
 - Challenge issued with shard_hash (not CID)
@@ -549,6 +628,8 @@ await store.delete(content_hash)
 - **Payment flow**: Store content with replication_factor=3 -> verify FTNS charged proportionally -> providers earn FTNS for serving retrieval
 - **Degraded network**: Store content with only 4 nodes -> verify constraint relaxation -> add nodes -> verify upgrade to full constraints
 - **Custody proof cycle**: Store content -> issue challenge -> receive proof -> verify -> reward provider
+- **Self-healing without owner**: Store public content -> take owner offline -> take down shard holder -> replication monitor reconstructs contract key -> signs updated descriptor -> content still retrievable by new requester
+- **Public retrieval without owner**: Store public content -> take owner offline -> new requester retrieves content via no-ticket fast path -> verify success
 
 ### Mock strategy
 
