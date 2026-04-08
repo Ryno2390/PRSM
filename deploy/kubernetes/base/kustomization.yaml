@@ -13,8 +13,6 @@ resources:
   - postgres-pvc.yaml
   - redis-deployment.yaml
   - redis-service.yaml
-  - ipfs-deployment.yaml
-  - ipfs-service.yaml
   - prometheus-deployment.yaml
   - prometheus-service.yaml
   - grafana-deployment.yaml
@@ -48,5 +46,3 @@ replicas:
     count: 1
   - name: redis
     count: 3
-  - name: ipfs
-    count: 2

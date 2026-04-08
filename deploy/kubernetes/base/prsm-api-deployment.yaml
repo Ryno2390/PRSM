@@ -71,8 +71,6 @@ spec:
             secretKeyRef:
               name: prsm-secrets
               key: redis-url
-        - name: IPFS_API_URL
-          value: "http://ipfs-service:5001"
         - name: PROMETHEUS_MULTIPROC_DIR
           value: "/tmp/prometheus"
         envFrom:

@@ -151,13 +151,6 @@ docs:
 docs-serve:
 	mkdocs serve
 
-# IPFS
-ipfs-start:
-	ipfs daemon
-
-ipfs-init:
-	ipfs init
-
 # Monitoring
 metrics:
 	@echo "Metrics are available at /metrics when the API server is running (make run)."

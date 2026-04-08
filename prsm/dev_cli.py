@@ -172,10 +172,6 @@ DATABASE_URL=sqlite+aiosqlite:///./prsm_dev.db
 # Redis (using default local instance)
 REDIS_URL=redis://localhost:6379/0
 
-# IPFS (using local node)
-IPFS_HOST=localhost
-IPFS_PORT=5001
-
 # API Keys (edit config/api_keys.env)
 API_KEYS_FILE=config/api_keys.env
 
@@ -201,7 +197,7 @@ CIRCUIT_BREAKER_ENABLED=true
             return False
     
     def setup_docker_services(self) -> bool:
-        """Setup Docker services (Redis, IPFS, etc.)"""
+        """Setup Docker services (Redis, etc.)"""
         console.print("\n🐳 Setting up Docker services...", style="bold blue")
         
         try:
@@ -241,13 +237,13 @@ CIRCUIT_BREAKER_ENABLED=true
             # Start services based on environment type
             if env_type == "quickstart":
                 services = []  # Start all services in quickstart
-                console.print("Starting minimal services (Redis + IPFS)...")
+                console.print("Starting minimal services (Redis)...")
             elif env_type == "onboarding":
                 services = []  # Start all services in onboarding
                 console.print("Starting onboarding services...")
             else:
-                services = ["redis", "ipfs"]  # Only essential services for dev
-                console.print("Starting essential services (Redis + IPFS)...")
+                services = ["redis"]  # Only essential services for dev
+                console.print("Starting essential services (Redis)...")
             
             cmd = ["docker-compose", "-f", str(compose_path), "up", "-d"] + services
             result = subprocess.run(cmd, capture_output=True, text=True)
@@ -264,12 +260,6 @@ CIRCUIT_BREAKER_ENABLED=true
                     console.print("✅ Redis is ready", style="green")
                 else:
                     console.print("⚠️ Redis connection test failed", style="yellow")
-                
-                # Test IPFS connection
-                if self._test_ipfs():
-                    console.print("✅ IPFS is ready", style="green")
-                else:
-                    console.print("⚠️ IPFS connection test failed", style="yellow")
                 
                 # Show helpful information
                 console.print(f"\n💡 Using {env_type} Docker environment")
@@ -302,14 +292,6 @@ CIRCUIT_BREAKER_ENABLED=true
             r = redis.Redis(host='localhost', port=6379, db=0)
             r.ping()
             return True
-        except Exception:
-            return False
-    
-    def _test_ipfs(self) -> bool:
-        """Test IPFS connection"""
-        try:
-            response = requests.get("http://localhost:5001/api/v0/version", timeout=5)
-            return response.status_code == 200
         except Exception:
             return False
     
@@ -373,17 +355,11 @@ CIRCUIT_BREAKER_ENABLED=true
         
         # Check Docker services
         health_status["redis"] = self._test_redis()
-        health_status["ipfs"] = self._test_ipfs()
-        
+
         if health_status["redis"]:
             console.print("✅ Redis: OK", style="green")
         else:
             console.print("❌ Redis: FAIL", style="red")
-        
-        if health_status["ipfs"]:
-            console.print("✅ IPFS: OK", style="green")
-        else:
-            console.print("❌ IPFS: FAIL", style="red")
         
         # Check configuration files
         config_files = [
@@ -689,7 +665,7 @@ def diagnose():
         docker_table.add_column("Ports")
         
         for container in containers:
-            if any(name in container.name for name in ["redis", "ipfs", "prsm"]):
+            if any(name in container.name for name in ["redis", "prsm"]):
                 status_color = "green" if container.status == "running" else "red"
                 ports = ", ".join([f"{p['HostPort']}:{p['PrivatePort']}" 
                                  for p in container.ports.values() 
@@ -746,9 +722,6 @@ def diagnose():
     if not health_status.get("redis", False):
         issues.append("Start Redis: docker-compose -f docker-compose.dev.yml up -d redis")
     
-    if not health_status.get("ipfs", False):
-        issues.append("Start IPFS: docker-compose -f docker-compose.dev.yml up -d ipfs")
-    
     if not health_status.get("configuration", False):
         issues.append("Run 'prsm-dev setup' to create configuration files")
     
@@ -763,14 +736,14 @@ def diagnose():
 
 
 @main.command()
-@click.option("--service", type=click.Choice(["redis", "ipfs", "all"]), default="all")
+@click.option("--service", type=click.Choice(["redis", "all"]), default="all")
 def start(service: str):
     """Start development services"""
     console.print(f"🚀 Starting {service} service(s)...", style="bold green")
-    
+
     try:
         if service == "all":
-            services = ["redis", "ipfs"]
+            services = ["redis"]
         else:
             services = [service]
         
@@ -788,7 +761,7 @@ def start(service: str):
 
 
 @main.command()
-@click.option("--service", type=click.Choice(["redis", "ipfs", "all"]), default="all")
+@click.option("--service", type=click.Choice(["redis", "all"]), default="all")
 def stop(service: str):
     """Stop development services"""
     console.print(f"🛑 Stopping {service} service(s)...", style="bold yellow")

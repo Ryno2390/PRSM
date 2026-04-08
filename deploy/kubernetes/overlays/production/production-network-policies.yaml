@@ -36,15 +36,6 @@ spec:
     ports:
     - protocol: TCP
       port: 6379
-  - to:
-    - podSelector:
-        matchLabels:
-          app.kubernetes.io/name: ipfs
-    ports:
-    - protocol: TCP
-      port: 5001
-    - protocol: TCP
-      port: 8080
   # DNS egress restricted to kube-dns only for security
   - to:
     - namespaceSelector:
