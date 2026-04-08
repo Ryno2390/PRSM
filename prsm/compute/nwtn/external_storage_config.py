@@ -32,11 +32,10 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 try:
-    import ipfshttpclient
-    IPFS_AVAILABLE = True
+    from prsm.storage import get_content_store as _get_content_store
+    STORAGE_AVAILABLE = True
 except ImportError:
-    IPFS_AVAILABLE = False
-    pass  # ipfshttpclient optional — IPFS runs in simulation mode
+    STORAGE_AVAILABLE = False
 
 
 @dataclass
@@ -110,7 +109,6 @@ class ExternalStorageConfig:
         self.enable_cache = enable_cache
         self.corpus_size = corpus_size
         
-        self._ipfs_client = None
         self._connected = False
         self._cache: Dict[str, Any] = {}
         
@@ -140,22 +138,24 @@ class ExternalStorageConfig:
         if self.enable_cache:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
         
-        if IPFS_AVAILABLE:
+        if STORAGE_AVAILABLE:
             try:
-                loop = asyncio.get_running_loop()
-                self._ipfs_client = await loop.run_in_executor(
-                    None,
-                    lambda: ipfshttpclient.connect(addr=self.ipfs_addr, timeout=60.0)
-                )
-                self._connected = True
-                logger.info(f"Connected to IPFS at {self.ipfs_addr}")
+                store = _get_content_store()
+                if store is None:
+                    from prsm.storage import init_content_store
+                    store = init_content_store()
+                self._connected = store is not None
+                if self._connected:
+                    logger.info("Connected to ContentStore (native storage)")
+                else:
+                    logger.warning("ContentStore not available, running in simulation mode")
             except Exception as e:
-                logger.warning(f"Failed to connect to IPFS: {e}, running in simulation mode")
+                logger.warning(f"Failed to initialize ContentStore: {e}, running in simulation mode")
                 self._connected = False
         else:
-            logger.info("IPFS not available, running in simulation mode")
+            logger.info("Storage module not available, running in simulation mode")
             self._connected = False
-        
+
         return True
     
     def get_storage_config(self, name: str) -> Optional[StorageConfig]:
@@ -166,41 +166,40 @@ class ExternalStorageConfig:
         """Set configuration for a storage backend."""
         self.storage_configs[name] = config
     
-    async def retrieve_content(self, cid: str) -> Optional[bytes]:
-        """Retrieve content from IPFS by CID."""
-        if self._cache.get(cid):
-            return self._cache[cid]
-        
-        if self._ipfs_client and self._connected:
+    async def retrieve_content(self, content_id: str) -> Optional[bytes]:
+        """Retrieve content from ContentStore by content hash."""
+        if self._cache.get(content_id):
+            return self._cache[content_id]
+
+        if self._connected and STORAGE_AVAILABLE:
             try:
-                loop = asyncio.get_running_loop()
-                content = await loop.run_in_executor(
-                    None,
-                    lambda: self._ipfs_client.cat(cid)
-                )
-                if self.enable_cache:
-                    self._cache[cid] = content
-                return content
+                from prsm.storage import get_content_store, ContentHash
+                from prsm.storage.exceptions import StorageError, ContentNotFoundError
+                store = _get_content_store()
+                if store is not None:
+                    content = await store.retrieve_local(ContentHash.from_hex(content_id))
+                    if self.enable_cache:
+                        self._cache[content_id] = content
+                    return content
             except Exception as e:
-                logger.error(f"Failed to retrieve content {cid}: {e}")
-        
+                logger.error(f"Failed to retrieve content {content_id}: {e}")
+
         return None
-    
+
     async def store_content(self, content: bytes, metadata: Dict[str, Any] = None) -> Optional[str]:
-        """Store content in IPFS and return the CID."""
-        if self._ipfs_client and self._connected:
+        """Store content in ContentStore and return the content hash hex."""
+        if self._connected and STORAGE_AVAILABLE:
             try:
-                loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(
-                    None,
-                    lambda: self._ipfs_client.add_bytes(content)
-                )
-                return result
+                store = _get_content_store()
+                if store is not None:
+                    from prsm.storage.exceptions import StorageError
+                    stored_hash = await store.store_local(content)
+                    return stored_hash.hex()
             except Exception as e:
                 logger.error(f"Failed to store content: {e}")
-        
-        fallback_cid = f"Qm{hashlib.sha256(content).hexdigest()[:44]}"
-        return fallback_cid
+
+        fallback_id = hashlib.sha256(content).hexdigest()
+        return fallback_id
     
     @property
     def is_connected(self) -> bool:

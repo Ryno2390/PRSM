@@ -231,13 +231,6 @@ def _include_service_routers(app: FastAPI) -> None:
         logger.warning(f"UI router not available: {e}")
 
     try:
-        from prsm.interface.api.ipfs_api import router as ipfs_router
-        app.include_router(ipfs_router, prefix="/ipfs", tags=["IPFS"])
-        logger.debug("IPFS router registered")
-    except ImportError as e:
-        logger.warning(f"IPFS router not available: {e}")
-
-    try:
         from prsm.interface.api.content_api import router as content_router
         app.include_router(content_router, tags=["Content"])
         logger.debug("Content router registered")
@@ -362,7 +355,6 @@ def get_router_summary() -> dict:
             "/api/v1/sessions",
             "/api/v1/tasks",
             "/ui",
-            "/ipfs"
         ],
         "integrations": [
             "/integrations",

@@ -30,7 +30,7 @@ from ..models.integration_models import (
 from ..security.sandbox_manager import SandboxManager
 from prsm.core.config import settings
 from prsm.core.models import FTNSTransaction
-from prsm.core.ipfs_client import get_ipfs_client
+from prsm.storage import get_content_store
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 
 

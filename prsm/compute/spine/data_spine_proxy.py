@@ -161,60 +161,63 @@ class DataSpineMetrics:
 
 class IPFSClient:
     """
-    Adapter wrapping prsm.core.ipfs_client.IPFSClient.
+    Adapter wrapping prsm.storage.ContentStore.
 
     Provides the local interface PRSMDataSpineProxy expects (add/get/pin returning
-    primitive types) while delegating to the canonical client that raises
-    IPFSConnectionError on failure rather than returning fake data.
+    primitive types) while delegating to the ContentStore singleton.
     """
 
     def __init__(self):
-        self._client = None   # lazy-initialized on first use
         self.connected = False
 
     async def _ensure_initialized(self) -> None:
-        """Initialize the canonical client on first use."""
-        if self._client is None:
-            from prsm.core.ipfs_client import create_ipfs_client
-            self._client = await create_ipfs_client()
-            self.connected = self._client.connected
+        """Ensure ContentStore singleton is available."""
+        from prsm.storage import get_content_store, init_content_store
+        store = get_content_store()
+        if store is None:
+            init_content_store()
+        self.connected = get_content_store() is not None
 
     async def add_content(self, content: bytes) -> str:
-        """Upload bytes to IPFS. Returns CID string. Raises IPFSConnectionError on failure."""
+        """Upload bytes to ContentStore. Returns content hash hex string. Raises OSError on failure."""
         await self._ensure_initialized()
-        from prsm.core.ipfs_client import IPFSConnectionError
-        result = await self._client.add_content(content)
-        if not result.success or not result.cid:
-            raise IPFSConnectionError(
-                f"IPFS upload failed: {result.error or 'no CID returned'}"
-            )
-        return result.cid
+        from prsm.storage import get_content_store
+        from prsm.storage.exceptions import StorageError
+        store = get_content_store()
+        if store is None:
+            raise OSError("ContentStore not available")
+        try:
+            stored_hash = await store.store_local(content)
+            return stored_hash.hex()
+        except (StorageError, OSError) as exc:
+            raise OSError(f"ContentStore upload failed: {exc}") from exc
 
-    async def get_content(self, ipfs_hash: str) -> bytes:
-        """Download content bytes from IPFS by CID. Raises IPFSConnectionError on failure."""
+    async def get_content(self, content_id: str) -> bytes:
+        """Download content bytes from ContentStore by hash. Raises OSError on failure."""
         await self._ensure_initialized()
-        from prsm.core.ipfs_client import IPFSConnectionError
-        result = await self._client.get_content(ipfs_hash)
-        if not result.success:
-            raise IPFSConnectionError(
-                f"IPFS download failed for {ipfs_hash}: {result.error}"
-            )
-        # IPFSNode stores content bytes in result.metadata["content"]
-        content = (result.metadata or {}).get("content")
-        if content is None:
-            raise IPFSConnectionError(
-                f"No content data in IPFS result for CID: {ipfs_hash}"
-            )
-        return content if isinstance(content, bytes) else content.encode()
+        from prsm.storage import get_content_store, ContentHash
+        from prsm.storage.exceptions import StorageError, ContentNotFoundError
+        store = get_content_store()
+        if store is None:
+            raise OSError("ContentStore not available")
+        try:
+            return await store.retrieve_local(ContentHash.from_hex(content_id))
+        except ContentNotFoundError as exc:
+            raise OSError(f"Content not found: {content_id}") from exc
+        except (StorageError, OSError) as exc:
+            raise OSError(f"ContentStore download failed for {content_id}: {exc}") from exc
 
-    async def pin_content(self, ipfs_hash: str) -> bool:
-        """Pin content in IPFS. Returns True on success, False on failure (never raises)."""
+    async def pin_content(self, content_id: str) -> bool:
+        """Check content exists (pin equivalent). Returns True on success, False on failure."""
         try:
             await self._ensure_initialized()
-            result = await self._client.pin_content(ipfs_hash)
-            return result.success
+            from prsm.storage import get_content_store, ContentHash
+            store = get_content_store()
+            if store is None:
+                return False
+            return await store.exists_local(ContentHash.from_hex(content_id))
         except Exception as e:
-            logger.warning("IPFS pin failed", cid=ipfs_hash, error=str(e))
+            logger.warning("ContentStore pin check failed", content_id=content_id, error=str(e))
             return False
 
 class ContentCompressor:

@@ -295,8 +295,9 @@ async def upload_file_ui(file_data: Dict[str, Any]) -> Dict[str, Any]:
         import json
         from pathlib import Path
         from datetime import timezone as tz
-        from prsm.core.ipfs_client import get_ipfs_client, IPFSConnectionError
-        
+        from prsm.storage import get_content_store, ContentHash
+        from prsm.storage.exceptions import StorageError
+
         # Validate required fields
         required_fields = ["filename", "content", "content_type"]
         for field in required_fields:
@@ -305,29 +306,28 @@ async def upload_file_ui(file_data: Dict[str, Any]) -> Dict[str, Any]:
                     status_code=400,
                     detail=f"Missing required field: {field}"
                 )
-        
+
         # Decode file content
         file_content = base64.b64decode(file_data["content"])
         file_size = len(file_content)
-        
-        # ── Upload to IPFS ──────────────────────────────────────────────────────
-        ipfs_client = get_ipfs_client()
-        try:
-            ipfs_result = await ipfs_client.add_content(
-                file_content,
-                filename=file_data["filename"],
-            )
-        except IPFSConnectionError as exc:
-            logger.error("IPFS unavailable for file upload", error=str(exc))
+
+        # ── Upload to ContentStore ──────────────────────────────────────────────
+        store = get_content_store()
+        if store is None:
             raise HTTPException(
                 status_code=503,
-                detail="File storage unavailable — IPFS daemon not reachable",
+                detail="File storage unavailable — ContentStore not initialized",
+            )
+        try:
+            stored_hash = await store.store_local(file_content)
+        except (StorageError, OSError) as exc:
+            logger.error("ContentStore unavailable for file upload", error=str(exc))
+            raise HTTPException(
+                status_code=503,
+                detail="File storage unavailable",
             )
 
-        if not ipfs_result.success or not ipfs_result.cid:
-            raise HTTPException(status_code=502, detail="File upload to IPFS failed")
-
-        real_cid = ipfs_result.cid
+        real_cid = stored_hash.hex()
 
         # ── Persist metadata to ContentProvenanceModel ──────────────────────────
         from prsm.core.database import get_async_session, ContentProvenanceModel

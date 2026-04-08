@@ -54,7 +54,8 @@ except (ImportError, RuntimeError):
 
 from prsm.core.models import TeacherModel, Curriculum, LearningSession
 from prsm.core.vector_db import get_vector_db_manager, embedding_generator
-from prsm.core.ipfs_client import get_ipfs_client, prsm_ipfs
+from prsm.storage import get_content_store, ContentHash
+from prsm.storage.exceptions import StorageError
 from prsm.compute.agents.executors.model_executor import ModelExecutor
 from prsm.compute.distillation.backends.pytorch_backend import PyTorchDistillationBackend
 from prsm.compute.distillation.backends.transformers_backend import TransformersDistillationBackend
@@ -1228,22 +1229,28 @@ class RealTeacherTrainer:
                 "framework": backend.__class__.__name__
             }
             
-            # Upload to IPFS
-            ipfs_result = await prsm_ipfs.upload_model(
-                model_path=Path(model_artifacts.model_path),
-                model_metadata=model_metadata
-            )
-            
-            if ipfs_result.success:
-                return {
-                    "model_cid": ipfs_result.cid,
-                    "metadata_cid": ipfs_result.metadata.get("metadata_cid"),
-                    "model_artifacts": model_artifacts,
-                    "ipfs_metadata": ipfs_result.metadata
-                }
+            # Upload to ContentStore
+            # TODO: full ContentStore integration
+            store = get_content_store()
+            if store is not None:
+                import json as _json
+                try:
+                    model_bytes = Path(model_artifacts.model_path).read_bytes()
+                    stored_hash = await store.store_local(model_bytes)
+                    content_id = stored_hash.hex()
+                    meta_bytes = _json.dumps(model_metadata).encode()
+                    meta_hash = await store.store_local(meta_bytes)
+                    return {
+                        "model_cid": content_id,
+                        "metadata_cid": meta_hash.hex(),
+                        "model_artifacts": model_artifacts,
+                    }
+                except (StorageError, OSError) as exc:
+                    logger.error("Failed to upload model to ContentStore", error=str(exc))
+                    return {"error": f"ContentStore upload failed: {exc}"}
             else:
-                logger.error("Failed to upload model to IPFS", error=ipfs_result.error)
-                return {"error": "IPFS upload failed"}
+                logger.error("ContentStore not available for model upload")
+                return {"error": "ContentStore not initialized"}
         
         except Exception as e:
             logger.error("Model saving failed", error=str(e))

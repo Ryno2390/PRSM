@@ -139,13 +139,13 @@ async def _init_vector_databases() -> None:
 
 
 async def _init_ipfs() -> None:
-    """Initialize IPFS distributed storage."""
+    """Initialize native content storage."""
     try:
-        from prsm.core.ipfs_client import init_ipfs
-        await init_ipfs()
-        logger.info("IPFS distributed storage initialized")
+        from prsm.storage import init_content_store
+        init_content_store()
+        logger.info("Native content storage initialized")
     except Exception as e:
-        logger.warning("IPFS initialization failed", error=str(e))
+        logger.warning("Content storage initialization failed", error=str(e))
 
 
 async def _init_secure_credentials() -> None:

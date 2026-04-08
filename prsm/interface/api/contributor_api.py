@@ -25,7 +25,7 @@ from prsm.core.auth import get_current_user
 from prsm.core.database import get_db_session
 from prsm.economy.tokenomics.contributor_manager import ContributorManager, ContributionProofRequest
 from prsm.economy.tokenomics.models import ContributorTier, ContributionType, ProofStatus
-from prsm.core.ipfs_client import get_ipfs_client
+from prsm.storage import get_content_store
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -98,19 +98,18 @@ async def submit_contribution_proof(
     proof_submission: ContributionProofSubmission,
     current_user=Depends(get_current_user),
     db=Depends(get_db_session),
-    ipfs_client=Depends(get_ipfs_client)
 ):
     """
     Submit proof of contribution for verification
-    
+
     This endpoint allows users to submit cryptographic proofs of their
     contributions to the PRSM network. Successful verification updates
     their contributor status and earning eligibility.
     """
-    
+
     try:
         # Initialize contributor manager
-        contributor_manager = ContributorManager(db, ipfs_client)
+        contributor_manager = ContributorManager(db)
         
         # Create proof request
         proof_request = ContributionProofRequest(

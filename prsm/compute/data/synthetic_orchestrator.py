@@ -20,7 +20,8 @@ from prsm.compute.distillation.models import (
 from prsm.compute.distillation.swarm_trainer import get_swarm_orchestrator
 from prsm.compute.nwtn.engines.world_model_engine import get_world_model
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
-from prsm.core.ipfs_client import create_ipfs_client
+from prsm.storage import get_content_store, ContentHash
+from prsm.storage.exceptions import StorageError
 
 logger = logging.getLogger(__name__)
 

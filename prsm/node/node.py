@@ -231,157 +231,133 @@ class _StakingFTNSAdapter:
 
 class _NodeIPFSAdapter:
     """
-    Real IPFS client adapter for the PRSM node.
+    ContentStore adapter for the PRSM node.
 
-    Wraps the production IPFSClient to provide the store_model/retrieve_model
-    interface expected by NWTNOrchestrator. Connection is lazy — the IPFS daemon
-    is not required at node startup and is only contacted on the first actual call.
+    Wraps prsm.storage.ContentStore to provide the store_model/retrieve_model
+    interface expected by NWTNOrchestrator. ContentStore is initialized lazily.
 
-    Fallback behaviour when IPFS is unreachable:
-    - store_model: returns a deterministic placeholder CID (same format as a real
-      CIDv0) so callers can identify the data, but logs clearly that no bytes
-      were persisted on the network.
-    - retrieve_model: returns None (same as before, but now logged explicitly).
+    Fallback behaviour when ContentStore is unavailable:
+    - store_model: returns a deterministic placeholder hash so callers can
+      identify the data, but logs clearly that no bytes were persisted.
+    - retrieve_model: returns None and logs a warning.
     """
 
-    def __init__(self, ipfs_api_url: str) -> None:
-        self._url = ipfs_api_url
-        self._client: Optional[Any] = None
-        # Prevent repeated connection attempts after the first failure
-        self._connect_attempted: bool = False
+    def __init__(self, ipfs_api_url: str = "") -> None:
+        # ipfs_api_url kept for backward-compat call sites; unused
+        self._store: Optional[Any] = None
 
-    async def _get_client(self) -> Optional[Any]:
-        """
-        Return the connected IPFSClient, initializing it on first call.
-
-        Returns None if the IPFS daemon is unreachable. Subsequent calls
-        return None immediately without retrying (avoids repeated timeouts
-        on every store/retrieve call when IPFS is offline).
-        """
-        if self._client is not None:
-            return self._client
-        if self._connect_attempted:
-            return None  # Already failed once; don't retry on every call
-
-        self._connect_attempted = True
+    async def _get_store(self) -> Optional[Any]:
+        """Return the ContentStore singleton, initializing if needed."""
+        if self._store is not None:
+            return self._store
         try:
-            from prsm.core.ipfs_client import IPFSClient, IPFSConfig
-            config = IPFSConfig(api_url=self._url)
-            client = IPFSClient(config)
-            await client.initialize()
-            if client.connected:
-                self._client = client
-                logger.info("NodeIPFSAdapter connected to IPFS at %s", self._url)
-            else:
-                logger.warning(
-                    "NodeIPFSAdapter: IPFS daemon not reachable at %s — "
-                    "model storage will use placeholder CIDs until IPFS is available",
-                    self._url,
-                )
+            from prsm.storage import get_content_store, init_content_store
+            store = get_content_store()
+            if store is None:
+                store = init_content_store()
+            self._store = store
+            logger.info("NodeIPFSAdapter: ContentStore ready")
         except Exception as exc:
             logger.warning(
-                "NodeIPFSAdapter: IPFS connection failed (%s) — "
-                "model storage will use placeholder CIDs",
+                "NodeIPFSAdapter: ContentStore initialization failed (%s) — "
+                "model storage will use placeholder hashes",
                 exc,
             )
-        return self._client
+        return self._store
 
     async def store_model(self, model_data: bytes, metadata: Dict[str, Any]) -> str:
         """
-        Upload model bytes to IPFS and return the real content CID.
+        Upload model bytes to ContentStore and return the content hash hex.
 
-        On success: pins the model bytes and uploads metadata JSON alongside;
-        returns the real CIDv0 assigned by the IPFS daemon.
-
-        On IPFS unavailable or upload failure: returns a deterministic
-        SHA-256-based placeholder CID so callers can identify the data,
-        but logs a clear WARNING that no bytes were persisted on the network.
-        The placeholder has the same format as a real CIDv0 but is guaranteed
-        not to exist on the IPFS network.
+        On ContentStore unavailable: returns a deterministic SHA-256-based
+        placeholder so callers can identify the data, with a clear WARNING.
         """
-        client = await self._get_client()
+        from prsm.storage.exceptions import StorageError
 
         def _placeholder() -> str:
-            return f"Qm{hashlib.sha256(model_data).hexdigest()[:44]}"
+            return hashlib.sha256(model_data).hexdigest()
 
-        if client is None:
-            cid = _placeholder()
+        store = await self._get_store()
+        if store is None:
+            content_id = _placeholder()
             logger.warning(
-                "NodeIPFSAdapter: IPFS unavailable — model NOT stored on network. "
-                "Returning placeholder CID %s",
-                cid[:20],
+                "NodeIPFSAdapter: ContentStore unavailable — model NOT stored. "
+                "Returning placeholder hash %s",
+                content_id[:20],
             )
-            return cid
+            return content_id
 
-        # Upload model bytes
-        result = await client.upload_content(
-            model_data, filename="model.bin", pin=True
-        )
-        if not result.success:
-            cid = _placeholder()
+        try:
+            stored_hash = await store.store_local(model_data)
+            content_id = stored_hash.hex()
+
+            # Store metadata JSON alongside the model (best-effort; non-fatal)
+            if metadata:
+                import json as _json
+                try:
+                    meta_bytes = _json.dumps(metadata, default=str).encode()
+                    await store.store_local(meta_bytes)
+                except Exception as exc:
+                    logger.debug(
+                        "NodeIPFSAdapter: metadata store failed for %s: %s",
+                        content_id[:20],
+                        exc,
+                    )  # Non-fatal
+
+            logger.info(
+                "NodeIPFSAdapter: model stored → hash %s (%d bytes)",
+                content_id,
+                len(model_data),
+            )
+            return content_id
+        except (StorageError, OSError) as exc:
+            content_id = _placeholder()
             logger.error(
-                "NodeIPFSAdapter: upload failed (%s) — returning placeholder CID %s",
-                result.error,
-                cid[:20],
+                "NodeIPFSAdapter: store failed (%s) — returning placeholder hash %s",
+                exc,
+                content_id[:20],
             )
-            return cid
+            return content_id
 
-        # Upload metadata JSON alongside the model (best-effort; non-fatal)
-        if metadata:
-            import json as _json
-            try:
-                meta_bytes = _json.dumps(metadata, default=str).encode()
-                await client.upload_content(
-                    meta_bytes,
-                    filename=f"{result.cid}_metadata.json",
-                    pin=True,
-                )
-            except Exception as exc:
-                logger.debug(
-                    "NodeIPFSAdapter: metadata upload failed for %s: %s",
-                    result.cid[:20],
-                    exc,
-                )  # Non-fatal
-
-        logger.info(
-            "NodeIPFSAdapter: model stored → CID %s (%d bytes)",
-            result.cid,
-            len(model_data),
-        )
-        return result.cid
-
-    async def retrieve_model(self, cid: str) -> Optional[bytes]:
+    async def retrieve_model(self, content_id: str) -> Optional[bytes]:
         """
-        Fetch model bytes from IPFS by CID.
+        Fetch model bytes from ContentStore by content hash.
 
-        Returns the raw bytes on success, or None when IPFS is unavailable
-        or the CID is not found on the network.
+        Returns the raw bytes on success, or None when ContentStore is
+        unavailable or the content is not found.
         """
-        client = await self._get_client()
+        from prsm.storage import ContentHash
+        from prsm.storage.exceptions import StorageError, ContentNotFoundError
 
-        if client is None:
+        store = await self._get_store()
+        if store is None:
             logger.warning(
-                "NodeIPFSAdapter: IPFS unavailable — cannot retrieve CID %s", cid[:20]
+                "NodeIPFSAdapter: ContentStore unavailable — cannot retrieve %s",
+                content_id[:20],
             )
             return None
 
-        result = await client.download_content(cid)
-
-        if result.success and result.metadata and "content" in result.metadata:
-            content: bytes = result.metadata["content"]
+        try:
+            content: bytes = await store.retrieve_local(ContentHash.from_hex(content_id))
             logger.info(
-                "NodeIPFSAdapter: retrieved %d bytes for CID %s",
+                "NodeIPFSAdapter: retrieved %d bytes for hash %s",
                 len(content),
-                cid[:20],
+                content_id[:20],
             )
             return content
-
-        logger.warning(
-            "NodeIPFSAdapter: content not found or download failed for CID %s — %s",
-            cid[:20],
-            result.error if result else "unknown error",
-        )
-        return None
+        except ContentNotFoundError:
+            logger.warning(
+                "NodeIPFSAdapter: content not found for hash %s",
+                content_id[:20],
+            )
+            return None
+        except (StorageError, OSError) as exc:
+            logger.warning(
+                "NodeIPFSAdapter: retrieve failed for hash %s — %s",
+                content_id[:20],
+                exc,
+            )
+            return None
 
 
 class _NodeModelRegistryAdapter:
@@ -1102,7 +1078,7 @@ class PRSMNode:
                 orchestrator = NWTNOrchestrator(
                     context_manager=get_context_manager(),
                     ftns_service=_NodeFTNSAdapter(self.ledger, self.identity.node_id),
-                    ipfs_client=_NodeIPFSAdapter(self.config.ipfs_api_url),
+                    ipfs_client=_NodeIPFSAdapter(),
                     model_registry=_NodeModelRegistryAdapter(),
                     backend_registry=backend_registry,
                 )
@@ -1132,8 +1108,13 @@ class PRSMNode:
         await self.gossip.start()
         await self.discovery.start()
 
-        # Ensure IPFS daemon is available (auto-start if possible)
-        await self._ensure_ipfs_available()
+        # Initialize native content storage
+        try:
+            from prsm.storage import init_content_store
+            init_content_store()
+            logger.info("ContentStore initialized")
+        except Exception as exc:
+            logger.warning("ContentStore initialization failed: %s", exc)
 
         # Initialize on-chain FTNS ledger (best-effort)
         if self.ftns_ledger:
@@ -1344,82 +1325,26 @@ class PRSMNode:
         if self.ledger:
             await self.ledger.close()
 
-        # Terminate IPFS daemon if we started it
-        if hasattr(self, '_ipfs_daemon_proc') and self._ipfs_daemon_proc is not None:
-            try:
-                self._ipfs_daemon_proc.terminate()
-                self._ipfs_daemon_proc = None
-                logger.info("IPFS daemon terminated")
-            except Exception as e:
-                logger.warning(f"Failed to terminate IPFS daemon: {e}")
+        # Close content storage
+        try:
+            from prsm.storage import close_content_store
+            close_content_store()
+            logger.info("ContentStore closed")
+        except Exception as e:
+            logger.warning(f"ContentStore close failed: {e}")
 
         self._started = False
         logger.info("PRSM node stopped")
 
     async def _ensure_ipfs_available(self) -> bool:
         """
-        Check IPFS daemon availability. Start it automatically if ipfs is on PATH
-        and the daemon is not already running.
-
-        Returns True if IPFS is (or becomes) available.
-        Returns False if IPFS is unavailable — node continues without it.
+        Deprecated: IPFS is replaced by native ContentStore.
+        Returns True if ContentStore is available.
         """
-        import shutil
-        import subprocess
-
-        ipfs_binary = shutil.which("ipfs")
-
-        # 1. Is the daemon already running? (fast check via HTTP)
         try:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "http://127.0.0.1:5001/api/v0/id",
-                    timeout=aiohttp.ClientTimeout(total=2)
-                ) as resp:
-                    if resp.status == 200:
-                        logger.info("IPFS daemon already running")
-                        return True
+            from prsm.storage import get_content_store
+            return get_content_store() is not None
         except Exception:
-            pass  # Daemon not reachable — try to start it
-
-        # 2. ipfs not installed → warn and continue
-        if not ipfs_binary:
-            logger.warning(
-                "IPFS daemon not running and 'ipfs' not found on PATH. "
-                "Data storage features will be limited. "
-                "Install IPFS: https://docs.ipfs.tech/install/command-line/"
-            )
-            return False
-
-        # 3. ipfs is installed → start the daemon as a background subprocess
-        try:
-            logger.info("Starting IPFS daemon automatically...")
-            daemon = subprocess.Popen(
-                [ipfs_binary, "daemon", "--init"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                start_new_session=True,
-            )
-            # Small delay to let daemon start
-            await asyncio.sleep(2)
-
-            # Verify it's running by re-checking the HTTP endpoint
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        "http://127.0.0.1:5001/api/v0/id",
-                        timeout=aiohttp.ClientTimeout(total=5)
-                    ) as resp:
-                        if resp.status == 200:
-                            logger.info("IPFS daemon started successfully (PID %d)", daemon.pid)
-                            return True
-            except Exception as e:
-                logger.debug("IPFS daemon start verification failed: %s", e)
-                logger.info("IPFS daemon may still be starting (PID %d)", daemon.pid)
-                return True  # Assume it will come up
-        except Exception as e:
-            logger.warning("Failed to start IPFS daemon: %s", e)
             return False
 
     async def _seed_welcome_grant(self) -> None:

@@ -225,23 +225,23 @@ class SSMModelInstance(ModelInstance):
         """Initialize the local SSM model architecture with streaming support"""
         from prsm.compute.nwtn.architectures.ssm_core import get_ssm_reasoner
         from prsm.core.utils.deterministic import force_determinism
-        from prsm.core.ipfs_client import create_ipfs_client
+        from prsm.storage import get_content_store
         from .weight_streamer import WeightStreamer
-        
+
         # 1. Setup deterministic base
         seed = self.config.get("seed", 42)
         force_determinism(seed)
-        
+
         # 2. Initialize Empty Skeleton (No weights in RAM yet)
         d_model = self.config.get("d_model", 512)
         layers = self.config.get("layers", 6)
         self.model = get_ssm_reasoner(d_model=d_model, layers=layers)
         self.model.eval()
-        
+
         # 3. Setup Weight Streamer
-        ipfs = get_ipfs_client()
+        store = get_content_store()
         self.streamer = WeightStreamer(
-            ipfs, 
+            store,
             max_layers_in_ram=self.config.get("max_layers_in_ram", 2),
             max_experts_in_ram=self.config.get("max_experts_in_ram", 8)
         )

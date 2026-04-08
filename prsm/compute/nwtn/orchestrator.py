@@ -798,7 +798,7 @@ def create_nwtn_orchestrator(
     Example:
         # For production use with real services
         from prsm.economy.tokenomics.ftns_service import FTNSService
-        from prsm.core.ipfs_client import IPFSClient
+        from prsm.storage import get_content_store
         # ... other imports
         
         orchestrator = create_nwtn_orchestrator(

@@ -60,7 +60,8 @@ async def upload_content_with_provenance(
     upload still succeeds and the CID is returned; provenance_registered=false
     in the response signals the gap.
     """
-    from prsm.core.ipfs_client import get_ipfs_client
+    from prsm.storage import get_content_store, ContentHash
+    from prsm.storage.exceptions import StorageError
     from prsm.core.database import ProvenanceQueries
 
     # ── Read file ────────────────────────────────────────────────────────────
@@ -79,30 +80,26 @@ async def upload_content_with_provenance(
         c.strip() for c in parent_cids.split(",") if c.strip()
     ]
 
-    # ── Upload to IPFS ───────────────────────────────────────────────────────
-    ipfs_client = get_ipfs_client()
-    if not ipfs_client:
+    # ── Upload to ContentStore ───────────────────────────────────────────────
+    store = get_content_store()
+    if store is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="IPFS service not available — ensure an IPFS daemon is running",
+            detail="Storage service not available — ensure ContentStore is initialized",
         )
 
-    result = await ipfs_client.upload_content(
-        content=content,
-        filename=filename,
-        pin=True,
-    )
-
-    if not result.success:
-        logger.error("IPFS upload failed", filename=filename, error=result.error)
+    try:
+        stored_hash = await store.store_local(content)
+    except (StorageError, OSError) as exc:
+        logger.error("ContentStore upload failed", filename=filename, error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"IPFS upload failed: {result.error}",
+            detail=f"Content upload failed: {exc}",
         )
 
-    cid = result.cid
-    logger.info("File uploaded to IPFS",
-                cid=cid, filename=filename, size=size_bytes, creator=current_user)
+    content_id = stored_hash.hex()
+    logger.info("File uploaded to ContentStore",
+                content_id=content_id, filename=filename, size=size_bytes, creator=current_user)
 
     # ── Register provenance ──────────────────────────────────────────────────
     # API-level uploads use the authenticated user_id as creator_id.
@@ -110,7 +107,7 @@ async def upload_content_with_provenance(
     # node identity keypair; node-based uploads (ContentUploader) sign with
     # their Ed25519 key. This is a known limitation documented in the record.
     provenance_record = {
-        "cid":                      cid,
+        "cid":                      content_id,
         "filename":                 filename,
         "size_bytes":               size_bytes,
         "content_hash":             content_hash,
@@ -136,10 +133,10 @@ async def upload_content_with_provenance(
         )
     except Exception as exc:
         logger.warning("Provenance DB persist failed (upload still succeeded)",
-                       cid=cid, error=str(exc))
+                       content_id=content_id, error=str(exc))
 
     return {
-        "cid":                    cid,
+        "cid":                    content_id,
         "filename":               filename,
         "size_bytes":             size_bytes,
         "content_hash":           content_hash,
@@ -148,7 +145,7 @@ async def upload_content_with_provenance(
         "parent_cids":            parent_cid_list,
         "replicas_requested":     replicas,
         "provenance_registered":  provenance_registered,
-        "access_url":             f"https://ipfs.io/ipfs/{cid}",
+        "access_url":             f"/storage/{content_id}",
     }
 
 
