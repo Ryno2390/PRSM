@@ -546,28 +546,8 @@ class PRSMNode:
         except ValueError:
             pass  # Already received welcome grant
 
-        # ── Transport ────────────────────────────────────────────
-        self.transport = WebSocketTransport(
-            identity=self.identity,
-            host=self.config.listen_host,
-            port=self.config.p2p_port,
-            nonce_window=self.config.nonce_window,
-            ws_ping_interval=self.config.ws_ping_interval,
-            ws_ping_timeout=self.config.ws_ping_timeout,
-            handshake_timeout=self.config.handshake_timeout,
-            nonce_cleanup_interval=self.config.nonce_cleanup_interval,
-        )
-
-        # ── Gossip ───────────────────────────────────────────────
-        self.gossip = GossipProtocol(
-            transport=self.transport,
-            fanout=self.config.gossip_fanout,
-            default_ttl=self.config.gossip_ttl,
-            heartbeat_interval=self.config.heartbeat_interval,
-        )
-
-        # ── Discovery ────────────────────────────────────────────
-        # Derive local capabilities from node roles
+        # ── Transport / Gossip / Discovery ───────────────────────
+        # Derive local capabilities from node roles (used by both backends)
         local_capabilities: list[str] = []
         for role in self.config.roles:
             if role in (NodeRole.FULL, NodeRole.COMPUTE):
@@ -577,22 +557,61 @@ class PRSMNode:
                 if "storage" not in local_capabilities:
                     local_capabilities.append("storage")
 
-        self.discovery = PeerDiscovery(
-            transport=self.transport,
-            bootstrap_nodes=self.config.bootstrap_nodes,
-            bootstrap_connect_timeout=self.config.bootstrap_connect_timeout,
-            bootstrap_retry_attempts=self.config.bootstrap_retry_attempts,
-            bootstrap_fallback_enabled=self.config.bootstrap_fallback_enabled,
-            bootstrap_fallback_nodes=self.config.bootstrap_fallback_nodes,
-            bootstrap_validate_addresses=self.config.bootstrap_validate_addresses,
-            bootstrap_backoff_base=self.config.bootstrap_backoff_base,
-            bootstrap_backoff_max=self.config.bootstrap_backoff_max,
-            target_peers=self.config.target_peers,
-            announce_interval=self.config.announce_interval,
-            maintenance_interval=self.config.maintenance_interval,
-            peer_stale_timeout=self.config.peer_stale_timeout,
-            local_capabilities=local_capabilities,
-        )
+        if self.config.transport_backend == "libp2p":
+            from prsm.node.libp2p_transport import Libp2pTransport
+            from prsm.node.libp2p_gossip import Libp2pGossip
+            from prsm.node.libp2p_discovery import Libp2pDiscovery
+
+            self.transport = Libp2pTransport(
+                identity=self.identity,
+                host=self.config.listen_host,
+                port=self.config.p2p_port,
+                library_path=self.config.libp2p_library_path,
+            )
+            self.gossip = Libp2pGossip(transport=self.transport)
+            self.discovery = Libp2pDiscovery(
+                transport=self.transport,
+                bootstrap_nodes=self.config.bootstrap_nodes,
+                gossip=self.gossip,
+            )
+            logger.info("Using libp2p transport backend")
+        else:
+            # ── WebSocket transport (fallback) ────────────────────
+            self.transport = WebSocketTransport(
+                identity=self.identity,
+                host=self.config.listen_host,
+                port=self.config.p2p_port,
+                nonce_window=self.config.nonce_window,
+                ws_ping_interval=self.config.ws_ping_interval,
+                ws_ping_timeout=self.config.ws_ping_timeout,
+                handshake_timeout=self.config.handshake_timeout,
+                nonce_cleanup_interval=self.config.nonce_cleanup_interval,
+            )
+
+            self.gossip = GossipProtocol(
+                transport=self.transport,
+                fanout=self.config.gossip_fanout,
+                default_ttl=self.config.gossip_ttl,
+                heartbeat_interval=self.config.heartbeat_interval,
+            )
+
+            self.discovery = PeerDiscovery(
+                transport=self.transport,
+                bootstrap_nodes=self.config.bootstrap_nodes,
+                bootstrap_connect_timeout=self.config.bootstrap_connect_timeout,
+                bootstrap_retry_attempts=self.config.bootstrap_retry_attempts,
+                bootstrap_fallback_enabled=self.config.bootstrap_fallback_enabled,
+                bootstrap_fallback_nodes=self.config.bootstrap_fallback_nodes,
+                bootstrap_validate_addresses=self.config.bootstrap_validate_addresses,
+                bootstrap_backoff_base=self.config.bootstrap_backoff_base,
+                bootstrap_backoff_max=self.config.bootstrap_backoff_max,
+                target_peers=self.config.target_peers,
+                announce_interval=self.config.announce_interval,
+                maintenance_interval=self.config.maintenance_interval,
+                peer_stale_timeout=self.config.peer_stale_timeout,
+                local_capabilities=local_capabilities,
+            )
+            logger.info("Using WebSocket transport backend (fallback)")
 
         # ── Compute ──────────────────────────────────────────────
         if NodeRole.FULL in self.config.roles or NodeRole.COMPUTE in self.config.roles:

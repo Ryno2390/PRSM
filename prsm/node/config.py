@@ -124,6 +124,13 @@ class NodeConfig:
     gas_price_multiplier: float = 1.2
     max_gas_gwei: int = 50
 
+    # libp2p transport configuration
+    transport_backend: str = "libp2p"          # "libp2p" or "websocket"
+    libp2p_library_path: str = ""              # Auto-detected if empty
+    enable_relay: bool = True                  # Circuit Relay v2
+    enable_nat_traversal: bool = True          # AutoNAT + hole punching
+    dht_mode: str = "auto"                     # "server", "client", or "auto"
+
     # Discovery tuning
     target_peers: int = 8
     announce_interval: float = 60.0
@@ -160,6 +167,10 @@ class NodeConfig:
         env_bootstrap = os.environ.get("PRSM_BOOTSTRAP_NODES", "")
         if env_bootstrap:
             self.bootstrap_nodes = [s.strip() for s in env_bootstrap.split(",") if s.strip()]
+
+        # Allow override via PRSM_TRANSPORT_BACKEND env var
+        if os.getenv("PRSM_TRANSPORT_BACKEND"):
+            self.transport_backend = os.getenv("PRSM_TRANSPORT_BACKEND")
 
     @property
     def identity_path(self) -> Path:
