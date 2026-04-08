@@ -78,8 +78,9 @@ class TestBlobStore:
         data = b"directory structure test"
         content_hash = await store.store(data)
         path = store._path_for(content_hash)
-        hex_str = content_hash.hex()
-        expected_prefix_dir = os.path.join(store.data_dir, hex_str[:2])
+        # Bucket prefix is the first 2 hex chars of the DIGEST (not the algo-prefixed hex)
+        digest_hex = content_hash.digest.hex()
+        expected_prefix_dir = os.path.join(store.data_dir, digest_hex[:2])
         assert os.path.isdir(expected_prefix_dir)
         assert os.path.isfile(path)
 
