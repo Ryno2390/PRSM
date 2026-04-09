@@ -20,7 +20,6 @@ from prsm.mcp_server import (
     handle_prsm_yield_estimate,
     handle_prsm_stake,
     handle_prsm_revenue_split,
-    handle_prsm_decompose,
     handle_prsm_settlement_stats,
     handle_prsm_privacy_status,
     handle_prsm_training_status,
@@ -28,8 +27,8 @@ from prsm.mcp_server import (
 
 
 class TestMCPToolDefinitions:
-    def test_seventeen_tools_defined(self):
-        assert len(TOOLS) == 17
+    def test_sixteen_tools_defined(self):
+        assert len(TOOLS) == 16
 
     def test_tool_names(self):
         names = [t.name for t in TOOLS]
@@ -46,7 +45,6 @@ class TestMCPToolDefinitions:
         assert "prsm_yield_estimate" in names
         assert "prsm_stake" in names
         assert "prsm_revenue_split" in names
-        assert "prsm_decompose" in names
         assert "prsm_settlement_stats" in names
         assert "prsm_privacy_status" in names
         assert "prsm_training_status" in names
@@ -247,12 +245,6 @@ class TestFullToolSuite:
         result = await handle_prsm_stake({"amount": 1000})
         assert "DEDICATED" in result
         assert "1.5" in result
-
-    @pytest.mark.asyncio
-    async def test_decompose_handler(self):
-        from prsm.mcp_server import handle_prsm_decompose
-        result = await handle_prsm_decompose({"query": "Count vehicles in NC"})
-        assert "Decomposition" in result or "decomposition" in result.lower()
 
     @pytest.mark.asyncio
     async def test_privacy_status_handler(self):

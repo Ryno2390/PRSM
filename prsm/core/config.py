@@ -347,63 +347,6 @@ class PRSMSettings(BaseSettings):
         }
     
     @property
-    def backend_config(self) -> Dict[str, Any]:
-        """LLM Backend configuration for NWTN pipeline"""
-        return {
-            "primary_backend": self.backend_primary,
-            "fallback_chain": self.backend_fallback_chain,
-            "anthropic_api_key": self.anthropic_api_key,
-            "openai_api_key": self.openai_api_key,
-            "local_model_path": self.local_model_path,
-            "ollama_host": self.ollama_host,
-            "use_ollama": self.use_ollama,
-            "timeout_seconds": self.backend_timeout_seconds,
-            "max_retries": self.backend_max_retries,
-            "retry_delay_seconds": self.backend_retry_delay,
-            "rate_limit_rpm": self.backend_rate_limit_rpm,
-            "mock_delay_seconds": self.mock_delay_seconds,
-        }
-    
-    def get_backend_config(self) -> "BackendConfig":
-        """
-        Get a BackendConfig instance for the NWTN pipeline.
-        
-        Returns:
-            BackendConfig: Configuration for LLM backends
-        """
-        from prsm.compute.nwtn.backends import BackendConfig, BackendType
-        
-        # Parse primary backend
-        try:
-            primary = BackendType(self.backend_primary.lower())
-        except ValueError:
-            primary = BackendType.MOCK
-        
-        # Parse fallback chain
-        fallback_chain = []
-        for b in self.backend_fallback_chain.split(","):
-            b = b.strip().lower()
-            try:
-                fallback_chain.append(BackendType(b))
-            except ValueError:
-                continue
-        
-        return BackendConfig(
-            primary_backend=primary,
-            fallback_chain=fallback_chain or [BackendType.MOCK],
-            anthropic_api_key=self.anthropic_api_key,
-            openai_api_key=self.openai_api_key,
-            local_model_path=self.local_model_path,
-            ollama_host=self.ollama_host,
-            use_ollama=self.use_ollama,
-            timeout_seconds=self.backend_timeout_seconds,
-            max_retries=self.backend_max_retries,
-            retry_delay_seconds=self.backend_retry_delay,
-            rate_limit_rpm=self.backend_rate_limit_rpm,
-            mock_delay_seconds=self.mock_delay_seconds,
-        )
-
-    @property
     def bittorrent_config(self) -> Dict[str, Any]:
         """BitTorrent configuration for P2P file distribution."""
         return {
