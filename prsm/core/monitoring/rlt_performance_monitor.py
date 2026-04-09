@@ -31,12 +31,25 @@ from concurrent.futures import ThreadPoolExecutor
 
 import structlog
 
-from prsm.compute.teachers.rlt.quality_monitor import QualityMonitor, QualityMetrics, MonitoringConfig
-from prsm.compute.teachers.rlt.student_comprehension_evaluator import ComprehensionMetrics, EvaluationConfig
-from prsm.compute.teachers.rlt.dense_reward_trainer import RLTTrainingConfig
+# v1.6.0 scope alignment: prsm.compute.teachers and prsm.core.safety deleted in PR 3
+try:
+    from prsm.compute.teachers.rlt.quality_monitor import QualityMonitor, QualityMetrics, MonitoringConfig
+    from prsm.compute.teachers.rlt.student_comprehension_evaluator import ComprehensionMetrics, EvaluationConfig
+    from prsm.compute.teachers.rlt.dense_reward_trainer import RLTTrainingConfig
+except ImportError:
+    QualityMonitor = None  # type: ignore[assignment,misc]
+    QualityMetrics = None  # type: ignore[assignment,misc]
+    MonitoringConfig = None  # type: ignore[assignment,misc]
+    ComprehensionMetrics = None  # type: ignore[assignment,misc]
+    EvaluationConfig = None  # type: ignore[assignment,misc]
+    RLTTrainingConfig = None  # type: ignore[assignment,misc]
 from .metrics import MetricsCollector, SystemMetrics
-from prsm.core.safety.monitor import SafetyMonitor
-from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork
+try:
+    from prsm.core.safety.monitor import SafetyMonitor
+    from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork
+except ImportError:
+    SafetyMonitor = None  # type: ignore[assignment,misc]
+    CircuitBreakerNetwork = None  # type: ignore[assignment,misc]
 
 logger = structlog.get_logger(__name__)
 

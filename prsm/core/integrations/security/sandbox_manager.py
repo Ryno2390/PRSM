@@ -49,7 +49,14 @@ from ..models.integration_models import SecurityRisk, LicenseType, SecurityScanR
 from prsm.core.config import settings
 from prsm.core.models import TimestampMixin
 from .audit_logger import audit_logger
-from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
+# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3 as legacy AGI-safety
+# scaffolding. Wrap import so sandbox_manager remains importable; circuit breaker
+# functionality will be replaced in PR 4/PR 5.
+try:
+    from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
+except ImportError:
+    CircuitBreakerNetwork = None  # type: ignore[assignment,misc]
+    ThreatLevel = None  # type: ignore[assignment,misc]
 
 logger = structlog.get_logger(__name__)
 
@@ -580,8 +587,8 @@ class SandboxManager:
         self.emergency_mode = False
         self.blocked_patterns = set()
         
-        # Initialize Circuit Breaker
-        self.circuit_breaker = CircuitBreakerNetwork(node_id="sandbox_manager_node")
+        # Initialize Circuit Breaker (None when prsm.core.safety is unavailable)
+        self.circuit_breaker = CircuitBreakerNetwork(node_id="sandbox_manager_node") if CircuitBreakerNetwork is not None else None
         
         # Initialize sandbox environment
         self._setup_sandbox()
@@ -1177,11 +1184,12 @@ class SandboxManager:
             # Activate emergency mode
             self.emergency_mode = True
             
-            # Trigger circuit breaker network
-            await self.circuit_breaker.trigger_emergency_halt(
-                threat_level=ThreatLevel.CRITICAL,
-                reason=f"Sandbox Critical Threat: {scan_result.vulnerabilities_found[0] if scan_result.vulnerabilities_found else 'unknown vulnerability'}"
-            )
+            # Trigger circuit breaker network (if available)
+            if self.circuit_breaker is not None:
+                await self.circuit_breaker.trigger_emergency_halt(
+                    threat_level=ThreatLevel.CRITICAL if ThreatLevel is not None else "CRITICAL",
+                    reason=f"Sandbox Critical Threat: {scan_result.vulnerabilities_found[0] if scan_result.vulnerabilities_found else 'unknown vulnerability'}"
+                )
             
             # Immediately terminate all active tool sandboxes
             for sandbox_id, context in list(self.active_tool_sandboxes.items()):
@@ -1420,7 +1428,7 @@ class SandboxManager:
             return await self._execute_tool_without_sandbox(tool_execution_request)
             
         # Check circuit breaker status
-        if self.circuit_breaker.emergency_halt_active or self.circuit_breaker.is_open(tool_execution_request.tool_id):
+        if self.circuit_breaker is not None and (self.circuit_breaker.emergency_halt_active or self.circuit_breaker.is_open(tool_execution_request.tool_id)):
             logger.warning("Circuit breaker is OPEN or emergency halt is active, blocking execution")
             return ToolSandboxResult(
                 sandbox_id="circuit_breaker_blocked",

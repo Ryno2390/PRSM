@@ -12,7 +12,11 @@ import json
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 
-from prsm.knowledge_system import UnifiedKnowledgeSystem
+# v1.6.0 scope alignment: prsm.knowledge_system deleted in PR 3
+try:
+    from prsm.knowledge_system import UnifiedKnowledgeSystem
+except ImportError:
+    UnifiedKnowledgeSystem = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 

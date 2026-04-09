@@ -123,20 +123,6 @@ def _include_core_routers(app: FastAPI) -> None:
 def _include_marketplace_routers(app: FastAPI) -> None:
     """Include marketplace-related routers."""
     try:
-        from prsm.interface.api.real_marketplace_api import router as marketplace_router
-        app.include_router(marketplace_router, prefix="/api/v1/marketplace", tags=["Marketplace"])
-        logger.debug("Marketplace router registered")
-    except ImportError as e:
-        logger.warning(f"Marketplace router not available: {e}")
-
-    try:
-        from prsm.interface.api.recommendation_api import router as recommendation_router
-        app.include_router(recommendation_router, prefix="/api/v1/marketplace", tags=["Recommendations"])
-        logger.debug("Recommendation router registered")
-    except ImportError as e:
-        logger.warning(f"Recommendation router not available: {e}")
-
-    try:
         from prsm.interface.api.reputation_api import router as reputation_router
         app.include_router(reputation_router, prefix="/api/v1", tags=["Reputation"])
         logger.debug("Reputation router registered")
@@ -148,13 +134,6 @@ def _include_marketplace_routers(app: FastAPI) -> None:
 
 def _include_advanced_routers(app: FastAPI) -> None:
     """Include advanced feature routers."""
-    try:
-        from prsm.interface.api.distillation_api import router as distillation_router
-        app.include_router(distillation_router, prefix="/api/v1", tags=["Distillation"])
-        logger.debug("Distillation router registered")
-    except ImportError as e:
-        logger.warning(f"Distillation router not available: {e}")
-
     try:
         from prsm.interface.api.monitoring_api import router as monitoring_router
         app.include_router(monitoring_router, prefix="/api/v1", tags=["Monitoring"])
@@ -337,12 +316,9 @@ def get_router_summary() -> dict:
             "/api/v1/budget"
         ],
         "marketplace": [
-            "/api/v1/marketplace",
-            "/api/v1/marketplace/recommendations",
             "/api/v1/reputation"
         ],
         "advanced": [
-            "/api/v1/distillation",
             "/api/v1/monitoring",
             "/api/v1/compliance",
             "/api/v1/contributors",

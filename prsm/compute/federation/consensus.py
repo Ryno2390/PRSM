@@ -28,8 +28,14 @@ from prsm.core.config import settings
 from prsm.core.models import (
     PeerNode, AgentResponse, SafetyFlag, SafetyLevel
 )
-from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-from prsm.core.safety.monitor import SafetyMonitor
+# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
+try:
+    from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
+    from prsm.core.safety.monitor import SafetyMonitor
+except ImportError:
+    CircuitBreakerNetwork = None  # type: ignore[assignment,misc]
+    ThreatLevel = None  # type: ignore[assignment,misc]
+    SafetyMonitor = None  # type: ignore[assignment,misc]
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 
 
