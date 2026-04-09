@@ -2241,8 +2241,8 @@ def compute_quote(query, shards, tier):
 @main.command("demo")
 def demo():
     """Run the PRSM Ring 1-10 demo (no network required)."""
-    from prsm.demo import main as demo_main
-    demo_main()
+    # v1.6.0 scope alignment: prsm.demo deleted in PR 3
+    click.echo("Demo module removed in v1.6.0 scope alignment. Use 'prsm node start' instead.", err=True)
 
 
 @main.command("mcp-server")

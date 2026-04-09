@@ -14,7 +14,11 @@ import structlog
 
 from prsm.core.models import FTNSTransaction
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
-from prsm.core.safety.monitor import SafetyMonitor
+# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
+try:
+    from prsm.core.safety.monitor import SafetyMonitor
+except ImportError:
+    SafetyMonitor = None  # type: ignore[assignment,misc]
 from .models import (
     Team, TeamMember, TeamWallet, TeamTask, TeamInvitation,
     TeamRole, TeamMembershipStatus, TeamType, GovernanceModel, RewardPolicy
@@ -52,7 +56,7 @@ class TeamService:
         
         # Services integration
         self.wallet_service = get_team_wallet_service()
-        self.safety_monitor = SafetyMonitor()
+        self.safety_monitor = SafetyMonitor() if SafetyMonitor is not None else None
         
         # Performance statistics
         self.team_stats = {

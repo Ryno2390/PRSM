@@ -23,9 +23,17 @@ getcontext().prec = 18
 from prsm.core.config import settings
 from prsm.core.models import GovernanceProposal, Vote, PRSMBaseModel
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
-from prsm.core.safety.monitor import SafetyMonitor
-from prsm.core.safety.governance import SafetyGovernance
-from prsm.compute.improvement.proposal_engine import ImprovementProposalEngine
+# v1.6.0 scope alignment: prsm.core.safety and prsm.compute.improvement deleted in PR 3
+try:
+    from prsm.core.safety.monitor import SafetyMonitor
+    from prsm.core.safety.governance import SafetyGovernance
+except ImportError:
+    SafetyMonitor = None  # type: ignore[assignment,misc]
+    SafetyGovernance = None  # type: ignore[assignment,misc]
+try:
+    from prsm.compute.improvement.proposal_engine import ImprovementProposalEngine
+except ImportError:
+    ImprovementProposalEngine = None  # type: ignore[assignment,misc]
 
 logger = structlog.get_logger()
 

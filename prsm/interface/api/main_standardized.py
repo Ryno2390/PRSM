@@ -227,17 +227,6 @@ def include_standardized_routers():
     except ImportError as e:
         logger.warning(f"⚠️ Models API not available: {e}")
     
-    # Marketplace
-    try:
-        from prsm.interface.api.real_marketplace_api import router as marketplace_router
-        app.include_router(
-            marketplace_router,
-            **get_router_config("marketplace", "FTNS token marketplace operations")
-        )
-        logger.info("✅ Marketplace API endpoints registered")
-    except ImportError as e:
-        logger.warning(f"⚠️ Marketplace API not available: {e}")
-    
     # Budget Management
     try:
         from prsm.interface.api.budget_api import router as budget_router

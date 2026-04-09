@@ -42,7 +42,11 @@ from .scalable_p2p_network import (
 )
 from prsm.core.config import settings
 from prsm.core.models import PeerNode
-from prsm.core.safety.monitor import SafetyMonitor
+# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
+try:
+    from prsm.core.safety.monitor import SafetyMonitor
+except ImportError:
+    SafetyMonitor = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 

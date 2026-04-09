@@ -26,7 +26,11 @@ from prsm.core.models import (
     MarketplaceListing, MarketplaceTransaction, PricingModel,
     FTNSTransaction, FTNSBalance
 )
-from prsm.core.safety.monitor import SafetyMonitor
+# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
+try:
+    from prsm.core.safety.monitor import SafetyMonitor
+except ImportError:
+    SafetyMonitor = None  # type: ignore[assignment,misc]
 from .atomic_ftns_service import get_atomic_ftns_service, AtomicFTNSService
 
 logger = structlog.get_logger(__name__)

@@ -12,32 +12,58 @@ Enhanced P2P Network Features:
 """
 
 # Enhanced P2P Network Components (in-scope, kept through v1.6.0)
-from .scalable_p2p_network import (
-    ScalableP2PNetwork,
-    NetworkMetrics,
-    PeerNodeInfo,
-    NodeRole,
-    NetworkTopology
-)
+# Wrapped in try/except because these files import from prsm.core.safety which is
+# being removed in PR 3; prsm.core.safety stubs will be replaced in PR 4/PR 5.
+try:
+    from .scalable_p2p_network import (
+        ScalableP2PNetwork,
+        NetworkMetrics,
+        PeerNodeInfo,
+        NodeRole,
+        NetworkTopology
+    )
+except (ImportError, ModuleNotFoundError):
+    ScalableP2PNetwork = None  # type: ignore[assignment,misc]
+    NetworkMetrics = None  # type: ignore[assignment,misc]
+    PeerNodeInfo = None  # type: ignore[assignment,misc]
+    NodeRole = None  # type: ignore[assignment,misc]
+    NetworkTopology = None  # type: ignore[assignment,misc]
 
-from .production_fault_tolerance import (
-    ProductionFaultTolerance,
-    FaultEvent,
-    NetworkHealth,
-    FaultSeverity,
-    FaultCategory,
-    RecoveryAction
-)
+try:
+    from .production_fault_tolerance import (
+        ProductionFaultTolerance,
+        FaultEvent,
+        NetworkHealth,
+        FaultSeverity,
+        FaultCategory,
+        RecoveryAction
+    )
+except (ImportError, ModuleNotFoundError):
+    ProductionFaultTolerance = None  # type: ignore[assignment,misc]
+    FaultEvent = None  # type: ignore[assignment,misc]
+    NetworkHealth = None  # type: ignore[assignment,misc]
+    FaultSeverity = None  # type: ignore[assignment,misc]
+    FaultCategory = None  # type: ignore[assignment,misc]
+    RecoveryAction = None  # type: ignore[assignment,misc]
 
-from .enhanced_consensus_system import (
-    EnhancedConsensusSystem,
-    EnhancedConsensusNode,
-    ConsensusProposal,
-    ConsensusResult,
-    ConsensusMessage,
-    ConsensusPhase,
-    ConsensusStatus
-)
+try:
+    from .enhanced_consensus_system import (
+        EnhancedConsensusSystem,
+        EnhancedConsensusNode,
+        ConsensusProposal,
+        ConsensusResult,
+        ConsensusMessage,
+        ConsensusPhase,
+        ConsensusStatus
+    )
+except (ImportError, ModuleNotFoundError):
+    EnhancedConsensusSystem = None  # type: ignore[assignment,misc]
+    EnhancedConsensusNode = None  # type: ignore[assignment,misc]
+    ConsensusProposal = None  # type: ignore[assignment,misc]
+    ConsensusResult = None  # type: ignore[assignment,misc]
+    ConsensusMessage = None  # type: ignore[assignment,misc]
+    ConsensusPhase = None  # type: ignore[assignment,misc]
+    ConsensusStatus = None  # type: ignore[assignment,misc]
 
 # Legacy RLT/evolution/knowledge-transfer imports (scheduled for deletion in PR 4)
 # Wrapped in try/except to avoid breaking the package when these files have

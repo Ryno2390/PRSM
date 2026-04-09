@@ -25,7 +25,11 @@ from prsm.core.config import settings
 from prsm.core.models import GovernanceProposal, Vote, PRSMBaseModel
 from prsm.economy.tokenomics.atomic_ftns_service import get_atomic_ftns_service
 from prsm.core.database import FTNSQueries, GovernanceQueries
-from prsm.core.safety.monitor import SafetyMonitor
+# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
+try:
+    from prsm.core.safety.monitor import SafetyMonitor
+except ImportError:
+    SafetyMonitor = None  # type: ignore[assignment,misc]
 
 logger = structlog.get_logger()
 
@@ -175,8 +179,8 @@ class TokenWeightedVoting:
         self.cache_expiry: Dict[str, datetime] = {}
         
         # Safety integration
-        self.safety_monitor = SafetyMonitor()
-        
+        self.safety_monitor = SafetyMonitor() if SafetyMonitor is not None else None
+
         # Performance statistics
         self.governance_stats = {
             "total_proposals_created": 0,
