@@ -27,9 +27,6 @@ def include_all_routers(app: FastAPI) -> None:
     # === Core API Routers ===
     _include_core_routers(app)
 
-    # === Marketplace Routers ===
-    _include_marketplace_routers(app)
-
     # === Advanced Feature Routers ===
     _include_advanced_routers(app)
 
@@ -118,18 +115,6 @@ def _include_core_routers(app: FastAPI) -> None:
         logger.warning(f"FTNS router not available: {e}")
 
     logger.info("Core API routers registered")
-
-
-def _include_marketplace_routers(app: FastAPI) -> None:
-    """Include marketplace-related routers."""
-    try:
-        from prsm.interface.api.reputation_api import router as reputation_router
-        app.include_router(reputation_router, prefix="/api/v1", tags=["Reputation"])
-        logger.debug("Reputation router registered")
-    except ImportError as e:
-        logger.warning(f"Reputation router not available: {e}")
-
-    logger.info("Marketplace routers registered")
 
 
 def _include_advanced_routers(app: FastAPI) -> None:
@@ -314,9 +299,6 @@ def get_router_summary() -> dict:
             "/api/v1/crypto",
             "/api/v1/governance",
             "/api/v1/budget"
-        ],
-        "marketplace": [
-            "/api/v1/reputation"
         ],
         "advanced": [
             "/api/v1/monitoring",

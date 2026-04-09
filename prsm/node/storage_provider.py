@@ -143,13 +143,15 @@ class StorageProvider:
         self.ledger_sync = None  # Set by node.py after construction
 
         # Storage proof system - verifier for challenging other providers
-        # and prover for answering challenges to this provider
+        # and prover for answering challenges to this provider.
+        # NOTE: the legacy ipfs_client kwarg was removed in the v1.5.0
+        # IPFS -> native-storage migration; StorageProofVerifier reads from
+        # the ContentStore when it needs shard bytes.
         self._proof_verifier = StorageProofVerifier(
-            ipfs_client=None,  # Will be set later if available
             challenge_timeout_minutes=self.challenge_config.challenge_timeout_minutes,
             max_pending_challenges=self.challenge_config.max_concurrent_challenges,
         )
-        self._storage_prover: Optional[StorageProver] = None  # Initialized after IPFS check
+        self._storage_prover: Optional[StorageProver] = None  # Initialized after ContentStore check
 
         # Track pending challenges issued by this provider
         self._pending_challenges: Dict[str, ChallengeRecord] = {}
@@ -184,11 +186,13 @@ class StorageProvider:
         if self.ipfs_available:
             logger.info(f"ContentStore active, storage provider active ({self.pledged_gb}GB pledged)")
 
-            # Initialize the storage prover for answering challenges
+            # Initialize the storage prover for answering challenges.
+            # NOTE: the legacy ipfs_client / ipfs_api_url kwargs were removed
+            # in the v1.5.0 IPFS -> ContentStore migration. StorageProver now
+            # takes an optional content_client; passing None keeps the prover
+            # relying on the caller to provide challenge bytes directly.
             self._storage_prover = StorageProver(
                 identity=self.identity,
-                ipfs_client=None,
-                ipfs_api_url="",
             )
             
             # Register gossip handlers
@@ -235,8 +239,11 @@ class StorageProvider:
             self._storage_prover = None
 
     async def _check_ipfs(self) -> bool:
-        """Check if ContentStore is available (replaces IPFS daemon check)."""
-        # TODO: full ContentStore integration
+        """Check if ContentStore is available (replaces IPFS daemon check).
+
+        Initializes the global ContentStore singleton lazily if one is not
+        already present. Returns True when the store is reachable.
+        """
         try:
             from prsm.storage import get_content_store, init_content_store
             store = get_content_store()
@@ -251,46 +258,70 @@ class StorageProvider:
         return None
 
     async def pin_content(self, cid: str) -> bool:
-        """Store/pin content in ContentStore."""
-        # TODO: full ContentStore integration
+        """Pin content in the local ContentStore.
+
+        The content is expected to already be present in the store; this
+        method promotes it to "pinned" status (protected from GC) and
+        records the authoritative size returned by ContentStore.
+        """
         if not self.ipfs_available:
             return False
         try:
-            from prsm.storage import get_content_store, ContentHash
-            from prsm.storage.exceptions import StorageError
+            from prsm.storage import ContentHash, get_content_store
+
             store = get_content_store()
             if store is None:
                 return False
-            # Record as pinned (content assumed already stored)
             exists = await store.exists_local(ContentHash.from_hex(cid))
-            if exists:
-                size = await self._get_content_size(cid)
-                self.pinned_content[cid] = PinnedContent(cid=cid, size_bytes=size)
-                return True
+            if not exists:
+                return False
+            size = await self._get_content_size(cid)
+            self.pinned_content[cid] = PinnedContent(cid=cid, size_bytes=size)
+            return True
+        except ValueError:
+            # Malformed content hash hex.
             return False
         except Exception as e:
             logger.error(f"Failed to pin {cid}: {e}")
             return False
 
     async def _get_content_size(self, cid: str) -> int:
-        """Get the size of stored content from ContentStore."""
-        # TODO: full ContentStore integration
-        return 0
+        """Get the size of stored content from ContentStore.
+
+        Reads the manifest's total_size for *cid*. Returns 0 when the
+        ContentStore is unavailable, the CID hex is malformed, or the
+        content is not present locally.
+        """
+        try:
+            from prsm.storage import ContentHash, get_content_store
+
+            store = get_content_store()
+            if store is None:
+                return 0
+            return await store.size_local(ContentHash.from_hex(cid))
+        except ValueError:
+            # Malformed content hash hex (bad algorithm prefix, etc.).
+            return 0
+        except Exception as e:
+            logger.debug(f"_get_content_size failed for {cid[:12]}...: {e}")
+            return 0
 
     async def verify_pin(self, cid: str) -> bool:
-        """Verify that content exists in ContentStore."""
-        # TODO: full ContentStore integration
+        """Verify that content exists in the local ContentStore."""
         if not self.ipfs_available:
             return False
         try:
-            from prsm.storage import get_content_store, ContentHash
+            from prsm.storage import ContentHash, get_content_store
+
             store = get_content_store()
             if store is None:
                 return False
             return await store.exists_local(ContentHash.from_hex(cid))
+        except ValueError:
+            # Malformed content hash hex.
+            return False
         except Exception:
-            pass
-        return False
+            return False
 
     # ── Gossip handlers ──────────────────────────────────────────
 

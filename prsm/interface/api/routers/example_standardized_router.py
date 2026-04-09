@@ -28,7 +28,7 @@ class ModelCreateRequest(BaseModel):
     """Standardized request model for creating models"""
     name: str = Field(..., min_length=1, max_length=255, description="Model name")
     description: str = Field(..., min_length=1, max_length=1000, description="Model description")
-    model_type: str = Field(..., regex="^(teacher|student|specialist|general)$", description="Model type")
+    model_type: str = Field(..., pattern="^(teacher|student|specialist|general)$", description="Model type")
     specialization: Optional[str] = Field(None, max_length=255, description="Model specialization")
     performance_score: Optional[float] = Field(None, ge=0.0, le=1.0, description="Performance score")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional metadata")
@@ -66,7 +66,7 @@ class ModelListResponse(PaginatedResponse):
 class ModelSearchRequest(BaseModel):
     """Standardized request model for model search"""
     query: str = Field(..., min_length=1, max_length=500, description="Search query")
-    model_type: Optional[str] = Field(None, regex="^(teacher|student|specialist|general)$", description="Filter by model type")
+    model_type: Optional[str] = Field(None, pattern="^(teacher|student|specialist|general)$", description="Filter by model type")
     specialization: Optional[str] = Field(None, max_length=255, description="Filter by specialization")
     min_performance: Optional[float] = Field(None, ge=0.0, le=1.0, description="Minimum performance score")
     max_results: int = Field(default=10, ge=1, le=100, description="Maximum number of results")
@@ -180,7 +180,7 @@ async def create_model(
     )
 )
 async def list_models(
-    model_type: Optional[str] = Query(None, regex="^(teacher|student|specialist|general)$", description="Filter by model type"),
+    model_type: Optional[str] = Query(None, pattern="^(teacher|student|specialist|general)$", description="Filter by model type"),
     specialization: Optional[str] = Query(None, max_length=255, description="Filter by specialization"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     pagination: PaginationParams = Depends(get_pagination_params),

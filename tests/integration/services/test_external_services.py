@@ -23,7 +23,6 @@ try:
     from prsm.integration.security_scanner import SecurityScanner
     from prsm.compute.federation.p2p_network import P2PNetwork
     from prsm.core.monitoring.external_metrics import ExternalMetricsCollector
-    from prsm.economy.marketplace.external_model_registry import ExternalModelRegistry
 except ImportError:
     # Create mocks if imports fail
     httpx = Mock()
@@ -33,7 +32,12 @@ except ImportError:
     SecurityScanner = Mock
     P2PNetwork = Mock
     ExternalMetricsCollector = Mock
-    ExternalModelRegistry = Mock
+
+# ExternalModelRegistry was part of the legacy AI model marketplace subtree
+# (prsm/economy/marketplace/), which was removed in the v1.6.0 scope
+# alignment sprint. External-model-registry integration is out of scope for
+# this release; the tests below mock the registry directly when needed.
+ExternalModelRegistry = Mock
 
 
 @pytest.mark.integration

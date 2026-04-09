@@ -185,6 +185,7 @@ class ContentUploader:
         sharding_threshold: int = DEFAULT_SHARDING_THRESHOLD,
         embedding_fn: Optional[Callable] = None,
         semantic_index_path: Optional[Path] = None,
+        ipfs_api_url: str = "http://127.0.0.1:5001",
     ):
         self.identity = identity
         self.gossip = gossip
@@ -193,6 +194,10 @@ class ContentUploader:
         self.content_index = content_index  # For looking up parent content creators
         self.ledger_sync = ledger_sync      # For broadcasting transactions
         self.content_economy = content_economy  # For replication tracking (Phase 4)
+        # Legacy IPFS HTTP endpoint for _ipfs_add / _ipfs_cat helpers. Kept
+        # for back-compat with call sites that still use the HTTP IPFS
+        # daemon; new code should go through ContentStore.
+        self.ipfs_api_url = ipfs_api_url
 
         # Sharding configuration
         self.sharding_threshold = sharding_threshold

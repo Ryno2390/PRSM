@@ -201,6 +201,22 @@ class ContentStore:
         """Return ``True`` if *content_hash* is present in the manifest cache."""
         return content_hash.hex() in self._manifest_cache
 
+    async def size_local(self, content_hash: ContentHash) -> int:
+        """Return the total content size in bytes for *content_hash*.
+
+        Reads the cached manifest's ``total_size`` field (set when the
+        content was sharded and stored). Returns 0 if the content is not
+        present in the local manifest cache — callers that care about the
+        distinction between "absent" and "empty" should first check
+        :meth:`exists_local`.
+        """
+        cache_key = content_hash.hex()
+        entry = self._manifest_cache.get(cache_key)
+        if entry is None:
+            return 0
+        _ciphertext, _key_shares, manifest = entry
+        return manifest.total_size
+
     async def delete_local(self, content_hash: ContentHash) -> None:
         """Delete all shards and the manifest cache entry for *content_hash*.
 

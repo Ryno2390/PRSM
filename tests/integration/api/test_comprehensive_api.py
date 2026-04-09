@@ -17,22 +17,19 @@ from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from prsm.core.auth.models import TokenResponse, UserRole
 import time
 
-try:
-    import httpx
-    from fastapi import status
-    
-    # Workaround: database module has get_db_session but dependencies expects get_db
-    # Add get_db as an alias before importing dependencies
-    from prsm.core import database as _db_module
-    if not hasattr(_db_module, 'get_db'):
-        _db_module.get_db = _db_module.get_db_session
-    
-    from prsm.interface.api.main import create_app
-    from prsm.interface.api import dependencies  # Import to ensure module is loaded for patching
-    from prsm.core.auth.jwt_handler import create_access_token
-    from prsm.core.models import PRSMSession, FTNSTransaction
-except (ImportError, Exception) as e:
-    pytest.skip(f"API modules have import errors (pydantic regex issue): {e}", allow_module_level=True)
+import httpx
+from fastapi import status
+
+# Workaround: database module has get_db_session but dependencies expects get_db
+# Add get_db as an alias before importing dependencies
+from prsm.core import database as _db_module
+if not hasattr(_db_module, 'get_db'):
+    _db_module.get_db = _db_module.get_db_session
+
+from prsm.interface.api.main import create_app
+from prsm.interface.api import dependencies  # Import to ensure module is loaded for patching
+from prsm.core.auth.jwt_handler import create_access_token
+from prsm.core.models import PRSMSession, FTNSTransaction
 
 
 @pytest.mark.api
@@ -173,185 +170,49 @@ class TestAuthenticationAPI:
 @pytest.mark.api
 @pytest.mark.integration
 class TestNWTNAPI:
-    """Test NWTN reasoning engine API endpoints"""
-    
-    async def test_nwtn_query_basic(self, async_test_client, user_headers, api_data_factory, mock_user_for_auth):
-        """Test basic NWTN query"""
+    """Test NWTN inference endpoint surface.
+
+    NWTN reasoning (NeuroSymbolicOrchestrator / System 1+2) was removed in
+    the v1.6.0 scope-alignment sprint. The API now returns HTTP 501 until
+    an in-scope inference surface is re-introduced on top of the Ring-9
+    training pipeline. These tests pin that contract.
+    """
+
+    async def test_nwtn_query_returns_501(
+        self, async_test_client, user_headers, api_data_factory, mock_user_for_auth
+    ):
+        """POST /api/v1/nwtn/query must return HTTP 501 Not Implemented."""
         query_data = api_data_factory.create_nwtn_query_request(
             query="What is artificial intelligence?",
             mode="adaptive",
-            max_depth=2
+            max_depth=2,
         )
-        
-        with mock_user_for_auth(), patch('prsm.compute.nwtn.reasoning.s1_neuro_symbolic.NeuroSymbolicOrchestrator.solve_task') as mock_process:
-            mock_process.return_value = {
-                "output": "Artificial intelligence is...",
-                "trace": [],
-                "reward": 0.85,
-                "verification_hash": "test_hash",
-                "input_hash": "test_input_hash",
-                "pq_signature": {},
-                "mode": "adaptive"
-            }
-            
-            response = await async_test_client.post(
-                "/api/v1/nwtn/query",
-                json=query_data,
-                headers=user_headers
-            )
-        
-        assert response.status_code == status.HTTP_200_OK
-        response_data = response.json()
-        
-        # PRSMResponse uses final_answer, confidence_score, reasoning_trace
-        assert "final_answer" in response_data
-        assert "confidence_score" in response_data
-        assert "session_id" in response_data
-        assert "reasoning_trace" in response_data
-        assert 0 <= response_data["confidence_score"] <= 1
-    
-    async def test_nwtn_query_with_context(self, async_test_client, user_headers, api_data_factory, mock_user_for_auth):
-        """Test NWTN query with context"""
-        query_data = api_data_factory.create_nwtn_query_request(
-            query="Continue the previous discussion about AI",
-            mode="contextual",
-            context={
-                "previous_queries": ["What is AI?"],
-                "session_id": "existing_session_123"
-            }
-        )
-        
-        with mock_user_for_auth(), patch('prsm.compute.nwtn.reasoning.s1_neuro_symbolic.NeuroSymbolicOrchestrator.solve_task') as mock_process:
-            mock_process.return_value = {
-                "output": "Continuing our discussion about AI...",
-                "trace": [],
-                "reward": 0.90,
-                "verification_hash": "test_hash",
-                "input_hash": "test_input_hash",
-                "pq_signature": {},
-                "mode": "contextual"
-            }
-            
-            response = await async_test_client.post(
-                "/api/v1/nwtn/query",
-                json=query_data,
-                headers=user_headers
-            )
-        
-        assert response.status_code == status.HTTP_200_OK
-        response_data = response.json()
-        
-        # PRSMResponse uses final_answer, confidence_score, reasoning_trace
-        assert "session_id" in response_data
-        assert "final_answer" in response_data
-        assert "confidence_score" in response_data
-    
-    async def test_nwtn_query_modes(self, async_test_client, user_headers, api_data_factory, mock_user_for_auth):
-        """Test different NWTN query modes"""
-        modes = ["adaptive", "deep", "quick", "creative"]
-        
-        for mode in modes:
-            query_data = api_data_factory.create_nwtn_query_request(
-                query=f"Test query for {mode} mode",
-                mode=mode
-            )
-            
-            with mock_user_for_auth(), patch('prsm.compute.nwtn.reasoning.s1_neuro_symbolic.NeuroSymbolicOrchestrator.solve_task') as mock_process:
-                mock_process.return_value = {
-                    "output": f"Response in {mode} mode",
-                    "trace": [],
-                    "reward": 0.80,
-                    "verification_hash": "test_hash",
-                    "input_hash": "test_input_hash",
-                    "pq_signature": {},
-                    "mode": mode
-                }
-                
-                response = await async_test_client.post(
-                    "/api/v1/nwtn/query",
-                    json=query_data,
-                    headers=user_headers
-                )
-            
-            assert response.status_code == status.HTTP_200_OK
-            response_data = response.json()
-            # PRSMResponse has metadata with mode
-            assert "final_answer" in response_data
-            assert response_data["metadata"]["mode"] == mode
-    
-    async def test_nwtn_session_history(self, async_test_client, user_headers, mock_user_for_auth):
-        """Test NWTN session history retrieval"""
-        session_id = "test_session_123"
-        
-        # The API checks hasattr(orchestrator, 'get_session_history') and returns
-        # a placeholder response if the method doesn't exist. Since the method
-        # doesn't exist on the actual class, we mock the instance to have the method.
-        mock_history_result = [
-            {
-                "query": "What is AI?",
-                "response": "AI is...",
-                "timestamp": "2024-01-01T12:00:00Z"
-            },
-            {
-                "query": "How does machine learning work?",
-                "response": "Machine learning works by...",
-                "timestamp": "2024-01-01T12:05:00Z"
-            }
-        ]
-        
+
         with mock_user_for_auth():
-            # Mock the NeuroSymbolicOrchestrator at the source where it's imported
-            with patch('prsm.compute.nwtn.reasoning.s1_neuro_symbolic.NeuroSymbolicOrchestrator') as mock_orchestrator_class:
-                mock_orchestrator_instance = MagicMock()
-                mock_orchestrator_instance.get_session_history = AsyncMock(return_value=mock_history_result)
-                mock_orchestrator_class.return_value = mock_orchestrator_instance
-                
-                response = await async_test_client.get(
-                    f"/api/v1/nwtn/sessions/{session_id}/history",
-                    headers=user_headers
-                )
-        
-        assert response.status_code == status.HTTP_200_OK
-        response_data = response.json()
-        
-        # API returns {"session_id": ..., "history": [...], "status": ...}
-        assert "session_id" in response_data
-        assert "history" in response_data
-        assert response_data["status"] == "success"
-    
-    @pytest.mark.performance
-    async def test_nwtn_query_performance(self, async_test_client, user_headers, api_data_factory, api_performance_monitor, mock_user_for_auth):
-        """Test NWTN query performance"""
-        query_data = api_data_factory.create_nwtn_query_request(
-            query="Performance test query"
-        )
-        
-        with mock_user_for_auth(), patch('prsm.compute.nwtn.reasoning.s1_neuro_symbolic.NeuroSymbolicOrchestrator.solve_task') as mock_process:
-            mock_process.return_value = {
-                "output": "Performance test response",
-                "trace": [],
-                "reward": 0.85,
-                "verification_hash": "test_hash",
-                "input_hash": "test_input_hash",
-                "pq_signature": {},
-                "mode": "adaptive"
-            }
-            
-            start_time = time.time()
             response = await async_test_client.post(
                 "/api/v1/nwtn/query",
                 json=query_data,
-                headers=user_headers
+                headers=user_headers,
             )
-            end_time = time.time()
-        
-        response_time_ms = (end_time - start_time) * 1000
-        
-        assert response.status_code == status.HTTP_200_OK
-        assert response_time_ms < 3000  # Less than 3 seconds
-        
-        # Record performance metrics
-        api_performance_monitor.record_request(start_time, end_time, len(response.content))
+
+        assert response.status_code == status.HTTP_501_NOT_IMPLEMENTED
+        response_data = response.json()
+        assert "detail" in response_data
+        assert "v1.6.0" in response_data["detail"]
+
+    async def test_nwtn_session_history_returns_501(
+        self, async_test_client, user_headers, mock_user_for_auth
+    ):
+        """GET /api/v1/nwtn/sessions/{id}/history must return HTTP 501."""
+        with mock_user_for_auth():
+            response = await async_test_client.get(
+                "/api/v1/nwtn/sessions/test_session_123/history",
+                headers=user_headers,
+            )
+
+        assert response.status_code == status.HTTP_501_NOT_IMPLEMENTED
+        response_data = response.json()
+        assert "detail" in response_data
 
 
 @pytest.mark.api
@@ -539,112 +400,9 @@ class TestNetworkAndGovernance:
         assert isinstance(data["data"]["proposals"], list)
 
 
-@pytest.mark.api
-@pytest.mark.integration
-class TestMarketplaceAPI:
-    """Test Marketplace API endpoints"""
-    
-    async def test_list_marketplace_items(self, async_test_client, user_headers, mock_user_for_auth):
-        """Test listing marketplace items"""
-        with mock_user_for_auth(), patch('prsm.economy.marketplace.real_marketplace_service.RealMarketplaceService.search_resources') as mock_items:
-            mock_items.return_value = [
-                {
-                    "item_id": "item_1",
-                    "title": "NWTN Query Template",
-                    "description": "Optimized template for scientific queries",
-                    "price": 15.00,
-                    "category": "templates",
-                    "creator": "expert_user"
-                },
-                {
-                    "item_id": "item_2",
-                    "title": "Data Analysis Script",
-                    "description": "Python script for data analysis",
-                    "price": 25.00,
-                    "category": "scripts",
-                    "creator": "data_scientist"
-                }
-            ]
-            
-            response = await async_test_client.get(
-                "/api/v1/marketplace/items",
-                headers=user_headers,
-                params={"category": "all", "limit": 20}
-            )
-        
-        assert response.status_code == status.HTTP_200_OK
-        response_data = response.json()
-        
-        assert isinstance(response_data, list)
-        assert len(response_data) == 2
-        assert all("item_id" in item for item in response_data)
-        assert all("price" in item for item in response_data)
-    
-    async def test_create_marketplace_item(self, async_test_client, user_headers, api_data_factory, mock_user_for_auth):
-        """Test creating marketplace item"""
-        item_data = api_data_factory.create_marketplace_item_request(
-            title="New Analysis Tool",
-            description="Advanced data analysis tool",
-            price=45.00,
-            category="tools"
-        )
-        
-        with mock_user_for_auth(), patch('prsm.economy.marketplace.real_marketplace_service.RealMarketplaceService.create_resource_listing') as mock_create:
-            mock_create.return_value = {
-                "item_id": "new_item_123",
-                "title": "New Analysis Tool",
-                "status": "active",
-                "created_at": "2024-01-01T12:00:00Z"
-            }
-            
-            response = await async_test_client.post(
-                "/api/v1/marketplace/items",
-                json=item_data,
-                headers=user_headers
-            )
-        
-        assert response.status_code == status.HTTP_201_CREATED
-        response_data = response.json()
-        
-        assert "item_id" in response_data
-        assert response_data["title"] == "New Analysis Tool"
-        assert response_data["status"] == "active"
-    
-    async def test_purchase_marketplace_item(self, async_test_client, user_headers, mock_user_for_auth):
-        """Test purchasing marketplace item"""
-        item_id = "550e8400-e29b-41d4-a716-446655440000"  # Valid UUID format
-        purchase_data = {
-            "quantity": 1,
-            "payment_method": "ftns_balance"
-        }
-        
-        with mock_user_for_auth(), \
-             patch('prsm.economy.marketplace.real_marketplace_service.RealMarketplaceService.get_resource_details') as mock_get_resource, \
-             patch('prsm.economy.marketplace.real_marketplace_service.RealMarketplaceService.create_order') as mock_create_order:
-            mock_get_resource.return_value = {
-                "id": item_id,
-                "base_price": 25.00,
-                "title": "Test Item",
-                "resource_type": "model"
-            }
-            mock_create_order.return_value = {
-                "id": "order_456",
-                "resource_id": item_id,
-                "status": "completed"
-            }
-            
-            response = await async_test_client.post(
-                f"/api/v1/marketplace/items/{item_id}/purchase",
-                json=purchase_data,
-                headers=user_headers
-            )
-        
-        assert response.status_code == status.HTTP_200_OK
-        response_data = response.json()
-        
-        assert "purchase_id" in response_data
-        assert "transaction_id" in response_data
-        assert response_data["status"] == "completed"
+# TestMarketplaceAPI was removed in the v1.6.0 scope-alignment sprint: the
+# AI-model marketplace subtree (prsm/economy/marketplace/) was deleted as
+# AGI-era legacy, so no /api/v1/marketplace/* endpoints exist.
 
 
 @pytest.mark.api
@@ -676,49 +434,59 @@ class TestAPISecurityFeatures:
                     assert "database" not in response_data.get("message", "").lower()
     
     async def test_xss_protection(self, async_test_client, user_headers, security_test_helper, mock_user_for_auth):
-        """Test XSS protection"""
+        """Test XSS protection on the NWTN query surface.
+
+        The NWTN endpoint is intentionally 501 Not Implemented in v1.6.0, so
+        no payload can ever be reflected. This test still drives the surface
+        with XSS payloads to confirm we never leak a 200 with raw markup.
+        """
         xss_payloads = security_test_helper.create_xss_payloads()
-        
+
         with mock_user_for_auth():
             for payload in xss_payloads:
                 query_data = {
                     "query": payload,
                     "mode": "adaptive"
                 }
-                
+
                 response = await async_test_client.post(
                     "/api/v1/nwtn/query",
                     json=query_data,
                     headers=user_headers
                 )
-                
-                # Should handle malicious input safely
-                assert response.status_code in [200, 400, 422]
-                
+
+                # 501 (endpoint disabled), 400/422 (validation), or 200 if an
+                # inference surface is re-introduced are all acceptable. In
+                # no case may the server echo raw <script> into the body.
+                assert response.status_code in [200, 400, 422, 501]
+
                 if response.status_code == 200:
                     response_data = response.json()
-                    # Response should not contain raw script tags
                     assert "<script>" not in response_data.get("response", "")
     
     async def test_request_size_limits(self, async_test_client, user_headers, mock_user_for_auth):
-        """Test request size limits"""
-        # Create extremely large request
+        """Test request size limits on the NWTN query surface.
+
+        A 100KB query body should either be rejected by middleware
+        (400/413/422) or flow through to the handler which unconditionally
+        returns 501 in v1.6.0. Either is an acceptable safe outcome; what we
+        care about is that the server never returns 200 with echoed content.
+        """
         large_query = "A" * 100000  # 100KB query
-        
+
         query_data = {
             "query": large_query,
             "mode": "adaptive"
         }
-        
+
         with mock_user_for_auth():
             response = await async_test_client.post(
                 "/api/v1/nwtn/query",
                 json=query_data,
                 headers=user_headers
             )
-        
-        # Should reject oversized requests
-        assert response.status_code in [400, 413, 422]
+
+        assert response.status_code in [400, 413, 422, 501]
     
     async def test_malformed_json_handling(self, async_test_client, user_headers, security_test_helper, mock_user_for_auth):
         """Test malformed JSON handling"""
@@ -750,26 +518,17 @@ class TestAPIPerformanceAndLoad:
     """Test API performance and load handling"""
     
     async def test_concurrent_requests(self, async_test_client, user_headers, api_data_factory, mock_user_for_auth):
-        """Test handling of concurrent requests"""
+        """Test handling of concurrent requests against the NWTN surface.
+
+        The endpoint returns 501 unconditionally in v1.6.0; this test now
+        verifies the server can sustain the concurrent load without crashes
+        and returns a deterministic 501 for each request.
+        """
         query_data = api_data_factory.create_nwtn_query_request(
             query="Concurrent test query"
         )
 
-        # Apply patches once outside the concurrent tasks — applying the same
-        # class-level patch inside 10 concurrent coroutines causes mock leakage
-        # because asyncio.gather interleaves teardown, leaving solve_task mocked.
-        with mock_user_for_auth(), \
-             patch('prsm.compute.nwtn.reasoning.s1_neuro_symbolic.NeuroSymbolicOrchestrator.solve_task') as mock_process:
-            mock_process.return_value = {
-                "output": "Concurrent response",
-                "trace": [],
-                "reward": 0.8,
-                "verification_hash": "test_hash",
-                "input_hash": "test_input_hash",
-                "pq_signature": {},
-                "mode": "adaptive"
-            }
-
+        with mock_user_for_auth():
             async def make_request():
                 return await async_test_client.post(
                     "/api/v1/nwtn/query",
@@ -777,15 +536,15 @@ class TestAPIPerformanceAndLoad:
                     headers=user_headers
                 )
 
-            # Execute 10 concurrent requests
             tasks = [make_request() for _ in range(10)]
             responses = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Count successful responses
-        successful = sum(1 for r in responses if hasattr(r, 'status_code') and r.status_code == 200)
-
-        # Should handle at least 80% of concurrent requests successfully
-        assert successful >= 8
+        # All responses must be 501, and none may be exceptions.
+        not_implemented = sum(
+            1 for r in responses
+            if hasattr(r, "status_code") and r.status_code == 501
+        )
+        assert not_implemented == 10
     
     async def test_rate_limiting(self, async_test_client, user_headers, rate_limit_tester, mock_user_for_auth):
         """Test API rate limiting does not block legitimate traffic
@@ -853,73 +612,52 @@ class TestAPIPerformanceAndLoad:
 class TestAPIErrorHandling:
     """Test API error handling and recovery"""
     
-    async def test_internal_server_error_handling(self, async_test_client, user_headers, mock_user_for_auth):
-        """Test internal server error handling"""
-        with mock_user_for_auth(), patch('prsm.compute.nwtn.reasoning.s1_neuro_symbolic.NeuroSymbolicOrchestrator.solve_task') as mock_process:
-            mock_process.side_effect = Exception("Internal processing error")
-            
+    async def test_nwtn_endpoint_stable_under_garbage_input(
+        self, async_test_client, user_headers, mock_user_for_auth
+    ):
+        """The NWTN endpoint returns a deterministic 501 regardless of body shape."""
+        with mock_user_for_auth():
             query_data = {
                 "user_id": "test_user",
-                "prompt": "Test query that will fail"
+                "prompt": "Test query",
             }
-            
             response = await async_test_client.post(
                 "/api/v1/nwtn/query",
                 json=query_data,
-                headers=user_headers
+                headers=user_headers,
             )
-        
-        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+
+        assert response.status_code == status.HTTP_501_NOT_IMPLEMENTED
         response_data = response.json()
-        
-        # API returns "detail" for error responses
         assert "detail" in response_data
-        # Should not expose internal error details
-        assert "Internal processing error" not in response_data.get("detail", "")
-    
-    async def test_timeout_handling(self, async_test_client, user_headers, mock_user_for_auth):
-        """Test request timeout handling"""
-        with mock_user_for_auth(), patch('prsm.compute.nwtn.reasoning.s1_neuro_symbolic.NeuroSymbolicOrchestrator.solve_task') as mock_process:
-            # Simulate a timeout by raising an exception that would occur from timeout
-            # Note: asyncio.sleep is mocked in tests, so we simulate timeout behavior directly
-            import asyncio
-            mock_process.side_effect = asyncio.TimeoutError("Request timed out")
-            
-            query_data = {
-                "user_id": "test_user",
-                "prompt": "Slow query"
-            }
-            
-            response = await async_test_client.post(
-                "/api/v1/nwtn/query",
-                json=query_data,
-                headers=user_headers
-            )
-        
-        # Should handle timeout gracefully - may return 500 for unhandled timeout
-        # or 408/504 if the API has explicit timeout handling
-        assert response.status_code in [408, 500, 504, 200]  # 200 if timeout is caught and handled gracefully
-    
+
     async def test_validation_error_responses(self, async_test_client, user_headers, mock_user_for_auth):
-        """Test validation error responses"""
+        """Test validation error responses for invalid request bodies.
+
+        Pydantic runs before the handler, so a body missing the required
+        UserInput fields should fail validation (422) before ever reaching
+        the 501-returning handler.
+        """
         invalid_data = {
-            "query": "",  # Empty query should be invalid
-            "mode": "invalid_mode",  # Invalid mode
-            "max_depth": -1  # Invalid depth
+            "query": "",
+            "mode": "invalid_mode",
+            "max_depth": -1,
         }
-        
+
         with mock_user_for_auth():
             response = await async_test_client.post(
                 "/api/v1/nwtn/query",
                 json=invalid_data,
                 headers=user_headers
             )
-        
-        # Accept either 422 (validation error) or 500 (if validation fails in unexpected way)
-        assert response.status_code in [status.HTTP_422_UNPROCESSABLE_ENTITY, status.HTTP_500_INTERNAL_SERVER_ERROR]
+
+        # 422 (pydantic validation) is expected; 501 is also acceptable if
+        # the handler short-circuits before validation in any future refactor.
+        assert response.status_code in [
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_501_NOT_IMPLEMENTED,
+        ]
         response_data = response.json()
-        
-        # API returns "detail" for error responses
         assert "detail" in response_data
 
 
@@ -928,40 +666,23 @@ class TestAPIErrorHandling:
 class TestAPIResponseSchemas:
     """Test API response schema validation"""
     
-    async def test_nwtn_response_schema(self, async_test_client, user_headers, api_response_schemas, api_data_factory, mock_user_for_auth):
-        """Test NWTN response matches expected schema"""
+    async def test_nwtn_501_response_shape(
+        self, async_test_client, user_headers, api_data_factory, mock_user_for_auth
+    ):
+        """The NWTN 501 response must carry a 'detail' string explaining v1.6.0 scope."""
         query_data = api_data_factory.create_nwtn_query_request()
-        
-        with mock_user_for_auth(), patch('prsm.compute.nwtn.reasoning.s1_neuro_symbolic.NeuroSymbolicOrchestrator.solve_task') as mock_process:
-            mock_process.return_value = {
-                "output": "Test response",
-                "trace": [],
-                "reward": 0.85,
-                "verification_hash": "test_hash",
-                "input_hash": "test_input_hash",
-                "pq_signature": {},
-                "mode": "adaptive"
-            }
-            
+
+        with mock_user_for_auth():
             response = await async_test_client.post(
                 "/api/v1/nwtn/query",
                 json=query_data,
-                headers=user_headers
+                headers=user_headers,
             )
-        
-        assert response.status_code == status.HTTP_200_OK
+
+        assert response.status_code == status.HTTP_501_NOT_IMPLEMENTED
         response_data = response.json()
-        
-        # Validate against expected schema
-        expected_schema = api_response_schemas["nwtn_response"]
-        
-        # Check required fields
-        for field in expected_schema["required"]:
-            assert field in response_data
-        
-        # Check field types
-        assert isinstance(response_data["final_answer"], str)
-        assert isinstance(response_data["confidence_score"], (int, float))
+        assert "detail" in response_data
+        assert isinstance(response_data["detail"], str)
     
     async def test_error_response_schema(self, async_test_client, api_response_schemas):
         """Test error response matches expected schema"""

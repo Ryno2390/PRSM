@@ -117,8 +117,6 @@ class SystemHealthMonitor:
             "core_models": self._check_core_models,
             "database_layer": self._check_database_layer,
             "ftns_service": self._check_ftns_service,
-            "marketplace": self._check_marketplace,
-            "orchestrator": self._check_orchestrator,
             "safety_system": self._check_safety_system,
             "p2p_network": self._check_p2p_network,
             "integration_layer": self._check_integration_layer
@@ -431,20 +429,6 @@ class SystemHealthMonitor:
         try:
             # Check if FTNS classes can be imported
             from prsm.economy.tokenomics.ftns_budget_manager import FTNSBudgetManager
-            return True
-        except:
-            return False
-    
-    async def _check_marketplace(self):
-        try:
-            from prsm.economy.marketplace.expanded_models import ResourceType
-            return True
-        except:
-            return False
-    
-    async def _check_orchestrator(self):
-        try:
-            from prsm.compute.nwtn.enhanced_orchestrator import EnhancedNWTNOrchestrator
             return True
         except:
             return False

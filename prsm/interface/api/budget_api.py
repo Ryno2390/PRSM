@@ -30,7 +30,6 @@ from prsm.economy.tokenomics.ftns_budget_manager import (
     SpendingCategory, BudgetStatus, get_ftns_budget_manager
 )
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
-from ..nwtn.enhanced_orchestrator import get_enhanced_nwtn_orchestrator
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/v1/budget", tags=["Budget Management"])
