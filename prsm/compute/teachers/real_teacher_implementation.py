@@ -56,7 +56,12 @@ from prsm.core.models import TeacherModel, Curriculum, LearningSession
 from prsm.core.vector_db import get_vector_db_manager, embedding_generator
 from prsm.storage import get_content_store, ContentHash
 from prsm.storage.exceptions import StorageError
-from prsm.compute.agents.executors.model_executor import ModelExecutor
+# ModelExecutor removed (agents/executors/ deleted in v1.6.0 PR 1).
+# real_teacher_implementation.py is deleted in PR 3.
+try:
+    from prsm.compute.agents.executors.model_executor import ModelExecutor
+except (ImportError, ModuleNotFoundError):
+    ModelExecutor = None  # type: ignore[assignment,misc]
 from prsm.compute.distillation.backends.pytorch_backend import PyTorchDistillationBackend
 from prsm.compute.distillation.backends.transformers_backend import TransformersDistillationBackend
 

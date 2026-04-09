@@ -27,7 +27,11 @@ from pydantic import BaseModel, Field
 from prsm.core.models import (
     PRSMBaseModel, TimestampMixin, ReasoningStep, AgentType, TaskStatus
 )
-from prsm.compute.agents.executors.model_executor import ModelExecutor
+# ModelExecutor removed (agents/executors/ deleted in v1.6.0 scope alignment)
+try:
+    from prsm.compute.agents.executors.model_executor import ModelExecutor
+except ImportError:
+    ModelExecutor = None  # type: ignore[assignment,misc]
 
 logger = structlog.get_logger(__name__)
 

@@ -37,9 +37,18 @@ import structlog
 from pydantic import BaseModel, Field
 
 from prsm.core.models import AgentTask, AgentResponse, PRSMBaseModel
-from prsm.compute.agents.executors.model_executor import BaseExecutor
-from prsm.compute.nwtn.chemistry_hybrid_executor import ChemistryHybridExecutor, ChemistryPrediction, ReactionConditions
-from prsm.compute.agents.executors.llm_executor import LLMExecutor
+# Legacy AGI-framework imports removed in v1.6.0 scope alignment
+# chemistry_benchmark.py is scheduled for deletion in PR 3
+try:
+    from prsm.compute.agents.executors.model_executor import BaseExecutor
+    from prsm.compute.agents.executors.llm_executor import LLMExecutor
+    from prsm.compute.nwtn.chemistry_hybrid_executor import ChemistryHybridExecutor, ChemistryPrediction, ReactionConditions
+except ImportError:
+    BaseExecutor = None  # type: ignore[assignment,misc]
+    LLMExecutor = None  # type: ignore[assignment,misc]
+    ChemistryHybridExecutor = None  # type: ignore[assignment,misc]
+    ChemistryPrediction = None  # type: ignore[assignment,misc]
+    ReactionConditions = None  # type: ignore[assignment,misc]
 
 logger = structlog.get_logger(__name__)
 
