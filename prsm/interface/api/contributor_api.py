@@ -289,7 +289,7 @@ async def get_contribution_history(
 
 @router.get("/metrics", response_model=ContributionMetricsResponse)
 async def get_contribution_metrics(
-    period: str = Query("monthly", regex="^(daily|weekly|monthly|quarterly)$"),
+    period: str = Query("monthly", pattern="^(daily|weekly|monthly|quarterly)$"),
     periods: int = Query(6, ge=1, le=24, description="Number of periods to include"),
     current_user=Depends(get_current_user),
     db=Depends(get_db_session)

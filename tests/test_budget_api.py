@@ -18,12 +18,9 @@ from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, patch
 
 # Import the FastAPI app and budget components
-try:
-    from prsm.interface.api.main import app
-    from prsm.interface.api.budget_api import get_budget_manager
-    from prsm.economy.tokenomics.ftns_budget_manager import FTNSBudgetManager, SpendingCategory
-except Exception as e:
-    pytest.skip(f"API/Budget module has import errors (pydantic regex issue): {e}", allow_module_level=True)
+from prsm.interface.api.main import app
+from prsm.interface.api.budget_api import get_budget_manager
+from prsm.economy.tokenomics.ftns_budget_manager import FTNSBudgetManager, SpendingCategory
 
 
 class TestBudgetAPI:

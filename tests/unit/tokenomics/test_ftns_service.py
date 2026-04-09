@@ -12,20 +12,17 @@ from datetime import datetime, timezone
 # Set precision for financial calculations matching production
 getcontext().prec = 18
 
-try:
-    from prsm.economy.tokenomics.ftns_service import (
-        FTNSService,
-        BASE_NWTN_FEE,
-        CONTEXT_UNIT_COST,
-        ARCHITECT_DECOMPOSITION_COST,
-        COMPILER_SYNTHESIS_COST,
-        AGENT_COSTS,
-        REWARD_PER_MB,
-        MODEL_CONTRIBUTION_REWARD,
-        SUCCESSFUL_TEACHING_REWARD
-    )
-except (ImportError, ModuleNotFoundError) as e:
-    pytest.skip("FTNS service constants not yet exported", allow_module_level=True)
+from prsm.economy.tokenomics.ftns_service import (
+    FTNSService,
+    BASE_NWTN_FEE,
+    CONTEXT_UNIT_COST,
+    ARCHITECT_DECOMPOSITION_COST,
+    COMPILER_SYNTHESIS_COST,
+    AGENT_COSTS,
+    REWARD_PER_MB,
+    MODEL_CONTRIBUTION_REWARD,
+    SUCCESSFUL_TEACHING_REWARD,
+)
 from prsm.core.models import PRSMSession, FTNSBalance, FTNSTransaction
 
 

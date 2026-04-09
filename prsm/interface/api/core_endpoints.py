@@ -20,15 +20,9 @@ from fastapi.responses import JSONResponse
 from prsm.core.config import get_settings
 from prsm.core.models import UserInput, PRSMResponse
 from prsm.core.auth import get_current_user
-from prsm.core.database import FTNSQueries
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
-
-# FTNS pricing rate: actual LLM tokens × rate = FTNS charged per query.
-# Matches the established rate in NWTNOrchestrator (orchestrator.py:598).
-# Override with PRSM_FTNS_PER_TOKEN env var.
-_FTNSS_PER_TOKEN: float = float(os.getenv("PRSM_FTNS_PER_TOKEN", "0.01"))
 
 
 async def _execute_nwtn_query(
@@ -38,109 +32,18 @@ async def _execute_nwtn_query(
     """
     Shared implementation for /query and /api/v1/nwtn/query.
 
-    Runs inference, charges FTNS atomically, maps trace to API model.
-    FTNS deduction is non-blocking: if the DB is unavailable the query
-    still returns but ftns_charged will be 0.0 and a warning is logged.
+    NWTN reasoning (the NeuroSymbolicOrchestrator / System 1+2 stack) was
+    removed in the v1.6.0 scope-alignment sprint — this endpoint now returns
+    HTTP 501 until the in-scope Ring-9 training pipeline exposes a public
+    inference surface. See docs/2026-04-09-v1.6-scope-alignment-design.md.
     """
-    from prsm.compute.nwtn.reasoning.s1_neuro_symbolic import NeuroSymbolicOrchestrator
-    from prsm.core.models import AgentType
-
-    # Resolve current_user to a plain string ID regardless of whether the
-    # dependency injected a User object or a raw string.
-    if hasattr(current_user, "id"):
-        user_id_str: str = str(current_user.id)
-    else:
-        user_id_str = str(current_user)
-
-    # Fix session_id BEFORE inference — this becomes the idempotency key.
-    # If the client retries the same session_id, the deduction won't double-charge.
-    session_id = user_input.session_id or uuid4()
-    idempotency_key = f"query:{user_id_str}:{session_id}"
-
-    logger.info("Processing NWTN query",
-                user_id=user_input.user_id,
-                session_id=str(session_id),
-                prompt_length=len(user_input.prompt))
-
-    # --- Inference ---
-    orchestrator = NeuroSymbolicOrchestrator(node_id="api_node_primary")
-    result = await orchestrator.solve_task(
-        user_input.prompt,
-        str(user_input.context_allocation) if user_input.context_allocation is not None else ""
-    )
-
-    tokens_used: int = result.get("tokens_used", 0)
-    ftns_amount: float = round(tokens_used * _FTNSS_PER_TOKEN, 6)
-
-    # --- Atomic FTNS deduction (non-blocking on infrastructure failure) ---
-    ftns_charged: float = 0.0
-    if ftns_amount > 0:
-        try:
-            deduct_result = await FTNSQueries.execute_atomic_deduct(
-                user_id=user_id_str,
-                amount=ftns_amount,
-                idempotency_key=idempotency_key,
-                description=f"NWTN query: {user_input.prompt[:80]}",
-                transaction_type="query_usage",
-            )
-            if deduct_result["success"]:
-                ftns_charged = ftns_amount
-                logger.info("FTNS deducted",
-                            user_id=user_id_str,
-                            tokens=tokens_used,
-                            ftns=ftns_charged,
-                            transaction_id=deduct_result.get("transaction_id"),
-                            new_balance=deduct_result.get("new_balance"))
-            else:
-                logger.warning("FTNS deduction rejected",
-                               user_id=user_id_str,
-                               ftns_amount=ftns_amount,
-                               reason=deduct_result.get("error_message"))
-        except Exception as exc:
-            # DB down, network error, etc. — do not block inference result.
-            logger.error("FTNS deduction unavailable",
-                         user_id=user_id_str,
-                         ftns_amount=ftns_amount,
-                         error=str(exc))
-
-    # --- Map trace to response model ---
-    mapped_trace = []
-    for step in result.get("trace", []):
-        agent_type = AgentType.CANDIDATE_GENERATOR
-        if "VERIFICATION" in step.get("a", "") or "CHECK" in step.get("a", ""):
-            agent_type = AgentType.CANDIDATE_EVALUATOR
-        elif "STRATEGY" in step.get("a", ""):
-            agent_type = AgentType.ARCHITECT
-        mapped_trace.append({
-            "step_id": uuid4(),
-            "agent_type": agent_type,
-            "agent_id": result.get("node_id", "system"),
-            "input_data": {"action": step.get("a")},
-            "output_data": {"content": step.get("c"), "metadata": step.get("m")},
-            "execution_time": 0.1,
-            "confidence_score": step.get("s", 1.0),
-            "timestamp": datetime.now(),
-        })
-
-    from prsm.core.models import PRSMResponse
-    return PRSMResponse(
-        session_id=session_id,
-        user_id=user_input.user_id,
-        final_answer=result["output"],
-        reasoning_trace=mapped_trace,
-        confidence_score=result.get("reward", 1.0),
-        context_used=tokens_used,
-        ftns_charged=ftns_charged,          # ← Real value, not 0.0
-        safety_validated=True,
-        metadata={
-            "verification_hash": result.get("verification_hash"),
-            "input_hash": result.get("input_hash"),
-            "pq_signature": result.get("pq_signature"),
-            "raw_trace": result.get("trace"),
-            "mode": result.get("mode"),
-            "inference_source": result.get("inference_source", "unknown"),
-            "tokens_used": tokens_used,
-        },
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            "NWTN inference endpoint is not available in v1.6.0. "
+            "NWTN reasoning has been re-scoped to the Ring-9 training "
+            "pipeline; no user-facing inference API is exposed at this time."
+        ),
     )
 
 
@@ -393,41 +296,13 @@ def _register_nwtn_endpoints(app: FastAPI) -> None:
         """
         Get NWTN session history.
 
-        Returns the reasoning history for a specific session.
+        NWTN reasoning was re-scoped to the Ring-9 training pipeline in
+        v1.6.0 and no longer exposes a session-history surface.
         """
-        from prsm.compute.nwtn.reasoning.s1_neuro_symbolic import NeuroSymbolicOrchestrator
-
-        logger.info("Retrieving session history",
-                   session_id=session_id,
-                   user_id=current_user)
-
-        try:
-            orchestrator = NeuroSymbolicOrchestrator(node_id="api_node_primary")
-
-            # Check if the orchestrator has a get_session_history method
-            if hasattr(orchestrator, 'get_session_history'):
-                history = await orchestrator.get_session_history(session_id)
-                return {
-                    "session_id": session_id,
-                    "history": history,
-                    "status": "success"
-                }
-            else:
-                # Return placeholder response if method doesn't exist
-                return {
-                    "session_id": session_id,
-                    "history": [],
-                    "status": "success",
-                    "message": "Session history not yet implemented"
-                }
-        except Exception as e:
-            logger.error("Failed to retrieve session history",
-                        session_id=session_id,
-                        error=str(e))
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to retrieve session history: {str(e)}"
-            )
+        raise HTTPException(
+            status_code=501,
+            detail="NWTN session history is not available in v1.6.0",
+        )
 
 
 def _register_model_endpoints(app: FastAPI) -> None:

@@ -802,16 +802,25 @@ class ContentProvider:
         return None
 
     async def _ipfs_cat(self, content_id: str) -> Optional[bytes]:
-        """Retrieve content from ContentStore by content hash."""
-        # TODO: full ContentStore integration
+        """Retrieve content from the local ContentStore by content hash.
+
+        Returns None (never raises) for any of: ContentStore unavailable,
+        malformed CID hex, missing content, or underlying storage errors.
+        """
         try:
-            from prsm.storage import get_content_store, ContentHash
-            from prsm.storage.exceptions import StorageError, ContentNotFoundError
+            from prsm.storage import ContentHash, get_content_store
+            from prsm.storage.exceptions import ContentNotFoundError, StorageError
+
             store = get_content_store()
             if store is None:
-                logger.debug(f"ContentStore not available, cannot retrieve {content_id[:12]}...")
+                logger.debug(
+                    f"ContentStore not available, cannot retrieve {content_id[:12]}..."
+                )
                 return None
             return await store.retrieve_local(ContentHash.from_hex(content_id))
+        except ValueError:
+            # Malformed content hash hex (bad algorithm prefix, wrong length).
+            logger.debug(f"Malformed content id: {content_id[:12]}...")
         except ContentNotFoundError:
             logger.debug(f"Content not found in ContentStore for {content_id[:12]}...")
         except (StorageError, OSError) as e:
