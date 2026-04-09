@@ -1,211 +1,23 @@
 """
-NWTN (Newton) - Neural Web for Transformation Networking
-Hybrid AI Architecture Implementation for PRSM
+PRSM Future NWTN Model Infrastructure (Ring 9 — "The Mind")
+============================================================
 
-This module implements the complete hybrid AI architecture described in the
-brainstorming document, featuring:
+Ring 9 of the Sovereign-Edge AI architecture: training pipeline and model
+service for the future fine-tuned NWTN model that will create WASM agents.
 
-System 1 (Fast/Intuitive):
-- Transformer-based pattern recognition
-- Rapid SOC (Subject/Object/Concept) identification
-- Multi-provider AI integration (OpenAI, Anthropic, Ollama)
+Currently PRSM users rely on third-party LLMs (local or via OAuth/API);
+once trained, the NWTN model will be added as an LLM option that
+dispatches WASM mobile agents to find data, run computations, and report
+back to staked aggregator nodes.
 
-System 2 (Slow/Logical):
-- First-principles world model reasoning
-- Causal relationship validation
-- Logical consistency checking
+Core modules:
+- training: AgentTrace collection, validation, JSONL export for fine-tuning
 
-Learning & Collaboration:
-- Bayesian search with automated experimentation
-- Knowledge sharing across PRSM network
-- Hive mind updates for core knowledge
-- Threshold-based SOC confidence management
-
-Key Components:
-- HybridNWTNEngine: Main hybrid reasoning engine
-- WorldModelEngine: First-principles reasoning system
-- BayesianSearchEngine: Automated experimentation
-- HybridNWTNManager: Multi-agent coordination
-
-Usage:
-    from prsm.compute.nwtn import create_hybrid_agent, create_agent_team
-    
-    # Single agent
-    agent = await create_hybrid_agent(domain="physics")
-    result = await agent.process_query("What is energy conservation?")
-    
-    # Agent team
-    team = await create_agent_team("chemistry", team_size=3)
-    result = await process_team_query(team, "How do catalysts work?")
+The legacy NWTN AGI framework (orchestrator, meta_reasoning_engine,
+voicebox, agent_forge, etc.) was removed in v1.6.0. Do not reintroduce
+those concepts — reasoning belongs in third-party LLMs, not in PRSM.
 """
 
-# Core hybrid architecture components (require torch)
-try:
-    from .architectures.hybrid_architecture import (
-        HybridNWTNEngine,
-        SOC,
-        SOCType,
-        ConfidenceLevel,
-        ExperimentResult,
-        ExperimentType,
-        create_hybrid_nwtn_engine,
-        create_specialized_agent_team,
-        integrate_with_nwtn_orchestrator
-    )
-except (ImportError, RuntimeError, AttributeError):
-    HybridNWTNEngine = None  # type: ignore[assignment,misc]
-    SOC = None  # type: ignore[assignment,misc]
-    SOCType = None  # type: ignore[assignment,misc]
-    ConfidenceLevel = None  # type: ignore[assignment,misc]
-    ExperimentResult = None  # type: ignore[assignment,misc]
-    ExperimentType = None  # type: ignore[assignment,misc]
-    create_hybrid_nwtn_engine = None  # type: ignore[assignment]
-    create_specialized_agent_team = None  # type: ignore[assignment]
-    integrate_with_nwtn_orchestrator = None  # type: ignore[assignment]
+from prsm.compute.nwtn import training
 
-# World model engine
-from .engines.world_model_engine import (
-    NeuroSymbolicEngine,
-    ScientificConstraint,
-    get_world_model
-)
-
-# Backward compatibility alias
-WorldModelEngine = NeuroSymbolicEngine
-
-# New orchestration and reasoning components
-from .orchestrator import (
-    NWTNOrchestrator,
-    NWTNResponse,
-    ClarifiedPrompt,
-    IntentCategory,
-    get_nwtn_orchestrator,
-    create_nwtn_orchestrator
-)
-
-from .meta_reasoning_engine import (
-    MetaReasoningEngine,
-    ThinkingMode,
-    BreakthroughMode,
-    ReasoningCandidate,
-    MetaReasoningResult,
-    get_meta_reasoning_engine
-)
-
-# Alias for backward compatibility with tests
-from .meta_reasoning_engine import BreakthroughMode as BreakthroughModesClass
-
-class BreakthroughModes:
-    """Breakthrough mode constants for backward compatibility"""
-    CONSERVATIVE = BreakthroughMode.CONSERVATIVE
-    BALANCED = BreakthroughMode.BALANCED
-    REVOLUTIONARY = BreakthroughMode.REVOLUTIONARY
-
-# Import from breakthrough_modes module for backward compatibility
-from .breakthrough_modes import BreakthroughMode as BreakthroughModeExport
-
-from .complete_system import (
-    NWTNCompleteSystem,
-    NWTNCompleteResponse,
-    BreakthroughModes,
-    get_nwtn_complete_system,
-    process_nwtn_query
-)
-
-from .external_storage_config import (
-    ExternalStorageConfig,
-    ExternalKnowledgeBase,
-    StorageConfig,
-    PaperMetadata,
-    get_external_knowledge_base,
-    initialize_external_storage
-)
-
-from .context_manager import (
-    ContextManager,
-    ContextUsage,
-    get_context_manager
-)
-
-# Note: BayesianSearchEngine components are archived as they are not currently used
-
-# Note: HybridNWTNManager components are archived as they are not currently used
-
-# Note: Convenience functions are archived as HybridNWTNManager is not currently used
-# The current NWTN pipeline uses EnhancedNWTNOrchestrator instead
-
-# Meta-Harness optimization components
-from .harness_optimizer import (
-    HarnessOptimizer,
-    OptimizationHistory,
-    SessionOutcome,
-    ParetoPoint,
-)
-
-# Export all components
-__all__ = [
-    # Core architecture
-    "HybridNWTNEngine",
-    "SOC",
-    "SOCType", 
-    "ConfidenceLevel",
-    "ExperimentResult",
-    "ExperimentType",
-    
-    # World model
-    "NeuroSymbolicEngine",
-    "WorldModelEngine",
-    "ScientificConstraint",
-    "get_world_model",
-    
-    # Orchestration layer
-    "NWTNOrchestrator",
-    "NWTNResponse",
-    "ClarifiedPrompt",
-    "IntentCategory",
-    "get_nwtn_orchestrator",
-    "create_nwtn_orchestrator",
-    
-    # Meta-reasoning engine
-    "MetaReasoningEngine",
-    "ThinkingMode",
-    "BreakthroughMode",
-    "ReasoningCandidate",
-    "MetaReasoningResult",
-    "get_meta_reasoning_engine",
-    
-    # Complete system facade
-    "NWTNCompleteSystem",
-    "NWTNCompleteResponse",
-    "BreakthroughModes",
-    "get_nwtn_complete_system",
-    "process_nwtn_query",
-    
-    # External storage
-    "ExternalStorageConfig",
-    "ExternalKnowledgeBase",
-    "StorageConfig",
-    "PaperMetadata",
-    "get_external_knowledge_base",
-    "initialize_external_storage",
-    
-    # Context management
-    "ContextManager",
-    "ContextUsage",
-    "get_context_manager",
-    
-    # Meta-Harness optimization
-    "HarnessOptimizer",
-    "OptimizationHistory",
-    "SessionOutcome",
-    "ParetoPoint",
-
-    # Note: Bayesian search, integration, and convenience functions are archived
-    
-    # Factory functions (only those still available)
-    "create_hybrid_nwtn_engine",
-    "create_specialized_agent_team",
-    "create_world_model_engine",
-    "create_domain_specialized_engine",
-    "create_base_world_model",
-]
+__all__ = ["training"]

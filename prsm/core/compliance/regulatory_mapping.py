@@ -13,7 +13,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime, timezone
 
-from prsm.compute.nwtn.engines.world_model_engine import get_world_model, EthicalConstraint
+# v1.6.0 scope alignment: world_model_engine deleted in PR 2.
+# prsm/core/compliance/ classification is spot-checked in PR 4.
+try:
+    from prsm.compute.nwtn.engines.world_model_engine import get_world_model, EthicalConstraint
+except ImportError:
+    get_world_model = None  # type: ignore[assignment]
+    EthicalConstraint = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 

@@ -40,8 +40,16 @@ from datetime import datetime, timezone
 import structlog
 from pydantic import BaseModel, Field
 
-from prsm.compute.nwtn.hybrid_architecture import HybridNWTNEngine, SOC, ConfidenceLevel
-from prsm.compute.nwtn.hybrid_integration import HybridNWTNManager
+# v1.6.0 scope alignment: legacy NWTN hybrid modules deleted in PR 2.
+# Wrap in try/except; prsm/compute/evaluation/ is effectively legacy.
+try:
+    from prsm.compute.nwtn.hybrid_architecture import HybridNWTNEngine, SOC, ConfidenceLevel
+    from prsm.compute.nwtn.hybrid_integration import HybridNWTNManager
+except ImportError:
+    HybridNWTNEngine = None  # type: ignore[assignment,misc]
+    SOC = None  # type: ignore[assignment,misc]
+    ConfidenceLevel = None  # type: ignore[assignment,misc]
+    HybridNWTNManager = None  # type: ignore[assignment,misc]
 
 logger = structlog.get_logger(__name__)
 

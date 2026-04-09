@@ -11,12 +11,34 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
+import os
+
 import click
 import uvicorn
 from rich.console import Console
 from rich.table import Table
 
-from prsm.compute.nwtn.backends.config import detect_available_backends
+
+def detect_available_backends() -> dict:
+    """
+    Check which LLM backends have valid API keys configured.
+
+    Inlined in v1.6.0 from the removed ``prsm.compute.nwtn.backends.config``
+    module — the legacy backends subsystem was deleted as part of the scope
+    alignment refactor (PR 2). PRSM users now rely on third-party LLMs
+    (local or via OAuth/API); this helper only needs to inspect environment
+    variables to decide whether a real backend is available.
+    """
+    anthropic_available = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    openai_available = bool(os.environ.get("OPENAI_API_KEY"))
+    local_available = bool(os.environ.get("PRSM_LOCAL_MODEL_URL"))
+    return {
+        "anthropic": anthropic_available,
+        "openai": openai_available,
+        "local": local_available,
+        "any_real_backend": anthropic_available or openai_available or local_available,
+    }
+
 
 console = Console()
 

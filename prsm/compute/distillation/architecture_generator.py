@@ -20,10 +20,19 @@ from .models import (
     ModelSize, OptimizationTarget, TrainingStrategy
 )
 
-from prsm.compute.nwtn.architectures.ssm_core import SSMConfig, get_ssm_reasoner
-from prsm.compute.nwtn.architectures.liquid_core import get_liquid_reasoner
-from prsm.compute.nwtn.architectures.fsmn_core import get_fsmn_reasoner
-from prsm.compute.nwtn.architectures.sanm_core import get_sanm_reasoner
+# v1.6.0 scope alignment: legacy NWTN architectures deleted in PR 2.
+# Wrap in try/except; this whole subtree is deleted in PR 3.
+try:
+    from prsm.compute.nwtn.architectures.ssm_core import SSMConfig, get_ssm_reasoner
+    from prsm.compute.nwtn.architectures.liquid_core import get_liquid_reasoner
+    from prsm.compute.nwtn.architectures.fsmn_core import get_fsmn_reasoner
+    from prsm.compute.nwtn.architectures.sanm_core import get_sanm_reasoner
+except ImportError:
+    SSMConfig = None  # type: ignore[assignment,misc]
+    get_ssm_reasoner = None  # type: ignore[assignment]
+    get_liquid_reasoner = None  # type: ignore[assignment]
+    get_fsmn_reasoner = None  # type: ignore[assignment]
+    get_sanm_reasoner = None  # type: ignore[assignment]
 
 logger = structlog.get_logger(__name__)
 

@@ -10,7 +10,13 @@ import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 
-from prsm.compute.nwtn.knowledge_graph import RecursiveKnowledgeGraph, DiscoveryUpdate
+# v1.6.0 scope alignment: knowledge_graph legacy module deleted in PR 2.
+# This file is scheduled for PR 3 deletion.
+try:
+    from prsm.compute.nwtn.knowledge_graph import RecursiveKnowledgeGraph, DiscoveryUpdate
+except ImportError:
+    RecursiveKnowledgeGraph = None  # type: ignore[assignment,misc]
+    DiscoveryUpdate = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
