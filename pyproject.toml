@@ -7,8 +7,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prsm-network"
-version = "1.5.0"
-description = "Protocol for Recursive Scientific Modeling - A decentralized AI-powered scientific research platform"
+version = "1.6.0"
+description = "Protocol for Recursive Scientific Modeling - A P2P infrastructure protocol for open-source collaboration"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [

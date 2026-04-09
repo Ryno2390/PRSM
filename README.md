@@ -1,23 +1,22 @@
-# PRSM: Sovereign-Edge AI Protocol
+# PRSM: P2P Infrastructure Protocol for Open-Source Collaboration
 
 **The code goes to the data. Not the other way around.**
 
-PRSM is a decentralized protocol that turns idle consumer hardware — gaming PCs, consoles, laptops, phones — into a distributed AI compute fabric. Instead of uploading your data to a cloud provider, PRSM sends lightweight WASM mobile agents to the nodes that already have the data. The computation happens at the edge, the results come back, and nobody in between sees your query or your data.
+PRSM is a P2P infrastructure protocol that aggregates latent storage, compute, and data from consumer nodes — gaming PCs, consoles, laptops, phones — into a mesh network accessible to third-party LLMs via MCP tools. Contributors earn FTNS tokens for sharing their latent resources; users leverage PRSM infrastructure through their preferred LLMs (local or via OAuth/API). PRSM is not an AGI framework. Reasoning happens in third-party LLMs; PRSM provides the infrastructure those LLMs use to access distributed resources and data.
 
-**Version 1.0.0** | [PyPI](https://pypi.org/project/prsm-network/) | [Getting Started](docs/GETTING_STARTED.md) | [Architecture Spec](docs/SOVEREIGN_EDGE_AI_SPEC.md)
+**Version 1.6.0** | [PyPI](https://pypi.org/project/prsm-network/) | [Getting Started](docs/GETTING_STARTED.md) | [Architecture Spec](docs/SOVEREIGN_EDGE_AI_SPEC.md)
 
 [![PyPI version](https://badge.fury.io/py/prsm-network.svg)](https://pypi.org/project/prsm-network/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-479%20passing-brightgreen.svg)](#)
-[![MCP Tools](https://img.shields.io/badge/MCP%20tools-17-blue.svg)](#mcp-integration)
+[![MCP Tools](https://img.shields.io/badge/MCP%20tools-16-blue.svg)](#mcp-integration)
 
 ---
 
 ## Why PRSM Exists
 
-**The problem:** Frontier AI is a "brain in a vat" — incredibly smart, but with no hands to touch real-world data securely and no wallet to pay for its own compute. Every query you send to a centralized API is logged, stored, and potentially trained on. Meanwhile, 300 million gaming PCs sit idle 90% of the day.
+**The problem:** Frontier AI labs hoard data, compute, and models behind API walls. Every query you send to a centralized API is logged, stored, and potentially trained on. Meanwhile, billions of consumer devices sit idle — gaming PCs, laptops, phones, tablets — each with storage, compute, and sometimes proprietary data that never leave the device.
 
-**The PRSM solution:**
+**The PRSM thesis:** Build an open-source commons for AI infrastructure. Aggregate the latent resources of consumer electronics into a P2P mesh. Let any LLM — local, OAuth, or API — use that mesh via MCP tools. Pay contributors in FTNS tokens so sharing beats hoarding.
 
 | Centralized AI (today) | PRSM |
 |------------------------|------|
@@ -27,7 +26,7 @@ PRSM is a decentralized protocol that turns idle consumer hardware — gaming PC
 | You pay per token | Hybrid pricing — commodity compute + market-rate data |
 | Vendor lock-in | Works with any LLM via MCP |
 
-**The result:** A network where the model is open but the computation is private. You can read every weight, but you can't see what anyone asked or what it answered.
+**The result:** A network where the model is open but the computation is private, and where contributing your idle storage/compute/data earns you a share of every query it serves.
 
 ---
 
@@ -44,14 +43,13 @@ prsm demo
 prsm node benchmark
 
 # Start your node
-export OPENROUTER_API_KEY=your-key    # Free at openrouter.ai/keys
 prsm node start
 
-# Run a query through the full pipeline
-prsm compute run --query "What causes climate change?" --budget 1.0
+# Expose PRSM tools to any MCP-compatible LLM
+prsm mcp-server
 ```
 
-> **FTNS tokens required:** PRSM's distributed compute requires FTNS tokens to pay providers. New nodes receive a 100 FTNS welcome grant. Use `prsm compute quote` to estimate costs first.
+> **FTNS tokens:** Providers earn FTNS for sharing storage, compute, and data through their node. New nodes receive a 100 FTNS welcome grant. Third-party LLMs invoke PRSM tools via MCP; reasoning happens in the LLM, execution happens on PRSM nodes.
 
 See the full [Getting Started Guide](docs/GETTING_STARTED.md) for detailed setup.
 
@@ -69,19 +67,19 @@ PRSM is built as concentric capability rings. Each ring wraps and enriches the o
 | 2 | **The Courier** | Mobile agent dispatch — agents travel to data via P2P gossip + bidding |
 | 3 | **The Swarm** | Semantic sharding — data split by meaning, parallel map-reduce across nodes |
 | 4 | **The Economy** | Hybrid pricing — deterministic compute rates + market-rate data + 80/15/5 revenue splits |
-| 5 | **The Brain** | Agent Forge — LLM decomposes queries into WASM agent instructions |
+| 5 | **The Router** | Query decomposition performed by the caller's LLM (removed in v1.6.0 — replaced by third-party LLM integration via MCP) |
 | 6 | **The Polish** | Production hardening — dynamic gas, RPC failover, CLI commands |
 | 7 | **The Vault** | Confidential compute — TEE abstraction + differential privacy noise |
 | 8 | **The Shield** | Model sharding — tensor parallelism + randomized pipelines + collision detection |
-| 9 | **The Mind** | NWTN training pipeline — collect traces, evaluate quality, deploy fine-tuned models |
+| 9 | **The Mind** | NWTN training pipeline — collect traces, evaluate quality, deploy fine-tuned models (reserved for future work) |
 | 10 | **The Fortress** | Security — integrity verification, privacy budgets, hash-chained audit logs |
 
 ### End-to-End Flow
 
 ```
-Researcher: prsm compute run --query "EV adoption trends in NC" --budget 10.0
+Third-party LLM (Claude/GPT/local): calls prsm_analyze via MCP
 
-  → Ring 5:  AgentForge decomposes query via LLM
+  → LLM:     Decomposes the query into WASM agent instructions
   → Ring 3:  Finds relevant semantic shards by embedding similarity
   → Ring 4:  Quotes cost: compute + data + network fee
   → Ring 3:  Fans out parallel agents to shard-holding nodes
@@ -90,16 +88,15 @@ Researcher: prsm compute run --query "EV adoption trends in NC" --budget 10.0
   → Ring 7:  Differential privacy noise applied
   → Ring 3:  Results aggregated when quorum met
   → Ring 4:  FTNS settled: 80% data owner / 15% compute / 5% treasury
-  → Ring 9:  AgentTrace saved for NWTN fine-tuning
 
-  ← Result returned to researcher
+  ← Result returned to the LLM for final synthesis
 ```
 
 ---
 
 ## MCP Integration
 
-Any LLM can use PRSM as a compute backend via the Model Context Protocol. **17 tools** are exposed:
+Any LLM can use PRSM as a compute backend via the Model Context Protocol. **16 tools** are exposed:
 
 ```bash
 prsm mcp-server    # Start the MCP server
@@ -118,7 +115,6 @@ Then Claude (or any MCP-compatible LLM) can:
 | `prsm_quote` | Cost estimate before committing (free) |
 | `prsm_create_agent` | Build custom agent with 11 data operations |
 | `prsm_dispatch_agent` | Execute agent on the network |
-| `prsm_decompose` | Preview how a query would be decomposed |
 | `prsm_upload_dataset` | Publish data with pricing |
 | `prsm_list_datasets` | Browse available datasets |
 | `prsm_search_shards` | Find relevant data shards |
@@ -136,16 +132,13 @@ Then Claude (or any MCP-compatible LLM) can:
 
 ## For Data Providers
 
-Publish a dataset and earn 80% of every query against it:
+Publish data through your node's ContentStore and earn 80% of every query against it:
 
 ```bash
-prsm marketplace list-dataset \
-  --title "NADA NC Vehicle Registrations 2025" \
-  --dataset-id nada-nc-2025 \
-  --base-fee 5.0 \
-  --per-shard 0.5 \
-  --shards 12 \
-  --require-stake 100
+prsm storage upload ./my_dataset.parquet \
+  --description "NADA NC Vehicle Registrations 2025" \
+  --royalty-rate 0.05 \
+  --replicas 5
 ```
 
 Revenue split: **80% to you**, 15% to compute providers, 5% to PRSM treasury.
@@ -225,9 +218,8 @@ See [Deployment Guide](deploy/production/DEPLOYMENT_GUIDE.md) for full instructi
 
 | Metric | Value |
 |--------|-------|
-| Version | 1.0.0 |
-| Tests | 479 passing |
-| MCP Tools | 17 |
+| Version | 1.6.0 |
+| MCP Tools | 16 |
 | SDKs | Python, JavaScript, Go |
 | FTNS Token | [Base mainnet](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5) |
 | Bootstrap | `wss://bootstrap1.prsm-network.com:8765` |
