@@ -105,66 +105,6 @@ class TrainingJob:
         return d
 
 
-# ── Lightweight NWTN adapters ────────────────────────────────────────
-# These shim classes wrap existing node subsystems to match the interface
-# expected by NWTNOrchestrator, avoiding a dependency on test mocks.
-
-
-class _NodeContextAdapter:
-    """Deprecated: use get_context_manager() instead. Retained for reference only."""
-
-    async def get_session_usage(self, session_id: Any) -> Optional[Dict[str, Any]]:
-        return None
-
-    async def optimize_context_allocation(self, historical_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-        return {"avg_efficiency": 0.7, "over_allocation_rate": 0.1, "under_allocation_rate": 0.1}
-
-    def record_usage(self, session_id: str, context_used: int, allocated: int) -> None:
-        pass
-
-
-class _NodeFTNSAdapter:
-    """Bridges node ledger to the FTNS interface expected by NWTN."""
-
-    def __init__(self, ledger: Any, node_id: str) -> None:
-        self._ledger = ledger
-        self._node_id = node_id
-
-    async def get_user_balance(self, user_id: str) -> Any:
-        balance = await self._ledger.get_balance(self._node_id)
-
-        @dataclass
-        class _Balance:
-            balance: float
-            user_id: str
-
-        return _Balance(balance=balance, user_id=user_id)
-
-    def get_user_balance_sync(self, user_id: str) -> float:
-        return 0.0  # sync path not available with async ledger
-
-    async def charge_user(self, user_id: str, amount: float, description: str = "") -> bool:
-        try:
-            await self._ledger.debit(
-                wallet_id=self._node_id,
-                amount=amount,
-                tx_type=TransactionType.COMPUTE_PAYMENT,
-                description=description or "NWTN inference charge",
-            )
-            return True
-        except ValueError:
-            return False
-
-    def award_tokens(self, user_id: str, amount: float, description: str = "") -> bool:
-        return True  # no-op at node level
-
-    def deduct_tokens(self, user_id: str, amount: float, description: str = "") -> bool:
-        return True  # deferred to async charge_user
-
-    async def reward_contribution(self, user_id: str, contribution_type: str, amount: float) -> bool:
-        return True
-
-
 class _StakingFTNSAdapter:
     """Bridges node ledger to the FTNS interface expected by StakingManager."""
 
@@ -229,212 +169,6 @@ class _StakingFTNSAdapter:
             return False
 
 
-class _NodeIPFSAdapter:
-    """
-    ContentStore adapter for the PRSM node.
-
-    Wraps prsm.storage.ContentStore to provide the store_model/retrieve_model
-    interface expected by NWTNOrchestrator. ContentStore is initialized lazily.
-
-    Fallback behaviour when ContentStore is unavailable:
-    - store_model: returns a deterministic placeholder hash so callers can
-      identify the data, but logs clearly that no bytes were persisted.
-    - retrieve_model: returns None and logs a warning.
-    """
-
-    def __init__(self, ipfs_api_url: str = "") -> None:
-        # ipfs_api_url kept for backward-compat call sites; unused
-        self._store: Optional[Any] = None
-
-    async def _get_store(self) -> Optional[Any]:
-        """Return the ContentStore singleton, initializing if needed."""
-        if self._store is not None:
-            return self._store
-        try:
-            from prsm.storage import get_content_store, init_content_store
-            store = get_content_store()
-            if store is None:
-                store = init_content_store()
-            self._store = store
-            logger.info("NodeIPFSAdapter: ContentStore ready")
-        except Exception as exc:
-            logger.warning(
-                "NodeIPFSAdapter: ContentStore initialization failed (%s) — "
-                "model storage will use placeholder hashes",
-                exc,
-            )
-        return self._store
-
-    async def store_model(self, model_data: bytes, metadata: Dict[str, Any]) -> str:
-        """
-        Upload model bytes to ContentStore and return the content hash hex.
-
-        On ContentStore unavailable: returns a deterministic SHA-256-based
-        placeholder so callers can identify the data, with a clear WARNING.
-        """
-        from prsm.storage.exceptions import StorageError
-
-        def _placeholder() -> str:
-            return hashlib.sha256(model_data).hexdigest()
-
-        store = await self._get_store()
-        if store is None:
-            content_id = _placeholder()
-            logger.warning(
-                "NodeIPFSAdapter: ContentStore unavailable — model NOT stored. "
-                "Returning placeholder hash %s",
-                content_id[:20],
-            )
-            return content_id
-
-        try:
-            stored_hash = await store.store_local(model_data)
-            content_id = stored_hash.hex()
-
-            # Store metadata JSON alongside the model (best-effort; non-fatal)
-            if metadata:
-                import json as _json
-                try:
-                    meta_bytes = _json.dumps(metadata, default=str).encode()
-                    await store.store_local(meta_bytes)
-                except Exception as exc:
-                    logger.debug(
-                        "NodeIPFSAdapter: metadata store failed for %s: %s",
-                        content_id[:20],
-                        exc,
-                    )  # Non-fatal
-
-            logger.info(
-                "NodeIPFSAdapter: model stored → hash %s (%d bytes)",
-                content_id,
-                len(model_data),
-            )
-            return content_id
-        except (StorageError, OSError) as exc:
-            content_id = _placeholder()
-            logger.error(
-                "NodeIPFSAdapter: store failed (%s) — returning placeholder hash %s",
-                exc,
-                content_id[:20],
-            )
-            return content_id
-
-    async def retrieve_model(self, content_id: str) -> Optional[bytes]:
-        """
-        Fetch model bytes from ContentStore by content hash.
-
-        Returns the raw bytes on success, or None when ContentStore is
-        unavailable or the content is not found.
-        """
-        from prsm.storage import ContentHash
-        from prsm.storage.exceptions import StorageError, ContentNotFoundError
-
-        store = await self._get_store()
-        if store is None:
-            logger.warning(
-                "NodeIPFSAdapter: ContentStore unavailable — cannot retrieve %s",
-                content_id[:20],
-            )
-            return None
-
-        try:
-            content: bytes = await store.retrieve_local(ContentHash.from_hex(content_id))
-            logger.info(
-                "NodeIPFSAdapter: retrieved %d bytes for hash %s",
-                len(content),
-                content_id[:20],
-            )
-            return content
-        except ContentNotFoundError:
-            logger.warning(
-                "NodeIPFSAdapter: content not found for hash %s",
-                content_id[:20],
-            )
-            return None
-        except (StorageError, OSError) as exc:
-            logger.warning(
-                "NodeIPFSAdapter: retrieve failed for hash %s — %s",
-                content_id[:20],
-                exc,
-            )
-            return None
-
-
-class _NodeModelRegistryAdapter:
-    """DB-backed model registry adapter for PRSMNode.
-
-    Persists teacher models to TeacherModelModel and discovers specialists
-    via specialization-matched queries ordered by performance score.
-    Falls back to empty list when the database is unavailable.
-    """
-
-    async def register_teacher_model(self, model: Any, cid: str) -> bool:
-        """Persist a teacher model to TeacherModelModel. Idempotent on name+version collision."""
-        from prsm.core.database import get_async_session, TeacherModelModel
-        from sqlalchemy.exc import IntegrityError
-        from uuid import uuid4
-
-        async with get_async_session() as db:
-            try:
-                row = TeacherModelModel(
-                    teacher_id=uuid4(),
-                    name=getattr(model, 'name', str(model)),
-                    specialization=getattr(model, 'specialization', 'general'),
-                    performance_score=float(getattr(model, 'performance_score', 0.0)),
-                    ipfs_cid=cid,
-                    version=getattr(model, 'version', '1.0.0'),
-                    active=True,
-                )
-                db.add(row)
-                await db.commit()
-                logger.info(f"Registered teacher model: {row.name} ({row.specialization})")
-                return True
-            except IntegrityError:
-                # Model already registered (name+version UNIQUE constraint) — treat as success
-                await db.rollback()
-                return True
-            except Exception as e:
-                await db.rollback()
-                logger.warning(f"Failed to register teacher model '{getattr(model, 'name', model)}': {e}")
-                return False
-
-    async def discover_specialists(self, domain: str) -> list:
-        """Query TeacherModelModel for active specialists matching domain, ordered by performance."""
-        from prsm.core.database import get_async_session, TeacherModelModel
-        from prsm.core.models import TeacherModel
-        from sqlalchemy import select, or_
-
-        async with get_async_session() as db:
-            try:
-                stmt = (
-                    select(TeacherModelModel)
-                    .where(TeacherModelModel.active == True)
-                    .where(
-                        or_(
-                            TeacherModelModel.specialization.ilike(f"%{domain}%"),
-                            TeacherModelModel.specialization == "general",
-                        )
-                    )
-                    .order_by(TeacherModelModel.performance_score.desc())
-                    .limit(10)
-                )
-                result = await db.execute(stmt)
-                rows = result.scalars().all()
-
-                return [
-                    TeacherModel(
-                        teacher_id=row.teacher_id,
-                        name=row.name,
-                        specialization=row.specialization,
-                        performance_score=row.performance_score or 0.0,
-                        ipfs_cid=row.ipfs_cid,
-                        version=row.version or "1.0.0",
-                    )
-                    for row in rows
-                ]
-            except Exception as e:
-                logger.warning(f"discover_specialists query failed for domain '{domain}': {e}")
-                return []
 
 
 class PRSMNode:
@@ -770,9 +504,6 @@ class PRSMNode:
         else:
             logger.info("BitTorrent not available - libtorrent may not be installed")
 
-        # Create FTNS adapter for teacher rewards/charges
-        self._ftns_adapter = _NodeFTNSAdapter(self.ledger, self.identity.node_id)
-
         # ── Payment Escrow & Result Consensus ─────────────────────
         from prsm.node.payment_escrow import PaymentEscrow
         from prsm.node.result_consensus import ResultConsensus
@@ -958,20 +689,8 @@ class PRSMNode:
         
         self._settler_registry.on_settlement_ready(_on_batch_approved)
 
-        # ── Agent Forge (Ring 5) ──────────────────────────────────────
-        try:
-            from prsm.compute.nwtn.agent_forge.forge import AgentForge
-
-            self.agent_forge = AgentForge(
-                backend_registry=getattr(self, '_backend_registry', None),
-                pricing_engine=self.pricing_engine,
-                swarm_coordinator=self.swarm_coordinator,
-                agent_dispatcher=self.agent_dispatcher,
-            )
-            logger.info("Agent forge (Ring 5) initialized")
-        except (ImportError, AttributeError):
-            self.agent_forge = None
-            logger.debug("Agent forge not available")
+        # Agent Forge (Ring 5) removed in v1.6.0 — legacy NWTN AGI framework
+        self.agent_forge = None
 
         # ── Confidential Compute (Ring 7) ─────────────────────────────
         try:
@@ -1063,30 +782,8 @@ class PRSMNode:
         # Wire ledger into gossip for persistence / catch-up
         self.gossip.ledger = self.ledger
 
-        # Best-effort NWTN orchestrator wiring for compute provider
-        if self.compute_provider:
-            try:
-                from prsm.compute.nwtn.orchestrator import NWTNOrchestrator
-                from prsm.compute.nwtn.backends import BackendRegistry
-                from prsm.compute.nwtn.backends.config import BackendConfig
-                from prsm.compute.nwtn.context_manager import get_context_manager
-                
-                # Create backend registry from environment for real LLM inference
-                backend_config = BackendConfig.from_environment()
-                backend_registry = BackendRegistry(backend_config)
-                
-                orchestrator = NWTNOrchestrator(
-                    context_manager=get_context_manager(),
-                    ftns_service=_NodeFTNSAdapter(self.ledger, self.identity.node_id),
-                    ipfs_client=_NodeIPFSAdapter(),
-                    model_registry=_NodeModelRegistryAdapter(),
-                    backend_registry=backend_registry,
-                )
-                await orchestrator.initialize()
-                self.compute_provider.orchestrator = orchestrator
-                logger.info("NWTN orchestrator wired to compute provider with backend registry")
-            except Exception as e:
-                logger.info(f"NWTN orchestrator not available: {e}")
+        # NWTN orchestrator removed in v1.6.0 — legacy AGI framework replaced
+        # by third-party LLMs invoked via MCP
 
         # Load persisted training run records from disk
         self._load_training_runs()
@@ -1156,11 +853,9 @@ class PRSMNode:
                     gpu_available = True
                     if "gpu" not in cap_list:
                         cap_list.append("gpu")
-                try:
-                    from prsm.compute.nwtn.backends.config import detect_available_backends
-                    backends_list = [b.value for b in detect_available_backends()]
-                except Exception:
-                    pass
+                # NWTN backends subsystem removed in v1.6.0 — third-party LLMs
+                # are now dispatched directly by MCP clients; no local backend
+                # advertisement is required.
             self.discovery.set_local_capabilities(
                 capabilities=cap_list,
                 backends=backends_list,

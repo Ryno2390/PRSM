@@ -136,18 +136,17 @@ class TestContentUploadCli:
         import asyncio
         from unittest.mock import AsyncMock
 
-        # Mock get_ipfs_client
-        mock_ipfs_result = MagicMock()
-        mock_ipfs_result.success = True
-        mock_ipfs_result.cid = "QmTestCID123"
-        mock_ipfs_result.error = None
+        # Mock the native ContentStore (v1.4.0+ path — IPFS was removed)
+        # The endpoint now imports get_content_store and ContentHash from
+        # prsm.storage inside the function body, so patch there.
+        from prsm.storage import ContentHash
 
-        mock_ipfs_client = MagicMock()
-        mock_ipfs_client.upload_content = AsyncMock(return_value=mock_ipfs_result)
+        deterministic_hash = ContentHash.from_data(b"test content")
+        mock_store = MagicMock()
+        mock_store.store_local = AsyncMock(return_value=deterministic_hash)
 
         # Mock ProvenanceQueries.upsert_provenance
-        # Note: get_ipfs_client is imported inside the function, so we patch at the source module
-        with patch("prsm.core.ipfs_client.get_ipfs_client", return_value=mock_ipfs_client), \
+        with patch("prsm.storage.get_content_store", return_value=mock_store), \
              patch("prsm.core.database.ProvenanceQueries.upsert_provenance", new_callable=AsyncMock) as mock_upsert:
 
             mock_upsert.return_value = True
@@ -179,7 +178,7 @@ class TestContentUploadCli:
 
             # Assert result contains expected fields
             assert result.get("provenance_registered") == True
-            assert result.get("cid") == "QmTestCID123"
+            assert result.get("cid") == deterministic_hash.hex()
 
             # Assert ProvenanceQueries.upsert_provenance called with creator_id == authenticated user
             mock_upsert.assert_called_once()

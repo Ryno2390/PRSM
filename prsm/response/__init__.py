@@ -1,1 +1,0 @@
-"""PRSM Response Module"""

@@ -347,21 +347,6 @@ TOOLS = [
         },
     ),
     Tool(
-        name="prsm_decompose",
-        description=(
-            "Decompose a query into a structured execution plan WITHOUT executing it. "
-            "Shows what datasets are needed, what operations would be performed, "
-            "recommended execution route (direct_llm/single_agent/swarm), and complexity."
-        ),
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "The query to decompose"},
-            },
-            "required": ["query"],
-        },
-    ),
-    Tool(
         name="prsm_settlement_stats",
         description="Get FTNS settlement queue statistics — pending transfers, total settled, gas usage.",
         inputSchema={
@@ -795,34 +780,6 @@ async def handle_prsm_revenue_split(arguments: Dict[str, Any]) -> str:
         return f"Split calculation failed: {e}"
 
 
-async def handle_prsm_decompose(arguments: Dict[str, Any]) -> str:
-    query = arguments.get("query", "")
-    try:
-        result = await _call_node_api("POST", "/compute/forge", {
-            "query": query,
-            "budget_ftns": 0.01,
-        })
-        return json.dumps(result, indent=2)
-    except Exception:
-        # Fall back to local decomposition
-        try:
-            from prsm.compute.nwtn.agent_forge import AgentForge
-            forge = AgentForge()
-            decomp = await forge.decompose(query)
-            return (
-                f"Query Decomposition\n"
-                f"  Query: {query}\n"
-                f"  Route: {decomp.recommended_route.value}\n"
-                f"  Datasets: {decomp.required_datasets or '(none — direct LLM answer)'}\n"
-                f"  Operations: {decomp.operations or ['generate']}\n"
-                f"  Parallelizable: {decomp.parallelizable}\n"
-                f"  Hardware Tier: {decomp.min_hardware_tier}\n"
-                f"  Complexity: {decomp.estimated_complexity}"
-            )
-        except Exception as e2:
-            return f"Decomposition failed: {e2}"
-
-
 async def handle_prsm_settlement_stats(arguments: Dict[str, Any]) -> str:
     try:
         result = await _call_node_api("GET", "/settlement/stats")
@@ -894,7 +851,6 @@ TOOL_HANDLERS = {
     "prsm_yield_estimate": handle_prsm_yield_estimate,
     "prsm_stake": handle_prsm_stake,
     "prsm_revenue_split": handle_prsm_revenue_split,
-    "prsm_decompose": handle_prsm_decompose,
     "prsm_settlement_stats": handle_prsm_settlement_stats,
     "prsm_privacy_status": handle_prsm_privacy_status,
     "prsm_training_status": handle_prsm_training_status,
