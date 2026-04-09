@@ -1,45 +1,12 @@
 """
-PRSM Automated Distillation System
-Democratizes creation of specialized distilled models for the PRSM ecosystem
+PRSM Legacy Distillation System (Deprecated)
 
-This module provides comprehensive automated distillation capabilities:
-- Teacher model analysis and knowledge extraction
-- Optimal student architecture generation
-- Multi-stage automated training pipelines
-- Quality assurance and safety validation
-- FTNS economic integration
-- Marketplace deployment automation
+This subtree is scheduled for deletion in v1.6.0 PR 3 (bulk legacy cleanup).
+Its auto-imports have been stripped to prevent cascading ImportError
+cascades in the test collection phase after the PR 2 NWTN trim removed
+dependencies like prsm.compute.nwtn.engines.world_model_engine.
 
-The system enables any PRSM user to create high-quality, specialized
-models without deep ML expertise, accelerating the growth of the
-decentralized agent network.
+Do not add new code here — the whole subtree is going away.
 """
 
-from .orchestrator import DistillationOrchestrator
-from .models import (
-    DistillationRequest, DistillationJob, DistillationStatus,
-    TeacherAnalysis, StudentArchitecture, TrainingConfig,
-    QualityMetrics, SafetyAssessment
-)
-from .knowledge_extractor import KnowledgeExtractor
-from .architecture_generator import ArchitectureGenerator
-from .training_pipeline import TrainingPipeline
-from .evaluator import ModelEvaluator
-from .safety_validator import SafetyValidator
-
-__all__ = [
-    "DistillationOrchestrator",
-    "DistillationRequest",
-    "DistillationJob", 
-    "DistillationStatus",
-    "TeacherAnalysis",
-    "StudentArchitecture",
-    "TrainingConfig",
-    "QualityMetrics",
-    "SafetyAssessment",
-    "KnowledgeExtractor",
-    "ArchitectureGenerator", 
-    "TrainingPipeline",
-    "ModelEvaluator",
-    "SafetyValidator"
-]
+__all__ = []

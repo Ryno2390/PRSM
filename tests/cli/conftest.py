@@ -99,7 +99,31 @@ if not _pydantic_available:
 # triggering prsm/__init__.py (which does `from prsm.core.config import ...`)
 # ---------------------------------------------------------------------------
 def _ensure_prsm_stub():
-    """Ensure prsm package is importable without its heavy __init__.py."""
+    """Ensure prsm package is importable without its heavy __init__.py.
+
+    ONLY installs the stub when the real prsm.core.config cannot be imported
+    (typically because pydantic is not available). In a normal development
+    environment where pydantic is installed, this is a no-op — the real
+    prsm.core.config is loaded, and subsequent test collection continues to
+    work correctly.
+
+    Prior to v1.6.0, this function unconditionally replaced prsm.core.config
+    with an empty stub, which poisoned sys.modules for the rest of the pytest
+    session and caused cascading ImportError ("cannot import name 'get_settings'")
+    in every subsequent test module that imported through the real prsm
+    package. This regressed only after PR 2 deleted the legacy NWTN test
+    files whose earlier alphabetic collection order happened to load the
+    real prsm.core.config first, masking the bug.
+    """
+    # Fast path: if the real prsm.core.config can be imported, don't stub
+    # anything. This is the common case in a healthy dev environment.
+    try:
+        import prsm.core.config as _real_cfg  # noqa: F401
+        if hasattr(_real_cfg, "get_settings"):
+            return  # Real module is loaded and valid — no stubbing needed.
+    except ImportError:
+        pass
+
     if "prsm" not in sys.modules or hasattr(sys.modules["prsm"], "_cli_test_stub"):
         prsm_root = Path(__file__).resolve().parent.parent.parent / "prsm"
         # Create stub for prsm

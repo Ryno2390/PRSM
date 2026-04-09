@@ -12,7 +12,11 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from uuid import uuid4
 
-from prsm.compute.nwtn.reasoning.s1_neuro_symbolic import NeuroSymbolicOrchestrator
+# v1.6.0 scope alignment: s1_neuro_symbolic legacy module deleted in PR 2.
+try:
+    from prsm.compute.nwtn.reasoning.s1_neuro_symbolic import NeuroSymbolicOrchestrator
+except ImportError:
+    NeuroSymbolicOrchestrator = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 

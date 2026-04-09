@@ -37,16 +37,18 @@ class TestRing9Smoke:
         assert card.status == DeploymentStatus.RETIRED
 
     def test_all_rings_1_through_9_import(self):
+        # Ring 5 AgentForge was removed in v1.6.0 scope alignment — the legacy
+        # NWTN AGI framework (agent_forge, orchestrator, meta_reasoning_engine,
+        # etc.) is no longer part of PRSM. Reasoning belongs in third-party LLMs.
         from prsm.compute.wasm import WASMRuntime, HardwareProfiler
         from prsm.compute.agents import AgentDispatcher, AgentExecutor
         from prsm.compute.swarm import SwarmCoordinator
         from prsm.economy.pricing import PricingEngine
-        from prsm.compute.nwtn.agent_forge import AgentForge
         from prsm.compute.tee import DPNoiseInjector, ConfidentialResult
         from prsm.compute.model_sharding import ModelSharder, PipelineRandomizer
         from prsm.compute.nwtn.training import TrainingPipeline, ModelCard
         from prsm.compute.nwtn.training.model_service import NWTNModelService
         assert all(x is not None for x in [
             WASMRuntime, AgentDispatcher, SwarmCoordinator, PricingEngine,
-            AgentForge, DPNoiseInjector, ModelSharder, TrainingPipeline, NWTNModelService,
+            DPNoiseInjector, ModelSharder, TrainingPipeline, NWTNModelService,
         ])

@@ -23,7 +23,12 @@ from enum import Enum
 import json
 import statistics
 
-from prsm.compute.nwtn.meta_reasoning_engine import ThinkingMode
+# v1.6.0 scope alignment: meta_reasoning_engine legacy module deleted in PR 2.
+# enhanced_pricing_engine is effectively legacy (depends on deleted NWTN reasoning).
+try:
+    from prsm.compute.nwtn.meta_reasoning_engine import ThinkingMode
+except ImportError:
+    ThinkingMode = None  # type: ignore[assignment,misc]
 from enum import Enum
 
 class VerbosityLevel(Enum):

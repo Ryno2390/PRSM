@@ -35,7 +35,10 @@ from prsm.node.gossip import (
 from prsm.node.identity import NodeIdentity
 from prsm.node.local_ledger import LocalLedger, TransactionType
 from prsm.node.transport import P2PMessage, WebSocketTransport
-from prsm.compute.nwtn.backends.config import detect_available_backends
+# NOTE: `from prsm.compute.nwtn.backends.config import detect_available_backends`
+# was removed in v1.6.0 — it was an unused import and the legacy NWTN backends
+# module was deleted as part of the scope-alignment refactor (PR 2). The symbol
+# was imported at module load but never referenced anywhere in this file.
 from prsm.node.payment_escrow import PaymentEscrow
 from prsm.node.result_consensus import ResultConsensus
 

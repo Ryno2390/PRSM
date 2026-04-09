@@ -14,11 +14,21 @@ from typing import Dict, List, Optional, Any
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
 
-from prsm.compute.distillation.models import (
-    SyntheticTask, SyntheticDataShard, DataLineageRecord
-)
-from prsm.compute.distillation.swarm_trainer import get_swarm_orchestrator
-from prsm.compute.nwtn.engines.world_model_engine import get_world_model
+# v1.6.0 scope alignment: distillation and NWTN world_model_engine are legacy
+# and being deleted in PR 3. Wrap imports in try/except to prevent collection
+# cascades during PR 2's test runs.
+try:
+    from prsm.compute.distillation.models import (
+        SyntheticTask, SyntheticDataShard, DataLineageRecord
+    )
+    from prsm.compute.distillation.swarm_trainer import get_swarm_orchestrator
+    from prsm.compute.nwtn.engines.world_model_engine import get_world_model
+except ImportError:
+    SyntheticTask = None  # type: ignore[assignment,misc]
+    SyntheticDataShard = None  # type: ignore[assignment,misc]
+    DataLineageRecord = None  # type: ignore[assignment,misc]
+    get_swarm_orchestrator = None  # type: ignore[assignment]
+    get_world_model = None  # type: ignore[assignment]
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from prsm.storage import get_content_store, ContentHash
 from prsm.storage.exceptions import StorageError

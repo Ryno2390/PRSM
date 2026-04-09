@@ -17,7 +17,12 @@ import time
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 
-from prsm.compute.nwtn.reasoning.surprise_gating import SurpriseGater
+# v1.6.0 scope alignment: surprise_gating legacy module deleted in PR 2.
+# nwtn_hardware_sdk is an orphan legacy SDK (its only test was deleted).
+try:
+    from prsm.compute.nwtn.reasoning.surprise_gating import SurpriseGater
+except ImportError:
+    SurpriseGater = None  # type: ignore[assignment,misc]
 
 class HardwareNWTNNode:
     """

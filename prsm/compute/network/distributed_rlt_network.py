@@ -25,7 +25,12 @@ from dataclasses import dataclass, field
 from uuid import uuid4
 from enum import Enum
 import structlog
-from prsm.compute.nwtn.reasoning.s1_neuro_symbolic import NeuroSymbolicOrchestrator
+# v1.6.0 scope alignment: s1_neuro_symbolic legacy module deleted in PR 2.
+# This file is scheduled for PR 3 deletion.
+try:
+    from prsm.compute.nwtn.reasoning.s1_neuro_symbolic import NeuroSymbolicOrchestrator
+except ImportError:
+    NeuroSymbolicOrchestrator = None  # type: ignore[assignment,misc]
 from prsm.economy.governance.resilience import ResilienceManager
 
 logger = structlog.get_logger(__name__)
