@@ -49,14 +49,7 @@ except ImportError:
 
 from prsm.core.config import settings
 from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
-# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
-try:
-    from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-    from prsm.core.safety.monitor import SafetyMonitor
-except ImportError:
-    CircuitBreakerNetwork = None  # type: ignore[assignment,misc]
-    ThreatLevel = None  # type: ignore[assignment,misc]
-    SafetyMonitor = None  # type: ignore[assignment,misc]
+# v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor / CircuitBreakerNetwork) deleted.
 
 logger = logging.getLogger(__name__)
 
@@ -488,11 +481,9 @@ class EnhancedConsensusSystem:
     def __init__(
         self,
         network_manager,
-        safety_monitor: SafetyMonitor = None,
         byzantine_tolerance: float = DEFAULT_BYZANTINE_TOLERANCE
     ):
         self.network_manager = network_manager
-        self.safety_monitor = safety_monitor or SafetyMonitor()
         self.byzantine_tolerance = byzantine_tolerance
         
         # Consensus nodes

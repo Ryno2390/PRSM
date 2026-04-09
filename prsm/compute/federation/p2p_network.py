@@ -21,14 +21,8 @@ from prsm.core.models import (
 )
 from prsm.storage import get_content_store
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
-# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
-try:
-    from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-    from prsm.core.safety.monitor import SafetyMonitor
-except ImportError:
-    CircuitBreakerNetwork = None  # type: ignore[assignment,misc]
-    ThreatLevel = None  # type: ignore[assignment,misc]
-    SafetyMonitor = None  # type: ignore[assignment,misc]
+# v1.6.0 scope alignment: prsm.core.safety deleted. Federation primitives
+# no longer validate in-network model output.
 from .consensus import get_consensus, ConsensusType
 from ..performance.benchmark_collector import time_async_operation, get_global_collector
 
@@ -83,11 +77,7 @@ class P2PModelNetwork:
         self.model_shards: Dict[str, List[ModelShard]] = {}  # model_cid -> shards
         self.shard_locations: Dict[UUID, Set[str]] = {}  # shard_id -> peer_ids
         self.execution_queue: asyncio.Queue = asyncio.Queue()
-        
-        # Safety integration
-        self.circuit_breaker = CircuitBreakerNetwork()
-        self.safety_monitor = SafetyMonitor()
-        
+
         # Consensus integration
         self.consensus_engine = get_consensus()
         
@@ -101,150 +91,13 @@ class P2PModelNetwork:
         self._execution_lock = asyncio.Lock()
         
     
-    async def distribute_model_shards(self, model_cid: str, shard_count: int) -> List[ModelShard]:
-        """
-        Distribute model into shards across the P2P network with safety oversight
-        
-        Args:
-            model_cid: IPFS CID of the model to distribute
-            shard_count: Number of shards to create
-            
-        Returns:
-            List of ModelShard objects representing the distributed shards
-        """
-        async with self._shard_lock:
-            # Safety check - validate model before distribution
-            if ENABLE_SAFETY_MONITORING:
-                safety_check = await self.safety_monitor.validate_model_output(
-                    {"model_cid": model_cid, "action": "distribute"},
-                    ["no_malicious_code", "validate_integrity"]
-                )
-                if not safety_check:
-                    raise ValueError(f"Safety validation failed for model {model_cid}")
-            
-            # Get model data from ContentStore
-            # TODO: full ContentStore integration
-            store = get_content_store()
-            try:
-                from prsm.storage import ContentHash
-                from prsm.storage.exceptions import StorageError
-                if store is not None:
-                    model_data = await store.retrieve_local(ContentHash.from_hex(model_cid))
-                    metadata = {}
-                else:
-                    model_data = b""
-                    metadata = {}
-                model_size = len(model_data)
-                
-                # Calculate shard sizes
-                shard_size = max(model_size // shard_count, 1024)  # Minimum 1KB per shard
-                
-                shards = []
-                for i in range(shard_count):
-                    # Calculate shard boundaries
-                    start_byte = i * shard_size
-                    end_byte = min((i + 1) * shard_size, model_size)
-                    shard_data = model_data[start_byte:end_byte]
-                    
-                    # Create verification hash
-                    verification_hash = hashlib.sha256(shard_data).hexdigest()
-                    
-                    # Create shard object
-                    shard = ModelShard(
-                        model_cid=model_cid,
-                        shard_index=i,
-                        total_shards=shard_count,
-                        verification_hash=verification_hash,
-                        size_bytes=len(shard_data)
-                    )
-                    
-                    # Distribute shard to peers
-                    hosting_peers = await self._select_hosting_peers(shard.shard_id)
-                    shard.hosted_by = hosting_peers
-                    
-                    # Store shard data on selected peers (simulated)
-                    await self._store_shard_on_peers(shard, shard_data, hosting_peers)
-                    
-                    shards.append(shard)
-                    
-                    # Track shard locations
-                    self.shard_locations[shard.shard_id] = set(hosting_peers)
-                
-                # Update model shard registry
-                self.model_shards[model_cid] = shards
-                
-                # Log distribution success
-                print(f"✅ Distributed model {model_cid} into {shard_count} shards across {len(self.active_peers)} peers")
-                
-                return shards
-                
-            except Exception as e:
-                # Circuit breaker notification for distribution failure
-                if ENABLE_SAFETY_MONITORING:
-                    await self.circuit_breaker.monitor_model_behavior(
-                        model_cid, 
-                        {"error": str(e), "action": "distribute_failed"}
-                    )
-                raise ValueError(f"Failed to distribute model shards: {str(e)}")
-    
-    
-    async def coordinate_distributed_execution(self, task: ArchitectTask) -> List[Future]:
-        """
-        Coordinate distributed execution of a task across P2P network
-        
-        Args:
-            task: ArchitectTask to execute across the network
-            
-        Returns:
-            List of Future objects representing peer execution results
-        """
-        _emit_collaboration_compatibility_fence(
-            "prsm.compute.federation.p2p_network.P2PModelNetwork.coordinate_distributed_execution"
-        )
-        async with self._execution_lock:
-            # Safety validation
-            if ENABLE_SAFETY_MONITORING:
-                safety_check = await self.safety_monitor.validate_model_output(
-                    task.dict(), 
-                    ["validate_task_safety", "check_resource_limits"]
-                )
-                if not safety_check:
-                    await self.circuit_breaker.trigger_emergency_halt(
-                        ThreatLevel.HIGH.value,
-                        f"Unsafe task detected: {task.task_id}"
-                    )
-                    raise ValueError(f"Task {task.task_id} failed safety validation")
-            
-            # Select qualified peers for execution
-            qualified_peers = await self._select_execution_peers(task)
-            if len(qualified_peers) < 2:
-                raise ValueError(f"Insufficient qualified peers ({len(qualified_peers)}) for task execution")
-            
-            # Create execution futures
-            execution_futures = []
-            
-            for peer_id in qualified_peers:
-                # Create execution future for each peer
-                future = asyncio.create_task(
-                    self._execute_on_peer(peer_id, task)
-                )
-                execution_futures.append(future)
-            
-            # Track execution metrics
-            execution_id = str(uuid4())
-            self.execution_metrics[execution_id] = {
-                "task_id": task.task_id,
-                "peer_count": len(qualified_peers),
-                "start_time": datetime.now(timezone.utc),
-                "peers": qualified_peers
-            }
-            
-            print(f"🚀 Coordinating distributed execution for task {task.task_id} across {len(qualified_peers)} peers")
-            
-            return execution_futures
-    
-    
-    async def validate_peer_contributions(self, peer_results: List[dict], 
+    # v1.6.0 scope alignment: distribute_model_shards() and
+    # coordinate_distributed_execution() were AGI-era model-execution entrypoints
+    # that relied on SafetyMonitor.validate_model_output + CircuitBreakerNetwork.
+    # Federation primitives no longer validate in-network model output; execution
+    # flows through prsm.node.compute_provider + prsm.collaboration.CollaborationManager.
+
+    async def validate_peer_contributions(self, peer_results: List[dict],
                                         consensus_type: str = ConsensusType.BYZANTINE_FAULT_TOLERANT) -> bool:
         """
         Validate contributions from peers using advanced consensus mechanisms
@@ -366,14 +219,7 @@ class P2PModelNetwork:
                 print(f"✅ Execution integrity validated through consensus for {len(execution_log)} log entries")
             else:
                 print(f"❌ Execution integrity validation failed for {len(execution_log)} log entries")
-                
-                # Alert safety monitoring
-                if ENABLE_SAFETY_MONITORING:
-                    await self.circuit_breaker.trigger_emergency_halt(
-                        ThreatLevel.MEDIUM.value,
-                        "Execution integrity validation failed"
-                    )
-            
+
             return integrity_valid
             
         except Exception as e:
@@ -554,23 +400,16 @@ class P2PModelNetwork:
     
     
     async def _handle_consensus_failures(self, failed_peers: List[str]):
-        """Handle consensus failures by updating reputations and alerting safety systems"""
+        """Handle consensus failures by updating reputations."""
         for peer_id in failed_peers:
             if peer_id in self.active_peers:
                 # Significant reputation penalty for consensus failures
                 await self._update_peer_reputation(peer_id, -0.15)
-                
+
                 # Check if peer should be removed from network
                 peer_reputation = self.active_peers[peer_id].reputation_score
                 if peer_reputation < PEER_REPUTATION_THRESHOLD:
                     print(f"⚠️ Peer {peer_id} reputation below threshold, considering removal")
-                    
-                    # Alert safety monitoring
-                    if ENABLE_SAFETY_MONITORING:
-                        await self.circuit_breaker.monitor_model_behavior(
-                            peer_id,
-                            {"consensus_failure": True, "reputation": peer_reputation}
-                        )
 
 
 # === Global P2P Network Instance ===

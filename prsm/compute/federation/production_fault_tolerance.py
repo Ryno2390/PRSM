@@ -46,14 +46,8 @@ except ImportError:
 
 from prsm.core.config import settings
 from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
-# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
-try:
-    from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-    from prsm.core.safety.monitor import SafetyMonitor
-except ImportError:
-    CircuitBreakerNetwork = None  # type: ignore[assignment,misc]
-    ThreatLevel = None  # type: ignore[assignment,misc]
-    SafetyMonitor = None  # type: ignore[assignment,misc]
+# v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor) deleted.
+# Fault tolerance now routes events through the structured logger only.
 from .consensus import DistributedConsensus, ConsensusResult, ConsensusType
 
 logger = logging.getLogger(__name__)
@@ -181,12 +175,10 @@ class ProductionFaultTolerance:
         self,
         network_manager,
         consensus_manager,
-        safety_monitor: SafetyMonitor = None
     ):
         self.network_manager = network_manager
         self.consensus_manager = consensus_manager
-        self.safety_monitor = safety_monitor or SafetyMonitor()
-        
+
         # Fault tracking
         self.active_faults: Dict[str, FaultEvent] = {}
         self.fault_history: deque = deque(maxlen=1000)
@@ -630,20 +622,15 @@ class ProductionFaultTolerance:
         self.fault_history.append(fault)
         self.detection_stats[fault.category.value] += 1
         
-        logger.warning(f"Fault detected: {fault.description} (ID: {fault.fault_id})")
-        
-        # Trigger safety monitor alert
-        await self.safety_monitor.log_safety_event(
-            event_type="fault_detected",
-            severity=fault.severity.value,
-            details={
-                "fault_id": fault.fault_id,
-                "category": fault.category.value,
-                "affected_nodes": fault.affected_nodes,
-                "description": fault.description
-            }
+        logger.warning(
+            "Fault detected: %s (ID: %s, severity=%s, category=%s, affected_nodes=%s)",
+            fault.description,
+            fault.fault_id,
+            fault.severity.value,
+            fault.category.value,
+            fault.affected_nodes,
         )
-        
+
         # Determine recovery actions based on severity
         if fault.is_critical and AUTO_RECOVERY_ENABLED:
             fault.recovery_actions = self.recovery_policies.get(fault.category, [])

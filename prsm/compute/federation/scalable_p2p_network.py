@@ -51,14 +51,7 @@ except ImportError as e:
 
 from prsm.core.config import settings
 from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
-# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
-try:
-    from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-    from prsm.core.safety.monitor import SafetyMonitor
-except ImportError:
-    CircuitBreakerNetwork = None  # type: ignore[assignment,misc]
-    ThreatLevel = None  # type: ignore[assignment,misc]
-    SafetyMonitor = None  # type: ignore[assignment,misc]
+# v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor / CircuitBreakerNetwork) deleted.
 from .consensus import DistributedConsensus, ConsensusResult, ConsensusType
 try:
     from .production_consensus import ProductionByzantineConsensus
@@ -232,8 +225,7 @@ class ScalableP2PNetwork:
         # Components
         self.consensus_manager = None
         self.fault_manager = None
-        self.safety_monitor = SafetyMonitor()
-        
+
         # Performance optimization
         self.message_queue = asyncio.Queue(maxsize=MESSAGE_BATCH_SIZE * 10)
         self.consensus_cache: Dict[str, ConsensusResult] = {}

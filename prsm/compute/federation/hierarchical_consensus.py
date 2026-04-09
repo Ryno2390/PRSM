@@ -17,14 +17,7 @@ import math
 
 from prsm.core.config import settings
 from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
-# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
-try:
-    from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-    from prsm.core.safety.monitor import SafetyMonitor
-except ImportError:
-    CircuitBreakerNetwork = None  # type: ignore[assignment,misc]
-    ThreatLevel = None  # type: ignore[assignment,misc]
-    SafetyMonitor = None  # type: ignore[assignment,misc]
+# v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor / CircuitBreakerNetwork) deleted.
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from .consensus import DistributedConsensus, ConsensusResult, ConsensusType
 
@@ -121,11 +114,7 @@ class HierarchicalConsensusNetwork:
         # Consensus infrastructure
         self.base_consensus = DistributedConsensus()
         self.active_hierarchical_sessions: Dict[str, Dict[str, Any]] = {}
-        
-        # Safety integration
-        self.circuit_breaker = CircuitBreakerNetwork()
-        self.safety_monitor = SafetyMonitor()
-        
+
         # Performance metrics
         self.hierarchical_metrics = {
             "total_hierarchical_consensus": 0,

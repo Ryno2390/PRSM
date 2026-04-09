@@ -536,14 +536,17 @@ class TestContentExtraction:
 # Test Eligible Voters Count (Phase 4b)
 # ============================================================================
 
+@pytest.mark.skip(
+    reason="prsm.core.teams.governance removed in v1.6.0 scope alignment "
+    "(institutional team management no longer in scope; nodes are nodes)"
+)
 class TestEligibleVotersCount:
     """Tests for eligible voter counting"""
 
     @pytest.fixture
     def governance_service(self):
         """Create team governance service instance"""
-        from prsm.core.teams.governance import TeamGovernanceService
-        return TeamGovernanceService()
+        return None
 
     @pytest.mark.asyncio
     async def test_count_eligible_voters_returns_zero_on_error(self, governance_service):
@@ -574,14 +577,17 @@ class TestEligibleVotersCount:
 # Test Multisig Transaction Execution (Phase 9)
 # ============================================================================
 
+@pytest.mark.skip(
+    reason="prsm.core.teams.wallet removed in v1.6.0 scope alignment "
+    "(institutional team multisig no longer in scope; nodes are nodes)"
+)
 class TestMultisigExecution:
     """Tests for multisig transaction execution"""
 
     @pytest.fixture
     def wallet_service(self):
         """Create wallet service instance"""
-        from prsm.core.teams.wallet import TeamWalletService
-        return TeamWalletService()
+        return None
 
     @pytest.mark.asyncio
     async def test_execute_multisig_transaction_transfers_ftns(self, wallet_service):

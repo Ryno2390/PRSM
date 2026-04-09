@@ -29,14 +29,7 @@ except ImportError as e:
 
 from prsm.core.config import settings
 from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
-# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
-try:
-    from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-    from prsm.core.safety.monitor import SafetyMonitor
-except ImportError:
-    CircuitBreakerNetwork = None  # type: ignore[assignment,misc]
-    ThreatLevel = None  # type: ignore[assignment,misc]
-    SafetyMonitor = None  # type: ignore[assignment,misc]
+# v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor / CircuitBreakerNetwork) deleted.
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 
 
@@ -507,11 +500,7 @@ class ProductionConsensus:
         # Peer management
         self.known_peers: Dict[str, PeerNode] = {}
         self.peer_reputations: Dict[str, float] = {}
-        
-        # Safety integration
-        self.circuit_breaker = CircuitBreakerNetwork()
-        self.safety_monitor = SafetyMonitor()
-        
+
         # Performance metrics
         self.consensus_metrics: Dict[str, Any] = {
             "total_consensus_attempts": 0,
@@ -908,17 +897,7 @@ class ProductionConsensus:
                     await ftns_service.charge_context_access(peer_id, 10000)  # Heavy penalty
                 except Exception as e:
                     print(f"⚠️ FTNS penalty failed for peer {peer_id}: {e}")
-                
-                # Report to safety monitoring
-                await self.circuit_breaker.monitor_model_behavior(
-                    peer_id,
-                    {
-                        "behavior": "byzantine_failure",
-                        "evidence": evidence,
-                        "timestamp": datetime.now(timezone.utc)
-                    }
-                )
-            
+
             print(f"✅ Byzantine failure handling completed")
             
         except Exception as e:

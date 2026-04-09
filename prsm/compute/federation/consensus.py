@@ -28,14 +28,9 @@ from prsm.core.config import settings
 from prsm.core.models import (
     PeerNode, AgentResponse, SafetyFlag, SafetyLevel
 )
-# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
-try:
-    from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-    from prsm.core.safety.monitor import SafetyMonitor
-except ImportError:
-    CircuitBreakerNetwork = None  # type: ignore[assignment,misc]
-    ThreatLevel = None  # type: ignore[assignment,misc]
-    SafetyMonitor = None  # type: ignore[assignment,misc]
+# v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor / CircuitBreakerNetwork)
+# deleted. Consensus no longer runs in-network model-output validation; it
+# focuses on Byzantine fault tolerance and cryptographic verification.
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 
 
@@ -101,11 +96,7 @@ class DistributedConsensus:
         self.peer_reputations: Dict[str, float] = {}
         self.consensus_history: List[ConsensusResult] = []
         self.ftns_service = get_ftns_service()
-        
-        # Safety integration
-        self.circuit_breaker = CircuitBreakerNetwork()
-        self.safety_monitor = SafetyMonitor()
-        
+
         # Performance tracking
         self.consensus_metrics: Dict[str, Any] = {
             "total_consensus_attempts": 0,
@@ -142,11 +133,7 @@ class DistributedConsensus:
             try:
                 self.consensus_metrics["total_consensus_attempts"] += 1
                 self.consensus_metrics["consensus_types_used"][consensus_type] += 1
-                
-                # Safety validation for all peer results
-                if ENABLE_SAFETY_CONSENSUS:
-                    peer_results = await self._safety_validate_peer_results(peer_results)
-                
+
                 # Check minimum participants (Bypass for ZK proofs)
                 if consensus_type != ConsensusType.ZK_SNARK and len(peer_results) < MIN_CONSENSUS_PARTICIPANTS:
                     return ConsensusResult(
@@ -239,17 +226,7 @@ class DistributedConsensus:
             if not await self._cross_validate_peer_logs(peer_logs):
                 print("⚠️ Cross-peer log validation failed")
                 return False
-            
-            # Safety validation of execution sequence
-            if ENABLE_SAFETY_CONSENSUS:
-                safety_valid = await self.safety_monitor.validate_model_output(
-                    {"execution_log": execution_log},
-                    ["validate_execution_sequence", "check_safety_compliance"]
-                )
-                if not safety_valid:
-                    print("⚠️ Safety validation of execution log failed")
-                    return False
-            
+
             print(f"✅ Execution integrity validated for {len(peer_logs)} peers")
             return True
             
@@ -284,29 +261,7 @@ class DistributedConsensus:
                         self.peer_reputations[peer_id] = 0.0
                     
                     print(f"📉 Peer {peer_id} reputation reduced to {self.peer_reputations[peer_id]:.2f}")
-            
-            # Safety framework integration
-            if ENABLE_SAFETY_CONSENSUS:
-                for peer_id in failed_peers:
-                    # Report to circuit breaker
-                    assessment = await self.circuit_breaker.monitor_model_behavior(
-                        peer_id,
-                        {
-                            "behavior": "byzantine_failure",
-                            "session_id": session_id,
-                            "timestamp": datetime.now(timezone.utc)
-                        }
-                    )
-                    
-                    # Trigger emergency halt if threat level is high
-                    if assessment and hasattr(assessment, 'threat_level'):
-                        threat_value = getattr(assessment.threat_level, 'value', 0)
-                        if threat_value >= ThreatLevel.HIGH.value:
-                            await self.circuit_breaker.trigger_emergency_halt(
-                                ThreatLevel.HIGH.value,
-                                f"Byzantine failure detected in peer {peer_id}"
-                            )
-            
+
             # FTNS penalty (economic disincentive)
             for peer_id in failed_peers:
                 try:
@@ -525,25 +480,23 @@ class DistributedConsensus:
     
     
     async def _safety_critical_consensus(self, peer_results: List[Dict[str, Any]], session_id: str) -> ConsensusResult:
-        """Safety-critical consensus requiring very high agreement"""
+        """Safety-critical consensus requiring very high agreement.
+
+        v1.6.0 scope alignment: the AGI-era SafetyMonitor.validate_model_output
+        hook has been removed. "Safety-critical" now means only that we enforce
+        the strictest quorum (SAFETY_CONSENSUS_THRESHOLD) on top of the
+        weighted-majority consensus result.
+        """
         if not peer_results:
             return ConsensusResult(consensus_achieved=False, consensus_type=ConsensusType.SAFETY_CRITICAL)
-        
+
         # Use weighted consensus as base
         base_result = await self._weighted_majority_consensus(peer_results, session_id)
-        
-        # Require safety consensus threshold
-        consensus_achieved = (base_result.consensus_achieved and 
+
+        # Require the strictest agreement threshold
+        consensus_achieved = (base_result.consensus_achieved and
                             base_result.agreement_ratio >= SAFETY_CONSENSUS_THRESHOLD)
-        
-        # Additional safety validation
-        if consensus_achieved and ENABLE_SAFETY_CONSENSUS:
-            safety_valid = await self.safety_monitor.validate_model_output(
-                base_result.agreed_value,
-                ["safety_critical_validation", "high_confidence_check"]
-            )
-            consensus_achieved = consensus_achieved and safety_valid
-        
+
         return ConsensusResult(
             agreed_value=base_result.agreed_value if consensus_achieved else None,
             consensus_achieved=consensus_achieved,
@@ -577,36 +530,6 @@ class DistributedConsensus:
                 )
                 
         return ConsensusResult(consensus_achieved=False, consensus_type=ConsensusType.ZK_SNARK)
-    
-    
-    async def _safety_validate_peer_results(self, peer_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Safety validate all peer results, filtering out unsafe ones"""
-        validated_results = []
-        
-        for result in peer_results:
-            try:
-                # Safety validation
-                is_safe = await self.safety_monitor.validate_model_output(
-                    result,
-                    ["validate_peer_result", "check_safety_compliance"]
-                )
-                
-                if is_safe:
-                    validated_results.append(result)
-                else:
-                    peer_id = result.get("peer_id", "unknown")
-                    print(f"⚠️ Peer {peer_id} result failed safety validation")
-                    
-                    # Report unsafe result
-                    await self.circuit_breaker.monitor_model_behavior(
-                        peer_id,
-                        {"unsafe_result": True, "result": result}
-                    )
-                    
-            except Exception as e:
-                print(f"⚠️ Safety validation error for peer result: {str(e)}")
-        
-        return validated_results
     
     
     async def _detect_byzantine_peers(self, peer_results: List[Dict[str, Any]], consensus_value: Any) -> List[str]:

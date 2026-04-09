@@ -15,14 +15,7 @@ import statistics
 
 from prsm.core.config import settings
 from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
-# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
-try:
-    from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-    from prsm.core.safety.monitor import SafetyMonitor
-except ImportError:
-    CircuitBreakerNetwork = None  # type: ignore[assignment,misc]
-    ThreatLevel = None  # type: ignore[assignment,misc]
-    SafetyMonitor = None  # type: ignore[assignment,misc]
+# v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor / CircuitBreakerNetwork) deleted.
 from .consensus import DistributedConsensus, ConsensusResult, ConsensusType
 
 
@@ -120,11 +113,7 @@ class FaultInjector:
             "fault_type_distribution": defaultdict(int),
             "severity_distribution": defaultdict(int)
         }
-        
-        # Safety integration
-        self.circuit_breaker = CircuitBreakerNetwork()
-        self.safety_monitor = SafetyMonitor()
-        
+
         # Injection control
         self.injection_active = False
         self.injection_rate = FAULT_INJECTION_RATE

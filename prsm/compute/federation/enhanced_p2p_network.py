@@ -47,15 +47,9 @@ from prsm.core.models import (
 )
 from prsm.storage import get_content_store
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
-# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
-try:
-    from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-    from prsm.core.safety.monitor import SafetyMonitor
-except ImportError:
-    CircuitBreakerNetwork = None  # type: ignore[assignment,misc]
-    ThreatLevel = None  # type: ignore[assignment,misc]
-    SafetyMonitor = None  # type: ignore[assignment,misc]
-# ModelExecutor import removed (agents/executors/ deleted in v1.6.0 scope alignment)
+# v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor / CircuitBreakerNetwork)
+# and agents/executors/ deleted. Federation primitives no longer validate in-network
+# model output; third-party LLMs handle reasoning.
 
 # HTTP client for RPC execution
 try:
@@ -638,10 +632,6 @@ class ProductionP2PNetwork:
             'signature_failures': 0
         }
         
-        # Safety integration
-        self.circuit_breaker = CircuitBreakerNetwork()
-        self.safety_monitor = SafetyMonitor()
-        
         # Setup message handlers
         self._setup_message_handlers()
     
@@ -689,115 +679,12 @@ class ProductionP2PNetwork:
         except Exception as e:
             print(f"❌ Error stopping P2P network: {e}")
     
-    async def distribute_model_shards(self, model_cid: str, shard_count: int) -> List[ModelShard]:
-        """
-        Distribute model into shards across the P2P network (REAL implementation)
-        """
-        try:
-            # Safety check
-            safety_check = await self.safety_monitor.validate_model_output(
-                {"model_cid": model_cid, "action": "distribute"},
-                ["no_malicious_code", "validate_integrity"]
-            )
-            if not safety_check:
-                raise ValueError(f"Safety validation failed for model {model_cid}")
-            
-            # Get model data from ContentStore
-            # TODO: full ContentStore integration
-            from prsm.storage import ContentHash
-            from prsm.storage.exceptions import StorageError
-            store = get_content_store()
-            if store is not None:
-                try:
-                    model_data = await store.retrieve_local(ContentHash.from_hex(model_cid))
-                except (StorageError, OSError):
-                    model_data = b""
-            else:
-                model_data = b""
-            metadata = {}
-            model_size = len(model_data)
-            
-            # Calculate shard sizes
-            shard_size = max(model_size // shard_count, 1024)
-            shards = []
-            
-            for i in range(shard_count):
-                # Create shard
-                start_byte = i * shard_size
-                end_byte = min((i + 1) * shard_size, model_size)
-                shard_data = model_data[start_byte:end_byte]
-                
-                shard = ModelShard(
-                    model_cid=model_cid,
-                    shard_index=i,
-                    total_shards=shard_count,
-                    verification_hash=hashlib.sha256(shard_data).hexdigest(),
-                    size_bytes=len(shard_data)
-                )
-                
-                # Find hosting peers via DHT
-                hosting_peers = await self._find_hosting_peers_via_dht(shard.shard_id)
-                shard.hosted_by = hosting_peers
-                
-                # REAL shard distribution
-                success = await self._distribute_shard_to_peers(shard, shard_data, hosting_peers)
-                if not success:
-                    raise ValueError(f"Failed to distribute shard {i}")
-                
-                shards.append(shard)
-                self.shard_locations[shard.shard_id] = set(hosting_peers)
-            
-            # Update model shard registry
-            self.model_shards[model_cid] = shards
-            
-            # Store shard metadata in DHT
-            await self._store_shard_metadata_in_dht(model_cid, shards)
-            
-            print(f"✅ Distributed model {model_cid} into {shard_count} shards across network")
-            return shards
-            
-        except Exception as e:
-            print(f"❌ Failed to distribute model shards: {e}")
-            raise
-    
-    async def coordinate_distributed_execution(self, task: ArchitectTask) -> List[Future]:
-        """
-        Coordinate distributed execution across P2P network (REAL implementation)
-        """
-        _emit_collaboration_compatibility_fence(
-            "prsm.compute.federation.enhanced_p2p_network.ProductionP2PNetwork.coordinate_distributed_execution"
-        )
-        try:
-            # Safety validation
-            safety_check = await self.safety_monitor.validate_model_output(
-                task.dict(), 
-                ["validate_task_safety", "check_resource_limits"]
-            )
-            if not safety_check:
-                raise ValueError(f"Task {task.task_id} failed safety validation")
-            
-            # Find execution peers via DHT
-            execution_peers = await self._find_execution_peers_via_dht(task)
-            if len(execution_peers) < 2:
-                raise ValueError(f"Insufficient qualified peers for task execution")
-            
-            # Create execution futures
-            execution_futures = []
-            
-            for peer_id, peer_address in execution_peers:
-                # REAL peer execution via RPC
-                future = asyncio.create_task(
-                    self._execute_task_on_peer_rpc(peer_id, peer_address, task)
-                )
-                execution_futures.append(future)
-            
-            print(f"🚀 Coordinating distributed execution across {len(execution_peers)} peers")
-            return execution_futures
-            
-        except Exception as e:
-            print(f"❌ Failed to coordinate distributed execution: {e}")
-            raise
-    
+    # v1.6.0 scope alignment: distribute_model_shards() and
+    # coordinate_distributed_execution() were AGI-era model-execution entrypoints
+    # that relied on SafetyMonitor.validate_model_output. Federation primitives
+    # no longer validate in-network model output; execution now flows through
+    # prsm.node.compute_provider + prsm.collaboration.CollaborationManager.
+
     async def connect_to_peer(self, peer_address: str, peer_id: str) -> bool:
         """Connect to a peer using real networking"""
         try:
@@ -1347,13 +1234,13 @@ class ProductionP2PNetwork:
             request = json.loads(request_body.decode('utf-8'))
 
             # Route to appropriate handler based on operation
+            # v1.6.0 scope alignment: the "model_execution" / "execute" RPC
+            # operations were AGI-era model-inference entrypoints and have been
+            # removed. Shard retrieval is preserved for content distribution.
             operation = request.get("operation", "")
             result = None
 
-            if operation == "model_execution" or operation == "execute":
-                # Execute model inference
-                result = await self._handle_model_execution(request)
-            elif operation == "shard_retrieve":
+            if operation == "shard_retrieve":
                 # Retrieve shard
                 result = await self._handle_shard_retrieve_request(request)
             else:
@@ -1375,22 +1262,6 @@ class ProductionP2PNetwork:
                 await writer.wait_closed()
             except Exception:
                 pass
-
-    async def _handle_model_execution(self, request: dict) -> dict:
-        """Handle model execution RPC request.
-
-        NOTE: Legacy 5-layer agent framework (ModelExecutor) removed in v1.6.0
-        scope alignment. Model execution is now handled by WASM mobile agents
-        dispatched via prsm.compute.agents.dispatcher (Ring 2 Courier).
-        """
-        return {
-            "success": False,
-            "error": "model_execution_via_p2p_rpc_not_supported",
-            "message": (
-                "Direct model execution via P2P RPC is no longer supported. "
-                "Use WASM mobile agents via prsm.compute.agents.dispatcher."
-            )
-        }
 
     async def _handle_shard_retrieve_request(self, request: dict) -> dict:
         """Handle shard retrieve RPC request."""

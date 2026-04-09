@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
-from .models import AssetType, SwapType, TransactionStatus, CHRONOSStakingRequest
+from .models import AssetType, SwapType, TransactionStatus
 from .clearing_engine import ChronosEngine
 from .hub_spoke_router import HubSpokeRouter, RoutingPath
 
