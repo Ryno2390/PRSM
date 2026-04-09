@@ -25,11 +25,6 @@ from prsm.core.config import settings
 from prsm.core.models import GovernanceProposal, Vote, PRSMBaseModel
 from prsm.economy.tokenomics.atomic_ftns_service import get_atomic_ftns_service
 from prsm.core.database import FTNSQueries, GovernanceQueries
-# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
-try:
-    from prsm.core.safety.monitor import SafetyMonitor
-except ImportError:
-    SafetyMonitor = None  # type: ignore[assignment,misc]
 
 logger = structlog.get_logger()
 
@@ -177,9 +172,6 @@ class TokenWeightedVoting:
         # Voting power cache
         self.voting_power_cache: Dict[str, VotingPowerCalculation] = {}
         self.cache_expiry: Dict[str, datetime] = {}
-        
-        # Safety integration
-        self.safety_monitor = SafetyMonitor() if SafetyMonitor is not None else None
 
         # Performance statistics
         self.governance_stats = {
@@ -227,16 +219,7 @@ class TokenWeightedVoting:
                 )
                 if not proposal_fee_paid:
                     raise ValueError("Insufficient FTNS balance for proposal submission fee")
-                
-                # Safety validation
-                safety_check = await self.safety_monitor.validate_model_output(
-                    {"proposal": proposal.dict()},
-                    ["no_malicious_content", "content_appropriateness"]
-                )
-                
-                if not safety_check:
-                    raise ValueError("Proposal failed safety validation")
-                
+
                 # Set proposal metadata
                 proposal.proposer_id = proposer_id
                 proposal.created_at = datetime.now(timezone.utc)

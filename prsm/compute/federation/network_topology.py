@@ -15,14 +15,7 @@ import networkx as nx
 
 from prsm.core.config import settings
 from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
-# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
-try:
-    from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
-    from prsm.core.safety.monitor import SafetyMonitor
-except ImportError:
-    CircuitBreakerNetwork = None  # type: ignore[assignment,misc]
-    ThreatLevel = None  # type: ignore[assignment,misc]
-    SafetyMonitor = None  # type: ignore[assignment,misc]
+# v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor / CircuitBreakerNetwork) deleted.
 from .consensus import DistributedConsensus, ConsensusResult, ConsensusType
 
 
@@ -199,12 +192,8 @@ class TopologyOptimizer:
         # Performance tracking
         self.baseline_performance: Optional[Dict[str, float]] = None
         self.current_performance: Dict[str, float] = {}
-        
-        # Safety integration
-        self.circuit_breaker = CircuitBreakerNetwork()
-        self.safety_monitor = SafetyMonitor()
-    
-    async def initialize_topology(self, peer_nodes: List[PeerNode], 
+
+    async def initialize_topology(self, peer_nodes: List[PeerNode],
                                 topology_type: TopologyType = TopologyType.ADAPTIVE) -> bool:
         """Initialize network topology with peer nodes"""
         try:

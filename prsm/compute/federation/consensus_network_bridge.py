@@ -42,11 +42,7 @@ from .scalable_p2p_network import (
 )
 from prsm.core.config import settings
 from prsm.core.models import PeerNode
-# v1.6.0 scope alignment: prsm.core.safety deleted in PR 3
-try:
-    from prsm.core.safety.monitor import SafetyMonitor
-except ImportError:
-    SafetyMonitor = None  # type: ignore[assignment,misc]
+# v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor) deleted.
 
 logger = logging.getLogger(__name__)
 
@@ -86,8 +82,7 @@ class ConsensusNetworkBridge:
     def __init__(self):
         self.consensus_system = EnhancedConsensusSystem()
         self.p2p_network = ScalableP2PNetwork()
-        self.safety_monitor = SafetyMonitor()
-        
+
         # Integration state
         self.active_consensus_sessions: Dict[str, Dict[str, Any]] = {}
         self.consensus_message_queue: deque = deque(maxlen=1000)

@@ -31,7 +31,6 @@ from prsm.core.auth.auth_manager import auth_manager
 from prsm.core.integrations.security.audit_logger import audit_logger
 from .voting import get_token_weighted_voting
 from .quadratic_voting import quadratic_voting
-from .proposals import get_proposal_manager
 
 logger = structlog.get_logger(__name__)
 
@@ -108,7 +107,6 @@ class GovernanceTokenDistributor:
         # Service integrations
         self.ftns_service = DatabaseFTNSService()
         self.voting_system = get_token_weighted_voting()
-        self.proposal_manager = get_proposal_manager()
         
         # Distribution tracking
         self.distributions: Dict[UUID, TokenDistribution] = {}
