@@ -2,6 +2,82 @@
 
 All notable changes to PRSM are documented here.
 
+## [1.6.0] - 2026-04-09
+
+### Changed - Scope Alignment Release
+
+PRSM's scope has been formally narrowed to match the current product thesis:
+a P2P infrastructure protocol for open-source collaboration, not an AGI
+framework. This release removes ~210K lines of legacy code from earlier
+conceptions and fixes the real bugs that legacy was hiding.
+
+### Removed
+
+**Legacy AGI Framework (entire subsystems):**
+- Old NWTN orchestrator and meta-reasoning subsystems (meta_reasoning_engine,
+  hybrid_integration, complete_system, voicebox, agent_forge, hybrid_architecture,
+  chemistry_hybrid_executor, backends, bsc, team, whiteboard, synthesis,
+  openclaw, reasoning, engines, architectures, knowledge_graph) — Ring 9
+  (NWTN training pipeline) preserved for future fine-tuned NWTN model
+- Teacher model framework (prsm/compute/teachers/, distillation/, evolution/,
+  improvement/, students/, candidates/, ai_orchestration/)
+- Benchmarking, evaluation, validation, network subsystems
+- 5-layer agent framework (architects, compilers, prompters, routers,
+  executors) from prsm/compute/agents/ — WASM mobile agent runtime preserved
+- AGI safety circuit breakers (prsm/core/safety/)
+- Enterprise/institutional infrastructure (prsm/core/institutional/,
+  enterprise/, compliance/, teams/)
+- AI marketplace (prsm/economy/marketplace/, prsm/economy/tokenomics/marketplace.py)
+- Coordinated multi-agent collaboration (prsm/collaboration/)
+- Legacy top-level modules (knowledge_system, demo, performance, sdks,
+  query, response, learning, nlp, optimization, dev_cli)
+- AI-improvement governance (prsm/economy/governance/proposals.py)
+- Legacy API routers: distillation_api, cdn_api, marketplace (3 variants),
+  recommendation_api, reputation_api, monitoring_api, compliance_api,
+  teams_api, budget_api legacy endpoints
+- CLI command groups: `prsm teacher`, `prsm nwtn`, `prsm distill`,
+  `prsm marketplace`, `prsm reputation`, `prsm nwtn agent-team`,
+  `prsm agent forge` (~2600 lines of CLI wiring to deleted backends)
+- MCP tool `prsm_decompose` (depended on deleted agent_forge)
+- `prsm-dev` bootstrap CLI (generated NWTNOrchestrator sample code)
+
+**Legacy files within kept subsystems:**
+- prsm/compute/federation/: distributed_evolution, distributed_rlt_network,
+  knowledge_transfer, phase5_demo, distributed_model_registry, model_registry
+- prsm/compute/chronos/: enterprise_sdk, staking_integration, treasury_provider
+- prsm/core/monitoring/: rlt_performance_monitor, enterprise_monitoring
+- prsm/node/node.py: _NodeContextAdapter, _NodeFTNSAdapter, _NodeIPFSAdapter,
+  _NodeModelRegistryAdapter (shims that bridged node subsystems into the
+  NWTN orchestrator interface)
+- prsm/core/config.py: get_backend_config + backend_config property
+  (referenced deleted prsm.compute.nwtn.backends)
+
+### Fixed
+
+- Pydantic v2 migration in the API layer (Field `regex=` → `pattern=`)
+- ContentStore wiring in content_provider.py and storage_provider.py
+- StorageProofVerifier / StorageProver / ContentUploader: removed obsolete
+  `ipfs_client` and `ipfs_api_url` kwargs (v1.5.0 IPFS migration stragglers)
+- Removed stale test skip markers hiding passing tests
+- 14 stale test import errors eliminated by deleting legacy test files:
+  test_phase9_completeness, test_system_resource_integration,
+  test_section28_integrations, test_release_scripts,
+  test_node_model_registry; plus updating test_mcp_server and
+  test_content_upload to the new storage interface
+
+### Migration Notes
+
+No public API changes for in-scope modules. If you were importing from any of
+the removed legacy subsystems, you were depending on code that was never in
+the current product scope. Migration paths:
+- For distributed AI workloads: use third-party LLMs via MCP
+- For content storage: use `prsm.storage` (native since v1.4.0)
+- For P2P networking: use `prsm.compute.federation` (mesh + consensus)
+- For WASM agent dispatch: use `prsm.compute.agents` (dispatcher/executor)
+- For governance: use `prsm.governance` (protocol governance)
+
+---
+
 ## [0.35.1] - 2026-04-07
 
 ### Added — Phase 1: Sovereign-Edge AI (Rings 1-6)
