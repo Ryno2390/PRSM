@@ -31,7 +31,11 @@ from prsm.core.models import (
 from prsm.data.context.enhanced_context_compression import (
     ContextSegment, ContextType, ContextImportance, EnhancedContextCompressionEngine
 )
-from prsm.compute.agents.executors.model_executor import ModelExecutor
+# ModelExecutor removed (agents/executors/ deleted in v1.6.0 scope alignment)
+try:
+    from prsm.compute.agents.executors.model_executor import ModelExecutor
+except ImportError:
+    ModelExecutor = None  # type: ignore[assignment,misc]
 
 logger = structlog.get_logger(__name__)
 

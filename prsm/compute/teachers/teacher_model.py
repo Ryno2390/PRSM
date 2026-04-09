@@ -20,7 +20,13 @@ from prsm.core.models import (
     TeacherModel, Curriculum, LearningSession,
     ModelType, PRSMBaseModel
 )
-from .real_teacher_implementation import create_real_teacher, RealTeacherModel
+# real_teacher_implementation imports agents/executors/model_executor (deleted in PR 1).
+# Wrapped in try/except; teacher_model.py is deleted in PR 3.
+try:
+    from .real_teacher_implementation import create_real_teacher, RealTeacherModel
+except (ImportError, ModuleNotFoundError):
+    create_real_teacher = None  # type: ignore[assignment]
+    RealTeacherModel = None  # type: ignore[assignment,misc]
 
 # Import training infrastructure from Phase 1.3
 from .training_config import (

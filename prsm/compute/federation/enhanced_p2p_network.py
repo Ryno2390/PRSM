@@ -49,7 +49,7 @@ from prsm.storage import get_content_store
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from prsm.core.safety.circuit_breaker import CircuitBreakerNetwork, ThreatLevel
 from prsm.core.safety.monitor import SafetyMonitor
-from prsm.compute.agents.executors.model_executor import ModelExecutor
+# ModelExecutor import removed (agents/executors/ deleted in v1.6.0 scope alignment)
 
 # HTTP client for RPC execution
 try:
@@ -1371,48 +1371,20 @@ class ProductionP2PNetwork:
                 pass
 
     async def _handle_model_execution(self, request: dict) -> dict:
-        """Handle model execution RPC request."""
-        try:
-            instruction = request.get("instruction", "")
-            args = request.get("args", {})
-            model_id = args.get("model_id", "gpt-3.5-turbo")  # Default fallback
-            parameters = args.get("parameters", {})
+        """Handle model execution RPC request.
 
-            # Create model executor and execute the task
-            executor = ModelExecutor()
-
-            # Prepare input for the model executor
-            input_data = {
-                "task": instruction,
-                "models": [model_id],
-                "parallel": False,
-                **parameters
-            }
-
-            # Execute the task
-            results = await executor.process(input_data, context={"user_id": "p2p_network"})
-
-            if results and results[0].success:
-                result_content = results[0].result
-                if isinstance(result_content, dict):
-                    content = result_content.get("content", str(result_content))
-                else:
-                    content = str(result_content)
-
-                return {
-                    "success": True,
-                    "result": content,
-                    "model_id": results[0].model_id,
-                    "execution_time": results[0].execution_time,
-                    "tokens_used": len(content.split())  # Approximate token count
-                }
-            else:
-                error_msg = results[0].error if results else "No results returned"
-                return {"success": False, "error": error_msg}
-
-        except Exception as e:
-            logger.error("model_execution_failed: %s", str(e))
-            return {"success": False, "error": str(e)}
+        NOTE: Legacy 5-layer agent framework (ModelExecutor) removed in v1.6.0
+        scope alignment. Model execution is now handled by WASM mobile agents
+        dispatched via prsm.compute.agents.dispatcher (Ring 2 Courier).
+        """
+        return {
+            "success": False,
+            "error": "model_execution_via_p2p_rpc_not_supported",
+            "message": (
+                "Direct model execution via P2P RPC is no longer supported. "
+                "Use WASM mobile agents via prsm.compute.agents.dispatcher."
+            )
+        }
 
     async def _handle_shard_retrieve_request(self, request: dict) -> dict:
         """Handle shard retrieve RPC request."""

@@ -28,7 +28,11 @@ from pydantic import BaseModel, Field
 from prsm.core.models import (
     PRSMBaseModel, TimestampMixin, ModelType, TaskStatus, SafetyLevel
 )
-from prsm.compute.agents.executors.model_executor import ModelExecutor
+# ModelExecutor removed (agents/executors/ deleted in v1.6.0 PR 1). students/ deleted in PR 3.
+try:
+    from prsm.compute.agents.executors.model_executor import ModelExecutor
+except (ImportError, ModuleNotFoundError):
+    ModelExecutor = None  # type: ignore[assignment,misc]
 
 logger = structlog.get_logger(__name__)
 
