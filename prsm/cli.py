@@ -498,6 +498,11 @@ from prsm.cli_modules.skills_cli import skills as skills_group  # noqa: E402
 main.add_command(skills_group, "skills")
 
 
+# ── On-chain Provenance CLI (Phase 1) ────────────────────────────────
+from prsm.cli_modules.provenance import provenance as provenance_group  # noqa: E402
+main.add_command(provenance_group, "provenance")
+
+
 @main.command()
 @click.option("--host", default="127.0.0.1", help="Host to bind to (default: localhost for security)")
 @click.option("--port", default=8000, help="Port to bind to")
