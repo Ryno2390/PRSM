@@ -2,41 +2,103 @@
 
 All notable changes to PRSM are documented here.
 
-## [Unreleased] — Phase 1.1: Codex Review Fixes (partial)
+## [Unreleased] — Phase 1.1 + 1.2: Codex Review Fixes (complete)
 
-Independent codex re-review of Phase 1 surfaced 6 P1 + 3 P2 bugs.
-Phase 1.1 addressed 8 of the 9, but the codex re-review of Phase 1.1
-itself caught a partial fix on P1 #1 plus three new findings:
-
-  - **P1 #1 (partial)** — `compute_content_hash` helper, CLI, and the
-    `_try_onchain_distribute` reader path are all in place, but the
-    upload/serve/API surface (`content_uploader.py`, `content_provider.py`,
-    `content_economy_routes.py`) never populates `provenance_hash` in
-    `content_metadata`. Real traffic still falls back to local. The
-    end-to-end hash chain claim is not yet true.
-  - **P2 (new)** — `broadcast_pending` payments are reported as
-    `COMPLETED` to API callers because `process_content_access` sets the
-    status unconditionally after `_distribute_royalties` returns.
-  - **P2 (new)** — A malformed `provenance_hash` raises `ValueError` from
-    `bytes.fromhex()` outside the protected try block, so the entire
-    payment is marked `FAILED` instead of falling back to local.
-  - **P3 (new)** — `ProvenanceRegistryClient.register_content` still
-    validates `royalty_rate_bps <= 10000`; the contract caps at 9800.
-
-**Verdict: NOT SAFE TO DEPLOY.** Phase 1.2 will close the four
-remaining items.
+Independent codex review of Phase 1 surfaced 6 P1 + 3 P2 bugs; Phase
+1.1 closed 8 of 9. Codex re-review of Phase 1.1 caught the partial
+P1 #1 fix plus three new findings; Phase 1.2 closed all four and
+picked up five additional findings across three subsequent codex
+passes before reaching **SAFE TO DEPLOY**.
 
 ### What landed in Phase 1.1 (verified by codex)
 
-  - P1 #2: capped royalty rate at MAX_ROYALTY_RATE_BPS = 9800
-  - P1 #4: distinguished pre-broadcast vs post-broadcast failures
-           via BroadcastFailedError / OnChainPendingError / OnChainRevertedError
+  - P1 #2: capped royalty rate at `MAX_ROYALTY_RATE_BPS = 9800`
+  - P1 #4: distinguished pre-broadcast vs post-broadcast failures via
+    `BroadcastFailedError` / `OnChainPendingError` / `OnChainRevertedError`
   - P1 #5 + P2 #8: per-client lock + pending nonce strategy
   - P1 #6: local fallback now pays serving node its remainder
-  - P2 #7: slim getCreatorAndRate getter eliminates metadataUri gas
-           griefing
-  - P2 #9: deploy script preflights checksum, bytecode, symbol(),
-           chain id; optional AUTO_VERIFY=1 for Basescan
+  - P2 #7: slim `getCreatorAndRate` getter eliminates `metadataUri`
+           gas griefing
+  - P2 #9: deploy script preflights checksum, bytecode, `symbol()`,
+           chain id; optional `AUTO_VERIFY=1` for Basescan
+
+### What landed in Phase 1.2 (verified by codex, fourth pass: SAFE TO DEPLOY)
+
+From Phase 1.1 re-review (four original findings):
+
+  - **P1 #1 (closed)** — `provenance_hash` now threads end-to-end
+    through upload, gossip, serve, API, and marketplace retrieval:
+      * `ContentUploader.__init__` accepts `creator_address`;
+        `upload()` and `_upload_with_sharding()` compute the canonical
+        hash via `compute_content_hash(creator_address, file_bytes)`
+        and persist it on `UploadedContent`, the signed provenance
+        record, and the `GOSSIP_CONTENT_ADVERTISE` payload.
+      * `ContentProvider` forwards it from `_local_content` into
+        `process_content_access()` at serve time.
+      * `ContentAccessRequest` (FastAPI) accepts an optional
+        `provenance_hash` field.
+      * `ContentAnnouncement.to_gossip_data()` /
+        `from_gossip_data()` round-trip the hash; `ContentIndex`
+        stores it on `ContentRecord` and backfills it from later
+        advertisements without clobbering populated values.
+      * `announce_content()` helper forwards a caller-supplied hash.
+      * `request_content_retrieval()` looks up the hash (plus real
+        `creator_id` and `parent_cids`) from `ContentIndex` so the
+        marketplace path actually routes through the on-chain
+        RoyaltyDistributor.
+  - **P2 — `PaymentStatus.PENDING_ONCHAIN`** — new enum value.
+    `process_content_access()` scans the distribution list for any
+    `broadcast_pending` entry and surfaces `PENDING_ONCHAIN` instead
+    of `COMPLETED`. Retrieval and serve paths explicitly accept it as
+    non-terminal.
+  - **P2 — malformed `provenance_hash`** — `bytes.fromhex()` moved
+    inside the protected try block in `_try_onchain_distribute()`,
+    so a bad hex string safely returns `None` and falls back to local
+    instead of marking the whole payment `FAILED`.
+  - **P3 — 9800 cap** — `ProvenanceRegistryClient.register_content`
+    now mirrors the contract's `MAX_ROYALTY_RATE_BPS = 9800` and
+    rejects `9801..10000` client-side.
+
+From Phase 1.2 second codex pass (two new P1s):
+
+  - **P1 — kwarg/attr alignment** — `ContentEconomy.process_content_access`
+    takes `content_id=`, not `cid=`; the dataclass field is
+    `content_id`. The provider serve path, the FastAPI handler, the
+    `_fire_payment_for_test` seam, and the `multi_party_escrow`
+    bridge all called with the wrong kwarg and read `payment.cid`,
+    TypeError'ing before any Phase 1.2 code could run. All four sites
+    are now aligned; the hardened
+    `test_provider_forwards_provenance_hash_to_content_economy` test
+    uses a real `ContentEconomy` instance (not a free-function mock)
+    so a regression is caught loudly.
+  - **P1 — gossip discovery** — `ContentAnnouncement` and
+    `ContentRecord` gained a `provenance_hash` field, and
+    `ContentIndex._on_content_advertise()` copies it from the gossip
+    payload into the record without clobbering an already-populated
+    value.
+
+From Phase 1.2 third codex pass (two final findings):
+
+  - **P2 — marketplace retrieval** — `request_content_retrieval()`
+    now looks up the ContentIndex record and forwards
+    `provenance_hash`, `creator_id`, and `parent_cids` into
+    `process_content_access()`, so the marketplace path can naturally
+    produce `PENDING_ONCHAIN` instead of always falling back to local.
+  - **P3 — `announce_content()` helper** — now forwards a
+    caller-supplied `provenance_hash` into the `ContentAnnouncement`
+    dataclass (previously dropped).
+
+### Phase 1.3 follow-up (not blocking)
+
+  - **P2 (deferred)** — `provenance_hash` is not persisted in the
+    `ContentProvenanceModel` SQL row. After a node restart, previously
+    uploaded content loses its hash and silently bypasses on-chain
+    routing. Phase 1.3 will add an Alembic migration, a column on the
+    model, and restore-on-hydrate. Deferred out of Phase 1.2 scope
+    because DB migrations warrant their own plan.
+
+**Verdict: SAFE TO DEPLOY** (fourth codex pass, reasoning effort high).
+Operator-gated Base Sepolia bake-in remains the gate to Base mainnet.
 
 ## [Unreleased] — Phase 1: On-Chain Provenance
 
