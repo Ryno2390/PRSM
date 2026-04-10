@@ -594,3 +594,65 @@ def test_uploader_without_creator_address_skips_provenance_hash():
 
     assert uploaded is not None
     assert uploaded.provenance_hash is None
+
+
+# ── Phase 1.2 Task 5: ContentProvider forwards provenance_hash ──────────
+
+
+def test_provider_forwards_provenance_hash_to_content_economy():
+    """ContentProvider.register_local_content with a provenance_hash in
+    metadata must forward it to ContentEconomy.process_content_access at
+    serve time. Phase 1.2 P1 #1 fix (provider half)."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_provider import ContentProvider
+
+    identity = MagicMock()
+    identity.node_id = "node-provider-xyz"
+    transport = MagicMock()
+    transport.send_message = AsyncMock()
+    gossip = MagicMock()
+    content_economy = MagicMock()
+    captured = {}
+
+    async def capture_access(cid, accessor_id, content_metadata):
+        captured["cid"] = cid
+        captured["content_metadata"] = content_metadata
+        result = MagicMock()
+        result.status = MagicMock()
+        result.status.value = "completed"
+        result.amount = 100
+        return result
+
+    content_economy.process_content_access = capture_access
+
+    provider = ContentProvider(
+        identity=identity,
+        transport=transport,
+        gossip=gossip,
+        content_economy=content_economy,
+    )
+
+    expected_hash = "0x" + "ab" * 32
+    provider.register_local_content(
+        cid="cid-with-hash",
+        size_bytes=100,
+        content_hash="sha256-of-bytes",
+        filename="x.txt",
+        metadata={
+            "creator_id": "creator-xyz",
+            "royalty_rate": 0.01,
+            "provenance_hash": expected_hash,
+        },
+    )
+
+    asyncio.run(
+        provider._fire_payment_for_test(
+            cid="cid-with-hash",
+            accessor_id="some-peer",
+        )
+    )
+
+    assert captured["cid"] == "cid-with-hash"
+    assert captured["content_metadata"].get("provenance_hash") == expected_hash

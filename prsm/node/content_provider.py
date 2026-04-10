@@ -553,6 +553,15 @@ class ContentProvider:
             # Process payment for content access (Phase 4)
             if self.content_economy:
                 try:
+                    # Phase 1.2: forward provenance_hash so content_economy can
+                    # route the payment through the on-chain RoyaltyDistributor
+                    # when enabled. The uploader populates it either at the top
+                    # level or nested under "metadata" depending on code path.
+                    nested_metadata = content_info.get("metadata") or {}
+                    provenance_hash = (
+                        content_info.get("provenance_hash")
+                        or nested_metadata.get("provenance_hash")
+                    )
                     payment = await self.content_economy.process_content_access(
                         cid=cid,
                         accessor_id=peer.peer_id,
@@ -560,6 +569,7 @@ class ContentProvider:
                             "royalty_rate": content_info.get("royalty_rate", 0.01),
                             "creator_id": content_info.get("creator_id", ""),
                             "parent_cids": content_info.get("parent_cids", []),
+                            "provenance_hash": provenance_hash,
                         },
                     )
                     if payment.status.value == "completed":
@@ -844,8 +854,38 @@ class ContentProvider:
             logger.error(f"Gateway fetch failed for {gateway_url}: {e}")
         return None
     
+    # ── Phase 1.2 test seam ────────────────────────────────────────────
+
+    async def _fire_payment_for_test(
+        self, cid: str, accessor_id: str
+    ) -> Any:
+        """Test seam: invoke the payment-on-access path directly. Used by
+        tests/integration/test_onchain_provenance_e2e.py to verify
+        provenance_hash forwarding without standing up the full P2P stack.
+        """
+        if not self.content_economy:
+            return None
+        content_info = self._local_content.get(cid)
+        if not content_info:
+            return None
+        nested_metadata = content_info.get("metadata") or {}
+        provenance_hash = (
+            content_info.get("provenance_hash")
+            or nested_metadata.get("provenance_hash")
+        )
+        return await self.content_economy.process_content_access(
+            cid=cid,
+            accessor_id=accessor_id,
+            content_metadata={
+                "royalty_rate": content_info.get("royalty_rate", 0.01),
+                "creator_id": content_info.get("creator_id", ""),
+                "parent_cids": content_info.get("parent_cids", []),
+                "provenance_hash": provenance_hash,
+            },
+        )
+
     # ── Statistics ──────────────────────────────────────────────────────
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """Get provider statistics."""
         return {
