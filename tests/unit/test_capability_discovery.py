@@ -456,10 +456,12 @@ class TestComputeRequesterSmartRouting:
         assert JobType.INFERENCE in JOB_TYPE_PREFERRED_BACKENDS
         assert JobType.EMBEDDING in JOB_TYPE_PREFERRED_BACKENDS
         assert JobType.BENCHMARK in JOB_TYPE_PREFERRED_BACKENDS
-        assert JobType.TRAINING in JOB_TYPE_PREFERRED_BACKENDS
         # WASM_EXECUTE does not require an LLM backend — it is intentionally
         # absent from JOB_TYPE_PREFERRED_BACKENDS.
         assert JobType.WASM_EXECUTE not in JOB_TYPE_PREFERRED_BACKENDS
+        # JobType.TRAINING was removed in v1.6.x along with the
+        # distillation/teacher subsystem (PRSM is no longer an AGI framework).
+        assert not hasattr(JobType, "TRAINING")
 
 
 class TestCapabilityDetection:

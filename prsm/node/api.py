@@ -34,7 +34,6 @@ from prsm.node.api_hardening import (
     require_auth,
     websocket_status_endpoint,
 )
-from prsm.node.node import TrainingJob, TrainingJobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -93,27 +92,6 @@ class ContentUploadRequest(BaseModel):
         description="CIDs of source material this content derives from",
     )
 
-
-# ── Teacher Model Constants ─────────────────────────────────────
-
-TEACHER_CREATION_REWARD_FTNS = 10.0   # FTNS credited for creating a teacher
-TEACHER_TRAINING_BASE_COST_FTNS = 50.0  # Minimum FTNS charged per training run
-
-
-# ── Teacher Model Request/Response Models ───────────────────────
-
-class TeacherCreateRequest(BaseModel):
-    """Request body for creating a new teacher model."""
-    specialization: str = Field(..., description="Domain name, e.g. 'physics', 'genomics'")
-    domain: Optional[str] = Field(None, description="Sub-domain; defaults to specialization")
-    use_real_implementation: bool = Field(True, description="Use PyTorch backend if available")
-
-
-class TeacherTrainingRequest(BaseModel):
-    """Request body for starting a teacher training run."""
-    epochs: Optional[int] = Field(None, ge=1, le=100, description="Override training epochs")
-    learning_rate: Optional[float] = Field(None, gt=0.0, description="Override learning rate")
-    training_data_cid: Optional[str] = Field(None, description="IPFS CID of custom training data")
 
 
 def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
@@ -448,6 +426,63 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "job_id": job_id,
             "response": result.get("response", result.get("text", str(result))),
             "result": result,
+        }
+
+    @app.get("/privacy/budget", tags=["privacy"])
+    async def get_privacy_budget() -> Dict[str, Any]:
+        """Return the current differential-privacy budget audit report.
+
+        Used by the prsm_privacy_status MCP tool. The budget is enforced
+        across all forge queries with privacy_level != 'none'.
+        """
+        if not hasattr(node, "privacy_budget") or node.privacy_budget is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Privacy budget not initialized (Ring 7 unavailable)",
+            )
+        return node.privacy_budget.get_audit_report()
+
+    @app.post("/compute/forge/quote")
+    async def compute_forge_quote(body: Dict[str, Any] = {}) -> Dict[str, Any]:
+        """Get a cost quote for a forge query without executing it (free).
+
+        POST body: {
+            "query": "...",
+            "shard_cids": ["QmA", "QmB"],   // optional
+            "shard_count": 3,                // optional, default 3
+            "hardware_tier": "t2",           // optional, default t2
+            "estimated_pcu_per_shard": 50.0  // optional, default 50.0
+        }
+
+        Returns the same CostQuote shape used by the prsm_quote MCP tool and
+        the Python SDK's client.quote() helper. This endpoint is what the
+        JavaScript and Go SDKs call.
+        """
+        from prsm.economy.pricing import PricingEngine
+
+        query = body.get("query", "") or ""
+        if not query.strip():
+            raise HTTPException(status_code=400, detail="Missing 'query' field")
+
+        shard_cids = body.get("shard_cids") or []
+        # If caller passed shard_cids, use that count; otherwise honor explicit shard_count
+        shard_count = len(shard_cids) if shard_cids else int(body.get("shard_count", 3))
+        if shard_count < 1:
+            shard_count = 1
+        hardware_tier = str(body.get("hardware_tier", "t2"))
+        estimated_pcu = float(body.get("estimated_pcu_per_shard", 50.0))
+
+        engine = PricingEngine()
+        quote = engine.quote_swarm_job(
+            shard_count=shard_count,
+            hardware_tier=hardware_tier,
+            estimated_pcu_per_shard=estimated_pcu,
+        )
+        return {
+            "query": query,
+            "shard_count": shard_count,
+            "hardware_tier": hardware_tier,
+            **quote.to_dict(),
         }
 
     @app.post("/compute/forge")
@@ -2152,713 +2187,6 @@ def create_api_app(node: Any, enable_security: bool = True) -> FastAPI:
             "transactions": [tx.to_dict() for tx in transactions],
             "count": len(transactions),
         }
-
-    # ── Teacher Model Endpoints ───────────────────────────────────────
-
-    @app.post("/teacher/create", tags=["teacher"])
-    async def create_teacher(request: TeacherCreateRequest) -> Dict[str, Any]:
-        """
-        Create a new teacher model.
-        
-        Creates a distilled teacher model for the specified specialization.
-        Rewards the node with FTNS tokens for contributing to the network.
-        
-        Args:
-            request: Teacher creation parameters including specialization
-            
-        Returns:
-            Created teacher model details including teacher_id
-            
-        Raises:
-            HTTPException 503: If teacher creation infrastructure unavailable
-        """
-        try:
-            from prsm.core.models import TeacherModel, ModelType
-            from prsm.compute.teachers import create_production_teacher
-            
-            # Create the teacher model
-            teacher_model = TeacherModel(
-                name=f"{request.specialization.title()} Teacher",
-                specialization=request.specialization,
-            )
-            
-            # Create the DistilledTeacher instance (async)
-            teacher = await create_production_teacher(
-                teacher_model=teacher_model,
-                use_real_implementation=request.use_real_implementation
-            )
-            
-            # Generate teacher ID and store metadata
-            teacher_id = str(teacher_model.teacher_id)
-            teacher._created_at = time.time()
-            
-            # Store in node's registry
-            node.teacher_registry[teacher_id] = teacher
-            
-            # Persist registry
-            node._save_teacher_registry()
-            
-            # Reward the node for creating a teacher
-            if hasattr(node, '_ftns_adapter') and node._ftns_adapter:
-                await node._ftns_adapter.charge_user(
-                    user_id=node.identity.node_id,
-                    amount=-TEACHER_CREATION_REWARD_FTNS,  # Negative = credit
-                    description=f"Teacher creation reward: {request.specialization}"
-                )
-            
-            logger.info(f"Created teacher model: {teacher_id} for specialization: {request.specialization}")
-            
-            return {
-                "teacher_id": teacher_id,
-                "name": teacher_model.name,
-                "specialization": teacher_model.specialization,
-                "domain": request.domain or request.specialization,
-                "model_type": teacher_model.model_type.value,
-                "created_at": teacher._created_at,
-                "reward_ftns": TEACHER_CREATION_REWARD_FTNS,
-            }
-            
-        except ImportError as e:
-            logger.error(f"Teacher model imports failed: {e}")
-            raise HTTPException(
-                status_code=503,
-                detail="Teacher model infrastructure not available"
-            )
-        except Exception as e:
-            logger.error(f"Teacher creation failed: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to create teacher: {str(e)}"
-            )
-
-    @app.get("/teacher/list", tags=["teacher"])
-    async def list_teachers() -> Dict[str, Any]:
-        """
-        List all teacher models.
-        
-        Returns metadata for all teacher models registered on this node.
-        
-        Returns:
-            List of teacher model metadata dictionaries
-        """
-        # Load persisted metadata
-        persisted_meta = node._load_teacher_registry_meta()
-        
-        # Combine with in-memory registry
-        teachers = []
-        
-        # Add from in-memory registry (most up-to-date)
-        for teacher_id, teacher in node.teacher_registry.items():
-            teachers.append({
-                "teacher_id": teacher_id,
-                "name": teacher.teacher_model.name,
-                "specialization": teacher.teacher_model.specialization,
-                "domain": getattr(teacher.teacher_model, "domain", teacher.teacher_model.specialization),
-                "model_type": teacher.teacher_model.model_type.value,
-                "created_at": getattr(teacher, "_created_at", None),
-                "status": "active",
-            })
-        
-        # Add any persisted teachers not in memory
-        in_memory_ids = set(node.teacher_registry.keys())
-        for teacher_id, meta in persisted_meta.items():
-            if teacher_id not in in_memory_ids:
-                teachers.append({
-                    "teacher_id": teacher_id,
-                    "name": meta.get("name"),
-                    "specialization": meta.get("specialization"),
-                    "domain": meta.get("domain"),
-                    "model_type": meta.get("model_type"),
-                    "created_at": meta.get("created_at"),
-                    "status": "persisted",
-                })
-        
-        return {
-            "teachers": teachers,
-            "count": len(teachers),
-        }
-
-    @app.get("/teacher/{teacher_id}", tags=["teacher"])
-    async def get_teacher(teacher_id: str) -> Dict[str, Any]:
-        """
-        Get details for a specific teacher model.
-        
-        Args:
-            teacher_id: UUID of the teacher model
-            
-        Returns:
-            Detailed teacher model information
-            
-        Raises:
-            HTTPException 404: If teacher not found
-        """
-        # Check in-memory registry first
-        if teacher_id in node.teacher_registry:
-            teacher = node.teacher_registry[teacher_id]
-            return {
-                "teacher_id": teacher_id,
-                "name": teacher.teacher_model.name,
-                "specialization": teacher.teacher_model.specialization,
-                "domain": getattr(teacher.teacher_model, "domain", teacher.teacher_model.specialization),
-                "model_type": teacher.teacher_model.model_type.value,
-                "performance_score": getattr(teacher.teacher_model, "performance_score", None),
-                "created_at": getattr(teacher, "_created_at", None),
-                "status": "active",
-                "teaching_history_count": len(getattr(teacher, "teaching_history", [])),
-            }
-        
-        # Check persisted metadata
-        persisted_meta = node._load_teacher_registry_meta()
-        if teacher_id in persisted_meta:
-            meta = persisted_meta[teacher_id]
-            return {
-                "teacher_id": teacher_id,
-                "name": meta.get("name"),
-                "specialization": meta.get("specialization"),
-                "domain": meta.get("domain"),
-                "model_type": meta.get("model_type"),
-                "created_at": meta.get("created_at"),
-                "status": "persisted",
-            }
-        
-        raise HTTPException(
-            status_code=404,
-            detail=f"Teacher model not found: {teacher_id}"
-        )
-
-    @app.post("/teacher/{teacher_id}/train", tags=["teacher"])
-    async def train_teacher(teacher_id: str, request: TeacherTrainingRequest) -> Dict[str, Any]:
-        """
-        Start a training run for a teacher model.
-        
-        Initiates an asynchronous training run. Charges FTNS based on
-        training configuration.
-        
-        Args:
-            teacher_id: UUID of the teacher model
-            request: Training configuration parameters
-            
-        Returns:
-            Training run details including run_id and poll_url
-            
-        Raises:
-            HTTPException 404: If teacher not found
-            HTTPException 402: If insufficient FTNS balance
-            HTTPException 422: If training configuration invalid
-        """
-        # Check if teacher exists
-        if teacher_id not in node.teacher_registry:
-            # Try to load from persisted metadata
-            persisted_meta = node._load_teacher_registry_meta()
-            if teacher_id in persisted_meta:
-                raise HTTPException(
-                    status_code=422,
-                    detail="Teacher model persisted but not loaded. Restart node or recreate teacher."
-                )
-            raise HTTPException(
-                status_code=404,
-                detail=f"Teacher model not found: {teacher_id}"
-            )
-        
-        teacher = node.teacher_registry[teacher_id]
-        
-        # Check balance for training cost
-        if hasattr(node, '_ftns_adapter') and node._ftns_adapter:
-            balance = await node._ftns_adapter.get_user_balance(node.identity.node_id)
-            if balance.balance < TEACHER_TRAINING_BASE_COST_FTNS:
-                raise HTTPException(
-                    status_code=402,
-                    detail=f"Insufficient FTNS balance. Required: {TEACHER_TRAINING_BASE_COST_FTNS}, Available: {balance.balance}"
-                )
-            
-            # Charge for training
-            await node._ftns_adapter.charge_user(
-                user_id=node.identity.node_id,
-                amount=TEACHER_TRAINING_BASE_COST_FTNS,
-                description=f"Teacher training: {teacher.teacher_model.specialization}"
-            )
-        
-        # Generate a unique run ID for this training run
-        run_id = str(_uuid.uuid4())
-
-        # Read total_epochs from the teacher's config before launching
-        total_epochs = None
-        if hasattr(teacher, "training_config"):
-            total_epochs = getattr(
-                getattr(teacher.training_config, "hyperparameters", None),
-                "epochs", None
-            )
-
-        # Register the job in PENDING state before the task starts
-        job = TrainingJob(
-            run_id=run_id,
-            teacher_id=teacher_id,
-            status=TrainingJobStatus.PENDING,
-            started_at=time.time(),
-            total_epochs=total_epochs,
-        )
-        node.training_jobs[run_id] = job
-
-        # The training coroutine — updates job state as it progresses
-        # Note: Use globals()['asyncio'] for Python 3.14 closure compatibility
-        _asyncio_mod = globals()['asyncio']
-        
-        async def run_training():
-            job.status = TrainingJobStatus.RUNNING
-            try:
-                if hasattr(teacher, "train"):
-                    result = await teacher.train()
-                else:
-                    await _asyncio_mod.sleep(1)  # Basic DistilledTeacher has no real train()
-                    result = None
-                job.status = TrainingJobStatus.COMPLETED
-                job.result = result
-                job.completed_at = time.time()
-                logger.info("Training completed", teacher_id=teacher_id, run_id=run_id)
-            except _asyncio_mod.CancelledError:
-                job.status = TrainingJobStatus.CANCELLED
-                job.completed_at = time.time()
-                logger.info("Training cancelled", teacher_id=teacher_id, run_id=run_id)
-            except Exception as e:
-                job.status = TrainingJobStatus.FAILED
-                job.error = str(e)
-                job.completed_at = time.time()
-                logger.error("Training failed", teacher_id=teacher_id, run_id=run_id, error=str(e))
-            finally:
-                node._save_training_runs()
-
-        task = _asyncio_mod.create_task(run_training())
-        job._task = task  # Keep reference for cancellation
-
-        return {
-            "run_id":         run_id,
-            "teacher_id":     teacher_id,
-            "status":         "pending",
-            "total_epochs":   total_epochs,
-            "cost_ftns":      TEACHER_TRAINING_BASE_COST_FTNS,
-            "poll_url":       f"/teacher/{teacher_id}/training/{run_id}",
-        }
-
-    @app.get("/teacher/{teacher_id}/training/{run_id}", tags=["teacher"])
-    async def get_training_status(teacher_id: str, run_id: str) -> Dict[str, Any]:
-        """
-        Poll the status of a specific training run.
-
-        Returns live progress (current_epoch, current_step, elapsed_seconds)
-        when status is 'running', and the full TrainingResult when 'completed'.
-        """
-        if run_id not in node.training_jobs:
-            raise HTTPException(404, f"Training run {run_id} not found")
-
-        job = node.training_jobs[run_id]
-
-        if job.teacher_id != teacher_id:
-            raise HTTPException(404, f"Training run {run_id} does not belong to teacher {teacher_id}")
-
-        response = job.to_dict()
-
-        # Augment with live progress when running
-        if job.status == TrainingJobStatus.RUNNING:
-            teacher = node.teacher_registry.get(teacher_id)
-            if teacher and hasattr(teacher, "trainer") and teacher.trainer is not None:
-                trainer = teacher.trainer
-                current_epoch  = getattr(trainer, "current_epoch",  0)
-                total_epochs   = job.total_epochs or getattr(
-                    getattr(trainer, "config", None), "hyperparameters", None
-                ) and trainer.config.hyperparameters.epochs or 1
-                elapsed = (
-                    time.time() - trainer.training_start_time
-                    if trainer.training_start_time else 0.0
-                )
-                response["progress"] = {
-                    "current_epoch":  current_epoch,
-                    "total_epochs":   total_epochs,
-                    "current_step":   getattr(trainer, "current_step", 0),
-                    "global_step":    getattr(trainer, "global_step",  0),
-                    "progress_pct":   round(current_epoch / max(total_epochs, 1) * 100, 1),
-                    "elapsed_seconds": round(elapsed, 1),
-                }
-
-        return response
-
-
-    @app.get("/teacher/{teacher_id}/training", tags=["teacher"])
-    async def list_training_runs(teacher_id: str) -> Dict[str, Any]:
-        """
-        List all training runs for a teacher model (running, completed, and failed).
-        """
-        runs = [
-            job.to_dict()
-            for job in node.training_jobs.values()
-            if job.teacher_id == teacher_id
-        ]
-        # Most-recent first
-        runs.sort(key=lambda r: r["started_at"], reverse=True)
-        return {"runs": runs, "count": len(runs)}
-
-
-    @app.delete("/teacher/{teacher_id}/training/{run_id}", tags=["teacher"])
-    async def cancel_training_run(teacher_id: str, run_id: str) -> Dict[str, Any]:
-        """
-        Cancel a pending or running training job.
- 
-        Calls task.cancel() on the underlying asyncio.Task.
-        The task will transition to CANCELLED status asynchronously.
-        """
-        if run_id not in node.training_jobs:
-            raise HTTPException(404, f"Training run {run_id} not found")
-
-        job = node.training_jobs[run_id]
-
-        if job.teacher_id != teacher_id:
-            raise HTTPException(404, f"Training run {run_id} does not belong to teacher {teacher_id}")
-
-        if job.status not in (TrainingJobStatus.PENDING, TrainingJobStatus.RUNNING):
-            raise HTTPException(
-                409,
-                f"Cannot cancel a run in '{job.status.value}' state"
-            )
-
-        if job._task and not job._task.done():
-            job._task.cancel()
-            # Status transitions to CANCELLED inside run_training()'s CancelledError handler
-            return {"cancelled": True, "run_id": run_id,
-                    "note": "Cancellation requested. Poll status to confirm."}
-
-        # Task already done but status wasn't updated — edge case
-        job.status = TrainingJobStatus.CANCELLED
-        job.completed_at = time.time()
-        node._save_training_runs()
-        return {"cancelled": True, "run_id": run_id}
-
-    @app.get("/teacher/backends/available", tags=["teacher"])
-    async def get_available_backends() -> Dict[str, Any]:
-        """
-        Get available ML training backends.
-        
-        Returns information about which ML backends (PyTorch, etc.)
-        are available for teacher model training.
-        
-        Returns:
-            Dictionary of available backends and their status
-        """
-        backends = {
-            "pytorch": {"available": False, "version": None, "gpu": False},
-            "tensorflow": {"available": False, "version": None, "gpu": False},
-        }
-        
-        # Check PyTorch
-        try:
-            import torch
-            backends["pytorch"]["available"] = True
-            backends["pytorch"]["version"] = torch.__version__
-            backends["pytorch"]["gpu"] = torch.cuda.is_available()
-        except ImportError:
-            pass
-        
-        # Check TensorFlow
-        try:
-            import tensorflow as tf
-            backends["tensorflow"]["available"] = True
-            backends["tensorflow"]["version"] = tf.__version__
-            backends["tensorflow"]["gpu"] = len(tf.config.list_physical_devices('GPU')) > 0
-        except ImportError:
-            pass
-        
-        # Use detect_available_backends from config if available
-        try:
-            detected = detect_available_backends()
-            for backend_name, info in detected.items():
-                if backend_name in backends:
-                    backends[backend_name].update(info)
-                else:
-                    backends[backend_name] = info
-        except Exception as e:
-            logger.debug(f"Could not use detect_available_backends: {e}")
-        
-        return {
-            "backends": backends,
-            "recommended": "pytorch" if backends["pytorch"]["available"] else "simulated",
-        }
-
-    # ── Distillation Endpoints ───────────────────────────────────────
-
-    class DistillationSubmitRequest(BaseModel):
-        """Request body for submitting a distillation job."""
-        teacher_model_id: str = Field(..., description="ID from /teacher/list, or external model name")
-        domain: str = Field(..., description="Target domain, e.g. 'medical_research'")
-        target_size: str = Field("small", description="'tiny'|'small'|'medium'|'large'")
-        optimization: str = Field("balanced", description="'speed'|'quality'|'size'|'balanced'")
-        budget_ftns: int = Field(..., ge=100, description="Max FTNS to spend")
-        name: Optional[str] = None
-        description: Optional[str] = None
-
-    def _get_distillation_orchestrator():
-        """Lazy singleton; wired to the node's ledger on first call."""
-        from prsm.compute.distillation.orchestrator import DistillationOrchestrator
-        if not hasattr(_get_distillation_orchestrator, "_instance"):
-            ftns_adapter = node._ftns_adapter  # _FTNSLedgerAdapter already on the node
-            _get_distillation_orchestrator._instance = DistillationOrchestrator(
-                ftns_service=ftns_adapter,
-            )
-        return _get_distillation_orchestrator._instance
-
-    @app.post("/distillation/submit", tags=["distillation"])
-    async def submit_distillation(request: DistillationSubmitRequest) -> Dict[str, Any]:
-        """
-        Submit a distillation job.
-        
-        Creates a new distillation job to train a smaller student model
-        from a teacher model. The job runs asynchronously and can be
-        monitored via the /distillation/{job_id} endpoint.
-        
-        Args:
-            request: Distillation parameters including teacher_model_id, domain, etc.
-            
-        Returns:
-            Job ID, status, and estimated cost
-            
-        Raises:
-            HTTPException 503: If distillation infrastructure unavailable
-            HTTPException 400: If insufficient balance or invalid parameters
-        """
-        if not node.identity:
-            raise HTTPException(status_code=503, detail="Node not initialized")
-        
-        # Check balance before creating job
-        if node.ledger:
-            balance = await node.ledger.get_balance(node.identity.node_id)
-            if balance < request.budget_ftns:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Insufficient balance: {balance:.2f} < {request.budget_ftns}"
-                )
-        
-        try:
-            from prsm.compute.distillation.models import DistillationRequest, ModelSize, OptimizationTarget
-            
-            # Map string to enum
-            target_size_map = {
-                "tiny": ModelSize.TINY,
-                "small": ModelSize.SMALL,
-                "medium": ModelSize.MEDIUM,
-                "large": ModelSize.LARGE,
-            }
-            optimization_map = {
-                "speed": OptimizationTarget.SPEED,
-                "quality": OptimizationTarget.ACCURACY,
-                "size": OptimizationTarget.SIZE,
-                "balanced": OptimizationTarget.BALANCED,
-            }
-            
-            req = DistillationRequest(
-                user_id=node.identity.node_id,
-                teacher_model=request.teacher_model_id,
-                domain=request.domain,
-                target_size=target_size_map.get(request.target_size, ModelSize.SMALL),
-                optimization_target=optimization_map.get(request.optimization, OptimizationTarget.BALANCED),
-                budget_ftns=request.budget_ftns,
-            )
-            
-            orchestrator = _get_distillation_orchestrator()
-            job = await orchestrator.create_distillation(req)
-            
-            logger.info(f"Submitted distillation job {job.job_id} for domain: {request.domain}")
-            
-            return {
-                "job_id": str(job.job_id),
-                "status": job.status.value,
-                "estimated_cost_ftns": request.budget_ftns,
-                "teacher_model_id": request.teacher_model_id,
-                "domain": request.domain,
-                "target_size": request.target_size,
-            }
-            
-        except ImportError as e:
-            logger.error(f"Distillation imports failed: {e}")
-            raise HTTPException(
-                status_code=503,
-                detail="Distillation infrastructure not available"
-            )
-        except Exception as e:
-            logger.error(f"Distillation submission failed: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to submit distillation job: {str(e)}"
-            )
-
-    @app.get("/distillation/{job_id}", tags=["distillation"])
-    async def get_distillation_job(job_id: str) -> Dict[str, Any]:
-        """
-        Get distillation job status.
-        
-        Returns the current status and details of a distillation job.
-        
-        Args:
-            job_id: The distillation job ID
-            
-        Returns:
-            Job status, progress, and result (if completed)
-            
-        Raises:
-            HTTPException 404: If job not found
-        """
-        try:
-            orchestrator = _get_distillation_orchestrator()
-            
-            # Check active jobs first
-            from uuid import UUID
-            job_uuid = UUID(job_id)
-            
-            if job_uuid in orchestrator.active_jobs:
-                job = orchestrator.active_jobs[job_uuid]
-            elif job_uuid in orchestrator.completed_jobs:
-                job = orchestrator.completed_jobs[job_uuid]
-            else:
-                raise HTTPException(status_code=404, detail="Distillation job not found")
-            
-            result = {
-                "job_id": str(job.job_id),
-                "status": job.status.value,
-                "user_id": job.user_id,
-                "teacher_model": job.teacher_model,
-                "domain": job.domain,
-                "target_size": job.target_size.value if job.target_size else None,
-                "created_at": job.created_at.isoformat() if job.created_at else None,
-                "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-                "error": job.error,
-            }
-            
-            if job.result:
-                result["result"] = {
-                    "model_cid": job.result.model_cid if hasattr(job.result, 'model_cid') else None,
-                    "quality_score": job.result.quality_score if hasattr(job.result, 'quality_score') else None,
-                }
-            
-            return result
-            
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid job ID format")
-        except KeyError:
-            raise HTTPException(status_code=404, detail="Distillation job not found")
-        except Exception as e:
-            logger.error(f"Error getting distillation job: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to get job status: {str(e)}"
-            )
-
-    @app.delete("/distillation/{job_id}", tags=["distillation"])
-    async def cancel_distillation_job(job_id: str) -> Dict[str, Any]:
-        """
-        Cancel a distillation job.
-        
-        Cancels an active distillation job. Completed jobs cannot be cancelled.
-        
-        Args:
-            job_id: The distillation job ID
-            
-        Returns:
-            Cancellation status
-            
-        Raises:
-            HTTPException 404: If job not found
-            HTTPException 400: If job cannot be cancelled
-        """
-        try:
-            orchestrator = _get_distillation_orchestrator()
-            
-            from uuid import UUID
-            job_uuid = UUID(job_id)
-            
-            if job_uuid not in orchestrator.active_jobs:
-                raise HTTPException(status_code=404, detail="Distillation job not found or already completed")
-            
-            job = orchestrator.active_jobs[job_uuid]
-            
-            # Cancel the job
-            if hasattr(orchestrator, 'cancel_job'):
-                await orchestrator.cancel_job(job_uuid)
-            else:
-                # Fallback: mark as cancelled
-                from prsm.compute.distillation.models import DistillationStatus
-                job.status = DistillationStatus.CANCELLED
-                orchestrator.completed_jobs[job_uuid] = job
-                del orchestrator.active_jobs[job_uuid]
-            
-            logger.info(f"Cancelled distillation job {job_id}")
-            
-            return {
-                "job_id": job_id,
-                "status": "cancelled",
-                "message": "Distillation job cancelled successfully"
-            }
-            
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid job ID format")
-        except KeyError:
-            raise HTTPException(status_code=404, detail="Distillation job not found")
-        except Exception as e:
-            logger.error(f"Error cancelling distillation job: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to cancel job: {str(e)}"
-            )
-
-    @app.get("/distillation", tags=["distillation"])
-    async def list_distillation_jobs(status: Optional[str] = None) -> Dict[str, Any]:
-        """
-        List all distillation jobs.
-        
-        Returns a list of all distillation jobs, optionally filtered by status.
-        
-        Args:
-            status: Optional status filter ('queued', 'training', 'completed', 'failed', 'cancelled')
-            
-        Returns:
-            List of distillation jobs
-        """
-        try:
-            orchestrator = _get_distillation_orchestrator()
-            
-            jobs = []
-            
-            # Add active jobs
-            for job in orchestrator.active_jobs.values():
-                if status is None or job.status.value == status:
-                    jobs.append({
-                        "job_id": str(job.job_id),
-                        "status": job.status.value,
-                        "user_id": job.user_id,
-                        "domain": job.domain,
-                        "created_at": job.created_at.isoformat() if job.created_at else None,
-                    })
-            
-            # Add completed jobs
-            for job in orchestrator.completed_jobs.values():
-                if status is None or job.status.value == status:
-                    jobs.append({
-                        "job_id": str(job.job_id),
-                        "status": job.status.value,
-                        "user_id": job.user_id,
-                        "domain": job.domain,
-                        "created_at": job.created_at.isoformat() if job.created_at else None,
-                        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-                    })
-            
-            return {
-                "jobs": jobs,
-                "count": len(jobs),
-                "active_count": len(orchestrator.active_jobs),
-                "completed_count": len(orchestrator.completed_jobs),
-            }
-            
-        except Exception as e:
-            logger.error(f"Error listing distillation jobs: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to list jobs: {str(e)}"
-            )
 
     # ── WebSocket Endpoints ───────────────────────────────────────
 

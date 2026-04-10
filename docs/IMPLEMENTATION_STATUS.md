@@ -1,6 +1,6 @@
 # PRSM Implementation Status
 
-[![Version](https://img.shields.io/badge/version-1.6.2-blue.svg)](https://pypi.org/project/prsm-network/)
+[![Version](https://img.shields.io/badge/version-1.7.0-blue.svg)](https://pypi.org/project/prsm-network/)
 [![Rings](https://img.shields.io/badge/rings-10%2F10%20shipped-brightgreen.svg)](#sovereign-edge-ai-rings)
 
 This document tracks which subsystems ship with PRSM and how they map to the 10-ring Sovereign-Edge AI architecture.
@@ -71,7 +71,7 @@ Third-party LLM (Claude / GPT / local) calls prsm_analyze via MCP
 | Content Economy | Shipped | Royalty distribution (80/15/5 Phase 4 model), multi-party escrow, replication enforcement |
 | Web Onboarding UI | Shipped | 6-step wizard at `/onboarding/` |
 | Rate Limiting | Shipped | Per-IP + per-user + per-endpoint; Redis-backed when `REDIS_URL` is set |
-| Circuit Breakers | Shipped | Wired into HTTP clients (Anthropic, OpenAI, OpenRouter) |
+| Circuit Breakers | Library only | `prsm/core/circuit_breaker.py` is a fully implemented adaptive state machine (CLOSED/OPEN/HALF_OPEN, sliding-window failure rate, configurable thresholds). It is **not currently wired** into any live HTTP client — there is no first-party LLM client to protect since `node.agent_forge` was removed in v1.6.0. Available for downstream integrations via `from prsm.core.circuit_breaker import get_breaker`. |
 | OpenTelemetry Tracing | Shipped | Console / Jaeger / OTLP via `OTEL_EXPORTER` env var |
 | Secrets Management | Shipped | Centralized `SecretsManager` with required-variable validation |
 | Alembic Migrations | Shipped | Covers all ORM tables |
@@ -93,12 +93,12 @@ Third-party LLM (Claude / GPT / local) calls prsm_analyze via MCP
 | NWTN Training Pipeline | Shipped | AgentTrace → JSONL export → model card — no fine-tuned model yet |
 | Security Audit Tools | Shipped | Integrity verification, privacy budget, audit chain |
 | MCP Server | Shipped | 16 tools exposed via `prsm mcp-server` / `prsm/mcp_server.py` |
-| Python SDK | Published | `pip install prsm-network` (v1.6.2) |
+| Python SDK | Published | `pip install prsm-network` (v1.7.0) |
 | JavaScript/TypeScript SDK | Published | `npm install prsm-sdk` |
 | Go SDK | Published | `go get github.com/Ryno2390/PRSM/sdks/go` |
 | Payment Gateway (Stripe/PayPal) | Code complete — needs keys | See `prsm/economy/payments/fiat_gateway.py` |
 | FTNS Token (Base mainnet) | Deployed | `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` |
-| Chronos FTNS↔USD/USDT bridge | Shipped | `prsm/compute/chronos/` |
+| Chronos FTNS↔USD/USDT bridge | Shipped (mock exchanges) | `prsm/compute/chronos/` — routing/clearing/cashout API real; Coinbase/Binance/Kraken integrations are sandbox mocks pending API keys |
 
 ---
 

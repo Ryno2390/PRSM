@@ -317,7 +317,9 @@ TOOLS = [
     Tool(
         name="prsm_stake",
         description=(
-            "Stake FTNS tokens as a prosumer to earn higher yield rates. "
+            "Preview or submit a FTNS stake on the running node. "
+            "By default returns a tier preview without submitting. Pass execute=true "
+            "to actually call POST /staking/stake. "
             "Tiers: Casual (0), Pledged (100+), Dedicated (1000+), Sentinel (10000+). "
             "Higher tiers earn proportionally more per compute job."
         ),
@@ -325,6 +327,16 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "amount": {"type": "number", "description": "FTNS to stake", "minimum": 0},
+                "execute": {
+                    "type": "boolean",
+                    "description": "If true, actually submit the stake. Default false (preview only).",
+                    "default": False,
+                },
+                "stake_type": {
+                    "type": "string",
+                    "description": "Stake type — passed through to the staking manager.",
+                    "default": "general",
+                },
             },
             "required": ["amount"],
         },
@@ -484,22 +496,59 @@ async def handle_prsm_quote(arguments: Dict[str, Any]) -> str:
 
 
 async def handle_prsm_list_datasets(arguments: Dict[str, Any]) -> str:
-    """Handle prsm_list_datasets tool call."""
-    search = arguments.get("search", "")
+    """Handle prsm_list_datasets tool call.
+
+    Hits /content/search on the running node, optionally filtered by query
+    string. Filters by max_price if the dataset's per-shard royalty rate is
+    available in the index record. Returns up to 20 results by default.
+    """
+    search = (arguments.get("search") or "").strip()
     max_price = arguments.get("max_price")
+    limit = int(arguments.get("limit") or 20)
 
     try:
-        # Try the node API first
-        result = await _call_node_api("GET", "/rings/status")
-        # If node is running, use it
-        return (
-            f"PRSM Network Status\n"
-            f"  Rings Initialized: {result.get('rings_initialized', 0)}/10\n"
-            f"  Note: Use 'prsm marketplace list-dataset' CLI to publish datasets.\n"
-            f"  Data marketplace browsing via API is available when datasets are published."
-        )
+        result = await _call_node_api("GET", f"/content/search?q={search}&limit={limit}")
     except Exception:
-        return "PRSM node not running. Start with: prsm node start"
+        # Fallback: surface the index stats so the user knows the node is reachable
+        try:
+            stats = await _call_node_api("GET", "/content/index/stats")
+            return (
+                f"Dataset listing failed but content index is reachable.\n"
+                f"  Total entries: {stats.get('total_entries', 0)}\n"
+                f"  Total bytes: {stats.get('total_bytes', 0)}\n"
+                f"  Tip: publish data with prsm_upload_dataset."
+            )
+        except Exception:
+            return "PRSM node not running. Start with: prsm node start"
+
+    records = result.get("results", []) or []
+    if max_price is not None:
+        try:
+            mp = float(max_price)
+            records = [
+                r for r in records
+                if r.get("royalty_rate") is None or float(r.get("royalty_rate") or 0) <= mp
+            ]
+        except (TypeError, ValueError):
+            pass
+
+    if not records:
+        return (
+            f"No datasets found"
+            + (f" matching '{search}'" if search else "")
+            + ".\n  Use prsm_upload_dataset to publish data, or prsm storage upload via CLI."
+        )
+
+    lines = [f"Datasets ({len(records)} of {result.get('count', len(records))}):"]
+    for r in records[:limit]:
+        size_mb = (r.get("size_bytes") or 0) / (1024 * 1024)
+        royalty = r.get("royalty_rate")
+        royalty_str = f" royalty={royalty}" if royalty is not None else ""
+        lines.append(
+            f"  • {r.get('cid', '?')[:16]}…  {r.get('filename', '(unnamed)')}"
+            f"  {size_mb:.2f} MB  by {r.get('creator_id', '?')[:12]}{royalty_str}"
+        )
+    return "\n".join(lines)
 
 
 async def handle_prsm_node_status(arguments: Dict[str, Any]) -> str:
@@ -668,17 +717,36 @@ async def handle_prsm_agent_status(arguments: Dict[str, Any]) -> str:
 
 
 async def handle_prsm_search_shards(arguments: Dict[str, Any]) -> str:
-    query = arguments.get("query", "")
-    top_k = arguments.get("top_k", 5)
+    """Handle prsm_search_shards by querying the node's content index."""
+    query = (arguments.get("query") or "").strip()
+    top_k = int(arguments.get("top_k") or 5)
+
+    if not query:
+        return "Search requires a 'query' string."
+
     try:
-        result = await _call_node_api("GET", f"/rings/status")
+        result = await _call_node_api("GET", f"/content/search?q={query}&limit={top_k}")
+    except Exception as e:
+        return f"Shard search requires a running PRSM node ({e}). Start with: prsm node start"
+
+    records = result.get("results", []) or []
+    if not records:
         return (
-            f"Shard search for: '{query}' (top {top_k})\n"
-            f"Note: Shard search requires datasets uploaded to the network.\n"
-            f"Use prsm_upload_dataset to publish data, then search will find relevant shards."
+            f"No shards found for: '{query}'\n"
+            f"  Use prsm_upload_dataset to publish data, or check the index with "
+            f"prsm_list_datasets."
         )
-    except Exception:
-        return f"Shard search requires a running PRSM node. Start with: prsm node start"
+
+    lines = [f"Shard search results for '{query}' (top {len(records)}):"]
+    for r in records:
+        providers = r.get("providers") or []
+        size_mb = (r.get("size_bytes") or 0) / (1024 * 1024)
+        lines.append(
+            f"  • CID {r.get('cid', '?')}\n"
+            f"      file={r.get('filename', '(unnamed)')}  size={size_mb:.2f} MB  "
+            f"providers={len(providers)}  creator={r.get('creator_id', '?')[:12]}"
+        )
+    return "\n".join(lines)
 
 
 async def handle_prsm_upload_dataset(arguments: Dict[str, Any]) -> str:
@@ -741,19 +809,55 @@ async def handle_prsm_yield_estimate(arguments: Dict[str, Any]) -> str:
 
 
 async def handle_prsm_stake(arguments: Dict[str, Any]) -> str:
+    """Handle prsm_stake — actually stake against the running node.
+
+    If 'execute' is true, calls POST /staking/stake on the node. Otherwise
+    returns a tier preview (the legacy info-only behavior). The execute flag
+    defaults to False so naive callers can't accidentally lock tokens.
+    """
     amount = arguments.get("amount", 0)
+    execute = bool(arguments.get("execute", False))
+    stake_type = arguments.get("stake_type", "general")
+
     try:
         from prsm.economy.pricing.models import ProsumerTier
         tier = ProsumerTier.from_stake(int(amount))
+    except Exception as e:
+        return f"Staking info failed: {e}"
+
+    if not execute:
         return (
-            f"Staking Info\n"
+            f"Staking Preview (no transaction submitted)\n"
             f"  Amount: {amount} FTNS\n"
             f"  Tier: {tier.name}\n"
             f"  Yield Boost: {tier.yield_boost}x\n"
-            f"  Note: To actually stake, use the running node CLI: prsm ftns stake {int(amount)}"
+            f"  To actually stake, call prsm_stake again with execute=true."
+        )
+
+    if int(amount) <= 0:
+        return "Cannot stake 0 FTNS. Provide a positive 'amount'."
+
+    try:
+        result = await _call_node_api(
+            "POST",
+            "/staking/stake",
+            {"amount": float(amount), "stake_type": stake_type, "metadata": {}},
         )
     except Exception as e:
-        return f"Staking info failed: {e}"
+        return (
+            f"Stake submission failed: {e}\n"
+            f"  Is your node running? Tip: prsm node start"
+        )
+
+    return (
+        f"Stake Submitted\n"
+        f"  Stake ID: {result.get('stake_id', '?')}\n"
+        f"  Amount: {result.get('amount', amount)} FTNS\n"
+        f"  Type: {result.get('stake_type', stake_type)}\n"
+        f"  Status: {result.get('status', 'unknown')}\n"
+        f"  Tier: {tier.name} (yield boost {tier.yield_boost}x)\n"
+        f"  Staked at: {result.get('staked_at', '')}"
+    )
 
 
 async def handle_prsm_revenue_split(arguments: Dict[str, Any]) -> str:
@@ -789,25 +893,39 @@ async def handle_prsm_settlement_stats(arguments: Dict[str, Any]) -> str:
 
 
 async def handle_prsm_privacy_status(arguments: Dict[str, Any]) -> str:
+    """Handle prsm_privacy_status — fetches the live DP budget audit report."""
     try:
-        from prsm.security import PrivacyBudgetTracker
-        # Try node API first
-        result = await _call_node_api("GET", "/rings/status")
-        privacy = result.get("privacy", {})
-        if privacy:
-            return (
-                f"Privacy Budget Status\n"
-                f"  Total Spent: {privacy.get('total_spent', 0)} ε\n"
-                f"  Remaining: {privacy.get('remaining', 'unknown')} ε\n"
-                f"  Operations: {privacy.get('num_operations', 0)}"
-            )
-        return "Privacy tracking active but no spending recorded yet."
-    except Exception:
+        report = await _call_node_api("GET", "/privacy/budget")
+    except Exception as e:
         return (
-            "Privacy Budget: Not connected to node.\n"
-            "The privacy budget tracks cumulative differential privacy (ε) spending "
-            "across inference sessions to enforce privacy guarantees."
+            f"Privacy Budget: Cannot reach node ({e}).\n"
+            f"  Start a node with: prsm node start\n"
+            f"  The privacy budget tracks cumulative differential privacy (ε) "
+            f"spending across forge queries with privacy_level != 'none'."
         )
+
+    max_eps = report.get("max_epsilon", 0)
+    spent = report.get("total_spent", 0)
+    remaining = report.get("remaining", 0)
+    num_ops = report.get("num_operations", 0)
+    spends = report.get("spends", []) or []
+
+    pct = (spent / max_eps * 100.0) if max_eps else 0.0
+    lines = [
+        f"Differential Privacy Budget",
+        f"  Total budget: {max_eps:.1f} ε",
+        f"  Spent:        {spent:.3f} ε  ({pct:.1f}%)",
+        f"  Remaining:    {remaining:.3f} ε",
+        f"  Operations:   {num_ops}",
+    ]
+    if spends:
+        lines.append("  Recent spends:")
+        for s in spends[-5:]:
+            lines.append(
+                f"    - {s.get('operation', '?')}  ε={s.get('epsilon', 0):.3f}  "
+                f"model={s.get('model_id', '') or '(none)'}"
+            )
+    return "\n".join(lines)
 
 
 async def handle_prsm_training_status(arguments: Dict[str, Any]) -> str:

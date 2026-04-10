@@ -120,17 +120,27 @@ type ExecuteResponse struct {
 	FTNSCharged float64  `json:"ftns_charged,omitempty"`
 }
 
-// QuoteRequest represents a request for a cost quote
+// QuoteRequest represents a cost quote request for the Ring 1-10 forge pipeline
 type QuoteRequest struct {
-	Prompt   string   `json:"prompt"`
-	TaskType TaskType `json:"task_type,omitempty"`
+	Query                string   `json:"query"`
+	ShardCids            []string `json:"shard_cids,omitempty"`
+	ShardCount           int      `json:"shard_count,omitempty"`
+	HardwareTier         string   `json:"hardware_tier,omitempty"`
+	EstimatedPcuPerShard float64  `json:"estimated_pcu_per_shard,omitempty"`
 }
 
-// QuoteResponse represents the cost quote
+// QuoteResponse mirrors the CostQuote shape returned by /compute/forge/quote
 type QuoteResponse struct {
-	EstimatedCost float64 `json:"estimated_cost"`
-	EstimatedTime int     `json:"estimated_time_seconds"`
-	RingsUsed     []int   `json:"rings_used"`
+	Query          string                   `json:"query"`
+	ShardCount     int                      `json:"shard_count"`
+	HardwareTier   string                   `json:"hardware_tier"`
+	ComputeCost    string                   `json:"compute_cost"`
+	DataCost       string                   `json:"data_cost"`
+	NetworkFee     string                   `json:"network_fee"`
+	Total          string                   `json:"total"`
+	ShardBreakdown []map[string]interface{} `json:"shard_breakdown"`
+	Confidence     float64                  `json:"confidence"`
+	Alternatives   []map[string]interface{} `json:"alternatives"`
 }
 
 // WASMManifest represents a WASM agent manifest
@@ -233,18 +243,26 @@ func (m *Manager) Execute(ctx context.Context, req ExecuteRequest) (*ExecuteResp
 	return &result, nil
 }
 
-// GetQuote gets a cost estimate for a task
+// GetQuote gets a cost estimate for a Ring 1-10 forge query.
+// Hits the same /compute/forge/quote endpoint as the JavaScript SDK.
 func (m *Manager) GetQuote(ctx context.Context, req QuoteRequest) (*QuoteResponse, error) {
 	body := map[string]interface{}{
-		"prompt": req.Prompt,
+		"query": req.Query,
 	}
-	if req.TaskType != "" {
-		body["task_type"] = req.TaskType
-	} else {
-		body["task_type"] = TaskTypeAnalysis
+	if len(req.ShardCids) > 0 {
+		body["shard_cids"] = req.ShardCids
+	}
+	if req.ShardCount > 0 {
+		body["shard_count"] = req.ShardCount
+	}
+	if req.HardwareTier != "" {
+		body["hardware_tier"] = req.HardwareTier
+	}
+	if req.EstimatedPcuPerShard > 0 {
+		body["estimated_pcu_per_shard"] = req.EstimatedPcuPerShard
 	}
 
-	resp, err := m.client.DoRequest(ctx, "POST", "/api/v1/forge/quote", body)
+	resp, err := m.client.DoRequest(ctx, "POST", "/compute/forge/quote", body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quote: %w", err)
 	}

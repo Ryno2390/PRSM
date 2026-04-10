@@ -61,50 +61,6 @@ from prsm.node.bittorrent_requester import BitTorrentRequester, BitTorrentReques
 logger = logging.getLogger(__name__)
 
 
-# ── Training Job Status Tracking ────────────────────────────────────────
-
-class TrainingJobStatus(str, _Enum):
-    """Status of an async training job for a teacher model."""
-    PENDING   = "pending"    # task created, not yet running
-    RUNNING   = "running"    # teacher.train() is executing
-    COMPLETED = "completed"  # succeeded, result available
-    FAILED    = "failed"     # raised an exception
-    CANCELLED = "cancelled"  # cancelled via DELETE endpoint
-
-
-@dataclass
-class TrainingJob:
-    """Tracks a single async training run for a teacher model."""
-    run_id: str
-    teacher_id: str
-    status: TrainingJobStatus
-    started_at: float
-    completed_at: Optional[float] = None
-    total_epochs: Optional[int] = None   # from training config, known before start
-    result: Optional[Any] = None         # TrainingResult on completion
-    error: Optional[str] = None
-    _task: Optional[asyncio.Task] = field(default=None, repr=False, compare=False)  # asyncio.Task — not serialized
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Serializable snapshot — safe for JSON and API responses."""
-        d = {
-            "run_id":        self.run_id,
-            "teacher_id":    self.teacher_id,
-            "status":        self.status.value,
-            "started_at":    self.started_at,
-            "completed_at":  self.completed_at,
-            "total_epochs":  self.total_epochs,
-            "error":         self.error,
-        }
-        if self.result is not None:
-            # Handle result with to_dict() method or convert to dict directly
-            if hasattr(self.result, 'to_dict'):
-                d["result"] = self.result.to_dict()
-            else:
-                d["result"] = self.result
-        return d
-
-
 class _StakingFTNSAdapter:
     """Bridges node ledger to the FTNS interface expected by StakingManager."""
 
@@ -217,8 +173,6 @@ class PRSMNode:
         self.bt_manifest_store: Optional[TorrentManifestStore] = None
         self.bt_provider: Optional[BitTorrentProvider] = None
         self.bt_requester: Optional[BitTorrentRequester] = None
-        self.teacher_registry: Dict[str, Any] = {}  # teacher_id (str) → DistilledTeacher instance
-        self.training_jobs: Dict[str, TrainingJob] = {}  # run_id (str UUID) → TrainingJob
 
         self._started = False
         self._start_time: Optional[float] = None
@@ -785,9 +739,6 @@ class PRSMNode:
         # NWTN orchestrator removed in v1.6.0 — legacy AGI framework replaced
         # by third-party LLMs invoked via MCP
 
-        # Load persisted training run records from disk
-        self._load_training_runs()
-
         # Hydrate content uploader from DB (restores provenance across restarts)
         if self.content_uploader:
             hydrated = await self.content_uploader._hydrate_from_db()
@@ -1237,66 +1188,6 @@ class PRSMNode:
             },
         }
         return status
-
-    def _save_teacher_registry(self) -> None:
-        """Persist teacher metadata (not model weights) across restarts."""
-        registry_path = Path(self.config.data_dir) / "teachers.json"
-        data = {}
-        for tid, t in self.teacher_registry.items():
-            # Get domain from teacher_model or fall back to specialization
-            domain = getattr(t.teacher_model, "domain", None)
-            if domain is None:
-                domain = t.teacher_model.specialization
-            
-            data[tid] = {
-                "name": t.teacher_model.name,
-                "specialization": t.teacher_model.specialization,
-                "domain": domain,
-                "model_type": t.teacher_model.model_type.value,
-                "created_at": getattr(t, "_created_at", time.time()),
-            }
-        registry_path.write_text(json.dumps(data, indent=2))
-
-    def _load_teacher_registry_meta(self) -> Dict[str, Any]:
-        """Load teacher metadata for display (instances are recreated on demand)."""
-        registry_path = Path(self.config.data_dir) / "teachers.json"
-        if registry_path.exists():
-            return json.loads(registry_path.read_text())
-        return {}
-
-    def _save_training_runs(self) -> None:
-        """Persist completed/failed run metadata for display after restart."""
-        path = Path(self.config.data_dir) / "training_runs.json"
-        # Only persist terminal states — pending/running don't survive restart
-        terminal = {
-            run_id: job.to_dict()
-            for run_id, job in self.training_jobs.items()
-            if job.status in (TrainingJobStatus.COMPLETED,
-                              TrainingJobStatus.FAILED,
-                              TrainingJobStatus.CANCELLED)
-        }
-        path.write_text(json.dumps(terminal, indent=2))
-
-    def _load_training_runs(self) -> None:
-        """Restore terminal training run records from disk on startup."""
-        path = Path(self.config.data_dir) / "training_runs.json"
-        if not path.exists():
-            return
-        data = json.loads(path.read_text())
-        for run_id, d in data.items():
-            job = TrainingJob(
-                run_id=run_id,
-                teacher_id=d["teacher_id"],
-                status=TrainingJobStatus(d["status"]),
-                started_at=d["started_at"],
-                completed_at=d.get("completed_at"),
-                total_epochs=d.get("total_epochs"),
-                error=d.get("error"),
-            )
-            if "result" in d:
-                # Re-attach result dict as a plain dict (no need to reconstruct dataclass)
-                job.result = d["result"]
-            self.training_jobs[run_id] = job
 
     async def _run_api(self) -> None:
         """Run the management API server."""

@@ -2,6 +2,155 @@
 
 All notable changes to PRSM are documented here.
 
+## [1.7.0] - 2026-04-10
+
+### Audit Findings & Punch List — Real Features, Honest Docs
+
+A 12-item audit-and-fix sweep that reconciled the public docs with the actual
+shipped code. The audit caught two stale claims (SDK quote endpoints and
+HTTP-client circuit breaker wiring), one duplicate-implementation problem, and
+several layers of legacy code that survived the v1.6.0 sprint. All 12 items
+shipped; full test suite green (3235 passed, 0 unexpected failures, 4 xfailed,
+55 skipped).
+
+### Added
+
+- **`POST /compute/forge/quote`** — new server endpoint that returns a real
+  `CostQuote` for a Ring 1-10 forge query without executing it. Backed by
+  `PricingEngine.quote_swarm_job`. Used by all three SDKs' `quote()` helpers.
+- **`GET /privacy/budget`** — new server endpoint exposing the live differential
+  privacy budget audit report (`node.privacy_budget.get_audit_report()`).
+- **Top-level `client.quote()`** in JavaScript SDK — convenience method that
+  delegates to `client.forge.quote(...)` and mirrors the Python SDK example.
+- **Top-level `client.Quote()`** in Go SDK — convenience method that delegates
+  to `client.Forge.GetQuote(...)`.
+- **`TensorParallelExecutor(remote_dispatcher=...)`** — new optional constructor
+  parameter on Ring 8's tensor-parallel executor. Acts as the Ring 2 integration
+  seam: assignments with non-local `node_id` route through the dispatcher when
+  one is provided.
+- **`ExchangeRouter(live_trading=False)`** — opt-in flag for Chronos exchange
+  routing. When `False` (default), `execute_trade` returns simulated fills using
+  real CoinGecko spot prices. When `True`, the router refuses to proceed unless
+  per-exchange credentials are non-placeholder, and even then errors with a
+  clear "not implemented in 1.6.x" message rather than risking accidental fills.
+
+### Changed
+
+- **All 4 partial MCP tools now hit real endpoints:**
+  - `prsm_list_datasets` — queries `/content/search` (with `/content/index/stats`
+    fallback) instead of returning a placeholder string
+  - `prsm_search_shards` — queries `/content/search` and renders real results
+  - `prsm_stake` — now optionally calls `POST /staking/stake` when `execute=true`
+    (preview is the safe default; tool schema declares `execute` and `stake_type`)
+  - `prsm_privacy_status` — reads the new `/privacy/budget` endpoint instead of
+    returning generic explanation text
+- **Chronos `_get_exchange_price`** now uses the existing real CoinGecko fetcher
+  (`_fetch_exchange_rate_from_source`) instead of hardcoded `base_rates`. Live
+  test verified $73K BTC fetched from CoinGecko API.
+- **Chronos `execute_trade`** now clearly tags `execution_mode="simulated"` and
+  refuses to silently use placeholder credentials.
+- **`TensorParallelExecutor.execute_parallel`** result now includes
+  `execution_modes={"local": N, "remote": M}` so callers can verify what
+  actually happened.
+- **Go SDK `forge.QuoteRequest`** rebuilt to match the new server contract:
+  `Query`, `ShardCids`, `ShardCount`, `HardwareTier`, `EstimatedPcuPerShard`
+  (was `Prompt`/`TaskType`). `QuoteResponse` mirrors the `CostQuote` shape.
+- **`docs/IMPLEMENTATION_STATUS.md`** — Circuit breaker entry now honestly says
+  "Library only — not currently wired into any live HTTP client" (the previous
+  "Wired into HTTP clients (Anthropic, OpenAI, OpenRouter)" claim was false:
+  no first-party HTTP client uses `CircuitBreaker.call`, and `node.agent_forge`
+  was set to `None` in v1.6.0). Chronos entry now acknowledges sandbox mocks.
+
+### Removed
+
+**Strict-mode failure for Ring 8 remote assignments without a dispatcher.**
+The previous `_execute_shard` placeholder silently fell back to local execution
+regardless of `node_id`, hiding the missing remote-execution capability behind
+a fake "success". Non-local assignments without a dispatcher now raise
+`NotImplementedError` with a clear error message naming the integration seam.
+
+**Dead `prsm demo` command references** removed from `README.md`,
+`docs/CLI_REFERENCE.md`, and `llms.txt`. The command was removed in v1.6.0 but
+the docs continued to advertise it.
+
+**~7,000 lines of legacy code that survived the v1.6.0 sprint:**
+
+- **`prsm/node/api.py`** — entire `/teacher/*` and `/distillation/*` endpoint
+  blocks (~707 lines, 13 endpoints)
+- **`prsm/node/node.py`** — `TrainingJob`, `TrainingJobStatus`,
+  `teacher_registry`, `training_jobs`, `_save_teacher_registry`,
+  `_load_teacher_registry_meta`, `_save_training_runs`, `_load_training_runs`
+- **`prsm/node/compute_provider.py`** — `_run_training`, `JobType.TRAINING`,
+  legacy distillation backend capability check
+- **`prsm/node/compute_requester.py`** — `submit_training_job`, JobType.TRAINING
+  entries in `JOB_TYPE_CAPABILITIES` and `JOB_TYPE_PREFERRED_BACKENDS`
+- **`prsm/node/capability_detection.py`** — distillation capability advertisement
+- **`prsm/interface/api/main.py`** — `/teachers/*` legacy endpoints
+- **`prsm/compute/collaboration/`** — 13 legacy subdirs (`academic`, `datascience`,
+  `design`, `enterprise`, `grants`, `jupyter`, `latex`, `references`,
+  `specialized`, `tech_transfer`, `university_industry`, `containers`,
+  `development`) plus `models.py` and `state_sync.py`. Kept `p2p/` (peer
+  reputation, bandwidth optimization, node discovery, shard distribution) and
+  `security/` (post-quantum sharding, access control, key management).
+- **`prsm/core/integrations/langchain/`** — 5 files / 2,527 lines. Was a v0.x
+  AGI-orchestration LangChain wrapper that contradicted the v1.6.0 scope and
+  was already broken (`__init__.py` referenced non-existent `embeddings.py`
+  and `retriever.py`).
+- **`sdks/python/`** — duplicate `prsm-python-sdk@0.2.0` package. The canonical
+  Python SDK is unambiguously `prsm/sdk/` (shipped as part of `prsm-network`).
+- **7 empty shell directories** with only `__pycache__`:
+  `prsm/compute/{distillation,evolution,improvement,ai_orchestration,students,teachers}/`,
+  `prsm/core/institutional/`
+- **8 broken legacy imports** referencing the empty shells in `interface/api/main.py`,
+  `node/api.py`, `node/capability_detection.py`, `node/compute_provider.py`
+- **8 legacy test files** for deleted subsystems:
+  `tests/integration/test_complete_collaboration_platform.py`,
+  `tests/integration/test_collaboration_platform_integration.py`,
+  `tests/test_phase8_sdk.py`,
+  `tests/unit/test_python_sdk.py`,
+  `tests/unit/test_distillation_node_integration.py`,
+  `tests/unit/test_teacher_node_integration.py`,
+  `tests/unit/test_compute_provider_nwtn_integration.py`,
+  `tests/unit/test_training_job_status.py`
+
+### Fixed
+
+- **JS and Go SDK `quote()` would 404 in production.** Both SDKs already had
+  `forge.quote()` / `Forge.GetQuote()` helpers, but the endpoints they called
+  (`/api/v1/compute/forge/quote` and `/api/v1/forge/quote`) **did not exist on
+  the server**. The new `POST /compute/forge/quote` endpoint fixes both.
+- **`tests/integration/test_ring8_shield.py::test_tensor_parallel_execution`**
+  was previously passing only because the executor silently ignored `node_id`.
+  The test has been replaced with three honest tests covering local, remote
+  with a dispatcher, and remote without a dispatcher.
+- **`tests/unit/test_pipeline_security.py::test_execute_parallel_produces_result`**
+  now uses `node_id="local"` explicitly instead of relying on the silent
+  local-fallback that the old executor implemented.
+
+### Audit Corrections (issued during execution)
+
+The original audit report contained two errors that were caught and corrected
+during punch-list execution:
+
+1. **PayPal IS implemented.** `PayPalProvider` exists at
+   `prsm/economy/payments/fiat_gateway.py:262-479` with full OAuth, payment
+   intent creation, status polling, and refund support. The original audit had
+   only checked `payment_provider.py`. The README "Stripe/PayPal" claim is
+   accurate; no doc change needed.
+2. **All three SDKs already had `quote()` methods.** They were nested under
+   `client.forge.quote` (JS) and `client.Forge.GetQuote` (Go) — the audit
+   incorrectly checked only the top-level client surface. The real bug was that
+   the server endpoints they called did not exist (now fixed).
+
+### Test Suite
+
+- **Before:** 132 unexpected failures (per pre-sprint baseline)
+- **After:** 0 unexpected failures, 3235 passed, 55 skipped, 4 xfailed
+- 3 pre-existing network/peer integration flakes deselected from CI
+  (`test_cross_node_peer_connection`, `test_peers_endpoint_if_available`,
+  `test_two_nodes_compute_job_and_payment`) — these were failing on `main`
+  before this release and are tracked separately.
+
 ## [1.6.3] - 2026-04-10
 
 ### Docs-Only Release — Documentation Accuracy Sweep

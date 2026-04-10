@@ -45,19 +45,68 @@ class TestRing8Smoke:
         assert len(set(node_ids)) == 4  # All unique
 
     @pytest.mark.asyncio
-    async def test_tensor_parallel_execution(self):
+    async def test_tensor_parallel_execution_local(self):
+        """Local-only tensor parallel execution.
+
+        This intentionally uses node_id="local" because PRSM 1.6.x ships
+        Ring 8 with local in-process execution and a remote-dispatch seam,
+        but no first-party WASM tensor-matmul agent yet. See
+        test_tensor_parallel_execution_remote for the dispatcher seam test.
+        """
         sharder = ModelSharder()
         weights = {"w": np.random.randn(8, 4)}
         model = sharder.shard_model("m1", "Test", weights, n_shards=2)
 
         executor = TensorParallelExecutor()
         assignments = [
-            {"node_id": "a", "shard_index": 0},
-            {"node_id": "b", "shard_index": 1},
+            {"node_id": "local", "shard_index": 0},
+            {"node_id": "local", "shard_index": 1},
         ]
         result = await executor.execute_parallel(model, b"", assignments)
         assert result["status"] == "success"
         assert result["shards_executed"] == 2
+        assert result["execution_modes"] == {"local": 2, "remote": 0}
+
+    @pytest.mark.asyncio
+    async def test_tensor_parallel_remote_dispatch_seam(self):
+        """The remote_dispatcher hook routes non-local assignments out."""
+        sharder = ModelSharder()
+        weights = {"w": np.random.randn(8, 4)}
+        model = sharder.shard_model("m1", "Test", weights, n_shards=2)
+
+        called_with = []
+
+        async def fake_dispatcher(shard, input_data, assignment):
+            called_with.append((shard.shard_index, assignment.get("node_id")))
+            return {"output_array": [float(shard.shard_index)] * 4}
+
+        executor = TensorParallelExecutor(remote_dispatcher=fake_dispatcher)
+        assert executor.supports_remote_execution is True
+
+        result = await executor.execute_parallel(
+            model, b"",
+            [
+                {"node_id": "remote-A", "shard_index": 0},
+                {"node_id": "remote-B", "shard_index": 1},
+            ],
+        )
+        assert result["status"] == "success"
+        assert result["execution_modes"] == {"local": 0, "remote": 2}
+        assert sorted(called_with) == [(0, "remote-A"), (1, "remote-B")]
+
+    @pytest.mark.asyncio
+    async def test_tensor_parallel_remote_without_dispatcher_errors(self):
+        """Without a dispatcher, remote assignments must fail loudly."""
+        sharder = ModelSharder()
+        weights = {"w": np.random.randn(8, 4)}
+        model = sharder.shard_model("m1", "Test", weights, n_shards=2)
+
+        executor = TensorParallelExecutor()  # no dispatcher
+        result = await executor.execute_parallel(
+            model, b"", [{"node_id": "remote-X", "shard_index": 0}]
+        )
+        assert result["status"] == "failed"
+        assert any("remote_dispatcher" in e for e in result["errors"])
 
     def test_collision_detection(self):
         detector = CollisionDetector(dp_epsilon=8.0, tolerance_multiplier=1.0)

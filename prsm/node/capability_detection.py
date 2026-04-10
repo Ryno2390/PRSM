@@ -149,14 +149,7 @@ def detect_node_capabilities() -> dict:
             capabilities.append("training")
             capabilities.append("fine_tuning")
 
-    # Check for distillation capability (PyTorch backend)
-    try:
-        from prsm.compute.distillation.backends.pytorch_backend import PyTorchDistillationBackend
-        capabilities.append("training")
-        capabilities.append("distillation")
-        logger.info("Distillation capability available (PyTorch backend detected)")
-    except ImportError:
-        pass
+    # Distillation capability removed in v1.6.0 (PRSM is no longer an AGI framework)
 
     # If no real backends, add minimal capability for testing
     if not capabilities:
