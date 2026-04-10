@@ -595,7 +595,7 @@ class ContentEconomyEscrowBridge:
             await self.escrow.accumulate(
                 creator_id=recipient_id,
                 amount=amount,
-                source_cid=payment.cid,
+                source_cid=payment.content_id,
                 accessor_id=payment.accessor_id,
             )
     

@@ -563,12 +563,12 @@ class ContentProvider:
                         or nested_metadata.get("provenance_hash")
                     )
                     payment = await self.content_economy.process_content_access(
-                        cid=cid,
+                        content_id=cid,
                         accessor_id=peer.peer_id,
                         content_metadata={
                             "royalty_rate": content_info.get("royalty_rate", 0.01),
                             "creator_id": content_info.get("creator_id", ""),
-                            "parent_cids": content_info.get("parent_cids", []),
+                            "parent_content_ids": content_info.get("parent_cids", []),
                             "provenance_hash": provenance_hash,
                         },
                     )
@@ -874,12 +874,12 @@ class ContentProvider:
             or nested_metadata.get("provenance_hash")
         )
         return await self.content_economy.process_content_access(
-            cid=cid,
+            content_id=cid,
             accessor_id=accessor_id,
             content_metadata={
                 "royalty_rate": content_info.get("royalty_rate", 0.01),
                 "creator_id": content_info.get("creator_id", ""),
-                "parent_cids": content_info.get("parent_cids", []),
+                "parent_content_ids": content_info.get("parent_cids", []),
                 "provenance_hash": provenance_hash,
             },
         )

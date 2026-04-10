@@ -602,36 +602,63 @@ def test_uploader_without_creator_address_skips_provenance_hash():
 def test_provider_forwards_provenance_hash_to_content_economy():
     """ContentProvider.register_local_content with a provenance_hash in
     metadata must forward it to ContentEconomy.process_content_access at
-    serve time. Phase 1.2 P1 #1 fix (provider half)."""
+    serve time. Phase 1.2 P1 #1 fix (provider half).
+
+    Uses a REAL ContentEconomy instance (not a MagicMock for
+    process_content_access) so that any signature mismatch between the
+    provider call site and the real method raises TypeError. This test
+    exists because the original Task 5 test missed a pre-existing
+    cid=/content_id= kwarg bug — a free-function mock swallowed it.
+    """
     import asyncio
     from unittest.mock import AsyncMock, MagicMock
 
     from prsm.node.content_provider import ContentProvider
+    from prsm.node.content_economy import ContentEconomy, RoyaltyModel
 
     identity = MagicMock()
     identity.node_id = "node-provider-xyz"
     transport = MagicMock()
     transport.send_message = AsyncMock()
     gossip = MagicMock()
-    content_economy = MagicMock()
-    captured = {}
+    ledger = MagicMock()
+    ledger.debit = AsyncMock()
+    content_index = MagicMock()
 
-    async def capture_access(cid, accessor_id, content_metadata):
-        captured["cid"] = cid
+    # Real ContentEconomy instance — its process_content_access has the
+    # real signature, so a bad kwarg (e.g. cid= instead of content_id=)
+    # or a missing metadata key will blow up loudly.
+    economy = ContentEconomy(
+        identity=identity,
+        ledger=ledger,
+        gossip=gossip,
+        content_index=content_index,
+        ftns_ledger=None,
+        royalty_model=RoyaltyModel.PHASE4,
+    )
+
+    # Stub the royalty distribution so we can capture the metadata
+    # the provider forwarded without exercising the full royalty
+    # pipeline. This is the one point we intercept; process_content_access
+    # itself runs for real.
+    captured: dict = {}
+
+    async def capture_distribute(
+        payment, creator_id, parent_content_ids, content_metadata
+    ):
+        captured["content_id"] = payment.content_id
+        captured["creator_id"] = creator_id
+        captured["parent_content_ids"] = parent_content_ids
         captured["content_metadata"] = content_metadata
-        result = MagicMock()
-        result.status = MagicMock()
-        result.status.value = "completed"
-        result.amount = 100
-        return result
+        return []
 
-    content_economy.process_content_access = capture_access
+    economy._distribute_royalties = capture_distribute
 
     provider = ContentProvider(
         identity=identity,
         transport=transport,
         gossip=gossip,
-        content_economy=content_economy,
+        content_economy=economy,
     )
 
     expected_hash = "0x" + "ab" * 32
@@ -654,5 +681,5 @@ def test_provider_forwards_provenance_hash_to_content_economy():
         )
     )
 
-    assert captured["cid"] == "cid-with-hash"
+    assert captured["content_id"] == "cid-with-hash"
     assert captured["content_metadata"].get("provenance_hash") == expected_hash
