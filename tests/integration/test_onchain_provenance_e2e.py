@@ -503,3 +503,94 @@ def test_broadcast_pending_distribution_surfaces_as_pending_onchain_status():
     assert any(
         d["type"] == "broadcast_pending" for d in payment.royalty_distributions
     )
+
+
+# ── Phase 1.2 Task 4: ContentUploader computes/persists provenance_hash ─
+
+
+def test_uploader_with_creator_address_computes_provenance_hash():
+    """ContentUploader constructed with a creator_address must compute
+    and persist the canonical provenance_hash. Phase 1.2 P1 #1 fix."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_uploader import ContentUploader
+
+    identity = MagicMock()
+    identity.node_id = "node-uploader-xyz"
+    identity.public_key_b64 = "fakekey"
+    identity.sign = MagicMock(return_value="sig")
+    gossip = MagicMock()
+    gossip.publish = AsyncMock()
+    ledger = MagicMock()
+
+    creator_address = "0x1111111111111111111111111111111111111111"
+
+    uploader = ContentUploader(
+        identity=identity,
+        gossip=gossip,
+        ledger=ledger,
+        creator_address=creator_address,
+    )
+    # Bypass actual IPFS + DB persistence.
+    uploader._ipfs_add = AsyncMock(return_value="QmFakeCID123")
+    uploader._persist_provenance = AsyncMock()
+
+    file_bytes = b"hello world phase 1.2"
+    uploaded = asyncio.run(
+        uploader.upload(content=file_bytes, filename="test.txt")
+    )
+
+    assert uploaded is not None
+    assert uploaded.provenance_hash is not None
+    assert uploaded.provenance_hash.startswith("0x")
+    assert len(uploaded.provenance_hash) == 66  # 0x + 64 hex chars
+
+    # Matches what the CLI helper would produce.
+    from prsm.economy.web3.provenance_registry import compute_content_hash
+    expected = "0x" + compute_content_hash(creator_address, file_bytes).hex()
+    assert uploaded.provenance_hash == expected
+
+    # Verify the gossip CONTENT_ADVERTISE payload carries the hash so
+    # other nodes can route their payments on-chain too.
+    from prsm.node.gossip import GOSSIP_CONTENT_ADVERTISE
+    ad_calls = [
+        call for call in gossip.publish.call_args_list
+        if call.args and call.args[0] == GOSSIP_CONTENT_ADVERTISE
+    ]
+    assert ad_calls, "expected a GOSSIP_CONTENT_ADVERTISE publish"
+    advertised = ad_calls[0].args[1]
+    assert advertised.get("provenance_hash") == expected
+
+
+def test_uploader_without_creator_address_skips_provenance_hash():
+    """ContentUploader without creator_address gets None — backward
+    compatible. The on-chain branch then skips and local handles."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_uploader import ContentUploader
+
+    identity = MagicMock()
+    identity.node_id = "node-uploader-xyz"
+    identity.public_key_b64 = "fakekey"
+    identity.sign = MagicMock(return_value="sig")
+    gossip = MagicMock()
+    gossip.publish = AsyncMock()
+    ledger = MagicMock()
+
+    uploader = ContentUploader(
+        identity=identity,
+        gossip=gossip,
+        ledger=ledger,
+        creator_address=None,
+    )
+    uploader._ipfs_add = AsyncMock(return_value="QmFakeCID456")
+    uploader._persist_provenance = AsyncMock()
+
+    uploaded = asyncio.run(
+        uploader.upload(content=b"some bytes", filename="x.txt")
+    )
+
+    assert uploaded is not None
+    assert uploaded.provenance_hash is None

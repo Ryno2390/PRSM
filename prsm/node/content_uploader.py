@@ -161,6 +161,10 @@ class UploadedContent:
     embedding_id: Optional[str] = None          # "emb:<content_id>" when an embedding was generated
     near_duplicate_of: Optional[str] = None     # content ID of most-similar existing content
     near_duplicate_similarity: Optional[float] = None  # Cosine similarity to that content ID
+    # Phase 1.2: canonical on-chain provenance hash
+    # (keccak256(creator_address || sha3_256(file_bytes))).
+    # None when the uploader was constructed without a creator_address.
+    provenance_hash: Optional[str] = None  # 0x-prefixed hex
 
 
 class ContentUploader:
@@ -187,6 +191,7 @@ class ContentUploader:
         embedding_fn: Optional[Callable] = None,
         semantic_index_path: Optional[Path] = None,
         ipfs_api_url: str = "http://127.0.0.1:5001",
+        creator_address: Optional[str] = None,
     ):
         self.identity = identity
         self.gossip = gossip
@@ -199,6 +204,11 @@ class ContentUploader:
         # for back-compat with call sites that still use the HTTP IPFS
         # daemon; new code should go through ContentStore.
         self.ipfs_api_url = ipfs_api_url
+
+        # Phase 1.2: 0x address used to compute the canonical provenance_hash
+        # for the on-chain registry. None disables on-chain provenance — the
+        # local royalty path still works.
+        self.creator_address = creator_address
 
         # Sharding configuration
         self.sharding_threshold = sharding_threshold
@@ -273,6 +283,19 @@ class ContentUploader:
         size_bytes = len(content)
         parents = parent_content_ids or []
 
+        # Phase 1.2: compute the canonical creator-bound provenance hash
+        # so the on-chain registry and content_economy can find each other.
+        provenance_hash_hex: Optional[str] = None
+        if self.creator_address:
+            try:
+                from prsm.economy.web3.provenance_registry import compute_content_hash
+                ph = compute_content_hash(self.creator_address, content)
+                provenance_hash_hex = "0x" + ph.hex()
+            except Exception as exc:
+                logger.warning(
+                    f"failed to compute provenance_hash for {filename}: {exc}"
+                )
+
         # ── Semantic deduplication ────────────────────────────────────────────
         # Generate an embedding and check for near-duplicates *before* committing
         # to IPFS so we can auto-register derivative relationships early.
@@ -324,6 +347,7 @@ class ContentUploader:
                 embedding=embedding,
                 near_dup_cid=near_dup_cid,
                 near_dup_sim=near_dup_sim,
+                provenance_hash_hex=provenance_hash_hex,
             )
 
         # Standard monolithic upload for small files
@@ -349,6 +373,7 @@ class ContentUploader:
             "is_sharded": False,
             "embedding_id": embedding_id,
             "near_duplicate_of": near_dup_cid,
+            "provenance_hash": provenance_hash_hex,
         }
         provenance_bytes = json.dumps(provenance_data, sort_keys=True).encode()
         provenance_signature = self.identity.sign(provenance_bytes)
@@ -366,6 +391,7 @@ class ContentUploader:
             embedding_id=embedding_id,
             near_duplicate_of=near_dup_cid,
             near_duplicate_similarity=near_dup_sim,
+            provenance_hash=provenance_hash_hex,
         )
         self.uploaded_content[cid] = uploaded
         await self._persist_provenance(uploaded)  # Persist to DB
@@ -393,6 +419,7 @@ class ContentUploader:
             "royalty_rate": rate,
             "parent_content_ids": parents,
             "embedding_id": embedding_id,
+            "provenance_hash": provenance_hash_hex,
         })
 
         # Request storage replication
@@ -431,6 +458,7 @@ class ContentUploader:
         embedding: "Optional[np.ndarray]" = None,
         near_dup_cid: Optional[str] = None,
         near_dup_sim: Optional[float] = None,
+        provenance_hash_hex: Optional[str] = None,
     ) -> Optional[UploadedContent]:
         """Upload large content using sharding.
 
@@ -488,6 +516,7 @@ class ContentUploader:
                 "shard_size": manifest.shard_size,
                 "embedding_id": embedding_id,
                 "near_duplicate_of": near_dup_cid,
+                "provenance_hash": provenance_hash_hex,
             }
             provenance_bytes = json.dumps(provenance_data, sort_keys=True).encode()
             provenance_signature = self.identity.sign(provenance_bytes)
@@ -507,6 +536,7 @@ class ContentUploader:
                 embedding_id=embedding_id,
                 near_duplicate_of=near_dup_cid,
                 near_duplicate_similarity=near_dup_sim,
+                provenance_hash=provenance_hash_hex,
             )
             self.uploaded_content[manifest_cid] = uploaded
             await self._persist_provenance(uploaded)  # Persist to DB
@@ -536,6 +566,7 @@ class ContentUploader:
                 "is_sharded": True,
                 "total_shards": manifest.total_shards,
                 "embedding_id": embedding_id,
+                "provenance_hash": provenance_hash_hex,
             })
 
             # Request storage replication for each shard
@@ -587,6 +618,7 @@ class ContentUploader:
                 "parent_content_ids": parent_content_ids,
                 "is_sharded": False,
                 "sharding_failed": True,
+                "provenance_hash": provenance_hash_hex,
             }
             provenance_bytes = json.dumps(provenance_data, sort_keys=True).encode()
             provenance_signature = self.identity.sign(provenance_bytes)
@@ -601,6 +633,7 @@ class ContentUploader:
                 royalty_rate=royalty_rate,
                 parent_content_ids=parent_content_ids,
                 is_sharded=False,
+                provenance_hash=provenance_hash_hex,
             )
             self.uploaded_content[cid] = uploaded
             await self._persist_provenance(uploaded)  # Persist to DB
@@ -621,6 +654,7 @@ class ContentUploader:
                 "metadata": metadata or {},
                 "royalty_rate": royalty_rate,
                 "parent_content_ids": parent_content_ids,
+                "provenance_hash": provenance_hash_hex,
             })
             if replicas > 0:
                 await self.gossip.publish(GOSSIP_STORAGE_REQUEST, {
