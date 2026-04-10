@@ -1028,9 +1028,21 @@ class ContentEconomy:
             },
         )
         
-        if payment.status != PaymentStatus.COMPLETED:
+        # Phase 1.2: PENDING_ONCHAIN means the on-chain broadcast succeeded
+        # but the receipt is unknown — the tx may still settle. Treat it as
+        # a valid "proceed" state for retrieval (the chain will reconcile),
+        # same as COMPLETED. Only hard failures return None.
+        if payment.status not in (
+            PaymentStatus.COMPLETED,
+            PaymentStatus.PENDING_ONCHAIN,
+        ):
             logger.error(f"Payment failed for retrieval {request_id}: {payment.error}")
             return None
+        if payment.status == PaymentStatus.PENDING_ONCHAIN:
+            logger.warning(
+                f"Retrieval {request_id} proceeding with in-flight on-chain "
+                f"payment (tx pending reconciliation)"
+            )
         
         # Request content from selected provider
         # (ContentProvider will handle the actual retrieval)
