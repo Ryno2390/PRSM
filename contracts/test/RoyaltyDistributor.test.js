@@ -106,15 +106,17 @@ describe("RoyaltyDistributor", function () {
       expect(await token.balanceOf(servingNode.address)).to.equal(0);
     });
 
-    it("reverts if creator + network fee exceed 100%", async function () {
-      const contentHash = ethers.keccak256(ethers.toUtf8Bytes("over"));
-      await registry.connect(creator).registerContent(contentHash, 9900, "ipfs://O");
-
-      const gross = ONE * 100n;
-      // creator share = 99, network = 2, sum = 101 > 100 → revert
+    // Phase 1.1: the registry now caps rates at MAX_ROYALTY_RATE_BPS = 9800
+    // so the distributor's "Rate plus fee exceeds 100%" require is no longer
+    // reachable from a real registered content hash. The require is kept as
+    // defense-in-depth (e.g. for a hypothetical buggy/malicious registry).
+    // To verify the invariant, registering at the max+1 rate fails at the
+    // registry, which transitively prevents the distributor revert.
+    it("registry cap prevents the distributor's overflow revert (invariant)", async function () {
+      const contentHash = ethers.keccak256(ethers.toUtf8Bytes("invariant"));
       await expect(
-        distributor.connect(payer).distributeRoyalty(contentHash, servingNode.address, gross)
-      ).to.be.revertedWith("Rate plus fee exceeds 100%");
+        registry.connect(creator).registerContent(contentHash, 9801, "ipfs://X")
+      ).to.be.revertedWith("Rate exceeds max");
     });
   });
 
@@ -128,6 +130,47 @@ describe("RoyaltyDistributor", function () {
       expect(c).to.equal((gross * 800n) / 10000n);
       expect(n).to.equal((gross * 200n) / 10000n);
       expect(s).to.equal(gross - c - n);
+    });
+  });
+
+  describe("metadataUri gas griefing regression (Phase 1.1 P2 #7)", function () {
+    it("payment gas is independent of metadataUri size", async function () {
+      const smallHash = ethers.keccak256(ethers.toUtf8Bytes("small-meta"));
+      const bigHash = ethers.keccak256(ethers.toUtf8Bytes("big-meta"));
+      const smallMeta = "ipfs://X";
+      const bigMeta = "ipfs://" + "Q".repeat(8000); // ~8KB
+
+      await registry.connect(creator).registerContent(smallHash, 800, smallMeta);
+      await registry.connect(creator).registerContent(bigHash, 800, bigMeta);
+
+      const gross = ONE * 1n;
+
+      // Warmup pass: prime the token recipient slots so cold-vs-warm SSTORE
+      // doesn't dominate the measurement. Each distribute touches creator,
+      // treasury, and servingNode balances; the first touch is ~22100 gas
+      // and subsequent touches are ~5000.
+      await distributor.connect(payer).distributeRoyalty(smallHash, servingNode.address, gross);
+      await distributor.connect(payer).distributeRoyalty(bigHash, servingNode.address, gross);
+
+      // Measurement pass: now that all token slots are warm, the only
+      // difference between small-meta and big-meta should be the metadata
+      // storage access. With the slim getCreatorAndRate getter, that
+      // difference is zero.
+      const txSmall = await distributor
+        .connect(payer)
+        .distributeRoyalty(smallHash, servingNode.address, gross);
+      const txBig = await distributor
+        .connect(payer)
+        .distributeRoyalty(bigHash, servingNode.address, gross);
+
+      const rcSmall = await txSmall.wait();
+      const rcBig = await txBig.wait();
+
+      // If the distributor were reading metadataUri, the 8KB difference
+      // would cost ~525k extra gas (250 SLOADs at ~2100 each). With the
+      // slim getter, the diff must be near zero (allow tiny variance).
+      const diff = Number(rcBig.gasUsed - rcSmall.gasUsed);
+      expect(Math.abs(diff)).to.be.lessThan(1000);
     });
   });
 });

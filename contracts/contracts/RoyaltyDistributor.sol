@@ -5,15 +5,14 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 interface IProvenanceRegistry {
-    function contents(bytes32 contentHash)
+    /// @dev Slim getter — returns only what the distributor needs. The
+    ///      registry's full `contents()` getter would also return an
+    ///      unbounded `string metadataUri`, which a squatter could use to
+    ///      grief payment gas. We deliberately avoid that path here.
+    function getCreatorAndRate(bytes32 contentHash)
         external
         view
-        returns (
-            address creator,
-            uint16 royaltyRateBps,
-            uint64 registeredAt,
-            string memory metadataUri
-        );
+        returns (address creator, uint16 royaltyRateBps);
 }
 
 /**
@@ -68,7 +67,7 @@ contract RoyaltyDistributor is ReentrancyGuard {
         require(gross > 0, "Zero amount");
         require(servingNode != address(0), "Zero serving node");
 
-        (address creator, uint16 rateBps, , ) = registry.contents(contentHash);
+        (address creator, uint16 rateBps) = registry.getCreatorAndRate(contentHash);
         require(creator != address(0), "Not registered");
 
         uint256 creatorAmt = (gross * rateBps) / 10000;
@@ -115,7 +114,7 @@ contract RoyaltyDistributor is ReentrancyGuard {
             uint256 servingNodeAmount
         )
     {
-        (address creator, uint16 rateBps, , ) = registry.contents(contentHash);
+        (address creator, uint16 rateBps) = registry.getCreatorAndRate(contentHash);
         require(creator != address(0), "Not registered");
 
         creatorAmount = (gross * rateBps) / 10000;

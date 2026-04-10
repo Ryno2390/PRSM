@@ -85,6 +85,24 @@ describe("ProvenanceRegistry", function () {
     });
   });
 
+  describe("getCreatorAndRate", function () {
+    it("returns just creator and rate, no metadata", async function () {
+      const contentHash = ethers.keccak256(ethers.toUtf8Bytes("slim"));
+      await registry.connect(creator).registerContent(contentHash, 800, "ipfs://X");
+
+      const [c, rate] = await registry.getCreatorAndRate(contentHash);
+      expect(c).to.equal(creator.address);
+      expect(rate).to.equal(800);
+    });
+
+    it("returns zero address for unregistered content", async function () {
+      const contentHash = ethers.keccak256(ethers.toUtf8Bytes("missing-slim"));
+      const [c, rate] = await registry.getCreatorAndRate(contentHash);
+      expect(c).to.equal(ethers.ZeroAddress);
+      expect(rate).to.equal(0);
+    });
+  });
+
   describe("transferContentOwnership", function () {
     it("allows current creator to transfer", async function () {
       const contentHash = ethers.keccak256(ethers.toUtf8Bytes("xfer"));
