@@ -439,3 +439,67 @@ def test_malformed_provenance_hash_falls_back_safely():
     # have produced a valid distribution list (not raised).
     assert distributions
     assert any(d["type"] == "serving_node" for d in distributions)
+
+
+# ── Phase 1.2 Task 3: broadcast_pending surfaces as PENDING_ONCHAIN ──────
+
+
+def test_broadcast_pending_distribution_surfaces_as_pending_onchain_status():
+    """When _try_onchain_distribute returns a 'broadcast_pending' stub
+    (RPC lost receipt after broadcast), process_content_access must set
+    payment.status to PENDING_ONCHAIN, NOT COMPLETED. The API uses this
+    status to tell clients the payment needs reconciliation. Phase 1.2
+    P2 regression."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_economy import (
+        ContentEconomy,
+        PaymentStatus,
+        RoyaltyModel,
+    )
+
+    identity = MagicMock()
+    identity.node_id = "node-serving-xyz"
+    ledger = MagicMock()
+    ledger.credit = AsyncMock()
+    ledger.debit = AsyncMock()
+    gossip = MagicMock()
+    content_index = MagicMock()
+
+    economy = ContentEconomy(
+        identity=identity,
+        ledger=ledger,
+        gossip=gossip,
+        content_index=content_index,
+        ftns_ledger=None,
+        royalty_model=RoyaltyModel.PHASE4,
+    )
+
+    # Force _try_onchain_distribute to return a broadcast_pending stub.
+    async def fake_try_onchain(payment, content_metadata):
+        return [
+            {
+                "recipient_id": "onchain:in_flight",
+                "amount": float(payment.amount),
+                "type": "broadcast_pending",
+                "tx_hash": "0x" + "ab" * 32,
+            }
+        ]
+
+    economy._try_onchain_distribute = fake_try_onchain
+
+    payment = asyncio.run(
+        economy.process_content_access(
+            content_id="cid-test",
+            accessor_id="node-serving-xyz",
+            content_metadata={"royalty_rate": 100, "creator_id": "c"},
+        )
+    )
+
+    assert payment.status == PaymentStatus.PENDING_ONCHAIN, (
+        f"expected PENDING_ONCHAIN, got {payment.status}"
+    )
+    assert any(
+        d["type"] == "broadcast_pending" for d in payment.royalty_distributions
+    )
