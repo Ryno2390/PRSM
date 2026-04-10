@@ -1,6 +1,6 @@
 # PRSM Python SDK
 
-Official Python client for the Protocol for Recursive Scientific Modeling (PRSM).
+Official Python client for **PRSM — a P2P infrastructure protocol for open-source collaboration**. PRSM aggregates consumer-node storage, compute, and data into a mesh network any third-party LLM can reach through MCP tools. This SDK lets your Python application drive the PRSM infrastructure layer directly. Reasoning happens in your LLM of choice — PRSM supplies the distributed compute, storage, and FTNS settlement.
 
 [![PyPI version](https://badge.fury.io/py/prsm-python-sdk.svg)](https://badge.fury.io/py/prsm-python-sdk)
 [![Python versions](https://img.shields.io/pypi/pyversions/prsm-python-sdk.svg)](https://pypi.org/project/prsm-python-sdk/)
@@ -22,19 +22,25 @@ async def main():
     # Initialize client
     client = PRSMClient(api_key="your_api_key_here")
     
-    # Simple AI query
-    response = await client.query("Explain quantum computing in simple terms")
+    # Ring 1-10 compute query
+    response = await client.query(
+        "Explain quantum computing in simple terms",
+        budget=1.0,
+    )
     print(response.content)
-    
-    # Check token balance
+
+    # Check FTNS balance
     balance = await client.ftns.get_balance()
     print(f"FTNS Balance: {balance.available_balance}")
-    
-    # Search for models
-    models = await client.marketplace.search_models("gpt")
-    print(f"Found {len(models)} models")
-    
-    # Clean up
+
+    # Publish a dataset to the ContentStore
+    cid = await client.storage.upload(
+        "./my_dataset.parquet",
+        description="EV registrations 2025",
+        royalty_rate=0.05,
+    )
+    print(f"Uploaded: {cid}")
+
     await client.close()
 
 # Run the example
@@ -43,14 +49,13 @@ asyncio.run(main())
 
 ## Features
 
-- 🤖 **AI Query Interface** - Simple access to PRSM's distributed AI network
-- 💰 **FTNS Token Management** - Built-in token balance and cost tracking
-- 🔒 **Authentication** - Secure API key and JWT token handling
-- 📊 **Model Marketplace** - Browse and use community-contributed models
-- 🛡️ **Safety Integration** - Built-in safety monitoring and circuit breakers
-- 📈 **Performance Monitoring** - Request tracking and optimization
-- 🌐 **P2P Network Access** - Direct access to distributed computing resources
-- 🔧 **Tool Integration** - MCP tool protocol support for enhanced capabilities
+- **Ring 1-10 Compute Client** — submit quotes and queries through the full PRSM pipeline
+- **FTNS Token Management** — balance checks, transfers, yield estimation
+- **Authentication** — secure API key and JWT token handling
+- **ContentStore** — upload content with royalty tracking, download by CID
+- **MCP Tool Surface** — drive the same 16 tools third-party LLMs use
+- **WebSocket Streaming** — live job progress updates for long-running compute jobs
+- **P2P Network Access** — direct access to the PRSM mesh via your local node
 
 ## Advanced Usage
 
@@ -89,28 +94,22 @@ async def cost_example():
     await client.close()
 ```
 
-### Model Marketplace
+### Publish Data with Royalty Tracking
 
 ```python
-async def marketplace_example():
+async def storage_example():
     client = PRSMClient(api_key="your_api_key")
-    
-    # Search for specific models
-    science_models = await client.marketplace.search_models(
-        query="scientific research",
-        min_performance=0.8,
-        max_cost=0.001
+
+    # Upload content through your local node's ContentStore
+    result = await client.storage.upload(
+        "./nada_registrations_2025.parquet",
+        description="NADA NC Vehicle Registrations 2025",
+        royalty_rate=0.05,   # 0.05 FTNS earned per access
+        replicas=5,
     )
-    
-    # Use a specific model
-    if science_models:
-        model = science_models[0]
-        response = await client.query(
-            "Explain CRISPR gene editing",
-            model_id=model.id
-        )
-        print(f"Response from {model.name}: {response.content}")
-    
+    print(f"CID: {result.cid}")
+    print(f"You earn 80% of every query that hits this content")
+
     await client.close()
 ```
 

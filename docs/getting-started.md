@@ -1,6 +1,6 @@
 # PRSM Getting Started Guide
 
-> PRSM — Decentralized AI infrastructure.
+> PRSM — P2P infrastructure protocol for open-source collaboration.
 
 ## Quick Install
 

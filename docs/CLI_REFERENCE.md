@@ -22,12 +22,9 @@ prsm setup                         # Interactive configuration wizard
 ## Compute
 
 ```bash
-# Full forge pipeline (Rings 1-10) — requires FTNS budget
+# Full Ring 1-10 pipeline — requires FTNS budget
 prsm compute run --query "What causes climate change?" --budget 1.0
 prsm compute run --query "EV trends in NC" --budget 10.0 --privacy high
-
-# Legacy NWTN path
-prsm compute run --prompt "What is 2+2?" --budget 0.01
 
 # Cost estimate (free, no tokens spent)
 prsm compute quote "your query"
@@ -43,23 +40,26 @@ prsm ftns yield-estimate                        # Default estimate
 prsm ftns yield-estimate --hours 20 --stake 1000  # Custom estimate
 ```
 
-## Data Marketplace
+## Storage / Data Publishing
 
 ```bash
-prsm marketplace list-dataset \
-  --title "My Dataset" \
-  --dataset-id my-data \
-  --base-fee 5.0 \
-  --per-shard 0.5 \
-  --shards 10 \
-  --require-stake 100
+# Upload content to your node's ContentStore with royalty tracking
+prsm storage upload ./my_dataset.parquet \
+  --description "My Dataset 2025" \
+  --royalty-rate 0.05 \
+  --replicas 5
+
+# Download content by CID
+prsm storage download <cid> -o ./local_file.parquet
+
+# List content you've uploaded
+prsm storage list
 ```
 
-## Agent Operations
+## Demo
 
 ```bash
-prsm agent forge "Analyze vehicle registration trends in NC"  # Preview decomposition
-prsm demo                                                       # Full Ring 1-10 demo
+prsm demo       # Full Ring 1-10 end-to-end demo
 ```
 
 ## MCP Server
@@ -81,7 +81,7 @@ prsm daemon status   # Check status
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
-| `OPENROUTER_API_KEY` | LLM backend for forge | `sk-or-...` |
+| `OPENROUTER_API_KEY` | Third-party LLM backend | `sk-or-...` |
 | `PRSM_NODE_API_KEY` | API authentication | Any strong secret |
 | `PRSM_BOOTSTRAP_NODES` | Custom bootstrap | `ws://host:9001` |
 | `PRSM_FAUCET_ENABLED` | Enable/disable faucet | `1` or `0` |

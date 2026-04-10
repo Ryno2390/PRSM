@@ -208,37 +208,35 @@ python -m pytest tests/performance/ -v --benchmark-only
 ### Interactive Testing Examples
 
 ```python
-# test_interactive.py - Run this for hands-on testing
+# test_interactive.py — hands-on testing via the PRSM SDK
 import asyncio
-from prsm.nwtn.orchestrator import NWTNOrchestrator
-from prsm.core.models import PRSMSession
+from prsm.sdk import PRSMClient
 
 async def interactive_test():
     """Interactive test session for development"""
-    orchestrator = NWTNOrchestrator()
-    
-    # Test 1: Basic query processing
-    print("🧪 Test 1: Basic Query Processing")
-    session = PRSMSession(user_id="dev_test")
-    response = await orchestrator.process_query(
+    client = PRSMClient("http://localhost:8000")
+
+    # Test 1: Cost quote (free — no FTNS spent)
+    print("Test 1: Cost Quote")
+    quote = await client.quote("EV trends in NC", shards=5, tier="t2")
+    print(f"Estimated cost: {quote.total_ftns} FTNS")
+
+    # Test 2: Full Ring 1-10 query execution
+    print("\nTest 2: Ring 1-10 Pipeline")
+    result = await client.query(
         "Explain quantum computing in simple terms",
-        session
+        budget=1.0,
+        privacy="standard",
     )
-    print(f"✅ Response length: {len(response.content)} characters")
-    print(f"✅ Context used: {response.context_used} FTNS")
-    
-    # Test 2: Multi-agent coordination
-    print("\n🧪 Test 2: Multi-Agent Coordination")
-    complex_query = "Design a sustainable energy system for a city of 1 million people"
-    response = await orchestrator.process_query(complex_query, session)
-    print(f"✅ Reasoning steps: {len(response.reasoning_trace)}")
-    
-    # Test 3: Error handling
-    print("\n🧪 Test 3: Error Handling")
+    print(f"Result length: {len(result.content)} characters")
+    print(f"FTNS spent: {result.ftns_spent}")
+
+    # Test 3: Error handling with an empty query
+    print("\nTest 3: Error Handling")
     try:
-        await orchestrator.process_query("", session)  # Empty query
+        await client.query("", budget=0.01)
     except ValueError as e:
-        print(f"✅ Proper error handling: {e}")
+        print(f"Proper error handling: {e}")
 
 if __name__ == "__main__":
     asyncio.run(interactive_test())
@@ -366,89 +364,32 @@ def test_my_new_endpoint():
     assert "Processed test" in response.json()["result"]
 ```
 
-### Adding a New Agent Component
+### Adding a New WASM Mobile Agent
 
-```python
-# 1. Create the agent class
-# prsm/agents/my_new_agent.py
+PRSM dispatches WASM (WebAssembly) mobile agents to remote nodes where the data lives. Agents are compiled Rust or AssemblyScript modules that execute in a zero-persistence Wasmtime sandbox. See `prsm/compute/agents/` and `prsm/compute/wasm/` for the agent dispatch and runtime code.
 
-from typing import Dict, Any, List
-import structlog
-from .base import BaseAgent
+```rust
+// my_agent.rs — compile to wasm32-wasi
+use prsm_sdk::{read_input, write_output, Filter, Aggregate};
 
-logger = structlog.get_logger(__name__)
-
-class MyNewAgent(BaseAgent):
-    """Agent for handling specific domain tasks."""
-    
-    def __init__(self, config: Dict[str, Any] = None):
-        super().__init__(config)
-        self.agent_type = "my_new_agent"
-        self.capabilities = ["capability1", "capability2"]
-    
-    async def process_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """Process a task specific to this agent's domain."""
-        logger.info("Processing task", agent_type=self.agent_type, task_id=task.get("id"))
-        
-        try:
-            # Your processing logic
-            result = await self._specific_processing(task)
-            
-            logger.info("Task completed successfully", 
-                       agent_type=self.agent_type,
-                       task_id=task.get("id"))
-            
-            return {
-                "status": "completed",
-                "result": result,
-                "agent_type": self.agent_type
-            }
-            
-        except Exception as e:
-            logger.error("Task processing failed",
-                        agent_type=self.agent_type,
-                        error=str(e))
-            raise
-    
-    async def _specific_processing(self, task: Dict[str, Any]) -> Any:
-        """Implement your specific processing logic here."""
-        # Placeholder for your implementation
-        return f"Processed task: {task.get('description', 'No description')}"
-
-# 2. Register the agent
-# prsm/agents/__init__.py
-from .my_new_agent import MyNewAgent
-
-AVAILABLE_AGENTS = {
-    "my_new_agent": MyNewAgent,
-    # ... other agents
+#[no_mangle]
+pub extern "C" fn run() {
+    let shard = read_input::<Vec<Record>>();
+    let filtered = shard.filter(|r| r.year == 2025);
+    let avg = filtered.aggregate_avg("price");
+    write_output(&avg);
 }
-
-# 3. Add configuration
-# config/agents.yaml
-my_new_agent:
-  enabled: true
-  max_concurrent_tasks: 5
-  timeout_seconds: 300
-  capabilities:
-    - capability1
-    - capability2
-
-# 4. Add tests
-# tests/test_my_new_agent.py
-import pytest
-from prsm.agents.my_new_agent import MyNewAgent
-
-@pytest.mark.asyncio
-async def test_my_new_agent_processing():
-    agent = MyNewAgent()
-    task = {"id": "test_task", "description": "Test task"}
-    
-    result = await agent.process_task(task)
-    
-    assert result["status"] == "completed"
-    assert "Processed task" in result["result"]
 ```
+
+```bash
+# Compile
+cargo build --target wasm32-wasi --release
+
+# Register the agent with your node so other nodes can dispatch it
+prsm compute run --wasm target/wasm32-wasi/release/my_agent.wasm --input data.json
+```
+
+From a third-party LLM (via MCP), the `prsm_create_agent` and `prsm_dispatch_agent` tools expose the same workflow programmatically so Claude, GPT, or any MCP-compatible LLM can author and dispatch custom agents during a query.
 
 ### Database Migrations
 

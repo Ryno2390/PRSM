@@ -4,7 +4,7 @@
 
 PRSM is a P2P infrastructure protocol that aggregates latent storage, compute, and data from consumer nodes — gaming PCs, consoles, laptops, phones — into a mesh network accessible to third-party LLMs via MCP tools. Contributors earn FTNS tokens for sharing their latent resources; users leverage PRSM infrastructure through their preferred LLMs (local or via OAuth/API). PRSM is not an AGI framework. Reasoning happens in third-party LLMs; PRSM provides the infrastructure those LLMs use to access distributed resources and data.
 
-**Version 1.6.0** | [PyPI](https://pypi.org/project/prsm-network/) | [Getting Started](docs/GETTING_STARTED.md) | [Architecture Spec](docs/SOVEREIGN_EDGE_AI_SPEC.md)
+**Version 1.6.2** | [PyPI](https://pypi.org/project/prsm-network/) | [Getting Started](docs/GETTING_STARTED.md) | [Architecture Spec](docs/SOVEREIGN_EDGE_AI_SPEC.md)
 
 [![PyPI version](https://badge.fury.io/py/prsm-network.svg)](https://pypi.org/project/prsm-network/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -67,7 +67,7 @@ PRSM is built as concentric capability rings. Each ring wraps and enriches the o
 | 2 | **The Courier** | Mobile agent dispatch — agents travel to data via P2P gossip + bidding |
 | 3 | **The Swarm** | Semantic sharding — data split by meaning, parallel map-reduce across nodes |
 | 4 | **The Economy** | Hybrid pricing — deterministic compute rates + market-rate data + 80/15/5 revenue splits |
-| 5 | **The Router** | Query decomposition performed by the caller's LLM (removed in v1.6.0 — replaced by third-party LLM integration via MCP) |
+| 5 | **Agent Forge** | WASM mobile agent runtime — query decomposition is performed by the caller's third-party LLM; PRSM dispatches the resulting WASM agents |
 | 6 | **The Polish** | Production hardening — dynamic gas, RPC failover, CLI commands |
 | 7 | **The Vault** | Confidential compute — TEE abstraction + differential privacy noise |
 | 8 | **The Shield** | Model sharding — tensor parallelism + randomized pipelines + collision detection |
@@ -218,7 +218,7 @@ See [Deployment Guide](deploy/production/DEPLOYMENT_GUIDE.md) for full instructi
 
 | Metric | Value |
 |--------|-------|
-| Version | 1.6.0 |
+| Version | 1.6.2 |
 | MCP Tools | 16 |
 | SDKs | Python, JavaScript, Go |
 | FTNS Token | [Base mainnet](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5) |

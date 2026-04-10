@@ -427,32 +427,34 @@ docker-compose logs prsm-worker | grep training
 - Check for data loader issues
 - Verify training data format
 
-### Model Loading Issues
+### Third-Party LLM Backend Issues
 
 **Symptoms**:
-- "Model not found" errors
-- Model loading timeouts
-- Inference failures
+- `prsm compute run` falls back to mock responses
+- MCP server returns empty responses to LLM calls
+- OpenRouter / Anthropic / OpenAI API errors
 
 **Diagnosis**:
 ```bash
-# List available models
-curl http://localhost:8000/api/v1/models \
-  -H "Authorization: Bearer TOKEN"
+# Check the MCP server is running
+curl http://localhost:9100/mcp/status
 
-# Test model loading
+# Verify the LLM backend credentials are loaded
+prsm config check
+
+# Test the third-party LLM connection directly
 python -c "
-from prsm.agents.executors.model_executor import ModelExecutor
-executor = ModelExecutor()
-print(executor.list_available_models())
+import os
+from prsm.compute.llm import get_backend
+backend = get_backend('openrouter')
+print(backend.health_check())
 "
 ```
 
 **Solutions**:
-- Verify model files exist in IPFS
-- Check model format compatibility
-- Update model registry
-- Clear model cache and reload
+- Confirm `OPENROUTER_API_KEY` (or `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`) is set in `~/.prsm/.env`
+- Check the backend quota on the provider's dashboard
+- PRSM does **not** host models — reasoning must be performed by a third-party LLM reached via OpenRouter or directly via provider SDK, or a local model via Ollama
 
 ### Training Resource Issues
 

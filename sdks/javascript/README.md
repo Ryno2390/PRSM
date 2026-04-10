@@ -1,6 +1,6 @@
 # PRSM JavaScript/TypeScript SDK
 
-Official JavaScript/TypeScript SDK for the **Protocol for Recursive Scientific Modeling (PRSM)**, featuring MIT's breakthrough SEAL (Self-Adapting Language Models) technology.
+Official JavaScript/TypeScript SDK for **PRSM — a P2P infrastructure protocol for open-source collaboration**. PRSM aggregates consumer-node storage, compute, and data into a mesh network that any third-party LLM can reach through MCP tools. This SDK lets your JavaScript or TypeScript application drive the PRSM infrastructure layer directly.
 
 [![npm version](https://badge.fury.io/js/%40prsm%2Fsdk.svg)](https://badge.fury.io/js/%40prsm%2Fsdk)
 [![TypeScript](https://img.shields.io/badge/%3C%2F%3E-TypeScript-%230074c1.svg)](https://www.typescriptlang.org/)
@@ -8,16 +8,17 @@ Official JavaScript/TypeScript SDK for the **Protocol for Recursive Scientific M
 
 ## Features
 
-- 🧠 **Complete API Client** - Full access to all PRSM endpoints including NWTN, SEAL, and marketplace
-- 🔒 **TypeScript Support** - Comprehensive type definitions for enhanced developer experience
-- ⚡ **Real-time WebSocket** - Live session progress updates and streaming responses
-- 🛡️ **Error Handling** - Robust error handling with automatic retry logic
-- 🔑 **Authentication** - JWT tokens, API keys, and secure session management
-- 💰 **FTNS Integration** - Complete token management and Web3 operations
-- 🏪 **Marketplace** - Model discovery, rental, and submission capabilities
-- 🔧 **Tool Execution** - Discover and execute tools with safety validation
-- 📊 **Circuit Breakers** - Built-in safety mechanisms and rate limiting
-- 🌐 **Cross-platform** - Works in browsers, Node.js, and React Native
+- **Ring 1-10 Compute Client** — submit quotes and queries through the full PRSM pipeline
+- **TypeScript Support** — comprehensive type definitions for enhanced DX
+- **Real-time WebSocket** — live job progress updates and streaming results
+- **Error Handling** — robust error handling with automatic retry logic
+- **Authentication** — JWT tokens, API keys, and secure session management
+- **FTNS Integration** — balance checks, transfers, yield estimation
+- **Storage / ContentStore** — upload content with royalty tracking, download by CID
+- **MCP Tool Surface** — drive the same 16 tools that third-party LLMs use
+- **Cross-platform** — Node.js, browsers, React Native
+
+PRSM itself does not host models — reasoning happens in your LLM of choice. The SDK drives PRSM's compute dispatch, storage, and FTNS settlement layers.
 
 ## Installation
 
@@ -41,91 +42,29 @@ const client = new PRSMClient({
   baseUrl: 'https://api.prsm.org'
 });
 
-// Submit a research query
-const result = await client.query(
-  'Analyze the impact of climate change on marine ecosystems',
-  {
-    domain: 'environmental_science',
-    maxIterations: 5,
-    includeCitations: true
-  }
-);
+// Get a free cost quote
+const quote = await client.compute.quote('EV adoption trends in NC', {
+  shards: 5,
+  tier: 't2',
+});
+console.log(`Estimated cost: ${quote.totalFtns} FTNS`);
+
+// Execute the query through the Ring 1-10 pipeline
+const result = await client.compute.run({
+  query: 'EV adoption trends in NC',
+  budget: quote.totalFtns * 1.1,
+  privacy: 'standard',
+});
 
 console.log(result.content);
-console.log(result.citations);
-```
-
-### Advanced NWTN Usage
-
-```typescript
-// Submit query with SEAL enhancement
-const session = await client.nwtn.submitQuery({
-  query: 'Develop a novel approach to protein folding prediction',
-  domain: 'biochemistry',
-  methodology: 'comprehensive_analysis',
-  maxIterations: 8,
-  includeCitations: true,
-  sealEnhancement: {
-    enabled: true,
-    autonomousImprovement: true,
-    targetLearningGain: 0.20,
-    restemMethodology: true
-  }
-});
-
-// Monitor progress with WebSocket
-await client.websocket.connect();
-client.websocket.subscribeToSession(session.sessionId, (progress) => {
-  console.log(`Progress: ${progress.progress}%`);
-  console.log(`Current step: ${progress.currentStep}`);
-});
-
-// Wait for completion
-const result = await client.nwtn.waitForCompletion(session.sessionId);
-console.log('Research completed:', result.results?.summary);
+console.log(`FTNS spent: ${result.ftnsSpent}`);
 ```
 
 ## Core Features
 
-### 1. Neural Web of Thought Networks (NWTN)
+> **Note:** The legacy NWTN research-session API, SEAL autonomous improvement API, hosted marketplace, and centralized REST governance were removed in v1.6.0. PRSM is now a P2P infrastructure protocol — reasoning happens in your third-party LLM via MCP, not inside PRSM. Governance is on-network stake-weighted voting by node operators, not a REST API.
 
-Submit complex research queries with autonomous reasoning:
-
-```typescript
-const session = await client.nwtn.submitQuery({
-  query: 'Design a sustainable urban transportation system',
-  domain: 'urban_planning',
-  methodology: 'comprehensive_analysis',
-  maxIterations: 6,
-  tools: ['simulation', 'optimization', 'visualization'],
-  context: {
-    city_size: 'large',
-    budget_constraint: 'moderate',
-    environmental_priority: 'high'
-  }
-});
-```
-
-### 2. SEAL Technology Integration
-
-Leverage MIT's Self-Adapting Language Models:
-
-```typescript
-// Get SEAL performance metrics
-const metrics = await client.seal.getMetrics();
-console.log('Knowledge incorporation improvement:', 
-  metrics.productionMetrics.improvementPercentage);
-
-// Trigger autonomous improvement
-const improvement = await client.seal.triggerImprovement({
-  domain: 'biomedical_research',
-  targetImprovement: 0.25,
-  improvementStrategy: 'restem_methodology',
-  maxIterations: 15
-});
-```
-
-### 3. FTNS Token Management
+### 1. FTNS Token Management
 
 Complete Web3 integration for FTNS tokens:
 
@@ -149,38 +88,31 @@ const purchase = await client.ftns.purchaseTokens({
 });
 ```
 
-### 4. Marketplace Operations
+### 2. ContentStore (Publish Data with Royalty Tracking)
 
-Discover, rent, and submit models:
+Upload content through your node's ContentStore and earn 80% of every query that hits it:
 
 ```typescript
-// Browse marketplace
-const models = await client.marketplace.browseModels({
-  category: 'scientific',
-  provider: 'verified',
-  minPerformance: 4.0,
-  featured: true,
-  limit: 20
+// Upload a dataset
+const result = await client.storage.upload({
+  filePath: './climate_data.parquet',
+  description: 'NOAA climate observations 2025',
+  royaltyRate: 0.05,   // 0.05 FTNS per access
+  replicas: 5,
 });
+console.log(`CID: ${result.cid}`);
 
-// Rent a model
-const rental = await client.marketplace.rentModel('model_123', {
-  durationHours: 24,
-  maxRequests: 1000
-});
+// Download by CID
+const download = await client.storage.download(result.cid);
 
-// Submit your own model
-const submission = await client.marketplace.submitModel({
-  name: 'Advanced Climate Model',
-  description: 'High-accuracy climate prediction model',
-  category: 'scientific',
-  modelFile: 'ipfs://QmXXXXXX...',
-  pricing: { ftnsPerRequest: 5, revenueShare: 0.7 },
-  tags: ['climate', 'prediction', 'environmental']
+// Search semantic shards
+const shards = await client.storage.searchShards({
+  query: 'climate observations',
+  limit: 10,
 });
 ```
 
-### 5. Real-time WebSocket Updates
+### 3. Real-time WebSocket Updates
 
 Get live updates for sessions, tools, and system events:
 
@@ -241,36 +173,6 @@ async function costExample() {
     console.log(response.content);
   } else {
     console.log('Insufficient FTNS balance');
-  }
-  
-  await client.close();
-}
-```
-
-### Model Marketplace
-
-```typescript
-import { ModelProvider } from '@prsm/sdk';
-
-async function marketplaceExample() {
-  const client = new PRSMClient({ apiKey: 'your_api_key' });
-  
-  // Search for specific models
-  const scienceModels = await client.marketplace.searchModels({
-    query: 'scientific research',
-    provider: ModelProvider.HUGGINGFACE,
-    minPerformance: 0.8,
-    maxCost: 0.001,
-    limit: 10
-  });
-  
-  // Use a specific model
-  if (scienceModels.length > 0) {
-    const model = scienceModels[0];
-    const response = await client.query('Explain CRISPR gene editing', {
-      modelId: model.id
-    });
-    console.log(`Response from ${model.name}: ${response.content}`);
   }
   
   await client.close();

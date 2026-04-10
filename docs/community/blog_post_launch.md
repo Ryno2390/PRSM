@@ -1,8 +1,8 @@
 # Blog Post — Launch Announcement
 
-## We Built a Peer-to-Peer AI Compute Network for Scientific Research. Here's Where We Are.
+## We Built a P2P Infrastructure Protocol That Lets Any LLM Reach Distributed Compute, Storage, and Data
 
-The way most researchers access AI compute today is structurally broken for science. You pay a centralized provider, your data and outputs pass through infrastructure you don't control, provenance is opaque, and costs scale in ways that make large collaborative projects economically unworkable. When the outputs of an AI-assisted research pipeline can't be reliably traced back to the models and data that produced them, reproducibility — the bedrock of science — is at risk.
+The way most people reach AI compute today is broken. You route your query to a centralized provider, your data and outputs pass through infrastructure you don't control, and every token you spend funds a datacenter you'll never visit. Meanwhile, billions of consumer devices — gaming PCs, consoles, laptops, phones — sit idle with storage, compute, and sometimes proprietary data that never leave the device.
 
 We built PRSM to take a different path.
 
@@ -10,37 +10,39 @@ We built PRSM to take a different path.
 
 ### What PRSM Is
 
-PRSM stands for Protocol for Recursive Scientific Modeling. It's a peer-to-peer framework where nodes contribute compute and storage, earn tokens for doing so, and spend those tokens to submit AI inference and embedding jobs. The goal is a self-sustaining network where the people doing the work are also the people running the infrastructure.
+PRSM stands for Protocol for Recursive Scientific Modeling, but the short version is this: **it's a P2P infrastructure protocol for open-source collaboration**. Nodes on a mesh network share their latent storage, compute, and data. Contributors earn FTNS tokens for sharing those resources. Any third-party LLM — Claude, GPT, a local Llama, whatever — can reach the network through MCP (Model Context Protocol) tools.
 
-The orchestration layer is called NWTN — Neural Web for Transformation Networking. It's a 5-layer agent pipeline that handles everything from breaking down a complex research task into subtasks, routing those subtasks to appropriate nodes, executing inference against real AI backends (Anthropic and OpenAI today, with the architecture designed to be backend-agnostic), validating results, and returning composed outputs. The approach is neuro-symbolic: NWTN reasons over structured representations of tasks and model capabilities, not just raw prompts.
+Crucially, **PRSM is not an AGI framework**. Reasoning happens inside the caller's LLM. PRSM doesn't host models. When you ask a question, your LLM decomposes it into WASM mobile-agent instructions, PRSM dispatches those agents to the nodes holding the relevant data, the agents execute in zero-persistence Wasmtime sandboxes, and the results flow back to the LLM for final synthesis. The code goes to the data — not the other way around.
 
-Storage is handled through IPFS with semantic provenance tracking built in. Every stored artifact carries metadata about what model produced it, what data it was derived from, and who contributed compute. This isn't cosmetic — it feeds directly into the royalty distribution logic, so contributors get credited and compensated when their stored artifacts are referenced downstream.
+Storage is handled through a native ContentStore with semantic provenance tracking built in. Every piece of content carries metadata about who produced it and what it was derived from. This feeds directly into the royalty pipeline: when a query hits your data, you earn FTNS.
 
 ---
 
 ### What Actually Works Today
 
-We shipped v0.2.1 alpha this week. Here's what's real:
+v1.6.2 shipped this week. Here's what's real:
 
-`pip install prsm-network` works. `prsm node start` connects your node to the bootstrap server at `wss://bootstrap1.prsm-network.com:8765`, and you receive a 100 FTNS token welcome grant. The REST API comes up at localhost:8000. You can submit compute jobs against live AI backends and get real results back. Single-node and multi-node compute are both functional. We have 1,391+ passing tests.
+- `pip install prsm-network` works. `prsm node start` connects your node to the bootstrap network at `wss://bootstrap1.prsm-network.com:8765`, and you receive a 100 FTNS welcome grant.
+- The Ring 1-10 Sovereign-Edge AI architecture is fully shipped: Wasmtime sandbox, mobile agent dispatch, semantic swarm compute, hybrid pricing, TEE abstraction + differential privacy, tensor-parallel model sharding, and a hash-chained audit log.
+- 16 MCP tools are exposed by `prsm mcp-server`, so Claude Desktop (or any MCP-compatible LLM) gains hands (WASM agents) and a wallet (FTNS settlement).
+- The **FTNS token is live on Base mainnet** at `0x5276a3756C85f2E9e46f6D34386167a209aa16e5`, with the Chronos bridge converting between FTNS and USD/USDT so node operators can cash out.
+- Python, JavaScript/TypeScript, and Go SDKs are all published.
 
-The FTNS token is deployed on Ethereum Sepolia testnet at `0xd979c096BE297F4C3a85175774Bc38C22b95E6a4`. The on-chain token economy — earning for contributing, spending to submit jobs — is implemented and testable today. The safety infrastructure includes circuit breakers, emergency halt mechanisms, rule-based monitoring, Ed25519 signatures, and post-quantum cryptography for message integrity.
-
-This is alpha software. We're being direct about that. The token economics are still being calibrated, the network has a small number of nodes, and there are rough edges. We're not asking you to trust PRSM with production workloads. We're asking you to run a node, poke at it, and tell us what breaks.
+This is still early — and we're direct about that. The network has a small number of nodes, the FTNS economy is being calibrated against real usage, and there are rough edges. We're not asking you to run production workloads on PRSM yet. We're asking you to run a node, plug it into your LLM of choice, and tell us what breaks.
 
 ---
 
 ### What's Coming
 
-The immediate roadmap focuses on three things: expanding the node network so there's meaningful redundancy and load distribution, refining the FTNS economic model based on real usage data from the testnet, and deepening the neuro-symbolic reasoning layer in NWTN so it can handle more complex multi-step research tasks with less hand-holding.
+Near-term focus is geographic bootstrap resilience (EU + APAC nodes) and a fine-tuned NWTN LLM (Ring 9) trained on real execution traces collected by the network. Ring 9 currently ships only the training pipeline; the fine-tuned model itself is future work. When it arrives, any node will be able to run it locally as an alternative to OpenRouter/Anthropic/OpenAI for WASM agent generation.
 
-Longer term, we're working toward a mainnet FTNS deployment, a model distillation pipeline that lets nodes contribute training as well as inference, and deeper integrations with scientific data repositories so that provenance tracking spans the full research lifecycle from raw data to published output.
+Longer term, protocol governance is entirely on-network: node operators vote on upgrades, treasury spending, and parameter updates. No institutional tier. Nodes are nodes.
 
 ---
 
 ### Get Involved
 
-If you're a researcher who's frustrated with the cost and opacity of current AI compute access, a developer who wants to work on distributed systems problems that actually matter, or a node operator looking to contribute to something early — we want to hear from you.
+If you're frustrated with the cost and opacity of centralized AI compute, if you want to point your favorite LLM at a network you control, or if you have idle hardware and want to earn FTNS for sharing it — we want to hear from you.
 
 ```bash
 pip install prsm-network

@@ -17,7 +17,7 @@ pip install -e .
 
 ### 2. Configure
 
-**Set up your LLM backend** (needed for the Agent Forge to decompose queries):
+**Connect a third-party LLM** (the LLM is the reasoning layer — PRSM just gives it compute, storage, and data access via MCP tools). You can use any MCP-compatible client, or configure a local/remote LLM through OpenRouter:
 
 ```bash
 # Option A: OpenRouter (recommended — many free models available)
@@ -72,20 +72,15 @@ prsm compute run --query "What is the capital of France?" --budget 0.01
 prsm ftns yield-estimate --hours 8 --stake 1000
 ```
 
-### 5. Explore the Forge Pipeline
+### 5. Explore the Ring Pipeline
 
-The `--query` flag routes through the full Ring 1-10 forge pipeline:
+The `--query` flag routes through the full Ring 1-10 pipeline:
 
-1. **Decompose** -- LLM analyzes what data and operations are needed
+1. **Decompose** -- Third-party LLM analyzes what data and operations are needed
 2. **Plan** -- Selects execution route (direct LLM / single agent / swarm)
 3. **Quote** -- Calculates cost before execution
-4. **Execute** -- Routes to appropriate ring
-5. **Trace** -- Collects training data for future NWTN fine-tuning
-
-```bash
-# See how a complex query gets decomposed
-prsm agent forge "Analyze vehicle registration trends in North Carolina"
-```
+4. **Execute** -- Routes WASM agents to the right ring
+5. **Trace** -- Collects execution traces for future NWTN training (Ring 9)
 
 ## Architecture Overview
 
@@ -97,7 +92,7 @@ PRSM is built as 10 concentric "Capability Rings":
 | 2 | The Courier | Mobile agent dispatch + settlement |
 | 3 | The Swarm | Semantic sharding + parallel execution |
 | 4 | The Economy | Hybrid pricing + prosumer staking |
-| 5 | The Brain | LLM agent forge + MCP tools |
+| 5 | Agent Forge | WASM mobile agent runtime + MCP tools |
 | 6 | The Polish | Dynamic gas, CLI, signatures |
 | 7 | The Vault | TEE + differential privacy |
 | 8 | The Shield | Model sharding + collusion resistance |
@@ -108,16 +103,13 @@ Each ring wraps and enriches the ones inside it. See `docs/SOVEREIGN_EDGE_AI_SPE
 
 ## For Data Providers
 
-Publish a dataset with pricing:
+Publish a dataset through your node's ContentStore with pricing:
 
 ```bash
-prsm marketplace list-dataset \
-  --title "My Dataset 2025" \
-  --dataset-id my-dataset \
-  --base-fee 5.0 \
-  --per-shard 0.5 \
-  --shards 10 \
-  --require-stake 100
+prsm storage upload ./my_dataset.parquet \
+  --description "My Dataset 2025" \
+  --royalty-rate 0.05 \
+  --replicas 5
 ```
 
 Revenue split: **80% to you** (data owner), 15% to compute providers, 5% to network.
@@ -167,5 +159,5 @@ curl http://localhost:8000/status
 
 - Read the [Sovereign-Edge AI Spec](SOVEREIGN_EDGE_AI_SPEC.md) for architecture details
 - Read the [Confidential Compute Spec](CONFIDENTIAL_COMPUTE_SPEC.md) for privacy architecture
-- Browse [MCP tools](../prsm/compute/nwtn/agent_forge/mcp_tools.py) for LLM integration
+- Browse [MCP server](../prsm/mcp_server.py) for LLM integration
 - Check [Implementation Status](IMPLEMENTATION_STATUS.md) for subsystem details
