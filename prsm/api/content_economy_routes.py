@@ -48,6 +48,14 @@ class ContentAccessRequest(BaseModel):
     royalty_rate: float = Field(..., ge=0.001, le=0.1, description="Per-access fee")
     creator_id: str = Field(..., description="Content creator ID")
     parent_cids: List[str] = Field(default_factory=list, description="Parent content CIDs")
+    provenance_hash: Optional[str] = Field(
+        None,
+        description=(
+            "Optional 0x-prefixed canonical provenance hash. When set and "
+            "PRSM_ONCHAIN_PROVENANCE=1, payment routes through the Base "
+            "RoyaltyDistributor instead of the local ledger."
+        ),
+    )
 
 
 class ContentAccessResponse(BaseModel):
@@ -160,6 +168,7 @@ async def process_content_access(
                 "royalty_rate": request.royalty_rate,
                 "creator_id": request.creator_id,
                 "parent_cids": request.parent_cids,
+                "provenance_hash": request.provenance_hash,
             },
         )
         
