@@ -13,12 +13,13 @@ PRSM provides SDKs in three languages, allowing you to integrate decentralized A
 | Go | `prsm-go-sdk` | ✅ Complete | `go get github.com/PRSM-AI/prsm-go-sdk` |
 
 All SDKs provide:
-- AI query execution with cost control
-- FTNS token management
-- Model marketplace access
-- Storage operations (IPFS)
-- Governance participation
-- WebSocket streaming
+- Ring 1-10 compute query execution with cost control (quote → run → settle)
+- FTNS token balance checks and transfers
+- ContentStore upload/download with royalty tracking
+- Node status and hardware benchmarking
+- WebSocket streaming for long-running compute jobs
+
+PRSM itself does not host models — reasoning happens in your third-party LLM of choice. The SDKs let you drive the PRSM infrastructure layer (compute dispatch, storage, FTNS settlement) from your application.
 
 ---
 
@@ -110,21 +111,19 @@ async def stream_query(client, prompt: str):
     print()  # Newline at end
 ```
 
-#### Participate in Governance
+#### Cost Quote Before Executing
 
 ```python
-async def vote_on_proposal(client, proposal_id: str, vote: str):
-    """Vote on a governance proposal."""
-    # Get proposal details
-    proposal = await client.governance.get_proposal(proposal_id)
-    print(f"Voting on: {proposal.title}")
+async def quote_and_run(client, query: str):
+    """Get a free quote first, then run the query if the cost is acceptable."""
+    quote = await client.quote(query, shards=5, tier="t2")
+    print(f"Estimated cost: {quote.total_ftns} FTNS")
 
-    # Cast vote
-    await client.governance.vote(
-        proposal_id=proposal_id,
-        vote=vote,  # "yes", "no", or "abstain"
-        comment="Voting based on technical analysis"
-    )
+    if quote.total_ftns > 5.0:
+        print("Query too expensive, skipping")
+        return None
+
+    return await client.query(query, budget=quote.total_ftns * 1.1)
 ```
 
 ### Error Handling
@@ -212,23 +211,23 @@ async function streamQuery(client: PRSMClient, prompt: string) {
 }
 ```
 
-#### Model Marketplace Search
+#### Publish Data with Royalty Tracking
 
 ```typescript
-async function findBestModel(client: PRSMClient, task: string) {
-    const results = await client.marketplace.searchModels({
-        query: task,
-        minPerformance: 0.8,
-        maxCost: 0.001,
-        limit: 5
+async function publishDataset(client: PRSMClient, filePath: string) {
+    const content = await fs.promises.readFile(filePath);
+
+    const result = await client.storage.upload({
+        filename: path.basename(filePath),
+        content,
+        description: "Vehicle registration data 2025",
+        royaltyRate: 0.05,   // 0.05 FTNS per access
+        replicas: 5,
     });
 
-    // Sort by performance
-    const best = results.models.sort(
-        (a, b) => b.performanceRating - a.performanceRating
-    )[0];
-
-    return best;
+    console.log(`Uploaded: ${result.cid}`);
+    console.log(`Earn 80% of every query that hits this content`);
+    return result;
 }
 ```
 
@@ -367,45 +366,35 @@ func ftnsOperations(ctx context.Context, client *prsm.Client) error {
 }
 ```
 
-#### NWTN Advanced Queries
+#### Ring 1-10 Compute Query with Budget
 
 ```go
-func advancedQuery(ctx context.Context, client *prsm.Client) error {
-    // Submit NWTN query
-    session, err := client.NWTN.SubmitQuery(ctx, &nwtn.QueryRequest{
-        Query:            "Analyze climate change data",
-        Domain:           ptr("climate-science"),
-        MaxIterations:    5,
-        IncludeCitations: true,
-        SEALEnhancement: &nwtn.SEALConfig{
-            Enabled:              true,
-            AutonomousImprovement: true,
-            TargetLearningGain:   0.15,
-        },
+func runQuery(ctx context.Context, client *prsm.Client) error {
+    // Get a free quote first
+    quote, err := client.Compute.Quote(ctx, &compute.QuoteRequest{
+        Query:  "EV adoption trends in NC",
+        Shards: 5,
+        Tier:   "t2",
+    })
+    if err != nil {
+        return err
+    }
+    fmt.Printf("Estimated cost: %.2f FTNS\n", quote.TotalFTNS)
+
+    // Execute the query with a budget
+    result, err := client.Compute.Run(ctx, &compute.RunRequest{
+        Query:   "EV adoption trends in NC",
+        Budget:  quote.TotalFTNS * 1.1,   // 10% headroom
+        Privacy: "standard",
     })
     if err != nil {
         return err
     }
 
-    fmt.Printf("Session ID: %s\n", session.SessionID)
-
-    // Wait for completion
-    completed, err := client.NWTN.WaitForCompletion(ctx, session.SessionID, &nwtn.WaitForCompletionOptions{
-        TimeoutDuration: 10 * time.Minute,
-        PollInterval:    5 * time.Second,
-        OnProgress: func(s *nwtn.SessionInfo) {
-            fmt.Printf("Progress: %.0f%%\n", s.Progress*100)
-        },
-    })
-    if err != nil {
-        return err
-    }
-
-    fmt.Printf("Result: %s\n", completed.Results.Summary)
+    fmt.Printf("Result: %s\n", result.Content)
+    fmt.Printf("FTNS spent: %.4f\n", result.FTNSSpent)
     return nil
 }
-
-func ptr(s string) *string { return &s }
 ```
 
 ---
@@ -496,10 +485,11 @@ async def query_with_retry(client, prompt, max_retries=3):
 
 | Endpoint | Rate Limit | Window |
 |----------|------------|--------|
-| `/query` | 100 requests | 1 minute |
+| `/compute/run` | 100 requests | 1 minute |
+| `/compute/quote` | 300 requests | 1 minute |
 | `/ftns/*` | 50 requests | 1 minute |
 | `/storage/*` | 30 requests | 1 minute |
-| `/marketplace/*` | 60 requests | 1 minute |
+| `/mcp/*` | 200 requests | 1 minute |
 
 ### Handling Rate Limits
 
@@ -530,12 +520,11 @@ See `sdks/python/examples/` for production-ready patterns:
 |---------|-------------|
 | `basic_usage.py` | Getting started with the SDK |
 | `streaming.py` | Real-time response streaming |
-| `marketplace.py` | Model discovery and rental |
+| `storage_upload.py` | Publish data with royalty tracking |
 | `tools.py` | MCP tool execution |
 | `cost_management.py` | Budget control and cost tracking |
 | `production/fastapi_integration.py` | FastAPI backend integration |
 | `production/docker_deployment.py` | Container deployment examples |
-| `scientific/research_paper_analysis.py` | Academic research workflows |
 
 ### Running Examples
 

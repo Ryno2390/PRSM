@@ -71,7 +71,7 @@ The Contributor Status system tracks user contributions and manages earning mult
 Submit a new contribution for verification and status update.
 
 ```python
-from prsm.tokenomics.contributor_manager import ContributorManager
+from prsm.economy.tokenomics.contributor_manager import ContributorManager
 
 async def submit_contribution(
     user_id: str,
@@ -171,7 +171,7 @@ The Dynamic Supply system automatically adjusts FTNS token supply to maintain ta
 Calculate required supply adjustment based on current market conditions.
 
 ```python
-from prsm.tokenomics.dynamic_supply_controller import DynamicSupplyController
+from prsm.economy.tokenomics.dynamic_supply_controller import DynamicSupplyController
 
 async def calculate_supply_adjustment() -> SupplyAdjustmentResult:
 ```
@@ -256,7 +256,7 @@ The Anti-Hoarding system implements demurrage fees and velocity tracking to enco
 Calculate token velocity for a specific user.
 
 ```python
-from prsm.tokenomics.anti_hoarding_engine import AntiHoardingEngine
+from prsm.economy.tokenomics.anti_hoarding_engine import AntiHoardingEngine
 
 async def calculate_user_velocity(
     user_id: str, 
@@ -355,7 +355,7 @@ The Emergency Protocols system provides automated crisis detection and response 
 Monitor for sudden price crashes that could indicate market manipulation.
 
 ```python
-from prsm.tokenomics.emergency_protocols import EmergencyProtocols
+from prsm.economy.tokenomics.emergency_protocols import EmergencyProtocols
 
 async def detect_price_crash(
     monitoring_window_minutes: int = 60
@@ -447,9 +447,9 @@ The Integration API provides unified access to all FTNS tokenomics functionality
 ### Unified FTNS Service
 
 ```python
-from prsm.tokenomics.integrated_ftns_service import IntegratedFTNSService
+from prsm.economy.tokenomics.enhanced_ftns_service import EnhancedFTNSService
 
-class IntegratedFTNSService:
+class EnhancedFTNSService:
     """Unified interface for all FTNS tokenomics functionality"""
     
     def __init__(self, db_session: AsyncSession):
@@ -630,11 +630,11 @@ class ErrorResponse:
 ```python
 import asyncio
 from decimal import Decimal
-from prsm.tokenomics.integrated_ftns_service import IntegratedFTNSService
+from prsm.economy.tokenomics.enhanced_ftns_service import EnhancedFTNSService
 
 async def onboard_new_user():
     # Initialize service
-    ftns = IntegratedFTNSService(db_session)
+    ftns = EnhancedFTNSService(db_session)
     
     # Create user account
     user_result = await ftns.create_user(
@@ -669,7 +669,7 @@ asyncio.run(onboard_new_user())
 
 ```python
 async def daily_operations():
-    ftns = IntegratedFTNSService(db_session)
+    ftns = EnhancedFTNSService(db_session)
     
     # Run daily tokenomics cycle
     cycle_result = await ftns.run_daily_tokenomics_cycle()
@@ -693,7 +693,7 @@ asyncio.run(daily_operations())
 
 ```python
 async def emergency_response_demo():
-    ftns = IntegratedFTNSService(db_session)
+    ftns = EnhancedFTNSService(db_session)
     
     # Simulate price crash
     crash_detection = await ftns.emergency_protocols.detect_price_crash()
@@ -719,7 +719,7 @@ asyncio.run(emergency_response_demo())
 
 ```python
 async def performance_monitoring():
-    ftns = IntegratedFTNSService(db_session)
+    ftns = EnhancedFTNSService(db_session)
     
     # Run performance benchmark
     benchmark = await ftns.run_performance_benchmark(operations_count=1000)

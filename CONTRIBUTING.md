@@ -1,12 +1,12 @@
 # Contributing to PRSM
 
-Welcome to the PRSM community! We're building the future of collaborative AI research, and your contributions are essential to making that vision a reality. Whether you're a researcher, developer, domain expert, or enthusiast, there are many ways to contribute to this groundbreaking project.
+Welcome to the PRSM community! PRSM is a P2P infrastructure protocol for open-source collaboration — a mesh network where consumer-class nodes share latent storage, compute, and data, and any third-party LLM can reach the network through MCP (Model Context Protocol) tools. Contributors earn FTNS tokens for running nodes and publishing data.
 
 ## 🎯 Our Mission
 
-PRSM aims to democratize AI research by creating a decentralized, transparent, and economically sustainable platform for scientific discovery. We believe that the best AI systems emerge from collaboration, not competition.
+Build an open-source commons for AI infrastructure. Aggregate the latent resources of consumer electronics into a P2P mesh. Let any LLM — local, OAuth, or API — use that mesh via MCP tools. Pay contributors in FTNS so sharing beats hoarding.
 
-**Revolutionary Technical Foundation**: PRSM pioneers a hybrid AI architecture combining transformer-based pattern recognition (System 1) with first-principles world models (System 2), enabling genuine scientific reasoning and causal understanding that goes beyond pattern matching to accelerate breakthrough discoveries.
+**What PRSM is not:** It's not an AGI framework, not a teacher/distillation platform, not a hosted-model marketplace. Reasoning happens in the caller's LLM. PRSM supplies infrastructure (WASM sandboxes, semantic shards, TEE-backed compute, FTNS settlement).
 
 ## 🚀 Getting Started
 
@@ -52,23 +52,25 @@ git checkout -b feature/your-feature-name
 ```
 PRSM/
 ├── prsm/                           # Main source code
-│   ├── nwtn/                       # NWTN Orchestrator
-│   ├── agents/                     # 5-layer agent system
-│   │   ├── prompters/              # Prompt optimization
-│   │   ├── routers/                # Task-model routing
-│   │   ├── executors/              # Model execution
-│   │   ├── compilers/              # Result compilation
-│   │   └── architects/             # Task decomposition
-│   ├── teachers/                   # Distilled teacher models
-│   ├── safety/                     # Safety infrastructure
-│   ├── federation/                 # P2P and consensus
-│   ├── tokenomics/                 # FTNS economy
-│   ├── governance/                 # Democratic governance
-│   ├── improvement/                # Self-improvement
-│   ├── data_layer/                 # IPFS and storage
-│   ├── node/                       # Node implementation
-│   ├── collaboration/              # Multi-agent collaboration
-│   └── core/                       # Models and config
+│   ├── compute/
+│   │   ├── wasm/                   # Ring 1: Wasmtime sandbox + hardware profiler
+│   │   ├── agents/                 # Ring 2 + Ring 5: mobile agent dispatch + WASM agent runtime
+│   │   ├── swarm/                  # Ring 3: semantic sharding + swarm coordinator
+│   │   ├── tee/                    # Ring 7: TEE runtime abstraction + DP noise
+│   │   ├── model_sharding/         # Ring 8: tensor-parallel model sharding
+│   │   ├── nwtn/training/          # Ring 9: NWTN training pipeline (AgentTrace → JSONL)
+│   │   ├── security/               # Ring 10: integrity, privacy budget, audit chain
+│   │   ├── federation/             # P2P node infrastructure
+│   │   └── chronos/                # FTNS ↔ USD/USDT bridge
+│   ├── economy/
+│   │   └── tokenomics/             # Ring 4: FTNS ledger + pricing + staking
+│   ├── storage/                    # Native ContentStore (post-v1.5.0)
+│   ├── node/                       # Node implementation + content economy
+│   ├── interface/api/              # HTTP API + middleware
+│   ├── cli.py                      # Main CLI
+│   ├── cli_modules/                # CLI subcommand modules
+│   ├── mcp_server.py               # MCP server exposing 16 PRSM tools
+│   └── core/                       # Models, config, DB, crypto
 ├── tests/                          # Test suite
 │   ├── unit/                       # Unit tests
 │   ├── integration/                # Integration tests
@@ -315,7 +317,7 @@ Share your research domain knowledge:
 ```bash
 # Good commit messages
 git commit -m "feat: add Byzantine consensus validation in P2P network"
-git commit -m "fix: resolve memory leak in teacher model training"
+git commit -m "fix: resolve memory leak in WASM agent dispatch"
 git commit -m "docs: add API documentation for governance system"
 git commit -m "test: increase coverage for safety monitoring"
 
@@ -620,21 +622,11 @@ PRSM deals with AI systems and research data, so security is paramount:
 - **Enterprise support** - Contact for commercial applications
 - **Conference speaking** - Opportunities for project presentation
 
-### **Team Contact**
-Join our specialized development teams:
-- **🔴 RED Team**: Foundational AI & SEAL Technology → [red-team@prsmai.com](mailto:red-team@prsmai.com)
-- **🟠 ORANGE Team**: System Orchestration & Optimization → [orange-team@prsmai.com](mailto:orange-team@prsmai.com)
-- **🟡 YELLOW Team**: Code Generation & Developer Tools → [yellow-team@prsmai.com](mailto:yellow-team@prsmai.com)
-- **🟢 GREEN Team**: Learning Systems & Community → [green-team@prsmai.com](mailto:green-team@prsmai.com)
-- **🔵 BLUE Team**: Security & Governance → [blue-team@prsmai.com](mailto:blue-team@prsmai.com)
-- **🟣 INDIGO Team**: Multi-Agent Intelligence → [indigo-team@prsmai.com](mailto:indigo-team@prsmai.com)
-- **🟪 VIOLET Team**: Marketplace & Enterprise → [violet-team@prsmai.com](mailto:violet-team@prsmai.com)
-
 ## 🎉 Thank You!
 
-Every contribution, no matter how small, helps advance the future of collaborative AI research. Whether you fix a typo, add a test, implement a feature, or share a use case - you're helping build something that could transform how science is conducted globally.
+Every contribution, no matter how small, helps build an open-source commons for AI infrastructure. Whether you fix a typo, add a test, implement a feature, run a node, or publish a dataset — you're helping make the network more valuable for everyone who relies on it.
 
-**Welcome to the PRSM community! Let's build the future of scientific AI together. 🚀**
+**Welcome to the PRSM community!**
 
 ---
 

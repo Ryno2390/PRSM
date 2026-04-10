@@ -194,25 +194,13 @@ During security incidents:
 
 ### **Built-in Security Controls**
 
-#### **AI Safety**
-```python
-# Circuit breaker protection
-from prsm.safety.circuit_breaker import CircuitBreakerNetwork
-
-breaker = CircuitBreakerNetwork()
-safety_assessment = await breaker.monitor_model_behavior(model_id, output)
-
-if safety_assessment.threat_level > ThreatLevel.MEDIUM:
-    await breaker.trigger_emergency_halt(
-        threat_level=safety_assessment.threat_level,
-        reason="Potential security threat detected"
-    )
-```
+#### **Sandboxed Compute**
+All WASM mobile agents execute in Wasmtime sandboxes (`prsm/compute/wasm/`) with enforced fuel, memory, and output-size limits. Sandboxes have no filesystem, no network, and no state after execution — agents literally cannot persist data.
 
 #### **Access Control**
 ```python
-# Token-based authorization
-from prsm.tokenomics.ftns_service import FTNSService
+# FTNS budget enforcement on compute jobs
+from prsm.economy.tokenomics.ftns_service import FTNSService
 
 ftns = FTNSService()
 user_balance = await ftns.get_balance(user_id)
@@ -223,15 +211,12 @@ if user_balance < required_tokens:
 
 #### **Data Integrity**
 ```python
-# Cryptographic verification
-from prsm.data_layer.enhanced_ipfs import PRSMIPFSClient
+# Storage proofs + Ring 10 integrity verification
+from prsm.storage.content_store import ContentStore
 
-ipfs = PRSMIPFSClient()
-content, metadata = await ipfs.retrieve_with_provenance(content_id)
-
-# Verify content integrity
-if not ipfs.verify_integrity(content, metadata['hash']):
-    raise IntegrityError("Content integrity verification failed")
+store = ContentStore()
+content, metadata = await store.retrieve(content_id, verify=True)
+# ContentStore raises on hash mismatch or signature verification failure
 ```
 
 ### **Network Security**

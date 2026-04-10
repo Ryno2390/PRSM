@@ -1,16 +1,15 @@
 # PRSM Go SDK
 
-Official Go SDK for PRSM (Protocol for Recursive Scientific Modeling)
+Official Go SDK for **PRSM — a P2P infrastructure protocol for open-source collaboration**. PRSM aggregates consumer-node storage, compute, and data into a mesh network that any third-party LLM can reach through MCP tools. This SDK lets your Go application drive the PRSM infrastructure layer directly.
 
-**🚨 NEWLY ENHANCED - Full Feature Parity with JavaScript SDK! 🚨**
+The Go SDK provides:
+- Ring 1-10 compute pipeline client (quote, run, status)
+- FTNS balance checks, transfers, and yield estimation
+- ContentStore upload/download with royalty tracking
+- WebSocket streaming for long-running compute jobs
+- MCP tool surface (the same 16 tools third-party LLMs use)
 
-This Go SDK now includes comprehensive support for:
-- ✅ NWTN (Neural Web of Thought Networks) with session management
-- ✅ SEAL Technology with autonomous improvement
-- ✅ Governance and DAO operations 
-- ✅ WebSocket real-time communication
-- ✅ Advanced marketplace operations
-- ✅ Complete error handling and safety monitoring
+PRSM itself does not host models — reasoning happens in your LLM of choice. The SDK drives PRSM's compute dispatch, storage, and FTNS settlement layers.
 
 ## 🚀 Quick Start
 
@@ -97,123 +96,11 @@ config := &client.Config{
 prsmClient := client.NewWithConfig(config)
 ```
 
-## 🧠 Core Features
+## Core Features
 
-### 1. NWTN (Neural Web of Thought Networks)
+> **Note:** The legacy NWTN research-session API, SEAL autonomous improvement API, hosted marketplace, and centralized REST governance were removed in v1.6.0. PRSM is now a P2P infrastructure protocol — reasoning happens in your third-party LLM via MCP, not inside PRSM. Governance is on-network stake-weighted voting by node operators, not a REST API.
 
-Advanced AI reasoning with session management and progress tracking:
-
-```go
-// Submit NWTN query with SEAL enhancement
-nwtnReq := &nwtn.QueryRequest{
-    Query:            "Analyze renewable energy impact on climate change",
-    Domain:           &domain,
-    MaxIterations:    5,
-    MaxTokens:        2000,
-    Temperature:      0.8,
-    IncludeCitations: true,
-    SEALEnhancement: &nwtn.SEALConfig{
-        Enabled:              true,
-        AutonomousImprovement: true,
-        TargetLearningGain:   0.20,
-        RestemMethodology:    true,
-    },
-}
-
-session, err := client.NWTN.SubmitQuery(ctx, nwtnReq)
-if err != nil {
-    return err
-}
-
-// Wait for completion with progress tracking
-completed, err := client.NWTN.WaitForCompletion(ctx, session.SessionID, &nwtn.WaitForCompletionOptions{
-    TimeoutDuration: 5 * time.Minute,
-    PollInterval:    10 * time.Second,
-    OnProgress: func(s *nwtn.SessionInfo) {
-        fmt.Printf("Progress: %.1f%% complete\n", s.Progress*100)
-    },
-})
-
-if err != nil {
-    return err
-}
-
-fmt.Printf("Results: %s\n", completed.Results.Summary)
-fmt.Printf("Citations: %d\n", len(completed.Results.Citations))
-```
-
-### 2. SEAL Technology Integration
-
-Self-Adapting Language model technology with autonomous improvement:
-
-```go
-// Get SEAL performance metrics
-metrics, err := client.SEAL.GetMetrics(ctx)
-if err != nil {
-    return err
-}
-
-fmt.Printf("SEAL Status: %s\n", metrics.SEALSystemStatus)
-fmt.Printf("Knowledge Incorporation: %.1f%% -> %.1f%%\n",
-    metrics.ProductionMetrics.KnowledgeIncorporationBaseline*100,
-    metrics.ProductionMetrics.KnowledgeIncorporationCurrent*100)
-fmt.Printf("Improvement: %.1f%%\n", metrics.ProductionMetrics.ImprovementPercentage*100)
-
-// Trigger autonomous improvement
-improvement, err := client.SEAL.TriggerImprovement(ctx, &seal.ImprovementConfig{
-    Domain:              "environmental_analysis",
-    TargetImprovement:   0.15,
-    ImprovementStrategy: "knowledge_distillation",
-    MaxIterations:       10,
-})
-
-if err != nil {
-    return err
-}
-
-fmt.Printf("Improvement ID: %s\n", improvement.ImprovementID)
-```
-
-### 3. Governance and DAO Operations
-
-Participate in PRSM governance with proposal submission and voting:
-
-```go
-// List active proposals
-proposals, err := client.Governance.ListProposals(ctx, &governance.ListProposalsOptions{
-    Status: &status,
-    Limit:  10,
-})
-
-if err != nil {
-    return err
-}
-
-// Submit new proposal
-proposal := &governance.ProposalRequest{
-    Title:              "AI Research Enhancement",
-    Description:        "Proposal to enhance AI research capabilities",
-    Category:           "research_development",
-    ImplementationPlan: "Three-phase implementation strategy",
-    BudgetRequired:     50000.0,
-}
-
-proposalResp, err := client.Governance.SubmitProposal(ctx, proposal)
-if err != nil {
-    return err
-}
-
-// Vote on proposal
-vote := &governance.VoteRequest{
-    Vote:        "yes",
-    VotingPower: 100.0,
-    Comment:     &comment,
-}
-
-err = client.Governance.Vote(ctx, proposalID, vote)
-```
-
-### 4. WebSocket Real-time Communication
+### 1. WebSocket Real-time Communication
 
 Real-time streaming and live updates:
 
@@ -297,37 +184,6 @@ advancedRequest := &types.QueryRequest{
 }
 
 response, err := client.Query(ctx, advancedRequest)
-```
-
-### 2. Model Discovery & Management
-
-Discover and interact with available AI models:
-
-```go
-// List all available models
-models, err := client.ListAvailableModels(ctx)
-if err != nil {
-    return err
-}
-
-for _, model := range models {
-    fmt.Printf("Model: %s (%s)\n", model.Name, model.ID)
-    fmt.Printf("  Provider: %s\n", model.Provider)
-    fmt.Printf("  Cost per token: %.6f FTNS\n", model.CostPerToken)
-    fmt.Printf("  Performance: %.2f/5.0\n", model.PerformanceRating)
-    fmt.Printf("  Available: %t\n", model.IsAvailable)
-}
-
-// Search marketplace for specific models
-searchQuery := &types.MarketplaceQuery{
-    Query:          "language model",
-    MaxCost:        &maxCost,
-    MinPerformance: &minPerformance,
-    Capabilities:   []string{"text-generation", "reasoning"},
-    Limit:          10,
-}
-
-searchResults, err := client.Marketplace.SearchModels(ctx, searchQuery)
 ```
 
 ### 3. FTNS Token Management
@@ -520,11 +376,11 @@ func TestErrorHandling(t *testing.T) {
 
 Comprehensive examples are available in the `examples/` directory:
 
-- **basic_query.go** - Simple AI query execution
+- **basic_query.go** - Simple Ring 1-10 compute query execution
 - **cost_estimation.go** - Cost estimation and balance checking
-- **model_marketplace.go** - Model discovery and marketplace features
+- **storage_upload.go** - ContentStore upload with royalty tracking
 - **ftns_management.go** - Token management and transactions
-- **advanced_features.go** - Safety monitoring, tools, and error handling
+- **advanced_features.go** - WebSocket streaming, MCP tools, error handling
 
 See the [Examples README](examples/README.md) for detailed usage instructions.
 

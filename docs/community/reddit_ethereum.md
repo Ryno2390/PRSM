@@ -1,35 +1,42 @@
 # Reddit — r/ethereum Post
 
 ## Title
-FTNS token live on Sepolia — building a P2P AI compute network where nodes earn for contributing inference/storage [alpha]
+FTNS token live on Base mainnet — powering a P2P infrastructure network where nodes earn for sharing compute/storage/data
 
 ## Body
 
-We just deployed the FTNS (Fungible Token for Node Services) contract to Ethereum Sepolia testnet as part of PRSM — a decentralized P2P network for AI compute and scientific research. Sharing here because the token economic model is genuinely novel and I'd value feedback from people who think carefully about this stuff.
+We've shipped the FTNS (Fungible Tokens for Node Support) contract to **Base mainnet** as part of PRSM — a P2P infrastructure protocol for open-source collaboration. Sharing here because the token economic model avoids a lot of the anti-patterns common in crypto projects, and I'd value feedback from people who think carefully about incentive design.
 
-**Contract address (Sepolia):** `0xd979c096BE297F4C3a85175774Bc38C22b95E6a4`
+**Contract address (Base mainnet):** `0x5276a3756C85f2E9e46f6D34386167a209aa16e5`
 
 **How the token economy works:**
 
-FTNS is the native unit of exchange in the PRSM compute marketplace. Nodes earn FTNS by contributing compute (running inference jobs routed by the NWTN orchestration layer) and storage (hosting artifacts on the IPFS-based provenance layer). Nodes spend FTNS to submit jobs to the network. The incentive is symmetric: the more you contribute, the more you can consume.
+FTNS is the native unit of exchange for sharing resources on the PRSM network. Consumer-class nodes — gaming PCs, laptops, phones — contribute latent storage, compute, and sometimes proprietary data, and earn FTNS for doing so. Any third-party LLM (Claude, GPT, local Llama) reaches the network through MCP (Model Context Protocol) tools. When an LLM dispatches a WASM mobile agent to your node, you get paid.
 
-New nodes receive a 100 FTNS welcome grant on first connection to the bootstrap server — this lets you start submitting jobs immediately without needing to front compute first. The intent is to lower the barrier to entry while the network bootstraps toward sufficient node density.
+The split is deterministic: **80% to the data owner, 15% to compute providers, 5% to treasury**. Atomic settlement on a DAG ledger with Ed25519 signatures.
 
-The royalty distribution mechanism is one of the more interesting parts: when stored artifacts (model outputs, embeddings, intermediate research results) are referenced in downstream jobs, the nodes that produced and hosted those artifacts receive a share of the job's FTNS cost. This is tracked via semantic provenance metadata attached to every stored artifact. The goal is to make contribution economically meaningful across time, not just for the node that runs the immediate inference job.
+**What's different from most token projects:**
 
-**Current state and honest caveats:**
+FTNS is **minted at contribution time**. No pre-mine, no ICO, no foundation reserve to dump. New nodes receive a 100 FTNS welcome grant on first connect. All additional supply enters circulation as settlement payouts when queries are actually served. If the network does no work, no FTNS is minted.
 
-This is Sepolia — testnet only, no mainnet deployment yet. The token economics are implemented and functional but are still being calibrated based on real usage data. We're deliberately not rushing to mainnet because we want the incentive model to actually work before we make it real-money. The staking mechanics and bridge architecture for mainnet are on the roadmap but not yet implemented.
+We run a Chronos fiat bridge (`prsm/compute/chronos/`) that converts FTNS ↔ USD/USDT, so node operators can actually cash out. Protocol governance is fully on-network: node operators vote on upgrades, treasury spending, and parameter updates. There's no institutional tier — nodes are nodes.
 
-The broader network is v0.2.1 alpha with 1,391+ passing tests. The safety layer includes circuit breakers, Ed25519 signatures, and post-quantum crypto for message integrity — relevant because you don't want nodes manipulating job results to inflate their earnings.
+**Current state:**
+
+- v1.6.2 shipped on PyPI
+- Ring 1-10 Sovereign-Edge AI architecture fully implemented
+- Base mainnet FTNS contract live
+- Python / JavaScript / Go SDKs published
+- Bootstrap node live at `wss://bootstrap1.prsm-network.com:8765`
 
 ```bash
 pip install prsm-network
 prsm node start
-# Auto-connects to bootstrap at wss://bootstrap1.prsm-network.com:8765
-# 100 FTNS welcome grant on first connect
+# Auto-connects to bootstrap, 100 FTNS welcome grant
+prsm mcp-server
+# Exposes 16 tools to any MCP-compatible LLM
 ```
 
 GitHub: https://github.com/Ryno2390/PRSM
 
-If you've thought about token-incentivized compute markets, stake-weighted job routing, or Sybil resistance in permissionless node networks — I'd genuinely like to hear your perspective on where the economic model has holes. That's the kind of feedback that's hard to get without posting in a community that actually understands this stuff.
+If you've thought about contribution-minted tokens, stake-weighted settlement, or Sybil resistance in permissionless node networks — I'd like to hear where the economic model has holes.

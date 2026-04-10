@@ -215,17 +215,18 @@ Links to related documentation
 ### Inline Comments
 ```python
 # Use comments to explain WHY, not WHAT
-async def process_query(user_input: str) -> PRSMResponse:
-    """Process user query with SEAL enhancement.
-    
+async def dispatch_agent(request: AgentDispatchRequest) -> AgentResult:
+    """Dispatch a WASM mobile agent to a remote node for execution.
+
     Args:
-        user_input: The user's research question
-        
+        request: Agent payload, target node filter, and budget envelope
+
     Returns:
-        Enhanced response with autonomous improvements
+        Execution result with FTNS settlement details
     """
-    # Apply SEAL methodology for autonomous improvement
-    return enhanced_response
+    # The fair-selection path uses gossip bidding so providers
+    # with matching hardware tiers compete on price and reputation
+    return await self._dispatch_via_gossip(request)
 ```
 
 ### Example Code Requirements
@@ -255,8 +256,8 @@ Use emojis consistently for visual navigation:
 - 🔧 **Configuration, Setup, Tools**
 - 📊 **Metrics, Performance, Analytics**
 - 🛡️ **Security, Safety, Compliance**
-- 💰 **Economics, FTNS, Marketplace**
-- 🔬 **Research, Science, SEAL Technology**
+- 💰 **Economics, FTNS, ContentStore**
+- 🔬 **Research, Science, WASM Agents**
 - 🤝 **Community, Contributing, Governance**
 - ⚡ **Performance, Speed, Optimization**
 - 🎯 **Goals, Objectives, Key Points**

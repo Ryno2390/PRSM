@@ -15,24 +15,19 @@
    - [Storage Endpoints](#node-storage-endpoints)
    - [WebSocket Endpoints](#node-websocket-endpoints)
    - [Authentication Endpoints](#node-authentication-endpoints)
-4. [Platform API Endpoints](#platform-api-endpoints)
-   - [NWTN (Neural Web of Thought Networks)](#nwtn-neural-web-of-thought-networks)
-   - [SEAL Technology API](#seal-technology-api)
-   - [Model Management](#model-management)
+4. [Platform API](#platform-api) — (legacy Platform API removed in v1.6.0)
 5. [Health & Monitoring](#health--monitoring)
 6. [User Management](#user-management)
-7. [Marketplace](#marketplace)
-8. [Governance](#governance)
-9. [Web3 & FTNS](#web3--ftns)
-10. [Security](#security)
-11. [WebSocket API](#websocket-api)
-12. [Error Handling](#error-handling)
-13. [Rate Limiting](#rate-limiting)
-14. [SDK Examples](#sdk-examples)
+7. [Web3 & FTNS](#web3--ftns)
+8. [Security](#security)
+9. [WebSocket API](#websocket-api)
+10. [Error Handling](#error-handling)
+11. [Rate Limiting](#rate-limiting)
+12. [SDK Examples](#sdk-examples)
 
 ## Overview
 
-The PRSM API provides a comprehensive RESTful interface for interacting with the Protocol for Recursive Scientific Modeling, featuring MIT's breakthrough SEAL (Self-Adapting Language Models) technology. All endpoints follow REST conventions and return JSON responses.
+The PRSM API provides a RESTful interface for interacting with PRSM — a P2P infrastructure protocol for open-source collaboration. The Node API documents the endpoints exposed by a running `prsm node start`; the MCP tools (see `prsm mcp-server`) expose the same functionality to third-party LLMs. All endpoints follow REST conventions and return JSON responses.
 
 ### Base URLs
 
@@ -1492,203 +1487,14 @@ Verifies JWT token and returns user information.
 
 ---
 
-## Platform API Endpoints
+## Platform API
 
-### NWTN (Neural Web of Thought Networks)
+The legacy Platform API (NWTN research sessions, SEAL autonomous improvement, Model Management, hosted AI marketplace, centralized governance) was removed in v1.6.0. PRSM is now a P2P infrastructure protocol — reasoning happens in the caller's third-party LLM via MCP, not inside PRSM. For the current API surface see:
 
-#### Submit Research Query
-```http
-POST /api/v1/nwtn/query
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "query": "Analyze the impact of climate change on marine ecosystems",
-  "domain": "environmental_science",
-  "methodology": "comprehensive_analysis",
-  "max_iterations": 5,
-  "include_citations": true,
-  "seal_enhancement": {
-    "enabled": true,
-    "autonomous_improvement": true,
-    "target_learning_gain": 0.15,
-    "restem_methodology": true
-  }
-}
-```
-
-**Response**:
-```json
-{
-  "session_id": "sess_abc123",
-  "status": "processing",
-  "query": "Analyze the impact of climate change on marine ecosystems",
-  "estimated_completion": "2025-06-11T14:30:00Z",
-  "cost_estimate": {
-    "ftns_tokens": 150,
-    "usd_equivalent": 0.75
-  },
-  "seal_status": {
-    "enhancement_enabled": true,
-    "autonomous_improvement_active": true,
-    "estimated_learning_gain": 0.15,
-    "self_edit_generation_rate": 3784
-  }
-}
-```
-
-#### Get Session Status
-```http
-GET /api/v1/nwtn/sessions/{session_id}
-Authorization: Bearer <token>
-```
-
-**Response**:
-```json
-{
-  "session_id": "sess_abc123",
-  "status": "completed",
-  "progress": 100,
-  "results": {
-    "summary": "Climate change significantly impacts marine ecosystems through...",
-    "key_findings": [
-      "Ocean acidification affects coral reef biodiversity",
-      "Rising temperatures alter fish migration patterns"
-    ],
-    "citations": [
-      {
-        "title": "Marine Ecosystem Response to Climate Change",
-        "authors": ["Smith, J.", "Doe, A."],
-        "journal": "Nature Climate Change",
-        "year": 2024
-      }
-    ],
-    "confidence_score": 0.92
-  },
-  "cost_actual": {
-    "ftns_tokens": 145,
-    "usd_equivalent": 0.73
-  },
-  "seal_performance": {
-    "autonomous_improvements_applied": 3,
-    "learning_gain_achieved": 0.16,
-    "knowledge_incorporation_improvement": 0.135,
-    "self_edit_examples_generated": 127,
-    "restem_policy_updates": 5
-  }
-}
-```
-
-#### List User Sessions
-```http
-GET /api/v1/nwtn/sessions?limit=20&offset=0&status=completed
-Authorization: Bearer <token>
-```
-
-### SEAL Technology API
-
-#### Get SEAL Performance Metrics
-```http
-GET /api/v1/seal/metrics
-Authorization: Bearer <token>
-```
-
-**Response**:
-```json
-{
-  "seal_system_status": "active",
-  "production_metrics": {
-    "knowledge_incorporation_baseline": 0.335,
-    "knowledge_incorporation_current": 0.470,
-    "improvement_percentage": 0.403,
-    "few_shot_learning_success_rate": 0.725,
-    "self_edit_generation_rate": 3784,
-    "autonomous_improvement_cycles_completed": 1547
-  },
-  "real_time_performance": {
-    "restem_policy_updates_per_second": 15327,
-    "seal_reward_calculations_per_second": 24130,
-    "autonomous_improvement_rate": 0.187
-  }
-}
-```
-
-#### Trigger SEAL Autonomous Improvement
-```http
-POST /api/v1/seal/improve
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "domain": "biomedical_research",
-  "target_improvement": 0.20,
-  "improvement_strategy": "restem_methodology",
-  "max_iterations": 10
-}
-```
-
-#### Get SEAL Enhancement Status for Session
-```http
-GET /api/v1/seal/sessions/{session_id}/status
-Authorization: Bearer <token>
-```
-
-### Model Management
-
-#### List Available Models
-```http
-GET /api/v1/models?category=language&provider=openai&limit=50
-```
-
-**Response**:
-```json
-{
-  "models": [
-    {
-      "id": "model_123",
-      "name": "GPT-4 Turbo",
-      "provider": "openai",
-      "category": "language",
-      "description": "Advanced language model for complex reasoning",
-      "pricing": {
-        "input_tokens": 0.01,
-        "output_tokens": 0.03,
-        "currency": "USD"
-      },
-      "capabilities": ["text_generation", "analysis", "reasoning"],
-      "context_length": 128000,
-      "available": true
-    }
-  ],
-  "total": 45,
-  "page": 1,
-  "pages": 3
-}
-```
-
-#### Get Model Details
-```http
-GET /api/v1/models/{model_id}
-```
-
-#### Train Custom Model
-```http
-POST /api/v1/models/train
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "name": "Custom Research Model",
-  "base_model": "llama2_7b",
-  "training_data": "ipfs://QmXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-  "training_parameters": {
-    "epochs": 3,
-    "learning_rate": 0.0001,
-    "batch_size": 16
-  },
-  "domain": "biomedical_research"
-}
-```
+- **Node API** (above) — all live HTTP endpoints exposed by `prsm node start`
+- **MCP tools** — 16 tools exposed by `prsm mcp-server` (`prsm/mcp_server.py`)
+- **FTNS tokenomics** — `prsm/economy/tokenomics/` and [`docs/FTNS_API_DOCUMENTATION.md`](FTNS_API_DOCUMENTATION.md)
+- **Governance** — on-network stake-weighted voting by node operators (not a REST API)
 
 ## Health & Monitoring
 
@@ -1792,138 +1598,6 @@ Content-Type: application/json
 {
   "current_password": "old_password",
   "new_password": "new_secure_password"
-}
-```
-
-## Marketplace
-
-### Browse Models
-```http
-GET /api/v1/marketplace/models?category=language&featured=true&limit=20
-```
-
-**Response**:
-```json
-{
-  "models": [
-    {
-      "id": "marketplace_model_123",
-      "name": "Advanced Research Assistant",
-      "description": "Specialized model for scientific literature analysis",
-      "creator": {
-        "username": "ai_researcher",
-        "verified": true
-      },
-      "category": "language",
-      "tags": ["research", "analysis", "scientific"],
-      "pricing": {
-        "ftns_per_request": 5,
-        "bulk_discount": 0.1
-      },
-      "stats": {
-        "downloads": 1547,
-        "rating": 4.8,
-        "reviews": 89
-      },
-      "featured": true,
-      "created_at": "2025-05-15T14:20:00Z"
-    }
-  ],
-  "total": 156,
-  "filters": {
-    "categories": ["language", "vision", "audio", "scientific"],
-    "providers": ["community", "verified", "official"]
-  }
-}
-```
-
-### Rent Model
-```http
-POST /api/v1/marketplace/models/{model_id}/rent
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "duration_hours": 24,
-  "max_requests": 1000
-}
-```
-
-### Submit Model to Marketplace
-```http
-POST /api/v1/marketplace/models
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "name": "Custom Scientific Model",
-  "description": "Specialized for climate data analysis",
-  "category": "scientific",
-  "model_file": "ipfs://QmXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-  "pricing": {
-    "ftns_per_request": 10,
-    "revenue_share": 0.7
-  },
-  "tags": ["climate", "data_analysis", "python"]
-}
-```
-
-## Governance
-
-### List Active Proposals
-```http
-GET /api/v1/governance/proposals?status=active&limit=10
-```
-
-**Response**:
-```json
-{
-  "proposals": [
-    {
-      "id": "prop_123",
-      "title": "Increase Research Grant Pool",
-      "description": "Proposal to allocate additional FTNS tokens for research grants",
-      "proposer": "governance_council",
-      "status": "active",
-      "voting_ends": "2025-06-18T23:59:59Z",
-      "votes": {
-        "yes": 1250000,
-        "no": 340000,
-        "abstain": 89000
-      },
-      "quorum_required": 1000000,
-      "threshold": 0.6,
-      "category": "funding"
-    }
-  ]
-}
-```
-
-### Submit Proposal
-```http
-POST /api/v1/governance/proposals
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "title": "New Research Domain Integration",
-  "description": "Proposal to add quantum computing as a supported research domain",
-  "category": "technical",
-  "implementation_plan": "Detailed plan for quantum computing integration...",
-  "budget_required": 50000
-}
-```
-
-### Vote on Proposal
-```http
-POST /api/v1/governance/proposals/{proposal_id}/vote
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "vote": "yes",
-  "voting_power": 1000,
-  "comment": "This proposal aligns with our research goals"
 }
 ```
 
@@ -2248,21 +1922,17 @@ This documentation covers **two API layers**:
 | Auth | 1 | Token verification |
 | **Total Node API** | **42** | |
 
-#### Platform API (Cloud Services)
+#### Platform API (removed in v1.6.0)
+The legacy Platform API (NWTN research sessions, SEAL autonomous improvement, hosted model marketplace, centralized governance) was removed during the v1.6.0 scope alignment. All current platform behaviors are exposed either through the Node API above or through MCP tools (`prsm mcp-server`). Governance is on-network stake-weighted voting, not a REST API.
+
+**Remaining Platform-ish endpoints (Node API):**
 | Category | Endpoints | Description |
 |----------|-----------|-------------|
-| NWTN | 3 | Query processing, sessions |
-| SEAL | 3 | Performance metrics, improvement |
-| Models | 3 | List, details, training |
-| Health | 4 | System health, probes, metrics |
+| Health | 4 | System health, liveness/readiness probes, Prometheus metrics |
 | Users | 3 | Profile, password management |
-| Marketplace | 3 | Browse, rent, submit models |
-| Governance | 3 | Proposals, voting |
 | Web3/FTNS | 4 | Balance, transfer, purchase, history |
 | Security | 3 | Status, 2FA, API keys |
-| **Total Platform API** | **29** | |
-
-**Grand Total: 71 documented endpoints**
+| **Total** | **14** | |
 
 ### Related Documentation
 - [WebSocket API](#websocket-api) - Real-time communication endpoints

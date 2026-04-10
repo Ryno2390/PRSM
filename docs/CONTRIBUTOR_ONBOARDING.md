@@ -1,10 +1,10 @@
 # 🤝 PRSM Contributor Onboarding Guide
 
-Welcome to the PRSM community! This guide will help you get started contributing to the Protocol for Recursive Scientific Modeling project.
+Welcome to the PRSM community! PRSM is a P2P infrastructure protocol for open-source collaboration — a mesh network where consumer nodes share latent storage, compute, and data, and any third-party LLM can reach the network through MCP tools.
 
 ## 🌟 Why Contribute to PRSM?
 
-PRSM is revolutionizing how AI research is conducted by creating a decentralized, collaborative platform for scientific modeling. Your contributions will help:
+Your contributions will help:
 
 - 🔬 **Advance AI Research**: Enable breakthrough scientific discoveries
 - 🌍 **Democratize AI Access**: Make advanced AI capabilities accessible to researchers worldwide  

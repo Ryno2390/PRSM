@@ -2,13 +2,15 @@
 
 ## ⚠️ INVESTMENT STATUS DISCLAIMER
 
-**PRSM is currently an advanced prototype seeking Series A funding to complete production-ready implementation.** While the core architecture is innovative and foundational components are operational, key systems including marketplace, financial transactions, and production infrastructure require 18-24 months of development to reach full production readiness.
+**PRSM ships working infrastructure today (v1.6.2)** — all 10 Sovereign-Edge AI rings are live, the Python/JavaScript/Go SDKs are published, and the FTNS token is deployed on Base mainnet. Series A funding accelerates network growth: geographic bootstrap expansion, fiat on-ramp credentials, external security audit, and marketing to node operators and data providers. Full network self-sustainability target: 18-24 months post-funding.
 
-**Investment Opportunity**: Series A funding to transform promising prototype into production-ready AI coordination platform.
+**Investment Opportunity**: Series A funding to scale a shipped P2P infrastructure protocol into a self-sustaining mesh network of consumer-class nodes serving any third-party LLM via MCP tools.
 
 ## 🎯 Executive Summary
 
-PRSM represents the infrastructure for AI coordination - positioned at the convergence of three unstoppable trends: AI proliferation, coordination complexity, and economic rationality. This is an investment in completing the technological foundation for AI coordination infrastructure.
+PRSM is a **P2P infrastructure protocol for open-source collaboration**. Consumer-class nodes share latent storage, compute, and data; contributors earn FTNS tokens; any third-party LLM (Claude, GPT, local Llama) reaches the network through MCP (Model Context Protocol) tools. Reasoning happens inside the caller's LLM — PRSM supplies the infrastructure that LLM uses to reach distributed resources without routing through a centralized provider.
+
+**PRSM is not an AGI framework.** It does not host models. It does not claim to build superintelligence. It is infrastructure — the plumbing that makes open, private, contributor-owned AI compute possible.
 
 ## 🏛 Corporate Structure
 
@@ -71,31 +73,31 @@ See [`docs/business/PRISMATICA_STRATEGY.md`](./PRISMATICA_STRATEGY.md) and [`doc
 
 **Series A: $18M**
 - **Valuation**: $72M pre-money
-- **Use of funds**: Complete marketplace implementation, production infrastructure, enterprise security
-- **Timeline**: 18-24 months to production-ready platform, 36 months to profitability
+- **Use of funds**: Network growth (bootstrap regional expansion), fiat on-ramp completion, external security audit, marketing to node operators and data providers
+- **Timeline**: 18-24 months to network self-sustainability, 36 months to positive cash flow at Prismatica
 - **Exit strategy**: Strategic acquisition or IPO within 5-7 years
 
 ## 🎮 Market Positioning
 
-### The Coordination Singularity
-- **Problem**: AI agents cannot efficiently coordinate at scale
-- **Solution**: PRSM provides the communication and consensus infrastructure
-- **Market**: $847B global AI market + $2.3T workflow automation market
-- **Timing**: Perfect intersection of AI capability and coordination necessity
+### The Infrastructure Thesis
+- **Problem**: Frontier AI labs hoard data, compute, and models behind API walls. Billions of consumer devices sit idle with latent storage, compute, and sometimes proprietary data that never leaves the device.
+- **Solution**: PRSM is a P2P infrastructure protocol that aggregates those latent consumer resources into a mesh network any third-party LLM can reach via MCP tools. Contributors earn FTNS; users leverage PRSM through their LLM of choice.
+- **Market**: Every organization running LLM inference over proprietary data — every research lab, every enterprise with compliance constraints, every developer who doesn't want to send their queries to a centralized API.
+- **Timing**: MCP adoption is making LLMs natively tool-aware, and consumer GPU capacity has far outpaced centralized datacenter growth.
 
 ### Competitive Advantages
-1. **First-mover advantage** in AI coordination infrastructure
-2. **Network effects** - value increases exponentially with adoption
-3. **Technical moats** - Fractal Time Network architecture
-4. **Economic inevitability** - coordination becomes mandatory, not optional
+1. **First-mover advantage** in MCP-native P2P compute infrastructure
+2. **Network effects** — value increases with every node that joins, every dataset published, and every LLM that adds PRSM to its tool belt
+3. **Privacy by construction** — WASM zero-persistence + semantic sharding + differential privacy + model sharding
+4. **Contribution-minted token** — FTNS has no pre-mine, no ICO, no foundation reserve to dump. Supply enters circulation only when real work is done on the network.
 
 ## 📈 Financial Projections
 
 ### Revenue Model
-- **SaaS subscriptions**: Enterprise AI coordination platform
-- **Transaction fees**: Cross-agent workflow processing
-- **FTNS tokens**: Network utility and governance
-- **Premium services**: Custom integration and support
+- **Prismatica mega-node FTNS royalties** — primary income stream, growing with network adoption
+- **Foundation dividends from Prismatica equity** — funds ongoing protocol development
+- **Chronos fiat bridge fees** — FTNS ↔ USD/USDT conversion
+- **Treasury 5% cut** — funds protocol upkeep under on-chain governance
 
 ### 5-Year Financial Forecast
 | Year | Revenue | Users | Agents | ARR Growth |
@@ -110,21 +112,25 @@ See [`docs/business/PRISMATICA_STRATEGY.md`](./PRISMATICA_STRATEGY.md) and [`doc
 
 ## 🛠 Technical Implementation
 
-### Development Progress (84 Components in Various Stages)
-- **Phase 1**: Core Architecture & Foundation
-- **Phase 2**: Advanced Agent Communication
-- **Phase 3**: Consensus Mechanisms
-- **Phase 4**: Performance Optimization
-- **Phase 5**: Enterprise Security & Monitoring
-- **Phase 6**: Production Deployment
-- **Phase 7**: Advanced Analytics & AI
+### Development Progress (all 10 Sovereign-Edge AI Rings shipped as of v1.6.2)
+- **Ring 1**: Wasmtime WASM sandbox + hardware profiler
+- **Ring 2**: Mobile agent dispatch + gossip bidding
+- **Ring 3**: Semantic sharding + swarm map-reduce
+- **Ring 4**: Hybrid FTNS pricing + prosumer staking
+- **Ring 5**: WASM mobile agent runtime + MCP tool surface (16 tools)
+- **Ring 6**: Production hardening (dynamic gas, RPC failover, CLI UX)
+- **Ring 7**: TEE runtime abstraction + differential privacy
+- **Ring 8**: Tensor-parallel model sharding + collusion detection
+- **Ring 9**: NWTN training pipeline (fine-tuned NWTN LLM itself is future work)
+- **Ring 10**: Integrity verification + privacy budget + hash-chained audit log
 
 ### Technology Stack
-- **Backend**: Python/FastAPI, PostgreSQL, Redis (Upstash, us-east-1)
-- **Frontend**: React, TypeScript, real-time dashboards
-- **Infrastructure**: Kubernetes, Docker, cloud-native
-- **AI/ML**: LangChain, OpenAI, Hugging Face integration; CoinGecko API (live price feeds)
+- **Backend**: Python/FastAPI, PostgreSQL, Redis (Upstash), Wasmtime WASM runtime
+- **Compute**: Consumer-class nodes (gaming PCs, consoles, laptops, phones)
+- **Storage**: Native ContentStore with semantic shard manifests
+- **Interop**: Model Context Protocol (MCP) — any MCP-compatible LLM gains PRSM tools
 - **Blockchain**: FTNS token live on **Base mainnet** — [`0x5276a3756C85f2E9e46f6D34386167a209aa16e5`](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5)
+- **Fiat bridge**: Chronos — FTNS ↔ USD/USDT for node operators cashing out
 
 ### SDK Availability (Live as of 2026-03-28)
 - **Python SDK**: `pip install prsm-python-sdk` — [pypi.org/project/prsm-python-sdk](https://pypi.org/project/prsm-python-sdk)
@@ -146,17 +152,17 @@ See [`docs/business/PRISMATICA_STRATEGY.md`](./PRISMATICA_STRATEGY.md) and [`doc
 
 ## 🎯 Go-to-Market Strategy
 
-### Target Markets
-1. **Enterprise AI teams** - Coordination infrastructure for internal agents
-2. **AI service providers** - Multi-agent workflow orchestration
-3. **Blockchain projects** - Cross-chain agent coordination
-4. **Research institutions** - Large-scale AI experiment coordination
+### Target Participants
+1. **Data providers** — Anyone with proprietary data (research labs, domain experts, hobbyist archivists) who can earn 80% of every query against their content
+2. **Compute providers** — Consumer hardware owners (gaming PCs, consoles, laptops, phones) who can earn FTNS for sharing idle cycles
+3. **LLM users** — Developers and researchers who want their LLM (Claude, GPT, local) to reach distributed data without routing through centralized APIs
+4. **MCP-compatible clients** — Claude Desktop, OpenClaw, and any MCP-aware coding or research assistant
 
-### Sales Strategy
-- **Enterprise sales**: Direct B2B sales to Fortune 1000
-- **Developer adoption**: Open-source tools and freemium model
-- **Partnership channel**: Integration with major AI platforms
-- **Community building**: Developer conferences and technical content
+### Growth Strategy
+- **Open-source grassroots** — drive adoption through the PyPI package, SDK ecosystem, and MCP tool exposure
+- **Data provider incentive** — 100 FTNS welcome grant + 80% royalty share creates strong on-ramp for data-rich contributors
+- **Bootstrap regional expansion** — EU + APAC bootstrap nodes once the NYC3 node saturates
+- **Developer content** — technical blog posts, conference talks, and direct engagement with research labs
 
 ## 🚀 Strategic Partnership Opportunities
 
@@ -182,23 +188,22 @@ PRSM's architecture aligns with Apple's privacy-focused approach to AI:
 ## 📊 Market Analysis
 
 ### Total Addressable Market (TAM)
-- **AI Infrastructure**: $247B by 2030
-- **Workflow Automation**: $2.3T global market
-- **Enterprise Software**: $856B annual spend
-- **Combined TAM**: $3.4T+ addressable market
+- **Global AI inference spend**: hundreds of billions annually, growing fast, almost entirely captured by a handful of centralized providers today
+- **Idle consumer compute**: billions of devices with GPUs that could participate if the incentive and infrastructure existed
+- **Proprietary data sitting on-prem**: regulated industries (healthcare, finance, research) that cannot ship data to centralized AI providers but could run agents against it locally
 
 ### Competitive Landscape
-- **No direct competitors** in AI coordination infrastructure
-- **Adjacent players**: Zapier (workflow), Temporal (orchestration)
-- **Competitive moats**: Network effects, technical complexity, first-mover
+- **vs. centralized AI providers (OpenAI, Anthropic)**: complementary, not competitive — PRSM gives those LLMs hands and a wallet via MCP
+- **vs. decentralized AI token projects**: PRSM mints at contribution time (no pre-mine), ships working infrastructure (WASM sandbox, semantic sharding, TEE integration), and has a live token on Base mainnet rather than a roadmap
+- **Competitive moats**: network effects on the data provider side, MCP native integration, contribution-minted FTNS, privacy by construction
 
 ## 💡 Investment Thesis
 
 ### Why Now?
-1. **AI proliferation**: Millions of agents coming online
-2. **Coordination complexity**: Exponential growth in agent interactions
-3. **Economic pressure**: Inefficient coordination costs billions
-4. **Technical readiness**: Infrastructure finally capable of scale
+1. **MCP adoption** is accelerating — every major LLM is adding native tool use. PRSM is MCP-native.
+2. **Centralization backlash** — regulated industries, privacy-sensitive users, and sovereignty-concerned governments are actively looking for alternatives to centralized AI APIs.
+3. **Idle consumer compute capacity** vastly exceeds centralized datacenter growth, and the incentive layer (FTNS) is finally live.
+4. **Infrastructure is shipped** — not a promise. All 10 rings are live in v1.6.2.
 
 ### Risk Mitigation
 - **Multiple forcing functions**: Economic inevitability reduces adoption risk

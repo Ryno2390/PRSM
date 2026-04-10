@@ -31,7 +31,7 @@ from pydantic import BaseModel
 
 # Local application imports
 from prsm.core.models import UserInput
-from prsm.agents.base import BaseAgent
+from prsm.compute.agents.dispatcher import AgentDispatcher
 from .local_module import LocalClass
 ```
 
