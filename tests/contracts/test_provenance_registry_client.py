@@ -75,14 +75,18 @@ def test_register_content_builds_and_sends_tx(mock_web3):
     w3.eth.wait_for_transaction_receipt.return_value = receipt
 
     content_hash = _hash("hello")
-    tx_hash = client.register_content(
+    result = client.register_content(
         content_hash, royalty_rate_bps=800, metadata_uri="ipfs://X"
     )
 
     contract.functions.registerContent.assert_called_once_with(
         content_hash, 800, "ipfs://X"
     )
+    # Phase 1.1 Task 4: returns (tx_hash_hex, TransferStatus)
+    assert isinstance(result, tuple)
+    tx_hash, status = result
     assert tx_hash.startswith("0x")
+    assert status.value == "confirmed"
 
 
 def test_register_content_rejects_invalid_rate(mock_web3):
