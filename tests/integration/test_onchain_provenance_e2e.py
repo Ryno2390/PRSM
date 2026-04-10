@@ -37,7 +37,9 @@ def _hardhat_available() -> bool:
     )
 
 
-pytestmark = pytest.mark.skipif(
+# Phase 1.1: per-test skip instead of module-level skip so the local
+# fallback regression test (which doesn't need Hardhat) still runs.
+requires_hardhat = pytest.mark.skipif(
     not _hardhat_available(), reason="Hardhat / npx not available"
 )
 
@@ -184,10 +186,14 @@ main().catch((e) => { console.error(e); process.exit(1); });
             script.unlink()
 
 
-def _content_hash(s: str) -> bytes:
-    return hashlib.sha3_256(s.encode()).digest()
+def _content_hash(creator_address: str, raw: bytes) -> bytes:
+    """Phase 1.1: canonical creator-bound content hash."""
+    from prsm.economy.web3.provenance_registry import compute_content_hash
+
+    return compute_content_hash(creator_address, raw)
 
 
+@requires_hardhat
 def test_register_then_distribute_e2e(hardhat_node, deployed):
     from prsm.economy.web3.provenance_registry import ProvenanceRegistryClient
     from prsm.economy.web3.royalty_distributor import RoyaltyDistributorClient
@@ -205,14 +211,17 @@ def test_register_then_distribute_e2e(hardhat_node, deployed):
         private_key=deployed["deployerKey"],
     )
 
-    content_hash = _content_hash("e2e-test-content")
+    content_hash = _content_hash(deployed["deployer"], b"e2e-test-content")
 
     # 1. Register
     assert not registry_client.is_registered(content_hash)
-    tx_register = registry_client.register_content(
+    register_result = registry_client.register_content(
         content_hash, royalty_rate_bps=800, metadata_uri="ipfs://e2e"
     )
+    # Phase 1.1 Task 4: returns (tx_hash_hex, TransferStatus)
+    tx_register, register_status = register_result
     assert tx_register.startswith("0x")
+    assert register_status.value == "confirmed"
     assert registry_client.is_registered(content_hash)
 
     record = registry_client.get_content(content_hash)
@@ -230,10 +239,13 @@ def test_register_then_distribute_e2e(hardhat_node, deployed):
 
     # 3. Distribute. The deployer is also payer; serving node = a fresh address.
     serving_node = "0x000000000000000000000000000000000000dEaD"
-    tx_dist = distributor_client.distribute_royalty(
+    distribute_result = distributor_client.distribute_royalty(
         content_hash, serving_node, gross_wei
     )
+    # Phase 1.1 Task 4: returns (tx_hash_hex, TransferStatus)
+    tx_dist, distribute_status = distribute_result
     assert tx_dist.startswith("0x")
+    assert distribute_status.value == "confirmed"
 
     # 4. Verify balances on-chain via direct token contract reads
     from web3 import Web3
@@ -266,3 +278,90 @@ def test_register_then_distribute_e2e(hardhat_node, deployed):
     # Creator started with 10_000 FTNS, paid 100 (gross), received 8 back.
     # Net: 10_000 - 100 + 8 = 9908
     assert creator_balance == (10_000 - 100 + 8) * 10**18
+
+
+# ── Phase 1.1 Task 10: local fallback economics regression ───────────────
+# This test does NOT need Hardhat (it constructs ContentEconomy with mocked
+# dependencies), but it lives in the integration suite because it's the
+# cross-cut regression for the Phase 1.1 P1 #6 fallback economics fix.
+
+
+def test_local_fallback_pays_serving_node_share():
+    """Without on-chain (no provenance_hash in metadata), the local Phase4
+    path must produce the 8/2/90 split with the 90% remainder going to the
+    serving node — not the direct creator. Phase 1.1 P1 #6 regression."""
+    import asyncio
+    from decimal import Decimal
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_economy import (
+        ContentEconomy,
+        ContentAccessPayment,
+        PaymentStatus,
+        RoyaltyModel,
+    )
+
+    identity = MagicMock()
+    identity.node_id = "node-serving-xyz"
+    ledger = MagicMock()
+    ledger.credit = AsyncMock()
+    ledger.debit = AsyncMock()
+    gossip = MagicMock()
+    content_index = MagicMock()
+
+    economy = ContentEconomy(
+        identity=identity,
+        ledger=ledger,
+        gossip=gossip,
+        content_index=content_index,
+        ftns_ledger=None,  # no on-chain ledger → on-chain branch skipped
+        royalty_model=RoyaltyModel.PHASE4,
+    )
+    economy._credit_royalty = AsyncMock()
+
+    # Mock the provenance chain so we can assert deterministic shares.
+    chain = MagicMock()
+    chain.original_creator = "creator-original"
+    chain.original_content_id = "cid-original"
+    chain.derivative_creators = []
+    economy._resolve_provenance_chain = AsyncMock(return_value=chain)
+
+    payment = ContentAccessPayment(
+        payment_id="p1",
+        content_id="cid-test",
+        accessor_id="accessor-x",
+        creator_id="creator-direct",
+        amount=Decimal("100"),
+        royalty_model=RoyaltyModel.PHASE4,
+        status=PaymentStatus.PENDING,
+    )
+
+    distributions = asyncio.run(
+        economy._distribute_royalties(
+            payment=payment,
+            creator_id="creator-direct",
+            parent_content_ids=[],
+            content_metadata={},  # no provenance_hash → on-chain skipped
+        )
+    )
+
+    by_type = {d["type"]: d for d in distributions}
+
+    # 8% to original creator
+    assert "original_creator" in by_type
+    assert by_type["original_creator"]["amount"] == 8.0
+
+    # 2% network fee
+    assert "network_fee" in by_type
+    assert by_type["network_fee"]["amount"] == 2.0
+
+    # 90% to serving node — the regression assertion. Pre-Phase-1.1 this
+    # was paid to "direct_creator" instead, so the serving node got 0.
+    assert "serving_node" in by_type, (
+        "local fallback should pay serving node — Phase 1.1 P1 #6 regression"
+    )
+    assert by_type["serving_node"]["recipient_id"] == "node-serving-xyz"
+    assert by_type["serving_node"]["amount"] == 90.0
+
+    # And explicitly: the old direct_creator type should be GONE.
+    assert "direct_creator" not in by_type
