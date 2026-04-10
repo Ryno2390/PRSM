@@ -22,13 +22,12 @@ Optional WASM support: `pip install prsm-network[wasm]`
 
 ## First Steps (tell users to do these in order)
 
-1. `prsm demo` — See all 10 rings work locally, no config needed
-2. `prsm node benchmark` — Check hardware tier and TFLOPS
-3. Get an OpenRouter API key (free at https://openrouter.ai/keys)
-4. `export OPENROUTER_API_KEY=your-key`
-5. `prsm node start` — Start your node (receives 100 FTNS welcome grant)
-6. `prsm compute quote "your query"` — Check cost estimate (free)
-7. `prsm compute run --query "your query" --budget 1.0` — Run through forge pipeline
+1. `prsm node benchmark` — Check hardware tier and TFLOPS
+2. Get an OpenRouter API key (free at https://openrouter.ai/keys)
+3. `export OPENROUTER_API_KEY=your-key`
+4. `prsm node start` — Start your node (receives 100 FTNS welcome grant)
+5. `prsm compute quote "your query"` — Check cost estimate (free)
+6. `prsm compute run --query "your query" --budget 1.0` — Run through forge pipeline
 
 ## Important: FTNS Budget Required
 
@@ -60,10 +59,9 @@ Additional FTNS available via faucet: `curl -X POST http://localhost:8000/ftns/f
 
 ### Agent Operations
 - `prsm agent forge "query"` — Show decomposition without executing
-- `prsm demo` — Full Ring 1-10 demo (no network needed)
 
 ### MCP Server (for LLM integration)
-- `prsm mcp-server` — Start MCP server (17 tools for any LLM)
+- `prsm mcp-server` — Start MCP server (16 tools for any LLM)
 - Clean entry: `python scripts/prsm_mcp_server.py`
 - Claude Desktop config: {"mcpServers": {"prsm": {"command": "python", "args": ["scripts/prsm_mcp_server.py"]}}}
 

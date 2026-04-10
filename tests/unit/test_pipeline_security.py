@@ -112,9 +112,12 @@ class TestTensorParallelExecutor:
             ],
         )
 
+        # node_id="local" — Ring 8 in-process numpy execution path. The
+        # executor's remote-dispatch seam is covered separately in
+        # tests/integration/test_ring8_shield.py.
         assignments = [
-            {"node_id": "node-a", "shard_index": 0},
-            {"node_id": "node-b", "shard_index": 1},
+            {"node_id": "local", "shard_index": 0},
+            {"node_id": "local", "shard_index": 1},
         ]
 
         result = await executor.execute_parallel(model, b"", assignments)

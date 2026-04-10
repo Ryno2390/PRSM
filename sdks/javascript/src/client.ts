@@ -726,6 +726,20 @@ export class PRSMClient extends EventEmitter {
   // ============================================================================
 
   /**
+   * Get a Ring 1-10 cost quote for a forge query.
+   *
+   * Top-level convenience method that mirrors the Python SDK's
+   * `client.quote()` helper. Delegates to `this.forge.quote()` and
+   * hits the `/compute/forge/quote` endpoint on the PRSM node.
+   */
+  async quote(
+    query: string,
+    options: { shardCids?: string[] } = {}
+  ): Promise<import('./forge').CostQuote> {
+    return this.forge.quote({ query, shardCids: options.shardCids });
+  }
+
+  /**
    * Quick research query with basic options
    */
   async query(

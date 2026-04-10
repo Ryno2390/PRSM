@@ -45,7 +45,6 @@ class JobType(str, Enum):
     INFERENCE = "inference"
     EMBEDDING = "embedding"
     BENCHMARK = "benchmark"
-    TRAINING = "training"       # NEW: distributed model training job
     WASM_EXECUTE = "wasm_execute"
 
 
@@ -259,14 +258,6 @@ class ComputeProvider:
         except ValueError:
             return
 
-        # Check for training capability before accepting TRAINING jobs
-        if job_type == JobType.TRAINING:
-            try:
-                from prsm.compute.distillation.backends.pytorch_backend import PyTorchDistillationBackend
-            except ImportError:
-                logger.debug("Declining TRAINING job - no distillation backend available")
-                return
-
         # Build the job object
         job = ComputeJob(
             job_id=job_id,
@@ -359,8 +350,6 @@ class ComputeProvider:
                 result = await self._run_inference(job)
             elif job.job_type == JobType.EMBEDDING:
                 result = await self._run_embedding(job)
-            elif job.job_type == JobType.TRAINING:
-                result = await self._run_training(job.payload)
             elif job.job_type == JobType.WASM_EXECUTE:
                 result = await self._run_wasm(job)
             else:
@@ -556,43 +545,6 @@ class ComputeProvider:
             "source": "mock",
             "warning": "No embedding backend configured. Using pseudo-vectors.",
         }
-
-    async def _run_training(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a distributed training job via the local distillation pipeline."""
-        teacher_model_id = payload.get("teacher_model_id", "")
-        domain = payload.get("domain", "general")
-        target_size = payload.get("target_size", "small")
-        budget_ftns = payload.get("budget_ftns", 100)
-
-        try:
-            from prsm.compute.distillation.models import DistillationRequest, ModelSize, OptimizationTarget
-            from prsm.compute.distillation.orchestrator import DistillationOrchestrator
-
-            req = DistillationRequest(
-                user_id=self.identity.node_id,
-                teacher_model=teacher_model_id,
-                domain=domain,
-                target_size=ModelSize(target_size),
-                optimization_target=OptimizationTarget.BALANCED,
-                budget_ftns=budget_ftns,
-            )
-            
-            # Create a local orchestrator instance for P2P training jobs
-            orchestrator = DistillationOrchestrator()
-            job = await orchestrator.create_distillation(req)
-            
-            return {
-                "job_id": str(job.job_id),
-                "status": job.status.value,
-                "source": "local_distillation",
-            }
-        except Exception as e:
-            logger.warning(f"Training job failed: {e}")
-            return {
-                "error": str(e),
-                "source": "local_distillation",
-                "status": "failed",
-            }
 
     async def _run_wasm(self, job: ComputeJob) -> Dict[str, Any]:
         """Execute a WASM module in a sandboxed runtime."""

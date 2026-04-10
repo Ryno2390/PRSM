@@ -29,7 +29,6 @@ class TestProjectStructure:
         "prsm/compute",
         "prsm/compute/agents",
         "prsm/compute/nwtn",
-        "prsm/compute/teachers",
         "prsm/compute/federation",
         "prsm/economy",
         "prsm/economy/tokenomics",

@@ -20,13 +20,24 @@ logger = logging.getLogger(__name__)
 class ExchangeRouter:
     """Routes trades through multiple exchanges for optimal execution."""
     
-    def __init__(self):
-        # Mock exchange configurations
+    def __init__(self, live_trading: bool = False):
+        """Initialize the exchange router.
+
+        Args:
+            live_trading: When False (default), execute_trade returns simulated
+                fills using real CoinGecko prices. When True, execute_trade
+                attempts to call the configured exchange APIs (requires real
+                api_key/api_secret on each ExchangeConfig). Live trading is
+                deliberately opt-in to prevent accidental real fills from a
+                fresh install where placeholder credentials are still in use.
+        """
+        self.live_trading = live_trading
+        # Exchange configurations (sandbox by default — see live_trading flag).
         self.exchanges = self._initialize_mock_exchanges()
-        
+
         # Rate limiting
         self.rate_limits = {}
-        
+
         # Price cache
         self.price_cache = {}
         self.cache_ttl = timedelta(seconds=30)
@@ -151,66 +162,50 @@ class ExchangeRouter:
         to_asset: AssetType,
         amount: Decimal
     ) -> Dict:
-        """Get price quote from specific exchange."""
-        
-        # Check rate limits
+        """Get price quote for a pair on a specific exchange.
+
+        Price discovery uses real CoinGecko spot data via
+        _fetch_exchange_rate_from_source (with a hardcoded fallback if the
+        request fails). Per-exchange spread + taker fees are then applied.
+        Trade execution itself is still simulated — see execute_trade.
+        """
         if not await self._check_rate_limit(exchange_name):
             return {"error": f"Rate limit exceeded for {exchange_name}"}
-        
+
         try:
-            # In real implementation, this would call actual exchange APIs
-            # For now, return mock data with realistic variation
-            
-            base_rates = {
-                ("BTC", "USD"): Decimal("50000"),
-                ("USD", "BTC"): Decimal("0.00002"),
-                ("ETH", "USD"): Decimal("3000"),
-                ("USD", "ETH"): Decimal("0.000333"),
-                ("BTC", "ETH"): Decimal("16.67"),
-                ("ETH", "BTC"): Decimal("0.06")
-            }
-            
-            pair_key = (from_asset.value, to_asset.value)
-            if pair_key not in base_rates:
-                return {"error": f"Pair {pair_key} not supported"}
-            
-            # Add exchange-specific spread and fees
-            base_rate = base_rates[pair_key]
-            
-            # Simulate different exchange rates
-            exchange_multipliers = {
-                "coinbase": Decimal("0.999"),  # Slightly lower rate
-                "binance": Decimal("1.001"),   # Slightly higher rate  
-                "kraken": Decimal("0.998")     # Lower rate, higher fees
-            }
-            
-            rate = base_rate * exchange_multipliers.get(exchange_name, Decimal("1.0"))
-            
-            # Calculate output amount
-            output_amount = amount * rate
-            
-            # Apply fees
-            fee_rate = config.fee_rates["taker"]
-            fee_amount = output_amount * fee_rate
-            net_output = output_amount - fee_amount
-            
-            return {
-                "exchange": exchange_name,
-                "from_asset": from_asset.value,
-                "to_asset": to_asset.value,
-                "input_amount": str(amount),
-                "output_amount": str(net_output),
-                "gross_output": str(output_amount),
-                "fee_amount": str(fee_amount),
-                "fee_rate": str(fee_rate),
-                "exchange_rate": str(rate),
-                "timestamp": datetime.utcnow().isoformat(),
-                "estimated_fill_time": "1-3 minutes"
-            }
-            
+            quote_data = await self._fetch_exchange_rate_from_source(
+                exchange_name, from_asset, to_asset
+            )
         except Exception as e:
             logger.error(f"Error getting price from {exchange_name}: {e}")
             return {"error": f"Failed to get quote from {exchange_name}"}
+
+        if "error" in quote_data:
+            return quote_data
+
+        rate = quote_data["rate"]
+        output_amount = amount * rate
+
+        fee_rate = config.fee_rates["taker"]
+        fee_amount = output_amount * fee_rate
+        net_output = output_amount - fee_amount
+
+        return {
+            "exchange": exchange_name,
+            "from_asset": from_asset.value,
+            "to_asset": to_asset.value,
+            "input_amount": str(amount),
+            "output_amount": str(net_output),
+            "gross_output": str(output_amount),
+            "fee_amount": str(fee_amount),
+            "fee_rate": str(fee_rate),
+            "exchange_rate": str(rate),
+            "spread": str(quote_data.get("spread", Decimal("0"))),
+            "price_source": quote_data.get("source", "fallback"),
+            "timestamp": datetime.utcnow().isoformat(),
+            "estimated_fill_time": "1-3 minutes",
+            "execution_mode": "simulated",
+        }
     
     async def execute_trade(
         self,
@@ -219,39 +214,69 @@ class ExchangeRouter:
         to_asset: AssetType,
         amount: Decimal
     ) -> Dict:
-        """Execute trade on specified exchange."""
-        
+        """Execute trade on specified exchange.
+
+        Behavior depends on the router's live_trading flag (default False).
+        With live_trading=False the trade is simulated against the real
+        CoinGecko spot price; with live_trading=True the call refuses to
+        proceed unless the per-exchange config has real (non-placeholder)
+        credentials. Real exchange-side order placement is intentionally
+        not implemented in PRSM 1.6.x — Chronos's in-scope role is the
+        FTNS↔USD/USDT bridge, not full multi-exchange routing — and this
+        guard prevents accidental fills until that integration ships.
+        """
+
         if exchange_name not in self.exchanges:
             return {"error": f"Exchange {exchange_name} not configured"}
-        
+
         config = self.exchanges[exchange_name]
-        
+
         if not self._supports_pair(config, from_asset, to_asset):
             return {"error": f"Exchange {exchange_name} doesn't support {from_asset}->{to_asset}"}
-        
-        # Check rate limits
+
         if not await self._check_rate_limit(exchange_name, action="trade"):
             return {"error": f"Trade rate limit exceeded for {exchange_name}"}
-        
+
+        # Live-trading guard. Refuse if either the router-wide flag is off OR
+        # the per-exchange config still has placeholder credentials.
+        is_placeholder = (
+            (config.api_key or "").startswith("mock_")
+            or (config.api_secret or "").startswith("mock_")
+            or config.sandbox_mode
+        )
+        if self.live_trading and is_placeholder:
+            return {
+                "error": (
+                    f"Live trading enabled but {exchange_name} still has "
+                    f"placeholder credentials. Configure real api_key/api_secret "
+                    f"and disable sandbox_mode before retrying."
+                )
+            }
+        if self.live_trading and not is_placeholder:
+            # No real exchange order-placement implementation in this release.
+            return {
+                "error": (
+                    "Live exchange order placement is not implemented in PRSM "
+                    "1.6.x. Chronos's in-scope role is the FTNS↔USD/USDT bridge "
+                    "(see prsm.compute.chronos.cashout_api). Set live_trading=False "
+                    "to use the simulated execution path."
+                )
+            }
+
         try:
-            # In real implementation, this would place actual orders
-            
-            # Simulate trade execution
-            trade_id = f"{exchange_name}_{from_asset.value}_{to_asset.value}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-            
-            # Get current price
             quote = await self._get_exchange_price(exchange_name, config, from_asset, to_asset, amount)
-            
             if "error" in quote:
                 return quote
-            
-            # Simulate execution delay
-            await asyncio.sleep(1)
-            
+
+            await asyncio.sleep(0.05)  # tiny delay so this is non-blocking-ish
+            trade_id = f"sim_{exchange_name}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}"
+
             return {
                 "trade_id": trade_id,
                 "exchange": exchange_name,
                 "status": "filled",
+                "execution_mode": "simulated",
+                "price_source": quote.get("price_source", "fallback"),
                 "from_asset": from_asset.value,
                 "to_asset": to_asset.value,
                 "input_amount": str(amount),
@@ -259,9 +284,9 @@ class ExchangeRouter:
                 "fee_amount": quote["fee_amount"],
                 "exchange_rate": quote["exchange_rate"],
                 "executed_at": datetime.utcnow().isoformat(),
-                "settlement_time": "T+0"  # Immediate settlement for simulation
+                "settlement_time": "T+0",
             }
-            
+
         except Exception as e:
             logger.error(f"Trade execution failed on {exchange_name}: {e}")
             return {"error": f"Trade execution failed: {str(e)}"}

@@ -322,7 +322,7 @@ class VersionedOpenAPIGenerator:
         samples.append({
             "lang": "python",
             "label": f"Python SDK v{version.value}",
-            "source": f'''from prsm_sdk import PRSMClient
+            "source": f'''from prsm.sdk import PRSMClient
 
 # Initialize client for v{version.value}
 client = PRSMClient(

@@ -4,17 +4,38 @@ Tensor Parallel Executor
 
 Coordinates parallel model shard execution across nodes
 with ring all-reduce synchronization.
+
+Execution modes per shard (decided per assignment):
+- LOCAL — Executed in-process via numpy. Used for tests, single-node runs,
+  and assignments with node_id == "local" or unset.
+- REMOTE — Dispatched via the Ring 2 AgentDispatcher when (a) a dispatcher
+  is wired into the executor and (b) the assignment names a non-local
+  node_id. Requires a tensor-matmul WASM module to ship with PRSM; until
+  that lands, REMOTE assignments raise NotImplementedError instead of
+  silently falling back to LOCAL — this prevents the "looks distributed
+  but isn't" failure mode.
 """
 
 import asyncio
 import logging
 import time
 import numpy as np
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from prsm.compute.model_sharding.models import ShardedModel, PipelineConfig
 
 logger = logging.getLogger(__name__)
+
+
+# A RemoteShardDispatcher takes (shard, input_data, assignment) and returns
+# a dict in the same shape as TensorParallelExecutor._execute_local. It is
+# the integration seam between Ring 8 (sharding) and Ring 2 (mobile-agent
+# dispatch). The default executor has no dispatcher; tests/integrations
+# install one when they need real network execution.
+RemoteShardDispatcher = Callable[
+    [Any, bytes, Dict[str, Any]],
+    Awaitable[Dict[str, Any]],
+]
 
 
 class TensorParallelExecutor:
@@ -24,9 +45,29 @@ class TensorParallelExecutor:
         self,
         confidential_executor=None,
         pipeline_config: Optional[PipelineConfig] = None,
+        remote_dispatcher: Optional[RemoteShardDispatcher] = None,
     ):
+        """Create a tensor-parallel executor.
+
+        Args:
+            confidential_executor: Ring 7 ConfidentialExecutor (currently
+                informational; reserved for DP noise wiring).
+            pipeline_config: PipelineConfig instance or None for defaults.
+            remote_dispatcher: Optional async callable that runs a single
+                shard on a remote node. When provided, assignments that
+                name a non-local node_id are routed through it. When None
+                (the default), only local execution is supported and
+                non-local assignments raise NotImplementedError so callers
+                immediately see the gap instead of getting a fake "success"
+                from a silent local-fallback.
+        """
         self._confidential_executor = confidential_executor
         self.config = pipeline_config or PipelineConfig()
+        self._remote_dispatcher = remote_dispatcher
+
+    @property
+    def supports_remote_execution(self) -> bool:
+        return self._remote_dispatcher is not None
 
     async def execute_parallel(
         self,
@@ -42,6 +83,7 @@ class TensorParallelExecutor:
         started_at = time.time()
         shard_results = []
         errors = []
+        execution_modes: Dict[str, int] = {"local": 0, "remote": 0}
 
         # Fan out execution per shard
         tasks = []
@@ -60,6 +102,8 @@ class TensorParallelExecutor:
                 errors.append(str(result))
             elif result is not None:
                 shard_results.append(result)
+                mode = result.get("execution_mode", "local") if isinstance(result, dict) else "local"
+                execution_modes[mode] = execution_modes.get(mode, 0) + 1
 
         # All-reduce aggregation
         aggregated = None
@@ -79,6 +123,7 @@ class TensorParallelExecutor:
             "shards_executed": len(shard_results),
             "shards_failed": len(errors),
             "errors": errors,
+            "execution_modes": execution_modes,
             "aggregated_output": aggregated.tolist() if aggregated is not None else None,
             "execution_time_seconds": time.time() - started_at,
         }
@@ -89,12 +134,62 @@ class TensorParallelExecutor:
         input_data: bytes,
         assignment: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Execute a single shard (placeholder for remote execution)."""
-        # In production, this dispatches to the assigned node via Ring 2
-        # For now, simulate local execution
+        """Execute a single shard, routing to local or remote.
+
+        Routing logic:
+            * If the assignment has no node_id, or node_id == "local", run
+              locally with numpy (tests + single-node).
+            * Otherwise, if a remote_dispatcher is wired in, delegate to it.
+            * Otherwise raise NotImplementedError so the caller sees the
+              missing remote-execution capability instead of a silent fall
+              back. This is the documented v1.6.x behavior — Ring 8 supports
+              remote dispatch through the Ring 2 seam, but the WASM
+              tensor-matmul agent module is still TODO.
+        """
+        node_id = assignment.get("node_id") or "local"
+
+        if node_id == "local":
+            return await self._execute_local(shard, input_data, assignment)
+
+        if self._remote_dispatcher is None:
+            raise NotImplementedError(
+                f"Shard {shard.shard_index} assigned to remote node "
+                f"{node_id!r}, but TensorParallelExecutor was constructed "
+                f"without a remote_dispatcher. Wire one in via "
+                f"TensorParallelExecutor(remote_dispatcher=...) — see "
+                f"prsm.compute.model_sharding.executor docs."
+            )
+
+        try:
+            result = await self._remote_dispatcher(shard, input_data, assignment)
+        except Exception as e:
+            logger.warning(
+                f"Remote dispatch failed for shard {shard.shard_index} "
+                f"on {node_id}: {e}"
+            )
+            raise
+
+        # Defensive normalization — ensure the dispatcher returned the
+        # contract shape and tag execution_mode for the parent aggregator.
+        if not isinstance(result, dict) or "output_array" not in result:
+            raise ValueError(
+                f"remote_dispatcher returned malformed result for shard "
+                f"{shard.shard_index}: {type(result).__name__}"
+            )
+        result.setdefault("shard_index", shard.shard_index)
+        result.setdefault("node_id", node_id)
+        result["execution_mode"] = "remote"
+        return result
+
+    async def _execute_local(
+        self,
+        shard,
+        input_data: bytes,
+        assignment: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Run a shard's forward pass in-process via numpy."""
         tensor = np.frombuffer(shard.tensor_data, dtype=np.float64).reshape(shard.tensor_shape)
 
-        # Simple forward pass simulation: multiply input by shard weights
         try:
             input_array = np.frombuffer(input_data, dtype=np.float64)
             if input_array.size == 0:
@@ -111,6 +206,7 @@ class TensorParallelExecutor:
             "shard_index": shard.shard_index,
             "node_id": assignment.get("node_id", "local"),
             "output_array": output.tolist(),
+            "execution_mode": "local",
         }
 
     @staticmethod

@@ -313,13 +313,10 @@ def generate_python_examples() -> Dict[str, str]:
     """Generate Python SDK examples"""
     
     return {
-        "installation": '''# Install the PRSM Python SDK
-pip install prsm-sdk
-
-# Or install from source
-pip install git+https://github.com/prsm-org/prsm-python-sdk.git
+        "installation": '''# Install PRSM (includes the Python SDK)
+pip install prsm-network
 ''',
-        "basic_usage": '''from prsm_sdk import PRSMClient
+        "basic_usage": '''from prsm.sdk import PRSMClient
 import asyncio
 
 # Initialize client

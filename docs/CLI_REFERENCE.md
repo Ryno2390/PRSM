@@ -56,16 +56,10 @@ prsm storage download <cid> -o ./local_file.parquet
 prsm storage list
 ```
 
-## Demo
-
-```bash
-prsm demo       # Full Ring 1-10 end-to-end demo
-```
-
 ## MCP Server
 
 ```bash
-prsm mcp-server                      # Start MCP server (17 tools)
+prsm mcp-server                      # Start MCP server (16 tools)
 python scripts/prsm_mcp_server.py    # Clean entry point (no log noise)
 ```
 

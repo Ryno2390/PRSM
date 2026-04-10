@@ -179,6 +179,19 @@ func (c *Client) EstimateCost(ctx context.Context, prompt string, modelID *strin
 	return response.EstimatedCost, nil
 }
 
+// Quote is a top-level convenience method that returns a Ring 1-10 cost
+// quote for a forge query, mirroring the Python SDK's client.quote() helper
+// and the JavaScript SDK's client.forge.quote() helper. It delegates to
+// Forge.GetQuote under the hood.
+//
+// Default shard count is 3 and hardware tier is "t2" if not provided in req.
+func (c *Client) Quote(ctx context.Context, req forge.QuoteRequest) (*forge.QuoteResponse, error) {
+	if c.Forge == nil {
+		return nil, errors.New("forge manager not initialized")
+	}
+	return c.Forge.GetQuote(ctx, req)
+}
+
 // GetSafetyStatus retrieves the current safety monitoring status
 func (c *Client) GetSafetyStatus(ctx context.Context) (*types.SafetyStatus, error) {
 	var status types.SafetyStatus

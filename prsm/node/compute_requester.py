@@ -43,7 +43,6 @@ JOB_TYPE_CAPABILITIES = {
     JobType.INFERENCE: "inference",
     JobType.EMBEDDING: "embedding",
     JobType.BENCHMARK: "benchmark",
-    JobType.TRAINING: "training",
 }
 
 # Mapping of job types to preferred backends
@@ -51,7 +50,6 @@ JOB_TYPE_PREFERRED_BACKENDS = {
     JobType.INFERENCE: ["anthropic", "openai", "local"],
     JobType.EMBEDDING: ["openai", "local"],
     JobType.BENCHMARK: ["local", "anthropic", "openai"],
-    JobType.TRAINING: ["local", "anthropic", "openai"],  # Training: local first for large workloads
 }
 
 
@@ -381,67 +379,6 @@ class ComputeRequester:
             f"Job {job_id[:8]} completed by {provider_id[:8]}, "
             f"verified={verified}, paid {job.ftns_budget} FTNS"
         )
-
-    async def submit_training_job(
-        self,
-        teacher_model_id: str,
-        domain: str,
-        target_size: str = "small",
-        budget_ftns: float = 200.0,
-    ) -> Optional[str]:
-        """Broadcast a training job to capable P2P nodes. Returns job_id or None.
-        
-        Args:
-            teacher_model_id: ID of the teacher model to distill from
-            domain: Target domain for the distilled model
-            target_size: Target model size ('tiny', 'small', 'medium', 'large')
-            budget_ftns: Maximum FTNS to spend on this training job
-            
-        Returns:
-            job_id if job was submitted to peers, None if no capable peers found
-            (caller should fall back to local execution)
-        """
-        if not self.discovery:
-            logger.info("No discovery service; cannot find training-capable peers")
-            return None
-            
-        capable_peers = self.discovery.find_peers_with_capability("training")
-        if not capable_peers:
-            logger.info("No training-capable peers found; running locally")
-            return None  # Caller should fall back to local execution
-
-        job_id = uuid.uuid4().hex
-        await self.gossip.publish(GOSSIP_JOB_OFFER, {
-            "job_id": job_id,
-            "job_type": JobType.TRAINING.value,
-            "requester_id": self.identity.node_id,
-            "payload": {
-                "teacher_model_id": teacher_model_id,
-                "domain": domain,
-                "target_size": target_size,
-                "budget_ftns": budget_ftns,
-            },
-            "ftns_budget": budget_ftns,
-        })
-        
-        # Track the submitted job
-        job = SubmittedJob(
-            job_id=job_id,
-            job_type=JobType.TRAINING,
-            payload={
-                "teacher_model_id": teacher_model_id,
-                "domain": domain,
-                "target_size": target_size,
-            },
-            ftns_budget=budget_ftns,
-        )
-        self.submitted_jobs[job_id] = job
-        
-        logger.info(
-            f"Submitted training job {job_id[:8]} to {len(capable_peers)} capable peers, "
-            f"budget: {budget_ftns} FTNS"
-        )
-        return job_id
 
     def get_stats(self) -> Dict[str, Any]:
         """Return requester statistics."""
