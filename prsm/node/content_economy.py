@@ -80,6 +80,7 @@ class PaymentStatus(str, Enum):
     PENDING = "pending"
     ESCROWED = "escrowed"
     COMPLETED = "completed"
+    PENDING_ONCHAIN = "pending_onchain"  # broadcast OK, receipt unknown
     FAILED = "failed"
     REFUNDED = "refunded"
 
@@ -325,11 +326,21 @@ class ContentEconomy:
                     amount=float(total_distributed),
                 )
             
-            payment.status = PaymentStatus.COMPLETED
+            # Phase 1.2: if any distribution was a broadcast_pending stub from
+            # the on-chain branch, the chain tx may still settle. Surface that
+            # to the API as PENDING_ONCHAIN so callers know to reconcile
+            # manually rather than treating the payment as final.
+            if any(
+                d.get("type") == "broadcast_pending"
+                for d in payment.royalty_distributions
+            ):
+                payment.status = PaymentStatus.PENDING_ONCHAIN
+            else:
+                payment.status = PaymentStatus.COMPLETED
             payment.completed_at = time.time()
-            
+
             logger.info(
-                f"Content access payment completed: {payment_id} "
+                f"Content access payment {payment.status.value}: {payment_id} "
                 f"({total_amount} FTNS for {content_id[:12]}... by {accessor_id[:8]})"
             )
             
