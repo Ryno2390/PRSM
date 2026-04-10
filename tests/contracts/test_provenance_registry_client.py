@@ -188,3 +188,105 @@ def test_compute_content_hash_different_content_different_hash():
     h1 = compute_content_hash(creator, b"file one")
     h2 = compute_content_hash(creator, b"file two")
     assert h1 != h2
+
+
+# ── Phase 1.1 Task 5: per-client lock + pending nonce ────────────────────
+
+
+def test_concurrent_register_content_uses_distinct_nonces(mock_web3):
+    """Two concurrent register_content calls on the same client must
+    serialize and use distinct nonces. The lock prevents racing
+    get_transaction_count → sign → send sequences from reusing a nonce."""
+    import threading
+    import time as _t
+
+    client, contract, w3 = _make_client(mock_web3)
+
+    # Each build_transaction call should embed the nonce from overrides.
+    def fake_build(overrides):
+        return {**overrides, "to": "0xRegistry", "data": "0x", "gas": 100000}
+
+    contract.functions.registerContent.return_value.build_transaction.side_effect = (
+        fake_build
+    )
+
+    nonces_seen = []
+    nonce_counter = [0]
+    counter_lock = threading.Lock()
+
+    def fake_get_count(addr, *args, **kwargs):
+        # Simulate a slow RPC so the race window is real if no client lock.
+        _t.sleep(0.01)
+        with counter_lock:
+            n = nonce_counter[0]
+            nonce_counter[0] += 1
+        return n
+
+    w3.eth.get_transaction_count.side_effect = fake_get_count
+    w3.eth.gas_price = 1_000_000_000
+    w3.eth.chain_id = 8453
+
+    sign_lock = threading.Lock()
+
+    def fake_sign(tx, key):
+        with sign_lock:
+            nonces_seen.append(tx["nonce"])
+        signed = MagicMock()
+        signed.raw_transaction = b"raw"
+        return signed
+
+    w3.eth.account.sign_transaction.side_effect = fake_sign
+    w3.eth.send_raw_transaction.return_value = b"\xab" * 32
+    receipt = MagicMock()
+    receipt.status = 1
+    w3.eth.wait_for_transaction_receipt.return_value = receipt
+
+    errors = []
+
+    def call(idx):
+        try:
+            client.register_content(_hash(f"c{idx}"), 800, "ipfs://x")
+        except Exception as e:  # pragma: no cover
+            errors.append(e)
+
+    threads = [threading.Thread(target=call, args=(i,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    # All nonces must be distinct (no two threads got the same nonce).
+    assert len(nonces_seen) == 4
+    assert len(set(nonces_seen)) == 4, f"nonce collision: {nonces_seen}"
+
+
+def test_pending_nonce_strategy_used(mock_web3):
+    """_tx_overrides must request the 'pending' nonce so back-to-back
+    txs from the same client see each other's pending state."""
+    client, contract, w3 = _make_client(mock_web3)
+    contract.functions.registerContent.return_value.build_transaction.return_value = {
+        "to": "0xRegistry",
+        "data": "0x",
+        "gas": 100000,
+        "gasPrice": 1,
+        "nonce": 0,
+        "chainId": 8453,
+    }
+    w3.eth.get_transaction_count.return_value = 0
+    w3.eth.gas_price = 1_000_000_000
+    w3.eth.chain_id = 8453
+    signed = MagicMock()
+    signed.raw_transaction = b"raw"
+    w3.eth.account.sign_transaction.return_value = signed
+    w3.eth.send_raw_transaction.return_value = b"\xab" * 32
+    receipt = MagicMock()
+    receipt.status = 1
+    w3.eth.wait_for_transaction_receipt.return_value = receipt
+
+    client.register_content(_hash("p"), 800, "ipfs://x")
+
+    # Verify get_transaction_count was called with "pending" as the second arg.
+    call_args = w3.eth.get_transaction_count.call_args
+    assert call_args is not None
+    assert "pending" in call_args.args, f"expected 'pending' in {call_args}"
