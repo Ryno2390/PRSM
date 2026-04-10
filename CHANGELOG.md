@@ -2,6 +2,42 @@
 
 All notable changes to PRSM are documented here.
 
+## [Unreleased] — Phase 1.1: Codex Review Fixes (partial)
+
+Independent codex re-review of Phase 1 surfaced 6 P1 + 3 P2 bugs.
+Phase 1.1 addressed 8 of the 9, but the codex re-review of Phase 1.1
+itself caught a partial fix on P1 #1 plus three new findings:
+
+  - **P1 #1 (partial)** — `compute_content_hash` helper, CLI, and the
+    `_try_onchain_distribute` reader path are all in place, but the
+    upload/serve/API surface (`content_uploader.py`, `content_provider.py`,
+    `content_economy_routes.py`) never populates `provenance_hash` in
+    `content_metadata`. Real traffic still falls back to local. The
+    end-to-end hash chain claim is not yet true.
+  - **P2 (new)** — `broadcast_pending` payments are reported as
+    `COMPLETED` to API callers because `process_content_access` sets the
+    status unconditionally after `_distribute_royalties` returns.
+  - **P2 (new)** — A malformed `provenance_hash` raises `ValueError` from
+    `bytes.fromhex()` outside the protected try block, so the entire
+    payment is marked `FAILED` instead of falling back to local.
+  - **P3 (new)** — `ProvenanceRegistryClient.register_content` still
+    validates `royalty_rate_bps <= 10000`; the contract caps at 9800.
+
+**Verdict: NOT SAFE TO DEPLOY.** Phase 1.2 will close the four
+remaining items.
+
+### What landed in Phase 1.1 (verified by codex)
+
+  - P1 #2: capped royalty rate at MAX_ROYALTY_RATE_BPS = 9800
+  - P1 #4: distinguished pre-broadcast vs post-broadcast failures
+           via BroadcastFailedError / OnChainPendingError / OnChainRevertedError
+  - P1 #5 + P2 #8: per-client lock + pending nonce strategy
+  - P1 #6: local fallback now pays serving node its remainder
+  - P2 #7: slim getCreatorAndRate getter eliminates metadataUri gas
+           griefing
+  - P2 #9: deploy script preflights checksum, bytecode, symbol(),
+           chain id; optional AUTO_VERIFY=1 for Basescan
+
 ## [Unreleased] — Phase 1: On-Chain Provenance
 
 Closes Phase 1 of the audit-gap remediation roadmap
