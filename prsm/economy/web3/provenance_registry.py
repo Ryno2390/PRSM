@@ -10,7 +10,8 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from enum import Enum
+from typing import Optional, Tuple
 
 try:
     from web3 import Web3
@@ -24,6 +25,49 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+
+
+# ── Phase 1.1 Task 4: broadcast vs settle distinction ───────────────────
+
+
+class TransferStatus(str, Enum):
+    """Outcome of an on-chain write attempt.
+
+    Used by callers to decide whether it is safe to fall back to a
+    local settlement path.
+    """
+    PRE_BROADCAST = "pre_broadcast"      # nothing on chain — safe to retry/fall back
+    BROADCAST_PENDING = "broadcast_pending"  # on chain, fate unknown — DO NOT fall back
+    CONFIRMED = "confirmed"              # on chain, success
+
+
+class BroadcastFailedError(RuntimeError):
+    """Raised when a tx failed BEFORE reaching the network.
+
+    The chain saw nothing. Callers may safely retry or fall back to a
+    local settlement path without risking a double payment.
+    """
+
+
+class OnChainPendingError(RuntimeError):
+    """Raised when broadcast succeeded but the receipt could not be confirmed.
+
+    The tx may still settle on chain. Callers MUST NOT fall back to a
+    local settlement path — doing so risks a double payment. The
+    `tx_hash` attribute is exposed so an operator can reconcile manually.
+    """
+
+    def __init__(self, message: str, tx_hash: str) -> None:
+        super().__init__(message)
+        self.tx_hash = tx_hash
+
+
+class OnChainRevertedError(RuntimeError):
+    """Raised when the receipt confirmed and the tx reverted on chain.
+
+    Safe to fall back: the chain rolled the tx back atomically, so no
+    state change occurred.
+    """
 
 
 # ── Phase 1.1 Task 3: canonical content hash helper ──────────────────────
@@ -169,8 +213,13 @@ class ProvenanceRegistryClient:
         content_hash: bytes,
         royalty_rate_bps: int,
         metadata_uri: str,
-    ) -> str:
-        """Register `content_hash` with caller as creator. Returns tx hash hex."""
+    ) -> Tuple[str, TransferStatus]:
+        """Register `content_hash` with caller as creator.
+
+        Returns (tx_hash_hex, TransferStatus). May raise BroadcastFailedError
+        (safe fallback), OnChainPendingError (do NOT fall back), or
+        OnChainRevertedError (safe fallback).
+        """
         if not self._account:
             raise RuntimeError("private_key required for write calls")
         if len(content_hash) != 32:
@@ -183,7 +232,9 @@ class ProvenanceRegistryClient:
         ).build_transaction(self._tx_overrides())
         return self._sign_and_send(tx)
 
-    def transfer_ownership(self, content_hash: bytes, new_creator: str) -> str:
+    def transfer_ownership(
+        self, content_hash: bytes, new_creator: str
+    ) -> Tuple[str, TransferStatus]:
         if not self._account:
             raise RuntimeError("private_key required for write calls")
         if len(content_hash) != 32:
@@ -226,14 +277,39 @@ class ProvenanceRegistryClient:
             "chainId": self.web3.eth.chain_id,
         }
 
-    def _sign_and_send(self, tx: dict) -> str:
+    def _sign_and_send(self, tx: dict) -> Tuple[str, TransferStatus]:
+        """Sign and broadcast a tx. Returns (tx_hash_hex, status).
+
+        Raises BroadcastFailedError if the broadcast itself failed
+        (safe fallback). Raises OnChainPendingError if broadcast
+        succeeded but receipt is unknown (UNSAFE to fall back — the
+        tx may still settle). Raises OnChainRevertedError if the
+        receipt shows a reverted tx (safe to fall back).
+        """
         signed = self.web3.eth.account.sign_transaction(tx, self._account.key)
         # web3.py 7.x exposes the signed payload as `raw_transaction`.
         raw = getattr(signed, "raw_transaction", None) or getattr(
             signed, "rawTransaction", None
         )
-        tx_hash = self.web3.eth.send_raw_transaction(raw)
-        receipt = self.web3.eth.wait_for_transaction_receipt(tx_hash)
+
+        try:
+            tx_hash_bytes = self.web3.eth.send_raw_transaction(raw)
+        except Exception as exc:
+            raise BroadcastFailedError(f"broadcast failed: {exc}") from exc
+
+        tx_hash_hex = "0x" + tx_hash_bytes.hex()
+
+        # From this point on, the tx may settle even if we crash.
+        try:
+            receipt = self.web3.eth.wait_for_transaction_receipt(
+                tx_hash_bytes, timeout=120
+            )
+        except Exception as exc:
+            raise OnChainPendingError(
+                f"broadcast OK but receipt unknown: {exc}", tx_hash=tx_hash_hex
+            ) from exc
+
         if receipt.status != 1:
-            raise RuntimeError(f"Transaction failed: 0x{tx_hash.hex()}")
-        return "0x" + tx_hash.hex()
+            raise OnChainRevertedError(f"tx reverted: {tx_hash_hex}")
+
+        return tx_hash_hex, TransferStatus.CONFIRMED

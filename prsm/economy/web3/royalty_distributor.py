@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 try:
     from web3 import Web3
@@ -19,6 +19,15 @@ except ImportError:  # pragma: no cover
     HAS_WEB3 = False
     Web3 = None  # type: ignore
     Account = None  # type: ignore
+
+# Re-export the broadcast/settle types from the registry module so tests
+# and downstream callers can import them from either client uniformly.
+from prsm.economy.web3.provenance_registry import (
+    BroadcastFailedError,
+    OnChainPendingError,
+    OnChainRevertedError,
+    TransferStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +165,13 @@ class RoyaltyDistributorClient:
 
     def distribute_royalty(
         self, content_hash: bytes, serving_node: str, gross: int
-    ) -> str:
+    ) -> Tuple[str, TransferStatus]:
+        """Distribute `gross` FTNS via the on-chain RoyaltyDistributor.
+
+        Returns (tx_hash_hex, TransferStatus). May raise BroadcastFailedError
+        (safe fallback), OnChainPendingError (do NOT fall back), or
+        OnChainRevertedError (safe fallback).
+        """
         if not self._account:
             raise RuntimeError("private_key required")
         if len(content_hash) != 32:
@@ -191,13 +206,36 @@ class RoyaltyDistributorClient:
             "chainId": self.web3.eth.chain_id,
         }
 
-    def _sign_and_send(self, tx: dict) -> str:
+    def _sign_and_send(self, tx: dict) -> Tuple[str, TransferStatus]:
+        """Sign and broadcast a tx. Returns (tx_hash_hex, status).
+
+        Same broadcast/settle distinction as ProvenanceRegistryClient:
+          - BroadcastFailedError: safe to fall back
+          - OnChainPendingError: DO NOT fall back (chain may settle)
+          - OnChainRevertedError: safe to fall back (chain rolled it back)
+        """
         signed = self.web3.eth.account.sign_transaction(tx, self._account.key)
         raw = getattr(signed, "raw_transaction", None) or getattr(
             signed, "rawTransaction", None
         )
-        tx_hash = self.web3.eth.send_raw_transaction(raw)
-        receipt = self.web3.eth.wait_for_transaction_receipt(tx_hash)
+
+        try:
+            tx_hash_bytes = self.web3.eth.send_raw_transaction(raw)
+        except Exception as exc:
+            raise BroadcastFailedError(f"broadcast failed: {exc}") from exc
+
+        tx_hash_hex = "0x" + tx_hash_bytes.hex()
+
+        try:
+            receipt = self.web3.eth.wait_for_transaction_receipt(
+                tx_hash_bytes, timeout=120
+            )
+        except Exception as exc:
+            raise OnChainPendingError(
+                f"broadcast OK but receipt unknown: {exc}", tx_hash=tx_hash_hex
+            ) from exc
+
         if receipt.status != 1:
-            raise RuntimeError(f"Transaction failed: 0x{tx_hash.hex()}")
-        return "0x" + tx_hash.hex()
+            raise OnChainRevertedError(f"tx reverted: {tx_hash_hex}")
+
+        return tx_hash_hex, TransferStatus.CONFIRMED
