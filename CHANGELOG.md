@@ -2,6 +2,95 @@
 
 All notable changes to PRSM are documented here.
 
+## [Unreleased] — Phase 1: On-Chain Provenance
+
+Closes Phase 1 of the audit-gap remediation roadmap
+([`docs/2026-04-10-audit-gap-roadmap.md`](docs/2026-04-10-audit-gap-roadmap.md)).
+Moves royalty distribution off the local SQLite ledger and onto Base
+mainnet so anyone can independently verify creator earnings.
+
+### Added
+
+- **`contracts/contracts/ProvenanceRegistry.sol`** — on-chain content
+  provenance registry. Maps a 32-byte content hash to a creator address
+  and royalty rate (basis points). Records are immutable except for
+  creator-initiated ownership transfer. 9 Hardhat tests, ~71k gas per
+  registration, ~29k per transfer.
+- **`contracts/contracts/RoyaltyDistributor.sol`** — atomic three-way
+  FTNS splitter (creator / network treasury / serving node). Pulls FTNS
+  from the payer via `transferFrom`, looks up creator + rate from the
+  registry, splits, and emits `RoyaltyPaid`. ReentrancyGuard on the
+  distribute path. 8 Hardhat tests, ~120k gas per distribution.
+- **`contracts/contracts/test/MockERC20.sol`** — test-only ERC-20 with
+  open mint, used by the distributor test suite.
+- **`contracts/scripts/deploy-provenance.js`** — Hardhat deploy script
+  for both contracts. Takes `FTNS_TOKEN_ADDRESS` and `NETWORK_TREASURY`
+  env vars and writes a timestamped manifest under
+  `contracts/deployments/`.
+- **`base-sepolia` network** added to `contracts/hardhat.config.js`
+  (chainId 84532, RPC `https://sepolia.base.org`) plus the matching
+  Etherscan custom chain entry for verification via the v2 API.
+- **`prsm/economy/web3/provenance_registry.py`** —
+  `ProvenanceRegistryClient` Web3.py 7.x wrapper. Methods:
+  `register_content`, `transfer_ownership`, `get_content`,
+  `is_registered`. Returns a `ContentRecord` dataclass for reads.
+  Hash-length and royalty-rate validation done client-side. 6 unit
+  tests with mocked Web3.
+- **`prsm/economy/web3/royalty_distributor.py`** —
+  `RoyaltyDistributorClient` with allowance-aware approval flow:
+  reads the existing FTNS allowance for the distributor and only sends
+  a fresh `approve` when the allowance is insufficient. Methods:
+  `preview_split`, `distribute_royalty`, `allowance`. 4 unit tests.
+- **`prsm provenance register|info|transfer` CLI** —
+  `prsm/cli_modules/provenance.py`, registered into the main click
+  group. `register` computes sha3-256 of file bytes as the content
+  hash. `info` accepts a 0x-prefixed hash or a file path. `transfer`
+  changes the creator address.
+- **Feature flag `PRSM_ONCHAIN_PROVENANCE=1`** in
+  `prsm/node/content_economy.py`. When set, `_distribute_royalties`
+  attempts an on-chain `RoyaltyDistributor.distributeRoyalty` call
+  before the local-ledger split. On any failure (chain outage,
+  unregistered content, missing 0x address), the call falls through
+  to the existing local path so payments are never lost.
+- **End-to-end integration test**
+  `tests/integration/test_onchain_provenance_e2e.py` — boots a real
+  Hardhat node, deploys all three contracts, exercises the full
+  Python client flow (register → preview → distribute), and asserts
+  on-chain balances. Skipped automatically when Hardhat node_modules
+  are absent.
+- **`docs/ONCHAIN_PROVENANCE.md`** — user-facing documentation
+  covering env vars, CLI, the split formula, and how to verify a
+  payment on Basescan.
+- **`docs/2026-04-10-audit-gap-roadmap.md`** — master roadmap for
+  Phases 1-7 of the audit-gap remediation program.
+- **`docs/2026-04-10-phase1-onchain-provenance-plan.md`** — TDD-style
+  10-task implementation plan for Phase 1.
+
+### Fixed
+
+Two pre-existing import bugs uncovered while running the unit suite
+(unrelated to Phase 1 but small enough to fix in passing):
+
+- `prsm/node/payment_escrow.py` — added missing `Callable` to typing
+  import. Was breaking test collection on every test that touched
+  `compute_provider.py`.
+- `prsm/node/content_uploader.py` — added missing
+  `from prsm.storage.models import ShardManifest`. Was breaking
+  test collection on `test_provenance_persistence.py` and
+  `test_royalty_pipeline.py`.
+
+### Notes
+
+- Feature is opt-in. With `PRSM_ONCHAIN_PROVENANCE` unset, behavior
+  is byte-for-byte identical to v1.7.0. Verified by running the
+  existing royalty/provenance unit suite (12 tests, all pass).
+- Live deployment to Base Sepolia and then Base mainnet is the
+  manual operator-gated step in Task 10 of the Phase 1 plan and is
+  not part of this changelog entry.
+- Pre-existing failures in `contracts/test/FTNSToken.test.js` and
+  `contracts/test/BridgeSecurity.test.js` (ethers v5 → v6 + OZ v5
+  custom-error migration) are out of scope for Phase 1 and remain.
+
 ## [1.7.0] - 2026-04-10
 
 ### Audit Findings & Punch List — Real Features, Honest Docs
