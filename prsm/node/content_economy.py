@@ -630,20 +630,24 @@ class ContentEconomy:
                 description=f"Network fee: {payment.content_id[:12]}...",
             )
 
-            # Direct creator gets remainder
+            # Phase 1.1 Task 7: serving node gets the remainder, mirroring
+            # the on-chain 8/2/90 split. Pre-Phase-1.1, this remainder went
+            # to the direct creator, which silently under-paid the serving
+            # node by ~90% on every payment that fell back to local.
             distributed = sum(d["amount"] for d in distributions)
             remainder = float(total_amount) - distributed
             if remainder > 0:
+                serving_node_id = self.identity.node_id
                 distributions.append({
-                    "recipient_id": creator_id,
+                    "recipient_id": serving_node_id,
                     "amount": remainder,
-                    "type": "direct_creator",
+                    "type": "serving_node",
                 })
                 await self._credit_royalty(
-                    recipient_id=creator_id,
+                    recipient_id=serving_node_id,
                     amount=remainder,
                     content_id=payment.content_id,
-                    description=f"Direct creator royalty: {payment.content_id[:12]}...",
+                    description=f"Serving node share: {payment.content_id[:12]}...",
                 )
 
         else:  # Legacy model
