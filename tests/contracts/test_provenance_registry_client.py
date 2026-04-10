@@ -93,8 +93,36 @@ def test_register_content_rejects_invalid_rate(mock_web3):
     client, contract, w3 = _make_client(mock_web3)
     with pytest.raises(ValueError, match="royalty_rate_bps"):
         client.register_content(
-            _hash("x"), royalty_rate_bps=10001, metadata_uri="ipfs://X"
+            _hash("x"), royalty_rate_bps=9801, metadata_uri="ipfs://X"
         )
+
+
+def test_register_content_accepts_max_rate(mock_web3):
+    """Verify the boundary at MAX_ROYALTY_RATE_BPS = 9800."""
+    client, contract, w3 = _make_client(mock_web3)
+    contract.functions.registerContent.return_value.build_transaction.return_value = {
+        "to": "0xRegistry",
+        "data": "0x",
+        "gas": 100000,
+        "gasPrice": 1,
+        "nonce": 0,
+        "chainId": 8453,
+    }
+    w3.eth.get_transaction_count.return_value = 0
+    w3.eth.gas_price = 1_000_000_000
+    w3.eth.chain_id = 8453
+    signed = MagicMock()
+    signed.raw_transaction = b"raw"
+    w3.eth.account.sign_transaction.return_value = signed
+    w3.eth.send_raw_transaction.return_value = b"\xab" * 32
+    receipt = MagicMock()
+    receipt.status = 1
+    w3.eth.wait_for_transaction_receipt.return_value = receipt
+
+    # Should not raise.
+    client.register_content(
+        _hash("max"), royalty_rate_bps=9800, metadata_uri="ipfs://M"
+    )
 
 
 def test_register_content_rejects_wrong_hash_length(mock_web3):
