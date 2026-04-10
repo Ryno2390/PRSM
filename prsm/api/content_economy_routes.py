@@ -162,19 +162,19 @@ async def process_content_access(
     """
     try:
         payment = await economy.process_content_access(
-            cid=request.cid,
+            content_id=request.cid,
             accessor_id=request.accessor_id,
             content_metadata={
                 "royalty_rate": request.royalty_rate,
                 "creator_id": request.creator_id,
-                "parent_cids": request.parent_cids,
+                "parent_content_ids": request.parent_cids,
                 "provenance_hash": request.provenance_hash,
             },
         )
-        
+
         return ContentAccessResponse(
             payment_id=payment.payment_id,
-            cid=payment.cid,
+            cid=payment.content_id,
             status=payment.status.value,
             amount=float(payment.amount),
             royalty_distributions=payment.royalty_distributions,
@@ -199,7 +199,7 @@ async def get_payment_status(
     
     return ContentAccessResponse(
         payment_id=payment.payment_id,
-        cid=payment.cid,
+        cid=payment.content_id,
         status=payment.status.value,
         amount=float(payment.amount),
         royalty_distributions=payment.royalty_distributions,
