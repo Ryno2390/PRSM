@@ -79,16 +79,16 @@ def mock_content_index():
     
     # Create some test records
     original_record = MagicMock()
-    original_record.cid = "original-cid-123"
+    original_record.content_id = "original-cid-123"
     original_record.creator_id = "original-creator"
-    original_record.parent_cids = []
+    original_record.parent_content_ids = []
     original_record.royalty_rate = 0.08
     original_record.providers = {"provider-1"}
     
     derivative_record = MagicMock()
-    derivative_record.cid = "derivative-cid-456"
+    derivative_record.content_id = "derivative-cid-456"
     derivative_record.creator_id = "derivative-creator"
-    derivative_record.parent_cids = ["original-cid-123"]
+    derivative_record.parent_content_ids = ["original-cid-123"]
     derivative_record.royalty_rate = 0.01
     derivative_record.providers = {"provider-2"}
     
@@ -123,12 +123,12 @@ async def content_economy(mock_identity, ledger, mock_gossip, mock_content_index
 async def test_process_content_access_basic(content_economy, ledger):
     """Test basic content access payment."""
     payment = await content_economy.process_content_access(
-        cid="test-cid-123",
+        content_id="test-cid-123",
         accessor_id="test-node-abc123",
         content_metadata={
             "royalty_rate": 0.01,
             "creator_id": "creator-xyz",
-            "parent_cids": [],
+            "parent_content_ids": [],
         },
     )
     
@@ -151,12 +151,12 @@ async def test_royalty_distribution_phase4_model(content_economy, ledger, mock_c
     """Test royalty distribution with Phase4 model (8% original, 1% derivative)."""
     # Process payment for derivative content
     payment = await content_economy.process_content_access(
-        cid="derivative-cid-456",
+        content_id="derivative-cid-456",
         accessor_id="test-node-abc123",
         content_metadata={
             "royalty_rate": 0.10,  # 0.10 FTNS access fee
             "creator_id": "derivative-creator",
-            "parent_cids": ["original-cid-123"],
+            "parent_content_ids": ["original-cid-123"],
         },
     )
     
@@ -190,12 +190,12 @@ async def test_royalty_distribution_legacy_model(mock_identity, ledger, mock_gos
     )
     
     payment = await economy.process_content_access(
-        cid="derivative-cid-456",
+        content_id="derivative-cid-456",
         accessor_id="test-node-abc123",
         content_metadata={
             "royalty_rate": 0.10,
             "creator_id": "derivative-creator",
-            "parent_cids": ["original-cid-123"],
+            "parent_content_ids": ["original-cid-123"],
         },
     )
     
@@ -229,12 +229,12 @@ async def test_payment_insufficient_balance(mock_identity, mock_gossip, mock_con
     )
 
     payment = await economy.process_content_access(
-        cid="test-cid-123",
+        content_id="test-cid-123",
         accessor_id="test-node-abc123",  # Must match identity.node_id to trigger debit
         content_metadata={
             "royalty_rate": 100.0,  # Expensive — exceeds 0 balance
             "creator_id": "creator-xyz",
-            "parent_cids": [],
+            "parent_content_ids": [],
         },
     )
 
@@ -249,12 +249,12 @@ async def test_payment_insufficient_balance(mock_identity, mock_gossip, mock_con
 async def test_track_content_upload(content_economy):
     """Test replication tracking starts on upload."""
     status = await content_economy.track_content_upload(
-        cid="new-content-123",
+        content_id="new-content-123",
         size_bytes=1024 * 1024,  # 1MB
         replicas_requested=3,
     )
     
-    assert status.cid == "new-content-123"
+    assert status.content_id == "new-content-123"
     assert status.min_replicas == 3
     assert status.current_replicas == 1  # Just us
     assert "test-node-abc123" in status.providers
@@ -265,14 +265,14 @@ async def test_update_replication_status(content_economy):
     """Test replication status updates correctly."""
     # Start tracking
     await content_economy.track_content_upload(
-        cid="content-456",
+        content_id="content-456",
         size_bytes=1024,
         replicas_requested=2,
     )
     
     # Simulate provider announcing content
     await content_economy.update_replication_status(
-        cid="content-456",
+        content_id="content-456",
         provider_id="provider-node-1",
         has_content=True,
     )
@@ -284,7 +284,7 @@ async def test_update_replication_status(content_economy):
     
     # Simulate provider removing content
     await content_economy.update_replication_status(
-        cid="content-456",
+        content_id="content-456",
         provider_id="provider-node-1",
         has_content=False,
     )
@@ -298,14 +298,14 @@ async def test_replication_request_when_below_minimum(content_economy, mock_goss
     """Test that additional replicas are requested when below minimum."""
     # Start with just us (1 replica, min=3)
     await content_economy.track_content_upload(
-        cid="under-replicated",
+        content_id="under-replicated",
         size_bytes=1024,
         replicas_requested=3,
     )
     
     # Should trigger a storage request via gossip
     await content_economy._check_replication_needs(
-        cid="under-replicated",
+        content_id="under-replicated",
         status=content_economy._replication_status["under-replicated"],
     )
     
@@ -323,7 +323,7 @@ async def test_retrieval_request_bidding(content_economy, mock_gossip):
     # Start retrieval request
     request_task = asyncio.create_task(
         content_economy.request_content_retrieval(
-            cid="marketplace-cid",
+            content_id="marketplace-cid",
             max_price_ftns=Decimal("0.05"),
             timeout=5.0,
         )
@@ -370,7 +370,7 @@ async def test_bid_selection(content_economy):
     bids = [
         ProviderBid(
             provider_id="cheap-slow",
-            cid="test-cid",
+            content_id="test-cid",
             price_ftns=Decimal("0.01"),
             estimated_latency_ms=500.0,
             available_bandwidth_mbps=10.0,
@@ -378,7 +378,7 @@ async def test_bid_selection(content_economy):
         ),
         ProviderBid(
             provider_id="expensive-fast",
-            cid="test-cid",
+            content_id="test-cid",
             price_ftns=Decimal("0.05"),
             estimated_latency_ms=10.0,
             available_bandwidth_mbps=100.0,
@@ -386,7 +386,7 @@ async def test_bid_selection(content_economy):
         ),
         ProviderBid(
             provider_id="balanced",
-            cid="test-cid",
+            content_id="test-cid",
             price_ftns=Decimal("0.03"),
             estimated_latency_ms=50.0,
             available_bandwidth_mbps=50.0,
@@ -409,7 +409,7 @@ async def test_bid_selection_exceeds_max_price(content_economy):
     bids = [
         ProviderBid(
             provider_id="expensive",
-            cid="test-cid",
+            content_id="test-cid",
             price_ftns=Decimal("0.10"),
             estimated_latency_ms=10.0,
             available_bandwidth_mbps=100.0,
@@ -432,7 +432,7 @@ async def test_index_content_embedding(content_economy):
     content_economy.embedding_fn = AsyncMock(return_value=[0.1] * 1536)  # Mock embedding
     
     result = await content_economy.index_content_embedding(
-        cid="embed-test-cid",
+        content_id="embed-test-cid",
         content=b"This is test content for semantic indexing. " * 10,
         metadata={
             "creator_id": "creator-xyz",
@@ -478,19 +478,19 @@ async def test_semantic_search(content_economy):
 async def test_resolve_provenance_chain(content_economy, mock_content_index):
     """Test provenance chain resolution for royalty distribution."""
     chain = await content_economy._resolve_provenance_chain(
-        cid="derivative-cid-456",
-        parent_cids=["original-cid-123"],
+        content_id="derivative-cid-456",
+        parent_content_ids=["original-cid-123"],
     )
     
     assert chain.original_creator == "original-creator"
-    assert chain.original_cid == "original-cid-123"
+    assert chain.original_content_id == "original-cid-123"
 
 
 @pytest.mark.asyncio
 async def test_resolve_parent_creators(content_economy):
     """Test resolving creator IDs from parent CIDs."""
     creators = await content_economy._resolve_parent_creators(
-        parent_cids=["original-cid-123", "unknown-cid"],
+        parent_content_ids=["original-cid-123", "unknown-cid"],
     )
     
     assert "original-creator" in creators
@@ -517,15 +517,15 @@ async def test_get_stats(content_economy):
 # ── Edge Cases ──────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_empty_parent_cids(content_economy, ledger):
+async def test_empty_parent_content_ids(content_economy, ledger):
     """Test royalty distribution when no parents (original content)."""
     payment = await content_economy.process_content_access(
-        cid="original-content-cid",
+        content_id="original-content-cid",
         accessor_id="test-node-abc123",
         content_metadata={
             "royalty_rate": 0.10,
             "creator_id": "creator-xyz",
-            "parent_cids": [],  # Original content
+            "parent_content_ids": [],  # Original content
         },
     )
     
@@ -543,12 +543,12 @@ async def test_concurrent_payments(content_economy, ledger):
     # Process multiple payments concurrently
     tasks = [
         content_economy.process_content_access(
-            cid=f"concurrent-cid-{i}",
+            content_id=f"concurrent-cid-{i}",
             accessor_id="test-node-abc123",
             content_metadata={
                 "royalty_rate": 0.01,
                 "creator_id": "creator-xyz",
-                "parent_cids": [],
+                "parent_content_ids": [],
             },
         )
         for i in range(5)

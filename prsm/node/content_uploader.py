@@ -701,7 +701,7 @@ class ContentUploader:
                 from_user=accessor_id,
                 to_user=self.identity.node_id,
                 amount=total_royalty,
-                cid=cid,
+                content_id=cid,
             )
 
         # Persist updated access stats to DB (non-blocking)
@@ -734,7 +734,7 @@ class ContentUploader:
             from_user=accessor_id,
             to_user=self.identity.node_id,
             amount=derivative_share,
-            cid=cid,
+            content_id=cid,
             description=f"Derivative royalty 70%: {cid[:12]}...",
         )
 
@@ -761,7 +761,7 @@ class ContentUploader:
                         from_user=accessor_id,
                         to_user=self.identity.node_id,
                         amount=per_parent,
-                        cid=cid,
+                        content_id=cid,
                         description=f"Source royalty 25%/{len(parent_creators)}: {cid[:12]}...",
                     )
                 # Remote source creators get credited when they receive the
@@ -784,7 +784,7 @@ class ContentUploader:
                 from_user=accessor_id,
                 to_user=self.identity.node_id,
                 amount=source_pool,
-                cid=cid,
+                content_id=cid,
                 description=f"Unclaimed source royalty 25%: {cid[:12]}...",
             )
 
@@ -1236,7 +1236,7 @@ class ContentUploader:
         from_user: str,
         to_user: str,
         amount: float,
-        cid: str,
+        content_id: str,
         description: str = "",
     ) -> None:
         """
@@ -1261,7 +1261,7 @@ class ContentUploader:
             from_user: Node ID of the content accessor (pays the royalty)
             to_user:   Node ID of the content creator (earns the royalty)
             amount:    FTNS to transfer (positive float, truncated to 6 decimal places)
-            cid:       Content identifier — used in description and idempotency key
+            content_id: Content identifier — used in description and idempotency key
             description: Human-readable label for the transaction record
         """
         if amount <= 0 or from_user == to_user:
@@ -1273,31 +1273,31 @@ class ContentUploader:
             import uuid as _uuid
 
             service = AtomicFTNSService()
-            idempotency_key = f"royalty:{cid}:{from_user}:{_uuid.uuid4().hex[:16]}"
+            idempotency_key = f"royalty:{content_id}:{from_user}:{_uuid.uuid4().hex[:16]}"
 
             result = await service.transfer_tokens_atomic(
                 from_user_id=from_user,
                 to_user_id=to_user,
                 amount=Decimal(str(round(amount, 6))),
                 idempotency_key=idempotency_key,
-                description=description or f"Content royalty: {cid[:12]}...",
+                description=description or f"Content royalty: {content_id[:12]}...",
             )
 
             if result.success:
                 logger.debug(
                     f"Platform royalty: {from_user[:8]}→{to_user[:8]} "
-                    f"{amount:.4f} FTNS for {cid[:12]}..."
+                    f"{amount:.4f} FTNS for {content_id[:12]}..."
                 )
             else:
                 # Most common cause: accessor has zero FTNS balance.
                 # Local ledger credit is already applied — content was served.
                 logger.info(
-                    f"Platform royalty deferred for {cid[:12]}...: "
+                    f"Platform royalty deferred for {content_id[:12]}...: "
                     f"{result.error_message} (local ledger credit intact)"
                 )
         except Exception as e:
             logger.warning(
-                f"Platform royalty transfer unavailable for {cid[:12]}...: {e}",
+                f"Platform royalty transfer unavailable for {content_id[:12]}...: {e}",
             )
 
     async def _hydrate_from_db(self) -> int:

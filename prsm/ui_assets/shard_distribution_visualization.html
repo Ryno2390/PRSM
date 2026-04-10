@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRSM Shard Distribution Visualization</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/shard-visualization.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+    <!-- Shard Distribution Dashboard -->
+    <div class="shard-dashboard-container">
+        <!-- Dashboard Header -->
+        <div class="dashboard-header">
+            <div class="header-info">
+                <h2><i class="fas fa-puzzle-piece"></i> Shard Distribution Visualization</h2>
+                <p>Real-time monitoring of cryptographic file sharding across the P2P network</p>
+            </div>
+            <div class="header-controls">
+                <div class="distribution-status">
+                    <div class="status-indicator healthy">
+                        <div class="status-dot"></div>
+                        <span>Distribution Healthy</span>
+                    </div>
+                    <div class="redundancy-level">
+                        <i class="fas fa-shield-alt"></i>
+                        <span>7-Shard Redundancy</span>
+                    </div>
+                </div>
+                <button class="refresh-btn" onclick="refreshShardData()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+        </div>
+
+        <!-- Shard Overview Cards -->
+        <div class="shard-overview">
+            <div class="overview-card">
+                <div class="card-icon">
+                    <i class="fas fa-server"></i>
+                </div>
+                <div class="card-content">
+                    <h3 id="total-shards">1,248</h3>
+                    <p>Total Shards</p>
+                    <span class="trend positive">+23 today</span>
+                </div>
+            </div>
+            
+            <div class="overview-card">
+                <div class="card-icon">
+                    <i class="fas fa-file-archive"></i>
+                </div>
+                <div class="card-content">
+                    <h3 id="active-files">178</h3>
+                    <p>Sharded Files</p>
+                    <span class="trend neutral">Active</span>
+                </div>
+            </div>
+            
+            <div class="overview-card">
+                <div class="card-icon">
+                    <i class="fas fa-network-wired"></i>
+                </div>
+                <div class="card-content">
+                    <h3 id="distribution-nodes">47</h3>
+                    <p>Distribution Nodes</p>
+                    <span class="trend positive">Optimal</span>
+                </div>
+            </div>
+            
+            <div class="overview-card">
+                <div class="card-icon">
+                    <i class="fas fa-check-double"></i>
+                </div>
+                <div class="card-content">
+                    <h3 id="redundancy-score">98.7%</h3>
+                    <p>Redundancy Score</p>
+                    <span class="trend positive">Excellent</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Dashboard Grid -->
+        <div class="dashboard-grid">
+            <!-- Global Shard Distribution Map -->
+            <div class="dashboard-panel shard-map">
+                <div class="panel-header">
+                    <h4><i class="fas fa-globe"></i> Global Shard Distribution</h4>
+                    <div class="panel-controls">
+                        <select id="map-view">
+                            <option value="geographic">Geographic View</option>
+                            <option value="cluster">Cluster View</option>
+                            <option value="security">Security Level</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <div class="world-map" id="shard-world-map">
+                        <!-- Interactive world map with shard distribution -->
+                        <div class="map-container">
+                            <div class="region north-america" data-region="na">
+                                <div class="region-label">North America</div>
+                                <div class="shard-nodes">
+                                    <div class="shard-node primary" data-node="stanford" style="top: 40%; left: 20%;">
+                                        <div class="node-dot"></div>
+                                        <div class="node-info">
+                                            <span class="node-name">Stanford</span>
+                                            <span class="shard-count">127 shards</span>
+                                        </div>
+                                    </div>
+                                    <div class="shard-node secondary" data-node="mit" style="top: 30%; left: 80%;">
+                                        <div class="node-dot"></div>
+                                        <div class="node-info">
+                                            <span class="node-name">MIT</span>
+                                            <span class="shard-count">89 shards</span>
+                                        </div>
+                                    </div>
+                                    <div class="shard-node primary" data-node="duke" style="top: 60%; left: 75%;">
+                                        <div class="node-dot"></div>
+                                        <div class="node-info">
+                                            <span class="node-name">Duke</span>
+                                            <span class="shard-count">203 shards</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="region europe" data-region="eu">
+                                <div class="region-label">Europe</div>
+                                <div class="shard-nodes">
+                                    <div class="shard-node tertiary" data-node="oxford" style="top: 35%; left: 45%;">
+                                        <div class="node-dot"></div>
+                                        <div class="node-info">
+                                            <span class="node-name">Oxford</span>
+                                            <span class="shard-count">67 shards</span>
+                                        </div>
+                                    </div>
+                                    <div class="shard-node secondary" data-node="eth" style="top: 50%; left: 55%;">
+                                        <div class="node-dot"></div>
+                                        <div class="node-info">
+                                            <span class="node-name">ETH Zurich</span>
+                                            <span class="shard-count">134 shards</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="region asia" data-region="asia">
+                                <div class="region-label">Asia</div>
+                                <div class="shard-nodes">
+                                    <div class="shard-node secondary" data-node="tokyo" style="top: 45%; left: 85%;">
+                                        <div class="node-dot"></div>
+                                        <div class="node-info">
+                                            <span class="node-name">Tokyo Tech</span>
+                                            <span class="shard-count">98 shards</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Connection Lines Between Nodes -->
+                        <svg class="connection-overlay" viewBox="0 0 100 100">
+                            <line class="shard-connection high-throughput" x1="20" y1="40" x2="80" y2="30"></line>
+                            <line class="shard-connection medium-throughput" x1="20" y1="40" x2="75" y2="60"></line>
+                            <line class="shard-connection high-throughput" x1="80" y1="30" x2="75" y2="60"></line>
+                            <line class="shard-connection low-throughput" x1="45" y1="35" x2="55" y2="50"></line>
+                            <line class="shard-connection medium-throughput" x1="85" y1="45" x2="55" y2="50"></line>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- File Shard Details -->
+            <div class="dashboard-panel file-shards">
+                <div class="panel-header">
+                    <h4><i class="fas fa-file-alt"></i> File Shard Details</h4>
+                    <div class="panel-controls">
+                        <input type="text" placeholder="Search files..." class="search-input">
+                        <select id="security-filter">
+                            <option value="all">All Security Levels</option>
+                            <option value="high">High Security</option>
+                            <option value="medium">Medium Security</option>
+                            <option value="standard">Standard</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <div class="file-list">
+                        <!-- High Security File -->
+                        <div class="file-item high-security" data-file-id="prop-algo-v2">
+                            <div class="file-header">
+                                <div class="file-icon">
+                                    <i class="fas fa-file-pdf"></i>
+                                    <div class="security-badge high">
+                                        <i class="fas fa-shield-alt"></i>
+                                    </div>
+                                </div>
+                                <div class="file-info">
+                                    <div class="file-name">Proprietary_Algorithm_v2.pdf</div>
+                                    <div class="file-meta">
+                                        <span class="file-size">2.4 MB</span>
+                                        <span class="security-level high">High Security</span>
+                                        <span class="shard-count">7 shards</span>
+                                    </div>
+                                </div>
+                                <button class="expand-btn" onclick="toggleFileDetails('prop-algo-v2')">
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
+                            </div>
+                            <div class="file-details" id="details-prop-algo-v2">
+                                <div class="shard-distribution">
+                                    <h6>Shard Distribution:</h6>
+                                    <div class="shard-list">
+                                        <div class="shard-item">
+                                            <div class="shard-indicator active"></div>
+                                            <span class="shard-label">Shard 1/7</span>
+                                            <span class="shard-location">Stanford Lab-01</span>
+                                            <span class="shard-status verified">Verified</span>
+                                        </div>
+                                        <div class="shard-item">
+                                            <div class="shard-indicator active"></div>
+                                            <span class="shard-label">Shard 2/7</span>
+                                            <span class="shard-location">MIT Research-03</span>
+                                            <span class="shard-status verified">Verified</span>
+                                        </div>
+                                        <div class="shard-item">
+                                            <div class="shard-indicator active"></div>
+                                            <span class="shard-label">Shard 3/7</span>
+                                            <span class="shard-location">Duke Medical-02</span>
+                                            <span class="shard-status verified">Verified</span>
+                                        </div>
+                                        <div class="shard-item">
+                                            <div class="shard-indicator active"></div>
+                                            <span class="shard-label">Shard 4/7</span>
+                                            <span class="shard-location">Oxford Quantum-Lab</span>
+                                            <span class="shard-status verified">Verified</span>
+                                        </div>
+                                        <div class="shard-item">
+                                            <div class="shard-indicator active"></div>
+                                            <span class="shard-label">Shard 5/7</span>
+                                            <span class="shard-location">ETH Zurich-Main</span>
+                                            <span class="shard-status verified">Verified</span>
+                                        </div>
+                                        <div class="shard-item">
+                                            <div class="shard-indicator active"></div>
+                                            <span class="shard-label">Shard 6/7</span>
+                                            <span class="shard-location">Tokyo Tech-AI</span>
+                                            <span class="shard-status verified">Verified</span>
+                                        </div>
+                                        <div class="shard-item">
+                                            <div class="shard-indicator warning"></div>
+                                            <span class="shard-label">Shard 7/7</span>
+                                            <span class="shard-location">Backup Storage</span>
+                                            <span class="shard-status replicating">Replicating</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="file-actions">
+                                    <button class="action-btn primary" onclick="reconstructFile('prop-algo-v2')">
+                                        <i class="fas fa-puzzle-piece"></i> Reconstruct
+                                    </button>
+                                    <button class="action-btn secondary" onclick="redistributeShards('prop-algo-v2')">
+                                        <i class="fas fa-sync-alt"></i> Redistribute
+                                    </button>
+                                    <button class="action-btn warning" onclick="validateIntegrity('prop-algo-v2')">
+                                        <i class="fas fa-check-circle"></i> Validate
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Medium Security File -->
+                        <div class="file-item medium-security" data-file-id="research-notebook">
+                            <div class="file-header">
+                                <div class="file-icon">
+                                    <i class="fas fa-file-code"></i>
+                                    <div class="security-badge medium">
+                                        <i class="fas fa-lock"></i>
+                                    </div>
+                                </div>
+                                <div class="file-info">
+                                    <div class="file-name">research_notebook.ipynb</div>
+                                    <div class="file-meta">
+                                        <span class="file-size">856 KB</span>
+                                        <span class="security-level medium">Medium Security</span>
+                                        <span class="shard-count">5 shards</span>
+                                    </div>
+                                </div>
+                                <button class="expand-btn" onclick="toggleFileDetails('research-notebook')">
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
+                            </div>
+                            <div class="file-details" id="details-research-notebook">
+                                <div class="shard-distribution">
+                                    <h6>Shard Distribution:</h6>
+                                    <div class="shard-list">
+                                        <div class="shard-item">
+                                            <div class="shard-indicator active"></div>
+                                            <span class="shard-label">Shard 1/5</span>
+                                            <span class="shard-location">Stanford Lab-01</span>
+                                            <span class="shard-status verified">Verified</span>
+                                        </div>
+                                        <div class="shard-item">
+                                            <div class="shard-indicator active"></div>
+                                            <span class="shard-label">Shard 2/5</span>
+                                            <span class="shard-location">MIT Research-03</span>
+                                            <span class="shard-status verified">Verified</span>
+                                        </div>
+                                        <div class="shard-item">
+                                            <div class="shard-indicator active"></div>
+                                            <span class="shard-label">Shard 3/5</span>
+                                            <span class="shard-location">Duke Medical-02</span>
+                                            <span class="shard-status verified">Verified</span>
+                                        </div>
+                                        <div class="shard-item">
+                                            <div class="shard-indicator active"></div>
+                                            <span class="shard-label">Shard 4/5</span>
+                                            <span class="shard-location">ETH Zurich-Main</span>
+                                            <span class="shard-status verified">Verified</span>
+                                        </div>
+                                        <div class="shard-item">
+                                            <div class="shard-indicator active"></div>
+                                            <span class="shard-label">Shard 5/5</span>
+                                            <span class="shard-location">Tokyo Tech-AI</span>
+                                            <span class="shard-status verified">Verified</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Distribution Analytics -->
+            <div class="dashboard-panel distribution-analytics">
+                <div class="panel-header">
+                    <h4><i class="fas fa-chart-bar"></i> Distribution Analytics</h4>
+                    <div class="panel-controls">
+                        <select id="analytics-timeframe">
+                            <option value="1h">Last Hour</option>
+                            <option value="6h">Last 6 Hours</option>
+                            <option value="24h">Last 24 Hours</option>
+                            <option value="7d">Last 7 Days</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <div class="analytics-grid">
+                        <div class="analytics-item">
+                            <h6>Geographic Distribution</h6>
+                            <div class="distribution-chart">
+                                <div class="chart-bar" style="height: 70%;" data-region="North America">
+                                    <div class="bar-value">65%</div>
+                                </div>
+                                <div class="chart-bar" style="height: 45%;" data-region="Europe">
+                                    <div class="bar-value">25%</div>
+                                </div>
+                                <div class="chart-bar" style="height: 25%;" data-region="Asia">
+                                    <div class="bar-value">10%</div>
+                                </div>
+                            </div>
+                            <div class="chart-labels">
+                                <span>North America</span>
+                                <span>Europe</span>
+                                <span>Asia</span>
+                            </div>
+                        </div>
+                        
+                        <div class="analytics-item">
+                            <h6>Security Level Distribution</h6>
+                            <div class="security-pie">
+                                <svg viewBox="0 0 100 100" class="pie-chart">
+                                    <circle cx="50" cy="50" r="40" fill="none" stroke="#ef4444" stroke-width="20" 
+                                            stroke-dasharray="75.4 251.2" stroke-dashoffset="0"></circle>
+                                    <circle cx="50" cy="50" r="40" fill="none" stroke="#f59e0b" stroke-width="20" 
+                                            stroke-dasharray="50.24 251.2" stroke-dashoffset="-75.4"></circle>
+                                    <circle cx="50" cy="50" r="40" fill="none" stroke="#10b981" stroke-width="20" 
+                                            stroke-dasharray="125.6 251.2" stroke-dashoffset="-125.64"></circle>
+                                </svg>
+                                <div class="pie-legend">
+                                    <div class="legend-item">
+                                        <div class="legend-color high"></div>
+                                        <span>High (30%)</span>
+                                    </div>
+                                    <div class="legend-item">
+                                        <div class="legend-color medium"></div>
+                                        <span>Medium (20%)</span>
+                                    </div>
+                                    <div class="legend-item">
+                                        <div class="legend-color standard"></div>
+                                        <span>Standard (50%)</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="analytics-item">
+                            <h6>Node Load Distribution</h6>
+                            <div class="load-metrics">
+                                <div class="load-item">
+                                    <span class="node-name">Stanford Lab-01</span>
+                                    <div class="load-bar">
+                                        <div class="load-fill" style="width: 85%"></div>
+                                    </div>
+                                    <span class="load-percent">85%</span>
+                                </div>
+                                <div class="load-item">
+                                    <span class="node-name">Duke Medical-02</span>
+                                    <div class="load-bar">
+                                        <div class="load-fill" style="width: 92%"></div>
+                                    </div>
+                                    <span class="load-percent">92%</span>
+                                </div>
+                                <div class="load-item">
+                                    <span class="node-name">ETH Zurich</span>
+                                    <div class="load-bar">
+                                        <div class="load-fill" style="width: 67%"></div>
+                                    </div>
+                                    <span class="load-percent">67%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions Panel -->
+        <div class="quick-actions-panel">
+            <h4><i class="fas fa-lightning-bolt"></i> Distribution Management</h4>
+            <div class="action-buttons">
+                <button class="action-btn primary" onclick="optimizeDistribution()">
+                    <i class="fas fa-chart-line"></i> Optimize Distribution
+                </button>
+                <button class="action-btn secondary" onclick="rebalanceShards()">
+                    <i class="fas fa-balance-scale"></i> Rebalance Shards
+                </button>
+                <button class="action-btn secondary" onclick="exportDistributionReport()">
+                    <i class="fas fa-file-export"></i> Export Report
+                </button>
+                <button class="action-btn warning" onclick="emergencyRedistribute()">
+                    <i class="fas fa-exclamation-triangle"></i> Emergency Redistribute
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/shard-visualization.js"></script>
+</body>
+</html>

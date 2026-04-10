@@ -15,129 +15,9 @@ from typing import List
 from pathlib import Path
 
 # ── Backend Detection Tests ─────────────────────────────────────────────────────
-
-class TestDetectAvailableBackends:
-    """Tests for detect_available_backends() function."""
-
-    def test_detect_available_backends_no_keys(self):
-        """Test that no backends are detected when no API keys are set."""
-        from prsm.compute.nwtn.backends.config import detect_available_backends
-
-        # Mock empty environment - all should be False
-        with patch.dict(os.environ, {}, clear=True):
-            # Remove any existing keys
-            os.environ.pop("ANTHROPIC_API_KEY", None)
-            os.environ.pop("OPENAI_API_KEY", None)
-            os.environ.pop("PRSM_LOCAL_MODEL_URL", None)
-
-            result = detect_available_backends()
-
-            assert result["anthropic"] is False
-            assert result["openai"] is False
-            assert result["local"] is False
-            assert result["any_real_backend"] is False
-
-    def test_detect_available_backends_anthropic_only(self):
-        """Test that only Anthropic backend is detected when ANTHROPIC_API_KEY is set."""
-        from prsm.compute.nwtn.backends.config import detect_available_backends
-
-        # Mock ANTHROPIC_API_KEY set
-        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test123"}, clear=True):
-            os.environ.pop("OPENAI_API_KEY", None)
-            os.environ.pop("PRSM_LOCAL_MODEL_URL", None)
-
-            result = detect_available_backends()
-
-            assert result["anthropic"] is True
-            assert result["openai"] is False
-            assert result["local"] is False
-            assert result["any_real_backend"] is True
-
-    def test_detect_available_backends_openai_only(self):
-        """Test that only OpenAI backend is detected when OPENAI_API_KEY is set."""
-        from prsm.compute.nwtn.backends.config import detect_available_backends
-
-        # Mock OPENAI_API_KEY set
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test123"}, clear=True):
-            os.environ.pop("ANTHROPIC_API_KEY", None)
-            os.environ.pop("PRSM_LOCAL_MODEL_URL", None)
-
-            result = detect_available_backends()
-
-            assert result["anthropic"] is False
-            assert result["openai"] is True
-            assert result["local"] is False
-            assert result["any_real_backend"] is True
-
-    def test_detect_available_backends_local_only(self):
-        """Test that only local backend is detected when PRSM_LOCAL_MODEL_URL is set."""
-        from prsm.compute.nwtn.backends.config import detect_available_backends
-
-        # Mock PRSM_LOCAL_MODEL_URL set
-        with patch.dict(os.environ, {"PRSM_LOCAL_MODEL_URL": "http://localhost:8000"}, clear=True):
-            os.environ.pop("ANTHROPIC_API_KEY", None)
-            os.environ.pop("OPENAI_API_KEY", None)
-
-            result = detect_available_backends()
-
-            assert result["anthropic"] is False
-            assert result["openai"] is False
-            assert result["local"] is True
-            assert result["any_real_backend"] is True
-
-    def test_detect_available_backends_multiple_keys(self):
-        """Test that multiple backends are detected when multiple keys are set."""
-        from prsm.compute.nwtn.backends.config import detect_available_backends
-
-        # Mock multiple keys set
-        with patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "sk-ant-test123",
-            "OPENAI_API_KEY": "sk-test456",
-            "PRSM_LOCAL_MODEL_URL": "http://localhost:8000"
-        }, clear=True):
-            result = detect_available_backends()
-
-            assert result["anthropic"] is True
-            assert result["openai"] is True
-            assert result["local"] is True
-            assert result["any_real_backend"] is True
-
-    def test_detect_available_backends_empty_string_keys(self):
-        """Test that empty string keys are treated as not configured."""
-        from prsm.compute.nwtn.backends.config import detect_available_backends
-
-        # Mock empty strings for API keys (should be treated as not configured)
-        with patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "",
-            "OPENAI_API_KEY": "",
-            "PRSM_LOCAL_MODEL_URL": ""
-        }, clear=True):
-            result = detect_available_backends()
-
-            assert result["anthropic"] is False
-            assert result["openai"] is False
-            assert result["local"] is False
-            assert result["any_real_backend"] is False
-
-    def test_detect_available_backends_whitespace_only_keys(self):
-        """Test that whitespace-only keys are treated as not configured."""
-        from prsm.compute.nwtn.backends.config import detect_available_backends
-
-        # Mock whitespace-only strings (should be treated as not configured due to bool())
-        # Note: bool("  ") is True, but this tests the actual behavior
-        with patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "   ",
-            "OPENAI_API_KEY": "\t\n",
-        }, clear=True):
-            os.environ.pop("PRSM_LOCAL_MODEL_URL", None)
-
-            result = detect_available_backends()
-
-            # Whitespace strings are truthy in Python, so they'll be detected
-            # This test documents the current behavior
-            assert result["anthropic"] is True  # "   " is truthy
-            assert result["openai"] is True     # "\t\n" is truthy
-            assert result["any_real_backend"] is True
+# TestDetectAvailableBackends removed in v1.6.1: the
+# prsm.compute.nwtn.backends module was deleted in v1.6.0 as part of the
+# legacy NWTN AGI framework removal.
 
 
 # ── Preflight Diagnostics Tests ────────────────────────────────────────────────
@@ -523,25 +403,8 @@ class TestEmbeddingMockResponseTagging:
 class TestSprint7Integration:
     """Integration tests for Sprint 7 UX improvements."""
 
-    def test_backend_detection_used_in_cli_startup(self):
-        """Test that backend detection is properly integrated in CLI startup."""
-        # This test verifies the import chain and function availability
-        from prsm.compute.nwtn.backends.config import detect_available_backends
-
-        # Verify function is callable
-        assert callable(detect_available_backends)
-
-        # Verify it returns the expected structure
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("ANTHROPIC_API_KEY", None)
-            os.environ.pop("OPENAI_API_KEY", None)
-            os.environ.pop("PRSM_LOCAL_MODEL_URL", None)
-
-            result = detect_available_backends()
-
-            # Verify all expected keys are present
-            expected_keys = {"anthropic", "openai", "local", "any_real_backend"}
-            assert set(result.keys()) == expected_keys
+    # test_backend_detection_used_in_cli_startup removed in v1.6.1:
+    # prsm.compute.nwtn.backends module was deleted in v1.6.0 (legacy AGI framework).
 
     def test_preflight_constants_defined(self):
         """Test that preflight status constants are properly defined."""

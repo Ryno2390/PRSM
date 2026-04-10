@@ -72,13 +72,13 @@ class TestRing8Smoke:
         from prsm.compute.agents import AgentDispatcher, AgentExecutor
         from prsm.compute.swarm import SwarmCoordinator
         from prsm.economy.pricing import PricingEngine
-        from prsm.compute.nwtn.agent_forge import AgentForge
+        # Ring 5 AgentForge removed in v1.6.0 (legacy NWTN AGI framework pruned)
         from prsm.compute.tee import ConfidentialResult, DPNoiseInjector
         from prsm.compute.model_sharding import ModelSharder, PipelineRandomizer
         from prsm.compute.model_sharding.executor import TensorParallelExecutor
         from prsm.compute.model_sharding.collision_detector import CollisionDetector
         assert all(x is not None for x in [
             WASMRuntime, AgentDispatcher, SwarmCoordinator, PricingEngine,
-            AgentForge, DPNoiseInjector, ModelSharder, TensorParallelExecutor,
+            DPNoiseInjector, ModelSharder, TensorParallelExecutor,
             CollisionDetector,
         ])

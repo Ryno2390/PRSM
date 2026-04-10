@@ -1,15 +1,19 @@
 """
-Ring 1-6 Cross-Node E2E Test
-=============================
+Ring 1-10 Cross-Node E2E Test
+==============================
 
-Tests all six capability rings across a real two-node P2P connection:
+Tests all capability rings across a real two-node P2P connection:
 
-Ring 1 - Hardware profiles gossip between nodes
-Ring 2 - Mobile agent dispatched from Node A, executed on Node B
-Ring 3 - Swarm job fans out across both nodes
-Ring 4 - Pricing engine quotes job costs, prosumer tiers work
-Ring 5 - Agent forge decomposes queries and routes execution
-Ring 6 - Dynamic gas pricing, signature verification, CLI commands
+Ring 1  - Hardware profiles gossip between nodes
+Ring 2  - Mobile agent dispatched from Node A, executed on Node B
+Ring 3  - Swarm job fans out across both nodes
+Ring 4  - Pricing engine quotes job costs, prosumer tiers work
+Ring 5  - REMOVED in v1.6.0 (legacy NWTN agent_forge pruned)
+Ring 6  - Dynamic gas pricing, signature verification, CLI commands
+Ring 7  - Confidential compute / TEE runtime
+Ring 8  - Tensor-parallel model sharding
+Ring 9  - NWTN model service and training pipeline
+Ring 10 - Security hardening (integrity, privacy budget, audit log)
 
 Two in-process PRSMNode instances connect via direct WebSocket bootstrap.
 """
@@ -196,7 +200,7 @@ async def test_ring2_agent_creation_and_dispatch(node_a):
     from prsm.compute.agents.models import AgentManifest, DispatchStatus
 
     manifest = AgentManifest(
-        required_cids=["QmTestShard001"],
+        required_content_ids=["QmTestShard001"],
         min_hardware_tier="t1",
         max_execution_seconds=10,
     )
@@ -224,7 +228,7 @@ async def test_ring2_executor_runs_wasm(node_b):
     agent = MobileAgent(
         agent_id="e2e-test-agent",
         wasm_binary=MINIMAL_WASM,
-        manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+        manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
         origin_node="test-origin",
         signature="test-sig",
         ftns_budget=1.0,
@@ -347,44 +351,9 @@ async def test_ring4_prosumer_yield_estimate(node_a):
     assert float(estimate["monthly_ftns"]) > 0
 
 
-# ── Ring 5: Agent Forge ───────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-@pytest.mark.e2e
-@pytest.mark.timeout(120)
-async def test_ring5_forge_initialized(node_a):
-    """Ring 5: Node has AgentForge available."""
-    assert node_a.agent_forge is not None, "Node A missing agent_forge"
-
-
-@pytest.mark.asyncio
-@pytest.mark.e2e
-@pytest.mark.timeout(120)
-async def test_ring5_forge_decomposition():
-    """Ring 5: AgentForge can decompose a query (without LLM backend)."""
-    from prsm.compute.nwtn.agent_forge import AgentForge, ExecutionRoute
-
-    # Without a backend, decompose returns defaults
-    forge = AgentForge()
-    decomp = await forge.decompose("What is 2+2?")
-
-    assert decomp.query == "What is 2+2?"
-    # Without backend, defaults to no datasets → DIRECT_LLM
-    assert decomp.recommended_route == ExecutionRoute.DIRECT_LLM
-
-
-@pytest.mark.asyncio
-@pytest.mark.e2e
-@pytest.mark.timeout(120)
-async def test_ring5_mcp_tools_available():
-    """Ring 5: MCP tool definitions are available."""
-    from prsm.compute.nwtn.agent_forge.mcp_tools import get_forge_tools
-
-    tools = get_forge_tools()
-    assert len(tools) == 5
-    tool_names = [t["name"] for t in tools]
-    assert "prsm_analyze" in tool_names
-    assert "prsm_quote" in tool_names
+# ── Ring 5: REMOVED ──────────────────────────────────────────────────────
+# Ring 5 AgentForge (NWTN agent_forge module) was deleted in v1.6.0 as part
+# of the legacy AGI framework removal. Ring 5 tests have been removed.
 
 
 # ── Ring 6: Production Hardening ──────────────────────────────────────────
@@ -730,8 +699,7 @@ async def test_cross_node_all_rings_initialized(node_a, node_b):
         # Ring 4
         assert node.pricing_engine is not None, f"{name} missing pricing_engine"
         assert node.prosumer_manager is not None, f"{name} missing prosumer_manager"
-        # Ring 5
-        assert node.agent_forge is not None, f"{name} missing agent_forge"
+        # Ring 5: removed in v1.6.0 (legacy NWTN AGI framework pruned)
         # Ring 7
         assert node.confidential_executor is not None, f"{name} missing confidential_executor"
         # Ring 8

@@ -50,7 +50,7 @@ class TestRing7Smoke:
         from prsm.compute.swarm import SwarmCoordinator
         from prsm.economy.pricing import PricingEngine
         from prsm.economy.prosumer import ProsumerManager
-        from prsm.compute.nwtn.agent_forge import AgentForge
+        # Ring 5 AgentForge removed in v1.6.0 (legacy NWTN AGI framework pruned)
         from prsm.compute.tee import TEEType, DPConfig, ConfidentialResult, DPNoiseInjector
         from prsm.compute.tee.confidential_executor import ConfidentialExecutor
-        assert all(x is not None for x in [WASMRuntime, AgentDispatcher, SwarmCoordinator, PricingEngine, AgentForge, ConfidentialExecutor])
+        assert all(x is not None for x in [WASMRuntime, AgentDispatcher, SwarmCoordinator, PricingEngine, ConfidentialExecutor])

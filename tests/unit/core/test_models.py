@@ -203,11 +203,11 @@ class TestFTNSTransaction:
             transaction_type="transfer",
             description="User to user transfer",
             context_units=100,
-            ipfs_cid="QmTestHash123"
+            content_id="QmTestHash123"
         )
         assert transaction.from_user == "sender_user"
         assert transaction.context_units == 100
-        assert transaction.ipfs_cid == "QmTestHash123"
+        assert transaction.content_id == "QmTestHash123"
 
 
 class TestFTNSBalance:

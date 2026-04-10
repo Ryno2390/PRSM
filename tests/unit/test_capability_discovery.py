@@ -447,13 +447,19 @@ class TestComputeRequesterSmartRouting:
         assert JOB_TYPE_CAPABILITIES[JobType.BENCHMARK] == "benchmark"
 
     def test_job_type_backend_mapping(self):
-        """Test that job types have preferred backends defined."""
+        """Test that LLM-backed job types have preferred backends defined.
+
+        WASM_EXECUTE is intentionally excluded from JOB_TYPE_PREFERRED_BACKENDS
+        because WASM jobs run in a local sandbox and do not depend on an
+        LLM backend (anthropic / openai / local).
+        """
         assert JobType.INFERENCE in JOB_TYPE_PREFERRED_BACKENDS
         assert JobType.EMBEDDING in JOB_TYPE_PREFERRED_BACKENDS
         assert JobType.BENCHMARK in JOB_TYPE_PREFERRED_BACKENDS
-        # All job types should have backend preferences
-        for job_type in JobType:
-            assert job_type in JOB_TYPE_PREFERRED_BACKENDS
+        assert JobType.TRAINING in JOB_TYPE_PREFERRED_BACKENDS
+        # WASM_EXECUTE does not require an LLM backend — it is intentionally
+        # absent from JOB_TYPE_PREFERRED_BACKENDS.
+        assert JobType.WASM_EXECUTE not in JOB_TYPE_PREFERRED_BACKENDS
 
 
 class TestCapabilityDetection:

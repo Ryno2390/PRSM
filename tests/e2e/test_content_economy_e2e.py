@@ -147,10 +147,10 @@ async def test_content_upload_tracks_replication(node_a):
     )
     
     assert result is not None
-    assert result.cid is not None
+    assert result.content_id is not None
     
     # Check replication tracking was created
-    status = content_economy._replication_status.get(result.cid)
+    status = content_economy._replication_status.get(result.content_id)
     assert status is not None
     assert status.min_replicas == 2
     assert status.current_replicas >= 1  # At least we have it
@@ -168,12 +168,12 @@ async def test_content_access_triggers_payment(node_a):
     
     # Process content access
     payment = await content_economy.process_content_access(
-        cid="QmTestCID123456789",
+        content_id="QmTestCID123456789",
         accessor_id=node_a.identity.node_id,
         content_metadata={
             "royalty_rate": 0.05,
             "creator_id": "creator-test-123",
-            "parent_cids": [],
+            "parent_content_ids": [],
         },
     )
     
@@ -194,12 +194,12 @@ async def test_royalty_distribution_derivative_work(node_a):
     
     # Process payment for derivative work
     payment = await content_economy.process_content_access(
-        cid="QmDerivativeCID",
+        content_id="QmDerivativeCID",
         accessor_id=node_a.identity.node_id,
         content_metadata={
             "royalty_rate": 0.10,
             "creator_id": "derivative-creator",
-            "parent_cids": ["QmOriginalCID"],
+            "parent_content_ids": ["QmOriginalCID"],
         },
     )
     
@@ -226,7 +226,7 @@ async def test_replication_status_update(node_a):
     
     # Create initial tracking
     await content_economy.track_content_upload(
-        cid="QmReplicationTest",
+        content_id="QmReplicationTest",
         size_bytes=1024,
         replicas_requested=3,
     )
@@ -237,7 +237,7 @@ async def test_replication_status_update(node_a):
     
     # Simulate another provider
     await content_economy.update_replication_status(
-        cid="QmReplicationTest",
+        content_id="QmReplicationTest",
         provider_id="provider-node-xyz",
         has_content=True,
     )
@@ -247,7 +247,7 @@ async def test_replication_status_update(node_a):
     
     # Simulate provider removing content
     await content_economy.update_replication_status(
-        cid="QmReplicationTest",
+        content_id="QmReplicationTest",
         provider_id="provider-node-xyz",
         has_content=False,
     )
@@ -314,10 +314,10 @@ async def test_cross_node_content_retrieval(node_a, node_b):
     assert result is not None
     
     # Register content in Node A's content provider
-    node_a.content_provider._local_content[result.cid] = {
+    node_a.content_provider._local_content[result.content_id] = {
         "royalty_rate": 0.05,
         "creator_id": node_a.identity.node_id,
-        "parent_cids": [],
+        "parent_content_ids": [],
         "filename": "cross-node-test.txt",
     }
     
@@ -325,12 +325,12 @@ async def test_cross_node_content_retrieval(node_a, node_b):
     initial_balance_b = await node_b.ledger.get_balance(node_b.identity.node_id)
     
     payment = await node_b.content_economy.process_content_access(
-        cid=result.cid,
+        content_id=result.content_id,
         accessor_id=node_b.identity.node_id,
         content_metadata={
             "royalty_rate": 0.05,
             "creator_id": node_a.identity.node_id,
-            "parent_cids": [],
+            "parent_content_ids": [],
         },
     )
     
@@ -359,7 +359,7 @@ async def test_storage_proof_updates_replication(node_a, mock_ipfs):
     
     # Simulate successful storage proof
     await content_economy.update_replication_status(
-        cid=cid,
+        content_id=cid,
         provider_id=node_a.identity.node_id,
         has_content=True,
     )
@@ -393,12 +393,12 @@ async def test_onchain_escrow_for_content_payment(node_a):
     
     # Process payment with on-chain escrow
     payment = await content_economy.process_content_access(
-        cid="QmOnChainTest",
+        content_id="QmOnChainTest",
         accessor_id=node_a.identity.node_id,
         content_metadata={
             "royalty_rate": 0.001,  # Small amount for testing
             "creator_id": "creator-test",
-            "parent_cids": [],
+            "parent_content_ids": [],
         },
     )
     
@@ -436,7 +436,7 @@ async def test_concurrent_content_uploads(node_a):
     assert len(successes) == 10
     
     # Each should have unique CID
-    cids = [r.cid for r in successes]
+    cids = [r.content_id for r in successes]
     assert len(set(cids)) == 10
 
 
@@ -450,12 +450,12 @@ async def test_concurrent_payments(node_a):
     # Process 20 payments concurrently
     tasks = [
         content_economy.process_content_access(
-            cid=f"QmConcurrentTest{i}",
+            content_id=f"QmConcurrentTest{i}",
             accessor_id=node_a.identity.node_id,
             content_metadata={
                 "royalty_rate": 0.01,
                 "creator_id": f"creator-{i % 5}",  # Multiple creators
-                "parent_cids": [],
+                "parent_content_ids": [],
             },
         )
         for i in range(20)
@@ -484,12 +484,12 @@ async def test_payment_with_insufficient_balance(node_a):
     # exceed available balance. accessor_id must match identity.node_id
     # to trigger the local debit path.
     payment = await content_economy.process_content_access(
-        cid="QmExpensiveContent",
+        content_id="QmExpensiveContent",
         accessor_id=node_a.identity.node_id,
         content_metadata={
             "royalty_rate": 1000.0,  # Exceeds 100 FTNS welcome grant
             "creator_id": "creator-test",
-            "parent_cids": [],
+            "parent_content_ids": [],
         },
     )
 

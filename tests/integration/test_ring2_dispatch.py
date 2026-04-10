@@ -63,7 +63,7 @@ class TestRing2Smoke:
         agent = dispatcher.create_agent(
             wasm_binary=MINIMAL_WASM,
             manifest=AgentManifest(
-                required_cids=["QmTestShard"],
+                required_content_ids=["QmTestShard"],
                 min_hardware_tier="t1",
             ),
             ftns_budget=2.0,
@@ -149,7 +149,7 @@ class TestRing2Smoke:
 
         agent = dispatcher.create_agent(
             wasm_binary=MINIMAL_WASM,
-            manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             ftns_budget=1.0,
             ttl=60,
         )
@@ -184,7 +184,7 @@ class TestRing2Smoke:
         agent = MobileAgent(
             agent_id="pcu-test",
             wasm_binary=MINIMAL_WASM,
-            manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             origin_node="origin",
             signature="sig",
             ftns_budget=1.0,

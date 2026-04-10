@@ -156,10 +156,9 @@ class PRSMSettings(BaseSettings):
     embedding_dimensions: int = Field(default=1536, env="PRSM_EMBEDDING_DIMENSIONS")
     
     # === LLM Backend Configuration ===
-    # Primary backend: anthropic, openai, local, mock
-    backend_primary: str = Field(default="mock", env="PRSM_PRIMARY_BACKEND")
-    backend_fallback_chain: str = Field(default="anthropic,openai,local,mock", env="PRSM_FALLBACK_CHAIN")
-    backend_timeout_seconds: int = Field(default=120, env="PRSM_BACKEND_TIMEOUT")
+    # v1.6.1: backend_primary / backend_fallback_chain / backend_timeout_seconds
+    # were removed — they had no consumers after the legacy NWTN backends module
+    # was deleted in v1.6.0.
     backend_max_retries: int = Field(default=3, env="PRSM_BACKEND_MAX_RETRIES")
     backend_retry_delay: float = Field(default=1.0, env="PRSM_BACKEND_RETRY_DELAY")
     backend_rate_limit_rpm: int = Field(default=60, env="PRSM_RATE_LIMIT_RPM")

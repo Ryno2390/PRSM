@@ -59,22 +59,22 @@ class TestSwarmCoordinator:
     def test_create_swarm_job(self, coordinator):
         job = coordinator.create_swarm_job(
             query="EV trends",
-            shard_cids=["QmA", "QmB", "QmC"],
+            shard_content_ids=["QmA", "QmB", "QmC"],
             wasm_binary=MINIMAL_WASM,
-            manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             budget_ftns=15.0,
         )
         assert job.status == SwarmStatus.PENDING
-        assert len(job.shard_cids) == 3
+        assert len(job.shard_content_ids) == 3
         assert job.budget_per_shard == 5.0
 
     @pytest.mark.asyncio
     async def test_execute_dispatches_per_shard(self, coordinator, mock_dispatcher):
         job = coordinator.create_swarm_job(
             query="test query",
-            shard_cids=["QmA", "QmB"],
+            shard_content_ids=["QmA", "QmB"],
             wasm_binary=MINIMAL_WASM,
-            manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             budget_ftns=10.0,
         )
 
@@ -88,9 +88,9 @@ class TestSwarmCoordinator:
     async def test_execute_collects_results(self, coordinator):
         job = coordinator.create_swarm_job(
             query="test",
-            shard_cids=["QmA", "QmB", "QmC"],
+            shard_content_ids=["QmA", "QmB", "QmC"],
             wasm_binary=MINIMAL_WASM,
-            manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             budget_ftns=15.0,
         )
 
@@ -118,9 +118,9 @@ class TestSwarmCoordinator:
 
         job = coordinator.create_swarm_job(
             query="test",
-            shard_cids=["QmA", "QmB", "QmC"],
+            shard_content_ids=["QmA", "QmB", "QmC"],
             wasm_binary=MINIMAL_WASM,
-            manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             budget_ftns=15.0,
             strategy=MapReduceStrategy(quorum_pct=0.5),
         )
@@ -134,9 +134,9 @@ class TestSwarmCoordinator:
     async def test_execute_with_aggregation(self, coordinator):
         job = coordinator.create_swarm_job(
             query="aggregate test",
-            shard_cids=["QmA", "QmB"],
+            shard_content_ids=["QmA", "QmB"],
             wasm_binary=MINIMAL_WASM,
-            manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             budget_ftns=10.0,
         )
 
@@ -148,9 +148,9 @@ class TestSwarmCoordinator:
     def test_get_job(self, coordinator):
         job = coordinator.create_swarm_job(
             query="test",
-            shard_cids=["QmA"],
+            shard_content_ids=["QmA"],
             wasm_binary=MINIMAL_WASM,
-            manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             budget_ftns=5.0,
         )
         assert coordinator.get_job(job.job_id) is not None

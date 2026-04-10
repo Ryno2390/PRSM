@@ -74,7 +74,7 @@ class TestRoyaltyPipeline:
         royalty_rate = 0.05
         
         content = UploadedContent(
-            cid=cid,
+            content_id=cid,
             filename="test_model.bin",
             size_bytes=1024,
             content_hash="abc123hash",
@@ -121,7 +121,7 @@ class TestRoyaltyPipeline:
         royalty_rate = 0.05
         
         content = UploadedContent(
-            cid=cid,
+            content_id=cid,
             filename="test_model.bin",
             size_bytes=1024,
             content_hash="abc123hash",
@@ -162,7 +162,7 @@ class TestRoyaltyPipeline:
         
         # Parent content (source) - same node
         parent_content = UploadedContent(
-            cid=parent_cid,
+            content_id=parent_cid,
             filename="source_model.bin",
             size_bytes=1024,
             content_hash="parent_hash",
@@ -173,13 +173,13 @@ class TestRoyaltyPipeline:
 
         # Derivative content
         derivative_content = UploadedContent(
-            cid=derivative_cid,
+            content_id=derivative_cid,
             filename="derivative_model.bin",
             size_bytes=2048,
             content_hash="derivative_hash",
             creator_id=content_uploader.identity.node_id,
             royalty_rate=royalty_rate,
-            parent_cids=[parent_cid],
+            parent_content_ids=[parent_cid],
         )
         content_uploader.uploaded_content[derivative_cid] = derivative_content
 
@@ -230,7 +230,7 @@ class TestRoyaltyPipeline:
         
         # Source content on this node
         source_content = UploadedContent(
-            cid=source_cid,
+            content_id=source_cid,
             filename="source_model.bin",
             size_bytes=1024,
             content_hash="source_hash",
@@ -250,11 +250,11 @@ class TestRoyaltyPipeline:
 
             # Create gossip message data
             gossip_data = {
-                "cid": derivative_cid,
+                "content_id": derivative_cid,
                 "accessor_id": accessor_id,
                 "creator_id": creator_id,
                 "royalty_rate": royalty_rate,
-                "parent_cids": [source_cid],  # Our content is a parent
+                "parent_content_ids": [source_cid],  # Our content is a parent
             }
 
             # Execute _on_content_access (origin is different from our node)
@@ -284,7 +284,7 @@ class TestRoyaltyPipeline:
         royalty_rate = 0.05
         
         content = UploadedContent(
-            cid=cid,
+            content_id=cid,
             filename="test_model.bin",
             size_bytes=1024,
             content_hash="abc123hash",
