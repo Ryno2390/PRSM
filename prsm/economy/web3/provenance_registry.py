@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import threading
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Tuple
@@ -202,6 +203,11 @@ class ProvenanceRegistryClient:
         if private_key:
             self._account = Account.from_key(private_key)
 
+        # Phase 1.1 Task 5: serialize the entire build → sign → send
+        # sequence so concurrent callers don't race on get_transaction_count
+        # and end up with two txs sharing the same nonce.
+        self._tx_lock = threading.Lock()
+
     @property
     def address(self) -> Optional[str]:
         return self._account.address if self._account else None
@@ -227,10 +233,11 @@ class ProvenanceRegistryClient:
         if not (0 <= royalty_rate_bps <= 10000):
             raise ValueError("royalty_rate_bps must be in [0, 10000]")
 
-        tx = self.contract.functions.registerContent(
-            content_hash, royalty_rate_bps, metadata_uri
-        ).build_transaction(self._tx_overrides())
-        return self._sign_and_send(tx)
+        with self._tx_lock:
+            tx = self.contract.functions.registerContent(
+                content_hash, royalty_rate_bps, metadata_uri
+            ).build_transaction(self._tx_overrides())
+            return self._sign_and_send(tx)
 
     def transfer_ownership(
         self, content_hash: bytes, new_creator: str
@@ -240,10 +247,11 @@ class ProvenanceRegistryClient:
         if len(content_hash) != 32:
             raise ValueError("content_hash must be 32 bytes")
 
-        tx = self.contract.functions.transferContentOwnership(
-            content_hash, Web3.to_checksum_address(new_creator)
-        ).build_transaction(self._tx_overrides())
-        return self._sign_and_send(tx)
+        with self._tx_lock:
+            tx = self.contract.functions.transferContentOwnership(
+                content_hash, Web3.to_checksum_address(new_creator)
+            ).build_transaction(self._tx_overrides())
+            return self._sign_and_send(tx)
 
     # ── Reads ──────────────────────────────────────────────────
 
@@ -272,7 +280,11 @@ class ProvenanceRegistryClient:
     def _tx_overrides(self) -> dict:
         return {
             "from": self._account.address,
-            "nonce": self.web3.eth.get_transaction_count(self._account.address),
+            # Use "pending" so back-to-back txs from this client see each
+            # other's pending state and don't reuse a nonce.
+            "nonce": self.web3.eth.get_transaction_count(
+                self._account.address, "pending"
+            ),
             "gasPrice": self.web3.eth.gas_price,
             "chainId": self.web3.eth.chain_id,
         }

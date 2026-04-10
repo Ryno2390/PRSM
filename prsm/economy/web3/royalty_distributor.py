@@ -8,6 +8,7 @@ needed, then calls `distributeRoyalty`.
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -134,6 +135,10 @@ class RoyaltyDistributorClient:
         if private_key:
             self._account = Account.from_key(private_key)
 
+        # Phase 1.1 Task 5: lock makes the approve+distribute pair atomic
+        # per client, and serializes nonce reads under concurrent callers.
+        self._tx_lock = threading.Lock()
+
     @property
     def address(self) -> Optional[str]:
         return self._account.address if self._account else None
@@ -179,29 +184,36 @@ class RoyaltyDistributorClient:
         if gross <= 0:
             raise ValueError("gross must be positive")
 
-        # Approve only if needed
-        current_allowance = int(
-            self.token.functions.allowance(
-                self._account.address, self.distributor_address
-            ).call()
-        )
-        if current_allowance < gross:
-            approve_tx = self.token.functions.approve(
-                self.distributor_address, gross
-            ).build_transaction(self._tx_overrides())
-            self._sign_and_send(approve_tx)
+        with self._tx_lock:
+            # Approve only if needed. The lock makes this allowance check
+            # plus the subsequent approve+distribute pair atomic — no
+            # other thread can interleave a competing approve.
+            current_allowance = int(
+                self.token.functions.allowance(
+                    self._account.address, self.distributor_address
+                ).call()
+            )
+            if current_allowance < gross:
+                approve_tx = self.token.functions.approve(
+                    self.distributor_address, gross
+                ).build_transaction(self._tx_overrides())
+                self._sign_and_send(approve_tx)
 
-        tx = self.distributor.functions.distributeRoyalty(
-            content_hash, Web3.to_checksum_address(serving_node), gross
-        ).build_transaction(self._tx_overrides())
-        return self._sign_and_send(tx)
+            tx = self.distributor.functions.distributeRoyalty(
+                content_hash, Web3.to_checksum_address(serving_node), gross
+            ).build_transaction(self._tx_overrides())
+            return self._sign_and_send(tx)
 
     # ── Internals ──────────────────────────────────────────────
 
     def _tx_overrides(self) -> dict:
         return {
             "from": self._account.address,
-            "nonce": self.web3.eth.get_transaction_count(self._account.address),
+            # Phase 1.1 Task 5: pending nonce so the approve+distribute pair
+            # under one lock acquisition sees its own pending state.
+            "nonce": self.web3.eth.get_transaction_count(
+                self._account.address, "pending"
+            ),
             "gasPrice": self.web3.eth.gas_price,
             "chainId": self.web3.eth.chain_id,
         }
