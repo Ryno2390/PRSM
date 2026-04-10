@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prsm-network"
-version = "1.6.1"
+version = "1.6.2"
 description = "Protocol for Recursive Scientific Modeling - A P2P infrastructure protocol for open-source collaboration"
 readme = "README.md"
 license = {text = "MIT"}
@@ -75,9 +75,11 @@ dependencies = [
     "pyjwt>=2.8.0",
     "bcrypt>=4.1.0",
     "passlib>=1.7.4",
-    
+    "pynacl>=1.5.0",
+
     # Monitoring & Metrics
     "prometheus-client>=0.19.0",
+    "psutil>=5.9.0",
 
     # Dashboard
     "streamlit>=1.28.0",

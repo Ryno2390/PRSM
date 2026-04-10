@@ -2,6 +2,39 @@
 
 All notable changes to PRSM are documented here.
 
+## [1.6.2] - 2026-04-10
+
+### Hotfix — Missing Base Dependencies
+
+Immediate hotfix after v1.6.1 discovered that fresh `pip install prsm-network`
+still failed on `from prsm.compute.federation import p2p_network` because
+`psutil` is hard-imported in `prsm/compute/performance/load_testing.py` (and
+9 other sites) without being in base dependencies. v1.6.1 fixed `asyncpg`
+but missed `psutil` and `pynacl`.
+
+### Fixed
+
+- **`psutil` added to base dependencies** — 10 hard imports across
+  `prsm/compute/performance/` (load_testing, optimization, task_worker,
+  scaling_test_controller), `prsm/core/monitoring/` (validators, profiler),
+  `prsm/core/performance/monitor.py`, `prsm/compute/scalability/cpu_optimizer.py`,
+  `prsm/interface/api/health_api.py`, and
+  `prsm/interface/dashboard/real_time_monitoring_dashboard.py` were all
+  hard-imported without try/except, causing `prsm.compute.federation` imports
+  to fail on fresh installs.
+- **`pynacl` added to base dependencies** — P2P cryptographic signatures
+  (Ed25519) are essential for any real node, even though the import sites
+  currently have try/except fallbacks.
+
+### Notes
+
+Fresh `pip install prsm-network==1.6.2` now imports all core modules
+(`prsm.storage`, `prsm.compute.agents`, `prsm.compute.federation`,
+`prsm.compute.chronos`, `prsm.compute.nwtn.training`,
+`prsm.economy.tokenomics`) without needing any optional extras.
+
+---
+
 ## [1.6.1] - 2026-04-10
 
 ### Polish Release — Test Debt Cleanup + Dead Code Removal
