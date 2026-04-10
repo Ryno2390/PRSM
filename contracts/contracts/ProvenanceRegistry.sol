@@ -18,6 +18,11 @@ contract ProvenanceRegistry {
         string metadataUri;     // ipfs://, https://, etc.
     }
 
+    /// @dev Must equal 10000 - RoyaltyDistributor.NETWORK_FEE_BPS so a registered
+    ///      rate can never make the distributor's split overflow gross. If the
+    ///      network fee constant ever changes, update this in lockstep.
+    uint16 public constant MAX_ROYALTY_RATE_BPS = 9800;
+
     mapping(bytes32 => Content) public contents;
 
     event ContentRegistered(
@@ -45,7 +50,7 @@ contract ProvenanceRegistry {
         string calldata metadataUri
     ) external {
         require(contents[contentHash].creator == address(0), "Already registered");
-        require(royaltyRateBps <= 10000, "Invalid rate");
+        require(royaltyRateBps <= MAX_ROYALTY_RATE_BPS, "Rate exceeds max");
 
         contents[contentHash] = Content({
             creator: msg.sender,
