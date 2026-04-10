@@ -311,6 +311,7 @@ class ContentEconomy:
                 payment=payment,
                 creator_id=creator_id,
                 parent_content_ids=parent_content_ids,
+                content_metadata=content_metadata,
             )
             payment.royalty_distributions = distributions
             
@@ -413,17 +414,25 @@ class ContentEconomy:
             return self.ftns_ledger._connected_address
         return None
 
-    @staticmethod
-    def _content_id_to_hash32(content_id: str) -> bytes:
-        """Map a string content_id to a 32-byte hash for the on-chain registry."""
-        return hashlib.sha3_256(content_id.encode("utf-8")).digest()
-
     async def _try_onchain_distribute(
         self,
         payment: "ContentAccessPayment",
+        content_metadata: Dict[str, Any],
     ) -> Optional[List[Dict[str, Any]]]:
-        """Attempt on-chain royalty distribution. Returns distributions on
-        success, None to signal the caller should fall through to local."""
+        """Attempt on-chain royalty distribution.
+
+        Returns:
+          - distributions list when on-chain settlement is final OR in flight
+            (caller MUST NOT fall back to local payment).
+          - None when no on-chain attempt was made or the attempt failed
+            before broadcast (caller may safely fall back).
+
+        Phase 1.1 Task 6: reads `provenance_hash` from content_metadata
+        directly, replacing the broken `sha3_256(content_id_string)` path
+        that never matched what the CLI registered. Phase 1.1 Task 4 error
+        types make the broadcast/settle distinction explicit so a chain
+        outage cannot trigger a double payment.
+        """
         distributor = self._get_royalty_distributor()
         if distributor is None:
             return None
@@ -433,69 +442,111 @@ class ContentEconomy:
             logger.debug("on-chain distribute skipped: no serving-node 0x address")
             return None
 
-        registry = self._get_provenance_client()
-        content_hash = self._content_id_to_hash32(payment.content_id)
-
-        # Hard requirement: content must already be registered on-chain.
-        # Auto-registration is intentionally NOT done here — only the creator
-        # can register, and the accessor is paying. CLI handles registration.
-        if registry is not None and not registry.is_registered(content_hash):
-            logger.info(
+        # Read the canonical hash directly from upload metadata.
+        provenance_hash = content_metadata.get("provenance_hash")
+        if not provenance_hash:
+            logger.debug(
                 f"on-chain distribute skipped: content {payment.content_id[:12]}… "
-                f"not registered on-chain (use `prsm provenance register`)"
+                f"has no provenance_hash in metadata (use `prsm provenance register`)"
             )
             return None
+        if isinstance(provenance_hash, str):
+            if provenance_hash.startswith("0x"):
+                provenance_hash = bytes.fromhex(provenance_hash[2:])
+            else:
+                provenance_hash = bytes.fromhex(provenance_hash)
+        if not isinstance(provenance_hash, (bytes, bytearray)) or len(provenance_hash) != 32:
+            logger.warning(
+                f"on-chain distribute skipped: invalid provenance_hash for "
+                f"{payment.content_id[:12]}…"
+            )
+            return None
+        provenance_hash = bytes(provenance_hash)
 
         gross_wei = int(Decimal(str(payment.amount)) * Decimal(10**18))
         if gross_wei <= 0:
             return None
 
+        # Late imports so the symbols stay local to the on-chain branch.
+        from prsm.economy.web3.royalty_distributor import (
+            BroadcastFailedError,
+            OnChainPendingError,
+            OnChainRevertedError,
+        )
+
         try:
-            # Run the sync Web3 call off the event loop so we don't block.
             preview = await asyncio.to_thread(
-                distributor.preview_split, content_hash, gross_wei
+                distributor.preview_split, provenance_hash, gross_wei
             )
-            tx_hash = await asyncio.to_thread(
+            tx_hash, status = await asyncio.to_thread(
                 distributor.distribute_royalty,
-                content_hash,
+                provenance_hash,
                 serving_node_addr,
                 gross_wei,
             )
-            logger.info(
-                f"on-chain royalty paid: content={content_hash.hex()[:12]}… "
-                f"gross={payment.amount} tx={tx_hash[:16]}…"
+        except BroadcastFailedError as exc:
+            logger.error(
+                f"on-chain distribute pre-broadcast failure (safe fallback): {exc}"
             )
+            return None
+        except OnChainRevertedError as exc:
+            logger.error(
+                f"on-chain distribute reverted (safe fallback): {exc}"
+            )
+            return None
+        except OnChainPendingError as exc:
+            logger.error(
+                f"on-chain distribute broadcast OK but receipt unknown — "
+                f"NOT falling back. tx_hash={exc.tx_hash}. "
+                f"Operator must reconcile manually."
+            )
+            # Return a single in-flight stub so the caller does NOT trigger
+            # local fallback. This is the key fix for the double-pay race.
             return [
                 {
-                    "recipient_id": "onchain:creator",
-                    "amount": preview.creator_amount / 10**18,
-                    "type": "original_creator",
-                    "tx_hash": tx_hash,
-                },
-                {
-                    "recipient_id": "onchain:network",
-                    "amount": preview.network_amount / 10**18,
-                    "type": "network_fee",
-                    "tx_hash": tx_hash,
-                },
-                {
-                    "recipient_id": serving_node_addr,
-                    "amount": preview.serving_node_amount / 10**18,
-                    "type": "serving_node",
-                    "tx_hash": tx_hash,
-                },
+                    "recipient_id": "onchain:in_flight",
+                    "amount": float(payment.amount),
+                    "type": "broadcast_pending",
+                    "tx_hash": exc.tx_hash,
+                }
             ]
         except Exception as exc:
             logger.error(
-                f"on-chain royalty distribution failed, falling back to local: {exc}"
+                f"on-chain distribute unexpected error (safe fallback): {exc}"
             )
             return None
+
+        logger.info(
+            f"on-chain royalty paid: hash={provenance_hash.hex()[:12]}… "
+            f"gross={payment.amount} status={status.value} tx={tx_hash[:16]}…"
+        )
+        return [
+            {
+                "recipient_id": "onchain:creator",
+                "amount": preview.creator_amount / 10**18,
+                "type": "original_creator",
+                "tx_hash": tx_hash,
+            },
+            {
+                "recipient_id": "onchain:network",
+                "amount": preview.network_amount / 10**18,
+                "type": "network_fee",
+                "tx_hash": tx_hash,
+            },
+            {
+                "recipient_id": serving_node_addr,
+                "amount": preview.serving_node_amount / 10**18,
+                "type": "serving_node",
+                "tx_hash": tx_hash,
+            },
+        ]
 
     async def _distribute_royalties(
         self,
         payment: ContentAccessPayment,
         creator_id: str,
         parent_content_ids: List[str],
+        content_metadata: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Distribute royalties according to the configured model.
 
@@ -503,20 +554,22 @@ class ContentEconomy:
         - 8% to original creator (first in chain)
         - 1% to each derivative creator (up to MAX_ROYALTY_CHAIN_DEPTH)
         - 2% network fee
-        - Remaining to direct creator
+        - Remaining to serving node (Phase 1.1 fix; was direct_creator)
 
         Legacy Model:
         - 70% to derivative creator
         - 25% split among source creators
         - 5% network fee
 
-        Phase 1 (on-chain): when PRSM_ONCHAIN_PROVENANCE=1 and the content
-        is registered in the on-chain ProvenanceRegistry, distribution
-        happens via RoyaltyDistributor on Base mainnet. Any failure falls
-        through to the local path so payments are never lost.
+        Phase 1.1 (on-chain): when PRSM_ONCHAIN_PROVENANCE=1 and
+        content_metadata contains a `provenance_hash`, distribution
+        happens via RoyaltyDistributor on Base mainnet. Pre-broadcast
+        and reverted failures fall through to the local path so
+        payments are never lost. Post-broadcast unknown short-circuits
+        with an in-flight stub to prevent double payment.
         """
-        # Phase 1: try on-chain first when enabled.
-        onchain = await self._try_onchain_distribute(payment)
+        # Phase 1.1: pass metadata so the on-chain branch can read provenance_hash.
+        onchain = await self._try_onchain_distribute(payment, content_metadata or {})
         if onchain is not None:
             return onchain
 
