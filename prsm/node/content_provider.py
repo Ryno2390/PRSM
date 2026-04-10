@@ -471,6 +471,10 @@ class ContentProvider:
             provider_id=self.identity.node_id,
             filename=kwargs.get("filename"),
             metadata=kwargs.get("metadata", {}),
+            # Phase 1.2: forward provenance_hash so on-chain routing
+            # survives the announce path in addition to the uploader's
+            # direct GOSSIP_CONTENT_ADVERTISE publish.
+            provenance_hash=kwargs.get("provenance_hash"),
         )
         
         await self.gossip.publish(GOSSIP_CONTENT_ADVERTISE, announcement.to_gossip_data())

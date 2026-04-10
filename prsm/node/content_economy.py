@@ -1016,15 +1016,34 @@ class ContentEconomy:
         
         request.selected_provider = selected_bid.provider_id
         request.status = "fulfilled"
-        
+
+        # Phase 1.2: look up canonical provenance_hash and the true
+        # original creator from the content_index so the marketplace
+        # retrieval path can actually route through the on-chain
+        # RoyaltyDistributor. Before this lookup the metadata only had
+        # the selected provider_id as creator_id, which disagrees with
+        # the real original creator and always falls back to local.
+        provenance_hash: Optional[str] = None
+        index_creator_id: Optional[str] = None
+        index_parents: List[str] = []
+        if self.content_index is not None:
+            lookup = getattr(self.content_index, "lookup", None)
+            if callable(lookup):
+                record = lookup(content_id)
+                if record is not None:
+                    provenance_hash = getattr(record, "provenance_hash", None)
+                    index_creator_id = getattr(record, "creator_id", None)
+                    index_parents = list(getattr(record, "parent_cids", []) or [])
+
         # Process payment
         payment = await self.process_content_access(
             content_id=content_id,
             accessor_id=self.identity.node_id,
             content_metadata={
                 "royalty_rate": float(selected_bid.price_ftns),
-                "creator_id": selected_bid.provider_id,
-                "parent_content_ids": [],
+                "creator_id": index_creator_id or selected_bid.provider_id,
+                "parent_content_ids": index_parents,
+                "provenance_hash": provenance_hash,
             },
         )
         
