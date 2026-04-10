@@ -90,9 +90,12 @@ class TestComputeProvider:
         result_bytes = json.dumps(job.result, sort_keys=True).encode()
         assert verify_signature(identity.public_key_b64, result_bytes, job.result_signature)
 
-        # Check earnings were recorded
+        # Provider does NOT self-credit — payment flows through requester-side
+        # escrow release (see compute_provider._execute_job docstring). Balance
+        # therefore remains 0 in this isolated test that only exercises the
+        # provider side.
         balance = await ledger.get_balance(identity.node_id)
-        assert balance == 5.0
+        assert balance == 0.0
 
     @pytest.mark.asyncio
     async def test_execute_inference_job(self, setup):

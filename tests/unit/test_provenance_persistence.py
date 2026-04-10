@@ -78,12 +78,12 @@ class TestProvenancePersistence:
                 
                 # Verify upload succeeded
                 assert result is not None
-                assert result.cid in content_uploader.uploaded_content
+                assert result.content_id in content_uploader.uploaded_content
                 
                 # Verify ProvenanceQueries.upsert_provenance was called
                 mock_upsert.assert_called_once()
                 call_args = mock_upsert.call_args[0][0]
-                assert call_args["cid"] == result.cid
+                assert call_args["content_id"] == result.content_id
                 assert call_args["creator_id"] == "test_node_123"  # from mock_identity.node_id
                 assert call_args["filename"] == "test_model.bin"
 
@@ -109,8 +109,8 @@ class TestProvenancePersistence:
                 
                 # Verify upload succeeded even though DB write failed
                 assert result is not None
-                assert result.cid in content_uploader.uploaded_content
-                assert content_uploader.uploaded_content[result.cid].filename == "test_model.bin"
+                assert result.content_id in content_uploader.uploaded_content
+                assert content_uploader.uploaded_content[result.content_id].filename == "test_model.bin"
 
     @pytest.mark.asyncio
     async def test_hydrate_loads_records_from_db(self, content_uploader):
@@ -118,7 +118,7 @@ class TestProvenancePersistence:
         # Mock ProvenanceQueries.load_all_for_node to return test records
         mock_records = [
             {
-                "cid": "QmTestCID111111111",
+                "content_id": "QmTestCID111111111",
                 "filename": "model_v1.bin",
                 "size_bytes": 1024,
                 "content_hash": "abc123def456",
@@ -126,18 +126,18 @@ class TestProvenancePersistence:
                 "created_at": 1700000000.0,
                 "provenance_signature": "sig1",
                 "royalty_rate": 0.02,
-                "parent_cids": [],
+                "parent_content_ids": [],
                 "access_count": 5,
                 "total_royalties": 10.5,
                 "is_sharded": False,
-                "manifest_cid": None,
+                "manifest_content_id": None,
                 "total_shards": 0,
                 "embedding_id": None,
                 "near_duplicate_of": None,
                 "near_duplicate_similarity": None,
             },
             {
-                "cid": "QmTestCID222222222",
+                "content_id": "QmTestCID222222222",
                 "filename": "model_v2.bin",
                 "size_bytes": 2048,
                 "content_hash": "def789ghi012",
@@ -145,11 +145,11 @@ class TestProvenancePersistence:
                 "created_at": 1700100000.0,
                 "provenance_signature": "sig2",
                 "royalty_rate": 0.03,
-                "parent_cids": ["QmParentCID123"],
+                "parent_content_ids": ["QmParentCID123"],
                 "access_count": 10,
                 "total_royalties": 25.0,
                 "is_sharded": True,
-                "manifest_cid": "QmManifestCID123",
+                "manifest_content_id": "QmManifestCID123",
                 "total_shards": 3,
                 "embedding_id": "emb123",
                 "near_duplicate_of": None,
@@ -178,7 +178,7 @@ class TestProvenancePersistence:
             
             record2 = content_uploader.uploaded_content["QmTestCID222222222"]
             assert record2.filename == "model_v2.bin"
-            assert record2.parent_cids == ["QmParentCID123"]
+            assert record2.parent_content_ids == ["QmParentCID123"]
             assert record2.is_sharded is True
 
     @pytest.mark.asyncio
@@ -187,7 +187,7 @@ class TestProvenancePersistence:
         # Pre-populate uploaded_content with a CID having access_count=5
         existing_cid = "QmExistingCID123456"
         content_uploader.uploaded_content[existing_cid] = UploadedContent(
-            cid=existing_cid,
+            content_id=existing_cid,
             filename="existing_model.bin",
             size_bytes=512,
             content_hash="existing_hash",
@@ -195,11 +195,11 @@ class TestProvenancePersistence:
             created_at=1700000000.0,
             provenance_signature="existing_sig",
             royalty_rate=0.01,
-            parent_cids=[],
+            parent_content_ids=[],
             access_count=5,  # This should NOT be overwritten
             total_royalties=15.0,
             is_sharded=False,
-            manifest_cid=None,
+            manifest_content_id=None,
             total_shards=0,
             embedding_id=None,
             near_duplicate_of=None,
@@ -209,7 +209,7 @@ class TestProvenancePersistence:
         # Mock DB returning same CID with access_count=0
         mock_records = [
             {
-                "cid": existing_cid,
+                "content_id": existing_cid,
                 "filename": "existing_model.bin",
                 "size_bytes": 512,
                 "content_hash": "existing_hash",
@@ -217,11 +217,11 @@ class TestProvenancePersistence:
                 "created_at": 1700000000.0,
                 "provenance_signature": "existing_sig",
                 "royalty_rate": 0.01,
-                "parent_cids": [],
+                "parent_content_ids": [],
                 "access_count": 0,  # Different from in-memory value
                 "total_royalties": 0.0,  # Different from in-memory value
                 "is_sharded": False,
-                "manifest_cid": None,
+                "manifest_content_id": None,
                 "total_shards": 0,
                 "embedding_id": None,
                 "near_duplicate_of": None,
@@ -248,7 +248,7 @@ class TestProvenancePersistence:
         # Pre-populate uploaded_content with a CID
         test_cid = "QmTestAccessCID123"
         content_uploader.uploaded_content[test_cid] = UploadedContent(
-            cid=test_cid,
+            content_id=test_cid,
             filename="test_model.bin",
             size_bytes=1024,
             content_hash="test_hash",
@@ -256,11 +256,11 @@ class TestProvenancePersistence:
             created_at=1700000000.0,
             provenance_signature="test_sig",
             royalty_rate=0.02,  # 2% royalty rate
-            parent_cids=[],
+            parent_content_ids=[],
             access_count=0,
             total_royalties=0.0,
             is_sharded=False,
-            manifest_cid=None,
+            manifest_content_id=None,
             total_shards=0,
             embedding_id=None,
             near_duplicate_of=None,

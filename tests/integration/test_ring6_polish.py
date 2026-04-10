@@ -36,8 +36,8 @@ class TestRing6Smoke:
         from prsm.compute.swarm import SwarmCoordinator, SwarmJob, SwarmResult
         from prsm.economy.pricing import PricingEngine, CostQuote, ProsumerTier
         from prsm.economy.prosumer import ProsumerManager
-        from prsm.compute.nwtn.agent_forge import AgentForge, TaskDecomposition
+        # Ring 5 AgentForge removed in v1.6.0 (legacy NWTN AGI framework pruned)
         assert all(x is not None for x in [
             WASMRuntime, AgentDispatcher, SwarmCoordinator,
-            PricingEngine, AgentForge,
+            PricingEngine,
         ])

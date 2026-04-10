@@ -175,13 +175,5 @@ class TestSpotArbitrage:
         assert engine.spot.network_utilization > 0
 
 
-class TestCLIListDataset:
-    def test_command_exists(self):
-        from click.testing import CliRunner
-        from prsm.cli import main
-        runner = CliRunner()
-        result = runner.invoke(main, ["marketplace", "list-dataset", "--help"])
-        assert result.exit_code == 0
-        assert "--title" in result.output
-        assert "--base-fee" in result.output
-        assert "--require-stake" in result.output
+# TestCLIListDataset removed in v1.6.1: the `marketplace list-dataset` CLI
+# subcommand was removed in v1.6.0 when the legacy marketplace was pruned.

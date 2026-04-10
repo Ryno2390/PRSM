@@ -88,11 +88,8 @@ class TestCLICommands:
         result = runner.invoke(main, ["ftns", "yield-estimate", "--help"])
         assert result.exit_code == 0
 
-    def test_agent_forge_command_exists(self):
-        from prsm.cli import main
-        runner = CliRunner()
-        result = runner.invoke(main, ["agent", "forge", "--help"])
-        assert result.exit_code == 0
+    # test_agent_forge_command_exists removed in v1.6.1:
+    # the `agent forge` CLI subcommand was removed in v1.6.0 along with Ring 5.
 
     def test_compute_quote_command_exists(self):
         from prsm.cli import main

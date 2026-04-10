@@ -313,3 +313,6 @@ contracts/.openzeppelin/
 
 # JS lock files (managed per-environment)
 sdks/javascript/package-lock.json
+
+# Editor / IDE state
+.obsidian/

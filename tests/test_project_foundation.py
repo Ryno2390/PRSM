@@ -109,10 +109,23 @@ class TestCoreImports:
             pytest.fail(f"Failed to import core config: {e}")
     
     def test_agent_framework_imports(self):
-        """Test that agent framework components can be imported"""
+        """Test that agent framework components can be imported.
+
+        v1.6.0 removed the legacy BaseAgent AGI abstraction; the current
+        agent framework exposes AgentDispatcher, AgentExecutor, MobileAgent
+        and AgentManifest as the public surface.
+        """
         try:
-            from prsm.compute.agents.base import BaseAgent
-            assert BaseAgent is not None
+            from prsm.compute.agents import (
+                AgentDispatcher,
+                AgentExecutor,
+                MobileAgent,
+                AgentManifest,
+            )
+            assert AgentDispatcher is not None
+            assert AgentExecutor is not None
+            assert MobileAgent is not None
+            assert AgentManifest is not None
         except ImportError as e:
             pytest.fail(f"Failed to import agent framework: {e}")
     

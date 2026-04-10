@@ -80,9 +80,9 @@ class TestRing3Smoke:
         coordinator = SwarmCoordinator(dispatcher=mock_dispatcher)
         job = coordinator.create_swarm_job(
             query="EV adoption in NC",
-            shard_cids=[s.cid for s in relevant],
+            shard_content_ids=[s.cid for s in relevant],
             wasm_binary=MINIMAL_WASM,
-            manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             budget_ftns=15.0,
         )
 
@@ -112,9 +112,9 @@ class TestRing3Smoke:
         coordinator = SwarmCoordinator(dispatcher=mock_dispatcher)
         job = coordinator.create_swarm_job(
             query="failing query",
-            shard_cids=["QmA", "QmB", "QmC"],
+            shard_content_ids=["QmA", "QmB", "QmC"],
             wasm_binary=MINIMAL_WASM,
-            manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             budget_ftns=15.0,
             strategy=MapReduceStrategy(quorum_pct=0.8),
         )

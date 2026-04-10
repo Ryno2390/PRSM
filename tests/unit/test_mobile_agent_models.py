@@ -18,36 +18,36 @@ WASM_MAGIC = b"\x00asm\x01\x00\x00\x00"
 class TestAgentManifest:
     def test_manifest_creation(self):
         manifest = AgentManifest(
-            required_cids=["QmShard123"],
+            required_content_ids=["QmShard123"],
             min_hardware_tier="t2",
             output_schema={"type": "object"},
             max_memory_bytes=256 * 1024 * 1024,
             max_execution_seconds=30,
             max_output_bytes=10 * 1024 * 1024,
         )
-        assert manifest.required_cids == ["QmShard123"]
+        assert manifest.required_content_ids == ["QmShard123"]
         assert manifest.min_hardware_tier == "t2"
 
     def test_manifest_to_dict_roundtrip(self):
         manifest = AgentManifest(
-            required_cids=["QmA", "QmB"],
+            required_content_ids=["QmA", "QmB"],
             min_hardware_tier="t3",
             output_schema={"type": "object", "properties": {"result": {"type": "number"}}},
         )
         d = manifest.to_dict()
         restored = AgentManifest.from_dict(d)
-        assert restored.required_cids == ["QmA", "QmB"]
+        assert restored.required_content_ids == ["QmA", "QmB"]
         assert restored.min_hardware_tier == "t3"
         assert restored.output_schema == manifest.output_schema
 
     def test_manifest_hash_deterministic(self):
-        m1 = AgentManifest(required_cids=["QmA"], min_hardware_tier="t2")
-        m2 = AgentManifest(required_cids=["QmA"], min_hardware_tier="t2")
+        m1 = AgentManifest(required_content_ids=["QmA"], min_hardware_tier="t2")
+        m2 = AgentManifest(required_content_ids=["QmA"], min_hardware_tier="t2")
         assert m1.content_hash() == m2.content_hash()
 
     def test_manifest_hash_changes_with_content(self):
-        m1 = AgentManifest(required_cids=["QmA"], min_hardware_tier="t2")
-        m2 = AgentManifest(required_cids=["QmB"], min_hardware_tier="t2")
+        m1 = AgentManifest(required_content_ids=["QmA"], min_hardware_tier="t2")
+        m2 = AgentManifest(required_content_ids=["QmB"], min_hardware_tier="t2")
         assert m1.content_hash() != m2.content_hash()
 
 
@@ -56,7 +56,7 @@ class TestMobileAgent:
         agent = MobileAgent(
             agent_id=str(uuid.uuid4()),
             wasm_binary=WASM_MAGIC + b"\x00" * 100,
-            manifest=AgentManifest(required_cids=["QmTest"], min_hardware_tier="t1"),
+            manifest=AgentManifest(required_content_ids=["QmTest"], min_hardware_tier="t1"),
             origin_node="node-abc123",
             signature="sig-placeholder",
             ftns_budget=5.0,
@@ -70,7 +70,7 @@ class TestMobileAgent:
             MobileAgent(
                 agent_id="bad-agent",
                 wasm_binary=b"not wasm",
-                manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+                manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
                 origin_node="node-x",
                 signature="sig",
                 ftns_budget=1.0,
@@ -83,7 +83,7 @@ class TestMobileAgent:
             MobileAgent(
                 agent_id="big-agent",
                 wasm_binary=big_wasm,
-                manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+                manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
                 origin_node="node-x",
                 signature="sig",
                 ftns_budget=1.0,
@@ -95,7 +95,7 @@ class TestMobileAgent:
         agent = MobileAgent(
             agent_id="sized-agent",
             wasm_binary=binary,
-            manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             origin_node="node-x",
             signature="sig",
             ftns_budget=1.0,
@@ -107,7 +107,7 @@ class TestMobileAgent:
         agent = MobileAgent(
             agent_id="expired-agent",
             wasm_binary=WASM_MAGIC,
-            manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             origin_node="node-x",
             signature="sig",
             ftns_budget=1.0,

@@ -78,7 +78,7 @@ async def test_partition_rejoin_shard_reconciliation_converges_on_repeat(monkeyp
 
     shard = ModelShard(
         shard_id=uuid4(),
-        model_cid="model-cid-1",
+        model_content_id="model-cid-1",
         shard_index=0,
         total_shards=1,
         hosted_by=["peer-b", "peer-a"],

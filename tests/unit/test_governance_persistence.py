@@ -208,21 +208,21 @@ async def test_create_proposal_persists_to_db():
     )
     
     # Mock the dependencies
+    # v1.6.0: safety_monitor was removed from TokenWeightedVoting along with
+    # the legacy AGI safety framework.
     with patch.object(voting_system, '_validate_proposer_eligibility', new_callable=AsyncMock) as mock_validate:
         with patch.object(voting_system, 'ftns_service') as mock_ftns:
             with patch.object(voting_system, '_persist_proposal', new_callable=AsyncMock) as mock_persist:
-                with patch.object(voting_system, 'safety_monitor') as mock_safety:
-                    mock_validate.return_value = True
-                    mock_ftns.atomic_deduct = AsyncMock(return_value=True)
-                    mock_safety.validate_model_output = AsyncMock(return_value=True)
-                    mock_persist.return_value = True
-                    
-                    # This should trigger persistence
-                    proposal_id = await voting_system.create_proposal("integration_test_user", proposal)
-                    
-                    # Verify persistence was called
-                    mock_persist.assert_called_once()
-                    assert proposal_id is not None
+                mock_validate.return_value = True
+                mock_ftns.atomic_deduct = AsyncMock(return_value=True)
+                mock_persist.return_value = True
+
+                # This should trigger persistence
+                proposal_id = await voting_system.create_proposal("integration_test_user", proposal)
+
+                # Verify persistence was called
+                mock_persist.assert_called_once()
+                assert proposal_id is not None
 
 
 @pytest.mark.asyncio

@@ -37,7 +37,7 @@ class SwarmCoordinator:
     def create_swarm_job(
         self,
         query: str,
-        shard_cids: List[str],
+        shard_content_ids: List[str],
         wasm_binary: bytes,
         manifest: AgentManifest,
         budget_ftns: float,
@@ -47,7 +47,7 @@ class SwarmCoordinator:
         job = SwarmJob(
             job_id=job_id,
             query=query,
-            shard_cids=shard_cids,
+            shard_content_ids=shard_content_ids,
             wasm_binary=wasm_binary,
             agent_manifest=manifest,
             budget_ftns=budget_ftns,
@@ -62,9 +62,9 @@ class SwarmCoordinator:
 
         # Phase 1: Fan out — dispatch one agent per shard
         dispatch_tasks = []
-        for shard_cid in job.shard_cids:
+        for shard_cid in job.shard_content_ids:
             shard_manifest = AgentManifest(
-                required_cids=[shard_cid],
+                required_content_ids=[shard_cid],
                 min_hardware_tier=job.agent_manifest.min_hardware_tier,
                 max_memory_bytes=job.agent_manifest.max_memory_bytes,
                 max_execution_seconds=job.agent_manifest.max_execution_seconds,
@@ -80,7 +80,7 @@ class SwarmCoordinator:
             )
 
             assignment = ShardAssignment(
-                shard_cid=shard_cid,
+                shard_content_id=shard_cid,
                 agent_id=agent.agent_id,
             )
             job.assignments[shard_cid] = assignment
@@ -96,7 +96,7 @@ class SwarmCoordinator:
         total_pcu = 0.0
         total_ftns = 0.0
 
-        for shard_cid, result in zip(job.shard_cids, dispatch_results):
+        for shard_cid, result in zip(job.shard_content_ids, dispatch_results):
             assignment = job.assignments.get(shard_cid)
             if isinstance(result, Exception):
                 if assignment:
@@ -157,7 +157,7 @@ class SwarmCoordinator:
             shard_results=shard_results,
             total_pcu=total_pcu,
             total_ftns_spent=total_ftns,
-            total_shards=len(job.shard_cids),
+            total_shards=len(job.shard_content_ids),
             aggregation_time_seconds=time.time() - aggregation_start,
             aggregated_output=aggregated,
         )

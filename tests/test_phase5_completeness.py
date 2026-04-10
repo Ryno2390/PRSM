@@ -98,27 +98,8 @@ def test_known_deferred_have_specific_messages():
                 )
 
 
-def test_breakthrough_mode_exports():
-    """Verify breakthrough mode exports are available."""
-    from prsm.compute.nwtn.breakthrough_modes import (
-        BreakthroughMode,
-        breakthrough_mode_manager,
-        get_breakthrough_mode_config,
-        suggest_breakthrough_mode,
-    )
-
-    # Test that suggest_breakthrough_mode works
-    # Safety-related queries should be conservative
-    safety_mode = suggest_breakthrough_mode("What is the safety profile of this drug?")
-    assert safety_mode in [BreakthroughMode.CONSERVATIVE, BreakthroughMode.BALANCED]
-
-    # Revolutionary/impossible queries should be revolutionary
-    revolutionary_mode = suggest_breakthrough_mode("What impossible breakthrough could revolutionize energy storage?")
-    assert revolutionary_mode == BreakthroughMode.REVOLUTIONARY
-
-    # Generic queries should be balanced
-    balanced_mode = suggest_breakthrough_mode("Compare market strategies for our business")
-    assert balanced_mode == BreakthroughMode.BALANCED
+# test_breakthrough_mode_exports removed in v1.6.1:
+# prsm.compute.nwtn.breakthrough_modes was deleted in v1.6.0 (legacy AGI framework).
 
 
 def test_ftns_service_constants():

@@ -1428,26 +1428,34 @@ class ProvenanceQueries:
                 created_at = datetime.fromtimestamp(
                     record.get("created_at", 0), tz=timezone.utc
                 )
-                existing = await session.get(ContentProvenanceModel, record["cid"])
+                # v1.5.0 migration: accept both new (content_id) and legacy (cid) keys
+                content_id = record.get("content_id") or record["cid"]
+                parent_content_ids = record.get(
+                    "parent_content_ids", record.get("parent_cids", [])
+                )
+                manifest_content_id = record.get(
+                    "manifest_content_id", record.get("manifest_cid")
+                )
+                existing = await session.get(ContentProvenanceModel, content_id)
                 if existing:
                     # Update mutable fields only — don't overwrite creator/signature
                     existing.access_count = record.get("access_count", existing.access_count)
                     existing.total_royalties = record.get("total_royalties", existing.total_royalties)
-                    existing.parent_cids = record.get("parent_cids", existing.parent_cids)
+                    existing.parent_cids = parent_content_ids
                 else:
                     row = ContentProvenanceModel(
-                        cid=record["cid"],
+                        cid=content_id,
                         filename=record["filename"],
                         size_bytes=record["size_bytes"],
                         content_hash=record["content_hash"],
                         creator_id=record["creator_id"],
                         provenance_signature=record.get("provenance_signature", ""),
                         royalty_rate=record.get("royalty_rate", 0.01),
-                        parent_cids=record.get("parent_cids", []),
+                        parent_cids=parent_content_ids,
                         access_count=record.get("access_count", 0),
                         total_royalties=record.get("total_royalties", 0.0),
                         is_sharded=record.get("is_sharded", False),
-                        manifest_cid=record.get("manifest_cid"),
+                        manifest_cid=manifest_content_id,
                         total_shards=record.get("total_shards", 0),
                         embedding_id=record.get("embedding_id"),
                         near_duplicate_of=record.get("near_duplicate_of"),
@@ -1533,18 +1541,20 @@ class ProvenanceQueries:
                 rows = result.fetchall()
                 return [
                     {
-                        "cid": row.cid,
+                        # v1.5.0 migration: dict uses content_id/parent_content_ids/
+                        # manifest_content_id naming; SQL schema retains legacy column names
+                        "content_id": row.cid,
                         "filename": row.filename,
                         "size_bytes": row.size_bytes,
                         "content_hash": row.content_hash,
                         "creator_id": row.creator_id,
                         "provenance_signature": row.provenance_signature,
                         "royalty_rate": float(row.royalty_rate),
-                        "parent_cids": row.parent_cids or [],
+                        "parent_content_ids": row.parent_cids or [],
                         "access_count": row.access_count,
                         "total_royalties": float(row.total_royalties),
                         "is_sharded": bool(row.is_sharded),
-                        "manifest_cid": row.manifest_cid,
+                        "manifest_content_id": row.manifest_cid,
                         "total_shards": row.total_shards or 0,
                         "embedding_id": row.embedding_id,
                         "near_duplicate_of": row.near_duplicate_of,
@@ -1575,17 +1585,18 @@ class ProvenanceQueries:
                 if row is None:
                     return None
                 return {
-                    "cid":                      row.cid,
+                    # v1.5.0: dict uses content_id/parent_content_ids/manifest_content_id
+                    "content_id":               row.cid,
                     "filename":                 row.filename,
                     "size_bytes":               row.size_bytes,
                     "content_hash":             row.content_hash,
                     "creator_id":               row.creator_id,
                     "royalty_rate":             float(row.royalty_rate),
-                    "parent_cids":              row.parent_cids or [],
+                    "parent_content_ids":       row.parent_cids or [],
                     "access_count":             row.access_count,
                     "total_royalties":          float(row.total_royalties),
                     "is_sharded":               bool(row.is_sharded),
-                    "manifest_cid":             row.manifest_cid,
+                    "manifest_content_id":      row.manifest_cid,
                     "total_shards":             row.total_shards or 0,
                     "embedding_id":             row.embedding_id,
                     "near_duplicate_of":        row.near_duplicate_of,

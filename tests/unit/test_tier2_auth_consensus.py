@@ -93,9 +93,9 @@ class TestResultConsensusIntegration:
         WASM = b"\x00asm\x01\x00\x00\x00"
         job = coordinator.create_swarm_job(
             query="test",
-            shard_cids=["QmA"],
+            shard_content_ids=["QmA"],
             wasm_binary=WASM,
-            manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             budget_ftns=5.0,
         )
 

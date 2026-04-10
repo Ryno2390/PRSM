@@ -36,22 +36,22 @@ class TestSwarmJob:
         job = SwarmJob(
             job_id="swarm-001",
             query="EV adoption trends",
-            shard_cids=["QmA", "QmB", "QmC"],
+            shard_content_ids=["QmA", "QmB", "QmC"],
             wasm_binary=b"\x00asm\x01\x00\x00\x00",
-            agent_manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            agent_manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             budget_ftns=10.0,
         )
         assert job.job_id == "swarm-001"
-        assert len(job.shard_cids) == 3
+        assert len(job.shard_content_ids) == 3
         assert job.status == SwarmStatus.PENDING
 
     def test_job_budget_per_shard(self):
         job = SwarmJob(
             job_id="swarm-002",
             query="test",
-            shard_cids=["QmA", "QmB", "QmC", "QmD"],
+            shard_content_ids=["QmA", "QmB", "QmC", "QmD"],
             wasm_binary=b"\x00asm\x01\x00\x00\x00",
-            agent_manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            agent_manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             budget_ftns=20.0,
         )
         assert job.budget_per_shard == 5.0
@@ -60,9 +60,9 @@ class TestSwarmJob:
         job = SwarmJob(
             job_id="swarm-003",
             query="test",
-            shard_cids=[f"Qm{i}" for i in range(10)],
+            shard_content_ids=[f"Qm{i}" for i in range(10)],
             wasm_binary=b"\x00asm\x01\x00\x00\x00",
-            agent_manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            agent_manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             budget_ftns=50.0,
             strategy=MapReduceStrategy(quorum_pct=0.8),
         )
@@ -72,9 +72,9 @@ class TestSwarmJob:
         job = SwarmJob(
             job_id="swarm-004",
             query="test",
-            shard_cids=["QmA", "QmB"],
+            shard_content_ids=["QmA", "QmB"],
             wasm_binary=b"\x00asm\x01\x00\x00\x00",
-            agent_manifest=AgentManifest(required_cids=[], min_hardware_tier="t1"),
+            agent_manifest=AgentManifest(required_content_ids=[], min_hardware_tier="t1"),
             budget_ftns=10.0,
             strategy=MapReduceStrategy(quorum_pct=0.5),
         )
@@ -107,9 +107,9 @@ class TestSwarmResult:
 class TestShardAssignment:
     def test_assignment_creation(self):
         assignment = ShardAssignment(
-            shard_cid="QmTestShard",
+            shard_content_id="QmTestShard",
             agent_id="agent-001",
             provider_id="provider-abc",
         )
-        assert assignment.shard_cid == "QmTestShard"
+        assert assignment.shard_content_id == "QmTestShard"
         assert assignment.status == "dispatched"

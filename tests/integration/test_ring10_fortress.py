@@ -42,9 +42,7 @@ class TestRing10Smoke:
         # Ring 4
         from prsm.economy.pricing import PricingEngine, CostQuote, ProsumerTier, DataAccessFee
         from prsm.economy.prosumer import ProsumerManager
-        # Ring 5
-        from prsm.compute.nwtn.agent_forge import AgentForge, TaskDecomposition, ExecutionRoute
-        from prsm.compute.nwtn.agent_forge.mcp_tools import get_forge_tools
+        # Ring 5 AgentForge removed in v1.6.0 (legacy NWTN AGI framework pruned)
         # Ring 6 (hardening from Phase 1)
         from prsm.economy.ftns_onchain import estimate_gas_price, RPCFailover
         from prsm.node.settler_registry import verify_settler_signature
@@ -68,7 +66,6 @@ class TestRing10Smoke:
             AgentDispatcher, AgentExecutor, MobileAgent,
             SwarmCoordinator, SwarmJob, MapReduceStrategy,
             PricingEngine, CostQuote, ProsumerTier, ProsumerManager,
-            AgentForge, TaskDecomposition, ExecutionRoute,
             estimate_gas_price, RPCFailover, verify_settler_signature,
             TEEType, DPConfig, DPNoiseInjector, ConfidentialExecutor,
             ModelSharder, PipelineRandomizer, TensorParallelExecutor, CollisionDetector,
@@ -76,6 +73,4 @@ class TestRing10Smoke:
             IntegrityVerifier, PrivacyBudgetTracker, PipelineAuditLog,
         ])
 
-        # Verify MCP tools
-        tools = get_forge_tools()
-        assert len(tools) == 5
+        # MCP tools check removed in v1.6.1 (Ring 5 AgentForge pruned in v1.6.0)

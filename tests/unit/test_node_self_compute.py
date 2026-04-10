@@ -179,7 +179,17 @@ async def test_self_compute_benchmark_produces_result():
 
 @pytest.mark.asyncio
 async def test_self_compute_records_earnings():
-    """Self-executed job records compute earnings via the ledger."""
+    """Self-executed job completes without self-crediting the ledger.
+
+    v1.6.0: compute_provider._execute_job no longer self-credits FTNS.
+    Payment flows through requester-side escrow release. For single-node
+    self-compute, requester and provider are the same account — a self-credit
+    would cause double-counting and ledger divergence.
+
+    This test verifies that:
+      1. The job completes successfully in single-node mode.
+      2. The provider does NOT call ledger.credit directly.
+    """
     provider = _make_provider(node_id="node-self", peer_count=0, allow_self_compute=True)
 
     job_data = {
@@ -198,10 +208,9 @@ async def test_self_compute_records_earnings():
             break
 
     assert "job-006" in provider.completed_jobs
-    # Ledger credit should have been called
-    provider.ledger.credit.assert_called_once()
-    call_kwargs = provider.ledger.credit.call_args
-    assert call_kwargs[1]["amount"] == 2.5 or call_kwargs.kwargs.get("amount") == 2.5
+    # Provider must NOT self-credit — payment flows through requester-side
+    # escrow release. See compute_provider._execute_job docstring.
+    provider.ledger.credit.assert_not_called()
 
 
 @pytest.mark.asyncio

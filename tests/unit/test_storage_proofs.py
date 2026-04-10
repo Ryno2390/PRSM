@@ -95,7 +95,7 @@ class TestStorageChallenge:
         """Test creating a storage challenge."""
         challenge = StorageChallenge(
             challenge_id="test_challenge_1",
-            cid=sample_cid,
+            shard_hash=sample_cid,
             nonce="test_nonce_123",
             difficulty=1024,
             deadline=datetime.now(timezone.utc) + timedelta(minutes=5),
@@ -104,7 +104,7 @@ class TestStorageChallenge:
         )
         
         assert challenge.challenge_id == "test_challenge_1"
-        assert challenge.cid == sample_cid
+        assert challenge.shard_hash == sample_cid
         assert challenge.nonce == "test_nonce_123"
         assert challenge.difficulty == 1024
         assert challenge.proof_type == ProofType.MERKLE  # Default
@@ -113,7 +113,7 @@ class TestStorageChallenge:
         """Test challenge serialization and deserialization."""
         challenge = StorageChallenge(
             challenge_id="test_challenge_2",
-            cid=sample_cid,
+            shard_hash=sample_cid,
             nonce="test_nonce_456",
             difficulty=2048,
             deadline=datetime.now(timezone.utc) + timedelta(minutes=5),
@@ -130,7 +130,7 @@ class TestStorageChallenge:
         # Deserialize
         restored = StorageChallenge.from_dict(data)
         assert restored.challenge_id == challenge.challenge_id
-        assert restored.cid == challenge.cid
+        assert restored.shard_hash == challenge.shard_hash
         assert restored.nonce == challenge.nonce
         assert restored.difficulty == challenge.difficulty
         assert restored.proof_type == ProofType.RANGE
@@ -140,7 +140,7 @@ class TestStorageChallenge:
         # Create expired challenge
         expired_challenge = StorageChallenge(
             challenge_id="expired_challenge",
-            cid=sample_cid,
+            shard_hash=sample_cid,
             nonce="nonce",
             difficulty=1024,
             deadline=datetime.now(timezone.utc) - timedelta(minutes=1),  # In the past
@@ -153,7 +153,7 @@ class TestStorageChallenge:
         # Create valid challenge
         valid_challenge = StorageChallenge(
             challenge_id="valid_challenge",
-            cid=sample_cid,
+            shard_hash=sample_cid,
             nonce="nonce",
             difficulty=1024,
             deadline=datetime.now(timezone.utc) + timedelta(minutes=5),
@@ -292,11 +292,11 @@ class TestStorageProofVerifier:
     def test_generate_challenge(self, proof_verifier, sample_cid, challenger_identity):
         """Test generating a storage challenge."""
         challenge = proof_verifier.generate_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
         )
         
-        assert challenge.cid == sample_cid
+        assert challenge.shard_hash == sample_cid
         assert challenge.challenger_id == challenger_identity.node_id
         assert challenge.difficulty == DEFAULT_CHALLENGE_DIFFICULTY
         assert challenge.proof_type == ProofType.MERKLE
@@ -308,7 +308,7 @@ class TestStorageProofVerifier:
     def test_generate_challenge_custom_params(self, proof_verifier, sample_cid, challenger_identity):
         """Test generating a challenge with custom parameters."""
         challenge = proof_verifier.generate_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
             difficulty=2048,
             proof_type=ProofType.RANGE,
@@ -337,7 +337,7 @@ class TestStorageProofVerifier:
     def test_get_challenge(self, proof_verifier, sample_cid, challenger_identity):
         """Test retrieving a challenge by ID."""
         challenge = proof_verifier.generate_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
         )
         
@@ -360,7 +360,7 @@ class TestStorageProofVerifier:
         """Test verifying a valid Merkle proof."""
         # Generate challenge
         challenge = proof_verifier.generate_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
         )
         
@@ -375,7 +375,7 @@ class TestStorageProofVerifier:
         proof = StorageProof(
             challenge_id=challenge.challenge_id,
             provider_id=provider_identity.node_id,
-            cid=sample_cid,
+            shard_hash=sample_cid,
             proof_type=ProofType.MERKLE,
             proof_data=chunk_data,
             timestamp=datetime.now(timezone.utc),
@@ -401,7 +401,7 @@ class TestStorageProofVerifier:
         # Create an expired challenge
         challenge = StorageChallenge(
             challenge_id="expired_test",
-            cid=sample_cid,
+            shard_hash=sample_cid,
             nonce="nonce",
             difficulty=1024,
             deadline=datetime.now(timezone.utc) - timedelta(minutes=1),
@@ -412,7 +412,7 @@ class TestStorageProofVerifier:
         proof = StorageProof(
             challenge_id=challenge.challenge_id,
             provider_id=provider_identity.node_id,
-            cid=sample_cid,
+            shard_hash=sample_cid,
             proof_type=ProofType.MERKLE,
             proof_data=b"test data",
             timestamp=datetime.now(timezone.utc),
@@ -434,14 +434,14 @@ class TestStorageProofVerifier:
     ):
         """Test verifying a proof with wrong CID."""
         challenge = proof_verifier.generate_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
         )
         
         proof = StorageProof(
             challenge_id=challenge.challenge_id,
             provider_id=provider_identity.node_id,
-            cid="WrongCID123",  # Wrong CID
+            shard_hash="WrongCID123",  # Wrong shard hash
             proof_type=ProofType.MERKLE,
             proof_data=b"test data",
             timestamp=datetime.now(timezone.utc),
@@ -464,7 +464,7 @@ class TestStorageProofVerifier:
     ):
         """Test verifying a range proof."""
         challenge = proof_verifier.generate_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
             proof_type=ProofType.RANGE,
         )
@@ -478,7 +478,7 @@ class TestStorageProofVerifier:
         proof = StorageProof(
             challenge_id=challenge.challenge_id,
             provider_id=provider_identity.node_id,
-            cid=sample_cid,
+            shard_hash=sample_cid,
             proof_type=ProofType.RANGE,
             proof_data=proof_data,
             timestamp=datetime.now(timezone.utc),
@@ -499,7 +499,7 @@ class TestStorageProofVerifier:
     ):
         """Test verifying a range proof with insufficient data."""
         challenge = proof_verifier.generate_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
             difficulty=1024,
             proof_type=ProofType.RANGE,
@@ -508,7 +508,7 @@ class TestStorageProofVerifier:
         proof = StorageProof(
             challenge_id=challenge.challenge_id,
             provider_id=provider_identity.node_id,
-            cid=sample_cid,
+            shard_hash=sample_cid,
             proof_type=ProofType.RANGE,
             proof_data=b"small",  # Too small
             timestamp=datetime.now(timezone.utc),
@@ -525,7 +525,7 @@ class TestStorageProofVerifier:
         # Create an expired challenge
         expired_challenge = StorageChallenge(
             challenge_id="expired_cleanup_test",
-            cid=sample_cid,
+            shard_hash=sample_cid,
             nonce="nonce",
             difficulty=1024,
             deadline=datetime.now(timezone.utc) - timedelta(minutes=1),
@@ -539,7 +539,7 @@ class TestStorageProofVerifier:
         
         # Create a valid challenge
         valid_challenge = proof_verifier.generate_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
         )
         
@@ -580,9 +580,10 @@ class TestStorageProver:
     def test_prover_initialization(self, provider_identity):
         """Test storage prover initialization."""
         prover = StorageProver(identity=provider_identity)
-        
+
         assert prover.identity == provider_identity
-        assert prover.ipfs_api_url == "http://127.0.0.1:5001"
+        # Post-v1.5.0: StorageProver uses content_client abstraction, not ipfs_api_url
+        assert prover.content_client is None
     
     @pytest.mark.asyncio
     async def test_answer_challenge_merkle(
@@ -596,7 +597,7 @@ class TestStorageProver:
         # Create challenge
         verifier = StorageProofVerifier()
         challenge = verifier.generate_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
         )
         
@@ -609,7 +610,7 @@ class TestStorageProver:
         assert proof is not None
         assert proof.challenge_id == challenge.challenge_id
         assert proof.provider_id == storage_prover.identity.node_id
-        assert proof.cid == sample_cid
+        assert proof.shard_hash == sample_cid
         assert proof.proof_type == ProofType.MERKLE
         assert proof.merkle_proof is not None
         assert proof.signature != ""
@@ -627,7 +628,7 @@ class TestStorageProver:
         verifier = StorageProofVerifier()
         
         challenge = verifier.generate_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
             proof_type=ProofType.RANGE,
         )
@@ -654,7 +655,7 @@ class TestStorageProver:
         verifier = StorageProofVerifier()
         
         challenge = verifier.generate_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
             proof_type=ProofType.FULL,
         )
@@ -680,7 +681,7 @@ class TestStorageProver:
         # Create expired challenge
         challenge = StorageChallenge(
             challenge_id="expired_answer_test",
-            cid=sample_cid,
+            shard_hash=sample_cid,
             nonce="nonce",
             difficulty=1024,
             deadline=datetime.now(timezone.utc) - timedelta(minutes=1),
@@ -708,7 +709,7 @@ class TestStorageProver:
         verifier = StorageProofVerifier()
         
         challenge = verifier.generate_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
         )
         
@@ -720,7 +721,7 @@ class TestStorageProver:
         assert proof is not None
         
         # Verify signature using provider's public key
-        signed_data = f"{proof.challenge_id}:{proof.cid}:{proof.proof_data.hex()}:{proof.timestamp.isoformat()}"
+        signed_data = f"{proof.challenge_id}:{proof.shard_hash}:{proof.proof_data.hex()}:{proof.timestamp.isoformat()}"
         is_valid = provider_identity.verify(signed_data.encode(), proof.signature)
         assert is_valid is True
 
@@ -768,7 +769,7 @@ class TestStorageRewardIntegration:
         proof = StorageProof(
             challenge_id="test_challenge",
             provider_id=provider_identity.node_id,
-            cid=sample_cid,
+            shard_hash=sample_cid,
             proof_type=ProofType.MERKLE,
             proof_data=b"test data",
             timestamp=datetime.now(timezone.utc),
@@ -803,7 +804,7 @@ class TestStorageRewardIntegration:
         proof = StorageProof(
             challenge_id="test_challenge_ftns",
             provider_id=provider_identity.node_id,
-            cid=sample_cid,
+            shard_hash=sample_cid,
             proof_type=ProofType.MERKLE,
             proof_data=b"test data",
             timestamp=datetime.now(timezone.utc),
@@ -826,7 +827,7 @@ class TestStorageRewardIntegration:
         
         challenge = StorageChallenge(
             challenge_id="failed_challenge",
-            cid=sample_cid,
+            shard_hash=sample_cid,
             nonce="nonce",
             difficulty=1024,
             deadline=datetime.now(timezone.utc) + timedelta(minutes=5),
@@ -854,7 +855,7 @@ class TestStorageRewardIntegration:
         
         challenge = StorageChallenge(
             challenge_id="expired_challenge",
-            cid=sample_cid,
+            shard_hash=sample_cid,
             nonce="nonce",
             difficulty=1024,
             deadline=datetime.now(timezone.utc) - timedelta(minutes=1),
@@ -905,11 +906,11 @@ class TestConvenienceFunctions:
     def test_create_storage_challenge(self, sample_cid, challenger_identity):
         """Test create_storage_challenge function."""
         challenge = create_storage_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
         )
         
-        assert challenge.cid == sample_cid
+        assert challenge.shard_hash == sample_cid
         assert challenge.challenger_id == challenger_identity.node_id
     
     @pytest.mark.asyncio
@@ -923,7 +924,7 @@ class TestConvenienceFunctions:
         """Test verify_storage_proof function."""
         # Create challenge
         challenge = create_storage_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
         )
         
@@ -938,7 +939,7 @@ class TestConvenienceFunctions:
         proof = StorageProof(
             challenge_id=challenge.challenge_id,
             provider_id=provider_identity.node_id,
-            cid=sample_cid,
+            shard_hash=sample_cid,
             proof_type=ProofType.MERKLE,
             proof_data=chunk_data,
             timestamp=datetime.now(timezone.utc),
@@ -978,7 +979,7 @@ class TestIntegration:
         
         # 1. Challenger generates challenge
         challenge = verifier.generate_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
         )
         
@@ -1023,7 +1024,7 @@ class TestIntegration:
         # Generate multiple challenges
         challenges = [
             verifier.generate_challenge(
-                cid=sample_cid,
+                shard_hash=sample_cid,
                 challenger_id=challenger_identity.node_id,
             )
             for _ in range(5)
@@ -1057,7 +1058,7 @@ class TestIntegration:
         
         for proof_type in [ProofType.MERKLE, ProofType.RANGE, ProofType.FULL]:
             challenge = verifier.generate_challenge(
-                cid=sample_cid,
+                shard_hash=sample_cid,
                 challenger_id=challenger_identity.node_id,
                 proof_type=proof_type,
             )
@@ -1096,7 +1097,7 @@ class TestEdgeCases:
         prover = StorageProver(identity=provider_identity)
         
         challenge = verifier.generate_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
         )
         
@@ -1114,7 +1115,7 @@ class TestEdgeCases:
         verifier = StorageProofVerifier()
         
         challenge = verifier.generate_challenge(
-            cid=sample_cid,
+            shard_hash=sample_cid,
             challenger_id=challenger_identity.node_id,
             difficulty=10 * 1024 * 1024 * 1024,  # 10 GB
         )
@@ -1129,7 +1130,7 @@ class TestEdgeCases:
         proof = StorageProof(
             challenge_id="unknown_challenge_id",
             provider_id=provider_identity.node_id,
-            cid=sample_cid,
+            shard_hash=sample_cid,
             proof_type=ProofType.MERKLE,
             proof_data=b"test",
             timestamp=datetime.now(timezone.utc),
@@ -1147,7 +1148,7 @@ class TestEdgeCases:
         
         challenges = [
             verifier.generate_challenge(
-                cid=sample_cid,
+                shard_hash=sample_cid,
                 challenger_id=challenger_identity.node_id,
             )
             for _ in range(10)
