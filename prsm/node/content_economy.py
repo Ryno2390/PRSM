@@ -450,18 +450,29 @@ class ContentEconomy:
                 f"has no provenance_hash in metadata (use `prsm provenance register`)"
             )
             return None
-        if isinstance(provenance_hash, str):
-            if provenance_hash.startswith("0x"):
-                provenance_hash = bytes.fromhex(provenance_hash[2:])
-            else:
-                provenance_hash = bytes.fromhex(provenance_hash)
-        if not isinstance(provenance_hash, (bytes, bytearray)) or len(provenance_hash) != 32:
+        # Parse the metadata-supplied hash. A malformed value is a metadata
+        # bug, not a payment failure — fall back to local instead of marking
+        # the whole payment FAILED.
+        try:
+            if isinstance(provenance_hash, str):
+                provenance_hash = bytes.fromhex(
+                    provenance_hash[2:]
+                    if provenance_hash.startswith("0x")
+                    else provenance_hash
+                )
+            if not isinstance(provenance_hash, (bytes, bytearray)):
+                raise ValueError("provenance_hash must be bytes or hex string")
+            if len(provenance_hash) != 32:
+                raise ValueError(
+                    f"provenance_hash must be 32 bytes (got {len(provenance_hash)})"
+                )
+            provenance_hash = bytes(provenance_hash)
+        except (ValueError, TypeError) as exc:
             logger.warning(
-                f"on-chain distribute skipped: invalid provenance_hash for "
-                f"{payment.content_id[:12]}…"
+                f"on-chain distribute skipped: malformed provenance_hash for "
+                f"{payment.content_id[:12]}…: {exc}"
             )
             return None
-        provenance_hash = bytes(provenance_hash)
 
         gross_wei = int(Decimal(str(payment.amount)) * Decimal(10**18))
         if gross_wei <= 0:

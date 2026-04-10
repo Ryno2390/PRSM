@@ -365,3 +365,77 @@ def test_local_fallback_pays_serving_node_share():
 
     # And explicitly: the old direct_creator type should be GONE.
     assert "direct_creator" not in by_type
+
+
+# ── Phase 1.2 Task 2: malformed provenance_hash must not fail payment ────
+
+
+def test_malformed_provenance_hash_falls_back_safely():
+    """A malformed provenance_hash in metadata must NOT mark the payment
+    FAILED. The on-chain branch should skip it (return None) and the
+    local fallback should handle distribution. Phase 1.2 P2 regression."""
+    import asyncio
+    from decimal import Decimal
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_economy import (
+        ContentEconomy,
+        ContentAccessPayment,
+        PaymentStatus,
+        RoyaltyModel,
+    )
+
+    identity = MagicMock()
+    identity.node_id = "node-serving-xyz"
+    ledger = MagicMock()
+    ledger.credit = AsyncMock()
+    ledger.debit = AsyncMock()
+    gossip = MagicMock()
+    content_index = MagicMock()
+
+    # Pretend the on-chain stack is wired so _try_onchain_distribute is taken.
+    fake_distributor = MagicMock()
+    fake_ftns_ledger = MagicMock()
+    fake_ftns_ledger._connected_address = (
+        "0xdEAd000000000000000000000000000000000001"
+    )
+
+    economy = ContentEconomy(
+        identity=identity,
+        ledger=ledger,
+        gossip=gossip,
+        content_index=content_index,
+        ftns_ledger=fake_ftns_ledger,
+        royalty_model=RoyaltyModel.PHASE4,
+    )
+    economy._credit_royalty = AsyncMock()
+    chain = MagicMock()
+    chain.original_creator = "creator-original"
+    chain.original_content_id = "cid-original"
+    chain.derivative_creators = []
+    economy._resolve_provenance_chain = AsyncMock(return_value=chain)
+    economy._get_royalty_distributor = MagicMock(return_value=fake_distributor)
+
+    payment = ContentAccessPayment(
+        payment_id="p-bad-hash",
+        content_id="cid-test",
+        accessor_id="accessor-x",
+        creator_id="creator-direct",
+        amount=Decimal("100"),
+        royalty_model=RoyaltyModel.PHASE4,
+        status=PaymentStatus.PENDING,
+    )
+
+    distributions = asyncio.run(
+        economy._distribute_royalties(
+            payment=payment,
+            creator_id="creator-direct",
+            parent_content_ids=[],
+            content_metadata={"provenance_hash": "GARBAGE_NOT_HEX"},
+        )
+    )
+
+    # The on-chain branch must have skipped, and the local fallback must
+    # have produced a valid distribution list (not raised).
+    assert distributions
+    assert any(d["type"] == "serving_node" for d in distributions)
