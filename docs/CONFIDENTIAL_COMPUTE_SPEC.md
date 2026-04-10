@@ -2,7 +2,20 @@
 
 **Version:** 1.0
 **Date:** 2026-04-06
-**Status:** Approved design — ready for implementation planning when Phase 2 begins
+**Status:** Historical sprint design document — see notice below
+
+> **⚠️ HISTORICAL DOCUMENT**
+>
+> This is the original Phase 2 design spec that drove implementation of Rings 7-10 during April 2026. It is preserved as a historical record of the sprint's design decisions.
+>
+> **Some details were reconsidered in v1.6.0 (2026-04-09).** In particular, where this document refers to "LLM-powered agent forge" (Ring 5) or "NWTN as Agent Architect," that implementation was re-scoped during the v1.6.0 scope alignment. PRSM no longer runs an internal LLM-backed reasoning layer — reasoning happens in third-party LLMs (local or via OAuth/API) that reach PRSM via MCP tools. Ring 9 ("The Mind") remains valid as the training pipeline for a **future** fine-tuned NWTN LLM that will become one of several LLM options alongside third-party models.
+>
+> For the **current** architecture, see:
+> - [`docs/architecture.md`](architecture.md) — current 10-Ring architecture and query flow
+> - [`docs/IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) — current subsystem status
+> - [`docs/2026-04-09-v1.6-scope-alignment-design.md`](2026-04-09-v1.6-scope-alignment-design.md) — the scope narrowing design
+>
+> The rest of this document is preserved as-written for historical accuracy.
 
 ---
 
