@@ -84,4 +84,21 @@ contract ProvenanceRegistry {
     function isRegistered(bytes32 contentHash) external view returns (bool) {
         return contents[contentHash].creator != address(0);
     }
+
+    /**
+     * @notice Slim accessor returning only creator + rate.
+     * @dev RoyaltyDistributor uses this on the payment hot path so it never
+     *      pays gas to load the unbounded `metadataUri` string from storage.
+     *      A squatter cannot grief payment gas by registering huge metadata.
+     * @return creator address that receives royalties for this content
+     * @return royaltyRateBps royalty rate in basis points (0..MAX_ROYALTY_RATE_BPS)
+     */
+    function getCreatorAndRate(bytes32 contentHash)
+        external
+        view
+        returns (address creator, uint16 royaltyRateBps)
+    {
+        Content storage c = contents[contentHash];
+        return (c.creator, c.royaltyRateBps);
+    }
 }
