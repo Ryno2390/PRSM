@@ -683,3 +683,128 @@ def test_provider_forwards_provenance_hash_to_content_economy():
 
     assert captured["content_id"] == "cid-with-hash"
     assert captured["content_metadata"].get("provenance_hash") == expected_hash
+
+
+# ── Phase 1.2 Task 9: gossip discovery preserves provenance_hash ────────
+
+
+def test_content_announcement_roundtrips_provenance_hash():
+    """ContentAnnouncement.to_gossip_data / from_gossip_data must round-trip
+    provenance_hash. Phase 1.2 Task 9 — otherwise peers discovering
+    content via gossip lose the hash and the on-chain branch in
+    content_economy silently falls back to local."""
+    from prsm.node.content_provider import ContentAnnouncement
+
+    expected_hash = "0x" + "cd" * 32
+    ann = ContentAnnouncement(
+        cid="QmABC",
+        size=1024,
+        content_type="text/plain",
+        content_hash="sha256-abc",
+        provider_id="provider-1",
+        filename="x.txt",
+        metadata={"creator_id": "creator-z", "royalty_rate": 0.01},
+        provenance_hash=expected_hash,
+    )
+
+    data = ann.to_gossip_data()
+    assert data.get("provenance_hash") == expected_hash
+
+    ann2 = ContentAnnouncement.from_gossip_data(data, origin="peer-1")
+    assert ann2.provenance_hash == expected_hash
+
+
+def test_content_index_preserves_provenance_hash_from_advertisement():
+    """ContentIndex._on_content_advertise must copy provenance_hash from
+    the gossip payload into the ContentRecord so downstream consumers
+    (replication, serve-time lookup on another node) can find it.
+    Phase 1.2 Task 9 regression."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from prsm.node.content_index import ContentIndex
+
+    gossip = MagicMock()
+    gossip.subscribe = MagicMock()
+    index = ContentIndex(gossip=gossip)
+
+    expected_hash = "0x" + "ef" * 32
+    payload = {
+        "cid": "QmDiscovered",
+        "filename": "d.txt",
+        "size_bytes": 42,
+        "content_hash": "sha256-d",
+        "creator_id": "creator-q",
+        "provider_id": "peer-42",
+        "created_at": 1_700_000_000.0,
+        "metadata": {},
+        "royalty_rate": 0.01,
+        "parent_cids": [],
+        "provenance_hash": expected_hash,
+    }
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise", data=payload, origin="peer-42"
+        )
+    )
+
+    record = index._records.get("QmDiscovered")
+    assert record is not None
+    assert record.provenance_hash == expected_hash
+
+    # A second advertisement from a different peer missing the hash must
+    # not clobber the populated value.
+    payload2 = dict(payload)
+    payload2["provider_id"] = "peer-99"
+    payload2.pop("provenance_hash")
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise", data=payload2, origin="peer-99"
+        )
+    )
+    record = index._records["QmDiscovered"]
+    assert record.provenance_hash == expected_hash
+    assert "peer-99" in record.providers
+
+
+def test_content_index_backfills_provenance_hash_on_later_advertisement():
+    """If the first advertisement lacks provenance_hash but a later one
+    carries it, the index should backfill the populated value. Phase 1.2
+    Task 9 defense-in-depth."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from prsm.node.content_index import ContentIndex
+
+    gossip = MagicMock()
+    gossip.subscribe = MagicMock()
+    index = ContentIndex(gossip=gossip)
+
+    first = {
+        "cid": "QmLate",
+        "filename": "late.txt",
+        "size_bytes": 10,
+        "content_hash": "sha256-late",
+        "creator_id": "creator-x",
+        "provider_id": "peer-1",
+        "created_at": 1_700_000_000.0,
+        "metadata": {},
+        # no provenance_hash
+    }
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise", data=first, origin="peer-1"
+        )
+    )
+    assert index._records["QmLate"].provenance_hash is None
+
+    expected_hash = "0x" + "12" * 32
+    second = dict(first)
+    second["provider_id"] = "peer-2"
+    second["provenance_hash"] = expected_hash
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise", data=second, origin="peer-2"
+        )
+    )
+    assert index._records["QmLate"].provenance_hash == expected_hash
