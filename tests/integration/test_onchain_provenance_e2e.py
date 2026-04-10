@@ -922,3 +922,139 @@ def test_request_content_retrieval_accepts_pending_onchain_payment(monkeypatch):
         "PENDING_ONCHAIN must not be treated as a hard payment failure; "
         f"got error logs: {payment_failed_logs}"
     )
+
+
+def test_request_content_retrieval_forwards_provenance_hash_from_index(monkeypatch):
+    """request_content_retrieval() must look up provenance_hash from the
+    content_index and pass it into process_content_access, otherwise the
+    marketplace retrieval path can never route through the on-chain
+    RoyaltyDistributor. Phase 1.2 Task 10 second-pass regression."""
+    import asyncio
+    from decimal import Decimal
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node import content_economy as ce_mod
+    from prsm.node.content_economy import (
+        ContentEconomy,
+        ContentAccessPayment,
+        PaymentStatus,
+        ProviderBid,
+        RoyaltyModel,
+    )
+
+    identity = MagicMock()
+    identity.node_id = "node-retriever"
+    ledger = MagicMock()
+    ledger.credit = AsyncMock()
+    ledger.debit = AsyncMock()
+    gossip = MagicMock()
+    gossip.publish = AsyncMock()
+
+    expected_hash = "0x" + "99" * 32
+
+    # content_index returns a record with provenance_hash set.
+    content_index = MagicMock()
+    fake_record = MagicMock()
+    fake_record.provenance_hash = expected_hash
+    fake_record.creator_id = "creator-from-index"
+    fake_record.parent_cids = ["parent-1"]
+    content_index.lookup = MagicMock(return_value=fake_record)
+
+    economy = ContentEconomy(
+        identity=identity,
+        ledger=ledger,
+        gossip=gossip,
+        content_index=content_index,
+        ftns_ledger=None,
+        royalty_model=RoyaltyModel.PHASE4,
+    )
+
+    # Inject a bid during the first sleep so request_content_retrieval
+    # progresses past bid collection.
+    real_sleep = asyncio.sleep
+
+    async def fake_sleep(delay: float) -> None:
+        if economy._retrieval_requests:
+            latest_req = next(reversed(economy._retrieval_requests.values()))
+            if not latest_req.bids:
+                latest_req.bids.append(
+                    ProviderBid(
+                        provider_id="peer-42",
+                        content_id=latest_req.content_id,
+                        price_ftns=Decimal("0.5"),
+                        estimated_latency_ms=100.0,
+                        available_bandwidth_mbps=100.0,
+                        reputation_score=1.0,
+                    )
+                )
+        await real_sleep(0)
+
+    monkeypatch.setattr(ce_mod.asyncio, "sleep", fake_sleep)
+
+    # Capture the content_metadata that process_content_access receives.
+    captured: dict = {}
+
+    async def fake_process(content_id, accessor_id, content_metadata):
+        captured["content_metadata"] = content_metadata
+        return ContentAccessPayment(
+            payment_id="p-ok",
+            content_id=content_id,
+            accessor_id=accessor_id,
+            creator_id=content_metadata.get("creator_id", ""),
+            amount=Decimal("1"),
+            royalty_model=RoyaltyModel.PHASE4,
+            status=PaymentStatus.COMPLETED,
+        )
+
+    economy.process_content_access = fake_process
+
+    asyncio.run(
+        economy.request_content_retrieval(
+            content_id="cid-known-to-index",
+            max_price_ftns=Decimal("1"),
+            timeout=0.01,
+        )
+    )
+
+    assert captured.get("content_metadata", {}).get("provenance_hash") == expected_hash
+    assert captured["content_metadata"]["creator_id"] == "creator-from-index"
+    assert captured["content_metadata"]["parent_content_ids"] == ["parent-1"]
+
+
+def test_announce_content_helper_forwards_provenance_hash():
+    """ContentProvider.announce_content() must forward a caller-supplied
+    provenance_hash into the gossip payload. Phase 1.2 Task 10 second-pass
+    regression — the helper previously dropped it."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_provider import ContentProvider
+
+    identity = MagicMock()
+    identity.node_id = "node-announcer"
+    transport = MagicMock()
+    gossip = MagicMock()
+    gossip.publish = AsyncMock()
+
+    provider = ContentProvider(
+        identity=identity,
+        transport=transport,
+        gossip=gossip,
+        content_economy=None,
+    )
+
+    expected_hash = "0x" + "77" * 32
+    asyncio.run(
+        provider.announce_content(
+            cid="QmXYZ",
+            size=1024,
+            content_type="text/plain",
+            content_hash="sha256-xyz",
+            filename="file.txt",
+            provenance_hash=expected_hash,
+        )
+    )
+
+    assert gossip.publish.await_count == 1
+    _topic, payload = gossip.publish.await_args.args
+    assert payload.get("provenance_hash") == expected_hash
