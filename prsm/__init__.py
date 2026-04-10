@@ -27,7 +27,7 @@ PRSM provides the infrastructure those LLMs use to access distributed
 resources and data.
 """
 
-__version__ = "1.6.2"
+__version__ = "1.6.3"
 __author__ = "PRSM Team"
 __email__ = "team@prsm.org"
 __description__ = "Protocol for Recursive Scientific Modeling - A P2P infrastructure protocol for open-source collaboration"

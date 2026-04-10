@@ -2,6 +2,97 @@
 
 All notable changes to PRSM are documented here.
 
+## [1.6.3] - 2026-04-10
+
+### Docs-Only Release — Documentation Accuracy Sweep
+
+Updates all forward-facing documentation to reflect PRSM's current v1.6.0+
+scope (P2P infrastructure protocol for open-source collaboration, not an
+AGI framework). Ensures the PyPI package page renders the accurate README.
+
+No code changes. Test suite and installed package behavior identical to v1.6.2.
+
+### Changed
+
+- **`README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `contracts/README.md`** updated
+  to remove legacy framing and reflect current scope
+- **`docs/architecture.md`** — full rewrite to current 10-Ring architecture,
+  query flow, privacy layers, FTNS economics
+- **`docs/IMPLEMENTATION_STATUS.md`** — full rewrite with shipped-rings table,
+  current subsystem status, explicit v1.6.0 removal list
+- **`docs/API_REFERENCE.md`, `docs/CLI_REFERENCE.md`, `docs/GETTING_STARTED.md`,
+  `docs/DEVELOPMENT_GUIDE.md`, `docs/TROUBLESHOOTING_GUIDE.md`,
+  `docs/SDK_DEVELOPER_GUIDE.md`, `docs/FTNS_API_DOCUMENTATION.md`** — legacy
+  examples replaced with current public surface
+- **`docs/business/INVESTOR_MATERIALS.md`** — thesis, market positioning,
+  revenue model rewritten to match current scope
+- **Community launch posts** (`blog_post_launch.md`, `hacker_news_launch.md`,
+  `reddit_ethereum.md`, `reddit_machinelearning.md`) — rewritten for P2P
+  infrastructure pitch
+- **`prsm/economy/tokenomics/README.md`** — 611-line legacy NWTN ThinkingMode
+  pricing doc replaced with real FTNS tokenomics (80/15/5 splits, PCU menu,
+  staking tiers)
+- **SDK READMEs** (`sdks/python`, `sdks/javascript`, `sdks/go`) — quick
+  start and features updated
+- **`docs/SOVEREIGN_EDGE_AI_SPEC.md`, `docs/CONFIDENTIAL_COMPUTE_SPEC.md`** —
+  added "⚠️ HISTORICAL DOCUMENT" banners directing readers to current
+  `docs/architecture.md`. Specs themselves preserved as historical records.
+
+### Removed
+
+**50 pure-legacy documentation files deleted:**
+- NWTN legacy pipeline: `COMPLETE_NWTN_PIPELINE_WORKFLOW.md`,
+  `NWTN_COMPLETE_SYSTEM_README.md`, `NWTN_PIPELINE_CHECKPOINTING.md`,
+  `NWTN_README_UPDATE.md`, `NWTN_Potemkin_Protection_Analysis.md`,
+  `NWTN_Stochastic_Parrots_Analysis.md`,
+  `architecture/NWTN_COMPLETE_PIPELINE_ARCHITECTURE.md`
+- Distillation / SEAL / teacher: `architecture/automated_distillation_system.md`,
+  `architecture/SEAL_IMPLEMENTATION.md`, `ENHANCED_FTNS_TOKEN_PRICING.md`,
+  `tokenomics/TOKENOMICS_OVERVIEW.md`
+- Enterprise architecture: `ARCHITECTURE_DEPENDENCIES.md`,
+  `SOC2_ISO27001_COMPLIANCE_FRAMEWORK.md`, `PHASE_7_ENTERPRISE_ARCHITECTURE.md`,
+  `ENTERPRISE_MONITORING_SYSTEM.md`, `MULTI_CLOUD_STRATEGY.md`,
+  `CONTAINER_RUNTIME_ABSTRACTION_SUMMARY.md`, `cdn_infrastructure.md`,
+  `advanced/DISTRIBUTED_RESOURCE_ARCHITECTURE.md`
+- Legacy marketplace: `marketplace/MARKETPLACE_ECOSYSTEM_GUIDE.md`,
+  `marketplace/MARKETPLACE_IMPLEMENTATION.md`, `marketplace-status.md`
+- Legacy API/code docs: `API_DOCUMENTATION.md`, `CODE_REVIEW.md`,
+  `EXAMPLES_COOKBOOK.md`, `api/PHASE_7_API_REFERENCE.md`,
+  `TECHNICAL_ADVANTAGES.md`
+- Legacy investor: `audit/INVESTOR_AUDIT_GUIDE.md`,
+  `business/INVESTMENT_READINESS_REPORT.md`, `business/INVESTOR_QUICKSTART.md`,
+  `business/roadmaps/PRODUCTION_ROADMAP.md`, `INVESTOR_QUICKSTART.md`,
+  `GAME_THEORETIC_INVESTOR_THESIS.md`
+- AI-auditor docs (all 4 files referenced deleted 7-phase Newton spectrum):
+  `ai-auditor/{AI_AUDIT_GUIDE,AI_AUDITOR_INDEX,README,TECHNICAL_CLAIMS_VALIDATION}.md`
+- Other legacy: `COLLABORATION_PLATFORM_COMPLETION_SUMMARY.md`,
+  `integration/COLLABORATION_PLATFORM_INTEGRATION_REPORT.md`,
+  `roadmaps/P2P_SECURE_COLLABORATION_INTEGRATION_ROADMAP.md`,
+  `SECURITY_ARCHITECTURE.md`, `security/SECURITY_IMPLEMENTATION_STATUS.md`,
+  `PERFORMANCE_METRICS.md`, `safety.md`, `PRSM_Development_Notes.txt`,
+  `evaluator_demo.md`, `REASONING_CONTEXT_AGGREGATOR_ROADMAP.md`
+
+### Preserved as Historical
+
+~90 dated records (CHANGELOG, sprint specs in `docs/plans/`, external audits,
+research notes, phase4 implementation record) left untouched.
+
+### Filesystem Cleanup
+
+Removed stale artifacts in `prsm/compute/nwtn/` left over from PR 2 (v1.6.0):
+11 empty legacy subdirectories, stale `__pycache__/` files for deleted modules,
+`.DS_Store` files, and 1 untracked academic paper markdown. `prsm/compute/nwtn/`
+now correctly contains only `__init__.py` + `training/` (Ring 9).
+
+### Stats
+
+- 79 files changed across two commits (`cf3dd38` + `a804099`)
+- 23,482 lines of legacy docs removed, 718 lines of accurate content added
+- Net: −22,764 lines of documentation
+- Ring 9 regression tests: 6 passed / 0 errors (unchanged)
+
+---
+
 ## [1.6.2] - 2026-04-10
 
 ### Hotfix — Missing Base Dependencies
