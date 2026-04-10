@@ -7,6 +7,7 @@ private-key signing.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from typing import Optional
@@ -23,6 +24,41 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+
+
+# ── Phase 1.1 Task 3: canonical content hash helper ──────────────────────
+
+
+def compute_content_hash(creator_address: str, raw_content_bytes: bytes) -> bytes:
+    """Canonical content hash for the on-chain registry.
+
+    Format: keccak256(creator_address_20bytes || sha3_256(raw_content_bytes))
+
+    Binding the creator into the hash defeats squatting: a different
+    creator registering the same raw content produces a different hash,
+    and lookups at payment time always use the *actual* creator's
+    address (from upload metadata), so an attacker cannot front-run a
+    creator's registration. The inner sha3_256 commits to the file
+    bytes so the registrant's hash is verifiable end-to-end.
+
+    The CLI, the upload pipeline, and content_economy all converge on
+    this single helper. Don't reimplement the formula in callers.
+    """
+    if not HAS_WEB3:
+        raise RuntimeError("web3 package required")
+    if not isinstance(creator_address, str) or not creator_address.startswith("0x"):
+        raise ValueError("creator_address must be a 0x-prefixed address")
+    try:
+        addr_checksum = Web3.to_checksum_address(creator_address)
+    except Exception as exc:
+        raise ValueError(f"invalid creator_address: {exc}") from exc
+
+    addr_bytes = bytes.fromhex(addr_checksum[2:])  # 20 bytes
+    if len(addr_bytes) != 20:
+        raise ValueError("address must be 20 bytes")
+
+    inner = hashlib.sha3_256(raw_content_bytes).digest()
+    return bytes(Web3.keccak(addr_bytes + inner))
 
 PROVENANCE_REGISTRY_ABI = [
     {

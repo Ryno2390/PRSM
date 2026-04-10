@@ -135,3 +135,52 @@ def test_is_registered_returns_bool(mock_web3):
     assert client.is_registered(_hash("yes")) is True
     contract.functions.isRegistered.return_value.call.return_value = False
     assert client.is_registered(_hash("no")) is False
+
+
+# ── Phase 1.1 Task 3: creator-bound canonical hash ────────────────────────
+
+
+def test_compute_content_hash_binds_creator():
+    """Two different creators registering the same file bytes produce
+    different content hashes — squatting impossible."""
+    from prsm.economy.web3.provenance_registry import compute_content_hash
+
+    file_bytes = b"the same exact file content"
+    alice = "0x1111111111111111111111111111111111111111"
+    mallory = "0x2222222222222222222222222222222222222222"
+
+    h_alice = compute_content_hash(alice, file_bytes)
+    h_mallory = compute_content_hash(mallory, file_bytes)
+
+    assert len(h_alice) == 32
+    assert len(h_mallory) == 32
+    assert h_alice != h_mallory
+
+
+def test_compute_content_hash_deterministic():
+    from prsm.economy.web3.provenance_registry import compute_content_hash
+
+    h1 = compute_content_hash(
+        "0xaAaA000000000000000000000000000000000001", b"x"
+    )
+    h2 = compute_content_hash(
+        "0xaaaa000000000000000000000000000000000001", b"x"
+    )
+    # Checksum case must not affect the result
+    assert h1 == h2
+
+
+def test_compute_content_hash_rejects_invalid_address():
+    from prsm.economy.web3.provenance_registry import compute_content_hash
+
+    with pytest.raises(ValueError, match="address"):
+        compute_content_hash("not-an-address", b"x")
+
+
+def test_compute_content_hash_different_content_different_hash():
+    from prsm.economy.web3.provenance_registry import compute_content_hash
+
+    creator = "0x1111111111111111111111111111111111111111"
+    h1 = compute_content_hash(creator, b"file one")
+    h2 = compute_content_hash(creator, b"file two")
+    assert h1 != h2

@@ -3,6 +3,7 @@
 from prsm.economy.web3.provenance_registry import (
     ContentRecord,
     ProvenanceRegistryClient,
+    compute_content_hash,
 )
 from prsm.economy.web3.royalty_distributor import (
     RoyaltyDistributorClient,
@@ -14,4 +15,5 @@ __all__ = [
     "ProvenanceRegistryClient",
     "RoyaltyDistributorClient",
     "SplitPreview",
+    "compute_content_hash",
 ]
