@@ -584,6 +584,14 @@ class ContentProvider:
                             f"Payment processed for {cid[:12]}... "
                             f"({payment.amount} FTNS from {peer.peer_id[:8]})"
                         )
+                    elif payment.status.value == "pending_onchain":
+                        # Phase 1.2: on-chain broadcast OK, receipt unknown —
+                        # reconciliation handles this out-of-band.
+                        logger.info(
+                            f"Payment pending on-chain reconciliation for "
+                            f"{cid[:12]}... ({payment.amount} FTNS from "
+                            f"{peer.peer_id[:8]})"
+                        )
                 except Exception as e:
                     # Log but don't fail the transfer - payment issues handled separately
                     logger.warning(f"Payment processing failed for {cid[:12]}...: {e}")

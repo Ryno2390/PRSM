@@ -808,3 +808,117 @@ def test_content_index_backfills_provenance_hash_on_later_advertisement():
         )
     )
     assert index._records["QmLate"].provenance_hash == expected_hash
+
+
+# ── Phase 1.2 Task 10: retrieval flow handles PENDING_ONCHAIN ───────────
+
+
+def test_request_content_retrieval_accepts_pending_onchain_payment(monkeypatch):
+    """request_content_retrieval() must NOT treat PaymentStatus.PENDING_ONCHAIN
+    as a hard failure. After Task 3 added the new status, the retrieval
+    path still checked `status != COMPLETED` and aborted — discarding
+    content even when the on-chain broadcast was in flight. Phase 1.2
+    Task 10 regression from the second codex re-review."""
+    import asyncio
+    from decimal import Decimal
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node import content_economy as ce_mod
+    from prsm.node.content_economy import (
+        ContentEconomy,
+        ContentAccessPayment,
+        PaymentStatus,
+        ProviderBid,
+        RoyaltyModel,
+    )
+
+    identity = MagicMock()
+    identity.node_id = "node-retriever"
+    ledger = MagicMock()
+    ledger.credit = AsyncMock()
+    ledger.debit = AsyncMock()
+    gossip = MagicMock()
+    gossip.publish = AsyncMock()
+    content_index = MagicMock()
+
+    economy = ContentEconomy(
+        identity=identity,
+        ledger=ledger,
+        gossip=gossip,
+        content_index=content_index,
+        ftns_ledger=None,
+        royalty_model=RoyaltyModel.PHASE4,
+    )
+
+    # Patch asyncio.sleep inside the content_economy module so the bid
+    # collection wait returns instantly *and* injects a bid into the
+    # most recent RetrievalRequest during the first sleep.
+    real_sleep = asyncio.sleep
+
+    async def fake_sleep(delay: float) -> None:
+        if economy._retrieval_requests:
+            latest_req = next(reversed(economy._retrieval_requests.values()))
+            if not latest_req.bids:
+                latest_req.bids.append(
+                    ProviderBid(
+                        provider_id="peer-42",
+                        content_id=latest_req.content_id,
+                        price_ftns=Decimal("0.5"),
+                        estimated_latency_ms=100.0,
+                        available_bandwidth_mbps=100.0,
+                        reputation_score=1.0,
+                    )
+                )
+        await real_sleep(0)
+
+    monkeypatch.setattr(ce_mod.asyncio, "sleep", fake_sleep)
+
+    # Stub process_content_access to return PENDING_ONCHAIN so we
+    # exercise the guard clause under test.
+    async def fake_process(content_id, accessor_id, content_metadata):
+        return ContentAccessPayment(
+            payment_id="p-pending",
+            content_id=content_id,
+            accessor_id=accessor_id,
+            creator_id=content_metadata.get("creator_id", ""),
+            amount=Decimal("1"),
+            royalty_model=RoyaltyModel.PHASE4,
+            status=PaymentStatus.PENDING_ONCHAIN,
+            royalty_distributions=[
+                {
+                    "recipient_id": "onchain:in_flight",
+                    "amount": 1.0,
+                    "type": "broadcast_pending",
+                    "tx_hash": "0x" + "ab" * 32,
+                }
+            ],
+        )
+
+    economy.process_content_access = fake_process
+
+    # The real request_content_retrieval returns None even for the
+    # success path (content delivery is a separate step), so we can't
+    # use the return value to distinguish in-flight-OK from payment-fail.
+    # Instead we capture whether the guard logged an error.
+    error_logs: list = []
+    monkeypatch.setattr(
+        ce_mod.logger,
+        "error",
+        lambda *args, **kwargs: error_logs.append((args, kwargs)),
+    )
+
+    asyncio.run(
+        economy.request_content_retrieval(
+            content_id="cid-needed",
+            max_price_ftns=Decimal("1"),
+            timeout=0.01,
+        )
+    )
+
+    payment_failed_logs = [
+        e for e in error_logs if "Payment failed for retrieval" in str(e[0])
+    ]
+    assert not payment_failed_logs, (
+        "PENDING_ONCHAIN must not be treated as a hard payment failure; "
+        f"got error logs: {payment_failed_logs}"
+    )
