@@ -21,7 +21,9 @@ Integration Points:
 """
 
 import asyncio
+import hashlib
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -52,6 +54,19 @@ MAX_ROYALTY_CHAIN_DEPTH = 5  # Max derivative chain depth to track
 LEGACY_DERIVATIVE_SHARE = 0.70
 LEGACY_SOURCE_SHARE = 0.25
 LEGACY_NETWORK_SHARE = 0.05
+
+
+# ── On-chain provenance feature flag (Phase 1) ────────────────────────────
+# When PRSM_ONCHAIN_PROVENANCE=1, _distribute_royalties first attempts an
+# on-chain RoyaltyDistributor.distributeRoyalty call. On any failure, the
+# call falls through to the existing local-ledger split so payments are
+# never lost.
+ONCHAIN_PROVENANCE_ENABLED = os.getenv(
+    "PRSM_ONCHAIN_PROVENANCE", ""
+).lower() in ("1", "true", "yes")
+PROVENANCE_REGISTRY_ADDRESS = os.getenv("PRSM_PROVENANCE_REGISTRY_ADDRESS", "")
+ROYALTY_DISTRIBUTOR_ADDRESS = os.getenv("PRSM_ROYALTY_DISTRIBUTOR_ADDRESS", "")
+DEFAULT_FTNS_TOKEN_ADDRESS = "0x5276a3756C85f2E9e46f6D34386167a209aa16e5"
 
 
 class RoyaltyModel(str, Enum):
@@ -336,6 +351,146 @@ class ContentEconomy:
         
         return payment
     
+    # ── On-chain provenance clients (Phase 1, lazy) ────────────────────────
+
+    def _get_provenance_client(self):
+        """Lazy-init ProvenanceRegistryClient. Returns None if disabled."""
+        if not ONCHAIN_PROVENANCE_ENABLED:
+            return None
+        if not PROVENANCE_REGISTRY_ADDRESS:
+            logger.warning(
+                "PRSM_ONCHAIN_PROVENANCE=1 but PRSM_PROVENANCE_REGISTRY_ADDRESS not set"
+            )
+            return None
+        if getattr(self, "_provenance_client", None) is None:
+            try:
+                from prsm.economy.web3.provenance_registry import (
+                    ProvenanceRegistryClient,
+                )
+                rpc_url = os.getenv("PRSM_BASE_RPC_URL", "https://mainnet.base.org")
+                pk = os.getenv("FTNS_WALLET_PRIVATE_KEY")
+                self._provenance_client = ProvenanceRegistryClient(
+                    rpc_url=rpc_url,
+                    contract_address=PROVENANCE_REGISTRY_ADDRESS,
+                    private_key=pk,
+                )
+            except Exception as exc:
+                logger.error(f"failed to init ProvenanceRegistryClient: {exc}")
+                self._provenance_client = None
+        return self._provenance_client
+
+    def _get_royalty_distributor(self):
+        """Lazy-init RoyaltyDistributorClient. Returns None if disabled."""
+        if not ONCHAIN_PROVENANCE_ENABLED:
+            return None
+        if not ROYALTY_DISTRIBUTOR_ADDRESS:
+            logger.warning(
+                "PRSM_ONCHAIN_PROVENANCE=1 but PRSM_ROYALTY_DISTRIBUTOR_ADDRESS not set"
+            )
+            return None
+        if getattr(self, "_royalty_client", None) is None:
+            try:
+                from prsm.economy.web3.royalty_distributor import (
+                    RoyaltyDistributorClient,
+                )
+                rpc_url = os.getenv("PRSM_BASE_RPC_URL", "https://mainnet.base.org")
+                pk = os.getenv("FTNS_WALLET_PRIVATE_KEY")
+                ftns_addr = os.getenv("FTNS_TOKEN_ADDRESS", DEFAULT_FTNS_TOKEN_ADDRESS)
+                self._royalty_client = RoyaltyDistributorClient(
+                    rpc_url=rpc_url,
+                    distributor_address=ROYALTY_DISTRIBUTOR_ADDRESS,
+                    ftns_token_address=ftns_addr,
+                    private_key=pk,
+                )
+            except Exception as exc:
+                logger.error(f"failed to init RoyaltyDistributorClient: {exc}")
+                self._royalty_client = None
+        return self._royalty_client
+
+    def _serving_node_address(self) -> Optional[str]:
+        """Return this node's on-chain 0x address if available."""
+        if self.ftns_ledger and getattr(self.ftns_ledger, "_connected_address", None):
+            return self.ftns_ledger._connected_address
+        return None
+
+    @staticmethod
+    def _content_id_to_hash32(content_id: str) -> bytes:
+        """Map a string content_id to a 32-byte hash for the on-chain registry."""
+        return hashlib.sha3_256(content_id.encode("utf-8")).digest()
+
+    async def _try_onchain_distribute(
+        self,
+        payment: "ContentAccessPayment",
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Attempt on-chain royalty distribution. Returns distributions on
+        success, None to signal the caller should fall through to local."""
+        distributor = self._get_royalty_distributor()
+        if distributor is None:
+            return None
+
+        serving_node_addr = self._serving_node_address()
+        if not serving_node_addr:
+            logger.debug("on-chain distribute skipped: no serving-node 0x address")
+            return None
+
+        registry = self._get_provenance_client()
+        content_hash = self._content_id_to_hash32(payment.content_id)
+
+        # Hard requirement: content must already be registered on-chain.
+        # Auto-registration is intentionally NOT done here — only the creator
+        # can register, and the accessor is paying. CLI handles registration.
+        if registry is not None and not registry.is_registered(content_hash):
+            logger.info(
+                f"on-chain distribute skipped: content {payment.content_id[:12]}… "
+                f"not registered on-chain (use `prsm provenance register`)"
+            )
+            return None
+
+        gross_wei = int(Decimal(str(payment.amount)) * Decimal(10**18))
+        if gross_wei <= 0:
+            return None
+
+        try:
+            # Run the sync Web3 call off the event loop so we don't block.
+            preview = await asyncio.to_thread(
+                distributor.preview_split, content_hash, gross_wei
+            )
+            tx_hash = await asyncio.to_thread(
+                distributor.distribute_royalty,
+                content_hash,
+                serving_node_addr,
+                gross_wei,
+            )
+            logger.info(
+                f"on-chain royalty paid: content={content_hash.hex()[:12]}… "
+                f"gross={payment.amount} tx={tx_hash[:16]}…"
+            )
+            return [
+                {
+                    "recipient_id": "onchain:creator",
+                    "amount": preview.creator_amount / 10**18,
+                    "type": "original_creator",
+                    "tx_hash": tx_hash,
+                },
+                {
+                    "recipient_id": "onchain:network",
+                    "amount": preview.network_amount / 10**18,
+                    "type": "network_fee",
+                    "tx_hash": tx_hash,
+                },
+                {
+                    "recipient_id": serving_node_addr,
+                    "amount": preview.serving_node_amount / 10**18,
+                    "type": "serving_node",
+                    "tx_hash": tx_hash,
+                },
+            ]
+        except Exception as exc:
+            logger.error(
+                f"on-chain royalty distribution failed, falling back to local: {exc}"
+            )
+            return None
+
     async def _distribute_royalties(
         self,
         payment: ContentAccessPayment,
@@ -354,7 +509,17 @@ class ContentEconomy:
         - 70% to derivative creator
         - 25% split among source creators
         - 5% network fee
+
+        Phase 1 (on-chain): when PRSM_ONCHAIN_PROVENANCE=1 and the content
+        is registered in the on-chain ProvenanceRegistry, distribution
+        happens via RoyaltyDistributor on Base mainnet. Any failure falls
+        through to the local path so payments are never lost.
         """
+        # Phase 1: try on-chain first when enabled.
+        onchain = await self._try_onchain_distribute(payment)
+        if onchain is not None:
+            return onchain
+
         distributions = []
         total_amount = payment.amount
 
