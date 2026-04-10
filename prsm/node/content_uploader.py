@@ -40,6 +40,7 @@ from prsm.node.gossip import (
 from prsm.node.transport import MSG_DIRECT, P2PMessage, PeerConnection, WebSocketTransport
 from prsm.node.identity import NodeIdentity
 from prsm.node.local_ledger import LocalLedger, TransactionType
+from prsm.storage.models import ShardManifest
 
 logger = logging.getLogger(__name__)
 
