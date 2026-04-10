@@ -230,8 +230,15 @@ class ProvenanceRegistryClient:
             raise RuntimeError("private_key required for write calls")
         if len(content_hash) != 32:
             raise ValueError("content_hash must be 32 bytes")
-        if not (0 <= royalty_rate_bps <= 10000):
-            raise ValueError("royalty_rate_bps must be in [0, 10000]")
+        # MAX_ROYALTY_RATE_BPS = 9800 in the registry contract; rates above
+        # this would be rejected on chain after wasting gas. Mirror the cap
+        # client-side so callers fail fast.
+        MAX_ROYALTY_RATE_BPS = 9800
+        if not (0 <= royalty_rate_bps <= MAX_ROYALTY_RATE_BPS):
+            raise ValueError(
+                f"royalty_rate_bps must be in [0, {MAX_ROYALTY_RATE_BPS}] "
+                f"(got {royalty_rate_bps})"
+            )
 
         with self._tx_lock:
             tx = self.contract.functions.registerContent(
