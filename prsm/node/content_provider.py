@@ -200,7 +200,7 @@ class ContentResponseMessage:
 @dataclass
 class ContentAnnouncement:
     """Announce content availability via gossip.
-    
+
     Broadcast when a node has content available for retrieval.
     """
     cid: str
@@ -211,7 +211,12 @@ class ContentAnnouncement:
     timestamp: float = field(default_factory=time.time)
     filename: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    
+    # Phase 1.2: canonical creator-bound provenance hash (0x-prefixed
+    # hex). Forwarded to remote nodes so replicated content can route
+    # royalties through the on-chain RoyaltyDistributor. None when the
+    # original uploader had no 0x creator_address.
+    provenance_hash: Optional[str] = None
+
     def to_gossip_data(self) -> Dict[str, Any]:
         """Convert to gossip message data."""
         return {
@@ -223,8 +228,9 @@ class ContentAnnouncement:
             "timestamp": self.timestamp,
             "filename": self.filename or "",
             "metadata": self.metadata,
+            "provenance_hash": self.provenance_hash,
         }
-    
+
     @classmethod
     def from_gossip_data(cls, data: Dict[str, Any], origin: str) -> "ContentAnnouncement":
         """Create from gossip message data."""
@@ -237,6 +243,7 @@ class ContentAnnouncement:
             timestamp=data.get("timestamp", time.time()),
             filename=data.get("filename"),
             metadata=data.get("metadata", {}),
+            provenance_hash=data.get("provenance_hash"),
         )
 
 

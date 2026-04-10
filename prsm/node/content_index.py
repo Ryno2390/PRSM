@@ -46,6 +46,10 @@ class ContentRecord:
     parent_cids: List[str] = field(default_factory=list)
     embedding_id: Optional[str] = None
     near_duplicate_of: Optional[str] = None
+    # Phase 1.2: canonical creator-bound provenance hash (0x-prefixed
+    # hex). Set from the gossip advertisement so peers discovering
+    # content remotely can still route royalties on-chain.
+    provenance_hash: Optional[str] = None
 
 
 class ContentIndex:
@@ -96,6 +100,12 @@ class ContentIndex:
             # Existing record — add the new provider and refresh LRU
             record = self._records[cid]
             record.providers.add(provider_id)
+            # Backfill provenance_hash if an earlier advertisement lacked it
+            # and a later one carries it. Don't overwrite a populated value.
+            if record.provenance_hash is None:
+                incoming_hash = data.get("provenance_hash")
+                if incoming_hash:
+                    record.provenance_hash = incoming_hash
             self._records.move_to_end(cid)
         else:
             # New record
@@ -112,6 +122,7 @@ class ContentIndex:
                 parent_cids=data.get("parent_cids", []),
                 embedding_id=data.get("embedding_id"),
                 near_duplicate_of=data.get("near_duplicate_of"),
+                provenance_hash=data.get("provenance_hash"),
             )
             self._records[cid] = record
             self._index_keywords(record)
