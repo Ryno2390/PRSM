@@ -39,11 +39,29 @@ describe("ProvenanceRegistry", function () {
       ).to.be.revertedWith("Already registered");
     });
 
-    it("rejects royalty rate above 100%", async function () {
-      const contentHash = ethers.keccak256(ethers.toUtf8Bytes("high"));
+    it("rejects royalty rate above MAX_ROYALTY_RATE_BPS (9800)", async function () {
+      const contentHash = ethers.keccak256(ethers.toUtf8Bytes("over"));
+      await expect(
+        registry.connect(creator).registerContent(contentHash, 9801, "ipfs://X")
+      ).to.be.revertedWith("Rate exceeds max");
+    });
+
+    it("rejects royalty rate above 100% (10001)", async function () {
+      const contentHash = ethers.keccak256(ethers.toUtf8Bytes("very-high"));
       await expect(
         registry.connect(creator).registerContent(contentHash, 10001, "ipfs://X")
       ).to.be.reverted;
+    });
+
+    it("accepts royalty rate exactly at MAX_ROYALTY_RATE_BPS (9800)", async function () {
+      const contentHash = ethers.keccak256(ethers.toUtf8Bytes("max"));
+      await registry.connect(creator).registerContent(contentHash, 9800, "ipfs://M");
+      const c = await registry.contents(contentHash);
+      expect(c.royaltyRateBps).to.equal(9800);
+    });
+
+    it("exposes MAX_ROYALTY_RATE_BPS as a public constant", async function () {
+      expect(await registry.MAX_ROYALTY_RATE_BPS()).to.equal(9800);
     });
 
     it("accepts zero royalty rate (free content)", async function () {
