@@ -606,6 +606,10 @@ class ContentEconomy:
             )
 
             # Original creator gets 8%
+            # Phase 1.3 Task 3g pass-6: the empty-string filter for
+            # original_creator is load-bearing — _resolve_provenance_chain
+            # may return chain.original_creator="" if all ancestors in the
+            # chain were known only from minimal ads. Don't remove this check.
             if provenance_chain.original_creator:
                 original_share = total_amount * Decimal(str(ORIGINAL_CREATOR_ROYALTY_RATE))
                 distributions.append({
@@ -623,6 +627,14 @@ class ContentEconomy:
 
             # Derivative creators get 1% each
             for i, derivative in enumerate(provenance_chain.derivative_creators[:MAX_ROYALTY_CHAIN_DEPTH]):
+                derivative_creator_id = derivative.get("creator_id", "")
+                if not derivative_creator_id:
+                    # Phase 1.3 Task 3g pass-6: defense-in-depth. The
+                    # source-of-truth filter lives in
+                    # _resolve_provenance_chain, but a stale chain built
+                    # before the fix (or a bug-resurfaced later) would
+                    # otherwise silently credit an empty wallet.
+                    continue
                 derivative_share = total_amount * Decimal(str(DERIVATIVE_CREATOR_ROYALTY_RATE))
                 distributions.append({
                     "recipient_id": derivative["creator_id"],
@@ -803,30 +815,49 @@ class ContentEconomy:
             if current_cid in visited or depth > MAX_ROYALTY_CHAIN_DEPTH:
                 return
             visited.add(current_cid)
-            
+
             record = self.content_index.lookup(current_cid)
             if not record:
                 return
-            
+
             if depth == 0 and not parent_content_ids:
                 # This is the content itself - the direct creator
-                chain.direct_creator = record.creator_id
+                chain.direct_creator = record.creator_id or ""
 
-            if record.parent_content_ids:
-                for parent_cid in record.parent_content_ids:
+            # Phase 1.3 Task 3g pass-6: ContentRecord's parent field is
+            # parent_cids, not parent_content_ids. The old attribute access
+            # was masked by MagicMock-based tests (MagicMock returns a new
+            # MagicMock on attribute access, which is truthy, so the branch
+            # fired with bogus iteration). Production would AttributeError.
+            record_parents = getattr(record, "parent_cids", None) or []
+            if record_parents:
+                for parent_cid in record_parents:
                     parent_record = self.content_index.lookup(parent_cid)
                     if parent_record:
                         if depth == 0:
-                            # First level parent - derivative relationship
-                            chain.derivative_creators.append({
-                                "creator_id": record.creator_id,
-                                "content_id": current_cid,
-                                "depth": depth + 1,
-                            })
+                            # First level parent - derivative relationship.
+                            # Phase 1.3 Task 3g pass-6: skip entries with an
+                            # empty creator_id. After Task 3g pass-5 made ""
+                            # a valid ContentRecord.creator_id state (for
+                            # records learned only from minimal replica
+                            # ads), crediting empty-wallet recipients would
+                            # lock derivative royalty shares in a phantom
+                            # local-ledger row instead of paying the real
+                            # creator.
+                            if record.creator_id:
+                                chain.derivative_creators.append({
+                                    "creator_id": record.creator_id,
+                                    "content_id": current_cid,
+                                    "depth": depth + 1,
+                                })
                         await trace_ancestors(parent_cid, depth + 1)
             else:
                 # No parents = original creator
-                if chain.original_creator is None:
+                if chain.original_creator is None and record.creator_id:
+                    # Phase 1.3 Task 3g pass-6: only set original_creator
+                    # when we know who it is. An empty string here would
+                    # cause _distribute_royalties to credit an empty wallet
+                    # for the 8% original-creator share.
                     chain.original_creator = record.creator_id
                     chain.original_content_id = current_cid
 
@@ -837,7 +868,10 @@ class ContentEconomy:
         # If no parents found, this is original content
         if not chain.original_creator:
             record = self.content_index.lookup(content_id)
-            if record:
+            if record and record.creator_id:
+                # Phase 1.3 Task 3g pass-6: only claim original creator
+                # when the record has a real creator_id, not an
+                # empty-string placeholder from a minimal ad.
                 chain.original_creator = record.creator_id
                 chain.original_content_id = content_id
 

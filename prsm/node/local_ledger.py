@@ -231,6 +231,17 @@ class LocalLedger:
         signature: Optional[str] = None,
     ) -> Transaction:
         """Credit FTNS to a wallet (from_wallet is None for system grants)."""
+        if not wallet_id:
+            # Phase 1.3 Task 3g pass-6: refuse empty wallet credits.
+            # An empty wallet_id creates a phantom row that can't be
+            # traced to a real creator. Any code path that tries to
+            # credit "" is a bug; fail loudly rather than silently
+            # locking FTNS to an unrecoverable key.
+            raise ValueError(
+                "local_ledger.credit: wallet_id must be non-empty "
+                f"(attempted tx_type={tx_type}, amount={amount}, "
+                f"description={description!r})"
+            )
         await self._ensure_wallet(wallet_id)
         tx = Transaction(
             tx_id=str(uuid.uuid4()),
