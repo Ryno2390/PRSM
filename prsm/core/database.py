@@ -1450,7 +1450,11 @@ class ProvenanceQueries:
                     existing.parent_cids = parent_content_ids
                     # Phase 1.3 Task 2: refresh provenance_hash so a later
                     # upload that adds a creator 0x address backfills the
-                    # canonical hash onto a previously-null row.
+                    # canonical hash onto a previously-null row. Guard with
+                    # `is not None` so API re-uploads via content_api.py —
+                    # which don't compute the hash and omit the field from
+                    # the record dict — can't null out a previously-
+                    # persisted value.
                     if record.get("provenance_hash") is not None:
                         existing.provenance_hash = record.get("provenance_hash")
                 else:
