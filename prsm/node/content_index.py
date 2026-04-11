@@ -97,15 +97,12 @@ class ContentIndex:
         provider_id = data.get("provider_id", origin)
 
         if cid in self._records:
-            # Existing record — add the new provider and refresh LRU
+            # Existing record — add the new provider and backfill any
+            # empty/default fields from the new advertisement. Never
+            # clobber a populated value.
             record = self._records[cid]
             record.providers.add(provider_id)
-            # Backfill provenance_hash if an earlier advertisement lacked it
-            # and a later one carries it. Don't overwrite a populated value.
-            if record.provenance_hash is None:
-                incoming_hash = data.get("provenance_hash")
-                if incoming_hash:
-                    record.provenance_hash = incoming_hash
+            self._backfill_record_from_advertise(record, data, origin)
             self._records.move_to_end(cid)
         else:
             # New record
@@ -129,6 +126,112 @@ class ContentIndex:
             self._evict_if_needed()
 
         logger.debug(f"Content index: {cid[:12]}... now has {len(self._records[cid].providers)} provider(s)")
+
+    def _backfill_record_from_advertise(
+        self,
+        record: ContentRecord,
+        data: Dict[str, Any],
+        origin: str,
+    ) -> None:
+        """Backfill empty/default fields on an existing ContentRecord
+        from a new advertisement payload. Never clobbers populated
+        values.
+
+        "Empty" is field-specific:
+         - strings: "" or None → backfill
+         - dicts:   {} → backfill
+         - lists:   [] → backfill
+         - creator_id: "" or equal to origin (the fallback used when
+           the advertise payload omits creator_id; see new-record path
+           above at ``creator_id=data.get("creator_id", origin)``) →
+           backfill when the new payload has a different, non-empty
+           value.
+         - royalty_rate: 0.01 → backfill when the new payload has a
+           non-default, non-0.01 value (best-effort: we can't
+           distinguish explicit 0.01 from default 0.01, so the first
+           advertisement to set a non-default wins).
+         - None for provenance_hash / embedding_id / near_duplicate_of
+           → backfill
+
+        Phase 1.3 Task 3g — generalization of the Phase 1.2 Task 9
+        provenance_hash-only backfill after codex pass 3 flagged the
+        single-field version as P2. Without this, nodes that first
+        learn about a CID from a minimal replica advertisement get
+        stuck with creator_id = origin-peer-id, empty filename, empty
+        parent_cids, and default royalty_rate forever — causing
+        Task 3f's serve_on_behalf_of_replica to pay royalties to the
+        wrong creator.
+        """
+        # String fields that backfill on empty string or None.
+        for field_name in ("filename", "content_hash"):
+            current = getattr(record, field_name)
+            if not current:
+                incoming = data.get(field_name)
+                if incoming:
+                    setattr(record, field_name, incoming)
+
+        # creator_id: backfill when the existing value is empty OR
+        # looks like the origin-fallback placeholder from a minimal
+        # ad. The new-record path uses
+        # ``data.get("creator_id", origin)`` — so when the advertise
+        # payload omitted creator_id, the record's creator_id is the
+        # original gossip origin peer id, which is also the initial
+        # entry in ``record.providers`` (via the provider_id
+        # fallback). We use "creator_id is a member of providers" as
+        # the signal that it was the fallback placeholder rather
+        # than a real creator. A replica's advertisement has no
+        # creator_id field (storage_provider doesn't know the
+        # creator), so its record comes out with creator_id =
+        # storage_peer_id — definitely wrong, must be repaired when
+        # a later advertisement carries the real creator. Note: this
+        # heuristic assumes creator_id (typically a wallet address or
+        # opaque identifier) does not collide with a peer_id. If a
+        # real creator IS also a provider (self-hosting), the
+        # advertisement's explicit creator_id matches the existing
+        # record's creator_id and nothing is changed — safe.
+        creator_is_fallback = (
+            not record.creator_id
+            or record.creator_id in record.providers
+        )
+        if creator_is_fallback:
+            incoming_creator = data.get("creator_id")
+            if incoming_creator and incoming_creator != record.creator_id:
+                record.creator_id = incoming_creator
+
+        # metadata dict: backfill when empty.
+        if not record.metadata:
+            incoming_metadata = data.get("metadata")
+            if incoming_metadata:
+                record.metadata = incoming_metadata
+
+        # parent_cids list: backfill when empty.
+        if not record.parent_cids:
+            incoming_parents = data.get("parent_cids")
+            if incoming_parents:
+                record.parent_cids = list(incoming_parents)
+
+        # royalty_rate: backfill default 0.01 when the new payload
+        # carries a non-default value. Best-effort — we can't
+        # distinguish an explicit 0.01 from a default 0.01, so if the
+        # first advertisement legitimately set royalty_rate=0.01 a
+        # later non-default ad will overwrite it. That is safer than
+        # the alternative (replica minimal ads permanently pinning
+        # royalty_rate to the 0.01 default).
+        if record.royalty_rate == 0.01:
+            incoming_rate = data.get("royalty_rate")
+            if incoming_rate is not None and incoming_rate != 0.01:
+                record.royalty_rate = incoming_rate
+
+        # Optional fields that are None by default.
+        for field_name in (
+            "embedding_id",
+            "near_duplicate_of",
+            "provenance_hash",
+        ):
+            if getattr(record, field_name) is None:
+                incoming = data.get(field_name)
+                if incoming is not None:
+                    setattr(record, field_name, incoming)
 
     async def _on_provenance_register(
         self, subtype: str, data: Dict[str, Any], origin: str

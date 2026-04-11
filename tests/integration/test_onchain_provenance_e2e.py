@@ -2116,3 +2116,144 @@ def test_storage_provider_refuses_replica_serve_without_index_record():
 
     # No response sent — requester will try another provider.
     transport.send_to_peer.assert_not_called()
+
+
+def test_content_index_backfills_metadata_from_richer_advertisement():
+    """When an existing ContentIndex record was created from a minimal
+    (replica) advertisement and a later advertisement arrives with
+    richer metadata, the empty fields must be backfilled from the
+    new payload without clobbering any already-populated values.
+
+    Phase 1.3 Task 3g regression — codex pass 3 P2. Without this
+    backfill, nodes that first learn about a CID from a replica
+    permanently lose the creator_id / filename / parent_cids /
+    content_hash, and Task 3f's replica serve path pays royalties
+    to the wrong creator."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from prsm.node.content_index import ContentIndex
+
+    gossip = MagicMock()
+    gossip.subscribe = MagicMock()
+    index = ContentIndex(gossip=gossip)
+
+    # Minimal replica-style advertisement arrives first: no creator_id,
+    # no filename, no parent_cids, no royalty_rate.
+    minimal = {
+        "cid": "QmRaceTest",
+        "content_hash": "sha256-race",
+        "provider_id": "replica-peer",
+        "size_bytes": 1024,
+    }
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise",
+            data=minimal,
+            origin="replica-peer",
+        )
+    )
+    record = index._records.get("QmRaceTest")
+    assert record is not None
+    # Minimal-ad record has origin as creator fallback.
+    assert record.creator_id == "replica-peer"
+    assert record.filename == ""
+    assert record.parent_cids == []
+    assert record.royalty_rate == 0.01  # default
+
+    # Full uploader advertisement arrives later with real metadata.
+    full = {
+        "cid": "QmRaceTest",
+        "content_hash": "sha256-race",
+        "provider_id": "uploader-peer",
+        "creator_id": "real-uploader",
+        "filename": "document.txt",
+        "size_bytes": 1024,
+        "parent_cids": ["parent-a", "parent-b"],
+        "royalty_rate": 0.05,
+        "metadata": {"tag": "value"},
+        "embedding_id": "emb:QmRaceTest",
+        "provenance_hash": "0x" + "99" * 32,
+    }
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise",
+            data=full,
+            origin="uploader-peer",
+        )
+    )
+
+    record = index._records.get("QmRaceTest")
+    assert record is not None
+    # Empty fields backfilled.
+    assert record.creator_id == "real-uploader", (
+        f"creator_id must backfill from minimal origin fallback; "
+        f"got {record.creator_id!r}"
+    )
+    assert record.filename == "document.txt"
+    assert record.parent_cids == ["parent-a", "parent-b"]
+    assert record.royalty_rate == 0.05
+    assert record.metadata == {"tag": "value"}
+    assert record.embedding_id == "emb:QmRaceTest"
+    assert record.provenance_hash == "0x" + "99" * 32
+    # Providers set includes both.
+    assert record.providers == {"replica-peer", "uploader-peer"}
+
+
+def test_content_index_does_not_clobber_populated_fields():
+    """When a full advertisement arrives first and a minimal one
+    arrives later, the populated fields must NOT be reset by the
+    minimal payload. Defense against the opposite race direction.
+    Phase 1.3 Task 3g regression."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from prsm.node.content_index import ContentIndex
+
+    gossip = MagicMock()
+    gossip.subscribe = MagicMock()
+    index = ContentIndex(gossip=gossip)
+
+    # Full uploader advertisement first.
+    full = {
+        "cid": "QmForwardRace",
+        "content_hash": "sha256-f",
+        "provider_id": "uploader-peer",
+        "creator_id": "real-uploader",
+        "filename": "first.txt",
+        "size_bytes": 2048,
+        "parent_cids": ["parent-x"],
+        "royalty_rate": 0.08,
+        "provenance_hash": "0x" + "aa" * 32,
+    }
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise",
+            data=full,
+            origin="uploader-peer",
+        )
+    )
+    # Minimal replica advertisement later.
+    minimal = {
+        "cid": "QmForwardRace",
+        "content_hash": "sha256-f",
+        "provider_id": "replica-peer",
+        "size_bytes": 2048,
+    }
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise",
+            data=minimal,
+            origin="replica-peer",
+        )
+    )
+    record = index._records.get("QmForwardRace")
+    assert record is not None
+    # Fields preserved from the first advertisement.
+    assert record.creator_id == "real-uploader"
+    assert record.filename == "first.txt"
+    assert record.parent_cids == ["parent-x"]
+    assert record.royalty_rate == 0.08
+    assert record.provenance_hash == "0x" + "aa" * 32
+    # Both providers listed.
+    assert record.providers == {"uploader-peer", "replica-peer"}
