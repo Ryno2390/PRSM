@@ -1058,3 +1058,129 @@ def test_announce_content_helper_forwards_provenance_hash():
     assert gossip.publish.await_count == 1
     _topic, payload = gossip.publish.await_args.args
     assert payload.get("provenance_hash") == expected_hash
+
+
+def test_uploaded_content_is_servable_by_provider():
+    """After a local upload, ContentProvider must be able to serve the
+    same CID. Phase 1.3 Task 1 regression — before this fix,
+    register_local_content had zero production callers, so the serve
+    path returned not_found for every uploaded CID and the on-chain
+    royalty payment never fired end-to-end."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_provider import ContentProvider
+    from prsm.node.content_uploader import ContentUploader
+
+    identity = MagicMock()
+    identity.node_id = "node-wiring-test"
+    identity.public_key_b64 = "fakekey"
+    identity.sign = MagicMock(return_value="sig")
+    gossip = MagicMock()
+    gossip.publish = AsyncMock()
+    ledger = MagicMock()
+    transport = MagicMock()
+
+    provider = ContentProvider(
+        identity=identity,
+        transport=transport,
+        gossip=gossip,
+        content_economy=None,
+    )
+    uploader = ContentUploader(
+        identity=identity,
+        gossip=gossip,
+        ledger=ledger,
+        content_provider=provider,
+    )
+    uploader._ipfs_add = AsyncMock(return_value="QmWiringTest")
+    uploader._persist_provenance = AsyncMock()
+
+    uploaded = asyncio.run(
+        uploader.upload(content=b"payload bytes", filename="w.txt")
+    )
+
+    assert uploaded is not None
+    assert provider.has_local_content(uploaded.content_id), (
+        "Upload path must populate ContentProvider._local_content so that "
+        "incoming content requests can be served and royalty payments fire"
+    )
+
+    # Verify the forwarded metadata carries the fields _handle_content_request
+    # reads when it dispatches to process_content_access.
+    info = provider._local_content.get(uploaded.content_id)
+    assert info is not None
+    md = info.get("metadata", {})
+    assert md.get("creator_id") == uploaded.creator_id
+    assert md.get("royalty_rate") == uploaded.royalty_rate
+    assert md.get("parent_cids") == uploaded.parent_content_ids
+    # provenance_hash is None when creator_address not set — that's expected
+    assert "provenance_hash" in md
+
+
+def test_hydrate_from_db_restores_provider_local_content():
+    """_hydrate_from_db must also call provider.register_local_content
+    so that after a restart, re-loaded content is servable. Without
+    this, the restart window loses servability for every previously
+    uploaded CID until the node serves it for the first time — which
+    never happens because _handle_content_request needs _local_content
+    populated first."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from prsm.node.content_provider import ContentProvider
+    from prsm.node.content_uploader import ContentUploader
+
+    identity = MagicMock()
+    identity.node_id = "node-hydrate-test"
+    identity.public_key_b64 = "fakekey"
+    gossip = MagicMock()
+    gossip.publish = AsyncMock()
+    ledger = MagicMock()
+    transport = MagicMock()
+
+    provider = ContentProvider(
+        identity=identity,
+        transport=transport,
+        gossip=gossip,
+        content_economy=None,
+    )
+    uploader = ContentUploader(
+        identity=identity,
+        gossip=gossip,
+        ledger=ledger,
+        content_provider=provider,
+    )
+
+    # Simulate DB returning one previously-persisted record.
+    fake_records = [{
+        "content_id": "QmHydrateTest",
+        "filename": "h.txt",
+        "size_bytes": 42,
+        "content_hash": "sha256-h",
+        "creator_id": "node-hydrate-test",
+        "created_at": 1_700_000_000.0,
+        "provenance_signature": "sig",
+        "royalty_rate": 0.01,
+        "parent_content_ids": [],
+        "access_count": 0,
+        "total_royalties": 0.0,
+        "is_sharded": False,
+        "manifest_content_id": None,
+        "total_shards": 0,
+        "embedding_id": None,
+        "near_duplicate_of": None,
+        "near_duplicate_similarity": None,
+    }]
+
+    with patch(
+        "prsm.core.database.ProvenanceQueries.load_all_for_node",
+        new=AsyncMock(return_value=fake_records),
+    ):
+        loaded = asyncio.run(uploader._hydrate_from_db())
+
+    assert loaded == 1
+    assert "QmHydrateTest" in uploader.uploaded_content
+    assert provider.has_local_content("QmHydrateTest"), (
+        "_hydrate_from_db must also populate provider._local_content"
+    )

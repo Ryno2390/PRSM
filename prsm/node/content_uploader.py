@@ -22,7 +22,10 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from prsm.node.content_provider import ContentProvider
 
 try:
     import numpy as np
@@ -192,6 +195,7 @@ class ContentUploader:
         semantic_index_path: Optional[Path] = None,
         ipfs_api_url: str = "http://127.0.0.1:5001",
         creator_address: Optional[str] = None,
+        content_provider: Optional["ContentProvider"] = None,
     ):
         self.identity = identity
         self.gossip = gossip
@@ -209,6 +213,13 @@ class ContentUploader:
         # for the on-chain registry. None disables on-chain provenance — the
         # local royalty path still works.
         self.creator_address = creator_address
+
+        # Phase 1.3: optional back-reference to the node's ContentProvider so
+        # the uploader can populate provider._local_content as soon as an
+        # upload succeeds. Without this, register_local_content has no
+        # production callers and the serve path returns not_found for every
+        # uploaded CID. None disables the wiring (used by legacy unit tests).
+        self._content_provider = content_provider
 
         # Sharding configuration
         self.sharding_threshold = sharding_threshold
@@ -228,6 +239,32 @@ class ContentUploader:
 
     async def close(self) -> None:
         pass
+
+    def _register_with_provider(self, uploaded: "UploadedContent") -> None:
+        """Forward a successfully uploaded record into ContentProvider._local_content.
+
+        No-op when no ContentProvider was injected (backward compat with
+        legacy unit tests that construct ContentUploader without a provider).
+
+        The metadata dict mirrors what _handle_content_request dispatches to
+        ContentEconomy.process_content_access. Note: the parent CID list is
+        stored under ``parent_cids`` (not ``parent_content_ids``) so the
+        existing reader at content_provider.py:582 finds it.
+        """
+        if self._content_provider is None:
+            return
+        self._content_provider.register_local_content(
+            cid=uploaded.content_id,
+            size_bytes=uploaded.size_bytes,
+            content_hash=uploaded.content_hash,
+            filename=uploaded.filename,
+            metadata={
+                "creator_id": uploaded.creator_id,
+                "royalty_rate": uploaded.royalty_rate,
+                "parent_cids": uploaded.parent_content_ids,
+                "provenance_hash": uploaded.provenance_hash,
+            },
+        )
 
     async def _get_embedding(self, content: bytes) -> "Optional[np.ndarray]":
         """Attempt to generate a semantic embedding for content.
@@ -394,6 +431,7 @@ class ContentUploader:
             provenance_hash=provenance_hash_hex,
         )
         self.uploaded_content[cid] = uploaded
+        self._register_with_provider(uploaded)  # Phase 1.3: populate provider._local_content
         await self._persist_provenance(uploaded)  # Persist to DB
 
         # Register embedding so future uploads can be checked against this one
@@ -539,6 +577,7 @@ class ContentUploader:
                 provenance_hash=provenance_hash_hex,
             )
             self.uploaded_content[manifest_cid] = uploaded
+            self._register_with_provider(uploaded)  # Phase 1.3: populate provider._local_content
             await self._persist_provenance(uploaded)  # Persist to DB
 
             # Register embedding for future deduplication checks
@@ -636,6 +675,7 @@ class ContentUploader:
                 provenance_hash=provenance_hash_hex,
             )
             self.uploaded_content[cid] = uploaded
+            self._register_with_provider(uploaded)  # Phase 1.3: populate provider._local_content
             await self._persist_provenance(uploaded)  # Persist to DB
 
             # Still advertise and request replication for fallback
@@ -1353,7 +1393,7 @@ class ContentUploader:
             for rec in records:
                 if rec["content_id"] in self.uploaded_content:
                     continue  # In-memory record takes precedence
-                self.uploaded_content[rec["content_id"]] = UploadedContent(
+                uploaded = UploadedContent(
                     content_id=rec["content_id"],
                     filename=rec["filename"],
                     size_bytes=rec["size_bytes"],
@@ -1372,6 +1412,13 @@ class ContentUploader:
                     near_duplicate_of=rec["near_duplicate_of"],
                     near_duplicate_similarity=rec["near_duplicate_similarity"],
                 )
+                self.uploaded_content[rec["content_id"]] = uploaded
+                # Phase 1.3: restart must also re-populate provider._local_content
+                # so previously-uploaded content stays servable after the restart.
+                # Note: provenance_hash is None here until Task 2 adds it to the DB
+                # schema — register_with_provider still passes whatever the dataclass
+                # carries (None today).
+                self._register_with_provider(uploaded)
                 loaded += 1
             if loaded > 0:
                 logger.info(

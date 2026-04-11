@@ -339,6 +339,26 @@ class PRSMNode:
 
         _semantic_index_path = Path.home() / ".prsm" / "semantic_index.json"
 
+        # ── Content Provider (Cross-Node Retrieval) ───────────────────────
+        # Phase 1.3: ContentProvider is constructed BEFORE ContentUploader so
+        # the uploader can hold a reference and populate provider._local_content
+        # on every successful upload / DB hydration. Previously the provider was
+        # built after the uploader, leaving register_local_content with zero
+        # production callers — the serve path returned not_found for every CID
+        # and the on-chain royalty payment never fired end-to-end.
+        _bandwidth_limiter = None
+        if self.storage_provider:
+            _bandwidth_limiter = self.storage_provider.bandwidth_limiter
+
+        self.content_provider = ContentProvider(
+            identity=self.identity,
+            transport=self.transport,
+            gossip=self.gossip,
+            ipfs_api_url=self.config.ipfs_api_url,
+            content_index=self.content_index,
+            bandwidth_limiter=_bandwidth_limiter,
+        )
+
         self.content_uploader = ContentUploader(
             identity=self.identity,
             gossip=self.gossip,
@@ -348,21 +368,7 @@ class PRSMNode:
             content_index=self.content_index,
             embedding_fn=_embedding_fn,
             semantic_index_path=_semantic_index_path,
-        )
-
-        # ── Content Provider (Cross-Node Retrieval) ───────────────────────
-        # Pass bandwidth limiter from storage_provider if available
-        _bandwidth_limiter = None
-        if self.storage_provider:
-            _bandwidth_limiter = self.storage_provider.bandwidth_limiter
-        
-        self.content_provider = ContentProvider(
-            identity=self.identity,
-            transport=self.transport,
-            gossip=self.gossip,
-            ipfs_api_url=self.config.ipfs_api_url,
-            content_index=self.content_index,
-            bandwidth_limiter=_bandwidth_limiter,
+            content_provider=self.content_provider,
         )
 
         # ── Ledger Sync ──────────────────────────────────────────
