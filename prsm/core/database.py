@@ -457,6 +457,12 @@ class ContentProvenanceModel(Base):
     near_duplicate_of = Column(String(255), nullable=True)
     near_duplicate_similarity = Column(Float, nullable=True)
 
+    # Phase 1.3: canonical on-chain provenance hash
+    # (keccak256(creator_address || sha3_256(file_bytes))). Nullable —
+    # rows uploaded before Phase 1.3 or without a configured creator
+    # 0x address stay null and fall back to local royalties.
+    provenance_hash = Column(String(length=66), nullable=True)
+
     created_at = Column(DateTime(timezone=True), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -1442,6 +1448,11 @@ class ProvenanceQueries:
                     existing.access_count = record.get("access_count", existing.access_count)
                     existing.total_royalties = record.get("total_royalties", existing.total_royalties)
                     existing.parent_cids = parent_content_ids
+                    # Phase 1.3 Task 2: refresh provenance_hash so a later
+                    # upload that adds a creator 0x address backfills the
+                    # canonical hash onto a previously-null row.
+                    if record.get("provenance_hash") is not None:
+                        existing.provenance_hash = record.get("provenance_hash")
                 else:
                     row = ContentProvenanceModel(
                         cid=content_id,
@@ -1460,6 +1471,7 @@ class ProvenanceQueries:
                         embedding_id=record.get("embedding_id"),
                         near_duplicate_of=record.get("near_duplicate_of"),
                         near_duplicate_similarity=record.get("near_duplicate_similarity"),
+                        provenance_hash=record.get("provenance_hash"),
                         created_at=created_at,
                     )
                     session.add(row)
@@ -1531,7 +1543,7 @@ class ProvenanceQueries:
                             provenance_signature, royalty_rate, parent_cids,
                             access_count, total_royalties, is_sharded, manifest_cid,
                             total_shards, embedding_id, near_duplicate_of,
-                            near_duplicate_similarity, created_at
+                            near_duplicate_similarity, provenance_hash, created_at
                         FROM content_provenance
                         WHERE creator_id = :creator_id
                         ORDER BY created_at ASC
@@ -1563,6 +1575,7 @@ class ProvenanceQueries:
                             if row.near_duplicate_similarity is not None
                             else None
                         ),
+                        "provenance_hash": row.provenance_hash,
                         "created_at": row.created_at.timestamp() if row.created_at else 0.0,
                     }
                     for row in rows
