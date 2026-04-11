@@ -1659,3 +1659,79 @@ def test_provider_publishes_gossip_content_access_after_payment():
     assert payload.get("accessor_id") == "peer-y"
     assert payload.get("creator_id") == "creator-x"
     assert payload.get("parent_content_ids") == ["parent-a"]
+
+
+def test_uploader_gossip_advertise_uses_canonical_keys():
+    """ContentUploader's GOSSIP_CONTENT_ADVERTISE publish must use the
+    reader-side canonical keys (`cid`, `parent_cids`) that ContentIndex
+    expects. Before this fix, the writer used `content_id` /
+    `parent_content_ids` and every non-sharded advertisement was
+    silently dropped by ContentIndex (empty-string default).
+
+    Phase 1.3 Task 3d regression — codex pass 2 caught the key
+    mismatch that has been silently breaking gossip discovery since
+    before Phase 1."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_uploader import ContentUploader
+    from prsm.node.gossip import GOSSIP_CONTENT_ADVERTISE, GOSSIP_STORAGE_REQUEST
+
+    identity = MagicMock()
+    identity.node_id = "node-gossip-keys"
+    identity.public_key_b64 = "fakekey"
+    identity.sign = MagicMock(return_value="sig")
+    gossip = MagicMock()
+    gossip.publish = AsyncMock()
+    ledger = MagicMock()
+
+    uploader = ContentUploader(
+        identity=identity,
+        gossip=gossip,
+        ledger=ledger,
+    )
+    uploader._ipfs_add = AsyncMock(return_value="QmKeyTest")
+    uploader._persist_provenance = AsyncMock()
+
+    uploaded = asyncio.run(
+        uploader.upload(
+            content=b"key-mismatch test payload",
+            filename="k.txt",
+            parent_content_ids=["QmParent"],
+        )
+    )
+    assert uploaded is not None
+
+    # Find the GOSSIP_CONTENT_ADVERTISE publish and assert canonical keys.
+    ad_calls = [
+        call for call in gossip.publish.call_args_list
+        if call.args and call.args[0] == GOSSIP_CONTENT_ADVERTISE
+    ]
+    assert ad_calls, "expected a GOSSIP_CONTENT_ADVERTISE publish"
+    ad_payload = ad_calls[0].args[1]
+    assert ad_payload.get("cid") == "QmKeyTest", (
+        f"advertise payload must use canonical key `cid`; got {ad_payload}"
+    )
+    assert ad_payload.get("parent_cids") == ["QmParent"], (
+        f"advertise payload must use canonical key `parent_cids`; "
+        f"got {ad_payload.get('parent_cids')!r}"
+    )
+    # Writer must NOT use the old wrong keys.
+    assert "content_id" not in ad_payload, (
+        "legacy `content_id` key leaked into gossip payload"
+    )
+    assert "parent_content_ids" not in ad_payload, (
+        "legacy `parent_content_ids` key leaked into gossip payload"
+    )
+
+    # Same check for GOSSIP_STORAGE_REQUEST.
+    sr_calls = [
+        call for call in gossip.publish.call_args_list
+        if call.args and call.args[0] == GOSSIP_STORAGE_REQUEST
+    ]
+    assert sr_calls, "expected a GOSSIP_STORAGE_REQUEST publish"
+    sr_payload = sr_calls[0].args[1]
+    assert sr_payload.get("cid") == "QmKeyTest", (
+        f"storage_request payload must use canonical key `cid`; got {sr_payload}"
+    )
+    assert "content_id" not in sr_payload

@@ -394,8 +394,13 @@ class ContentUploader:
         embedding_id = f"emb:{cid}" if embedding is not None else None
 
         # Create provenance record
+        # NOTE (Phase 1.3 Task 3d): wire-format keys must match reader
+        # expectations — `cid` / `parent_cids`, not `content_id` /
+        # `parent_content_ids`. See content_index._on_content_advertise,
+        # _on_provenance_register, local_ledger.upsert_provenance, and
+        # storage_provider._on_storage_request.
         provenance_data = {
-            "content_id": cid,
+            "cid": cid,
             "content_hash": content_hash,
             "creator_id": self.identity.node_id,
             "creator_public_key": self.identity.public_key_b64,
@@ -404,7 +409,7 @@ class ContentUploader:
             "created_at": time.time(),
             "metadata": metadata or {},
             "royalty_rate": rate,
-            "parent_content_ids": parents,
+            "parent_cids": parents,
             "is_sharded": False,
             "embedding_id": embedding_id,
             "near_duplicate_of": near_dup_cid,
@@ -444,7 +449,7 @@ class ContentUploader:
 
         # Advertise content availability to the network
         await self.gossip.publish(GOSSIP_CONTENT_ADVERTISE, {
-            "content_id": cid,
+            "cid": cid,
             "filename": filename,
             "size_bytes": size_bytes,
             "content_hash": content_hash,
@@ -453,7 +458,7 @@ class ContentUploader:
             "created_at": provenance_data["created_at"],
             "metadata": metadata or {},
             "royalty_rate": rate,
-            "parent_content_ids": parents,
+            "parent_cids": parents,
             "embedding_id": embedding_id,
             "provenance_hash": provenance_hash_hex,
         })
@@ -461,7 +466,7 @@ class ContentUploader:
         # Request storage replication
         if replicas > 0:
             await self.gossip.publish(GOSSIP_STORAGE_REQUEST, {
-                "content_id": cid,
+                "cid": cid,
                 "size_bytes": size_bytes,
                 "requester_id": self.identity.node_id,
                 "replicas_needed": replicas,
@@ -536,8 +541,12 @@ class ContentUploader:
             # Create provenance record for the sharded content
             # The manifest content ID serves as the primary identifier for sharded content
             embedding_id = f"emb:{manifest_cid}" if embedding is not None else None
+            # Phase 1.3 Task 3d: canonical wire-format keys (`cid`,
+            # `parent_cids`) so ContentIndex / local_ledger actually upsert
+            # the record instead of silently dropping it on empty-string
+            # defaults.
             provenance_data = {
-                "content_id": manifest_cid,  # Use manifest content ID as the primary identifier
+                "cid": manifest_cid,  # Use manifest content ID as the primary identifier
                 "content_hash": content_hash,
                 "creator_id": self.identity.node_id,
                 "creator_public_key": self.identity.public_key_b64,
@@ -546,7 +555,7 @@ class ContentUploader:
                 "created_at": time.time(),
                 "metadata": metadata or {},
                 "royalty_rate": royalty_rate,
-                "parent_content_ids": parent_content_ids,
+                "parent_cids": parent_content_ids,
                 "is_sharded": True,
                 "total_shards": manifest.total_shards,
                 "shard_size": manifest.shard_size,
@@ -599,7 +608,7 @@ class ContentUploader:
                 "created_at": provenance_data["created_at"],
                 "metadata": metadata or {},
                 "royalty_rate": royalty_rate,
-                "parent_content_ids": parent_content_ids,
+                "parent_cids": parent_content_ids,
                 "is_sharded": True,
                 "total_shards": manifest.total_shards,
                 "embedding_id": embedding_id,
@@ -610,7 +619,7 @@ class ContentUploader:
             if replicas > 0:
                 # Request replication for the manifest
                 await self.gossip.publish(GOSSIP_STORAGE_REQUEST, {
-                    "content_id": manifest_cid,
+                    "cid": manifest_cid,
                     "size_bytes": len(manifest.to_json()),
                     "requester_id": self.identity.node_id,
                     "replicas_needed": replicas,
@@ -619,7 +628,7 @@ class ContentUploader:
                 # Request replication for each shard
                 for shard_info in manifest.shards:
                     await self.gossip.publish(GOSSIP_STORAGE_REQUEST, {
-                        "content_id": shard_info.content_id,
+                        "cid": shard_info.content_id,
                         "size_bytes": shard_info.size,
                         "requester_id": self.identity.node_id,
                         "replicas_needed": replicas,
@@ -642,8 +651,10 @@ class ContentUploader:
                 return None
 
             size_bytes = len(content)
+            # Phase 1.3 Task 3d: canonical wire-format keys (`cid`,
+            # `parent_cids`) — reader side expects these.
             provenance_data = {
-                "content_id": cid,
+                "cid": cid,
                 "content_hash": content_hash,
                 "creator_id": self.identity.node_id,
                 "creator_public_key": self.identity.public_key_b64,
@@ -652,7 +663,7 @@ class ContentUploader:
                 "created_at": time.time(),
                 "metadata": metadata or {},
                 "royalty_rate": royalty_rate,
-                "parent_content_ids": parent_content_ids,
+                "parent_cids": parent_content_ids,
                 "is_sharded": False,
                 "sharding_failed": True,
                 "provenance_hash": provenance_hash_hex,
@@ -682,7 +693,7 @@ class ContentUploader:
                 "signature": provenance_signature,
             })
             await self.gossip.publish(GOSSIP_CONTENT_ADVERTISE, {
-                "content_id": cid,
+                "cid": cid,
                 "filename": filename,
                 "size_bytes": size_bytes,
                 "content_hash": content_hash,
@@ -691,12 +702,12 @@ class ContentUploader:
                 "created_at": provenance_data["created_at"],
                 "metadata": metadata or {},
                 "royalty_rate": royalty_rate,
-                "parent_content_ids": parent_content_ids,
+                "parent_cids": parent_content_ids,
                 "provenance_hash": provenance_hash_hex,
             })
             if replicas > 0:
                 await self.gossip.publish(GOSSIP_STORAGE_REQUEST, {
-                    "content_id": cid,
+                    "cid": cid,
                     "size_bytes": size_bytes,
                     "requester_id": self.identity.node_id,
                     "replicas_needed": replicas,
