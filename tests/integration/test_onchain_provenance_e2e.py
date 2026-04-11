@@ -2257,3 +2257,114 @@ def test_content_index_does_not_clobber_populated_fields():
     assert record.provenance_hash == "0x" + "aa" * 32
     # Both providers listed.
     assert record.providers == {"uploader-peer", "replica-peer"}
+
+
+def test_content_index_keyword_search_works_after_backfill():
+    """After a minimal replica ad creates an empty-filename record
+    and a later uploader ad backfills the filename, the keyword
+    index must be refreshed so search(filename_word) returns the
+    CID. Without this, Task 3g repairs the stored record but leaves
+    race-affected CIDs permanently invisible to keyword search.
+
+    Phase 1.3 Task 3g follow-up — codex pass 4 [P2] finding."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from prsm.node.content_index import ContentIndex
+
+    gossip = MagicMock()
+    gossip.subscribe = MagicMock()
+    index = ContentIndex(gossip=gossip)
+
+    # Minimal replica ad — no filename, no metadata.
+    minimal = {
+        "cid": "QmKeywordTest",
+        "content_hash": "sha256-kw",
+        "provider_id": "replica-peer",
+        "size_bytes": 0,
+    }
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise",
+            data=minimal,
+            origin="replica-peer",
+        )
+    )
+
+    # Sanity check: keyword search finds nothing because filename is empty.
+    assert index.search("document") == []
+
+    # Full uploader ad with a real filename.
+    full = {
+        "cid": "QmKeywordTest",
+        "content_hash": "sha256-kw",
+        "provider_id": "uploader-peer",
+        "creator_id": "real-uploader",
+        "filename": "document.txt",
+        "size_bytes": 4096,
+        "metadata": {"tag": "searchable_value"},
+    }
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise",
+            data=full,
+            origin="uploader-peer",
+        )
+    )
+
+    # Keyword search must now find the CID via filename tokens AND
+    # metadata values.
+    document_hits = index.search("document")
+    assert any(r.cid == "QmKeywordTest" for r in document_hits), (
+        f"search('document') must include QmKeywordTest after "
+        f"filename backfill; got {[r.cid for r in document_hits]}"
+    )
+    metadata_hits = index.search("searchable_value")
+    assert any(r.cid == "QmKeywordTest" for r in metadata_hits), (
+        f"search('searchable_value') must include QmKeywordTest "
+        f"after metadata backfill; got {[r.cid for r in metadata_hits]}"
+    )
+
+
+def test_content_index_backfills_size_bytes_from_richer_advertisement():
+    """A minimal ad that creates a record with size_bytes=0 must
+    accept a backfill from a later ad that carries a positive size.
+    Phase 1.3 Task 3g follow-up — codex pass 4 [P3] finding."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from prsm.node.content_index import ContentIndex
+
+    gossip = MagicMock()
+    gossip.subscribe = MagicMock()
+    index = ContentIndex(gossip=gossip)
+
+    minimal = {
+        "cid": "QmSizeTest",
+        "content_hash": "sha256-s",
+        "provider_id": "replica-peer",
+        # size_bytes deliberately omitted → defaults to 0 in new-record path
+    }
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise",
+            data=minimal,
+            origin="replica-peer",
+        )
+    )
+    assert index._records["QmSizeTest"].size_bytes == 0
+
+    full = {
+        "cid": "QmSizeTest",
+        "content_hash": "sha256-s",
+        "provider_id": "uploader-peer",
+        "size_bytes": 8192,
+    }
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise",
+            data=full,
+            origin="uploader-peer",
+        )
+    )
+    assert index._records["QmSizeTest"].size_bytes == 8192

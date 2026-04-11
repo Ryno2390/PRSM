@@ -102,7 +102,19 @@ class ContentIndex:
             # clobber a populated value.
             record = self._records[cid]
             record.providers.add(provider_id)
-            self._backfill_record_from_advertise(record, data, origin)
+            keyword_changed = self._backfill_record_from_advertise(
+                record, data, origin
+            )
+            if keyword_changed:
+                # A minimal ad created this record with empty filename
+                # and/or empty metadata, so _index_keywords added
+                # nothing on that path. Now that the backfill filled in
+                # real values, re-run it so search() can find the CID
+                # via the new filename tokens and metadata values. The
+                # helper is additive (adds CIDs to keyword sets), so
+                # this safely populates the new entries without needing
+                # to prune stale ones — there are none.
+                self._index_keywords(record)
             self._records.move_to_end(cid)
         else:
             # New record
@@ -132,7 +144,7 @@ class ContentIndex:
         record: ContentRecord,
         data: Dict[str, Any],
         origin: str,
-    ) -> None:
+    ) -> bool:
         """Backfill empty/default fields on an existing ContentRecord
         from a new advertisement payload. Never clobbers populated
         values.
@@ -150,8 +162,15 @@ class ContentIndex:
            non-default, non-0.01 value (best-effort: we can't
            distinguish explicit 0.01 from default 0.01, so the first
            advertisement to set a non-default wins).
+         - size_bytes: 0 → backfill when the new payload has a
+           positive size. A real content record always has positive
+           bytes, so 0 means "unknown / not in the incoming ad".
          - None for provenance_hash / embedding_id / near_duplicate_of
            → backfill
+
+        Returns True if any keyword-affecting field (filename,
+        metadata) was backfilled, so the caller knows whether to
+        re-run _index_keywords().
 
         Phase 1.3 Task 3g — generalization of the Phase 1.2 Task 9
         provenance_hash-only backfill after codex pass 3 flagged the
@@ -161,7 +180,15 @@ class ContentIndex:
         parent_cids, and default royalty_rate forever — causing
         Task 3f's serve_on_behalf_of_replica to pay royalties to the
         wrong creator.
+
+        Phase 1.3 Task 3g follow-up — codex pass 4 added the
+        keyword-index re-index trigger (without it, a record created
+        from a minimal ad and later filename-backfilled stayed
+        permanently invisible to search()) and added size_bytes to
+        the backfill list.
         """
+        keyword_affecting_change = False
+
         # String fields that backfill on empty string or None.
         for field_name in ("filename", "content_hash"):
             current = getattr(record, field_name)
@@ -169,6 +196,8 @@ class ContentIndex:
                 incoming = data.get(field_name)
                 if incoming:
                     setattr(record, field_name, incoming)
+                    if field_name == "filename":
+                        keyword_affecting_change = True
 
         # creator_id: backfill when the existing value is empty OR
         # looks like the origin-fallback placeholder from a minimal
@@ -203,12 +232,22 @@ class ContentIndex:
             incoming_metadata = data.get("metadata")
             if incoming_metadata:
                 record.metadata = incoming_metadata
+                keyword_affecting_change = True
 
         # parent_cids list: backfill when empty.
         if not record.parent_cids:
             incoming_parents = data.get("parent_cids")
             if incoming_parents:
                 record.parent_cids = list(incoming_parents)
+
+        # size_bytes: backfill 0 when a later ad carries a positive
+        # size. A real content record always has positive bytes, so 0
+        # means "unknown / not in the incoming ad". Not
+        # keyword-affecting.
+        if record.size_bytes == 0:
+            incoming_size = data.get("size_bytes")
+            if incoming_size:  # non-zero truthy
+                record.size_bytes = incoming_size
 
         # royalty_rate: backfill default 0.01 when the new payload
         # carries a non-default value. Best-effort — we can't
@@ -232,6 +271,8 @@ class ContentIndex:
                 incoming = data.get(field_name)
                 if incoming is not None:
                     setattr(record, field_name, incoming)
+
+        return keyword_affecting_change
 
     async def _on_provenance_register(
         self, subtype: str, data: Dict[str, Any], origin: str
