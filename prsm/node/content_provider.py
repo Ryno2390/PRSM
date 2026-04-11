@@ -883,6 +883,119 @@ class ContentProvider:
             logger.error(f"Gateway fetch failed for {gateway_url}: {e}")
         return None
     
+    # ── Phase 1.3 Task 3f: replica-serve delegation ───────────────────
+
+    async def serve_on_behalf_of_replica(
+        self,
+        cid: str,
+        request_id: str,
+        peer: "PeerConnection",
+        replica_size_bytes: int,
+        gateway_url: str,
+    ) -> bool:
+        """Serve a CID that this provider does NOT have in _local_content
+        but another subsystem (e.g., storage_provider) has pinned as a
+        replica. Looks up creator metadata via content_index, calls
+        content_economy.process_content_access to credit royalties,
+        publishes GOSSIP_CONTENT_ACCESS, and sends a canonical
+        ContentResponseMessage gateway response.
+
+        Refuses to serve if content_index has no record for the CID —
+        without creator metadata, we can't pay the creator, so we let
+        the requester try another provider.
+
+        Returns True if a response was sent, False if the serve was
+        refused (no content_index record or other unrecoverable gap).
+        Phase 1.3 Task 3f.
+        """
+        if self.content_index is None:
+            logger.warning(
+                f"serve_on_behalf_of_replica: no content_index configured; "
+                f"refusing replica serve for {cid[:12]}..."
+            )
+            return False
+
+        record = self.content_index.lookup(cid)
+        if record is None:
+            logger.warning(
+                f"serve_on_behalf_of_replica: content_index has no record "
+                f"for {cid[:12]}...; refusing replica serve (creator "
+                f"metadata required for royalty payment)"
+            )
+            return False
+
+        # Build payment metadata directly from the ContentRecord —
+        # we don't have a _local_content entry to resolve from, so we
+        # go straight to the index fields. Mirrors the key mapping
+        # _resolve_payment_metadata uses (parent_cids -> parent_content_ids).
+        content_metadata = {
+            "royalty_rate": record.royalty_rate,
+            "creator_id": record.creator_id,
+            "parent_content_ids": record.parent_cids,
+            "provenance_hash": record.provenance_hash,
+        }
+
+        if self.content_economy is not None:
+            try:
+                payment = await self.content_economy.process_content_access(
+                    content_id=cid,
+                    accessor_id=peer.peer_id,
+                    content_metadata=content_metadata,
+                )
+                if payment.status.value == "completed":
+                    logger.debug(
+                        f"Replica payment processed for {cid[:12]}... "
+                        f"({payment.amount} FTNS from {peer.peer_id[:8]})"
+                    )
+                elif payment.status.value == "pending_onchain":
+                    logger.info(
+                        f"Replica payment pending on-chain reconciliation "
+                        f"for {cid[:12]}... ({payment.amount} FTNS from "
+                        f"{peer.peer_id[:8]})"
+                    )
+            except Exception as e:
+                # Mirrors the inline serve path — payment failure is
+                # logged but doesn't block the serve. The replica has
+                # the bytes; payment is a separate concern.
+                logger.warning(
+                    f"Replica payment processing failed for {cid[:12]}...: {e}"
+                )
+
+        # Phase 1.3 Task 3b parity: publish GOSSIP_CONTENT_ACCESS so
+        # source creators on other nodes can credit their shares. This
+        # fires regardless of whether the payment call above succeeded
+        # or fell back to local, matching the inline serve path.
+        try:
+            await self.gossip.publish(GOSSIP_CONTENT_ACCESS, {
+                "cid": cid,
+                "accessor_id": peer.peer_id,
+                "creator_id": record.creator_id,
+                "royalty_rate": record.royalty_rate,
+                "parent_content_ids": record.parent_cids,
+                "timestamp": time.time(),
+            })
+        except Exception as exc:
+            logger.warning(
+                f"GOSSIP_CONTENT_ACCESS publish failed for replica serve "
+                f"of {cid[:12]}...: {exc}"
+            )
+
+        # Send the canonical response. Uses the same message shape
+        # the inline gateway-transfer path emits so the requester's
+        # ContentResponseMessage.from_payload() parses it as FOUND.
+        response = ContentResponseMessage(
+            request_id=request_id,
+            cid=cid,
+            status=ContentStatus.FOUND,
+            size=replica_size_bytes,
+            transfer_mode=TransferMode.GATEWAY,
+            gateway_url=gateway_url,
+            content_hash=record.content_hash,
+            filename=record.filename or None,
+        )
+        await self._send_response(peer.peer_id, response)
+        return True
+
     # ── Phase 1.2 test seam ────────────────────────────────────────────
 
     async def _fire_payment_for_test(
