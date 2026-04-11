@@ -895,77 +895,26 @@ class ContentUploader:
         logger.info("Content uploader started — listening for content requests")
 
     async def _on_direct_message(self, msg: P2PMessage, peer: PeerConnection) -> None:
-        """Route incoming direct messages to the appropriate handler."""
+        """Handle direct-message responses to content requests we initiated.
+
+        Phase 1.3 Task 3b: the server-side content_request handling was
+        moved to ContentProvider (which owns _local_content). The
+        uploader keeps only the client-side content_response path so
+        its request_content() method can resolve _pending_requests
+        futures when cross-node downloads complete.
+        """
         subtype = msg.payload.get("subtype", "")
-        if subtype == "content_request":
-            await self._handle_content_request(msg, peer)
-        elif subtype == "content_response":
+        if subtype == "content_response":
             self._handle_content_response(msg)
 
-    async def _handle_content_request(self, msg: P2PMessage, peer: PeerConnection) -> None:
-        """Serve content in response to a direct content_request."""
-        cid = msg.payload.get("cid", "")
-        request_id = msg.payload.get("request_id", "")
-
-        content_info = self.uploaded_content.get(cid)
-        if not content_info:
-            # We don't have this content
-            await self._send_direct(peer.peer_id, {
-                "subtype": "content_response",
-                "request_id": request_id,
-                "cid": cid,
-                "found": False,
-            })
-            return
-
-        # Small files (<=1MB): send inline as base64
-        if content_info.size_bytes <= 1_048_576:
-            raw = await self._ipfs_cat(cid)
-            if raw is not None:
-                import base64
-                await self._send_direct(peer.peer_id, {
-                    "subtype": "content_response",
-                    "request_id": request_id,
-                    "cid": cid,
-                    "found": True,
-                    "transfer_mode": "inline",
-                    "data_b64": base64.b64encode(raw).decode(),
-                    "filename": content_info.filename,
-                    "size_bytes": content_info.size_bytes,
-                    "content_hash": content_info.content_hash,
-                })
-            else:
-                await self._send_direct(peer.peer_id, {
-                    "subtype": "content_response",
-                    "request_id": request_id,
-                    "cid": cid,
-                    "found": False,
-                })
-                return
-        else:
-            # Large files: provide IPFS gateway URL
-            gateway_url = f"http://127.0.0.1:8080/ipfs/{cid}"
-            await self._send_direct(peer.peer_id, {
-                "subtype": "content_response",
-                "request_id": request_id,
-                "cid": cid,
-                "found": True,
-                "transfer_mode": "gateway",
-                "gateway_url": gateway_url,
-                "filename": content_info.filename,
-                "size_bytes": content_info.size_bytes,
-            })
-
-        # Record the access and gossip it
-        await self.record_access(cid, msg.sender_id)
-        await self.gossip.publish(GOSSIP_CONTENT_ACCESS, {
-            "cid": cid,
-            "accessor_id": msg.sender_id,
-            "creator_id": content_info.creator_id,
-            "royalty_rate": content_info.royalty_rate,
-            "parent_content_ids": content_info.parent_content_ids,
-            "timestamp": time.time(),
-        })
+    # Phase 1.3 Task 3b: _handle_content_request retired.
+    # ContentProvider._handle_content_request at content_provider.py
+    # is now the canonical serve path. The uploader was a vestigial
+    # duplicate server that used a legacy response shape (found=bool)
+    # and ran a duplicate local-ledger royalty distribution via
+    # record_access/_distribute_multilevel_royalty. Phase 1.3 Task 1
+    # activated the duplicate by populating ContentProvider._local_content
+    # for the first time; Task 3b removes the dead copy.
 
     # ── Content Retrieval (client side) ─────────────────────────
 
