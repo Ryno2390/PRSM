@@ -564,43 +564,10 @@ class ContentProvider:
             # Process payment for content access (Phase 4)
             if self.content_economy:
                 try:
-                    # Phase 1.3: register_local_content stores the caller's
-                    # metadata nested under the "metadata" key, but some
-                    # older call sites set fields at the top level. Two-step
-                    # lookup handles both shapes, mirroring the provenance_hash
-                    # pattern from Phase 1.2 Task 5. Without this, the
-                    # Phase 1.3 uploader wiring would silently fire payments
-                    # with empty creator_id, default 0.01 rate, and empty
-                    # parent chain.
-                    nested_metadata = content_info.get("metadata") or {}
-                    royalty_rate = (
-                        content_info.get("royalty_rate")
-                        or nested_metadata.get("royalty_rate")
-                        or 0.01
-                    )
-                    creator_id = (
-                        content_info.get("creator_id")
-                        or nested_metadata.get("creator_id")
-                        or ""
-                    )
-                    parent_content_ids = (
-                        content_info.get("parent_cids")
-                        or nested_metadata.get("parent_cids")
-                        or []
-                    )
-                    provenance_hash = (
-                        content_info.get("provenance_hash")
-                        or nested_metadata.get("provenance_hash")
-                    )
                     payment = await self.content_economy.process_content_access(
                         content_id=cid,
                         accessor_id=peer.peer_id,
-                        content_metadata={
-                            "royalty_rate": royalty_rate,
-                            "creator_id": creator_id,
-                            "parent_content_ids": parent_content_ids,
-                            "provenance_hash": provenance_hash,
-                        },
+                        content_metadata=self._resolve_payment_metadata(content_info),
                     )
                     if payment.status.value == "completed":
                         logger.debug(
@@ -906,39 +873,41 @@ class ContentProvider:
         content_info = self._local_content.get(cid)
         if not content_info:
             return None
-        # Phase 1.3: two-step lookup (top-level then nested, then default)
-        # for all four payment fields. Mirrors the inline serve path and
-        # the Phase 1.2 Task 5 provenance_hash pattern.
-        nested_metadata = content_info.get("metadata") or {}
-        royalty_rate = (
-            content_info.get("royalty_rate")
-            or nested_metadata.get("royalty_rate")
-            or 0.01
-        )
-        creator_id = (
-            content_info.get("creator_id")
-            or nested_metadata.get("creator_id")
-            or ""
-        )
-        parent_content_ids = (
-            content_info.get("parent_cids")
-            or nested_metadata.get("parent_cids")
-            or []
-        )
-        provenance_hash = (
-            content_info.get("provenance_hash")
-            or nested_metadata.get("provenance_hash")
-        )
         return await self.content_economy.process_content_access(
             content_id=cid,
             accessor_id=accessor_id,
-            content_metadata={
-                "royalty_rate": royalty_rate,
-                "creator_id": creator_id,
-                "parent_content_ids": parent_content_ids,
-                "provenance_hash": provenance_hash,
-            },
+            content_metadata=self._resolve_payment_metadata(content_info),
         )
+
+    def _resolve_payment_metadata(
+        self, content_info: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Build the content_metadata dict forwarded to
+        content_economy.process_content_access from a _local_content record.
+
+        Two-step lookup (top-level → nested → default) handles both
+        register_local_content's nested shape and any legacy call site that
+        set fields at the top level. Uses explicit None checks instead of
+        `or`-chain coalescing so that semantically meaningful falsy values
+        like royalty_rate=0.0 (free content) and creator_id="" are not
+        silently replaced by defaults.
+        """
+        nested_metadata = content_info.get("metadata") or {}
+
+        def _pick(key: str, default: Any) -> Any:
+            value = content_info.get(key)
+            if value is None:
+                value = nested_metadata.get(key)
+            if value is None:
+                value = default
+            return value
+
+        return {
+            "royalty_rate": _pick("royalty_rate", 0.01),
+            "creator_id": _pick("creator_id", ""),
+            "parent_content_ids": _pick("parent_cids", []),
+            "provenance_hash": _pick("provenance_hash", None),
+        }
 
     # ── Statistics ──────────────────────────────────────────────────────
 
