@@ -21,6 +21,7 @@ from prsm.core.bandwidth_limiter import BandwidthLimiter
 
 if TYPE_CHECKING:
     from prsm.node.config import NodeConfig
+    from prsm.node.content_provider import ContentProvider
 
 from prsm.node.config import is_active_now
 from prsm.node.gossip import (
@@ -110,6 +111,7 @@ class StorageProvider:
         content_economy: Optional[Any] = None,  # Phase 4: Replication tracking
         transport: Optional[Any] = None,
         discovery: Optional[Any] = None,
+        content_provider: Optional["ContentProvider"] = None,
     ):
         self.identity = identity
         self.gossip = gossip
@@ -121,6 +123,12 @@ class StorageProvider:
         self.reward_interval = reward_interval
         self.config = config  # NodeConfig for scheduling checks
         self.content_economy = content_economy  # Phase 4: Update replication status on challenges
+
+        # Phase 1.3 Task 3e: defer content_request serving to
+        # ContentProvider when it has the CID, to avoid a dual-handler
+        # race on MSG_DIRECT. storage_provider still handles pin-only
+        # content (CIDs not tracked by ContentProvider).
+        self._content_provider = content_provider
         
         # Bandwidth limits (0 = unlimited)
         self.upload_mbps_limit: float = 0.0
@@ -431,7 +439,17 @@ class StorageProvider:
         logger.info("Storage provider registered for content serving")
 
     async def _on_direct_content_request(self, msg: P2PMessage, peer: PeerConnection) -> None:
-        """Serve pinned content via IPFS gateway URL."""
+        """Serve pinned content via IPFS gateway URL.
+
+        Phase 1.3 Task 3e: defer to ContentProvider when it has the CID
+        in its _local_content — ContentProvider's serve path runs the
+        canonical payment flow and emits the canonical response shape.
+        storage_provider responds only for pinned CIDs that
+        ContentProvider doesn't serve. When it does respond, it uses
+        the canonical ContentResponseMessage shape (status=FOUND) so
+        the requester's ContentResponseMessage.from_payload() parser
+        doesn't silently downgrade the response to ERROR.
+        """
         subtype = msg.payload.get("subtype", "")
         if subtype != "content_request":
             return
@@ -440,22 +458,45 @@ class StorageProvider:
         request_id = msg.payload.get("request_id", "")
 
         if cid not in self.pinned_content:
-            return  # Let the content uploader handle unknown CIDs
+            return  # Let ContentProvider handle unknown CIDs
+
+        # Defer to ContentProvider if it also has the CID — it runs the
+        # canonical serve path with payment integration, and both
+        # handlers firing on MSG_DIRECT would otherwise race (our
+        # response skipping the payment await always arrived first).
+        if (
+            self._content_provider is not None
+            and self._content_provider.has_local_content(cid)
+        ):
+            return
+
+        # ContentProvider doesn't serve this CID; storage_provider fills
+        # in using the gateway URL. Emit canonical response shape so
+        # ContentResponseMessage.from_payload() parses as FOUND (the
+        # legacy `{"found": True}` shape was parsed as ERROR by the
+        # canonical parser, silently breaking every pinned retrieval).
+        # Late import to avoid any circular-import risk at module load.
+        from prsm.node.content_provider import (
+            ContentResponseMessage,
+            ContentStatus,
+            TransferMode,
+        )
 
         gateway_url = f"http://127.0.0.1:8080/ipfs/{cid}"
+        response_msg = ContentResponseMessage(
+            request_id=request_id,
+            cid=cid,
+            status=ContentStatus.FOUND,
+            size=self.pinned_content[cid].size_bytes,
+            transfer_mode=TransferMode.GATEWAY,
+            gateway_url=gateway_url,
+            content_hash=None,
+            filename=None,
+        )
         response = P2PMessage(
             msg_type=MSG_DIRECT,
             sender_id=self.identity.node_id,
-            payload={
-                "subtype": "content_response",
-                "request_id": request_id,
-                "cid": cid,
-                "found": True,
-                "transfer_mode": "gateway",
-                "gateway_url": gateway_url,
-                "filename": "",
-                "size_bytes": self.pinned_content[cid].size_bytes,
-            },
+            payload=response_msg.to_payload(),
         )
         await self.transport.send_to_peer(peer.peer_id, response)
 

@@ -1735,3 +1735,147 @@ def test_uploader_gossip_advertise_uses_canonical_keys():
         f"storage_request payload must use canonical key `cid`; got {sr_payload}"
     )
     assert "content_id" not in sr_payload
+
+
+def test_storage_provider_emits_canonical_response_shape():
+    """storage_provider._on_direct_content_request must emit responses
+    using ContentResponseMessage / ContentStatus.FOUND — the canonical
+    shape that ContentResponseMessage.from_payload() parses as a
+    successful response. Before this fix it emitted the legacy
+    {"found": True} shape which the parser treated as ERROR, so every
+    pinned-content retrieval was silently broken on the requester side.
+
+    Phase 1.3 Task 3e regression — codex pass 2 finding.
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.storage_provider import StorageProvider, PinnedContent
+    from prsm.node.transport import P2PMessage, MSG_DIRECT
+
+    identity = MagicMock()
+    identity.node_id = "node-storage-provider"
+    transport = MagicMock()
+    transport.send_to_peer = AsyncMock()
+    gossip = MagicMock()
+    ledger = MagicMock()
+
+    storage = StorageProvider(
+        identity=identity,
+        gossip=gossip,
+        ledger=ledger,
+        transport=transport,
+    )
+
+    # Populate pinned_content with a real entry so the handler takes
+    # the happy path instead of silently returning.
+    storage.pinned_content["QmPinnedTest"] = PinnedContent(
+        cid="QmPinnedTest",
+        size_bytes=1024,
+        pinned_at=0.0,
+    )
+
+    msg = P2PMessage(
+        msg_type=MSG_DIRECT,
+        sender_id="peer-req",
+        payload={
+            "subtype": "content_request",
+            "cid": "QmPinnedTest",
+            "request_id": "req-pinned",
+        },
+    )
+    peer = MagicMock()
+    peer.peer_id = "peer-req"
+
+    asyncio.run(storage._on_direct_content_request(msg, peer))
+
+    # Verify transport.send_to_peer was called with a canonical-shape
+    # response, not the legacy one.
+    assert transport.send_to_peer.await_count == 1
+    _peer_arg, sent_msg = transport.send_to_peer.await_args.args
+    payload = sent_msg.payload
+    # Canonical shape uses "status", not "found".
+    assert payload.get("status") == "found", (
+        f"storage_provider must emit canonical status=found; "
+        f"got {payload.get('status')!r} (legacy `found` key: {payload.get('found')!r})"
+    )
+    # Legacy key must NOT be present.
+    assert "found" not in payload or payload.get("found") is None, (
+        f"legacy `found` key leaked into canonical response: {payload}"
+    )
+    # Canonical transfer_mode must also be present.
+    assert payload.get("transfer_mode") == "gateway"
+    assert payload.get("gateway_url", "").endswith("QmPinnedTest")
+    assert payload.get("size") == 1024
+
+
+def test_storage_provider_defers_when_content_provider_has_cid():
+    """When ContentProvider already has the CID in its _local_content,
+    storage_provider must NOT respond — the provider serves instead,
+    using the canonical shape with payment integration. Otherwise both
+    handlers race and the requester's client dispatch picks whichever
+    response arrives first.
+
+    Phase 1.3 Task 3e regression — codex pass 2 finding.
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.storage_provider import StorageProvider, PinnedContent
+    from prsm.node.content_provider import ContentProvider
+    from prsm.node.transport import P2PMessage, MSG_DIRECT
+
+    identity = MagicMock()
+    identity.node_id = "node-dual-handler"
+    transport = MagicMock()
+    transport.send_to_peer = AsyncMock()
+    transport.on_message = MagicMock()
+    gossip = MagicMock()
+    ledger = MagicMock()
+
+    provider = ContentProvider(
+        identity=identity,
+        transport=transport,
+        gossip=gossip,
+        content_economy=None,
+    )
+    provider.register_local_content(
+        cid="QmSharedCID",
+        size_bytes=1024,
+        content_hash="sha256-shared",
+        filename="s.txt",
+        metadata={},
+    )
+
+    storage = StorageProvider(
+        identity=identity,
+        gossip=gossip,
+        ledger=ledger,
+        transport=transport,
+        content_provider=provider,
+    )
+    storage.pinned_content["QmSharedCID"] = PinnedContent(
+        cid="QmSharedCID",
+        size_bytes=1024,
+        pinned_at=0.0,
+    )
+
+    msg = P2PMessage(
+        msg_type=MSG_DIRECT,
+        sender_id="peer-req",
+        payload={
+            "subtype": "content_request",
+            "cid": "QmSharedCID",
+            "request_id": "req-shared",
+        },
+    )
+    peer = MagicMock()
+    peer.peer_id = "peer-req"
+
+    asyncio.run(storage._on_direct_content_request(msg, peer))
+
+    # storage_provider must NOT have sent a response — ContentProvider
+    # is expected to serve. The ContentProvider handler wasn't fired
+    # in this test, but that's fine; we're only asserting
+    # storage_provider's defer-to-provider behavior.
+    transport.send_to_peer.assert_not_called()
