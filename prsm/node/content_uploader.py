@@ -11,15 +11,16 @@ earns FTNS when other nodes access or use their content.
 Sprint 4 Phase 4: Added request_content() for cross-node downloads
 with provider discovery via ContentIndex, content hash verification,
 and support for both inline (base64) and IPFS gateway transfer modes.
+Phase 1.3 Task 3b: the client-side request_content/server-side
+handler pair has been retired here; ContentProvider is the canonical
+serve path and ContentProvider.request_content is the client path.
 """
 
 import asyncio
-import base64
 import hashlib
 import json
 import logging
 import time
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
@@ -40,7 +41,7 @@ from prsm.node.gossip import (
     GOSSIP_STORAGE_REQUEST,
     GossipProtocol,
 )
-from prsm.node.transport import MSG_DIRECT, P2PMessage, PeerConnection, WebSocketTransport
+from prsm.node.transport import WebSocketTransport
 from prsm.node.identity import NodeIdentity
 from prsm.node.local_ledger import LocalLedger, TransactionType
 from prsm.storage.models import ShardManifest
@@ -230,9 +231,6 @@ class ContentUploader:
         self._semantic_index = _SemanticIndex(persist_path=semantic_index_path)
 
         self.uploaded_content: Dict[str, UploadedContent] = {}
-
-        # Pending content retrieval requests: request_id → asyncio.Future[dict]
-        self._pending_requests: Dict[str, asyncio.Future] = {}
 
         # Manifest tracking: manifest_content_id -> manifest data
         self.shard_manifests: Dict[str, Any] = {}
@@ -888,24 +886,17 @@ class ContentUploader:
     # ── Network content serving ─────────────────────────────────
 
     def start(self) -> None:
-        """Register direct-message handler and gossip subscriptions."""
-        if self.transport:
-            self.transport.on_message(MSG_DIRECT, self._on_direct_message)
-        self.gossip.subscribe(GOSSIP_CONTENT_ACCESS, self._on_content_access)
-        logger.info("Content uploader started — listening for content requests")
+        """Register gossip subscriptions.
 
-    async def _on_direct_message(self, msg: P2PMessage, peer: PeerConnection) -> None:
-        """Handle direct-message responses to content requests we initiated.
-
-        Phase 1.3 Task 3b: the server-side content_request handling was
-        moved to ContentProvider (which owns _local_content). The
-        uploader keeps only the client-side content_response path so
-        its request_content() method can resolve _pending_requests
-        futures when cross-node downloads complete.
+        Phase 1.3 Task 3b: the uploader is no longer a direct-message
+        server or client — ContentProvider owns the canonical serve
+        path and ContentProvider.request_content / bt_requester are
+        the production client paths. The uploader now only subscribes
+        to GOSSIP_CONTENT_ACCESS so it can credit source-creator
+        royalty shares when derivative content is accessed elsewhere.
         """
-        subtype = msg.payload.get("subtype", "")
-        if subtype == "content_response":
-            self._handle_content_response(msg)
+        self.gossip.subscribe(GOSSIP_CONTENT_ACCESS, self._on_content_access)
+        logger.info("Content uploader started — listening for gossip access events")
 
     # Phase 1.3 Task 3b: _handle_content_request retired.
     # ContentProvider._handle_content_request at content_provider.py
@@ -915,155 +906,16 @@ class ContentUploader:
     # record_access/_distribute_multilevel_royalty. Phase 1.3 Task 1
     # activated the duplicate by populating ContentProvider._local_content
     # for the first time; Task 3b removes the dead copy.
-
-    # ── Content Retrieval (client side) ─────────────────────────
-
-    async def request_content(
-        self,
-        cid: str,
-        timeout: float = 30.0,
-        verify_hash: bool = True,
-    ) -> Optional[bytes]:
-        """Request content from the network by CID.
-
-        Looks up providers via the content index, sends a direct
-        content_request to the best available provider, and awaits
-        the response.  For inline transfers (≤1MB), the raw bytes
-        are returned directly.  For gateway transfers (>1MB), the
-        content is fetched from the provider's IPFS gateway URL.
-
-        Args:
-            cid: Content identifier to retrieve
-            timeout: Seconds to wait for a response (default 30)
-            verify_hash: If True, verify SHA-256 hash matches the
-                         content_hash from the content index record
-
-        Returns:
-            Content bytes, or None if not found / timed out / failed
-        """
-        if not self.transport:
-            logger.error("Cannot request content: no transport layer")
-            return None
-
-        # Check if we already have it locally
-        if cid in self.uploaded_content:
-            local_bytes = await self._ipfs_cat(cid)
-            if local_bytes is not None:
-                return local_bytes
-
-        # Look up providers from the content index
-        providers: set = set()
-        expected_hash: Optional[str] = None
-        if self.content_index:
-            record = self.content_index.lookup(cid)
-            if record:
-                providers = record.providers.copy()
-                expected_hash = record.content_hash
-                # Remove ourselves — we already checked local
-                providers.discard(self.identity.node_id)
-
-        if not providers:
-            logger.debug(f"No known providers for CID {cid[:12]}...")
-            return None
-
-        # Try each provider until one succeeds
-        for provider_id in providers:
-            result = await self._request_from_provider(cid, provider_id, timeout)
-            if result is None:
-                continue
-
-            content_bytes = result.get("content_bytes")
-            if content_bytes is None:
-                continue
-
-            # Verify content hash if requested and available
-            if verify_hash and expected_hash:
-                actual_hash = hashlib.sha256(content_bytes).hexdigest()
-                if actual_hash != expected_hash:
-                    logger.warning(
-                        f"Content hash mismatch for {cid[:12]}... from {provider_id[:8]}: "
-                        f"expected {expected_hash[:16]}..., got {actual_hash[:16]}..."
-                    )
-                    continue  # Try next provider
-
-            logger.info(
-                f"Retrieved {len(content_bytes)} bytes for CID {cid[:12]}... "
-                f"from provider {provider_id[:8]}"
-            )
-            return content_bytes
-
-        logger.warning(f"Failed to retrieve CID {cid[:12]}... from any provider")
-        return None
-
-    async def _request_from_provider(
-        self,
-        cid: str,
-        provider_id: str,
-        timeout: float,
-    ) -> Optional[Dict[str, Any]]:
-        """Send a content_request to a specific provider and await the response.
-
-        Returns a dict with 'content_bytes' key, or None on failure/timeout.
-        """
-        request_id = uuid.uuid4().hex[:16]
-
-        # Create a future that will be resolved when the response arrives
-        loop = asyncio.get_event_loop()
-        future: asyncio.Future = loop.create_future()
-        self._pending_requests[request_id] = future
-
-        try:
-            # Send the request
-            await self._send_direct(provider_id, {
-                "subtype": "content_request",
-                "request_id": request_id,
-                "cid": cid,
-            })
-
-            # Wait for the response
-            response = await asyncio.wait_for(future, timeout=timeout)
-
-        except asyncio.TimeoutError:
-            logger.debug(f"Content request to {provider_id[:8]} timed out for {cid[:12]}...")
-            return None
-        except Exception as e:
-            logger.debug(f"Content request to {provider_id[:8]} failed: {e}")
-            return None
-        finally:
-            self._pending_requests.pop(request_id, None)
-
-        if not response.get("found", False):
-            return None
-
-        transfer_mode = response.get("transfer_mode", "")
-
-        if transfer_mode == "inline":
-            # Decode base64 content
-            data_b64 = response.get("data_b64", "")
-            if data_b64:
-                try:
-                    content_bytes = base64.b64decode(data_b64)
-                    return {"content_bytes": content_bytes}
-                except Exception as e:
-                    logger.error(f"Failed to decode inline content: {e}")
-                    return None
-
-        elif transfer_mode == "gateway":
-            # Fetch from IPFS gateway URL
-            gateway_url = response.get("gateway_url", "")
-            if gateway_url:
-                content_bytes = await self._fetch_from_gateway(gateway_url)
-                if content_bytes is not None:
-                    return {"content_bytes": content_bytes}
-
-        return None
-
-    def _handle_content_response(self, msg: P2PMessage) -> None:
-        """Resolve a pending content request future with the response payload."""
-        request_id = msg.payload.get("request_id", "")
-        future = self._pending_requests.get(request_id)
-        if future and not future.done():
-            future.set_result(msg.payload)
+    #
+    # Phase 1.3 Task 3b follow-up: the client-side direct-message
+    # surface (request_content, _request_from_provider,
+    # _handle_content_response, _send_direct, _on_direct_message,
+    # _pending_requests) is also retired. It had zero production
+    # callers and its response parser used the legacy
+    # `response.get("found", False)` shape that only the retired
+    # server produced — so it was both dead and broken after Task 3b
+    # moved the server side to ContentProvider. The real client path
+    # is ContentProvider.request_content.
 
     async def _fetch_from_gateway(self, gateway_url: str) -> Optional[bytes]:
         """Fetch content bytes from an IPFS gateway URL."""
@@ -1140,17 +992,6 @@ class ContentUploader:
                     content_id=content_id,
                     description=f"Source royalty (gossip) for derivative {content_id[:12]}...",
                 )
-
-    async def _send_direct(self, peer_id: str, payload: Dict[str, Any]) -> None:
-        """Send a direct P2P message to a specific peer."""
-        if not self.transport:
-            return
-        msg = P2PMessage(
-            msg_type=MSG_DIRECT,
-            sender_id=self.identity.node_id,
-            payload=payload,
-        )
-        await self.transport.send_to_peer(peer_id, msg)
 
     async def _maybe_broadcast(self, tx) -> None:
         """Broadcast a transaction via ledger_sync if available."""
