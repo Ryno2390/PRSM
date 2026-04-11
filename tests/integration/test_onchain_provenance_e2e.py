@@ -1469,45 +1469,101 @@ def test_bootstrap_wires_creator_address_from_ftns_ledger(monkeypatch):
     )
 
 
-def test_bootstrap_creator_address_priority():
+def test_bootstrap_creator_address_priority(monkeypatch):
     """The helper that derives creator_address must prefer the on-chain
     FTNS ledger's connected address, fall back to PRSM_CREATOR_ADDRESS
-    env var, and return None if neither is configured.
+    env var, and return None if neither is configured. Invalid
+    addresses are rejected with a log warning.
 
     Phase 1.3 Task 3a regression."""
-    import os
-    from unittest.mock import MagicMock
+    from types import SimpleNamespace
     from prsm.node.node import _derive_creator_address
 
-    # Case 1: ftns_ledger has _connected_address - ledger wins.
-    ledger = MagicMock()
-    ledger._connected_address = "0xLedger000000000000000000000000000000beef"
-    assert _derive_creator_address(ledger) == ledger._connected_address
+    valid_ledger_addr = "0x1111111111111111111111111111111111111111"
+    valid_env_addr = "0x2222222222222222222222222222222222222222"
 
-    # Case 2: ftns_ledger has no _connected_address attribute - env var wins.
-    ledger_no_addr = MagicMock(spec=[])
-    os.environ["PRSM_CREATOR_ADDRESS"] = "0xFromEnv00000000000000000000000000000001"
-    try:
-        assert _derive_creator_address(ledger_no_addr) == os.environ["PRSM_CREATOR_ADDRESS"]
-    finally:
-        del os.environ["PRSM_CREATOR_ADDRESS"]
+    # Case 1: ledger has valid _connected_address — ledger wins.
+    ledger = SimpleNamespace(_connected_address=valid_ledger_addr)
+    monkeypatch.delenv("PRSM_CREATOR_ADDRESS", raising=False)
+    assert _derive_creator_address(ledger) == valid_ledger_addr
 
-    # Case 3: ftns_ledger is None - env var wins.
-    os.environ["PRSM_CREATOR_ADDRESS"] = "0xFromEnv00000000000000000000000000000002"
-    try:
-        assert _derive_creator_address(None) == os.environ["PRSM_CREATOR_ADDRESS"]
-    finally:
-        del os.environ["PRSM_CREATOR_ADDRESS"]
+    # Case 2: ledger missing _connected_address attr — env var wins.
+    ledger_no_attr = SimpleNamespace()
+    monkeypatch.setenv("PRSM_CREATOR_ADDRESS", valid_env_addr)
+    assert _derive_creator_address(ledger_no_attr) == valid_env_addr
 
-    # Case 4: both absent - None.
-    os.environ.pop("PRSM_CREATOR_ADDRESS", None)
+    # Case 3: ftns_ledger is None — env var wins.
+    assert _derive_creator_address(None) == valid_env_addr
+
+    # Case 4: both absent — None.
+    monkeypatch.delenv("PRSM_CREATOR_ADDRESS", raising=False)
     assert _derive_creator_address(None) is None
 
-    # Case 5: ftns_ledger has _connected_address = None - env var wins (null treated as absent).
-    ledger_none = MagicMock()
-    ledger_none._connected_address = None
-    os.environ["PRSM_CREATOR_ADDRESS"] = "0xFromEnv00000000000000000000000000000003"
-    try:
-        assert _derive_creator_address(ledger_none) == os.environ["PRSM_CREATOR_ADDRESS"]
-    finally:
-        del os.environ["PRSM_CREATOR_ADDRESS"]
+    # Case 5: ledger has _connected_address=None — env var wins (null treated as absent).
+    ledger_none = SimpleNamespace(_connected_address=None)
+    monkeypatch.setenv("PRSM_CREATOR_ADDRESS", valid_env_addr)
+    assert _derive_creator_address(ledger_none) == valid_env_addr
+
+    # Case 6: ledger has invalid-format address — warns, falls through to env var.
+    ledger_bad = SimpleNamespace(_connected_address="not-an-address")
+    assert _derive_creator_address(ledger_bad) == valid_env_addr
+
+    # Case 7: env var is garbage — warns, returns None.
+    monkeypatch.setenv("PRSM_CREATOR_ADDRESS", "also-not-an-address")
+    ledger_none2 = SimpleNamespace(_connected_address=None)
+    assert _derive_creator_address(ledger_none2) is None
+
+    # Case 8: env var is empty string — returns None (defensive).
+    monkeypatch.setenv("PRSM_CREATOR_ADDRESS", "")
+    assert _derive_creator_address(None) is None
+
+
+def test_real_ftns_ledger_populates_connected_address_synchronously(monkeypatch):
+    """OnChainFTNSLedger.__init__ must populate _connected_address
+    synchronously when FTNS_WALLET_PRIVATE_KEY is set in the env.
+    Without this, _derive_creator_address reads None at
+    PRSMNode.initialize() time — even though the ledger object exists,
+    the address field is empty until the async initialize() runs later
+    in start(). The canonical production deployment would silently
+    skip provenance_hash computation and bypass on-chain royalty
+    routing for every upload.
+
+    Phase 1.3 Task 3a critical fix. Account.from_key(key).address is
+    a pure-local elliptic curve derivation with no network call, so
+    it's safe to run synchronously in __init__."""
+    from eth_account import Account
+    from prsm.economy.ftns_onchain import OnChainFTNSLedger
+    from prsm.node.node import _derive_creator_address
+
+    # Burner key — never used on any real network. The address it
+    # derives to is deterministic so we can compare exactly.
+    burner_key = "0x" + "11" * 32
+    expected_addr = Account.from_key(burner_key).address
+
+    monkeypatch.setenv("FTNS_WALLET_PRIVATE_KEY", burner_key)
+
+    ledger = OnChainFTNSLedger(node_id="test-node")
+    assert ledger._connected_address == expected_addr, (
+        f"OnChainFTNSLedger.__init__ must populate _connected_address "
+        f"synchronously from FTNS_WALLET_PRIVATE_KEY; got "
+        f"{ledger._connected_address!r}, expected {expected_addr!r}"
+    )
+
+    # _derive_creator_address must return the real address, not None.
+    assert _derive_creator_address(ledger) == expected_addr
+
+
+def test_real_ftns_ledger_without_private_key_stays_none(monkeypatch):
+    """When FTNS_WALLET_PRIVATE_KEY is absent, _connected_address
+    remains None and _derive_creator_address falls through to the
+    env var path or None. Backward compat for nodes without an
+    on-chain wallet."""
+    from prsm.economy.ftns_onchain import OnChainFTNSLedger
+    from prsm.node.node import _derive_creator_address
+
+    monkeypatch.delenv("FTNS_WALLET_PRIVATE_KEY", raising=False)
+    monkeypatch.delenv("PRSM_CREATOR_ADDRESS", raising=False)
+
+    ledger = OnChainFTNSLedger(node_id="test-node")
+    assert ledger._connected_address is None
+    assert _derive_creator_address(ledger) is None

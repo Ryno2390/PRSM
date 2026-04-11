@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import time
 import uuid as _uuid
 from dataclasses import dataclass, field
@@ -61,28 +62,53 @@ from prsm.node.bittorrent_requester import BitTorrentRequester, BitTorrentReques
 logger = logging.getLogger(__name__)
 
 
+def _is_valid_eth_address(addr: Optional[str]) -> bool:
+    """Cheap format check for 0x-prefixed 20-byte Ethereum address."""
+    if not isinstance(addr, str):
+        return False
+    if not addr.startswith("0x") or len(addr) != 42:
+        return False
+    return all(c in "0123456789abcdefABCDEF" for c in addr[2:])
+
+
 def _derive_creator_address(ftns_ledger: Optional[Any]) -> Optional[str]:
     """Resolve the on-chain creator 0x address for this node.
 
     Priority:
-      1. ftns_ledger._connected_address - the address derived from
-         FTNS_WALLET_PRIVATE_KEY, the canonical on-chain identity.
-      2. PRSM_CREATOR_ADDRESS env var - for nodes that run without
-         the full on-chain FTNS stack but still want to register
-         content on-chain.
-      3. None - on-chain routing silently skips and local fallback
-         handles payments. Preserves backward compat with nodes that
-         don't run any on-chain stack.
+      1. ftns_ledger._connected_address — canonical on-chain identity
+         derived from FTNS_WALLET_PRIVATE_KEY in OnChainFTNSLedger.__init__.
+      2. PRSM_CREATOR_ADDRESS env var — for nodes without the full
+         on-chain stack that still want to register content on-chain.
+      3. None — backward compat; on-chain routing silently skips and
+         local fallback handles payments.
 
-    Phase 1.3 Task 3a - codex pass 1 caught the wiring gap; this
-    helper makes the priority explicit and testable.
+    Invalid addresses (bad format, empty string) log a warning and
+    fall through rather than poisoning the on-chain registry with a
+    hash bound to a garbage address.
+
+    Phase 1.3 Task 3a.
     """
-    import os
     if ftns_ledger is not None:
         addr = getattr(ftns_ledger, "_connected_address", None)
         if addr:
-            return addr
-    return os.environ.get("PRSM_CREATOR_ADDRESS") or None
+            if _is_valid_eth_address(addr):
+                return addr
+            logger.warning(
+                f"ftns_ledger._connected_address has invalid format: "
+                f"{addr!r}; falling through to env var."
+            )
+
+    env_addr = os.environ.get("PRSM_CREATOR_ADDRESS")
+    if env_addr:
+        if _is_valid_eth_address(env_addr):
+            return env_addr
+        logger.warning(
+            f"PRSM_CREATOR_ADDRESS env var has invalid format: "
+            f"{env_addr!r}; on-chain routing disabled for this node. "
+            f"Local royalty fallback will be used."
+        )
+
+    return None
 
 
 class _StakingFTNSAdapter:
