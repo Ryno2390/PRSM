@@ -1275,6 +1275,10 @@ class ContentUploader:
                 "embedding_id": uploaded.embedding_id,
                 "near_duplicate_of": uploaded.near_duplicate_of,
                 "near_duplicate_similarity": uploaded.near_duplicate_similarity,
+                # Phase 1.3 Task 2: canonical on-chain provenance hash —
+                # must survive node restarts so royalty routing stays
+                # on-chain across process lifetimes.
+                "provenance_hash": uploaded.provenance_hash,
                 "created_at": uploaded.created_at,
             }
             success = await ProvenanceQueries.upsert_provenance(record)
@@ -1411,13 +1415,20 @@ class ContentUploader:
                     embedding_id=rec["embedding_id"],
                     near_duplicate_of=rec["near_duplicate_of"],
                     near_duplicate_similarity=rec["near_duplicate_similarity"],
+                    # Phase 1.3 Task 2: restore canonical on-chain hash.
+                    # Use .get() so rows written before Phase 1.3 (when the
+                    # column did not exist and load_all_for_node omitted the
+                    # key) don't KeyError — legacy rows hydrate as None and
+                    # fall back to local royalties, matching the pre-1.3
+                    # behaviour operators already expect.
+                    provenance_hash=rec.get("provenance_hash"),
                 )
                 self.uploaded_content[rec["content_id"]] = uploaded
                 # Phase 1.3: restart must also re-populate provider._local_content
                 # so previously-uploaded content stays servable after the restart.
-                # Note: provenance_hash is None here until Task 2 adds it to the DB
-                # schema — _register_with_provider still passes whatever the dataclass
-                # carries (None today).
+                # provenance_hash is now populated from the DB above (Task 2),
+                # so on-chain routing survives restarts for rows uploaded with
+                # a configured creator 0x address.
                 self._register_with_provider(uploaded)
                 loaded += 1
             if loaded > 0:

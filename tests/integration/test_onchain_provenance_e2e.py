@@ -1354,3 +1354,86 @@ def test_handle_content_request_preserves_zero_royalty_rate():
         f"registered royalty_rate=0.0 must flow through as 0.0, not "
         f"coalesce to default 0.01; got {rate}"
     )
+
+
+def test_provenance_hash_survives_db_persist_and_hydrate():
+    """Upload a file with a creator_address, persist the provenance
+    record to the DB layer, clear in-memory state, hydrate from the DB,
+    and verify the canonical provenance_hash round-trips intact.
+
+    Phase 1.3 Task 2 regression — before this task the hash was
+    computed and gossiped but dropped on the DB write, so a node
+    restart silently lost on-chain routing for all uploads since the
+    last restart."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from prsm.economy.web3.provenance_registry import compute_content_hash
+    from prsm.node.content_uploader import ContentUploader
+
+    # In-memory DB substitute: dict-backed upsert + load.
+    fake_db: dict = {}
+
+    async def fake_upsert(record):
+        fake_db[record["content_id"]] = dict(record)
+        return True
+
+    async def fake_load_all(creator_id):
+        return [dict(r) for r in fake_db.values() if r.get("creator_id") == creator_id]
+
+    identity = MagicMock()
+    identity.node_id = "node-persist-test"
+    identity.public_key_b64 = "fakekey"
+    identity.sign = MagicMock(return_value="sig")
+    gossip = MagicMock()
+    gossip.publish = AsyncMock()
+    ledger = MagicMock()
+
+    creator_address = "0x1111111111111111111111111111111111111111"
+    file_bytes = b"persistence round-trip test"
+    expected_hash = "0x" + compute_content_hash(creator_address, file_bytes).hex()
+
+    # Write side.
+    uploader = ContentUploader(
+        identity=identity,
+        gossip=gossip,
+        ledger=ledger,
+        creator_address=creator_address,
+    )
+    uploader._ipfs_add = AsyncMock(return_value="QmPersistTestCID")
+
+    with patch(
+        "prsm.core.database.ProvenanceQueries.upsert_provenance",
+        new=AsyncMock(side_effect=fake_upsert),
+    ):
+        uploaded = asyncio.run(
+            uploader.upload(content=file_bytes, filename="persist.txt")
+        )
+
+    assert uploaded is not None
+    assert uploaded.provenance_hash == expected_hash
+    # Confirm the persist call actually wrote the field to the "DB".
+    assert "QmPersistTestCID" in fake_db, "upsert_provenance was not called"
+    assert fake_db["QmPersistTestCID"].get("provenance_hash") == expected_hash, (
+        f"provenance_hash missing from persisted record: "
+        f"{fake_db['QmPersistTestCID']}"
+    )
+
+    # Hard-clear in-memory state to simulate restart.
+    uploader.uploaded_content.clear()
+    assert "QmPersistTestCID" not in uploader.uploaded_content
+
+    # Read side: hydrate from the fake DB.
+    with patch(
+        "prsm.core.database.ProvenanceQueries.load_all_for_node",
+        new=AsyncMock(side_effect=fake_load_all),
+    ):
+        loaded = asyncio.run(uploader._hydrate_from_db())
+
+    assert loaded >= 1
+    restored = uploader.uploaded_content.get("QmPersistTestCID")
+    assert restored is not None, "content was not restored by _hydrate_from_db"
+    assert restored.provenance_hash == expected_hash, (
+        f"provenance_hash lost on DB round-trip: expected {expected_hash}, "
+        f"got {restored.provenance_hash!r}"
+    )
