@@ -564,11 +564,30 @@ class ContentProvider:
             # Process payment for content access (Phase 4)
             if self.content_economy:
                 try:
-                    # Phase 1.2: forward provenance_hash so content_economy can
-                    # route the payment through the on-chain RoyaltyDistributor
-                    # when enabled. The uploader populates it either at the top
-                    # level or nested under "metadata" depending on code path.
+                    # Phase 1.3: register_local_content stores the caller's
+                    # metadata nested under the "metadata" key, but some
+                    # older call sites set fields at the top level. Two-step
+                    # lookup handles both shapes, mirroring the provenance_hash
+                    # pattern from Phase 1.2 Task 5. Without this, the
+                    # Phase 1.3 uploader wiring would silently fire payments
+                    # with empty creator_id, default 0.01 rate, and empty
+                    # parent chain.
                     nested_metadata = content_info.get("metadata") or {}
+                    royalty_rate = (
+                        content_info.get("royalty_rate")
+                        or nested_metadata.get("royalty_rate")
+                        or 0.01
+                    )
+                    creator_id = (
+                        content_info.get("creator_id")
+                        or nested_metadata.get("creator_id")
+                        or ""
+                    )
+                    parent_content_ids = (
+                        content_info.get("parent_cids")
+                        or nested_metadata.get("parent_cids")
+                        or []
+                    )
                     provenance_hash = (
                         content_info.get("provenance_hash")
                         or nested_metadata.get("provenance_hash")
@@ -577,9 +596,9 @@ class ContentProvider:
                         content_id=cid,
                         accessor_id=peer.peer_id,
                         content_metadata={
-                            "royalty_rate": content_info.get("royalty_rate", 0.01),
-                            "creator_id": content_info.get("creator_id", ""),
-                            "parent_content_ids": content_info.get("parent_cids", []),
+                            "royalty_rate": royalty_rate,
+                            "creator_id": creator_id,
+                            "parent_content_ids": parent_content_ids,
                             "provenance_hash": provenance_hash,
                         },
                     )
@@ -887,7 +906,25 @@ class ContentProvider:
         content_info = self._local_content.get(cid)
         if not content_info:
             return None
+        # Phase 1.3: two-step lookup (top-level then nested, then default)
+        # for all four payment fields. Mirrors the inline serve path and
+        # the Phase 1.2 Task 5 provenance_hash pattern.
         nested_metadata = content_info.get("metadata") or {}
+        royalty_rate = (
+            content_info.get("royalty_rate")
+            or nested_metadata.get("royalty_rate")
+            or 0.01
+        )
+        creator_id = (
+            content_info.get("creator_id")
+            or nested_metadata.get("creator_id")
+            or ""
+        )
+        parent_content_ids = (
+            content_info.get("parent_cids")
+            or nested_metadata.get("parent_cids")
+            or []
+        )
         provenance_hash = (
             content_info.get("provenance_hash")
             or nested_metadata.get("provenance_hash")
@@ -896,9 +933,9 @@ class ContentProvider:
             content_id=cid,
             accessor_id=accessor_id,
             content_metadata={
-                "royalty_rate": content_info.get("royalty_rate", 0.01),
-                "creator_id": content_info.get("creator_id", ""),
-                "parent_content_ids": content_info.get("parent_cids", []),
+                "royalty_rate": royalty_rate,
+                "creator_id": creator_id,
+                "parent_content_ids": parent_content_ids,
                 "provenance_hash": provenance_hash,
             },
         )

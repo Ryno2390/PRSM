@@ -1184,3 +1184,95 @@ def test_hydrate_from_db_restores_provider_local_content():
     assert provider.has_local_content("QmHydrateTest"), (
         "_hydrate_from_db must also populate provider._local_content"
     )
+
+
+def test_handle_content_request_reads_nested_metadata_on_payment():
+    """After Phase 1.3 Task 1 wires register_local_content to receive
+    metadata nested under the "metadata" key, _handle_content_request
+    must read creator_id/royalty_rate/parent_cids with a two-step
+    lookup (top-level first, then nested) just like provenance_hash.
+    Otherwise payments fire with empty creator_id, default 0.01 rate,
+    and empty parent chain.
+
+    Phase 1.3 Task 1 fix — closes a shape mismatch between the writer
+    (register_local_content nests the metadata dict) and the reader
+    (_handle_content_request was reading top-level only for these
+    three fields). Mirrors the provenance_hash two-step lookup pattern
+    from Phase 1.2 Task 5."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_provider import ContentProvider
+    from prsm.node.content_economy import ContentEconomy, RoyaltyModel
+
+    identity = MagicMock()
+    identity.node_id = "node-nested-test"
+    transport = MagicMock()
+    transport.send_message = AsyncMock()
+    gossip = MagicMock()
+    ledger = MagicMock()
+    ledger.debit = AsyncMock()
+    content_index = MagicMock()
+
+    # Real ContentEconomy so any kwarg mismatch blows up loudly.
+    economy = ContentEconomy(
+        identity=identity,
+        ledger=ledger,
+        gossip=gossip,
+        content_index=content_index,
+        ftns_ledger=None,
+        royalty_model=RoyaltyModel.PHASE4,
+    )
+
+    captured: dict = {}
+
+    async def capture_distribute(
+        payment, creator_id, parent_content_ids, content_metadata
+    ):
+        captured["creator_id"] = creator_id
+        captured["parent_content_ids"] = parent_content_ids
+        captured["content_metadata"] = content_metadata
+        return []
+
+    economy._distribute_royalties = capture_distribute
+
+    provider = ContentProvider(
+        identity=identity,
+        transport=transport,
+        gossip=gossip,
+        content_economy=economy,
+    )
+
+    # Register content with metadata nested under "metadata" — the
+    # shape the uploader produces after Phase 1.3 Task 1.
+    provider.register_local_content(
+        cid="cid-nested-test",
+        size_bytes=100,
+        content_hash="sha256-nested",
+        filename="n.txt",
+        metadata={
+            "creator_id": "creator-real",
+            "royalty_rate": 0.05,
+            "parent_cids": ["parent-a", "parent-b"],
+            "provenance_hash": "0x" + "aa" * 32,
+        },
+    )
+
+    asyncio.run(
+        provider._fire_payment_for_test(
+            cid="cid-nested-test",
+            accessor_id="peer-x",
+        )
+    )
+
+    # The reader must have pulled nested values, NOT the defaults.
+    assert captured["creator_id"] == "creator-real", (
+        f"expected nested creator_id to win; got {captured['creator_id']!r}"
+    )
+    assert captured["content_metadata"]["royalty_rate"] == 0.05, (
+        f"expected nested royalty_rate 0.05; got {captured['content_metadata']['royalty_rate']}"
+    )
+    assert captured["parent_content_ids"] == ["parent-a", "parent-b"], (
+        f"expected nested parent_cids; got {captured['parent_content_ids']}"
+    )
+    assert captured["content_metadata"]["provenance_hash"] == "0x" + "aa" * 32
