@@ -1276,3 +1276,81 @@ def test_handle_content_request_reads_nested_metadata_on_payment():
         f"expected nested parent_cids; got {captured['parent_content_ids']}"
     )
     assert captured["content_metadata"]["provenance_hash"] == "0x" + "aa" * 32
+
+
+def test_handle_content_request_preserves_zero_royalty_rate():
+    """register_local_content with royalty_rate=0.0 (free content) must
+    flow through the reader as 0.0, not get coalesced to the default
+    0.01 by an `or`-chain.
+
+    Phase 1.3 Task 1 code-review fix — the original nested-metadata
+    two-step lookup used `or 0.01` which silently clobbered any
+    explicit 0.0 because 0.0 is falsy in Python. Real bug for free-tier
+    / public-goods / zero-royalty test content."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_provider import ContentProvider
+    from prsm.node.content_economy import ContentEconomy, RoyaltyModel
+
+    identity = MagicMock()
+    identity.node_id = "node-zero-rate"
+    transport = MagicMock()
+    transport.send_message = AsyncMock()
+    gossip = MagicMock()
+    ledger = MagicMock()
+    ledger.debit = AsyncMock()
+    content_index = MagicMock()
+
+    economy = ContentEconomy(
+        identity=identity,
+        ledger=ledger,
+        gossip=gossip,
+        content_index=content_index,
+        ftns_ledger=None,
+        royalty_model=RoyaltyModel.PHASE4,
+    )
+
+    captured: dict = {}
+
+    async def capture_distribute(
+        payment, creator_id, parent_content_ids, content_metadata
+    ):
+        captured["content_metadata"] = content_metadata
+        return []
+
+    economy._distribute_royalties = capture_distribute
+
+    provider = ContentProvider(
+        identity=identity,
+        transport=transport,
+        gossip=gossip,
+        content_economy=economy,
+    )
+
+    # Register free content (rate explicitly 0.0).
+    provider.register_local_content(
+        cid="cid-free-content",
+        size_bytes=100,
+        content_hash="sha256-free",
+        filename="free.txt",
+        metadata={
+            "creator_id": "creator-philanthropist",
+            "royalty_rate": 0.0,
+            "parent_cids": [],
+            "provenance_hash": None,
+        },
+    )
+
+    asyncio.run(
+        provider._fire_payment_for_test(
+            cid="cid-free-content",
+            accessor_id="peer-y",
+        )
+    )
+
+    rate = captured["content_metadata"]["royalty_rate"]
+    assert rate == 0.0, (
+        f"registered royalty_rate=0.0 must flow through as 0.0, not "
+        f"coalesce to default 0.01; got {rate}"
+    )

@@ -1416,7 +1416,7 @@ class ContentUploader:
                 # Phase 1.3: restart must also re-populate provider._local_content
                 # so previously-uploaded content stays servable after the restart.
                 # Note: provenance_hash is None here until Task 2 adds it to the DB
-                # schema — register_with_provider still passes whatever the dataclass
+                # schema — _register_with_provider still passes whatever the dataclass
                 # carries (None today).
                 self._register_with_provider(uploaded)
                 loaded += 1
