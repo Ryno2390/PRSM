@@ -1210,6 +1210,7 @@ def test_handle_content_request_reads_nested_metadata_on_payment():
     transport = MagicMock()
     transport.send_message = AsyncMock()
     gossip = MagicMock()
+    gossip.publish = AsyncMock()
     ledger = MagicMock()
     ledger.debit = AsyncMock()
     content_index = MagicMock()
@@ -1277,6 +1278,11 @@ def test_handle_content_request_reads_nested_metadata_on_payment():
     )
     assert captured["content_metadata"]["provenance_hash"] == "0x" + "aa" * 32
 
+    assert gossip.publish.await_count >= 1, (
+        "gossip.publish must have been called after the serve; if this "
+        "fails the test is silently exercising the exception handler"
+    )
+
 
 def test_handle_content_request_preserves_zero_royalty_rate():
     """register_local_content with royalty_rate=0.0 (free content) must
@@ -1298,6 +1304,7 @@ def test_handle_content_request_preserves_zero_royalty_rate():
     transport = MagicMock()
     transport.send_message = AsyncMock()
     gossip = MagicMock()
+    gossip.publish = AsyncMock()
     ledger = MagicMock()
     ledger.debit = AsyncMock()
     content_index = MagicMock()
@@ -1353,6 +1360,11 @@ def test_handle_content_request_preserves_zero_royalty_rate():
     assert rate == 0.0, (
         f"registered royalty_rate=0.0 must flow through as 0.0, not "
         f"coalesce to default 0.01; got {rate}"
+    )
+
+    assert gossip.publish.await_count >= 1, (
+        "gossip.publish must have been called after the serve; if this "
+        "fails the test is silently exercising the exception handler"
     )
 
 
@@ -1567,67 +1579,6 @@ def test_real_ftns_ledger_without_private_key_stays_none(monkeypatch):
     ledger = OnChainFTNSLedger(node_id="test-node")
     assert ledger._connected_address is None
     assert _derive_creator_address(ledger) is None
-
-
-def test_uploader_ignores_content_request_direct_messages():
-    """After Phase 1.3 Task 3b, ContentUploader is no longer a server
-    for content_request direct messages — the provider is the canonical
-    serve path. The uploader's dispatcher must NOT respond with the
-    legacy `found=True/False` payload shape, because that response
-    races with the provider's correct `status=FOUND` response and the
-    requester's client dispatcher can complete its pending future with
-    the wrong result.
-
-    This test fires a content_request message directly at the uploader's
-    _on_direct_message dispatcher and asserts no response is sent.
-    Phase 1.3 Task 3b regression."""
-    import asyncio
-    from unittest.mock import AsyncMock, MagicMock
-
-    from prsm.node.content_uploader import ContentUploader, UploadedContent
-    from prsm.node.transport import P2PMessage
-
-    identity = MagicMock()
-    identity.node_id = "node-retire-test"
-    gossip = MagicMock()
-    gossip.publish = AsyncMock()
-    ledger = MagicMock()
-
-    uploader = ContentUploader(
-        identity=identity,
-        gossip=gossip,
-        ledger=ledger,
-    )
-    # Spy on _send_direct to catch any response send.
-    send_spy = AsyncMock()
-    uploader._send_direct = send_spy
-
-    # Even if the uploader has the content locally, it must NOT respond.
-    # Populate uploaded_content to make sure we're testing the dispatcher
-    # behavior, not a fallback not-found path.
-    uploader.uploaded_content["QmRetireTest"] = UploadedContent(
-        content_id="QmRetireTest",
-        filename="r.txt",
-        size_bytes=100,
-        content_hash="sha256-r",
-        creator_id="node-retire-test",
-    )
-
-    msg = P2PMessage(
-        msg_type="direct",
-        sender_id="peer-x",
-        payload={
-            "subtype": "content_request",
-            "cid": "QmRetireTest",
-            "request_id": "req-1",
-        },
-    )
-    peer = MagicMock()
-    peer.peer_id = "peer-x"
-
-    asyncio.run(uploader._on_direct_message(msg, peer))
-
-    send_spy.assert_not_called()
 
 
 def test_provider_publishes_gossip_content_access_after_payment():

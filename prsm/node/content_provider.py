@@ -605,7 +605,7 @@ class ContentProvider:
                     "timestamp": time.time(),
                 })
             except Exception as exc:
-                logger.debug(
+                logger.warning(
                     f"GOSSIP_CONTENT_ACCESS publish failed for "
                     f"{cid[:12]}...: {exc}"
                 )
@@ -918,7 +918,7 @@ class ContentProvider:
                 "timestamp": time.time(),
             })
         except Exception as exc:
-            logger.debug(
+            logger.warning(
                 f"GOSSIP_CONTENT_ACCESS publish failed for "
                 f"{cid[:12]}...: {exc}"
             )
