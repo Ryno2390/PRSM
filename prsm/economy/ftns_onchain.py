@@ -183,6 +183,40 @@ class OnChainFTNSLedger:
         self._is_initialized = False
         self._lock = asyncio.Lock()
 
+        # Phase 1.3 Task 3a: populate _connected_address synchronously
+        # from the wallet private key. Account.from_key(key).address is
+        # a pure-local elliptic curve derivation — no network call — so
+        # it's safe to do in __init__. This makes the address available
+        # at PRSMNode.initialize() time (before the async initialize()
+        # runs in start()), which is when ContentUploader is constructed
+        # and _derive_creator_address reads this field. Without the sync
+        # population, ContentUploader.creator_address would always be
+        # None in production and every upload would silently skip
+        # provenance_hash computation and on-chain royalty routing.
+        #
+        # The async initialize() still runs later for RPC/balance/
+        # contract-state setup; it idempotently re-derives the same
+        # _account and _connected_address (no-op if already set).
+        if self.wallet_private_key and Account is not None:
+            try:
+                key = (
+                    self.wallet_private_key
+                    if self.wallet_private_key.startswith("0x")
+                    else "0x" + self.wallet_private_key
+                )
+                self._account = Account.from_key(key)
+                self._connected_address = self._account.address
+            except Exception as exc:
+                # Bad key format or missing eth_account — log and leave
+                # _connected_address=None so the upload path falls back
+                # to PRSM_CREATOR_ADDRESS env var or local royalties.
+                logger.warning(
+                    f"Could not derive connected_address from "
+                    f"FTNS_WALLET_PRIVATE_KEY: {exc}. On-chain routing "
+                    f"will require PRSM_CREATOR_ADDRESS env var or fall "
+                    f"back to local royalties."
+                )
+
     async def initialize(self) -> bool:
         """Connect to Base mainnet and load the FTNS contract."""
         if self._is_initialized:
