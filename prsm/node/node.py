@@ -61,6 +61,30 @@ from prsm.node.bittorrent_requester import BitTorrentRequester, BitTorrentReques
 logger = logging.getLogger(__name__)
 
 
+def _derive_creator_address(ftns_ledger: Optional[Any]) -> Optional[str]:
+    """Resolve the on-chain creator 0x address for this node.
+
+    Priority:
+      1. ftns_ledger._connected_address - the address derived from
+         FTNS_WALLET_PRIVATE_KEY, the canonical on-chain identity.
+      2. PRSM_CREATOR_ADDRESS env var - for nodes that run without
+         the full on-chain FTNS stack but still want to register
+         content on-chain.
+      3. None - on-chain routing silently skips and local fallback
+         handles payments. Preserves backward compat with nodes that
+         don't run any on-chain stack.
+
+    Phase 1.3 Task 3a - codex pass 1 caught the wiring gap; this
+    helper makes the priority explicit and testable.
+    """
+    import os
+    if ftns_ledger is not None:
+        addr = getattr(ftns_ledger, "_connected_address", None)
+        if addr:
+            return addr
+    return os.environ.get("PRSM_CREATOR_ADDRESS") or None
+
+
 class _StakingFTNSAdapter:
     """Bridges node ledger to the FTNS interface expected by StakingManager."""
 
@@ -359,6 +383,17 @@ class PRSMNode:
             bandwidth_limiter=_bandwidth_limiter,
         )
 
+        # ── On-Chain FTNS Ledger (Base mainnet) ────────────────────
+        # Phase 1.3 Task 3a: instantiated BEFORE ContentUploader so the
+        # uploader bootstrap can derive creator_address from the ledger's
+        # _connected_address. Previously this was constructed ~200 lines
+        # later, which left creator_address=None at upload-time and
+        # silently bypassed provenance_hash computation / on-chain
+        # royalty routing for every production upload.
+        self.ftns_ledger = OnChainFTNSLedger(
+            node_id=self.identity.node_id,
+        )
+
         self.content_uploader = ContentUploader(
             identity=self.identity,
             gossip=self.gossip,
@@ -369,6 +404,7 @@ class PRSMNode:
             embedding_fn=_embedding_fn,
             semantic_index_path=_semantic_index_path,
             content_provider=self.content_provider,
+            creator_address=_derive_creator_address(self.ftns_ledger),
         )
 
         # ── Ledger Sync ──────────────────────────────────────────
@@ -539,11 +575,6 @@ class PRSMNode:
             self.spot_arbitrage = None
             logger.debug("Economy engine not available")
 
-        # ── On-Chain FTNS Ledger (Base mainnet) ────────────────────
-        self.ftns_ledger = OnChainFTNSLedger(
-            node_id=self.identity.node_id,
-        )
-        
         # ── Content Economy (Phase 4) ──────────────────────────────────────
         # Determine royalty model from config
         royalty_model = RoyaltyModel.PHASE4

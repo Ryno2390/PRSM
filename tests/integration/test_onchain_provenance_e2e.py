@@ -1437,3 +1437,77 @@ def test_provenance_hash_survives_db_persist_and_hydrate():
         f"provenance_hash lost on DB round-trip: expected {expected_hash}, "
         f"got {restored.provenance_hash!r}"
     )
+
+
+def test_bootstrap_wires_creator_address_from_ftns_ledger(monkeypatch):
+    """PRSMNode bootstrap must pass creator_address into ContentUploader,
+    sourced from self.ftns_ledger._connected_address when available.
+    Without this, every production upload has creator_address=None,
+    skips provenance_hash computation, and silently bypasses the
+    on-chain royalty path - making Phase 1 inoperable end-to-end.
+
+    Phase 1.3 Task 3a regression - codex pass 1 caught this gap after
+    Task 1 wired register_local_content but node.py still omitted
+    the creator_address kwarg on the ContentUploader(...) call.
+
+    Note: the ContentUploader(...) construction currently lives in
+    PRSMNode.initialize() (not __init__), so we inspect the source
+    of initialize(). A static source-level check is sufficient and
+    stable under refactor - we don't need to stand up a full node
+    (which would require a database, transport, etc.).
+    """
+    import inspect
+    from prsm.node.node import PRSMNode
+
+    source = inspect.getsource(PRSMNode.initialize)
+    uploader_section = source[source.index("ContentUploader("):]
+    uploader_section = uploader_section[: uploader_section.index(")")]
+    assert "creator_address=" in uploader_section, (
+        "PRSMNode.initialize must pass creator_address= into "
+        "ContentUploader(...) so production uploads compute the "
+        f"canonical provenance_hash. ContentUploader call block:\n{uploader_section}"
+    )
+
+
+def test_bootstrap_creator_address_priority():
+    """The helper that derives creator_address must prefer the on-chain
+    FTNS ledger's connected address, fall back to PRSM_CREATOR_ADDRESS
+    env var, and return None if neither is configured.
+
+    Phase 1.3 Task 3a regression."""
+    import os
+    from unittest.mock import MagicMock
+    from prsm.node.node import _derive_creator_address
+
+    # Case 1: ftns_ledger has _connected_address - ledger wins.
+    ledger = MagicMock()
+    ledger._connected_address = "0xLedger000000000000000000000000000000beef"
+    assert _derive_creator_address(ledger) == ledger._connected_address
+
+    # Case 2: ftns_ledger has no _connected_address attribute - env var wins.
+    ledger_no_addr = MagicMock(spec=[])
+    os.environ["PRSM_CREATOR_ADDRESS"] = "0xFromEnv00000000000000000000000000000001"
+    try:
+        assert _derive_creator_address(ledger_no_addr) == os.environ["PRSM_CREATOR_ADDRESS"]
+    finally:
+        del os.environ["PRSM_CREATOR_ADDRESS"]
+
+    # Case 3: ftns_ledger is None - env var wins.
+    os.environ["PRSM_CREATOR_ADDRESS"] = "0xFromEnv00000000000000000000000000000002"
+    try:
+        assert _derive_creator_address(None) == os.environ["PRSM_CREATOR_ADDRESS"]
+    finally:
+        del os.environ["PRSM_CREATOR_ADDRESS"]
+
+    # Case 4: both absent - None.
+    os.environ.pop("PRSM_CREATOR_ADDRESS", None)
+    assert _derive_creator_address(None) is None
+
+    # Case 5: ftns_ledger has _connected_address = None - env var wins (null treated as absent).
+    ledger_none = MagicMock()
+    ledger_none._connected_address = None
+    os.environ["PRSM_CREATOR_ADDRESS"] = "0xFromEnv00000000000000000000000000000003"
+    try:
+        assert _derive_creator_address(ledger_none) == os.environ["PRSM_CREATOR_ADDRESS"]
+    finally:
+        del os.environ["PRSM_CREATOR_ADDRESS"]
