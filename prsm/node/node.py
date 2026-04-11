@@ -409,6 +409,17 @@ class PRSMNode:
             bandwidth_limiter=_bandwidth_limiter,
         )
 
+        # Phase 1.3 Task 3e: wire content_provider back into
+        # storage_provider so its _on_direct_content_request can
+        # defer to the canonical serve path when the provider also
+        # has the CID. Without this, both MSG_DIRECT handlers race
+        # and the legacy-shape response from storage_provider wins
+        # (arrives first because it skips payment), which the
+        # canonical ContentResponseMessage.from_payload() parser on
+        # the requester side downgrades to ERROR.
+        if self.storage_provider is not None:
+            self.storage_provider._content_provider = self.content_provider
+
         # ── On-Chain FTNS Ledger (Base mainnet) ────────────────────
         # Phase 1.3 Task 3a: instantiated BEFORE ContentUploader so the
         # uploader bootstrap can derive creator_address from the ledger's
