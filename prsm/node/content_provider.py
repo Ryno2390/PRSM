@@ -585,7 +585,31 @@ class ContentProvider:
                 except Exception as e:
                     # Log but don't fail the transfer - payment issues handled separately
                     logger.warning(f"Payment processing failed for {cid[:12]}...: {e}")
-            
+
+            # Phase 1.3 Task 3b: publish GOSSIP_CONTENT_ACCESS so
+            # source creators on other nodes can credit their shares
+            # locally. This used to fire from ContentUploader's
+            # (now-retired) server-side _handle_content_request. The
+            # publish happens AFTER the payment try/except so it fires
+            # regardless of whether the on-chain path succeeded or
+            # fell back to local. Payload fields preserved from the
+            # legacy uploader implementation.
+            try:
+                resolved = self._resolve_payment_metadata(content_info)
+                await self.gossip.publish(GOSSIP_CONTENT_ACCESS, {
+                    "cid": cid,
+                    "accessor_id": peer.peer_id,
+                    "creator_id": resolved.get("creator_id", ""),
+                    "royalty_rate": resolved.get("royalty_rate", 0.01),
+                    "parent_content_ids": resolved.get("parent_content_ids", []),
+                    "timestamp": time.time(),
+                })
+            except Exception as exc:
+                logger.debug(
+                    f"GOSSIP_CONTENT_ACCESS publish failed for "
+                    f"{cid[:12]}...: {exc}"
+                )
+
             self._telemetry["requests_served"] += 1
             self._telemetry["bytes_served"] += size
             
@@ -867,17 +891,38 @@ class ContentProvider:
         """Test seam: invoke the payment-on-access path directly. Used by
         tests/integration/test_onchain_provenance_e2e.py to verify
         provenance_hash forwarding without standing up the full P2P stack.
+
+        Phase 1.3 Task 3b: mirrors the inline serve path by also
+        publishing GOSSIP_CONTENT_ACCESS after the payment call, so
+        tests for the gossip-after-serve contract exercise the same
+        post-payment block as production.
         """
         if not self.content_economy:
             return None
         content_info = self._local_content.get(cid)
         if not content_info:
             return None
-        return await self.content_economy.process_content_access(
+        resolved = self._resolve_payment_metadata(content_info)
+        payment = await self.content_economy.process_content_access(
             content_id=cid,
             accessor_id=accessor_id,
-            content_metadata=self._resolve_payment_metadata(content_info),
+            content_metadata=resolved,
         )
+        try:
+            await self.gossip.publish(GOSSIP_CONTENT_ACCESS, {
+                "cid": cid,
+                "accessor_id": accessor_id,
+                "creator_id": resolved.get("creator_id", ""),
+                "royalty_rate": resolved.get("royalty_rate", 0.01),
+                "parent_content_ids": resolved.get("parent_content_ids", []),
+                "timestamp": time.time(),
+            })
+        except Exception as exc:
+            logger.debug(
+                f"GOSSIP_CONTENT_ACCESS publish failed for "
+                f"{cid[:12]}...: {exc}"
+            )
+        return payment
 
     def _resolve_payment_metadata(
         self, content_info: Dict[str, Any]

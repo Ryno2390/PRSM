@@ -1567,3 +1567,144 @@ def test_real_ftns_ledger_without_private_key_stays_none(monkeypatch):
     ledger = OnChainFTNSLedger(node_id="test-node")
     assert ledger._connected_address is None
     assert _derive_creator_address(ledger) is None
+
+
+def test_uploader_ignores_content_request_direct_messages():
+    """After Phase 1.3 Task 3b, ContentUploader is no longer a server
+    for content_request direct messages — the provider is the canonical
+    serve path. The uploader's dispatcher must NOT respond with the
+    legacy `found=True/False` payload shape, because that response
+    races with the provider's correct `status=FOUND` response and the
+    requester's client dispatcher can complete its pending future with
+    the wrong result.
+
+    This test fires a content_request message directly at the uploader's
+    _on_direct_message dispatcher and asserts no response is sent.
+    Phase 1.3 Task 3b regression."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_uploader import ContentUploader, UploadedContent
+    from prsm.node.transport import P2PMessage
+
+    identity = MagicMock()
+    identity.node_id = "node-retire-test"
+    gossip = MagicMock()
+    gossip.publish = AsyncMock()
+    ledger = MagicMock()
+
+    uploader = ContentUploader(
+        identity=identity,
+        gossip=gossip,
+        ledger=ledger,
+    )
+    # Spy on _send_direct to catch any response send.
+    send_spy = AsyncMock()
+    uploader._send_direct = send_spy
+
+    # Even if the uploader has the content locally, it must NOT respond.
+    # Populate uploaded_content to make sure we're testing the dispatcher
+    # behavior, not a fallback not-found path.
+    uploader.uploaded_content["QmRetireTest"] = UploadedContent(
+        content_id="QmRetireTest",
+        filename="r.txt",
+        size_bytes=100,
+        content_hash="sha256-r",
+        creator_id="node-retire-test",
+    )
+
+    msg = P2PMessage(
+        msg_type="direct",
+        sender_id="peer-x",
+        payload={
+            "subtype": "content_request",
+            "cid": "QmRetireTest",
+            "request_id": "req-1",
+        },
+    )
+    peer = MagicMock()
+    peer.peer_id = "peer-x"
+
+    asyncio.run(uploader._on_direct_message(msg, peer))
+
+    send_spy.assert_not_called()
+
+
+def test_provider_publishes_gossip_content_access_after_payment():
+    """After Phase 1.3 Task 3b moves the cross-node GOSSIP_CONTENT_ACCESS
+    publish from the retired uploader server path into the provider's
+    serve path, the provider must publish it after every successful
+    serve (regardless of whether payment succeeded on-chain or fell
+    back to local). This keeps source creators on other nodes informed
+    so they can credit their shares.
+
+    Phase 1.3 Task 3b regression."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_provider import ContentProvider
+    from prsm.node.content_economy import ContentEconomy, RoyaltyModel
+    from prsm.node.gossip import GOSSIP_CONTENT_ACCESS
+
+    identity = MagicMock()
+    identity.node_id = "node-provider-gossip"
+    transport = MagicMock()
+    transport.send_to_peer = AsyncMock()
+    gossip = MagicMock()
+    gossip.publish = AsyncMock()
+    ledger = MagicMock()
+    ledger.debit = AsyncMock()
+    content_index = MagicMock()
+
+    economy = ContentEconomy(
+        identity=identity,
+        ledger=ledger,
+        gossip=gossip,
+        content_index=content_index,
+        ftns_ledger=None,
+        royalty_model=RoyaltyModel.PHASE4,
+    )
+    # Stub the distribution so the test doesn't need a full pipeline.
+    economy._distribute_royalties = AsyncMock(return_value=[])
+
+    provider = ContentProvider(
+        identity=identity,
+        transport=transport,
+        gossip=gossip,
+        content_economy=economy,
+    )
+    provider.register_local_content(
+        cid="cid-gossip-test",
+        size_bytes=50,
+        content_hash="sha256-g",
+        filename="g.txt",
+        metadata={
+            "creator_id": "creator-x",
+            "royalty_rate": 0.02,
+            "parent_cids": ["parent-a"],
+            "provenance_hash": None,
+        },
+    )
+
+    asyncio.run(
+        provider._fire_payment_for_test(
+            cid="cid-gossip-test",
+            accessor_id="peer-y",
+        )
+    )
+
+    # The provider must have published GOSSIP_CONTENT_ACCESS with the
+    # access event so remote source creators can credit themselves.
+    access_calls = [
+        call for call in gossip.publish.call_args_list
+        if call.args and call.args[0] == GOSSIP_CONTENT_ACCESS
+    ]
+    assert access_calls, (
+        "Provider serve path must publish GOSSIP_CONTENT_ACCESS after "
+        "payment so cross-node source creators are notified"
+    )
+    payload = access_calls[0].args[1]
+    assert payload.get("cid") == "cid-gossip-test"
+    assert payload.get("accessor_id") == "peer-y"
+    assert payload.get("creator_id") == "creator-x"
+    assert payload.get("parent_content_ids") == ["parent-a"]
