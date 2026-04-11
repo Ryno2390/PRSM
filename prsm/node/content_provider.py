@@ -924,6 +924,22 @@ class ContentProvider:
             )
             return False
 
+        # Phase 1.3 Task 3g pass-5: refuse the serve when creator_id
+        # is empty. A record whose only advertisement was a minimal
+        # replica ad (no creator_id in payload) now surfaces
+        # creator_id="" from the new-record path, replacing the
+        # previous "default to origin peer id" lie. Without creator
+        # metadata we can't pay royalties, so decline and let the
+        # requester try another provider — mirrors the "no record"
+        # refusal path above.
+        if not record.creator_id:
+            logger.warning(
+                f"serve_on_behalf_of_replica: content_index record for "
+                f"{cid[:12]}... has empty creator_id; refusing replica "
+                f"serve (cannot pay royalties without creator metadata)"
+            )
+            return False
+
         # Build payment metadata directly from the ContentRecord —
         # we don't have a _local_content entry to resolve from, so we
         # go straight to the index fields. Mirrors the key mapping
