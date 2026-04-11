@@ -445,10 +445,16 @@ class StorageProvider:
         in its _local_content — ContentProvider's serve path runs the
         canonical payment flow and emits the canonical response shape.
         storage_provider responds only for pinned CIDs that
-        ContentProvider doesn't serve. When it does respond, it uses
-        the canonical ContentResponseMessage shape (status=FOUND) so
-        the requester's ContentResponseMessage.from_payload() parser
-        doesn't silently downgrade the response to ERROR.
+        ContentProvider doesn't serve.
+
+        Phase 1.3 Task 3f: replica-only pinned serves (CIDs pinned here
+        but missing from ContentProvider._local_content) now delegate
+        back to ContentProvider.serve_on_behalf_of_replica so the
+        creator earns FTNS for the access and the on-chain event fires.
+        Without this delegation, replica serves bypass on-chain
+        royalties and silently violate the Phase 1 acceptance criterion
+        ("anyone can independently verify a creator earned FTNS by
+        reading Base mainnet logs").
         """
         subtype = msg.payload.get("subtype", "")
         if subtype != "content_request":
@@ -470,35 +476,34 @@ class StorageProvider:
         ):
             return
 
-        # ContentProvider doesn't serve this CID; storage_provider fills
-        # in using the gateway URL. Emit canonical response shape so
-        # ContentResponseMessage.from_payload() parses as FOUND (the
-        # legacy `{"found": True}` shape was parsed as ERROR by the
-        # canonical parser, silently breaking every pinned retrieval).
-        # Late import to avoid any circular-import risk at module load.
-        from prsm.node.content_provider import (
-            ContentResponseMessage,
-            ContentStatus,
-            TransferMode,
-        )
+        # Phase 1.3 Task 3f: delegate to ContentProvider for the full
+        # payment + gossip + canonical response pipeline. storage_provider
+        # owns the gateway URL / pin metadata; ContentProvider owns the
+        # royalty/settlement contract. Without this delegation, replica
+        # serves bypass on-chain royalties and silently violate the
+        # Phase 1 acceptance criterion.
+        if self._content_provider is None:
+            # Bootstrap misconfig — fall back to silent skip rather than
+            # serving content for free.
+            logger.warning(
+                f"storage_provider has no content_provider reference; "
+                f"cannot pay creator for replica serve of {cid[:12]}..."
+            )
+            return
 
         gateway_url = f"http://127.0.0.1:8080/ipfs/{cid}"
-        response_msg = ContentResponseMessage(
-            request_id=request_id,
+        served = await self._content_provider.serve_on_behalf_of_replica(
             cid=cid,
-            status=ContentStatus.FOUND,
-            size=self.pinned_content[cid].size_bytes,
-            transfer_mode=TransferMode.GATEWAY,
+            request_id=request_id,
+            peer=peer,
+            replica_size_bytes=self.pinned_content[cid].size_bytes,
             gateway_url=gateway_url,
-            content_hash=None,
-            filename=None,
         )
-        response = P2PMessage(
-            msg_type=MSG_DIRECT,
-            sender_id=self.identity.node_id,
-            payload=response_msg.to_payload(),
-        )
-        await self.transport.send_to_peer(peer.peer_id, response)
+        if not served:
+            logger.debug(
+                f"Replica serve declined for {cid[:12]}... (no content_index "
+                f"record); requester will try another provider"
+            )
 
     # ── Reward loop ──────────────────────────────────────────────
 

@@ -1746,10 +1746,20 @@ def test_storage_provider_emits_canonical_response_shape():
     pinned-content retrieval was silently broken on the requester side.
 
     Phase 1.3 Task 3e regression — codex pass 2 finding.
+
+    Phase 1.3 Task 3f: storage_provider now delegates replica serves
+    to ContentProvider.serve_on_behalf_of_replica so the creator earns
+    FTNS. The canonical response shape is emitted by the delegation
+    call, not directly by storage_provider. This test still verifies
+    the canonical shape at the transport layer — it just also wires
+    up the delegation prerequisites (content_provider + content_index
+    with a ContentRecord for the pinned CID).
     """
     import asyncio
     from unittest.mock import AsyncMock, MagicMock
 
+    from prsm.node.content_provider import ContentProvider
+    from prsm.node.content_index import ContentIndex, ContentRecord
     from prsm.node.storage_provider import StorageProvider, PinnedContent
     from prsm.node.transport import P2PMessage, MSG_DIRECT
 
@@ -1757,14 +1767,40 @@ def test_storage_provider_emits_canonical_response_shape():
     identity.node_id = "node-storage-provider"
     transport = MagicMock()
     transport.send_to_peer = AsyncMock()
+    transport.on_message = MagicMock()
     gossip = MagicMock()
+    gossip.publish = AsyncMock()
+    gossip.subscribe = MagicMock()
     ledger = MagicMock()
+
+    # Wire up a real ContentIndex with a ContentRecord so
+    # serve_on_behalf_of_replica can resolve creator metadata.
+    index = ContentIndex(gossip=gossip)
+    index._records["QmPinnedTest"] = ContentRecord(
+        cid="QmPinnedTest",
+        filename="pinned.txt",
+        size_bytes=1024,
+        content_hash="sha256-pinned",
+        creator_id="creator-pinned",
+        providers=set(),
+    )
+
+    provider = ContentProvider(
+        identity=identity,
+        transport=transport,
+        gossip=gossip,
+        content_economy=None,
+        content_index=index,
+    )
+    # Deliberately do NOT register QmPinnedTest in _local_content —
+    # this exercises the replica-serve delegation path.
 
     storage = StorageProvider(
         identity=identity,
         gossip=gossip,
         ledger=ledger,
         transport=transport,
+        content_provider=provider,
     )
 
     # Populate pinned_content with a real entry so the handler takes
@@ -1790,7 +1826,9 @@ def test_storage_provider_emits_canonical_response_shape():
     asyncio.run(storage._on_direct_content_request(msg, peer))
 
     # Verify transport.send_to_peer was called with a canonical-shape
-    # response, not the legacy one.
+    # response, not the legacy one. The call goes through the
+    # delegation path (ContentProvider.serve_on_behalf_of_replica ->
+    # _send_response -> transport.send_to_peer).
     assert transport.send_to_peer.await_count == 1
     _peer_arg, sent_msg = transport.send_to_peer.await_args.args
     payload = sent_msg.payload
@@ -1878,4 +1916,203 @@ def test_storage_provider_defers_when_content_provider_has_cid():
     # is expected to serve. The ContentProvider handler wasn't fired
     # in this test, but that's fine; we're only asserting
     # storage_provider's defer-to-provider behavior.
+    transport.send_to_peer.assert_not_called()
+
+
+def test_storage_provider_replica_serve_fires_payment_and_gossip():
+    """Replica-only nodes (storage_provider pinned the CID but
+    content_provider._local_content doesn't have it) must route
+    replica serves through ContentProvider.serve_on_behalf_of_replica
+    so the creator earns FTNS for the access and the on-chain event
+    fires. Without this, replicas serve content for free and the
+    Phase 1 roadmap acceptance criterion is silently violated.
+
+    Phase 1.3 Task 3f regression — codex pass 3 finding.
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_provider import ContentProvider
+    from prsm.node.storage_provider import StorageProvider, PinnedContent
+    from prsm.node.content_economy import ContentEconomy, RoyaltyModel
+    from prsm.node.content_index import ContentIndex, ContentRecord
+    from prsm.node.transport import P2PMessage, MSG_DIRECT
+    from prsm.node.gossip import GOSSIP_CONTENT_ACCESS
+
+    identity = MagicMock()
+    identity.node_id = "node-replica"
+    transport = MagicMock()
+    transport.send_to_peer = AsyncMock()
+    transport.on_message = MagicMock()
+    gossip = MagicMock()
+    gossip.publish = AsyncMock()
+    gossip.subscribe = MagicMock()
+    ledger = MagicMock()
+    ledger.debit = AsyncMock()
+
+    # Real ContentIndex with a real ContentRecord — catches any
+    # field-name mismatch between the writer and the reader
+    # (the exact class of bug codex pass 3 flagged).
+    index = ContentIndex(gossip=gossip)
+    index._records["QmReplicaTest"] = ContentRecord(
+        cid="QmReplicaTest",
+        filename="replica.txt",
+        size_bytes=2048,
+        content_hash="sha256-replica",
+        creator_id="creator-replica-owner",
+        providers={"peer-uploader"},
+        parent_cids=["parent-a"],
+        royalty_rate=0.03,
+        provenance_hash=None,
+    )
+
+    economy = ContentEconomy(
+        identity=identity,
+        ledger=ledger,
+        gossip=gossip,
+        content_index=index,
+        ftns_ledger=None,
+        royalty_model=RoyaltyModel.PHASE4,
+    )
+    captured: dict = {}
+
+    async def capture_distribute(
+        payment, creator_id, parent_content_ids, content_metadata
+    ):
+        captured["content_id"] = payment.content_id
+        captured["creator_id"] = creator_id
+        captured["parent_content_ids"] = parent_content_ids
+        captured["content_metadata"] = content_metadata
+        return []
+
+    economy._distribute_royalties = capture_distribute
+
+    provider = ContentProvider(
+        identity=identity,
+        transport=transport,
+        gossip=gossip,
+        content_economy=economy,
+        content_index=index,
+    )
+    # Deliberately do NOT register QmReplicaTest in _local_content —
+    # this is a replica-only case.
+    assert not provider.has_local_content("QmReplicaTest")
+
+    storage = StorageProvider(
+        identity=identity,
+        transport=transport,
+        gossip=gossip,
+        ledger=ledger,
+        content_provider=provider,
+    )
+    storage.pinned_content["QmReplicaTest"] = PinnedContent(
+        cid="QmReplicaTest",
+        size_bytes=2048,
+        pinned_at=0.0,
+    )
+
+    msg = P2PMessage(
+        msg_type=MSG_DIRECT,
+        sender_id="peer-req",
+        payload={
+            "subtype": "content_request",
+            "cid": "QmReplicaTest",
+            "request_id": "req-r",
+        },
+    )
+    peer = MagicMock()
+    peer.peer_id = "peer-req"
+
+    asyncio.run(storage._on_direct_content_request(msg, peer))
+
+    # Payment must have fired with the correct creator and parents.
+    assert captured["content_id"] == "QmReplicaTest"
+    assert captured["creator_id"] == "creator-replica-owner"
+    assert captured["parent_content_ids"] == ["parent-a"]
+    assert captured["content_metadata"]["royalty_rate"] == 0.03
+
+    # Gossip must have been published.
+    access_calls = [
+        call for call in gossip.publish.call_args_list
+        if call.args and call.args[0] == GOSSIP_CONTENT_ACCESS
+    ]
+    assert access_calls, "expected GOSSIP_CONTENT_ACCESS publish"
+    access_payload = access_calls[0].args[1]
+    assert access_payload.get("cid") == "QmReplicaTest"
+    assert access_payload.get("creator_id") == "creator-replica-owner"
+
+    # Canonical response must have been sent.
+    assert transport.send_to_peer.await_count == 1
+    _peer_arg, sent_msg = transport.send_to_peer.await_args.args
+    payload = sent_msg.payload
+    assert payload.get("status") == "found", (
+        f"expected canonical status=found; got {payload.get('status')!r}"
+    )
+    assert payload.get("transfer_mode") == "gateway"
+    assert payload.get("gateway_url", "").endswith("/ipfs/QmReplicaTest")
+    assert payload.get("size") == 2048
+
+
+def test_storage_provider_refuses_replica_serve_without_index_record():
+    """If content_index has no record for the pinned CID,
+    storage_provider must refuse to serve — we can't pay the creator
+    without metadata, so letting the requester try another provider
+    is safer than free serving. Phase 1.3 Task 3f regression.
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_provider import ContentProvider
+    from prsm.node.storage_provider import StorageProvider, PinnedContent
+    from prsm.node.content_index import ContentIndex
+    from prsm.node.transport import P2PMessage, MSG_DIRECT
+
+    identity = MagicMock()
+    identity.node_id = "node-replica-orphan"
+    transport = MagicMock()
+    transport.send_to_peer = AsyncMock()
+    transport.on_message = MagicMock()
+    gossip = MagicMock()
+    gossip.publish = AsyncMock()
+    gossip.subscribe = MagicMock()
+    ledger = MagicMock()
+
+    index = ContentIndex(gossip=gossip)  # empty — no records
+
+    provider = ContentProvider(
+        identity=identity,
+        transport=transport,
+        gossip=gossip,
+        content_economy=None,
+        content_index=index,
+    )
+
+    storage = StorageProvider(
+        identity=identity,
+        transport=transport,
+        gossip=gossip,
+        ledger=ledger,
+        content_provider=provider,
+    )
+    storage.pinned_content["QmOrphan"] = PinnedContent(
+        cid="QmOrphan",
+        size_bytes=512,
+        pinned_at=0.0,
+    )
+
+    msg = P2PMessage(
+        msg_type=MSG_DIRECT,
+        sender_id="peer-req",
+        payload={
+            "subtype": "content_request",
+            "cid": "QmOrphan",
+            "request_id": "req-o",
+        },
+    )
+    peer = MagicMock()
+    peer.peer_id = "peer-req"
+
+    asyncio.run(storage._on_direct_content_request(msg, peer))
+
+    # No response sent — requester will try another provider.
     transport.send_to_peer.assert_not_called()
