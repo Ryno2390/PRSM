@@ -77,18 +77,24 @@ def mock_content_index():
     """Mock content index."""
     index = MagicMock()
     
-    # Create some test records
-    original_record = MagicMock()
+    # Create some test records.
+    # Phase 1.3 Task 3g pass-6: the ContentRecord field is parent_cids,
+    # NOT parent_content_ids. The old fixture attribute name was masked
+    # by MagicMock's auto-attribute behavior (it returned a truthy child
+    # mock for any attribute), which hid a production AttributeError in
+    # _resolve_provenance_chain. Using the real field name here keeps
+    # the mocks honest.
+    original_record = MagicMock(spec=["content_id", "creator_id", "parent_cids", "royalty_rate", "providers"])
     original_record.content_id = "original-cid-123"
     original_record.creator_id = "original-creator"
-    original_record.parent_content_ids = []
+    original_record.parent_cids = []
     original_record.royalty_rate = 0.08
     original_record.providers = {"provider-1"}
-    
-    derivative_record = MagicMock()
+
+    derivative_record = MagicMock(spec=["content_id", "creator_id", "parent_cids", "royalty_rate", "providers"])
     derivative_record.content_id = "derivative-cid-456"
     derivative_record.creator_id = "derivative-creator"
-    derivative_record.parent_content_ids = ["original-cid-123"]
+    derivative_record.parent_cids = ["original-cid-123"]
     derivative_record.royalty_rate = 0.01
     derivative_record.providers = {"provider-2"}
     

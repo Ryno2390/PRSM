@@ -2555,3 +2555,198 @@ def test_serve_on_behalf_of_replica_refuses_empty_creator_id():
         "empty — we can't pay the creator without metadata"
     )
     transport.send_to_peer.assert_not_called()
+
+
+def test_distribute_royalties_skips_empty_creator_in_chain():
+    """_resolve_provenance_chain must not append derivative creators
+    with empty creator_id, and _distribute_royalties must not credit
+    empty wallets. After Phase 1.3 Task 3g pass-5 made creator_id=""
+    a valid ContentRecord state (for records learned only from
+    minimal replica ads), crediting empty wallets would silently
+    lock royalty shares to a phantom local-ledger row.
+
+    Phase 1.3 Task 3g pass-6 regression — codex pass 6 [P2] finding."""
+    import asyncio
+    from decimal import Decimal
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_economy import (
+        ContentEconomy,
+        ContentAccessPayment,
+        PaymentStatus,
+        RoyaltyModel,
+    )
+    from prsm.node.content_index import ContentIndex, ContentRecord
+
+    identity = MagicMock()
+    identity.node_id = "serving-node"
+    ledger = MagicMock()
+    ledger.credit = AsyncMock()
+    ledger.debit = AsyncMock()
+    gossip = MagicMock()
+    gossip.subscribe = MagicMock()
+
+    # Build a real ContentIndex with a derivative chain where the
+    # ancestor's creator_id is empty (i.e. learned only from a
+    # minimal replica ad that never got backfilled).
+    index = ContentIndex(gossip=gossip)
+    index._records["ancestor"] = ContentRecord(
+        cid="ancestor",
+        filename="a.txt",
+        size_bytes=1024,
+        content_hash="sha256-a",
+        creator_id="",  # EMPTY — unknown creator
+        parent_cids=[],
+    )
+    index._records["child"] = ContentRecord(
+        cid="child",
+        filename="c.txt",
+        size_bytes=2048,
+        content_hash="sha256-c",
+        creator_id="child-creator",
+        parent_cids=["ancestor"],
+    )
+
+    economy = ContentEconomy(
+        identity=identity,
+        ledger=ledger,
+        gossip=gossip,
+        content_index=index,
+        ftns_ledger=None,
+        royalty_model=RoyaltyModel.PHASE4,
+    )
+    # Stub credit tracking to inspect what gets paid.
+    credits_fired: list = []
+
+    async def track_credit(**kwargs):
+        credits_fired.append(kwargs)
+        return MagicMock()
+
+    economy._credit_royalty = AsyncMock(side_effect=track_credit)
+
+    payment = ContentAccessPayment(
+        payment_id="p1",
+        content_id="child",
+        accessor_id="remote-user",
+        creator_id="child-creator",
+        amount=Decimal("100"),
+        royalty_model=RoyaltyModel.PHASE4,
+        status=PaymentStatus.PENDING,
+    )
+
+    distributions = asyncio.run(
+        economy._distribute_royalties(
+            payment=payment,
+            creator_id="child-creator",
+            parent_content_ids=["ancestor"],
+            content_metadata={},
+        )
+    )
+
+    # No distribution should have an empty recipient_id.
+    empty_recipients = [
+        d for d in distributions if not d.get("recipient_id")
+    ]
+    assert not empty_recipients, (
+        f"distributions contained empty recipient_id entries: "
+        f"{empty_recipients}"
+    )
+
+    # No credit should have fired to an empty wallet.
+    empty_credits = [
+        c for c in credits_fired
+        if not c.get("recipient_id")
+    ]
+    assert not empty_credits, (
+        f"empty-wallet credit fired: {empty_credits}"
+    )
+
+
+def test_resolve_provenance_chain_uses_correct_parent_field_name():
+    """_resolve_provenance_chain must read record.parent_cids (the
+    actual ContentRecord field name) not record.parent_content_ids.
+    The old attribute access was masked by MagicMock-based tests —
+    production would AttributeError on any real derivative traversal.
+
+    Phase 1.3 Task 3g pass-6 regression."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_economy import ContentEconomy, RoyaltyModel
+    from prsm.node.content_index import ContentIndex, ContentRecord
+
+    identity = MagicMock()
+    identity.node_id = "serving-node"
+    gossip = MagicMock()
+    gossip.subscribe = MagicMock()
+    ledger = MagicMock()
+
+    index = ContentIndex(gossip=gossip)
+    index._records["root"] = ContentRecord(
+        cid="root",
+        filename="r.txt",
+        size_bytes=512,
+        content_hash="sha256-r",
+        creator_id="root-creator",
+        parent_cids=[],
+    )
+    index._records["middle"] = ContentRecord(
+        cid="middle",
+        filename="m.txt",
+        size_bytes=1024,
+        content_hash="sha256-m",
+        creator_id="middle-creator",
+        parent_cids=["root"],
+    )
+    index._records["leaf"] = ContentRecord(
+        cid="leaf",
+        filename="l.txt",
+        size_bytes=2048,
+        content_hash="sha256-l",
+        creator_id="leaf-creator",
+        parent_cids=["middle"],
+    )
+
+    economy = ContentEconomy(
+        identity=identity,
+        ledger=ledger,
+        gossip=gossip,
+        content_index=index,
+        ftns_ledger=None,
+        royalty_model=RoyaltyModel.PHASE4,
+    )
+
+    chain = asyncio.run(
+        economy._resolve_provenance_chain(
+            content_id="leaf",
+            parent_content_ids=["middle"],
+        )
+    )
+
+    # The root-level creator traced through real parent_cids fields.
+    assert chain.original_creator == "root-creator", (
+        f"expected chain to trace through real parent_cids to root; "
+        f"got original_creator={chain.original_creator!r}"
+    )
+    assert chain.original_content_id == "root"
+
+
+def test_local_ledger_credit_refuses_empty_wallet_id():
+    """Defense-in-depth: local_ledger.credit must raise on empty
+    wallet_id rather than silently creating a phantom ledger row.
+
+    Phase 1.3 Task 3g pass-6 regression."""
+    import asyncio
+    from prsm.node.local_ledger import LocalLedger, TransactionType
+
+    ledger = LocalLedger(db_path=":memory:")
+
+    with pytest.raises(ValueError, match="wallet_id must be non-empty"):
+        asyncio.run(
+            ledger.credit(
+                wallet_id="",
+                amount=1.0,
+                tx_type=TransactionType.CONTENT_ROYALTY,
+                description="test empty credit",
+            )
+        )
