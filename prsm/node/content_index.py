@@ -123,7 +123,16 @@ class ContentIndex:
                 filename=data.get("filename", ""),
                 size_bytes=data.get("size_bytes", 0),
                 content_hash=data.get("content_hash", ""),
-                creator_id=data.get("creator_id", origin),
+                # Phase 1.3 Task 3g pass-5: empty string signals
+                # "unknown creator" so backfill can repair without
+                # ambiguity. The previous origin-peer-id fallback was
+                # a lie and broke legitimate self-hosting uploader
+                # detection — ContentUploader publishes creator_id ==
+                # provider_id == self.identity.node_id, so the
+                # "creator_id in record.providers" heuristic fired on
+                # every legitimate upload and silently overwrote the
+                # original creator when a second full ad arrived.
+                creator_id=data.get("creator_id", ""),
                 providers={provider_id},
                 created_at=data.get("created_at", time.time()),
                 metadata=data.get("metadata", {}),
@@ -199,32 +208,25 @@ class ContentIndex:
                     if field_name == "filename":
                         keyword_affecting_change = True
 
-        # creator_id: backfill when the existing value is empty OR
-        # looks like the origin-fallback placeholder from a minimal
-        # ad. The new-record path uses
-        # ``data.get("creator_id", origin)`` — so when the advertise
-        # payload omitted creator_id, the record's creator_id is the
-        # original gossip origin peer id, which is also the initial
-        # entry in ``record.providers`` (via the provider_id
-        # fallback). We use "creator_id is a member of providers" as
-        # the signal that it was the fallback placeholder rather
-        # than a real creator. A replica's advertisement has no
-        # creator_id field (storage_provider doesn't know the
-        # creator), so its record comes out with creator_id =
-        # storage_peer_id — definitely wrong, must be repaired when
-        # a later advertisement carries the real creator. Note: this
-        # heuristic assumes creator_id (typically a wallet address or
-        # opaque identifier) does not collide with a peer_id. If a
-        # real creator IS also a provider (self-hosting), the
-        # advertisement's explicit creator_id matches the existing
-        # record's creator_id and nothing is changed — safe.
-        creator_is_fallback = (
-            not record.creator_id
-            or record.creator_id in record.providers
-        )
-        if creator_is_fallback:
+        # creator_id: backfill only when empty. The new-record path
+        # now uses "" as the fallback for minimal ads (Phase 1.3
+        # Task 3g pass-5 fix), so an empty string is the unambiguous
+        # signal that the record came from a replica-like ad without
+        # creator metadata. A populated creator_id is never
+        # overwritten — Phase 1 uses the on-chain registry for the
+        # authoritative creator when a provenance_hash is present,
+        # and the local creator_id is informational plus used as the
+        # fallback payment routing. The previous
+        # "creator_id in record.providers" heuristic was a lie: in
+        # production, ContentUploader publishes
+        # creator_id == provider_id == self.identity.node_id, so the
+        # heuristic fired on every legitimate self-hosting uploader
+        # and silently overwrote the original creator when a second
+        # full ad arrived from a different peer (e.g. two nodes
+        # serving the same file, gossip relay re-advertise).
+        if not record.creator_id:
             incoming_creator = data.get("creator_id")
-            if incoming_creator and incoming_creator != record.creator_id:
+            if incoming_creator:
                 record.creator_id = incoming_creator
 
         # metadata dict: backfill when empty.

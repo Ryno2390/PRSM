@@ -2155,8 +2155,11 @@ def test_content_index_backfills_metadata_from_richer_advertisement():
     )
     record = index._records.get("QmRaceTest")
     assert record is not None
-    # Minimal-ad record has origin as creator fallback.
-    assert record.creator_id == "replica-peer"
+    # Phase 1.3 Task 3g pass-5: minimal-ad record now uses empty
+    # string as the "unknown creator" signal instead of the old
+    # origin-peer-id fallback (which broke legitimate self-hosting
+    # uploader detection).
+    assert record.creator_id == ""
     assert record.filename == ""
     assert record.parent_cids == []
     assert record.royalty_rate == 0.01  # default
@@ -2368,3 +2371,187 @@ def test_content_index_backfills_size_bytes_from_richer_advertisement():
         )
     )
     assert index._records["QmSizeTest"].size_bytes == 8192
+
+
+def test_content_index_preserves_creator_id_on_second_full_ad():
+    """A legitimate second full advertisement from a different peer
+    (e.g., two nodes hosting the same file, or gossip relay) must
+    NOT overwrite the existing record's creator_id. The pass-5
+    regression — the `creator_id in record.providers` heuristic was
+    treating every uploader self-hosting case as a fallback
+    placeholder.
+
+    Phase 1.3 Task 3g pass-5 fix."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from prsm.node.content_index import ContentIndex
+
+    gossip = MagicMock()
+    gossip.subscribe = MagicMock()
+    index = ContentIndex(gossip=gossip)
+
+    # First full ad — creator_peer self-hosts.
+    first = {
+        "cid": "QmCreatorLock",
+        "content_hash": "sha256-lock",
+        "provider_id": "creator-peer",
+        "creator_id": "creator-peer",
+        "filename": "lock.txt",
+        "size_bytes": 1024,
+        "royalty_rate": 0.05,
+    }
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise",
+            data=first,
+            origin="creator-peer",
+        )
+    )
+    assert index._records["QmCreatorLock"].creator_id == "creator-peer"
+
+    # Second full ad — different peer, different creator_id (e.g.,
+    # a different operator re-advertising the same bytes).
+    conflict = {
+        "cid": "QmCreatorLock",
+        "content_hash": "sha256-lock",
+        "provider_id": "other-peer",
+        "creator_id": "other-peer",
+        "filename": "lock.txt",
+        "size_bytes": 1024,
+        "royalty_rate": 0.05,
+    }
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise",
+            data=conflict,
+            origin="other-peer",
+        )
+    )
+
+    record = index._records["QmCreatorLock"]
+    assert record.creator_id == "creator-peer", (
+        f"legitimate creator_id must not be overwritten by a second "
+        f"full ad; got {record.creator_id!r}"
+    )
+    # Both providers listed.
+    assert record.providers == {"creator-peer", "other-peer"}
+
+
+def test_content_index_minimal_ad_creates_empty_creator_id():
+    """A minimal advertisement without creator_id produces a record
+    with creator_id='' (empty string) instead of the origin-peer-id
+    fallback. Empty is an unambiguous 'unknown creator' signal that
+    the backfill can act on and that serve_on_behalf_of_replica can
+    refuse on.
+
+    Phase 1.3 Task 3g pass-5 fix."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from prsm.node.content_index import ContentIndex
+
+    gossip = MagicMock()
+    gossip.subscribe = MagicMock()
+    index = ContentIndex(gossip=gossip)
+
+    minimal = {
+        "cid": "QmMinimalEmpty",
+        "content_hash": "sha256-min",
+        "provider_id": "replica-peer",
+        "size_bytes": 512,
+        # no creator_id — should NOT default to origin
+    }
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise",
+            data=minimal,
+            origin="replica-peer",
+        )
+    )
+
+    record = index._records["QmMinimalEmpty"]
+    assert record.creator_id == "", (
+        f"minimal ad without creator_id must produce empty string, "
+        f"not origin fallback; got {record.creator_id!r}"
+    )
+
+    # Later full ad backfills the creator.
+    full = {
+        "cid": "QmMinimalEmpty",
+        "content_hash": "sha256-min",
+        "provider_id": "uploader-peer",
+        "creator_id": "real-creator",
+        "filename": "doc.txt",
+        "size_bytes": 512,
+    }
+    asyncio.run(
+        index._on_content_advertise(
+            subtype="content_advertise",
+            data=full,
+            origin="uploader-peer",
+        )
+    )
+
+    record = index._records["QmMinimalEmpty"]
+    assert record.creator_id == "real-creator"
+
+
+def test_serve_on_behalf_of_replica_refuses_empty_creator_id():
+    """When content_index has a record but creator_id is empty
+    (i.e., only a minimal ad has been received for the CID),
+    serve_on_behalf_of_replica must refuse to serve — without
+    creator metadata, replica serves would bypass royalty payment.
+
+    Phase 1.3 Task 3g pass-5 fix."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prsm.node.content_provider import ContentProvider
+    from prsm.node.content_index import ContentIndex, ContentRecord
+
+    identity = MagicMock()
+    identity.node_id = "node-empty-creator"
+    transport = MagicMock()
+    transport.send_to_peer = AsyncMock()
+    gossip = MagicMock()
+    gossip.publish = AsyncMock()
+    gossip.subscribe = MagicMock()
+
+    index = ContentIndex(gossip=gossip)
+    # Pre-seed a record with empty creator_id.
+    index._records["QmEmptyCreator"] = ContentRecord(
+        cid="QmEmptyCreator",
+        filename="",
+        size_bytes=1024,
+        content_hash="sha256-ec",
+        creator_id="",  # empty — unknown
+        providers={"replica-peer"},
+    )
+
+    provider = ContentProvider(
+        identity=identity,
+        transport=transport,
+        gossip=gossip,
+        content_economy=None,
+        content_index=index,
+    )
+
+    peer = MagicMock()
+    peer.peer_id = "peer-req"
+
+    served = asyncio.run(
+        provider.serve_on_behalf_of_replica(
+            cid="QmEmptyCreator",
+            request_id="req-empty",
+            peer=peer,
+            replica_size_bytes=1024,
+            gateway_url="http://127.0.0.1:8080/ipfs/QmEmptyCreator",
+        )
+    )
+
+    assert served is False, (
+        "serve_on_behalf_of_replica must refuse when creator_id is "
+        "empty — we can't pay the creator without metadata"
+    )
+    transport.send_to_peer.assert_not_called()
