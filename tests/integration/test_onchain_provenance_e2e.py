@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -23,8 +24,12 @@ import pytest
 # mocks subprocess.Popen and subprocess.run for the entire test session. We
 # *do* need real processes here (real Hardhat node + real deploy scripts),
 # so capture the real callables at module-import time, before the patch is
-# applied to the subprocess module attributes.
+# applied to the subprocess module attributes. Same for time.sleep — the
+# conftest mock_time_sleep autouse fixture patches it to be instant, but
+# the Sepolia live test (Phase 1.3 Task 5) needs real delays for L2 state
+# propagation.
 from subprocess import Popen as _REAL_POPEN, run as _REAL_RUN  # noqa: E402
+from time import sleep as _REAL_SLEEP  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS_DIR = REPO_ROOT / "contracts"
@@ -2750,3 +2755,88 @@ def test_local_ledger_credit_refuses_empty_wallet_id():
                 description="test empty credit",
             )
         )
+
+
+# ── Phase 1.3 Task 5: Sepolia live smoke test ───────────────────────────
+# Gated on PRSM_SEPOLIA_TEST=1 + contract env vars. Skipped by default
+# so the normal test suite runs without a live deployment. The test
+# exercises the real Python Web3 client against deployed Sepolia contracts.
+
+
+@pytest.mark.skipif(
+    os.environ.get("PRSM_SEPOLIA_TEST") != "1",
+    reason="Sepolia live test disabled; set PRSM_SEPOLIA_TEST=1 with contract env vars",
+)
+def test_register_then_read_on_sepolia():
+    """Smoke test the full register_content + get_content round-trip
+    against a live Base Sepolia deployment. Exercises real RPC latency,
+    real confirmation waiting, real Basescan event emission.
+
+    Phase 1.3 Task 5."""
+    import os
+    import time as _time
+
+    from prsm.economy.web3.provenance_registry import (
+        ProvenanceRegistryClient,
+        compute_content_hash,
+    )
+
+    rpc_url = os.environ.get(
+        "BASE_SEPOLIA_RPC_URL",
+        "https://sepolia.base.org",
+    )
+    registry_addr = os.environ["PRSM_SEPOLIA_PROVENANCE_REGISTRY"]
+    private_key = os.environ["PRSM_SEPOLIA_PRIVATE_KEY"]
+
+    registry = ProvenanceRegistryClient(
+        rpc_url=rpc_url,
+        contract_address=registry_addr,
+        private_key=private_key,
+    )
+
+    # Register fresh content bound to the deployer address.
+    creator_addr = registry.address
+    assert creator_addr, "registry client must have a connected address"
+
+    # Unique content per test run so we don't collide with prior runs.
+    file_bytes = f"sepolia bake-in {_time.time()}".encode()
+    content_hash = compute_content_hash(creator_addr, file_bytes)
+
+    tx_hash, status = registry.register_content(
+        content_hash, royalty_rate_bps=800, metadata_uri="ipfs://bakein"
+    )
+    print(f"  register_content tx: {tx_hash}")
+    print(f"  status: {status.value}")
+    assert status.value == "confirmed", (
+        f"Sepolia register_content status: {status.value}, tx: {tx_hash}"
+    )
+
+    # Read it back via get_content. On Base Sepolia (L2), state
+    # propagation after a confirmed tx can lag by a few seconds —
+    # the receipt is confirmed but the view function may not reflect
+    # the new state immediately. Poll with a short retry loop.
+    record = None
+    for attempt in range(10):
+        record = registry.get_content(content_hash)
+        if record is not None:
+            break
+        # Use _REAL_SLEEP (captured before conftest's autouse
+        # mock_time_sleep patch replaces time.sleep with a no-op).
+        # L2 state propagation can lag a few seconds after a confirmed
+        # receipt on Base Sepolia.
+        _REAL_SLEEP(2)
+        print(f"  get_content attempt {attempt + 1}: not yet visible, retrying...")
+
+    assert record is not None, (
+        f"get_content returned None after 10 retries for hash we just "
+        f"registered (tx: {tx_hash}). L2 state propagation may be "
+        f"slower than expected."
+    )
+    assert record.creator.lower() == creator_addr.lower(), (
+        f"creator mismatch: expected {creator_addr}, got {record.creator}"
+    )
+    assert record.royalty_rate_bps == 800, (
+        f"royalty_rate_bps mismatch: expected 800, got {record.royalty_rate_bps}"
+    )
+    print(f"  get_content: creator={record.creator}, rate={record.royalty_rate_bps}bps")
+    print(f"  Basescan: https://sepolia.basescan.org/tx/{tx_hash}")
