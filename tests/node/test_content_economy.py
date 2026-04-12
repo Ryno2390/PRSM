@@ -97,12 +97,25 @@ def mock_content_index():
     derivative_record.parent_cids = ["original-cid-123"]
     derivative_record.royalty_rate = 0.01
     derivative_record.providers = {"provider-2"}
-    
+
+    # test_process_content_access_basic uses this CID with creator_id
+    # "creator-xyz" and empty parents. Without a content_index record
+    # for it, _resolve_provenance_chain returns None for original_creator
+    # and no creator-xyz distribution fires.
+    basic_record = MagicMock(spec=["content_id", "creator_id", "parent_cids", "royalty_rate", "providers"])
+    basic_record.content_id = "test-cid-123"
+    basic_record.creator_id = "creator-xyz"
+    basic_record.parent_cids = []
+    basic_record.royalty_rate = 0.01
+    basic_record.providers = {"test-node-abc123"}
+
     def lookup(cid):
         if cid == "original-cid-123":
             return original_record
         elif cid == "derivative-cid-456":
             return derivative_record
+        elif cid == "test-cid-123":
+            return basic_record
         return None
     
     index.lookup = lookup
