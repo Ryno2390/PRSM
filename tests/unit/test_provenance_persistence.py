@@ -126,7 +126,7 @@ class TestProvenancePersistence:
                 "created_at": 1700000000.0,
                 "provenance_signature": "sig1",
                 "royalty_rate": 0.02,
-                "parent_content_ids": [],
+                "parent_cids": [],
                 "access_count": 5,
                 "total_royalties": 10.5,
                 "is_sharded": False,
@@ -145,7 +145,7 @@ class TestProvenancePersistence:
                 "created_at": 1700100000.0,
                 "provenance_signature": "sig2",
                 "royalty_rate": 0.03,
-                "parent_content_ids": ["QmParentCID123"],
+                "parent_cids": ["QmParentCID123"],
                 "access_count": 10,
                 "total_royalties": 25.0,
                 "is_sharded": True,
@@ -178,7 +178,7 @@ class TestProvenancePersistence:
             
             record2 = content_uploader.uploaded_content["QmTestCID222222222"]
             assert record2.filename == "model_v2.bin"
-            assert record2.parent_content_ids == ["QmParentCID123"]
+            assert record2.parent_cids == ["QmParentCID123"]
             assert record2.is_sharded is True
 
     @pytest.mark.asyncio
@@ -195,7 +195,7 @@ class TestProvenancePersistence:
             created_at=1700000000.0,
             provenance_signature="existing_sig",
             royalty_rate=0.01,
-            parent_content_ids=[],
+            parent_cids=[],
             access_count=5,  # This should NOT be overwritten
             total_royalties=15.0,
             is_sharded=False,
@@ -217,7 +217,7 @@ class TestProvenancePersistence:
                 "created_at": 1700000000.0,
                 "provenance_signature": "existing_sig",
                 "royalty_rate": 0.01,
-                "parent_content_ids": [],
+                "parent_cids": [],
                 "access_count": 0,  # Different from in-memory value
                 "total_royalties": 0.0,  # Different from in-memory value
                 "is_sharded": False,
@@ -256,7 +256,7 @@ class TestProvenancePersistence:
             created_at=1700000000.0,
             provenance_signature="test_sig",
             royalty_rate=0.02,  # 2% royalty rate
-            parent_content_ids=[],
+            parent_cids=[],
             access_count=0,
             total_royalties=0.0,
             is_sharded=False,

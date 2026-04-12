@@ -179,7 +179,7 @@ class TestRoyaltyPipeline:
             content_hash="derivative_hash",
             creator_id=content_uploader.identity.node_id,
             royalty_rate=royalty_rate,
-            parent_content_ids=[parent_cid],
+            parent_cids=[parent_cid],
         )
         content_uploader.uploaded_content[derivative_cid] = derivative_content
 
@@ -254,7 +254,7 @@ class TestRoyaltyPipeline:
                 "accessor_id": accessor_id,
                 "creator_id": creator_id,
                 "royalty_rate": royalty_rate,
-                "parent_content_ids": [source_cid],  # Our content is a parent
+                "parent_cids": [source_cid],  # Our content is a parent
             }
 
             # Execute _on_content_access (origin is different from our node)

@@ -244,7 +244,7 @@ class ContentEconomy:
         Args:
             content_id: Content identifier
             accessor_id: Node/user accessing the content
-            content_metadata: Metadata including royalty_rate, creator_id, parent_content_ids
+            content_metadata: Metadata including royalty_rate, creator_id, parent_cids
 
         Returns:
             ContentAccessPayment with status and distribution details
@@ -254,7 +254,7 @@ class ContentEconomy:
         # Get royalty rate from metadata or default
         royalty_rate = content_metadata.get("royalty_rate", 0.01)
         creator_id = content_metadata.get("creator_id", "")
-        parent_content_ids = content_metadata.get("parent_content_ids", [])
+        parent_cids = content_metadata.get("parent_cids", [])
 
         # Calculate total payment amount
         # For Phase4: base access fee is the royalty_rate
@@ -311,7 +311,7 @@ class ContentEconomy:
             distributions = await self._distribute_royalties(
                 payment=payment,
                 creator_id=creator_id,
-                parent_content_ids=parent_content_ids,
+                parent_cids=parent_cids,
                 content_metadata=content_metadata,
             )
             payment.royalty_distributions = distributions
@@ -567,7 +567,7 @@ class ContentEconomy:
         self,
         payment: ContentAccessPayment,
         creator_id: str,
-        parent_content_ids: List[str],
+        parent_cids: List[str],
         content_metadata: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Distribute royalties according to the configured model.
@@ -602,7 +602,7 @@ class ContentEconomy:
             # Resolve provenance chain
             provenance_chain = await self._resolve_provenance_chain(
                 content_id=payment.content_id,
-                parent_content_ids=parent_content_ids,
+                parent_cids=parent_cids,
             )
 
             # Original creator gets 8%
@@ -685,7 +685,7 @@ class ContentEconomy:
                 )
 
         else:  # Legacy model
-            if parent_content_ids:
+            if parent_cids:
                 # Derivative work - split royalties
                 derivative_share = total_amount * Decimal(str(LEGACY_DERIVATIVE_SHARE))
                 source_pool = total_amount * Decimal(str(LEGACY_SOURCE_SHARE))
@@ -705,7 +705,7 @@ class ContentEconomy:
                 )
 
                 # Split source pool among parent creators
-                parent_creators = await self._resolve_parent_creators(parent_content_ids)
+                parent_creators = await self._resolve_parent_creators(parent_cids)
                 if parent_creators:
                     per_parent = float(source_pool) / len(parent_creators)
                     for parent_creator_id in parent_creators:
@@ -803,7 +803,7 @@ class ContentEconomy:
     async def _resolve_provenance_chain(
         self,
         content_id: str,
-        parent_content_ids: List[str],
+        parent_cids: List[str],
     ) -> "ProvenanceChain":
         """Resolve the full provenance chain for royalty distribution."""
         chain = ProvenanceChain()
@@ -820,15 +820,16 @@ class ContentEconomy:
             if not record:
                 return
 
-            if depth == 0 and not parent_content_ids:
+            if depth == 0 and not parent_cids:
                 # This is the content itself - the direct creator
                 chain.direct_creator = record.creator_id or ""
 
-            # Phase 1.3 Task 3g pass-6: ContentRecord's parent field is
-            # parent_cids, not parent_content_ids. The old attribute access
-            # was masked by MagicMock-based tests (MagicMock returns a new
-            # MagicMock on attribute access, which is truthy, so the branch
-            # fired with bogus iteration). Production would AttributeError.
+            # Phase 1.3 Task 3g pass-6: read ContentRecord's parent_cids
+            # field defensively. The original code used a different name
+            # (since canonicalized in Part D) and was masked by MagicMock
+            # auto-attribute behavior (MagicMock returns a truthy child
+            # mock for any attribute, which hid an AttributeError in
+            # production). Using getattr keeps the defensive read.
             record_parents = getattr(record, "parent_cids", None) or []
             if record_parents:
                 for parent_cid in record_parents:
@@ -862,7 +863,7 @@ class ContentEconomy:
                     chain.original_content_id = current_cid
 
         # Start tracing from parents
-        for parent_cid in parent_content_ids:
+        for parent_cid in parent_cids:
             await trace_ancestors(parent_cid, 0)
 
         # If no parents found, this is original content
@@ -877,10 +878,10 @@ class ContentEconomy:
 
         return chain
 
-    async def _resolve_parent_creators(self, parent_content_ids: List[str]) -> List[str]:
+    async def _resolve_parent_creators(self, parent_cids: List[str]) -> List[str]:
         """Resolve creator IDs for parent content IDs."""
         creators = []
-        for parent_cid in parent_content_ids:
+        for parent_cid in parent_cids:
             record = self.content_index.lookup(parent_cid)
             if record and record.creator_id and record.creator_id not in creators:
                 creators.append(record.creator_id)
@@ -1076,7 +1077,7 @@ class ContentEconomy:
             content_metadata={
                 "royalty_rate": float(selected_bid.price_ftns),
                 "creator_id": index_creator_id or selected_bid.provider_id,
-                "parent_content_ids": index_parents,
+                "parent_cids": index_parents,
                 "provenance_hash": provenance_hash,
             },
         )

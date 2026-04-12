@@ -345,7 +345,7 @@ def test_local_fallback_pays_serving_node_share():
         economy._distribute_royalties(
             payment=payment,
             creator_id="creator-direct",
-            parent_content_ids=[],
+            parent_cids=[],
             content_metadata={},  # no provenance_hash → on-chain skipped
         )
     )
@@ -435,7 +435,7 @@ def test_malformed_provenance_hash_falls_back_safely():
         economy._distribute_royalties(
             payment=payment,
             creator_id="creator-direct",
-            parent_content_ids=[],
+            parent_cids=[],
             content_metadata={"provenance_hash": "GARBAGE_NOT_HEX"},
         )
     )
@@ -649,11 +649,11 @@ def test_provider_forwards_provenance_hash_to_content_economy():
     captured: dict = {}
 
     async def capture_distribute(
-        payment, creator_id, parent_content_ids, content_metadata
+        payment, creator_id, parent_cids, content_metadata
     ):
         captured["content_id"] = payment.content_id
         captured["creator_id"] = creator_id
-        captured["parent_content_ids"] = parent_content_ids
+        captured["parent_cids"] = parent_cids
         captured["content_metadata"] = content_metadata
         return []
 
@@ -1023,7 +1023,7 @@ def test_request_content_retrieval_forwards_provenance_hash_from_index(monkeypat
 
     assert captured.get("content_metadata", {}).get("provenance_hash") == expected_hash
     assert captured["content_metadata"]["creator_id"] == "creator-from-index"
-    assert captured["content_metadata"]["parent_content_ids"] == ["parent-1"]
+    assert captured["content_metadata"]["parent_cids"] == ["parent-1"]
 
 
 def test_announce_content_helper_forwards_provenance_hash():
@@ -1118,7 +1118,7 @@ def test_uploaded_content_is_servable_by_provider():
     md = info.get("metadata", {})
     assert md.get("creator_id") == uploaded.creator_id
     assert md.get("royalty_rate") == uploaded.royalty_rate
-    assert md.get("parent_cids") == uploaded.parent_content_ids
+    assert md.get("parent_cids") == uploaded.parent_cids
     # provenance_hash is None when creator_address not set — that's expected
     assert "provenance_hash" in md
 
@@ -1167,7 +1167,7 @@ def test_hydrate_from_db_restores_provider_local_content():
         "created_at": 1_700_000_000.0,
         "provenance_signature": "sig",
         "royalty_rate": 0.01,
-        "parent_content_ids": [],
+        "parent_cids": [],
         "access_count": 0,
         "total_royalties": 0.0,
         "is_sharded": False,
@@ -1233,10 +1233,10 @@ def test_handle_content_request_reads_nested_metadata_on_payment():
     captured: dict = {}
 
     async def capture_distribute(
-        payment, creator_id, parent_content_ids, content_metadata
+        payment, creator_id, parent_cids, content_metadata
     ):
         captured["creator_id"] = creator_id
-        captured["parent_content_ids"] = parent_content_ids
+        captured["parent_cids"] = parent_cids
         captured["content_metadata"] = content_metadata
         return []
 
@@ -1278,8 +1278,8 @@ def test_handle_content_request_reads_nested_metadata_on_payment():
     assert captured["content_metadata"]["royalty_rate"] == 0.05, (
         f"expected nested royalty_rate 0.05; got {captured['content_metadata']['royalty_rate']}"
     )
-    assert captured["parent_content_ids"] == ["parent-a", "parent-b"], (
-        f"expected nested parent_cids; got {captured['parent_content_ids']}"
+    assert captured["parent_cids"] == ["parent-a", "parent-b"], (
+        f"expected nested parent_cids; got {captured['parent_cids']}"
     )
     assert captured["content_metadata"]["provenance_hash"] == "0x" + "aa" * 32
 
@@ -1326,7 +1326,7 @@ def test_handle_content_request_preserves_zero_royalty_rate():
     captured: dict = {}
 
     async def capture_distribute(
-        payment, creator_id, parent_content_ids, content_metadata
+        payment, creator_id, parent_cids, content_metadata
     ):
         captured["content_metadata"] = content_metadata
         return []
@@ -1663,14 +1663,14 @@ def test_provider_publishes_gossip_content_access_after_payment():
     assert payload.get("cid") == "cid-gossip-test"
     assert payload.get("accessor_id") == "peer-y"
     assert payload.get("creator_id") == "creator-x"
-    assert payload.get("parent_content_ids") == ["parent-a"]
+    assert payload.get("parent_cids") == ["parent-a"]
 
 
 def test_uploader_gossip_advertise_uses_canonical_keys():
     """ContentUploader's GOSSIP_CONTENT_ADVERTISE publish must use the
     reader-side canonical keys (`cid`, `parent_cids`) that ContentIndex
     expects. Before this fix, the writer used `content_id` /
-    `parent_content_ids` and every non-sharded advertisement was
+    `parent_cids` and every non-sharded advertisement was
     silently dropped by ContentIndex (empty-string default).
 
     Phase 1.3 Task 3d regression — codex pass 2 caught the key
@@ -1702,7 +1702,7 @@ def test_uploader_gossip_advertise_uses_canonical_keys():
         uploader.upload(
             content=b"key-mismatch test payload",
             filename="k.txt",
-            parent_content_ids=["QmParent"],
+            parent_cids=["QmParent"],
         )
     )
     assert uploaded is not None
@@ -1721,12 +1721,11 @@ def test_uploader_gossip_advertise_uses_canonical_keys():
         f"advertise payload must use canonical key `parent_cids`; "
         f"got {ad_payload.get('parent_cids')!r}"
     )
-    # Writer must NOT use the old wrong keys.
+    # Writer must NOT use the old wrong key for the content identifier.
+    # Part D canonicalized parent_content_ids -> parent_cids everywhere,
+    # so the old "parent_content_ids leaked" check is no longer meaningful.
     assert "content_id" not in ad_payload, (
         "legacy `content_id` key leaked into gossip payload"
-    )
-    assert "parent_content_ids" not in ad_payload, (
-        "legacy `parent_content_ids` key leaked into gossip payload"
     )
 
     # Same check for GOSSIP_STORAGE_REQUEST.
@@ -1982,11 +1981,11 @@ def test_storage_provider_replica_serve_fires_payment_and_gossip():
     captured: dict = {}
 
     async def capture_distribute(
-        payment, creator_id, parent_content_ids, content_metadata
+        payment, creator_id, parent_cids, content_metadata
     ):
         captured["content_id"] = payment.content_id
         captured["creator_id"] = creator_id
-        captured["parent_content_ids"] = parent_content_ids
+        captured["parent_cids"] = parent_cids
         captured["content_metadata"] = content_metadata
         return []
 
@@ -2033,7 +2032,7 @@ def test_storage_provider_replica_serve_fires_payment_and_gossip():
     # Payment must have fired with the correct creator and parents.
     assert captured["content_id"] == "QmReplicaTest"
     assert captured["creator_id"] == "creator-replica-owner"
-    assert captured["parent_content_ids"] == ["parent-a"]
+    assert captured["parent_cids"] == ["parent-a"]
     assert captured["content_metadata"]["royalty_rate"] == 0.03
 
     # Gossip must have been published.
@@ -2643,7 +2642,7 @@ def test_distribute_royalties_skips_empty_creator_in_chain():
         economy._distribute_royalties(
             payment=payment,
             creator_id="child-creator",
-            parent_content_ids=["ancestor"],
+            parent_cids=["ancestor"],
             content_metadata={},
         )
     )
@@ -2669,7 +2668,7 @@ def test_distribute_royalties_skips_empty_creator_in_chain():
 
 def test_resolve_provenance_chain_uses_correct_parent_field_name():
     """_resolve_provenance_chain must read record.parent_cids (the
-    actual ContentRecord field name) not record.parent_content_ids.
+    actual ContentRecord field name) not record.parent_cids.
     The old attribute access was masked by MagicMock-based tests —
     production would AttributeError on any real derivative traversal.
 
@@ -2724,7 +2723,7 @@ def test_resolve_provenance_chain_uses_correct_parent_field_name():
     chain = asyncio.run(
         economy._resolve_provenance_chain(
             content_id="leaf",
-            parent_content_ids=["middle"],
+            parent_cids=["middle"],
         )
     )
 

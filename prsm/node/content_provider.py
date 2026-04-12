@@ -601,7 +601,7 @@ class ContentProvider:
                     "accessor_id": peer.peer_id,
                     "creator_id": resolved.get("creator_id", ""),
                     "royalty_rate": resolved.get("royalty_rate", 0.01),
-                    "parent_content_ids": resolved.get("parent_content_ids", []),
+                    "parent_cids": resolved.get("parent_cids", []),
                     "timestamp": time.time(),
                 })
             except Exception as exc:
@@ -943,11 +943,11 @@ class ContentProvider:
         # Build payment metadata directly from the ContentRecord —
         # we don't have a _local_content entry to resolve from, so we
         # go straight to the index fields. Mirrors the key mapping
-        # _resolve_payment_metadata uses (parent_cids -> parent_content_ids).
+        # _resolve_payment_metadata uses (parent_cids -> parent_cids).
         content_metadata = {
             "royalty_rate": record.royalty_rate,
             "creator_id": record.creator_id,
-            "parent_content_ids": record.parent_cids,
+            "parent_cids": record.parent_cids,
             "provenance_hash": record.provenance_hash,
         }
 
@@ -987,7 +987,7 @@ class ContentProvider:
                 "accessor_id": peer.peer_id,
                 "creator_id": record.creator_id,
                 "royalty_rate": record.royalty_rate,
-                "parent_content_ids": record.parent_cids,
+                "parent_cids": record.parent_cids,
                 "timestamp": time.time(),
             })
         except Exception as exc:
@@ -1043,7 +1043,7 @@ class ContentProvider:
                 "accessor_id": accessor_id,
                 "creator_id": resolved.get("creator_id", ""),
                 "royalty_rate": resolved.get("royalty_rate", 0.01),
-                "parent_content_ids": resolved.get("parent_content_ids", []),
+                "parent_cids": resolved.get("parent_cids", []),
                 "timestamp": time.time(),
             })
         except Exception as exc:
@@ -1079,7 +1079,7 @@ class ContentProvider:
         return {
             "royalty_rate": _pick("royalty_rate", 0.01),
             "creator_id": _pick("creator_id", ""),
-            "parent_content_ids": _pick("parent_cids", []),
+            "parent_cids": _pick("parent_cids", []),
             "provenance_hash": _pick("provenance_hash", None),
         }
 

@@ -173,7 +173,7 @@ async def test_content_access_triggers_payment(node_a):
         content_metadata={
             "royalty_rate": 0.05,
             "creator_id": "creator-test-123",
-            "parent_content_ids": [],
+            "parent_cids": [],
         },
     )
     
@@ -199,7 +199,7 @@ async def test_royalty_distribution_derivative_work(node_a):
         content_metadata={
             "royalty_rate": 0.10,
             "creator_id": "derivative-creator",
-            "parent_content_ids": ["QmOriginalCID"],
+            "parent_cids": ["QmOriginalCID"],
         },
     )
     
@@ -317,7 +317,7 @@ async def test_cross_node_content_retrieval(node_a, node_b):
     node_a.content_provider._local_content[result.content_id] = {
         "royalty_rate": 0.05,
         "creator_id": node_a.identity.node_id,
-        "parent_content_ids": [],
+        "parent_cids": [],
         "filename": "cross-node-test.txt",
     }
     
@@ -330,7 +330,7 @@ async def test_cross_node_content_retrieval(node_a, node_b):
         content_metadata={
             "royalty_rate": 0.05,
             "creator_id": node_a.identity.node_id,
-            "parent_content_ids": [],
+            "parent_cids": [],
         },
     )
     
@@ -398,7 +398,7 @@ async def test_onchain_escrow_for_content_payment(node_a):
         content_metadata={
             "royalty_rate": 0.001,  # Small amount for testing
             "creator_id": "creator-test",
-            "parent_content_ids": [],
+            "parent_cids": [],
         },
     )
     
@@ -455,7 +455,7 @@ async def test_concurrent_payments(node_a):
             content_metadata={
                 "royalty_rate": 0.01,
                 "creator_id": f"creator-{i % 5}",  # Multiple creators
-                "parent_content_ids": [],
+                "parent_cids": [],
             },
         )
         for i in range(20)
@@ -489,7 +489,7 @@ async def test_payment_with_insufficient_balance(node_a):
         content_metadata={
             "royalty_rate": 1000.0,  # Exceeds 100 FTNS welcome grant
             "creator_id": "creator-test",
-            "parent_content_ids": [],
+            "parent_cids": [],
         },
     )
 

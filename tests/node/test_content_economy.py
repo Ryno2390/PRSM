@@ -79,7 +79,7 @@ def mock_content_index():
     
     # Create some test records.
     # Phase 1.3 Task 3g pass-6: the ContentRecord field is parent_cids,
-    # NOT parent_content_ids. The old fixture attribute name was masked
+    # NOT parent_cids. The old fixture attribute name was masked
     # by MagicMock's auto-attribute behavior (it returned a truthy child
     # mock for any attribute), which hid a production AttributeError in
     # _resolve_provenance_chain. Using the real field name here keeps
@@ -147,7 +147,7 @@ async def test_process_content_access_basic(content_economy, ledger):
         content_metadata={
             "royalty_rate": 0.01,
             "creator_id": "creator-xyz",
-            "parent_content_ids": [],
+            "parent_cids": [],
         },
     )
     
@@ -175,7 +175,7 @@ async def test_royalty_distribution_phase4_model(content_economy, ledger, mock_c
         content_metadata={
             "royalty_rate": 0.10,  # 0.10 FTNS access fee
             "creator_id": "derivative-creator",
-            "parent_content_ids": ["original-cid-123"],
+            "parent_cids": ["original-cid-123"],
         },
     )
     
@@ -214,7 +214,7 @@ async def test_royalty_distribution_legacy_model(mock_identity, ledger, mock_gos
         content_metadata={
             "royalty_rate": 0.10,
             "creator_id": "derivative-creator",
-            "parent_content_ids": ["original-cid-123"],
+            "parent_cids": ["original-cid-123"],
         },
     )
     
@@ -253,7 +253,7 @@ async def test_payment_insufficient_balance(mock_identity, mock_gossip, mock_con
         content_metadata={
             "royalty_rate": 100.0,  # Expensive — exceeds 0 balance
             "creator_id": "creator-xyz",
-            "parent_content_ids": [],
+            "parent_cids": [],
         },
     )
 
@@ -498,7 +498,7 @@ async def test_resolve_provenance_chain(content_economy, mock_content_index):
     """Test provenance chain resolution for royalty distribution."""
     chain = await content_economy._resolve_provenance_chain(
         content_id="derivative-cid-456",
-        parent_content_ids=["original-cid-123"],
+        parent_cids=["original-cid-123"],
     )
     
     assert chain.original_creator == "original-creator"
@@ -509,7 +509,7 @@ async def test_resolve_provenance_chain(content_economy, mock_content_index):
 async def test_resolve_parent_creators(content_economy):
     """Test resolving creator IDs from parent CIDs."""
     creators = await content_economy._resolve_parent_creators(
-        parent_content_ids=["original-cid-123", "unknown-cid"],
+        parent_cids=["original-cid-123", "unknown-cid"],
     )
     
     assert "original-creator" in creators
@@ -536,7 +536,7 @@ async def test_get_stats(content_economy):
 # ── Edge Cases ──────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_empty_parent_content_ids(content_economy, ledger):
+async def test_empty_parent_cids(content_economy, ledger):
     """Test royalty distribution when no parents (original content)."""
     payment = await content_economy.process_content_access(
         content_id="original-content-cid",
@@ -544,7 +544,7 @@ async def test_empty_parent_content_ids(content_economy, ledger):
         content_metadata={
             "royalty_rate": 0.10,
             "creator_id": "creator-xyz",
-            "parent_content_ids": [],  # Original content
+            "parent_cids": [],  # Original content
         },
     )
     
@@ -567,7 +567,7 @@ async def test_concurrent_payments(content_economy, ledger):
             content_metadata={
                 "royalty_rate": 0.01,
                 "creator_id": "creator-xyz",
-                "parent_content_ids": [],
+                "parent_cids": [],
             },
         )
         for i in range(5)
