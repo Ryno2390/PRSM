@@ -167,7 +167,7 @@ async def process_content_access(
             content_metadata={
                 "royalty_rate": request.royalty_rate,
                 "creator_id": request.creator_id,
-                "parent_content_ids": request.parent_cids,
+                "parent_cids": request.parent_cids,
                 "provenance_hash": request.provenance_hash,
             },
         )

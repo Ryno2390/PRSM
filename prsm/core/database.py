@@ -1436,9 +1436,7 @@ class ProvenanceQueries:
                 )
                 # v1.5.0 migration: accept both new (content_id) and legacy (cid) keys
                 content_id = record.get("content_id") or record["cid"]
-                parent_content_ids = record.get(
-                    "parent_content_ids", record.get("parent_cids", [])
-                )
+                parent_cids = record.get("parent_cids", [])
                 manifest_content_id = record.get(
                     "manifest_content_id", record.get("manifest_cid")
                 )
@@ -1447,7 +1445,7 @@ class ProvenanceQueries:
                     # Update mutable fields only — don't overwrite creator/signature
                     existing.access_count = record.get("access_count", existing.access_count)
                     existing.total_royalties = record.get("total_royalties", existing.total_royalties)
-                    existing.parent_cids = parent_content_ids
+                    existing.parent_cids = parent_cids
                     # Phase 1.3 Task 2: refresh provenance_hash so a later
                     # upload that adds a creator 0x address backfills the
                     # canonical hash onto a previously-null row. Guard with
@@ -1466,7 +1464,7 @@ class ProvenanceQueries:
                         creator_id=record["creator_id"],
                         provenance_signature=record.get("provenance_signature", ""),
                         royalty_rate=record.get("royalty_rate", 0.01),
-                        parent_cids=parent_content_ids,
+                        parent_cids=parent_cids,
                         access_count=record.get("access_count", 0),
                         total_royalties=record.get("total_royalties", 0.0),
                         is_sharded=record.get("is_sharded", False),
@@ -1557,7 +1555,7 @@ class ProvenanceQueries:
                 rows = result.fetchall()
                 return [
                     {
-                        # v1.5.0 migration: dict uses content_id/parent_content_ids/
+                        # v1.5.0 migration: dict uses content_id/parent_cids/
                         # manifest_content_id naming; SQL schema retains legacy column names
                         "content_id": row.cid,
                         "filename": row.filename,
@@ -1566,7 +1564,7 @@ class ProvenanceQueries:
                         "creator_id": row.creator_id,
                         "provenance_signature": row.provenance_signature,
                         "royalty_rate": float(row.royalty_rate),
-                        "parent_content_ids": row.parent_cids or [],
+                        "parent_cids": row.parent_cids or [],
                         "access_count": row.access_count,
                         "total_royalties": float(row.total_royalties),
                         "is_sharded": bool(row.is_sharded),
@@ -1602,14 +1600,14 @@ class ProvenanceQueries:
                 if row is None:
                     return None
                 return {
-                    # v1.5.0: dict uses content_id/parent_content_ids/manifest_content_id
+                    # v1.5.0: dict uses content_id/parent_cids/manifest_content_id
                     "content_id":               row.cid,
                     "filename":                 row.filename,
                     "size_bytes":               row.size_bytes,
                     "content_hash":             row.content_hash,
                     "creator_id":               row.creator_id,
                     "royalty_rate":             float(row.royalty_rate),
-                    "parent_content_ids":       row.parent_cids or [],
+                    "parent_cids":       row.parent_cids or [],
                     "access_count":             row.access_count,
                     "total_royalties":          float(row.total_royalties),
                     "is_sharded":               bool(row.is_sharded),

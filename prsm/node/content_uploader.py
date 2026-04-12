@@ -154,7 +154,7 @@ class UploadedContent:
     created_at: float = field(default_factory=time.time)
     provenance_signature: str = ""
     royalty_rate: float = DEFAULT_ROYALTY_RATE
-    parent_content_ids: List[str] = field(default_factory=list)
+    parent_cids: List[str] = field(default_factory=list)
     access_count: int = 0
     total_royalties: float = 0.0
     # Sharding metadata
@@ -246,7 +246,7 @@ class ContentUploader:
 
         The metadata dict mirrors what _handle_content_request dispatches to
         ContentEconomy.process_content_access. Note: the parent CID list is
-        stored under ``parent_cids`` (not ``parent_content_ids``) so the
+        stored under ``parent_cids`` (not ``parent_cids``) so the
         existing reader at content_provider.py:582 finds it.
         """
         if self._content_provider is None:
@@ -259,7 +259,7 @@ class ContentUploader:
             metadata={
                 "creator_id": uploaded.creator_id,
                 "royalty_rate": uploaded.royalty_rate,
-                "parent_cids": uploaded.parent_content_ids,
+                "parent_cids": uploaded.parent_cids,
                 "provenance_hash": uploaded.provenance_hash,
             },
         )
@@ -293,7 +293,7 @@ class ContentUploader:
         metadata: Optional[Dict[str, Any]] = None,
         replicas: int = 3,
         royalty_rate: Optional[float] = None,
-        parent_content_ids: Optional[List[str]] = None,
+        parent_cids: Optional[List[str]] = None,
         force_shard: bool = False,
     ) -> Optional[UploadedContent]:
         """Upload content to storage and register provenance.
@@ -304,7 +304,7 @@ class ContentUploader:
             metadata: Optional metadata dict
             replicas: Number of storage replicas to request
             royalty_rate: FTNS earned per access (clamped to 0.001–0.1, default 0.01)
-            parent_content_ids: content IDs of source material this content derives from
+            parent_cids: content IDs of source material this content derives from
             force_shard: If True, force sharding regardless of file size
 
         Returns:
@@ -316,7 +316,7 @@ class ContentUploader:
 
         content_hash = hashlib.sha256(content).hexdigest()
         size_bytes = len(content)
-        parents = parent_content_ids or []
+        parents = parent_cids or []
 
         # Phase 1.2: compute the canonical creator-bound provenance hash
         # so the on-chain registry and content_economy can find each other.
@@ -377,7 +377,7 @@ class ContentUploader:
                 metadata=metadata,
                 replicas=replicas,
                 royalty_rate=rate,
-                parent_content_ids=parents,
+                parent_cids=parents,
                 content_hash=content_hash,
                 embedding=embedding,
                 near_dup_cid=near_dup_cid,
@@ -396,7 +396,7 @@ class ContentUploader:
         # Create provenance record
         # NOTE (Phase 1.3 Task 3d): wire-format keys must match reader
         # expectations — `cid` / `parent_cids`, not `content_id` /
-        # `parent_content_ids`. See content_index._on_content_advertise,
+        # `parent_cids`. See content_index._on_content_advertise,
         # _on_provenance_register, local_ledger.upsert_provenance, and
         # storage_provider._on_storage_request.
         provenance_data = {
@@ -426,7 +426,7 @@ class ContentUploader:
             creator_id=self.identity.node_id,
             provenance_signature=provenance_signature,
             royalty_rate=rate,
-            parent_content_ids=parents,
+            parent_cids=parents,
             is_sharded=False,
             embedding_id=embedding_id,
             near_duplicate_of=near_dup_cid,
@@ -494,7 +494,7 @@ class ContentUploader:
         metadata: Optional[Dict[str, Any]],
         replicas: int,
         royalty_rate: float,
-        parent_content_ids: List[str],
+        parent_cids: List[str],
         content_hash: str,
         embedding: "Optional[np.ndarray]" = None,
         near_dup_cid: Optional[str] = None,
@@ -529,7 +529,7 @@ class ContentUploader:
                 metadata={
                     "filename": filename,
                     "uploader_metadata": metadata or {},
-                    "parent_content_ids": parent_content_ids,
+                    "parent_cids": parent_cids,
                 },
             )
 
@@ -555,7 +555,7 @@ class ContentUploader:
                 "created_at": time.time(),
                 "metadata": metadata or {},
                 "royalty_rate": royalty_rate,
-                "parent_cids": parent_content_ids,
+                "parent_cids": parent_cids,
                 "is_sharded": True,
                 "total_shards": manifest.total_shards,
                 "shard_size": manifest.shard_size,
@@ -574,7 +574,7 @@ class ContentUploader:
                 creator_id=self.identity.node_id,
                 provenance_signature=provenance_signature,
                 royalty_rate=royalty_rate,
-                parent_content_ids=parent_content_ids,
+                parent_cids=parent_cids,
                 is_sharded=True,
                 manifest_content_id=manifest_cid,
                 total_shards=manifest.total_shards,
@@ -608,7 +608,7 @@ class ContentUploader:
                 "created_at": provenance_data["created_at"],
                 "metadata": metadata or {},
                 "royalty_rate": royalty_rate,
-                "parent_cids": parent_content_ids,
+                "parent_cids": parent_cids,
                 "is_sharded": True,
                 "total_shards": manifest.total_shards,
                 "embedding_id": embedding_id,
@@ -637,7 +637,7 @@ class ContentUploader:
             logger.info(
                 f"Uploaded {filename} ({size_bytes} bytes) with sharding -> "
                 f"manifest={manifest_cid}, shards={manifest.total_shards}, "
-                f"royalty={royalty_rate} FTNS/access, parents={len(parent_content_ids)}"
+                f"royalty={royalty_rate} FTNS/access, parents={len(parent_cids)}"
             )
             return uploaded
 
@@ -663,7 +663,7 @@ class ContentUploader:
                 "created_at": time.time(),
                 "metadata": metadata or {},
                 "royalty_rate": royalty_rate,
-                "parent_cids": parent_content_ids,
+                "parent_cids": parent_cids,
                 "is_sharded": False,
                 "sharding_failed": True,
                 "provenance_hash": provenance_hash_hex,
@@ -679,7 +679,7 @@ class ContentUploader:
                 creator_id=self.identity.node_id,
                 provenance_signature=provenance_signature,
                 royalty_rate=royalty_rate,
-                parent_content_ids=parent_content_ids,
+                parent_cids=parent_cids,
                 is_sharded=False,
                 provenance_hash=provenance_hash_hex,
             )
@@ -702,7 +702,7 @@ class ContentUploader:
                 "created_at": provenance_data["created_at"],
                 "metadata": metadata or {},
                 "royalty_rate": royalty_rate,
-                "parent_cids": parent_content_ids,
+                "parent_cids": parent_cids,
                 "provenance_hash": provenance_hash_hex,
             })
             if replicas > 0:
@@ -726,11 +726,11 @@ class ContentUploader:
         metadata: Optional[Dict[str, Any]] = None,
         replicas: int = 3,
         royalty_rate: Optional[float] = None,
-        parent_content_ids: Optional[List[str]] = None,
+        parent_cids: Optional[List[str]] = None,
     ) -> Optional[UploadedContent]:
         """Upload JSON-serializable data to content storage."""
         content = json.dumps(data, indent=2).encode()
-        return await self.upload(content, filename, metadata, replicas, royalty_rate, parent_content_ids)
+        return await self.upload(content, filename, metadata, replicas, royalty_rate, parent_cids)
 
     async def upload_text(
         self,
@@ -739,10 +739,10 @@ class ContentUploader:
         metadata: Optional[Dict[str, Any]] = None,
         replicas: int = 3,
         royalty_rate: Optional[float] = None,
-        parent_content_ids: Optional[List[str]] = None,
+        parent_cids: Optional[List[str]] = None,
     ) -> Optional[UploadedContent]:
         """Upload text content to content storage."""
-        return await self.upload(text.encode("utf-8"), filename, metadata, replicas, royalty_rate, parent_content_ids)
+        return await self.upload(text.encode("utf-8"), filename, metadata, replicas, royalty_rate, parent_cids)
 
     async def record_access(self, cid: str, accessor_id: str) -> None:
         """Record that content was accessed, distributing royalties.
@@ -763,7 +763,7 @@ class ContentUploader:
         content.access_count += 1
         total_royalty = content.royalty_rate
 
-        if content.parent_content_ids and self.content_index:
+        if content.parent_cids and self.content_index:
             # Multi-level provenance: split royalties
             await self._distribute_multilevel_royalty(content, total_royalty, accessor_id)
         else:
@@ -823,7 +823,7 @@ class ContentUploader:
         )
 
         # Credit source material creators (split evenly among parents)
-        parent_creators = self._resolve_parent_creators(content.parent_content_ids)
+        parent_creators = self._resolve_parent_creators(content.parent_cids)
         if parent_creators:
             per_parent = source_pool / len(parent_creators)
             for parent_creator_id in parent_creators:
@@ -883,12 +883,12 @@ class ContentUploader:
         except Exception as e:
             logger.error(f"Network fee credit failed: {e}")
 
-    def _resolve_parent_creators(self, parent_content_ids: List[str]) -> List[str]:
+    def _resolve_parent_creators(self, parent_cids: List[str]) -> List[str]:
         """Look up the creator node IDs for parent content IDs via the content index."""
         creators = []
         if not self.content_index:
             return creators
-        for pcid in parent_content_ids:
+        for pcid in parent_cids:
             record = self.content_index.lookup(pcid)
             if record and record.creator_id:
                 creators.append(record.creator_id)
@@ -961,7 +961,7 @@ class ContentUploader:
         accessor_id = data.get("accessor_id", "")
         creator_id = data.get("creator_id", "")
         royalty_rate = data.get("royalty_rate", DEFAULT_ROYALTY_RATE)
-        parent_content_ids = data.get("parent_content_ids", [])
+        parent_cids = data.get("parent_cids", [])
 
         if not content_id or not accessor_id:
             return
@@ -972,24 +972,24 @@ class ContentUploader:
             return
 
         # Case 2: We are a source creator for a derivative work
-        if parent_content_ids:
-            my_parent_content_ids = [
-                pcid for pcid in parent_content_ids
+        if parent_cids:
+            my_parent_cids = [
+                pcid for pcid in parent_cids
                 if pcid in self.uploaded_content
             ]
-            if my_parent_content_ids:
+            if my_parent_cids:
                 source_pool = royalty_rate * SOURCE_CREATOR_SHARE
                 # Count total parents to split evenly
-                per_parent = source_pool / len(parent_content_ids)
-                source_royalty = per_parent * len(my_parent_content_ids)
+                per_parent = source_pool / len(parent_cids)
+                source_royalty = per_parent * len(my_parent_cids)
                 try:
                     await self.ledger.credit(
                         wallet_id=self.identity.node_id,
                         amount=source_royalty,
                         tx_type=TransactionType.CONTENT_ROYALTY,
-                        description=f"Source royalty for derivative {content_id[:12]}... ({len(my_parent_content_ids)} parent(s))",
+                        description=f"Source royalty for derivative {content_id[:12]}... ({len(my_parent_cids)} parent(s))",
                     )
-                    for pcid in my_parent_content_ids:
+                    for pcid in my_parent_cids:
                         self.uploaded_content[pcid].total_royalties += per_parent
                     logger.info(f"Source royalty earned: {source_royalty:.4f} FTNS for derivative {content_id[:12]}...")
                 except Exception as e:
@@ -1067,7 +1067,7 @@ class ContentUploader:
                 "creator_id": uploaded.creator_id,
                 "provenance_signature": uploaded.provenance_signature,
                 "royalty_rate": uploaded.royalty_rate,
-                "parent_content_ids": uploaded.parent_content_ids,
+                "parent_cids": uploaded.parent_cids,
                 "access_count": uploaded.access_count,
                 "total_royalties": uploaded.total_royalties,
                 "is_sharded": uploaded.is_sharded,
@@ -1207,7 +1207,7 @@ class ContentUploader:
                     created_at=rec["created_at"],
                     provenance_signature=rec["provenance_signature"],
                     royalty_rate=rec["royalty_rate"],
-                    parent_content_ids=rec["parent_content_ids"],
+                    parent_cids=rec["parent_cids"],
                     access_count=rec["access_count"],
                     total_royalties=rec["total_royalties"],
                     is_sharded=rec["is_sharded"],
