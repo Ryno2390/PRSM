@@ -885,4 +885,4 @@ After successful deployment:
 
 For issues or questions:
 - GitHub Issues: https://github.com/Ryno2390/PRSM/issues
-- Documentation: `docs/BOOTSTRAP_DEPLOYMENT.md`
+- Documentation: this file (`docs/BOOTSTRAP_DEPLOYMENT_GUIDE.md`)
