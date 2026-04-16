@@ -223,6 +223,8 @@ dist/
 /archive/
 # Allow planning/archive (completed plan docs belong in the repo)
 !planning/archive/
+# Allow docs/archive (superseded doc artifacts kept as historical record)
+!docs/archive/
 # Examples/demos archive directories - development artifacts, not for repo
 examples_and_demos/archive/
 examples_and_demos/demos/analogical_reasoning/archive/
