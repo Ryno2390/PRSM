@@ -1,4 +1,6 @@
-# PRSM Troubleshooting Guide
+# PRSM Troubleshooting — Local Development
+
+> **Scope:** This guide covers local-development setups (CLI, single-node, `prsm node start` workflow). For **production and containerized deployments** (Docker Compose, Kubernetes, PostgreSQL, IPFS, PCI / compliance operations), see [`TROUBLESHOOTING_GUIDE.md`](TROUBLESHOOTING_GUIDE.md).
 
 ## Installation Issues
 

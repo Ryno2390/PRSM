@@ -1,10 +1,14 @@
 # FTNS Token Testnet Deployment Guide
 
-This guide covers deploying the FTNS (Fungible Tokens for Node Support) token to testnet networks for on-chain economics demonstration.
+> **Scope:** This guide covers deploying the **FTNS ERC-20 token contract** to testnet networks for development and testing. For the **Phase 1 on-chain provenance / royalty contracts** (`ProvenanceRegistry.sol`, `RoyaltyDistributor.sol`) which are in Sepolia bake-in as of April 2026 with mainnet deploy imminent, see [`2026-04-11-phase1.3-completion-plan.md`](2026-04-11-phase1.3-completion-plan.md) and the [master roadmap](2026-04-10-audit-gap-roadmap.md).
+>
+> **FTNS token in production:** Per the master roadmap audit verdict, FTNS is already **live on Base mainnet** at `0x5276a3756C85f2E9e46f6D34386167a209aa16e5`. This guide covers the Ethereum Sepolia testnet deployment used for development workflows and the fresh-instance deployment path for contributors spinning up their own environments.
+
+This guide covers deploying the FTNS (pronounced "Photons") token to testnet networks for on-chain economics demonstration.
 
 ## ✅ Live Deployment (Ethereum Sepolia)
 
-The FTNS token is **already deployed** on Ethereum Sepolia testnet:
+The FTNS token is **already deployed** on Ethereum Sepolia testnet (used alongside the Base mainnet deployment for development workflows):
 
 | Field | Value |
 |---|---|
@@ -89,10 +93,11 @@ cd ..
 
 ### Supported Testnets
 
-| Network | Chain ID | Native Token | Explorer |
-|---------|----------|--------------|----------|
-| Sepolia | 11155111 | ETH | [sepolia.etherscan.io](https://sepolia.etherscan.io) |
-| Polygon Mumbai | 80001 | MATIC | [mumbai.polygonscan.com](https://mumbai.polygonscan.com) |
+| Network | Chain ID | Native Token | Explorer | Notes |
+|---------|----------|--------------|----------|---|
+| Ethereum Sepolia | 11155111 | ETH | [sepolia.etherscan.io](https://sepolia.etherscan.io) | Current primary dev/test network |
+| Base Sepolia | 84532 | ETH | [sepolia.basescan.org](https://sepolia.basescan.org) | Used for Phase 1 `ProvenanceRegistry` + `RoyaltyDistributor` bake-in (see master roadmap) |
+| Polygon Mumbai | 80001 | MATIC | [mumbai.polygonscan.com](https://mumbai.polygonscan.com) | **Deprecated 2024** — Polygon Labs sunset Mumbai in favor of Amoy. References in this guide are retained only for historical completeness; new deployments should use Base Sepolia or Ethereum Sepolia. |
 
 ### Configuration File
 

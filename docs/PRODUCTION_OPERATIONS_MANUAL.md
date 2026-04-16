@@ -1,5 +1,24 @@
 # PRSM Production Operations Manual
 
+> **Scope note (2026-04-16):** This manual was authored June 2025 for a centralized, Kubernetes-orchestrated deployment model (load balancer + k8s API replicas + PostgreSQL primary/replica + Redis cluster + IPFS cluster + Prometheus). That remains a valid operating mode for **Prismatica's T4 meganode infrastructure** and for **Foundation-operated Phase 1 on-chain indexer / API gateway** components.
+>
+> **It is not the operating mode for the bulk of PRSM supply.** The PRSM protocol is peer-to-peer: T1 consumer-edge and T2 prosumer nodes (the numerical majority) run single-process `prsm node start` on residential / prosumer hardware, not k8s pods. T3 cloud-arbitrage operators run on RunPod / Lambda / CoreWeave, not hyperscaler-k8s. Per the four-tier supply architecture in `PRSM_Vision.md` §6, only T4 meganodes map cleanly to the k8s operating model documented below.
+>
+> **Reading guidance:**
+> - If you operate a **T4 meganode** (Prismatica or strategic partner), this manual is directly applicable.
+> - If you operate the **Foundation's on-chain API gateway / indexer / monitoring infrastructure**, this manual's k8s patterns are applicable.
+> - If you operate a **T1/T2/T3 node**, use [`GETTING_STARTED.md`](GETTING_STARTED.md), [`quickstart.md`](quickstart.md), and [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) for local-dev guidance. This manual is orientational only.
+>
+> **Related docs:**
+> - [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) — local development troubleshooting
+> - [`TROUBLESHOOTING_GUIDE.md`](TROUBLESHOOTING_GUIDE.md) — production / containerized-deployment troubleshooting (companion to this manual)
+> - [`SECURITY_HARDENING.md`](SECURITY_HARDENING.md) + [`SECURITY_HARDENING_CHECKLIST.md`](SECURITY_HARDENING_CHECKLIST.md) + [`SECURITY_CONFIGURATION_AUDIT.md`](SECURITY_CONFIGURATION_AUDIT.md) — security suite
+> - [`BOOTSTRAP_DEPLOYMENT_GUIDE.md`](BOOTSTRAP_DEPLOYMENT_GUIDE.md) — bootstrap-node deploy
+> - [`2026-04-10-audit-gap-roadmap.md`](2026-04-10-audit-gap-roadmap.md) — master roadmap; Phase 1 on-chain ops + Phase 6 P2P hardening change operational surface
+> - [`2026-04-11-phase1.3-sepolia-bakein-log.md`](2026-04-11-phase1.3-sepolia-bakein-log.md) — live bake-in operations log as of April 2026
+>
+> **Terminology:** "PRSM" expands to "Protocol for Research, Storage, and Modeling." Earlier drafts of this doc used "Recursive Scientific Modeling" — that is legacy and should be disregarded. Metrics sections below mention "Model Training Success Rate," "Marketplace Transaction Volume," and "Governance Participation" — the first two were NWTN-era framings (NWTN orchestrator deleted in v1.6 scope alignment, April 2026); the third depends on governance structure not yet finalized. These metric names are retained in the manual as illustrative examples of the *kind* of operational metric worth tracking, but the specific metric names may not map to current code.
+
 ## Table of Contents
 
 1. [Overview](#overview)
@@ -17,7 +36,7 @@
 
 ## Overview
 
-This manual provides comprehensive operational procedures for running PRSM (Protocol for Recursive Scientific Modeling) in production environments. It covers deployment, monitoring, maintenance, and incident response procedures for system administrators and DevOps teams.
+This manual provides comprehensive operational procedures for running PRSM (**Protocol for Research, Storage, and Modeling**) infrastructure in production environments — primarily T4 meganode operators and Foundation-operated on-chain indexer / gateway components (see scope note at top). It covers deployment, monitoring, maintenance, and incident response procedures for system administrators and DevOps teams.
 
 ### System Requirements
 
@@ -700,19 +719,24 @@ kubectl exec -n prsm-production deployment/postgres -- \
 
 ## Document Information
 
-**Version**: 1.0  
-**Last Updated**: June 11, 2025  
-**Next Review**: July 11, 2025  
-**Owner**: PRSM DevOps Team  
-**Contact**: operations@prsm.org  
+**Version**: 1.1
+**Originally authored**: June 11, 2025
+**Last updated**: 2026-04-16 (scope banner, name-expansion fix, cross-references — procedural bodies unchanged)
+**Review cadence**: quarterly; next review due 2026-07-16
+**Owner**: Foundation DevOps Lead (role to be filled; see `PRSM_Vision.md` §12 Team) + Prismatica infrastructure team for T4 meganode operations
+**Contact**: operations contact to be published on foundation website at launch
 
 **Change Log**:
 - v1.0 (2025-06-11): Initial production operations manual
+- v1.1 (2026-04-16): Added scope banner clarifying T4-meganode vs T1/T2/T3 operating mode applicability; fixed protocol name expansion; added cross-references to companion suite and master roadmap; flagged NWTN-era metric names as illustrative rather than current
 
 ---
 
 *This document is part of the PRSM production documentation suite. For additional information, see:*
-- [Administrator Guide](ADMINISTRATOR_GUIDE.md)
+- [Administrator Guide](ADMINISTRATOR_GUIDE.md) (verify existence — may be historical)
 - [API Documentation](API_REFERENCE.md)
-- [Troubleshooting Guide](TROUBLESHOOTING_GUIDE.md)
-- [Security Procedures](SECURITY_HARDENING.md)
+- [Troubleshooting Guide (Production)](TROUBLESHOOTING_GUIDE.md) — direct companion to this manual
+- [Troubleshooting (Local Dev)](TROUBLESHOOTING.md) — for T1/T2/T3 node operators
+- [Security Hardening](SECURITY_HARDENING.md) + [Checklist](SECURITY_HARDENING_CHECKLIST.md) + [Config Audit](SECURITY_CONFIGURATION_AUDIT.md) + [Pen-Test Guide](PENETRATION_TESTING_GUIDE.md) — security suite
+- [Master Roadmap](2026-04-10-audit-gap-roadmap.md) — phase plan driving operational surface changes
+- [Phase 1 Sepolia Bake-in Log](2026-04-11-phase1.3-sepolia-bakein-log.md) — current live-ops artifact

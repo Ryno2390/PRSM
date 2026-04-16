@@ -1,19 +1,23 @@
-# PRSM Participant Guide — Earn FTNS by Contributing to Science
+# PRSM Participant Guide — Earn FTNS by Contributing
 
-Welcome to PRSM (Protocol for Recursive Scientific Modeling), a decentralized network where anyone can participate in advancing scientific AI research and earn rewards for their contributions.
+> **Related docs:** For technical installation / CLI workflow, see [`GETTING_STARTED.md`](GETTING_STARTED.md) and [`quickstart.md`](quickstart.md). For token economics detail, see `PRSM_Tokenomics.md`. For terminology disambiguation, see [`glossary.md`](glossary.md).
+
+Welcome to PRSM (**Protocol for Research, Storage, and Modeling**), a decentralized peer-to-peer infrastructure protocol where anyone can participate in providing compute, storage, or data for AI workloads and earn rewards.
 
 ## What is PRSM?
 
-PRSM is a decentralized network that connects people who have computing resources with researchers and developers who need AI capabilities. Instead of relying on a single company's servers, PRSM distributes AI work across thousands of computers worldwide — including yours.
+PRSM is a peer-to-peer infrastructure protocol that connects people who have computing resources with users who need compute, storage, and data access for AI workloads. Instead of relying on a single company's datacenters, PRSM distributes work across thousands of consumer devices and independent operators worldwide — including yours.
+
+**Important framing:** PRSM is **infrastructure**, not a model. Third-party LLMs (Claude, GPT, Gemini) do the reasoning; PRSM provides compute, storage, and data access underneath them via MCP (Model Context Protocol). You contribute to the substrate, not to building a model.
 
 **Why does this matter?**
 
-- **Democratized AI**: Anyone can access powerful AI capabilities without needing expensive hardware
-- **Fair Compensation**: Contributors earn tokens for providing compute, data, and expertise
-- **Scientific Progress**: The network is optimized for research, not just commercial applications
-- **Transparency**: All transactions and model performance are publicly verifiable
+- **Democratized AI infrastructure**: Compute becomes accessible without depending on a handful of hyperscaler datacenters
+- **Fair compensation**: Contributors earn FTNS for providing compute, storage, and data
+- **Verifiable provenance**: On-chain royalty distribution means every content access pays the creator, enforced by smart contracts rather than platform policy
+- **Transparency**: All transactions are publicly verifiable on-chain
 
-PRSM uses a token called **FTNS** (Federated Token Network System) to reward contributors and enable fair access to AI resources.
+PRSM uses a token called **FTNS** (pronounced "photons") to compensate contributors. FTNS is distributed **only as compensation for services rendered** to the network — it is never sold to investors by the foundation. See `PRSM_Tokenomics.md` §3 for the full distribution model.
 
 ## What is FTNS?
 
@@ -34,7 +38,7 @@ Earnings depend on what you contribute and how much:
 | Data Sharing | 1-50 FTNS/dataset | Curated, verified datasets |
 | Model Development | 10-100+ FTNS/model | Working AI models |
 
-*Note: FTNS is currently in testnet phase. Token values will be determined by governance when mainnet launches.*
+*Note: FTNS is currently in Sepolia testnet bake-in as of April 2026; Phase 1 on-chain royalty contracts are mainnet-imminent. FTNS price is not set by the foundation — it emerges organically from secondary-market activity on third-party venues once the network is live. The foundation does not operate FTNS sales, does not announce prices, and does not guarantee appreciation. Earnings above are illustrative targets that depend on network adoption and are not commitments.*
 
 ### Getting Your First FTNS
 
@@ -51,55 +55,53 @@ Share your computer's processing power to help run AI queries and earn FTNS auto
 
 #### Step 1: Install PRSM
 
-**Windows:**
-1. Download the installer from [prsm.ai/download](https://prsm.ai/download)
-2. Run the installer and follow the prompts
-3. Launch PRSM from your Start menu
+PRSM is a Python package. Install with `pip` on any platform (macOS, Linux, Windows with WSL):
 
-**macOS:**
 ```bash
-# Using Homebrew
-brew install prsm
-
-# Or download from the website
-# Open the DMG and drag PRSM to Applications
+pip install prsm-network
 ```
 
-**Linux:**
-```bash
-# Using snap
-sudo snap install prsm
+Requires Python 3.11+. For the full installation walkthrough including virtualenv setup and first-run configuration, see [`GETTING_STARTED.md`](GETTING_STARTED.md).
 
-# Or using pip
-pip install prsm-cli
+#### Step 2: Initialize Your Node
+
+```bash
+prsm setup --minimal   # smart defaults, fast path
+# OR
+prsm setup             # interactive wizard
 ```
 
-#### Step 2: Create Your Account
+On first run, PRSM generates an Ed25519 identity keypair (stored in `~/.prsm/identity.json`) and credits your node with a welcome grant of 100 FTNS. There is no separate "account" — your node identity *is* your account. Back up `~/.prsm/identity.json` the same way you would back up a crypto wallet: losing it means losing access to your FTNS balance.
 
-1. Open PRSM and click "Create New Account"
-2. Enter your email address
-3. Create a secure password (12+ characters recommended)
-4. Write down your recovery phrase and store it safely
-5. Your account is created with 100 FTNS welcome grant
+A browser/SDK-based wallet UX is planned for Phase 4 (Q4 2026) per the [master roadmap](2026-04-10-audit-gap-roadmap.md). Until then, the CLI is the primary interface.
 
 #### Step 3: Start Contributing
 
-1. Open the PRSM application
-2. Go to the "Compute" tab
-3. Click "Start Contributing"
-4. Adjust settings:
-   - **Resource Limit**: How much of your computer to share (50-100%)
-   - **Schedule**: When to contribute (e.g., "Only at night" or "Always")
-   - **GPU/CPU Selection**: Choose which resources to share
+```bash
+prsm daemon start              # run in the background
+prsm daemon status             # check it's running
+prsm daemon logs -f            # follow logs
+```
 
-Your computer will now automatically process AI queries from the network and earn FTNS.
+Adjust resource allocation via `prsm config set`:
+
+```bash
+prsm config set cpu_pct 50     # share 50% of CPU
+prsm config set memory_pct 40  # share 40% of RAM
+prsm config set gpu_pct 80     # share 80% of GPU (0 = disabled)
+prsm config set storage_gb 50  # pledge 50 GB for storage
+```
+
+See `prsm config show` for all options. Your node will automatically process compute jobs from the network and earn FTNS.
 
 #### Step 4: Monitor Your Earnings
 
-View your earnings in real-time:
-- **Dashboard**: Shows current session earnings and total balance
-- **Statistics**: View historical earnings, queries processed, and uptime
-- **Leaderboard**: See how you rank among contributors
+```bash
+curl http://localhost:8000/balance         # FTNS balance + recent transactions
+prsm ftns yield-estimate --hours 24        # projected daily earnings
+```
+
+Operator dashboard UI with historical charts and leaderboards is planned for Phase 3 per the [master roadmap](2026-04-10-audit-gap-roadmap.md).
 
 **Tips for Maximum Earnings:**
 - Keep your node online during peak hours (typically 9 AM - 9 PM UTC)
@@ -163,46 +165,40 @@ You'll earn FTNS automatically when:
 
 ---
 
-### Option C: Use PRSM for AI Queries
+### Option C: Use PRSM via a Third-Party LLM
 
-Spend your FTNS to access powerful AI capabilities for research, writing, or development.
+**PRSM does not host AI models.** The reasoning layer is always a third-party LLM (Claude, GPT, Gemini, local Ollama, etc.). PRSM provides the compute, storage, and data-access substrate *underneath* your LLM via MCP. You spend FTNS when your LLM invokes PRSM tools — not for the reasoning itself.
 
-#### Step 1: Access the Query Interface
+#### Using PRSM from an MCP-compatible LLM client
 
-1. Open PRSM
-2. Go to the "Query" tab
-3. Type your question or prompt
+When Phase 3's MCP server ships (target Q3 2026, per the [roadmap](2026-04-10-audit-gap-roadmap.md)), any MCP client (Claude Desktop, Cursor, Gemini CLI, etc.) can invoke PRSM tools such as:
 
-#### Step 2: Choose Your Model
+- `prsm_retrieve` — retrieve data from PRSM's data layer with creator royalty settlement
+- `prsm_compute` — dispatch heavy compute via the PRSM compute mesh
+- `prsm_inference` — run private inference via PRSM's zero-trust stack
 
-PRSM offers various AI models:
-- **General Purpose**: Fast, versatile models for everyday tasks
-- **Scientific**: Models trained on research papers and data
-- **Code**: Models specialized for programming
-- **Domain-Specific**: Models for biology, physics, chemistry, etc.
+Your LLM does the reasoning; PRSM tools provide data and compute the LLM can't hold in its own context. Every PRSM tool call debits FTNS from your node's balance.
 
-#### Step 3: Set Your Budget
+#### Using PRSM directly via CLI (today)
 
-Control your spending:
-- **Max Cost**: Set the maximum FTNS you're willing to spend
-- **Quality Level**: Higher quality costs more but gives better results
-- **Speed vs Quality**: Faster responses cost more
+Before the MCP server ships, you can interact with PRSM's compute pipeline via CLI:
 
-#### Example Queries
+```bash
+# Get a cost estimate first (free)
+prsm compute quote "analyze EV registration trends in NC" --shards 5 --tier t2
 
+# Run with a budget
+prsm compute run --query "analyze EV registration trends in NC" --budget 1.0
 ```
-# Research
-"Summarize the key findings from recent CRISPR gene editing papers"
 
-# Writing
-"Help me draft a research proposal on quantum computing applications"
+This routes through the Ring 1-10 pipeline — decompose → plan → quote → execute → trace. Under the hood, a third-party LLM (configured via `OPENROUTER_API_KEY` or equivalent) does the reasoning; PRSM dispatches WASM agents (SPRKs) to data-holding nodes.
 
-# Code
-"Write a Python function to calculate protein folding energy"
+#### Budget controls
 
-# Analysis
-"Compare the performance of transformer vs RNN architectures for time series prediction"
-```
+- `--budget N` caps FTNS spend at N
+- `prsm compute quote ...` estimates cost before committing
+- Higher tier (T2, T3) = faster compute but higher cost
+- More shards = more parallelism but higher aggregate cost
 
 ## Frequently Asked Questions
 
@@ -238,12 +234,14 @@ When you contribute compute, your personal files are **never** accessed. PRSM on
 
 ### What is FTNS worth?
 
-FTNS is currently in **testnet phase** with no real monetary value. During this phase:
-- You can earn and spend FTNS freely
-- All transactions are tracked on a test blockchain
-- Governance will determine real token economics before mainnet
+As of April 2026, PRSM is in Sepolia testnet bake-in with mainnet launch imminent. During the testnet phase FTNS has no secondary-market value — it can only be earned and spent within the testnet.
 
-When mainnet launches, FTNS will have real value determined by market forces and governance decisions.
+**Post-mainnet (important framing):**
+
+- **The foundation does not set FTNS price and does not operate a sale venue.** FTNS is distributed exclusively as compensation for services rendered (creator royalties, node operator compensation, contributor grants). It is never sold by the foundation to anyone.
+- **Secondary-market value emerges organically** via third-party exchanges (Aerodrome on Base, eventual CEX listings) once the network is live. The foundation does not seed AMM pools, announce prices, or guarantee appreciation.
+- **The protocol includes value-trajectory mechanisms** (Bitcoin-style halving schedule, 20% burn on every transaction, staking locks, organic demand growth) that collectively produce modest appreciation during bootstrap and steady-state stabilization as adoption matures. Appreciation is a consequence of protocol design, not a foundation promise. See `PRSM_Tokenomics.md` §4 for the full design.
+- **Bear case is a real possibility.** If PRSM fails to achieve adoption, FTNS remains low-value regardless of the halving / burn mechanics. Contribute what you can afford to lose the USD-equivalent value of.
 
 ### How do I get started without any FTNS?
 
