@@ -2410,3 +2410,108 @@ After all 8 tasks complete:
 - Same shape as Phase 1.3 Tasks 1-3 combined, smaller than the full Phase 1.3 surface.
 
 After Phase 2 ships, per the roadmap: "After Phase 1, re-audit before starting Phase 2" — but Phase 2 has already started. The audit-gap should happen after Phase 2 ships (re-audit before Phase 3).
+
+---
+
+## Addendum: Vision-Doc-Derived Requirements (Added 2026-04-14)
+
+The PRSM Vision document (`PRSM_Vision.md`) has evolved during the Phase 1.3 bake-in period to include two sections that impose new requirements on Phase 2 remote compute dispatch:
+
+- **Section 7: Private Inference — The Zero-Trust Compute Layer.** Positions PRSM as a regulated-industry-grade inference substrate with sharded weights, TEE-attested compute, and on-chain receipts.
+- **Section 6 subsection: The four-tier supply architecture.** Introduces T3 (professional arbitrage) operators running PRSM nodes on rented cloud GPUs, with spot preemption as a first-class concern.
+
+The Phase 2 design and plan documents above precede these Vision additions. Before Phase 2 ships, the following line items must be incorporated — either into Phase 2 scope directly, or explicitly deferred to a named successor phase with a written rationale.
+
+### Line item A: Spot preemption handling in signed-receipt protocol
+
+**Vision doc reference:** Section 6 ("Spot preemption handling") and Section 7 ("on-chain receipts").
+
+**Problem:** T3 operators run on cloud spot instances that can be preempted mid-inference. The current `ShardExecutionReceipt` design (Task 2 above) assumes complete-or-abandon semantics. Preemption is neither: the operator did honest work up to preemption, then the cloud provider killed the pod through no fault of the operator.
+
+**Required behavior:**
+
+1. **Partial-completion credit.** If a node is preempted after completing `k` of `n` tensor-parallel shards, it receives credit for the `k` completed shards (partial FTNS payment), not zero.
+2. **Re-routing.** The `RemoteShardDispatcher` must detect preemption (timeout with specific signal from the node's final heartbeat, if any) and re-dispatch the incomplete shards to another node without treating the preempted node as malicious.
+3. **No slashing for preemption.** Slashing applies only to provable abandonment (node signs on to a job, then goes silent with no preemption signal) or to verified malicious output (receipt mismatch, Section 7 activation-attestation failure). Preemption is neither.
+
+**Acceptance criterion:** New integration test — 3-node job where one node is killed mid-execution (simulated via `kill -9` or pod eviction API), the job completes successfully via re-routing, the preempted node receives partial FTNS credit, and no slashing event is recorded against it.
+
+**Recommendation:** incorporate into Phase 2 scope. Without this, T3 supply-tier adoption is blocked because no rational cloud operator will run PRSM nodes where preemption = total loss.
+
+### Line item B: Activation-inversion mitigation primitives
+
+**Vision doc reference:** Section 7, "Honest limits" — "Activation-inversion attacks can partially reconstruct input prompts from early-layer activations. Mitigations include topology rotation per inference and activation-layer TEE attestation, both of which are in the Phase 2+ roadmap."
+
+**Problem:** If the same set of nodes repeatedly handles the same early transformer layers across many inferences from the same user, they accumulate enough activation observations to mount reconstruction attacks. A rotating topology — where each inference is randomly assigned to a different subset of nodes across the full shard set — breaks this accumulation.
+
+**Required behavior:**
+
+1. **Per-inference topology randomization.** The `RemoteShardDispatcher` selects the node assignment for each shard from a randomized subset of eligible nodes. Consecutive inferences from the same requester do not reuse the same node-to-shard mapping.
+2. **Unlinkability.** The dispatch protocol does not expose to any participating node (a) which other nodes are handling adjacent shards, or (b) the identity of the requester. Nodes see only their assigned shard, the upstream activation, and a dispatch token.
+3. **Compatible with preemption re-routing (line item A).** When re-routing, the replacement node must come from a fresh random subset, not the next node in a deterministic ring.
+
+**Acceptance criterion:** 100 consecutive inferences from the same requester with the same prompt prefix result in <10% node-assignment overlap across inferences (measured across the top-K early-layer nodes where inversion attacks are most effective).
+
+**Recommendation:** design in Phase 2 (the dispatcher is being built now; adding topology randomization later is substantially harder than shipping it correctly on day one). Implementation can be scope-capped to "per-inference random selection over eligible pool"; more sophisticated privacy-preserving routing (onion-routed shard assignment, etc.) can defer.
+
+### Line item C: TEE attestation at inference granularity
+
+**Vision doc reference:** Section 7, "TEE-attested compute. Each SPRK executes in a hardware-isolated enclave."
+
+**Problem:** Phase 2 Rings 7-10 (already shipped) provide TEE runtime support at the node level — a node declares itself TEE-capable at join time. Section 7 requires something stronger: per-inference attestation that *this specific shard execution* occurred inside a valid, unrevoked TEE, with fresh quote verification. Node-level claims ("I'm running SGX, trust me") are insufficient for the regulated-industry tier.
+
+**Required behavior:**
+
+1. **Per-inference quote.** `ShardExecutionReceipt` optionally carries a TEE attestation quote bound to the specific execution (input hash, output hash, shard id, timestamp nonce).
+2. **Quote verification.** The dispatcher verifies the quote against a current attestation service (Intel DCAP, AMD KDS, etc.) before accepting the receipt for high-sensitivity jobs.
+3. **Tier gating.** Requesters can specify a job-level requirement: "accept receipts only from nodes that include a verified TEE quote for this execution." Non-TEE nodes are excluded from these jobs.
+4. **Revocation handling.** The dispatcher refuses receipts bearing quotes from revoked TEE instances (known-broken SGX platforms, etc.).
+
+**Acceptance criterion:** Integration test — a tier-gated job dispatched to a pool containing both TEE and non-TEE nodes only accepts results from TEE nodes, all receipts carry verified quotes, and the verification failure path (simulated expired quote) correctly rejects the receipt and re-dispatches.
+
+**Recommendation:** design in Phase 2, ship implementation in Phase 2.1 or Phase 3. The `ShardExecutionReceipt` schema from Task 2 must reserve the attestation field now; the verification logic can land later without breaking the wire format.
+
+### Line item D: Cross-references
+
+- Update `docs/2026-04-12-phase2-remote-compute-design.md` to reference Vision doc Section 7 in its "Security model" section.
+- Add explicit note to Task 2's `ShardExecutionReceipt` schema: reserved field for TEE attestation quote (optional in Phase 2, required in Phase 2.1+).
+- Add explicit note to Task 5's `RemoteShardDispatcher`: topology randomization is in-scope; see line item B.
+- Add explicit note to Task 7's integration test: preemption handling test is in-scope; see line item A.
+
+### Scope impact
+
+**In scope for Phase 2 (this plan):**
+- Line item A (preemption handling) — integrate into Task 2, Task 5, Task 7.
+- Line item B (topology randomization) — integrate into Task 5.
+- Line item C (TEE attestation schema field only, verification deferred) — integrate into Task 2.
+
+**Deferred to Phase 2.1 (new follow-on phase, not yet planned):**
+- Line item C verification logic and tier-gating enforcement.
+
+**Estimated scope impact:** +1 commit, +150 LoC production, +100 LoC tests. New total: ~9 commits, ~650 LoC production, ~500 LoC tests. Still smaller than Phase 1.3's full surface.
+
+### Naming clarification: compute verification tiers vs. content confidentiality tiers (Added 2026-04-15)
+
+A terminology collision exists in the broader PRSM documentation and must be clarified explicitly in any Phase 2 materials or inline comments that reference tiers:
+
+- **Compute verification tiers (A/B/C).** Used throughout this plan and in the codebase for the verification-strength spectrum applied to remote compute dispatch: Tier A is receipt-only (cheap; current Phase 2 scope), Tier B is redundant execution consensus (expensive; deferred to Phase 7), Tier C is stake-slash verification (requires on-chain slashing contract; deferred to Phase 7).
+- **Content confidentiality tiers (A/B/C).** Used in `PRSM_Vision.md` §2 and §7 for the confidentiality-strength spectrum applied to stored content: Tier A is public content (current Phase 1 scope), Tier B is encryption-before-sharding (deferred to Phase 7), Tier C is encryption + Reed-Solomon erasure coding + Shamir-split keys (deferred to Phase 7).
+
+These are **two independent tier systems applied to two different concerns (compute vs. data).** The naming collision is unfortunate but the concepts are orthogonal. When disambiguation is needed in code, comments, or communications, prefer the fully-qualified terms "compute verification Tier A/B/C" and "content confidentiality Tier A/B/C" rather than bare "Tier A/B/C."
+
+Phase 7 delivers both sets of Tier B and C simultaneously because both depend on similar cryptographic and consensus infrastructure (stake management, on-chain proofs, erasure coding). The Phase 7 plan documentation will include an explicit section disambiguating the two tier systems and confirming they do not share code paths — they are independent subsystems co-located in the same phase delivery for scheduling convenience, not logical coupling.
+
+### Cross-reference: R7 research track — KV/activation compression (Added 2026-04-16)
+
+The Phase 2 activation-streaming path (Task 5 `RemoteShardDispatcher` and downstream SPRK execution) transports activation tensors between pipeline-parallel and tensor-parallel stages in plaintext at native model precision. This is the primary driver of the 9000× bandwidth handicap documented in Risk Register G3 and PRSM_Vision §7.
+
+**Research track R7** (`docs/2026-04-14-phase4plus-research-track.md`) investigates KV cache and activation-tensor compression (rotation-based quantization, Johnson-Lindenstrauss residual corrections, established KV-quant schemes like KIVI / KVQuant / QuaRot) as an efficiency-side mitigation. R7 is research, not Phase 2 engineering — activation streaming in Phase 2 ships uncompressed, as currently designed.
+
+**Interactions with Phase 2 line items that any future R7-driven engineering phase must consider:**
+
+- **Line item B (topology randomization).** Compression schemes that rely on cross-stage statistics (e.g., calibrated quantization buckets) may weaken under per-inference topology rotation. R7 must be measured with Phase 2 topology randomization enabled, not against a fixed topology.
+- **Line item C (TEE attestation).** If compression executes inside the enclave, the enclave's attestation surface grows (compression library is part of the trusted codebase). If compression executes post-enclave, plaintext activations still exist in enclave memory — no privacy regression but also no privacy gain. R7 engineering phase must choose explicitly.
+- **Ring 9 DP noise (already shipped).** Composition of quantization noise with calibrated DP noise is not obvious; R7 must budget them jointly or demonstrate independence.
+- **Activation-inversion threat model (Risk Register G5, research track R3).** Quantization may reduce or may increase inversion reconstructability. R7 results must be validated against the R3 red-team before any production rollout.
+
+**No Phase 2 scope impact.** Phase 2 ships as planned with plaintext activation streaming. R7 is tracked as parallel research; any engineering integration is a future phase.
