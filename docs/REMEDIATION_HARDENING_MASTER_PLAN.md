@@ -1,19 +1,52 @@
 # PRSM Remediation & Hardening Master Plan
-## Series A Technical Due Diligence Response
-### Target: 4.5/10 → 8.5/10 Readiness Score in 12 Weeks
+
+> **⚠ Historical framing — do not treat the 12-week sprint plan below as an active roadmap.**
+>
+> This document was authored in **March 2026** as a "Series A technical due diligence response" — *before* the v1.6 scope-alignment sprint (April 2026) that deleted ~210K LoC of legacy code, *before* the equity-investment pivot (April 2026) that moved the fundraise surface to Prismatica equity (so the "PRSM-entity Series A DD" framing no longer applies), and *before* the current Phase 1-8 numbering established in the [master roadmap](2026-04-10-audit-gap-roadmap.md).
+>
+> The **technical content** (atomic FTNS transactions, JWT handling, PQC structuring, main.py modularization, Redis rate limiting, security test patterns) remains **useful reference material** — the specific code designs are largely sound and several have shipped. The **framing** (Series A DD response, 4.5/10 → 8.5/10 score target, 12-week sprint schedule) is superseded and should not drive current work.
+>
+> Current authoritative security / hardening posture lives in:
+> - [`SECURITY_HARDENING.md`](SECURITY_HARDENING.md), [`SECURITY_HARDENING_CHECKLIST.md`](SECURITY_HARDENING_CHECKLIST.md), [`SECURITY_CONFIGURATION_AUDIT.md`](SECURITY_CONFIGURATION_AUDIT.md)
+> - [`PENETRATION_TESTING_GUIDE.md`](PENETRATION_TESTING_GUIDE.md)
+> - [`archive/2026-04-10-phase1.1-codex-fixes-plan.md`](archive/2026-04-10-phase1.1-codex-fixes-plan.md) and [`archive/2026-04-10-phase1.2-codex-rereview-fixes-plan.md`](archive/2026-04-10-phase1.2-codex-rereview-fixes-plan.md) — shipped codex-driven security remediations for Phase 1 contracts
+> - [`2026-04-10-audit-gap-roadmap.md`](2026-04-10-audit-gap-roadmap.md) Phase 6 (P2P hardening) and Phase 7 (storage + verification tiers + slashing) for protocol-layer hardening
+> - Risk Register (Agent-Shared vault) for operational risk tracking
+>
+> Post-v1.6 status of the four sprints below is summarized in the audit table immediately following.
+
+## Post-v1.6 Status Audit (2026-04-16)
+
+Spot-check of the four original sprints against current code state. Status labels: **shipped** (done), **partial** (some pieces shipped), **outstanding** (file paths gone or no evidence of implementation), **unclear** (needs verification before acting).
+
+| Sprint | Focus | Status | Notes |
+|---|---|---|---|
+| **0.1** | Atomic FTNS deduction (double-spend fix) | **unclear — verify** | `prsm/economy/tokenomics/ftns_service.py` still exists; need to check whether `deduct_tokens_atomic` or equivalent row-locking pattern is actually wired. Spot-check before trusting. |
+| **0.2** | JWT verification hardening | **unclear — verify** | `prsm/core/auth/jwt_handler.py` still exists; verify revocation list + signature-check patterns are implemented per the original design. |
+| **1.1** | In-memory → PostgreSQL FTNS migration | **unclear — verify** | Factory pattern in `prsm/economy/tokenomics/__init__.py` should indicate whether persistent backend is live. |
+| **1.2** | Transaction rollback / recovery | **partial** | `prsm/economy/tokenomics/transaction_recovery.py` exists — implementation depth needs review. |
+| **2.1-2.3** | Post-quantum cryptography | **partial / deferred** | `prsm/core/cryptography/post_quantum.py` and `post_quantum_production.py` exist. Current R6 research-track posture ([`2026-04-14-phase4plus-research-track.md`](2026-04-14-phase4plus-research-track.md)) defers full PQC migration until NIST finalization + Ethereum L2 migration, so "graceful deprecation" path (Option B) may be the current working state rather than full liboqs integration. |
+| **3.1** | `api/main.py` modularization (2,204 lines → ~200) | **largely shipped** | Current `prsm/interface/api/main.py` is 536 lines (vs. 2,204 originally). Router registry in `prsm/interface/api/routers/` exists. Refactor landed even if line count exceeded the ~200 target. |
+| **3.2** | Redis-backed rate limiting | **outstanding** | `prsm/core/security/redis_rate_limiter.py` does **not** exist at the specified path. Either implemented elsewhere or not shipped. Verify before assuming. |
+| **4.1** | Security test suite | **outstanding** | `tests/security/test_double_spend.py` and `tests/security/test_jwt_security.py` do **not** exist. Security testing discipline may have moved elsewhere or may still be a gap. |
+| **4.2** | Pre-production security checklist | **superseded** | Checklist items folded into current [`SECURITY_HARDENING_CHECKLIST.md`](SECURITY_HARDENING_CHECKLIST.md). |
+
+**Takeaway:** the sprint-3 API modularization and some foundational database work appear to have shipped. The Redis rate-limiter work and the dedicated security test suite appear to still be gaps. Post-quantum cryptography has been scope-reduced to research-track (R6) rather than full 12-week sprint delivery. Before taking action on anything in this doc, **verify current repo state** — this document is a March-2026 snapshot of intent, not a current status board.
 
 ---
 
-## Executive Summary
+## Executive Summary (Historical, March 2026)
+
+> The original exec summary below reflects the March 2026 state of the repo. Retained verbatim for historical record. See the status audit above for current state.
 
 This document details a 12-week high-intensity implementation plan to address critical findings from our Series A technical due diligence audit. The plan is organized into four 3-week sprints, each with clear deliverables, success criteria, and "Definition of Done" metrics that map directly to audit requirements.
 
-**Current State Assessment:**
+**Current State Assessment (March 2026):**
 - Security Score: 4.5/10 (Critical vulnerabilities in financial operations)
 - Production Readiness: Low (In-memory state, stubbed cryptography, monolithic architecture)
 - Scalability: Limited (2,204-line main.py, no Redis-backed rate limiting in core paths)
 
-**Target State:**
+**Target State (March 2026 goal):**
 - Security Score: 8.5/10 (Production-hardened financial and auth systems)
 - Production Readiness: High (Persistent state, real cryptography, modular architecture)
 - Scalability: Enterprise-ready (Microservice-ready routers, distributed rate limiting)

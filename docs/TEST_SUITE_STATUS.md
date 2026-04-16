@@ -1,10 +1,21 @@
-# PRSM Test Suite Status - Phase 3 Completion
+# PRSM Test Suite — Mocking Infrastructure Reference
 
-## Date: 2026-02-16
+> **Snapshot date: 2026-02-16. The *numbers* in this doc (test counts, pass/fail rates, specific hanging-file names) are stale — v1.6 scope alignment (April 2026) deleted ~210K LoC and changed the test landscape. Run `pytest` against current code for current metrics.**
+>
+> **What remains current:** the **mocking infrastructure techniques** documented here (FakeRedis, FakeAsyncPGConnection, HTTP/LLM/time mocking patterns in `tests/conftest.py`, pytest timeout configuration in `pytest.ini`) are still load-bearing in the current codebase. Use this doc as a reference for how the mocking layer works, not as a current health dashboard.
+>
+> **Historical framing note:** the original title referred to "Phase 3 Completion" using pre-audit-gap-roadmap numbering. That usage does not match current "Phase 3" (Marketplace Matching Engine per [`2026-04-10-audit-gap-roadmap.md`](2026-04-10-audit-gap-roadmap.md)); the February 2026 "Phase 3" referred to a pre-v1.6 internal sprint scheme. Renamed here to avoid collision.
+>
+> **Related docs:**
+> - [`SECURITY_HARDENING_CHECKLIST.md`](SECURITY_HARDENING_CHECKLIST.md) — §10 Security Testing (similar snapshot caveats apply)
+> - [`2026-04-10-audit-gap-roadmap.md`](2026-04-10-audit-gap-roadmap.md) — for current test discipline per phase
+> - [`GETTING_STARTED.md`](GETTING_STARTED.md) / [`quickstart.md`](quickstart.md) — for running tests locally
+
+## Original snapshot date: 2026-02-16
 
 ## Summary
 
-Comprehensive external service mocking has been implemented to allow the PRSM test suite to run in isolation without requiring Redis, PostgreSQL, or external APIs to be running.
+Comprehensive external service mocking has been implemented to allow the PRSM test suite to run in isolation without requiring Redis, PostgreSQL, or external APIs to be running. The mocking patterns below remain the authoritative reference for `tests/conftest.py` structure; specific pass/fail counts are point-in-time and not maintained.
 
 ## Changes Implemented
 
@@ -66,9 +77,11 @@ Set automatically in `setup_test_environment` fixture:
 - `PRSM_ENVIRONMENT=test`
 - `PRSM_DATABASE_URL=sqlite:///:memory:`
 
-## Test Results
+## Test Results (Feb 2026 snapshot — stale)
 
-### Unit Tests
+> **Numbers below are February 2026 point-in-time measurements. Do not cite as current.** Run `pytest tests/unit -q` against current code for live state.
+
+### Unit Tests (Feb 2026)
 Successfully running with mocks:
 - **tests/unit/**: 96 passed, 24 failed, 1 skipped in 3.43s
 - **tests/test_configuration_management.py**: 31 passed, 4 failed in 3.92s
@@ -126,5 +139,7 @@ Add comprehensive external service mocking and test timeouts
 ⚠️ Full suite collection still has issues (needs investigation)
 ⚠️ Some integration tests may need additional isolation
 
-## Conclusion
-Phase 3 has successfully created a robust mocking infrastructure that allows most PRSM tests to run in isolation. While some tests still have collection/execution issues that need investigation, the foundation is solid and unit tests are running successfully with proper timeouts and mocking.
+## Conclusion (February 2026 snapshot)
+The mocking infrastructure work documented here successfully created robust external-service mocks (Redis, PostgreSQL, HTTP, LLM clients, time) allowing most PRSM tests to run in isolation. While some tests had collection/execution issues at the time of writing, the foundation was solid and unit tests were running successfully with proper timeouts and mocking.
+
+**Post-snapshot note (2026-04-16):** the v1.6 scope-alignment sprint (April 2026) deleted ~210K LoC including the NWTN orchestrator, teachers framework, and distillation pipeline — many of which carried their own test surfaces that no longer exist. The mocking infrastructure documented here still governs current `tests/conftest.py`, but the specific test files referenced as problematic (e.g., `test_enhanced_ipfs.py`) are no longer present in the repo. Treat this document as a reference for **how** the test mocking layer works, not as a current health dashboard.

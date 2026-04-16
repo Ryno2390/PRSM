@@ -1,6 +1,14 @@
 # Compute/Storage ↔ libp2p Wiring Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Phase 6 scope — not in active execution as of 2026-04-16.**
+>
+> Companion to [`libp2p-transport-implementation.md`](./libp2p-transport-implementation.md). Both plans are scheduled for **Phase 6 (P2P Network Hardening)** per the [master roadmap](../2026-04-10-audit-gap-roadmap.md), target Q2 2027 — after Phases 1-5 ship. This wiring plan assumes the libp2p transport plan has landed; it cannot execute independently.
+>
+> Preserved as the authoritative technical design for wiring compute and storage providers through libp2p; do not start task-level execution until Phase 6 opens and the transport plan has shipped.
+>
+> **Design spec companion:** `docs/libp2p-compute-storage-wiring.md`
+
+> **For agentic workers (when Phase 6 opens):** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Wire compute/storage providers through the libp2p transport, convert bilateral storage operations to direct P2P, add reliability tracking, and prove it all works with integration tests.
 

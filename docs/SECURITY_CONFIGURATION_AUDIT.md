@@ -1,11 +1,26 @@
 # PRSM Security Configuration Audit
 
+> **Historical audit snapshot — January 2026. Not a current-state document.**
+>
+> This audit was captured in January 2026 following the Technical Due Diligence (TDD) remediation work tracked in the [historical remediation plan](REMEDIATION_HARDENING_MASTER_PLAN.md). The control statuses and score-progression narrative reflect that point in time.
+>
+> **Framing note on "Series A investment readiness":** the original framing assumed PRSM would raise a conventional Series A at the protocol-entity level. That framing is superseded — per `PRSM_Tokenomics.md` §3 and `PRSM_Vision.md` §9, bootstrap capital now flows through **Prismatica equity (Reg D 506(c))**, not a PRSM-entity fundraise. The control inventory below remains directionally useful for any future diligence surface (Prismatica investor diligence, SOC 2 pursuit, enterprise customer security reviews), but the "Before Series A Close" deadlines no longer describe a real process.
+>
+> **Related docs in this suite:**
+> - [`SECURITY_HARDENING.md`](SECURITY_HARDENING.md) — security policy and hardening guide
+> - [`SECURITY_HARDENING_CHECKLIST.md`](SECURITY_HARDENING_CHECKLIST.md) — implementation-verification checklist
+> - [`PENETRATION_TESTING_GUIDE.md`](PENETRATION_TESTING_GUIDE.md) — pen-test methodology
+> - [`REMEDIATION_HARDENING_MASTER_PLAN.md`](REMEDIATION_HARDENING_MASTER_PLAN.md) — sprint-level plan (historical; see post-v1.6 status audit at top)
+> - [`2026-04-10-audit-gap-roadmap.md`](2026-04-10-audit-gap-roadmap.md) Phase 6 + Phase 7 — current protocol-layer hardening scope
+>
+> When a fresh security audit is run (pre-Prismatica Reg D 506(c) raise, pre-enterprise customer engagement, etc.), this document should be re-generated against the then-current code rather than updated in place.
+
 ## Overview
 
-This document provides a comprehensive audit of PRSM's security configuration following the Technical Due Diligence remediation. All controls have been verified and documented for Series A investment readiness.
+This document provides a comprehensive audit of PRSM's security configuration following the Technical Due Diligence remediation. Captured January 2026 as a point-in-time inventory.
 
 **Audit Date:** January 2026
-**Score Progression:** 4.5 → 6.0 → 7.5 → Target 10.0
+**Score Progression (as reported January 2026):** 4.5 → 6.0 → 7.5 → Target 10.0 — interim scoring from the remediation program; no current authoritative score; see the master roadmap audit verdict for current pillar statuses.
 
 ---
 
@@ -229,18 +244,20 @@ pytest tests/security/ tests/integration/ -v --tb=short
 
 ## Recommendations for 10/10 Score
 
-### Immediate (Before Series A Close)
+> **Sequencing note:** original framing tied these to "Before/After Series A Close." Under the equity-investment architecture (per `PRSM_Tokenomics.md` §3), the analogous gates are **Prismatica Reg D 506(c) raise** and **pre-mainnet / pre-enterprise-customer** engagement. The recommendations themselves remain directionally valid; the deadlines have been relabeled below.
 
-1. **Complete Penetration Test** - Engage NCC Group or similar
-2. **Implement Incident Response Playbooks** - Document procedures
-3. **Add SAST/DAST to CI/CD** - Automated security scanning
+### Immediate (pre-Prismatica equity raise / pre-mainnet public launch)
 
-### Short-Term (Post-Close)
+1. **Complete Penetration Test** — engage NCC Group, Trail of Bits, Zellic, Cure53, or equivalent (smart-contract-experienced firm preferred given Phase 1 on-chain components)
+2. **Implement Incident Response Playbooks** — document procedures; tie to Risk Register entries A1 (critical contract exploit) and F2 (reputational impact)
+3. **Add SAST/DAST to CI/CD** — automated security scanning
 
-4. **Database Encryption at Rest** - Enable at infrastructure level
-5. **Redis TLS** - Enable in production deployment
-6. **Bug Bounty Program** - Consider HackerOne or similar
-7. **Security Training** - Team security awareness
+### Short-Term (post-raise / during early mainnet operation)
+
+4. **Database Encryption at Rest** — enable at infrastructure level
+5. **Redis TLS** — enable in production deployment
+6. **Bug Bounty Program** — Immunefi-tier coverage for smart contracts (target ≥$1M payout per Risk Register A1 mitigation) plus HackerOne or equivalent for application surface
+7. **Security Training** — team security awareness
 
 ### Long-Term
 
@@ -265,7 +282,8 @@ pytest tests/security/ tests/integration/ -v --tb=short
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | Jan 2026 | PRSM Team | Initial audit post-remediation |
+| 1.1 | 2026-04-16 | Cross-reference pass | Added historical-framing banner; reframed "Series A" language to equity-investment architecture; added cross-refs to companion security docs and master roadmap |
 
 ---
 
-*Classification: Internal - Investment Committee*
+*Classification: Internal — pre-diligence reference. Document is a January 2026 snapshot; regenerate against current code when a fresh audit is required (pre-Prismatica raise, pre-enterprise customer engagement, or scheduled quarterly).*

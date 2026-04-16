@@ -1,14 +1,23 @@
 # PRSM Security Hardening Guide
 
+> **Related docs in this suite:**
+> - [`SECURITY_HARDENING_CHECKLIST.md`](SECURITY_HARDENING_CHECKLIST.md) — implementation-verification checklist with code/file references
+> - [`SECURITY_CONFIGURATION_AUDIT.md`](SECURITY_CONFIGURATION_AUDIT.md) — point-in-time audit snapshot of security controls
+> - [`PENETRATION_TESTING_GUIDE.md`](PENETRATION_TESTING_GUIDE.md) — pen-test methodology
+> - [`REMEDIATION_HARDENING_MASTER_PLAN.md`](REMEDIATION_HARDENING_MASTER_PLAN.md) — historical (March 2026) 12-week sprint plan; superseded framing but technical reference material. See post-v1.6 status audit at top of that doc.
+> - [`2026-04-10-audit-gap-roadmap.md`](2026-04-10-audit-gap-roadmap.md) Phase 6 (P2P hardening) and Phase 7 (storage + slashing + content confidentiality) for protocol-layer hardening scope.
+>
+> **Terminology note:** "PRSM" expands to "Protocol for Research, Storage, and Modeling." Earlier docs in this suite occasionally used "Protocol for Recursive Scientific Modeling" — that expansion is legacy and should be disregarded.
+
 ## Overview
 
-This guide provides security hardening recommendations and implementation guidelines for PRSM (Protocol for Recursive Scientific Modeling) deployments.
+This guide provides security hardening recommendations and implementation guidelines for PRSM (**Protocol for Research, Storage, and Modeling**) deployments.
 
 ## Quick Reference
 
-For the complete security hardening report and current security status, see:
-- **[Security Hardening Report](../prsm/security/SECURITY_HARDENING_REPORT.md)** - Detailed security implementation status
-- **[Security Framework](../security/README.md)** - Complete security audit system and procedures
+For detailed implementation status and current control inventory, see the companion checklist and audit documents linked above. Legacy cross-references:
+- **[Security Hardening Report](../prsm/security/SECURITY_HARDENING_REPORT.md)** — referenced from legacy docs; verify existence before relying on
+- **[Security Framework](../security/README.md)** — referenced from legacy docs; verify existence before relying on
 
 ## Security Hardening Checklist
 
@@ -130,11 +139,11 @@ For security-related questions or issues:
 
 ---
 
-**Last Updated**: July 8, 2025  
-**Next Review**: August 8, 2025  
-**Owner**: PRSM Security Team  
-**Contact**: security@prsm.org
+**Last Updated**: 2026-04-16 (cross-reference pass; content baseline dates from July 2025)
+**Review Cadence**: quarterly; next review due 2026-07-16
+**Owner**: Foundation CTO + Security Lead (roles to be filled; see `PRSM_Vision.md` §12 Team)
+**Contact**: security contact to be published on foundation website at launch
 
 ---
 
-*This guide is part of the PRSM security documentation suite. For complete security information, see the [Security Framework](../security/README.md) and [Security Hardening Report](../prsm/security/SECURITY_HARDENING_REPORT.md).*
+*This guide is part of the PRSM security documentation suite. See the cross-references at the top of this document for companion specs, the pen-test methodology, and the master roadmap's protocol-layer hardening phases (6 and 7).*

@@ -1,48 +1,85 @@
 # PRSM Penetration Testing Guide
 
+> **Scope note:** This guide was authored January 2026 and reflects application-layer testing priorities (API, auth, FTNS double-spend, rate limiting, etc.) as they stood pre-v1.6. The application-layer content below remains directionally useful, but a current pen-test engagement against PRSM must **additionally cover the on-chain and protocol-layer surface** that is either new since this guide was written or that became the primary attack surface post-v1.6:
+>
+> - **Phase 1 smart contracts on Base:** `ProvenanceRegistry.sol` and `RoyaltyDistributor.sol` — critical financial surface. See [`2026-04-11-phase1.3-completion-plan.md`](2026-04-11-phase1.3-completion-plan.md) for bake-in status and [`archive/2026-04-10-phase1.1-codex-fixes-plan.md`](archive/2026-04-10-phase1.1-codex-fixes-plan.md) + [`archive/2026-04-10-phase1.2-codex-rereview-fixes-plan.md`](archive/2026-04-10-phase1.2-codex-rereview-fixes-plan.md) for the 7-round codex audit trail already completed. Recommend a smart-contract-experienced firm (Trail of Bits, Zellic, OpenZeppelin, Certora, or Cantina) for this surface specifically; application-only firms will miss contract-specific attack classes.
+> - **Protocol-layer components:** libtorrent seeding / challenge-response proof-of-storage, Wasmtime SPRK sandbox (WASM module escape, fuel-metering bypass), Ed25519 signed-receipt forgery in Phase 2 remote compute dispatch, topology-randomization assumptions, TEE attestation posture.
+> - **Activation-inversion attack surface** on sharded inference (per `PRSM_Vision.md` §7 honest limits and research track item R3).
+>
+> **Related docs in this suite:**
+> - [`SECURITY_HARDENING.md`](SECURITY_HARDENING.md) — hardening policy
+> - [`SECURITY_HARDENING_CHECKLIST.md`](SECURITY_HARDENING_CHECKLIST.md) — implementation verification
+> - [`SECURITY_CONFIGURATION_AUDIT.md`](SECURITY_CONFIGURATION_AUDIT.md) — audit snapshot
+> - [`REMEDIATION_HARDENING_MASTER_PLAN.md`](REMEDIATION_HARDENING_MASTER_PLAN.md) — historical 12-week remediation sprint (see post-v1.6 status audit at top)
+> - [`2026-04-10-audit-gap-roadmap.md`](2026-04-10-audit-gap-roadmap.md) Phase 6 + Phase 7 for the protocol-layer hardening scope still to ship
+
 ## Overview
 
-This document provides guidance for third-party security auditors conducting penetration testing on the PRSM platform. It documents security controls, potential attack vectors, and testing priorities.
+This document provides guidance for third-party security auditors conducting penetration testing on the PRSM platform. It documents security controls, potential attack vectors, and testing priorities. Originally authored January 2026 for application-layer focus; see the scope note above for the broader surface current engagements must cover.
 
-**Recommended Testing Firms:**
+**Recommended Testing Firms by surface:**
+
+*Application layer (API, auth, FTNS application logic, rate limiting, infrastructure):*
 - NCC Group
 - Trail of Bits
 - Bishop Fox
 - Cure53
 - Doyensec
 
+*Smart-contract layer (Phase 1 `ProvenanceRegistry` / `RoyaltyDistributor`, plus Phase 2+ compute escrow and Phase 7+ slashing contracts):*
+- Trail of Bits (also covers application layer)
+- Zellic
+- OpenZeppelin Security
+- Certora (formal verification)
+- Cantina (distributed review)
+
+Current Phase 1 contracts already passed 7 rounds of independent codex review reaching SAFE TO DEPLOY verdict before Sepolia deployment; a human-auditor engagement is still recommended before mainnet high-value operation per Risk Register A1 mitigation.
+
 ---
 
 ## Executive Summary
 
-PRSM is a decentralized AI research platform with:
+PRSM is a peer-to-peer infrastructure protocol for open-source collaboration (compute / storage / data, not an AI model hosting platform). The January 2026 application-layer security surface included:
 - JWT-based authentication with token revocation
-- FTNS token economy with double-spend prevention
+- FTNS token economy with double-spend prevention (application-layer — Phase 1 on-chain surface also in scope now)
 - Redis-backed rate limiting
 - PostgreSQL for persistent storage
-- Post-quantum cryptography (hybrid mode)
+- Post-quantum cryptography (hybrid mode; current posture: R6 research-track defer per [`2026-04-14-phase4plus-research-track.md`](2026-04-14-phase4plus-research-track.md))
 - Enterprise SSO (SAML/OIDC)
+
+Additional surface introduced since January 2026 (must be included in scope for a current engagement):
+- On-chain `ProvenanceRegistry.sol` + `RoyaltyDistributor.sol` on Base Sepolia / Base mainnet
+- BitTorrent-based `libtorrent` data layer with challenge-response proof-of-storage
+- Wasmtime WASM sandbox (SPRK runtime) with fuel-metering resource limits
+- Ed25519 signed receipts for cross-node compute dispatch (Phase 2)
+- TEE attestation surface (SGX / TDX / SEV-SNP / Secure Enclave) — current posture: node-level attestation only; per-inference attestation deferred to Phase 2.1+
 
 ---
 
 ## Scope Definition
 
-### In-Scope Systems
+### In-Scope Systems (current — post-v1.6 / Phase 1 bake-in)
 
-| Component | Technology | Priority |
-|-----------|------------|----------|
-| API Server | FastAPI/Python | HIGH |
-| Authentication | JWT/OIDC/SAML | CRITICAL |
-| FTNS Token System | PostgreSQL | CRITICAL |
-| Rate Limiting | Redis | HIGH |
-| WebSocket Server | FastAPI | MEDIUM |
-| IPFS Integration | External | LOW |
-| Web3 Bridge | Ethereum/Smart Contracts | MEDIUM |
+| Component | Technology | Priority | Notes |
+|-----------|------------|----------|---|
+| **`ProvenanceRegistry.sol`** | Solidity on Base (Sepolia + mainnet) | **CRITICAL** | Phase 1. Source of truth for content ownership. Exploit = IP integrity loss. Already passed 7 rounds codex review. |
+| **`RoyaltyDistributor.sol`** | Solidity on Base (Sepolia + mainnet) | **CRITICAL** | Phase 1. Atomic three-way FTNS split. Exploit = drain protocol funds. Formal verification recommended. |
+| **FTNS ERC-20 contract** | Solidity on Base mainnet (`0x5276a3756C85f2E9e46f6D34386167a209aa16e5`) | **CRITICAL** | Supply integrity; mint-authority bounds. |
+| Authentication | JWT/OIDC/SAML | CRITICAL | Application-layer; unchanged from Jan 2026 scope. |
+| FTNS application-layer ledger | PostgreSQL | CRITICAL | Must be tested *in addition to* on-chain surface — mixed local/on-chain payment path. |
+| API Server | FastAPI/Python | HIGH | 536-line `main.py` post-refactor (was 2204). |
+| Rate Limiting | Redis | HIGH | Per `SECURITY_HARDENING_CHECKLIST.md`; verify Redis rate-limiter actually shipped (flagged as "outstanding" in REMEDIATION post-v1.6 audit). |
+| **libtorrent data layer** | C++ via Python bindings | HIGH | Challenge-response proof-of-storage, signed manifests, BEP 27 private torrents. New surface since Jan 2026. |
+| **Wasmtime SPRK runtime** | Rust/WASM | HIGH | Fuel-metering enforcement, WASI exposure, sandbox escape. New surface since Jan 2026. |
+| **Ed25519 signed receipts** (Phase 2) | Python ed25519 | HIGH | Remote-compute-dispatch attestation. Forgery = free compute + cost to requester. |
+| WebSocket Server | FastAPI | MEDIUM | Transport layer; libp2p replacement planned Phase 6. |
 
 ### Out-of-Scope
-- Third-party AI model APIs (OpenAI, Anthropic)
-- IPFS network infrastructure
-- Cloud provider infrastructure
+
+- Third-party AI model APIs (OpenAI, Anthropic, OpenRouter) — PRSM does not host models; the reasoning layer is a third-party LLM
+- Base L2 chain security itself (inherited from Ethereum)
+- Cloud provider infrastructure (RunPod, Lambda, CoreWeave — used by T3 operators but PRSM does not operate)
+- FHE / MPC primitives (research track R1, R2 — not in current product)
 
 ---
 
@@ -390,9 +427,9 @@ Recommendation: [Fix suggestion]
 
 ## Contact Information
 
-**Security Team:** security@prsm.ai
-**Engineering Lead:** [Redacted for documentation]
-**Escalation:** [Redacted for documentation]
+**Security contact:** to be published on foundation website at launch
+**Engineering Lead:** Foundation CTO (role to be filled; see `PRSM_Vision.md` §12 Team)
+**Escalation:** Foundation board via Prismatica liaison (see `Prismatica_Vision.md` §9 on Foundation–Prismatica relationship)
 
 ---
 
@@ -412,6 +449,7 @@ Recommendation: [Fix suggestion]
 
 ---
 
-*Document Version: 1.0*
-*Last Updated: January 2026*
-*Classification: Security Auditor - Confidential*
+*Document Version: 1.1*
+*Originally authored: January 2026. Cross-reference + on-chain scope expansion pass: 2026-04-16.*
+*Classification: Security Auditor — Confidential*
+*Note: the v1.0 January 2026 application-layer content is retained verbatim below the scope / exec-summary banners. On-chain and protocol-layer scope (Phase 1 contracts, libtorrent, Wasmtime SPRK, Ed25519 receipts) must be added to any current engagement — see scope note at top of document.*

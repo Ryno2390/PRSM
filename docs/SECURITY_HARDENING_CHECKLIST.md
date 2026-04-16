@@ -1,8 +1,17 @@
 # PRSM Security Hardening Checklist
 
+> **Status:** authored January 2026 following the Technical Due Diligence (TDD) remediation work tracked in the [historical remediation plan](REMEDIATION_HARDENING_MASTER_PLAN.md). The **checkbox state** and **file references** below reflect implementation intent at that snapshot. **Verify against current code before treating any ✅ box as current truth** — the codebase has evolved since January 2026, including the v1.6 scope-alignment sprint (April 2026, deleted ~210K LoC of legacy) and the Phase 1 on-chain provenance work (in Sepolia bake-in as of April 2026). Some file paths may have moved; some checkboxes may be stale in either direction (shipped work now, or regressed).
+>
+> **Related docs in this suite:**
+> - [`SECURITY_HARDENING.md`](SECURITY_HARDENING.md) — security policy and hardening guide
+> - [`SECURITY_CONFIGURATION_AUDIT.md`](SECURITY_CONFIGURATION_AUDIT.md) — point-in-time audit snapshot
+> - [`PENETRATION_TESTING_GUIDE.md`](PENETRATION_TESTING_GUIDE.md) — pen-test methodology
+> - [`REMEDIATION_HARDENING_MASTER_PLAN.md`](REMEDIATION_HARDENING_MASTER_PLAN.md) — sprint-level remediation plan (historical; see post-v1.6 status audit at top of that doc)
+> - [`2026-04-10-audit-gap-roadmap.md`](2026-04-10-audit-gap-roadmap.md) Phase 6 + Phase 7 — protocol-layer hardening scope
+
 ## Overview
 
-This checklist documents the security controls implemented to address findings from the Technical Due Diligence audit. Use this document to verify security posture before deployment and during security reviews.
+This checklist documents the security controls implemented to address findings from the Technical Due Diligence audit. Use this document to verify security posture before deployment and during security reviews. **Treat as implementation-intent reference, not current-state source of truth** — current state must be verified against the codebase.
 
 ---
 
@@ -264,12 +273,15 @@ This checklist documents the security controls implemented to address findings f
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 1.0 | 2024-XX-XX | PRSM Team | Initial checklist from TDD remediation |
+| 1.0 | 2026-01 | PRSM Team | Initial checklist from TDD remediation |
+| 1.1 | 2026-04-16 | Cross-reference pass | Added status banner, cross-refs to companion docs and master roadmap; flagged checkbox-state as snapshot not source of truth |
 
 ---
 
 ## References
 
-- Remediation Plan: `docs/REMEDIATION_HARDENING_MASTER_PLAN.md`
-- Security Tests: `tests/security/`
+- Remediation Plan (historical): [`REMEDIATION_HARDENING_MASTER_PLAN.md`](REMEDIATION_HARDENING_MASTER_PLAN.md) — see post-v1.6 status audit at top of that doc for which sprint items actually shipped
+- Master Roadmap: [`2026-04-10-audit-gap-roadmap.md`](2026-04-10-audit-gap-roadmap.md) — Phase 6 + Phase 7 for protocol-layer hardening
+- Companion: [`SECURITY_HARDENING.md`](SECURITY_HARDENING.md), [`SECURITY_CONFIGURATION_AUDIT.md`](SECURITY_CONFIGURATION_AUDIT.md)
+- Security Tests: `tests/security/` (verify presence — some referenced test files may not exist)
 - Migration Scripts: `scripts/migrations/`

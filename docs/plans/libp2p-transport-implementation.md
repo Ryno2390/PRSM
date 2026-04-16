@@ -1,6 +1,14 @@
 # libp2p Transport Layer Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Phase 6 scope — not in active execution as of 2026-04-16.**
+>
+> This plan is **design-complete** and technically current, but its **execution is scheduled for Phase 6 (P2P Network Hardening)** per the [master roadmap](../2026-04-10-audit-gap-roadmap.md), not the current Phase 1-2 rhythm. Phase 6's target is Q2 2027, after Phase 1 (mainnet provenance, in bake-in Day 5/7 as of 2026-04-16), Phase 2 (remote compute dispatch), Phase 3 (marketplace + MCP server), Phase 4 (wallet SDK), and Phase 5 (fiat on-ramp) ship.
+>
+> Preserved here as the authoritative technical design for the libp2p migration; do not start task-level execution against this plan until Phase 6 opens. When Phase 6 is formally planned, this document becomes the implementation-plan input to its execution flow.
+>
+> **Design spec companion:** `docs/libp2p-transport-design.md`
+
+> **For agentic workers (when Phase 6 opens):** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace PRSM's WebSocket transport with go-libp2p, gaining NAT traversal, GossipSub, and Kademlia DHT while preserving the exact public API all consumer modules depend on.
 

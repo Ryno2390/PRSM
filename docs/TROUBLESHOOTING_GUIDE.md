@@ -1,6 +1,6 @@
-# PRSM Troubleshooting Guide
+# PRSM Troubleshooting — Production & Deployment
 
-**Note**: This guide focuses on **production and containerized deployments**. For basic local development setup, start with the [Quickstart Guide](quickstart.md).
+> **Scope:** This guide covers **production and containerized deployments** (Docker Compose, Kubernetes, PostgreSQL, IPFS, PCI / compliance operations). For **local-development setups** (CLI, single-node, `prsm node start` workflow), see [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md). For basic first-run setup, start with the [Quickstart Guide](quickstart.md).
 
 **Command Syntax**: This guide uses both CLI commands (`python -m prsm.cli`) and direct script execution (`python scripts/`). For standard operations, prefer CLI commands as shown in the Quickstart Guide.
 
