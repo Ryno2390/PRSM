@@ -308,7 +308,11 @@ NWTN_CHECKPOINTS/
 .nwtn_traces/
 
 # Claude Code local config
-.claude/
+.claude/*
+!.claude/skills/
+.claude/skills/*
+# Allow PRSM-specific skill definitions (shared with repo for team/auditor reference)
+!.claude/skills/agent-teams/
 
 # OpenZeppelin build artifacts
 contracts/.openzeppelin/
