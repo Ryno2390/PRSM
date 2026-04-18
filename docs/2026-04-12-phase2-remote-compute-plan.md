@@ -10,6 +10,56 @@
 
 ---
 
+## Launch UX thesis (added 2026-04-18)
+
+**Short version.** T3 cloud-arbitrage nodes deliver frontier-adjacent inference latency from day 1, because the latency a developer perceives when calling Claude / GPT / Gemini is dominated by network RTT, not intra-datacenter bandwidth — and a T3 node running on a rented H100 competes on exactly the same network-RTT surface.
+
+**Latency decomposition (rough numbers, Claude-class API call):**
+
+| Component | Typical contribution |
+|---|---|
+| Developer ↔ nearest cloud region RTT | 20-80 ms |
+| Edge ↔ backend routing / auth | 10-40 ms |
+| Queuing + tokenization | 5-30 ms |
+| GPU forward-pass (short prompt) | 50-100 ms |
+| **Total perceived TTFT** | **~100-250 ms** |
+
+A T3 PRSM node running on AWS/GCP/Azure spot or on-demand H100 instances faces the same network surface as the proprietary endpoint: developer → PRSM gateway → T3 node on cloud GPU. Intra-model bandwidth is NVLink or PCIe, not the PRSM P2P wire. The gateway adds ~20-50 ms over direct API; with anycast / edge-deployed PoPs this narrows to ~10-20 ms.
+
+**Conclusion:** expected T3 TTFT at launch is within 10-30% of frontier APIs, not 2-5× worse. That is a qualitatively different product-positioning story from "PRSM is slower at first in exchange for sovereignty."
+
+**Arbitrage math (sanity check for supply-side motivation):**
+
+| Input | Range |
+|---|---|
+| Spot H100 hourly (AWS/GCP cross-region median) | $2-4 |
+| On-demand H100 hourly | $5-8 |
+| Throughput (70B-class model, mixed concurrency) | 1000-2000 tok/s |
+| Per-hour token capacity | 3.6M-7.2M |
+| Cost per M tokens served (spot → on-demand) | $0.50 — $2.20 |
+
+At PRSM inference pricing of $3/M tokens (roughly 1/5 of Sonnet-class API pricing), a T3 operator nets $0.80-$2.50/M tokens gross margin. Profitable arbitrage from week one without requiring ideological alignment — mercenary capacity materializes on its own.
+
+**Phase 2 implications (priorities that make this work at launch, not later):**
+
+1. **T3 onboarding UX is high-leverage.** A great "spin up a T3 node on AWS spot in 20 minutes" onboarding flow is plausibly the single highest-value non-core-protocol deliverable in Phase 2. Tracked in planning but not in this plan — flag for Phase 2.5 scope.
+
+2. **Geo-aware scheduler from day 1.** A Tokyo-developer → us-east-1 T3 node adds ~150 ms RTT and breaks the latency thesis for that user. The scheduler's dispatch path must consider geographic proximity at routing time. Already implicit in the `RemoteShardDispatcher` design — flag for explicit coverage in Task 5.
+
+3. **Cold-start discipline.** A 70B model's weights are ~140 GB. Cold-starting a T3 node adds multi-minute latency unless weights are pre-cached. Pre-pinning popular models + keeping hot standby capacity (warm pool of subscribed weights) matters for consistent UX. Covered partially by `ComputeProvider._can_accept_shard()` in Task 4, but "am I warm for this model?" signal needs to propagate to the scheduler.
+
+4. **TEE attestation from day 1, not day N.** For the arbitrage thesis to hold, developers must be able to trust a T3 node is running the claimed model (and not silently swapping in a cheaper one). Line item C (TEE attestation) is therefore launch-critical for Tier B/C confidentiality-demanding traffic, not a future hardening lever. Phase 2 still ships with Tier A receipt-only as the baseline, but the Tier B/C plugin path must be exercised end-to-end before go-live, not after.
+
+5. **Spot preemption as first-class case.** If T3 operators run on spot instances (lower cost, more competitive pricing) and preemption = total loss, no rational operator will run PRSM nodes. Line item A (partial-receipt protocol for spot preemption) becomes launch-critical, not nice-to-have.
+
+**What this reframes for R7 (KV/activation compression research):** previously tracked as "necessary to make consumer-edge viable." Revised: R7 is a **cost-curve lever, not a launch-viability lever.** T3 arbitrage carries the UX weight at launch; R7 matters when we need to shift supply mix T3 → T1/T2 to keep the cost basis dropping over 2-5 years, or when T3 capacity approaches the rented-GPU supply ceiling. See `docs/2026-04-14-phase4plus-research-track.md` §R7 "Trigger to move to engineering."
+
+**What this does not change:** the structural PRSM wins that compound regardless of launch latency — no vendor deprecation (weights pinned via ProvenanceRegistry), confidentiality as a per-request dial with verifiable attestation, composable SPRK ecosystem with pay-per-use economics, and unit economics without 50-70% platform margin. Those remain the long-term thesis. T3 arbitrage just means the short-term thesis is also competitive on the axis developers actually feel first (speed), not only on the axes they care about second (sovereignty, cost).
+
+**Pitch line:** *"Comparable latency immediately via T3 arbitrage, structurally cheaper throughout, sovereignty and composability compounding over time."* Replaces the earlier "slower at first, cheaper at steady state" framing in investor / developer conversations.
+
+---
+
 ## Context
 
 This plan implements [`docs/2026-04-12-phase2-remote-compute-design.md`](./2026-04-12-phase2-remote-compute-design.md). Read the design spec first — it covers architecture decisions, message protocol, out-of-scope deferrals, and the full rationale. This plan translates the spec into TDD-ordered bite-sized steps.

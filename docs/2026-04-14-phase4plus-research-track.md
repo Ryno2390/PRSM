@@ -143,9 +143,12 @@ TurboQuant's data-oblivious property makes it the best-fit *starting* candidate 
 
 3. **Composition stack.** Both applications must be measured against: (a) Phase 2 topology randomization (line item B) — does per-inference topology change invalidate any cached quantization state? TurboQuant's rotation matrix is random per-quantizer but fixed across vectors; interaction with per-inference topology randomization needs explicit test; (b) Ring 9 DP noise — quantization noise ≈ Gaussian with variance set by bit-width; jointly budgeting with DP noise (rather than composing naively) may be strictly better; (c) R3 activation-inversion attack surface — preliminary intuition says quantization *reduces* inversion fidelity (information-theoretic bottleneck) but adversarial structure in the specific rotation matrix could create new attack surface. Red-team required.
 
+**Framing clarification (2026-04-18):** R7 is a **cost-curve lever, not a launch-viability lever.** Phase 2's launch UX thesis (see `docs/2026-04-12-phase2-remote-compute-plan.md` "Launch UX thesis") is carried by T3 cloud-arbitrage nodes delivering frontier-adjacent latency on day 1. R7 matters when we need to shift the supply mix T3 → T1/T2 to keep the cost basis dropping over 2-5 years, or when T3 capacity approaches the rented-GPU supply ceiling. This removes timeline pressure: R7 can run as genuine research on a research calendar rather than as critical-path engineering.
+
 **Trigger to move to engineering:**
-- Research quarter identifies a scheme with ≥3× bandwidth reduction at <1% accuracy loss on PRSM's benchmark suite, with red-team report showing no regression on activation-inversion surface.
-- OR monitoring data shows T1/T2 supply share falling below target and T3 concentration exceeding R4 thresholds — forcing prioritization of T1-viability mechanisms.
+- Research quarter identifies a scheme with ≥3× bandwidth reduction at <1% accuracy loss on PRSM's benchmark suite, with red-team report showing no regression on activation-inversion surface; AND
+- Monitoring data shows T1/T2 supply share falling below target and T3 concentration exceeding R4 thresholds — forcing prioritization of T1-viability mechanisms. OR
+- Observed T3 capacity approaches the rented-GPU spot/on-demand supply ceiling and prices begin to drift upward, making T1/T2 expansion the obvious cost-control lever.
 
 ## Governance and Tracking
 
