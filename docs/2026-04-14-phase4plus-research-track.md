@@ -150,6 +150,64 @@ TurboQuant's data-oblivious property makes it the best-fit *starting* candidate 
 - Monitoring data shows T1/T2 supply share falling below target and T3 concentration exceeding R4 thresholds — forcing prioritization of T1-viability mechanisms. OR
 - Observed T3 capacity approaches the rented-GPU spot/on-demand supply ceiling and prices begin to drift upward, making T1/T2 expansion the obvious cost-control lever.
 
+## R8: Anti-Exfiltration Architecture for Frontier-Model Inference (Added 2026-04-19)
+
+**Research question:** What combination of hardware confidentiality, cryptographic weight sharding, fingerprint-based clone detection, and output watermarking is sufficient for a frontier AI lab to accept permissionless inference hosting on PRSM — i.e., to publish proprietary SOTA model weights to untrusted meganodes without expecting the weights to be exfiltrated, perturbed to evade provenance checks, and re-monetized by a thief at a lower FTNS rate?
+
+**Threat model:** Meganode operator runs PRSM inference for model M with weights W. During inference, W exists in plaintext in GPU VRAM on hardware the operator physically controls. Attack chain: (1) operator exfiltrates W via memory dump / side channel / VRAM probe; (2) applies perturbation δ below the publisher's fingerprint-detection threshold; (3) uploads W+δ as new model M' to PRSM's ProvenanceRegistry; (4) charges F' < F per M tokens, undercutting the original publisher; (5) captures demand while externalizing the $500M+ training cost. Consequence if undefended: no frontier lab publishes SOTA weights to PRSM, and PRSM remains a market for open-weights models only — a substantial cap on the network's TAM.
+
+This threat does not apply to proprietary inference providers (Anthropic, OpenAI, Google) because operator and model-owner are the same legal entity running on physically-controlled infrastructure. PRSM specifically breaks that coupling — which is the whole point (decentralized supply) and also the whole problem.
+
+**Current state.** Phase 2 Line item C specifies TEE attestation at inference granularity using H100 Confidential Compute or equivalent. This covers ~95% of the naive exfiltration surface (encrypted VRAM, attested runtime, weights sealed to enclave key). Remaining threats: side channels (cache timing, memory-bus probes, Rowhammer, power analysis, cold-boot against DRAM), physical invasive attacks against the SoC, and — critically — the centralization risk of trusting NVIDIA's attestation root.
+
+No current PRSM design addresses: (1) fingerprint-based clone detection in ProvenanceRegistry to block W+δ re-registration, (2) output watermarking for passive post-hoc detection, (3) k-of-n cryptographic weight sharding to raise collusion bars, or (4) hardware confidentiality beyond commodity TEE — i.e., chips whose physical design makes weight exfiltration architecturally impossible rather than merely expensive.
+
+**Specific sub-questions:**
+
+1. **Defense stack composition.** Given five candidate layers (TEE, k-of-n sharding, weight fingerprinting, output watermarking, custom silicon), what subset is (a) sufficient for a first-tier frontier lab to agree to publish SOTA weights, and (b) cost-rational for PRSM to build? Each layer has independent research and engineering cost; composition effects matter.
+
+2. **Robust weight fingerprinting under adversarial perturbation.** Standard model fingerprinting (activation-pattern hashes, weight-hash Merkle trees) is brittle under small perturbations. What fingerprinting scheme tolerates legitimate fine-tunes (LoRA, DPO, quantization) but detects "steal + random perturb" attacks? This is an open problem in the model-provenance literature. Candidate approaches: output-distribution hashes on a fixed probe set, layer-wise singular-value signatures, trained classifiers on weight statistics. All need red-team evaluation against adaptive perturbation attacks.
+
+3. **Output-level watermarking for generative models.** Can PRSM publishers embed cryptographically-keyed watermarks in model outputs that (a) survive small weight perturbations applied post-theft, (b) do not degrade output quality below publisher-acceptable thresholds, (c) are verifiable by third parties without revealing the watermark secret? Prior work: Google's SynthID (images), Kirchenbauer et al. for LLMs (input-independent but degradable). None are production-robust against adaptive attackers yet.
+
+4. **Custom silicon as an open standard.** Can the Foundation specify a confidential-inference chip architecture — tamper mesh, active shield, power-analysis-hardened crypto, per-chip hardware root, attestation anchored in PRSM's ProvenanceRegistry rather than any single vendor's CA — such that multiple fabs/designers can produce compliant hardware under competitive implementation? See `docs/2026-04-19-confidential-inference-silicon-standard.md` for the in-flight spec.
+
+5. **Economic-layer detection and slashing.** If a stolen+perturbed model M' is detected post-hoc via output watermarking, can PRSM's ProvenanceRegistry + staking contracts slash the offender's stake and redirect recovered FTNS to the original publisher? This is the economic backstop that makes hardware + cryptographic defenses bite — theft without profitable re-monetization is not rational.
+
+**Cross-references to other research tracks:**
+
+- **R3 (activation-inversion attack characterization).** The activation-inversion threat is adjacent: attackers with access to intermediate activations across many inferences can reconstruct weights, bypassing any TEE that only protects VRAM. R8 defenses against activation-inversion are the same defenses R3 is characterizing. Outputs compose.
+- **R2 (MPC for sharded inference).** R2's cryptographic weight sharding IS R8 defense layer (3) under a different name. If R2 produces a practical scheme, R8 inherits it.
+- **R7 (KV/activation compression).** Quantized activations may reduce the information leaked to an attacker performing activation inversion — potentially strengthening R8. Must be measured, not assumed.
+
+**Relationship to the Phase 2 launch UX thesis (see `docs/2026-04-12-phase2-remote-compute-plan.md`).** The launch thesis assumes T3 cloud-arbitrage nodes serve the initial demand. Those operators run H100s they do not own (rented from AWS/GCP/Azure). The data-center operator can always dump VRAM without the PRSM operator's cooperation. Therefore *even with H100 CC*, residual trust sits with the underlying cloud provider, not with PRSM's meganode operator. Frontier labs will factor this in when deciding whether to publish. R8 ultimately pushes toward PRSM-specific silicon that removes this residual dependency.
+
+**Governance split (decided 2026-04-19):**
+
+- **PRSM Foundation** owns the confidential-inference silicon standard: threat model, attestation protocol, compliance test suite, on-chain attestation registry contracts, certification process.
+- **Prismatica** (and any other interested party) is a first implementer. Prismatica commits to building T4 meganode hardware conforming to the published standard. It does not own the standard and cannot modify it without Foundation governance approval.
+- **Any fab/chip designer** may implement the standard and petition the Foundation for certification. Compliance is the gate, not brand; a successful alternate implementer reduces Prismatica's leverage to zero.
+
+This mirrors the governance pattern that worked for TCG/TPM, RISC-V, OpenCompute, and the Confidential Computing Consortium — separating standard-setting from implementation is the structural guarantee against rent extraction by the first implementer.
+
+**Watch signals:**
+
+- NVIDIA Confidential Compute SDK updates (attestation API changes, new side-channel mitigations).
+- AMD SEV-SNP / Intel TDX adoption at hyperscalers — moves baseline trust floor.
+- Academic red-team publications on H100 CC side channels.
+- Frontier lab public statements on "what would it take for us to publish weights to a decentralized marketplace" — the definitive signal.
+- Confidential Computing Consortium standards work on attested accelerator specifications.
+
+**Effort if pursued:** substantial. Sub-questions 1-3 are 1-2 quarters of research each, feasibly done by Foundation + academic partners. Sub-question 4 (custom silicon) is a 5-10 year arc and is tracked separately in the silicon-standard planning doc. Sub-question 5 requires contract work tied to ProvenanceRegistry v2.
+
+**Trigger to move to engineering:**
+
+- A first-tier frontier lab publicly commits to publishing SOTA weights to PRSM *conditional on* named defense-stack elements being shipped. This is the market signal that overrides any in-house prioritization judgment.
+- OR at least two complementary layers (e.g., robust fingerprinting + output watermarking) reach research maturity simultaneously, allowing a composition prototype to ship and be demoed to frontier labs as a persuasion artifact.
+- OR H100 CC is publicly broken in a way that forces the defense stack forward regardless of market signal.
+
+---
+
 ## Governance and Tracking
 
 - This document is reviewed semi-annually (next: 2026-10-14) to add new research questions and retire resolved ones.
