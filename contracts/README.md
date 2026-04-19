@@ -39,8 +39,8 @@ BASE_RPC_URL=https://mainnet.base.org
 # Deployer wallet (use a dedicated key — never your main wallet)
 PRIVATE_KEY=your_deployment_private_key
 
-# Contract verification
-BASESCAN_API_KEY=your_basescan_api_key
+# Contract verification (Etherscan V2 unified API covers Base mainnet + Sepolia)
+ETHERSCAN_API_KEY=your_etherscan_api_key
 ```
 
 ### Compile + Test
@@ -62,13 +62,13 @@ The live FTNS contract is already deployed to Base mainnet. For new test deploym
 npx hardhat run scripts/deploy.js --network base-sepolia
 
 # Base mainnet (mainnet)
-npx hardhat run scripts/deploy.js --network base-mainnet
+npx hardhat run scripts/deploy.js --network base
 ```
 
 Verify on Basescan:
 
 ```bash
-npx hardhat verify --network base-mainnet <CONTRACT_ADDRESS>
+npx hardhat verify --network base <CONTRACT_ADDRESS>
 ```
 
 See [`DEPLOYMENT_GUIDE.md`](DEPLOYMENT_GUIDE.md) for the full deployment walkthrough.

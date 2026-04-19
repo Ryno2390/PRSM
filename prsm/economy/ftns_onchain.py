@@ -317,8 +317,15 @@ class OnChainFTNSLedger:
                 import asyncio
                 loop = asyncio.get_running_loop()
 
+                # Use "pending" block so concurrent txs under the shared
+                # FTNS_WALLET_PRIVATE_KEY (this ledger + RoyaltyDistributorClient,
+                # which locks independently) don't collide on nonce. Matches the
+                # pattern in royalty_distributor.py:215.
                 nonce = await loop.run_in_executor(
-                    None, self.w3.eth.get_transaction_count, self._connected_address
+                    None,
+                    lambda: self.w3.eth.get_transaction_count(
+                        self._connected_address, "pending"
+                    ),
                 )
 
                 # Build tx

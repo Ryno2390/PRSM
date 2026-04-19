@@ -85,6 +85,19 @@ async function main() {
   console.log(`Deployer balance: ${hre.ethers.formatEther(balance)} ETH`);
   if (balance === 0n) throw new Error("Deployer has zero balance");
 
+  // 5. Treasury must not equal deployer. networkTreasury is immutable —
+  //    the Sepolia bake-in convenience of using deployer-as-treasury is
+  //    acceptable on testnet but would permanently route the 2% royalty
+  //    fee to the deployer EOA on mainnet with no upgrade path. Belt and
+  //    suspenders: operator selects the right value AND the script
+  //    refuses if they match.
+  if (treasuryChecksum.toLowerCase() === deployer.address.toLowerCase()) {
+    throw new Error(
+      `NETWORK_TREASURY (${treasuryChecksum}) must not equal deployer (${deployer.address}). ` +
+      `Use a dedicated treasury address — a multi-sig or foundation-controlled address, never the deployer EOA.`
+    );
+  }
+
   // 1. Registry
   console.log("\nDeploying ProvenanceRegistry…");
   const Registry = await hre.ethers.getContractFactory("ProvenanceRegistry");
