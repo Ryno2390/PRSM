@@ -117,6 +117,79 @@ def test_receipt_verification_output_hash_mismatch():
     assert _run(verifier.verify(receipt.to_dict(), wrong_bytes)) is False
 
 
+def test_receipt_verification_claimed_id_mismatches_pubkey():
+    """Codex P2: receipt claims provider A's node_id but carries B's
+    pubkey. Pre-fix this verified True (self-authenticating); now the
+    node_id-binding check rejects it before the signature check."""
+    victim = _fresh_identity()
+    attacker = _fresh_identity()
+    assert victim.node_id != attacker.node_id
+
+    output_bytes = b"output"
+    output_hash = hashlib.sha256(output_bytes).hexdigest()
+    executed_at = 1776019150
+
+    payload = build_receipt_signing_payload(
+        job_id="job-attack",
+        shard_index=0,
+        output_hash=output_hash,
+        executed_at_unix=executed_at,
+    )
+    attacker_sig = attacker.sign(payload)
+
+    receipt = ShardExecutionReceipt(
+        job_id="job-attack",
+        shard_index=0,
+        provider_id=victim.node_id,
+        provider_pubkey_b64=attacker.public_key_b64,
+        output_hash=output_hash,
+        executed_at_unix=executed_at,
+        signature=attacker_sig,
+    )
+
+    verifier = ReceiptOnlyVerification()
+    assert _run(verifier.verify(receipt.to_dict(), output_bytes)) is False
+
+
+def test_receipt_verification_expected_provider_mismatch():
+    """Codex P2: dispatcher supplies expected_provider_id; receipt claims
+    a different provider. Verification must reject even if signature
+    would otherwise verify."""
+    sender = _fresh_identity()
+    intended = _fresh_identity()
+    assert sender.node_id != intended.node_id
+
+    output_bytes = b"output"
+    output_hash = hashlib.sha256(output_bytes).hexdigest()
+    executed_at = 1776019150
+
+    payload = build_receipt_signing_payload(
+        job_id="job-expected",
+        shard_index=0,
+        output_hash=output_hash,
+        executed_at_unix=executed_at,
+    )
+    signature = sender.sign(payload)
+
+    receipt = ShardExecutionReceipt(
+        job_id="job-expected",
+        shard_index=0,
+        provider_id=sender.node_id,
+        provider_pubkey_b64=sender.public_key_b64,
+        output_hash=output_hash,
+        executed_at_unix=executed_at,
+        signature=signature,
+    )
+
+    verifier = ReceiptOnlyVerification()
+    assert _run(
+        verifier.verify(
+            receipt.to_dict(), output_bytes,
+            expected_provider_id=intended.node_id,
+        )
+    ) is False
+
+
 def test_receipt_verification_wrong_pubkey():
     """A signature valid over the correct payload but signed by a
     different key (attacker-controlled) fails verification."""
