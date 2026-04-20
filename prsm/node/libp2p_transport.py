@@ -120,6 +120,13 @@ class Libp2pTransport:
         """Compatibility shim — returns cached peer dict."""
         return self._peers
 
+    def get_peer(self, node_id: str) -> Optional[PeerConnection]:
+        """Return the PeerConnection for a node_id, or None if not connected.
+
+        Sync snapshot for Phase 2 RemoteShardDispatcher's peer-resolve step.
+        """
+        return self._peers.get(node_id)
+
     # ── Lifecycle ───────────────────────────────────────────────
 
     async def start(self) -> None:
