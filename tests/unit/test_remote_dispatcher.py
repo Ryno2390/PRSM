@@ -21,6 +21,7 @@ from prsm.compute.remote_dispatcher import (
     PeerNotConnectedError,
     RemoteShardDispatcher,
     ShardDispatchError,
+    ShardPreemptedError,
     ShardTooLargeError,
 )
 from prsm.compute.shard_receipt import (
@@ -297,6 +298,52 @@ def test_dispatch_refuses_when_escrow_creation_fails():
     transport.send_to_peer.assert_not_called()
     escrow.release_escrow.assert_not_called()
     escrow.refund_escrow.assert_not_called()
+
+
+def test_dispatch_preempted_response_refunds_and_raises():
+    """Phase 2.1 Line Item A: provider responds status=preempted
+    (cloud spot eviction). Dispatcher must:
+      - refund escrow (no output delivered, requester gets FTNS back)
+      - raise ShardPreemptedError (distinct from ShardDispatchError so
+        caller can re-dispatch without tagging the provider malicious)
+      - NOT release escrow
+      - NOT raise ShardDispatchError (that would conflate with
+        malicious/unrecoverable failure)"""
+    dispatcher, _, transport, escrow, provider = _make_dispatcher()
+    shard, input_tensor, _ = _make_shard()
+
+    async def send_preempted(peer_id, msg):
+        request_id = msg.payload["request_id"]
+        resp = {
+            "subtype": "shard_execute_response",
+            "request_id": request_id,
+            "status": "preempted",
+            "shard_index": shard.shard_index,
+            "error": "spot_instance_terminating",
+        }
+        resp_msg = P2PMessage(
+            msg_type=MSG_DIRECT, sender_id=provider.node_id, payload=resp,
+        )
+        peer = MagicMock(); peer.peer_id = provider.node_id
+        asyncio.create_task(dispatcher._on_direct_message(resp_msg, peer))
+
+    transport.send_to_peer.side_effect = send_preempted
+
+    with pytest.raises(ShardPreemptedError) as excinfo:
+        asyncio.run(dispatcher.dispatch(
+            shard=shard, input_tensor=input_tensor,
+            node_id=provider.node_id, job_id="job-1",
+            stake_tier=PipelineStakeTier.STANDARD, escrow_amount_ftns=1.0,
+        ))
+
+    assert excinfo.value.shard_index == shard.shard_index
+    assert excinfo.value.node_id == provider.node_id
+    assert "spot_instance_terminating" in excinfo.value.reason
+    # NOT a ShardDispatchError — honest-work failure is its own class.
+    assert not isinstance(excinfo.value, ShardDispatchError)
+
+    escrow.refund_escrow.assert_awaited_once()
+    escrow.release_escrow.assert_not_called()
 
 
 def test_dispatch_peer_not_connected():

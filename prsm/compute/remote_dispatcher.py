@@ -52,6 +52,29 @@ class EscrowReleaseFailedError(RuntimeError):
     reconciliation, not a refund to the requester."""
 
 
+class ShardPreemptedError(RuntimeError):
+    """Provider reported status=preempted (e.g., cloud spot-instance
+    eviction). Phase 2.1 Line Item A contract:
+
+      - Honest-work failure, NOT malicious. Callers MUST NOT tag the
+        provider as misbehaving or feed this into any future slashing
+        signal (Phase 7).
+      - Escrow is refunded (no compute output was delivered for this
+        shard) so the requester can re-dispatch elsewhere.
+      - Re-routing is the caller's responsibility — dispatcher does
+        not auto-retry on a different node because node selection is
+        a Line Item B concern (topology randomization).
+    """
+
+    def __init__(self, shard_index: int, node_id: str, reason: str = ""):
+        self.shard_index = shard_index
+        self.node_id = node_id
+        self.reason = reason
+        super().__init__(
+            f"shard {shard_index} preempted on node {node_id[:12]}…: {reason}"
+        )
+
+
 def _escrow_job_id(job_id: str, shard_index: int) -> str:
     """Compose the unique escrow-tracking key for one shard-exec lease.
 
@@ -164,6 +187,12 @@ class RemoteShardDispatcher:
                     )
                     continue
                 break
+            except ShardPreemptedError as exc:
+                # Honest-work failure — same provider won't help. Exit
+                # the retry loop immediately so the outer refund path
+                # runs and the caller can re-dispatch elsewhere.
+                last_exc = exc
+                break
             except ShardDispatchError as exc:
                 last_exc = exc
                 break
@@ -205,6 +234,12 @@ class RemoteShardDispatcher:
                 f"{self.max_retries} retries; falling back to local"
             )
             return await self._call_fallback(shard, input_tensor)
+
+        # Preemption is an honest-work signal — re-raise as-is so
+        # caller can distinguish from malicious/timeout failures and
+        # re-dispatch to a different node without any reputation hit.
+        if isinstance(last_exc, ShardPreemptedError):
+            raise last_exc
 
         if isinstance(last_exc, ShardDispatchError):
             raise last_exc
@@ -266,9 +301,16 @@ class RemoteShardDispatcher:
         finally:
             self._pending.pop(request_id, None)
 
-        if response.get("status") != "completed":
+        status = response.get("status")
+        if status == "preempted":
+            raise ShardPreemptedError(
+                shard_index=shard.shard_index,
+                node_id=node_id,
+                reason=str(response.get("error") or "cloud-provider eviction"),
+            )
+        if status != "completed":
             raise ShardDispatchError(
-                f"provider returned status={response.get('status')!r} "
+                f"provider returned status={status!r} "
                 f"error={response.get('error')!r}"
             )
 
