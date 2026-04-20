@@ -38,6 +38,41 @@ RemoteShardDispatcher = Callable[
 ]
 
 
+def execute_shard_locally(shard, input_data: bytes) -> np.ndarray:
+    """Execute a single tensor-parallel shard locally via numpy matmul.
+
+    Pure function with no side effects. Used by:
+      - TensorParallelExecutor._execute_local (the executor's local path)
+      - ComputeProvider._on_shard_execute_request (the remote-serve path)
+
+    Both call sites use this helper so local and remote execution
+    produce bit-identical output for the same shard + input. The
+    integration test in Phase 2 Task 7 asserts this equality.
+
+    Args:
+        shard: ModelShard with tensor_data (bytes) and tensor_shape.
+        input_data: Raw input bytes (interpreted as float64 array).
+
+    Returns:
+        Output numpy array. Shape depends on the matmul compatibility:
+        when tensor is 2D and input vector length matches tensor.shape[1],
+        returns tensor @ input_array. Otherwise returns a truncated flat
+        slice (legacy fallback preserved for existing test contracts).
+    """
+    tensor = np.frombuffer(shard.tensor_data, dtype=np.float64).reshape(shard.tensor_shape)
+
+    try:
+        input_array = np.frombuffer(input_data, dtype=np.float64)
+        if input_array.size == 0:
+            input_array = np.ones(tensor.shape[-1] if tensor.ndim > 1 else tensor.shape[0])
+
+        if tensor.ndim == 2 and input_array.shape[0] == tensor.shape[1]:
+            return tensor @ input_array
+        return tensor.flatten()[:min(10, tensor.size)]
+    except Exception:
+        return tensor.flatten()[:min(10, tensor.size)]
+
+
 class TensorParallelExecutor:
     """Executes model shards in parallel across assigned nodes."""
 
@@ -187,21 +222,12 @@ class TensorParallelExecutor:
         input_data: bytes,
         assignment: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Run a shard's forward pass in-process via numpy."""
-        tensor = np.frombuffer(shard.tensor_data, dtype=np.float64).reshape(shard.tensor_shape)
+        """Run a shard's forward pass in-process via numpy.
 
-        try:
-            input_array = np.frombuffer(input_data, dtype=np.float64)
-            if input_array.size == 0:
-                input_array = np.ones(tensor.shape[-1] if tensor.ndim > 1 else tensor.shape[0])
-
-            if tensor.ndim == 2 and input_array.shape[0] == tensor.shape[1]:
-                output = tensor @ input_array
-            else:
-                output = tensor.flatten()[:min(10, tensor.size)]
-        except Exception:
-            output = tensor.flatten()[:min(10, tensor.size)]
-
+        Thin wrapper around the module-level execute_shard_locally()
+        helper — see that function's docstring for the numerics contract.
+        """
+        output = execute_shard_locally(shard, input_data)
         return {
             "shard_index": shard.shard_index,
             "node_id": assignment.get("node_id", "local"),
