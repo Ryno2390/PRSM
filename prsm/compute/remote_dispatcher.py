@@ -52,6 +52,18 @@ class EscrowReleaseFailedError(RuntimeError):
     reconciliation, not a refund to the requester."""
 
 
+class MissingAttestationError(RuntimeError):
+    """A dispatch requested TEE attestation (require_tee_attestation=True)
+    but the returned receipt did not include a tee_attestation field.
+
+    Per Phase 3 design §7.2: a provider that claimed tee_capable in its
+    marketplace listing but fails to include a quote in its receipt is
+    effectively lying about its TEE support. The dispatcher refunds
+    escrow and surfaces this distinctly from ShardDispatchError so the
+    marketplace orchestrator can drop the provider's reputation below
+    the simple "failed dispatch" signal."""
+
+
 class ShardPreemptedError(RuntimeError):
     """Provider reported status=preempted (e.g., cloud spot-instance
     eviction). Phase 2.1 Line Item A contract:
@@ -124,6 +136,7 @@ class RemoteShardDispatcher:
         job_id: str,
         stake_tier: PipelineStakeTier,
         escrow_amount_ftns: float,
+        require_tee_attestation: bool = False,
     ) -> np.ndarray:
         """Dispatch shard to node_id and return the output tensor.
         Raises on unrecoverable failure after escrow refund."""
@@ -176,6 +189,7 @@ class RemoteShardDispatcher:
                     job_id=job_id,
                     stake_tier=stake_tier,
                     escrow_job_id=escrow_job_id,
+                    require_tee_attestation=require_tee_attestation,
                 )
                 break
             except asyncio.TimeoutError as exc:
@@ -191,6 +205,11 @@ class RemoteShardDispatcher:
                 # Honest-work failure — same provider won't help. Exit
                 # the retry loop immediately so the outer refund path
                 # runs and the caller can re-dispatch elsewhere.
+                last_exc = exc
+                break
+            except MissingAttestationError as exc:
+                # Provider claimed TEE support but omitted the quote.
+                # No retry on same provider — they're lying.
                 last_exc = exc
                 break
             except ShardDispatchError as exc:
@@ -241,6 +260,9 @@ class RemoteShardDispatcher:
         if isinstance(last_exc, ShardPreemptedError):
             raise last_exc
 
+        if isinstance(last_exc, MissingAttestationError):
+            raise last_exc
+
         if isinstance(last_exc, ShardDispatchError):
             raise last_exc
 
@@ -256,6 +278,7 @@ class RemoteShardDispatcher:
         job_id: str,
         stake_tier: PipelineStakeTier,
         escrow_job_id: str,
+        require_tee_attestation: bool = False,
     ) -> np.ndarray:
         """Single dispatch attempt. Raises asyncio.TimeoutError if no
         response arrives within default_timeout."""
@@ -330,6 +353,14 @@ class RemoteShardDispatcher:
         if not verified:
             raise ShardDispatchError(
                 f"receipt verification failed for shard {shard.shard_index}"
+            )
+
+        if require_tee_attestation and not receipt.get("tee_attestation"):
+            raise MissingAttestationError(
+                f"shard {shard.shard_index} dispatched with "
+                f"require_tee_attestation=True but provider "
+                f"{node_id[:12]}… returned a receipt with no "
+                f"tee_attestation field"
             )
 
         return output
