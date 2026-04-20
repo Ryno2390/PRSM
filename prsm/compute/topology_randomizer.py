@@ -86,8 +86,11 @@ class TopologyRandomizer:
                 f"pool size {len(pool)} < requested shards {num_shards} "
                 f"for unique assignment"
             )
-        # Fisher-Yates on the first num_shards positions — unbiased and
-        # doesn't build a full shuffled list when pool >> num_shards.
+        # Rejection-sampling: pick random candidates, discard duplicates.
+        # Unbiased (uniform over the pool) and avoids building a full
+        # shuffled list when pool >> num_shards. Expected work is
+        # num_shards * pool/(pool-num_shards+1) — fine when num_shards
+        # is small relative to pool.
         selected: List[str] = []
         seen: set = set()
         while len(selected) < num_shards:
