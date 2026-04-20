@@ -246,6 +246,15 @@ class WebSocketTransport:
         async with self._peers_lock:
             return [p.address for p in self.peers.values()]
 
+    def get_peer(self, node_id: str) -> Optional["PeerConnection"]:
+        """Return the PeerConnection for a node_id, or None if not connected.
+
+        Sync snapshot — for Phase 2 RemoteShardDispatcher's peer-resolve
+        step. Reads the peers dict without the async lock; callers should
+        treat the returned object as a snapshot (may disconnect after).
+        """
+        return self.peers.get(node_id)
+
     # ── Message handler registration ─────────────────────────────
 
     def on_message(self, msg_type: str, handler: MessageHandler) -> None:

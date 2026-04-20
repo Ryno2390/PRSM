@@ -549,6 +549,68 @@ class PRSMNode:
             timeout_seconds=300.0,
         )
 
+        # ── Remote Shard Dispatcher (Phase 2) ─────────────────────
+        # Plugs into TensorParallelExecutor's remote_dispatcher slot
+        # (wired below). Tier A verification (receipt-only) in Phase 2;
+        # Tiers B/C plug in at Phase 7 via the same VerificationStrategy
+        # protocol without changing the dispatch protocol.
+        from prsm.compute.remote_dispatcher import RemoteShardDispatcher
+        from prsm.compute.shard_receipt import ReceiptOnlyVerification
+
+        self.remote_shard_dispatcher = RemoteShardDispatcher(
+            identity=self.identity,
+            transport=self.transport,
+            payment_escrow=self._payment_escrow,
+            verification_strategy=ReceiptOnlyVerification(),
+            default_timeout=30.0,
+            max_retries=1,
+            max_shard_bytes=10 * 1024 * 1024,
+            local_fallback=None,
+        )
+
+        async def _tensor_remote_dispatch(shard, input_data, assignment):
+            """Adapter from TensorParallelExecutor's (shard, bytes,
+            assignment) contract to RemoteShardDispatcher.dispatch's
+            (shard, np.ndarray, node_id, job_id, stake_tier, amount)
+            contract. Wraps output in the dict shape _execute_local
+            returns.
+            """
+            import numpy as _np
+
+            from prsm.compute.model_sharding.models import PipelineStakeTier
+
+            node_id = assignment.get("node_id", "")
+            job_id = assignment.get("job_id", "")
+            tier_label = assignment.get("stake_tier", "standard")
+            tier_map = {t.label: t for t in PipelineStakeTier}
+            stake_tier = tier_map.get(tier_label, PipelineStakeTier.STANDARD)
+            escrow_amount = float(assignment.get("escrow_amount_ftns", 1.0))
+
+            input_arr = _np.frombuffer(input_data, dtype=_np.float64)
+            if input_arr.size == 0:
+                input_arr = _np.ones(
+                    shard.tensor_shape[-1] if len(shard.tensor_shape) > 1
+                    else shard.tensor_shape[0]
+                )
+
+            output = await self.remote_shard_dispatcher.dispatch(
+                shard=shard,
+                input_tensor=input_arr,
+                node_id=node_id,
+                job_id=job_id,
+                stake_tier=stake_tier,
+                escrow_amount_ftns=escrow_amount,
+            )
+
+            return {
+                "shard_index": shard.shard_index,
+                "node_id": node_id,
+                "output_array": output.tolist(),
+                "execution_mode": "remote",
+            }
+
+        self._tensor_remote_dispatch = _tensor_remote_dispatch
+
         # ── Mobile Agent Dispatch (Ring 2) ────────────────────────────
         try:
             from prsm.compute.agents.dispatcher import AgentDispatcher
@@ -741,6 +803,7 @@ class PRSMNode:
             self.tensor_executor = TensorParallelExecutor(
                 confidential_executor=self.confidential_executor,
                 pipeline_config=PipelineConfig(),
+                remote_dispatcher=self._tensor_remote_dispatch,
             )
             logger.info("Model sharding (Ring 8) initialized")
         except ImportError:
