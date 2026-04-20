@@ -16,6 +16,7 @@ import pytest
 
 from prsm.compute.model_sharding.models import ModelShard, PipelineStakeTier
 from prsm.compute.remote_dispatcher import (
+    EscrowCreationFailedError,
     PeerNotConnectedError,
     RemoteShardDispatcher,
     ShardDispatchError,
@@ -49,15 +50,19 @@ def _make_shard():
 
 def _make_dispatcher(timeout=0.5, max_retries=0, max_shard_bytes=1024, local_fallback=None):
     identity = generate_node_identity(display_name="requester")
+    # Provider identity is a real NodeIdentity so its node_id is the
+    # pubkey-derived hash — required by P2 verification (provider_id
+    # must match hex(sha256(pubkey))[:32]).
+    provider_identity = generate_node_identity(display_name="provider")
     transport = MagicMock()
-    peer_stub = MagicMock(); peer_stub.peer_id = "provider-1"
+    peer_stub = MagicMock(); peer_stub.peer_id = provider_identity.node_id
     transport.get_peer = MagicMock(return_value=peer_stub)
     transport.send_to_peer = AsyncMock()
     transport.on_message = MagicMock()
 
     escrow = MagicMock()
     escrow.create_escrow = AsyncMock(return_value=MagicMock(escrow_id="esc-1"))
-    escrow.release_escrow = AsyncMock()
+    escrow.release_escrow = AsyncMock(return_value=MagicMock(tx_id="tx-release-1"))
     escrow.refund_escrow = AsyncMock()
 
     verifier = ReceiptOnlyVerification()
@@ -72,13 +77,11 @@ def _make_dispatcher(timeout=0.5, max_retries=0, max_shard_bytes=1024, local_fal
         max_shard_bytes=max_shard_bytes,
         local_fallback=local_fallback,
     )
-    return dispatcher, identity, transport, escrow
+    return dispatcher, identity, transport, escrow, provider_identity
 
 
-def _provider_response(shard, input_tensor, request_id, job_id="job-1", tamper_sig=False):
-    """Build a valid shard_execute_response payload signed by a fresh provider."""
-    provider = generate_node_identity(display_name="provider")
-
+def _provider_response(shard, input_tensor, request_id, provider, job_id="job-1", tamper_sig=False):
+    """Build a valid shard_execute_response payload signed by the given provider."""
     tensor = np.frombuffer(shard.tensor_data, dtype=np.float64).reshape(shard.tensor_shape)
     output = tensor @ input_tensor
     output_bytes = output.tobytes()
@@ -115,16 +118,18 @@ def _provider_response(shard, input_tensor, request_id, job_id="job-1", tamper_s
     }
 
 
-def _wire_send_to_respond(transport, dispatcher, shard, input_tensor, tamper_sig=False):
-    """Configure transport.send_to_peer so it synchronously creates a task
-    to deliver a matching response via dispatcher._on_direct_message."""
+def _wire_send_to_respond(transport, dispatcher, shard, input_tensor, provider, tamper_sig=False):
+    """Configure transport.send_to_peer to deliver a matching response
+    signed by the given provider identity via dispatcher._on_direct_message."""
     async def send(peer_id, msg):
         request_id = msg.payload["request_id"]
-        resp_payload = _provider_response(shard, input_tensor, request_id, tamper_sig=tamper_sig)
-        resp_msg = P2PMessage(
-            msg_type=MSG_DIRECT, sender_id="provider-1", payload=resp_payload,
+        resp_payload = _provider_response(
+            shard, input_tensor, request_id, provider, tamper_sig=tamper_sig,
         )
-        peer = MagicMock(); peer.peer_id = "provider-1"
+        resp_msg = P2PMessage(
+            msg_type=MSG_DIRECT, sender_id=provider.node_id, payload=resp_payload,
+        )
+        peer = MagicMock(); peer.peer_id = provider.node_id
         asyncio.create_task(dispatcher._on_direct_message(resp_msg, peer))
 
     transport.send_to_peer.side_effect = send
@@ -132,13 +137,13 @@ def _wire_send_to_respond(transport, dispatcher, shard, input_tensor, tamper_sig
 
 def test_dispatch_happy_path():
     """Dispatch sends request, receives valid response, releases escrow, returns output."""
-    dispatcher, _, transport, escrow = _make_dispatcher()
+    dispatcher, _, transport, escrow, provider = _make_dispatcher()
     shard, input_tensor, expected = _make_shard()
-    _wire_send_to_respond(transport, dispatcher, shard, input_tensor)
+    _wire_send_to_respond(transport, dispatcher, shard, input_tensor, provider)
 
     result = asyncio.run(dispatcher.dispatch(
         shard=shard, input_tensor=input_tensor,
-        node_id="provider-1", job_id="job-1",
+        node_id=provider.node_id, job_id="job-1",
         stake_tier=PipelineStakeTier.STANDARD, escrow_amount_ftns=1.0,
     ))
 
@@ -153,14 +158,14 @@ def test_dispatch_timeout_falls_back():
     fallback_output = np.array([999.0, 999.0], dtype=np.float64)
     fallback = MagicMock(return_value=fallback_output)
 
-    dispatcher, _, transport, escrow = _make_dispatcher(
+    dispatcher, _, transport, escrow, provider = _make_dispatcher(
         timeout=0.1, max_retries=0, local_fallback=fallback,
     )
     shard, input_tensor, _ = _make_shard()
 
     result = asyncio.run(dispatcher.dispatch(
         shard=shard, input_tensor=input_tensor,
-        node_id="provider-1", job_id="job-1",
+        node_id=provider.node_id, job_id="job-1",
         stake_tier=PipelineStakeTier.STANDARD, escrow_amount_ftns=1.0,
     ))
 
@@ -172,14 +177,14 @@ def test_dispatch_timeout_falls_back():
 
 def test_dispatch_bad_signature_refunds():
     """A response with an invalid signature causes escrow refund + raise."""
-    dispatcher, _, transport, escrow = _make_dispatcher()
+    dispatcher, _, transport, escrow, provider = _make_dispatcher()
     shard, input_tensor, _ = _make_shard()
-    _wire_send_to_respond(transport, dispatcher, shard, input_tensor, tamper_sig=True)
+    _wire_send_to_respond(transport, dispatcher, shard, input_tensor, provider, tamper_sig=True)
 
     with pytest.raises(ShardDispatchError):
         asyncio.run(dispatcher.dispatch(
             shard=shard, input_tensor=input_tensor,
-            node_id="provider-1", job_id="job-1",
+            node_id=provider.node_id, job_id="job-1",
             stake_tier=PipelineStakeTier.STANDARD, escrow_amount_ftns=1.0,
         ))
 
@@ -189,7 +194,7 @@ def test_dispatch_bad_signature_refunds():
 
 def test_dispatch_size_limit_rejects():
     """Shard > max_shard_bytes raises ShardTooLargeError without network."""
-    dispatcher, _, transport, escrow = _make_dispatcher(max_shard_bytes=1024)
+    dispatcher, _, transport, escrow, provider = _make_dispatcher(max_shard_bytes=1024)
 
     big = np.ones((32, 32), dtype=np.float64)   # 32 * 32 * 8 = 8192 bytes
     tensor_bytes = big.tobytes()
@@ -208,7 +213,7 @@ def test_dispatch_size_limit_rejects():
     with pytest.raises(ShardTooLargeError):
         asyncio.run(dispatcher.dispatch(
             shard=shard, input_tensor=input_tensor,
-            node_id="provider-1", job_id="job-1",
+            node_id=provider.node_id, job_id="job-1",
             stake_tier=PipelineStakeTier.STANDARD, escrow_amount_ftns=1.0,
         ))
 
@@ -218,7 +223,7 @@ def test_dispatch_size_limit_rejects():
 
 def test_dispatch_retry_on_timeout():
     """First response swallowed; retry succeeds; single release fires."""
-    dispatcher, _, transport, escrow = _make_dispatcher(
+    dispatcher, _, transport, escrow, provider = _make_dispatcher(
         timeout=0.1, max_retries=1,
     )
     shard, input_tensor, expected = _make_shard()
@@ -230,18 +235,18 @@ def test_dispatch_retry_on_timeout():
         if call_count["n"] == 1:
             return
         request_id = msg.payload["request_id"]
-        resp_payload = _provider_response(shard, input_tensor, request_id)
+        resp_payload = _provider_response(shard, input_tensor, request_id, provider)
         resp_msg = P2PMessage(
-            msg_type=MSG_DIRECT, sender_id="provider-1", payload=resp_payload,
+            msg_type=MSG_DIRECT, sender_id=provider.node_id, payload=resp_payload,
         )
-        peer = MagicMock(); peer.peer_id = "provider-1"
+        peer = MagicMock(); peer.peer_id = provider.node_id
         asyncio.create_task(dispatcher._on_direct_message(resp_msg, peer))
 
     transport.send_to_peer.side_effect = send_sometimes
 
     result = asyncio.run(dispatcher.dispatch(
         shard=shard, input_tensor=input_tensor,
-        node_id="provider-1", job_id="job-1",
+        node_id=provider.node_id, job_id="job-1",
         stake_tier=PipelineStakeTier.STANDARD, escrow_amount_ftns=1.0,
     ))
 
@@ -250,9 +255,30 @@ def test_dispatch_retry_on_timeout():
     assert escrow.refund_escrow.await_count == 0
 
 
+def test_dispatch_refuses_when_escrow_creation_fails():
+    """Codex P1: if PaymentEscrow.create_escrow returns None (e.g.
+    insufficient balance), dispatch must raise EscrowCreationFailedError
+    and never call transport.send_to_peer. Pre-fix, execution proceeded
+    without a funded escrow — breaking pay-for-work."""
+    dispatcher, _, transport, escrow, provider = _make_dispatcher()
+    escrow.create_escrow = AsyncMock(return_value=None)
+    shard, input_tensor, _ = _make_shard()
+
+    with pytest.raises(EscrowCreationFailedError):
+        asyncio.run(dispatcher.dispatch(
+            shard=shard, input_tensor=input_tensor,
+            node_id=provider.node_id, job_id="job-1",
+            stake_tier=PipelineStakeTier.STANDARD, escrow_amount_ftns=1.0,
+        ))
+
+    transport.send_to_peer.assert_not_called()
+    escrow.release_escrow.assert_not_called()
+    escrow.refund_escrow.assert_not_called()
+
+
 def test_dispatch_peer_not_connected():
     """If transport.get_peer returns None and no fallback, raise PeerNotConnectedError."""
-    dispatcher, _, transport, escrow = _make_dispatcher()
+    dispatcher, _, transport, escrow, provider = _make_dispatcher()
     transport.get_peer = MagicMock(return_value=None)
 
     shard, input_tensor, _ = _make_shard()
@@ -260,7 +286,7 @@ def test_dispatch_peer_not_connected():
     with pytest.raises(PeerNotConnectedError):
         asyncio.run(dispatcher.dispatch(
             shard=shard, input_tensor=input_tensor,
-            node_id="provider-1", job_id="job-1",
+            node_id=provider.node_id, job_id="job-1",
             stake_tier=PipelineStakeTier.STANDARD, escrow_amount_ftns=1.0,
         ))
 

@@ -37,6 +37,12 @@ class ShardDispatchError(RuntimeError):
     """Generic dispatch failure after escrow refund."""
 
 
+class EscrowCreationFailedError(RuntimeError):
+    """PaymentEscrow.create_escrow returned None (e.g., insufficient
+    requester balance). Dispatch must NOT execute the shard without a
+    funded escrow — that would break the Phase 2 pay-for-work guarantee."""
+
+
 def _escrow_job_id(job_id: str, shard_index: int) -> str:
     """Compose the unique escrow-tracking key for one shard-exec lease.
 
@@ -117,6 +123,15 @@ class RemoteShardDispatcher:
             amount=escrow_amount_ftns,
             requester_id=self.identity.node_id,
         )
+        # P1: escrow MUST be funded before we dispatch. If create_escrow
+        # returned None (insufficient balance, ledger failure, etc.), the
+        # pay-for-work guarantee is broken — refuse to execute.
+        if escrow_entry is None:
+            raise EscrowCreationFailedError(
+                f"failed to create escrow for shard {shard.shard_index} "
+                f"of job {job_id!r} (requester={self.identity.node_id[:12]}…, "
+                f"amount={escrow_amount_ftns} FTNS)"
+            )
 
         last_exc: Optional[BaseException] = None
         for attempt in range(self.max_retries + 1):
@@ -129,9 +144,20 @@ class RemoteShardDispatcher:
                     stake_tier=stake_tier,
                     escrow_job_id=escrow_job_id,
                 )
-                await self.payment_escrow.release_escrow(
+                release_tx = await self.payment_escrow.release_escrow(
                     escrow_job_id, node_id,
                 )
+                # P1: release_escrow can return None on ledger failure.
+                # Compute succeeded but payment didn't land — surface as
+                # ShardDispatchError so caller knows to reconcile. We do
+                # NOT refund here: funds may still be in the escrow wallet,
+                # and a manual reconcile is safer than a blind refund.
+                if release_tx is None:
+                    raise ShardDispatchError(
+                        f"shard {shard.shard_index} executed successfully "
+                        f"but escrow release failed for {escrow_job_id!r}; "
+                        f"reconciliation required"
+                    )
                 return output
             except asyncio.TimeoutError as exc:
                 last_exc = exc
@@ -232,7 +258,13 @@ class RemoteShardDispatcher:
         output = np.frombuffer(output_bytes, dtype=output_dtype).reshape(output_shape)
 
         receipt = response.get("receipt", {})
-        verified = await self.verification_strategy.verify(receipt, output_bytes)
+        # P2: pass the node_id we dispatched to so the verifier binds
+        # the receipt to the intended provider. Otherwise a receipt
+        # could claim 'provider A' but carry B's pubkey+sig and still
+        # verify (self-authenticating against whatever pubkey it carries).
+        verified = await self.verification_strategy.verify(
+            receipt, output_bytes, expected_provider_id=node_id,
+        )
         if not verified:
             raise ShardDispatchError(
                 f"receipt verification failed for shard {shard.shard_index}"
