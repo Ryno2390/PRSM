@@ -175,6 +175,17 @@ class ComputeProvider:
 
         self._current_jobs: int = 0
 
+        # Phase 2.1 Line A / Phase 3 Task 5: track in-flight shard
+        # requests so preempt_inflight_shards() can signal all of
+        # them on SIGTERM / spot-instance eviction.
+        # Keyed by request_id → (peer_id, shard_index).
+        self._inflight_requests: Dict[str, tuple] = {}
+
+        # Phase 3 Task 5: bound MarketplaceAdvertiser (set by node.py
+        # after ComputeProvider is constructed). Lets the price-quote
+        # handler answer with the currently-advertised price.
+        self._marketplace_advertiser = None
+
     @property
     def available_capacity(self) -> Dict[str, Any]:
         active_count = len(self.active_jobs)
@@ -682,6 +693,8 @@ class ComputeProvider:
         subtype = msg.payload.get("subtype", "")
         if subtype == "shard_execute_request":
             await self._on_shard_execute_request(msg, peer)
+        elif subtype == "shard_price_quote_request":
+            await self._on_shard_price_quote_request(msg, peer)
 
     async def _on_shard_execute_request(self, msg: P2PMessage, peer) -> None:
         """Accept a shard_execute_request, run execute_shard_locally,
@@ -709,10 +722,12 @@ class ComputeProvider:
             input_bytes = base64.b64decode(payload.get("input_b64", ""))
 
             self._current_jobs += 1
+            self._inflight_requests[request_id] = (peer.peer_id, shard_index)
             try:
                 output = execute_shard_locally(shard, input_bytes)
             finally:
                 self._current_jobs -= 1
+                self._inflight_requests.pop(request_id, None)
 
             output_bytes = output.tobytes()
             output_hash = hashlib.sha256(output_bytes).hexdigest()
@@ -840,6 +855,120 @@ class ComputeProvider:
             payload=payload,
         )
         await self.transport.send_to_peer(peer_id, resp)
+
+    # ── Phase 2.1 Line A wiring + Phase 3 Task 5 ────────────────────
+
+    async def preempt_inflight_shards(self, reason: str = "spot_eviction") -> None:
+        """Send status=preempted for every in-flight shard request.
+
+        Called from a SIGTERM handler or cloud pod-eviction hook. The
+        requester's RemoteShardDispatcher raises ShardPreemptedError
+        (distinct from ShardDispatchError — no reputation penalty), the
+        escrow refunds, and a MarketplaceOrchestrator can re-dispatch
+        the preempted shards to a fresh eligible pool.
+
+        Idempotent: clearing _inflight_requests as we go means a second
+        call immediately returns without re-sending.
+        """
+        if not self._inflight_requests:
+            return
+
+        logger.warning(
+            f"preempt_inflight_shards: signaling preemption for "
+            f"{len(self._inflight_requests)} in-flight shard(s) "
+            f"(reason={reason!r})"
+        )
+
+        # Copy + clear first so any late-arriving retries can't race.
+        pending = list(self._inflight_requests.items())
+        self._inflight_requests.clear()
+
+        for request_id, (peer_id, shard_index) in pending:
+            try:
+                await self._send_shard_response(
+                    peer_id, request_id,
+                    status="preempted",
+                    shard_index=shard_index,
+                    error=reason,
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"preempt_inflight_shards: failed to notify peer "
+                    f"{peer_id[:12]}… for request {request_id}: {exc}"
+                )
+
+    async def _on_shard_price_quote_request(
+        self, msg: P2PMessage, peer,
+    ) -> None:
+        """Handle a shard_price_quote_request and respond with ack or reject.
+
+        Phase 3 Task 5 / design §3.4. Four reject paths:
+          - no_active_listing: this ComputeProvider has no MarketplaceAdvertiser
+            wired, so no advertised price exists.
+          - overloaded: _current_jobs >= max_concurrent_jobs.
+          - shard_too_large: requested shard exceeds MAX_SHARD_BYTES.
+          - above_ceiling: advertised price exceeds requester's
+            max_acceptable_price_ftns.
+
+        On accept, returns an ack with quoted_price_ftns + an expiry
+        30 seconds in the future. The ack is signed so the requester
+        can bind the subsequent dispatch to this specific quote.
+        """
+        payload = msg.payload
+        request_id = payload.get("request_id", "")
+        listing_id = payload.get("listing_id", "")
+        shard_index = payload.get("shard_index", 0)
+        shard_size_bytes = int(payload.get("shard_size_bytes", 0))
+        max_acceptable = float(payload.get("max_acceptable_price_ftns", 0.0))
+
+        reject_reason: Optional[str] = None
+        quoted_price: Optional[float] = None
+
+        if self._marketplace_advertiser is None:
+            reject_reason = "no_active_listing"
+        elif self._current_jobs >= self.max_concurrent_jobs:
+            reject_reason = "overloaded"
+        elif shard_size_bytes > self.MAX_SHARD_BYTES:
+            reject_reason = "shard_too_large"
+        else:
+            quoted_price = self._marketplace_advertiser.current_price_ftns()
+            if quoted_price > max_acceptable:
+                reject_reason = "above_ceiling"
+
+        if reject_reason is not None:
+            resp_payload = {
+                "subtype": "shard_price_quote_reject",
+                "request_id": request_id,
+                "listing_id": listing_id,
+                "shard_index": shard_index,
+                "reason": reject_reason,
+                "provider_id": self.identity.node_id,
+            }
+        else:
+            quote_expires_unix = int(time.time()) + 30
+            sig_src = (
+                f"{request_id}||{listing_id}||{shard_index}||"
+                f"{quoted_price}||{quote_expires_unix}||{self.identity.node_id}"
+            ).encode("utf-8")
+            signature = self.identity.sign(sig_src)
+            resp_payload = {
+                "subtype": "shard_price_quote_ack",
+                "request_id": request_id,
+                "listing_id": listing_id,
+                "shard_index": shard_index,
+                "quoted_price_ftns": quoted_price,
+                "quote_expires_unix": quote_expires_unix,
+                "provider_id": self.identity.node_id,
+                "provider_pubkey_b64": self.identity.public_key_b64,
+                "signature": signature,
+            }
+
+        resp = P2PMessage(
+            msg_type=MSG_DIRECT,
+            sender_id=self.identity.node_id,
+            payload=resp_payload,
+        )
+        await self.transport.send_to_peer(peer.peer_id, resp)
 
 
 def _cpu_benchmark(iterations: int) -> int:
