@@ -177,6 +177,34 @@ See [Confidential Compute Spec](docs/CONFIDENTIAL_COMPUTE_SPEC.md) for details.
 
 ---
 
+## Built on Ethereum + Base
+
+PRSM's smart contracts live on **Base**, an Ethereum Layer 2 operated by Coinbase. The FTNS token is a standard ERC-20 at [`0x5276a375...16e5`](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5).
+
+**Why Ethereum:**
+
+| Criterion | Ethereum delivers |
+|---|---|
+| Credible decentralization | ~1M validators, zero chain halts since PoS launch (Sept 2022) |
+| Developer ecosystem | Largest by an order of magnitude; Hardhat, Foundry, OpenZeppelin are Ethereum-native |
+| Auditor coverage | Dozens of reputable Solidity audit firms vs. 3-4 on alternatives |
+| US regulatory posture | ETH classified as commodity by CFTC; spot and futures ETFs approved |
+| Standards + composability | ERC-20 / ERC-721 / ERC-4337 — every wallet, exchange, indexer speaks EVM |
+
+**Why Base (not Ethereum L1 directly, not Solana, not a new chain):**
+
+- **~$0.01 transactions, 2-second blocks** — viable economics for micropayment royalty flow
+- **Coinbase as operator** — immediate legitimacy narrative for investor conversations
+- **Native USDC from Circle** — zero-friction fiat on-ramp for Phase 5 (Coinbase → Base in seconds)
+- **OP Stack foundation** — most battle-tested L2 codebase, portable to any OP Stack chain if Base ever falters
+- **Inherits Ethereum L1 security** — fraud proofs and trust-minimized withdrawals, not a trust-in-Coinbase promise
+
+**One-sentence answer for investors asking "why not Solana?":** *"We need Ethereum's decentralization and tooling, we don't need Solana's peak speed for our use case, and we get near-Solana performance via Base L2 without giving up any of Ethereum's other advantages."*
+
+For the full argument (evaluation framework, honest comparison of major chains, responses to common investor pushback), see [Technology Choices](docs/TECH_CHOICES.md).
+
+---
+
 ## SDKs
 
 | Language | Install | Docs |
@@ -229,6 +257,7 @@ See [Deployment Guide](deploy/production/DEPLOYMENT_GUIDE.md) for full instructi
 | Document | Description |
 |----------|------------|
 | [Getting Started](docs/GETTING_STARTED.md) | Install → configure → first query in 5 minutes |
+| [Technology Choices](docs/TECH_CHOICES.md) | Why Ethereum + Base — investor-facing chain-choice rationale |
 | [Sovereign-Edge AI Spec](docs/SOVEREIGN_EDGE_AI_SPEC.md) | Phase 1 architecture (Rings 1-6) |
 | [Confidential Compute Spec](docs/CONFIDENTIAL_COMPUTE_SPEC.md) | Phase 2 architecture (Rings 7-10) |
 | [Implementation Status](docs/IMPLEMENTATION_STATUS.md) | Subsystem status and test coverage |
