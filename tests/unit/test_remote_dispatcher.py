@@ -17,6 +17,7 @@ import pytest
 from prsm.compute.model_sharding.models import ModelShard, PipelineStakeTier
 from prsm.compute.remote_dispatcher import (
     EscrowCreationFailedError,
+    EscrowReleaseFailedError,
     PeerNotConnectedError,
     RemoteShardDispatcher,
     ShardDispatchError,
@@ -253,6 +254,28 @@ def test_dispatch_retry_on_timeout():
     np.testing.assert_allclose(result, expected, rtol=1e-12)
     assert escrow.release_escrow.await_count == 1
     assert escrow.refund_escrow.await_count == 0
+
+
+def test_dispatch_release_failure_does_not_auto_refund():
+    """Codex P1 pass 2: when release_escrow returns None after a
+    successful compute, dispatch raises EscrowReleaseFailedError and
+    does NOT call refund_escrow (escrow remains PENDING for manual
+    reconciliation; the compute itself was honest work, so refund
+    would wrongly take FTNS from the provider's unearned receivable)."""
+    dispatcher, _, transport, escrow, provider = _make_dispatcher()
+    escrow.release_escrow = AsyncMock(return_value=None)
+    shard, input_tensor, _ = _make_shard()
+    _wire_send_to_respond(transport, dispatcher, shard, input_tensor, provider)
+
+    with pytest.raises(EscrowReleaseFailedError):
+        asyncio.run(dispatcher.dispatch(
+            shard=shard, input_tensor=input_tensor,
+            node_id=provider.node_id, job_id="job-1",
+            stake_tier=PipelineStakeTier.STANDARD, escrow_amount_ftns=1.0,
+        ))
+
+    escrow.release_escrow.assert_awaited_once()
+    escrow.refund_escrow.assert_not_called()
 
 
 def test_dispatch_refuses_when_escrow_creation_fails():
