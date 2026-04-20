@@ -43,6 +43,15 @@ class EscrowCreationFailedError(RuntimeError):
     funded escrow — that would break the Phase 2 pay-for-work guarantee."""
 
 
+class EscrowReleaseFailedError(RuntimeError):
+    """PaymentEscrow.release_escrow returned None after a successful
+    shard execution. The escrow is still PENDING on the ledger; funds
+    have NOT moved. Callers must reconcile manually — dispatch does NOT
+    auto-refund here because the compute itself succeeded and the right
+    recovery is a retry of release (idempotent) or an operator-initiated
+    reconciliation, not a refund to the requester."""
+
+
 def _escrow_job_id(job_id: str, shard_index: int) -> str:
     """Compose the unique escrow-tracking key for one shard-exec lease.
 
@@ -133,6 +142,7 @@ class RemoteShardDispatcher:
                 f"amount={escrow_amount_ftns} FTNS)"
             )
 
+        output: Optional[np.ndarray] = None
         last_exc: Optional[BaseException] = None
         for attempt in range(self.max_retries + 1):
             try:
@@ -144,21 +154,7 @@ class RemoteShardDispatcher:
                     stake_tier=stake_tier,
                     escrow_job_id=escrow_job_id,
                 )
-                release_tx = await self.payment_escrow.release_escrow(
-                    escrow_job_id, node_id,
-                )
-                # P1: release_escrow can return None on ledger failure.
-                # Compute succeeded but payment didn't land — surface as
-                # ShardDispatchError so caller knows to reconcile. We do
-                # NOT refund here: funds may still be in the escrow wallet,
-                # and a manual reconcile is safer than a blind refund.
-                if release_tx is None:
-                    raise ShardDispatchError(
-                        f"shard {shard.shard_index} executed successfully "
-                        f"but escrow release failed for {escrow_job_id!r}; "
-                        f"reconciliation required"
-                    )
-                return output
+                break
             except asyncio.TimeoutError as exc:
                 last_exc = exc
                 if attempt < self.max_retries:
@@ -175,6 +171,30 @@ class RemoteShardDispatcher:
                 last_exc = exc
                 break
 
+        # SUCCESS path: compute completed; attempt escrow release. If
+        # release fails, the escrow is still PENDING on the ledger — do
+        # NOT auto-refund (compute was honest work), surface the release
+        # failure for operator reconciliation.
+        if output is not None:
+            release_tx = await self.payment_escrow.release_escrow(
+                escrow_job_id, node_id,
+            )
+            if release_tx is None:
+                logger.error(
+                    f"shard {shard.shard_index} executed successfully "
+                    f"but escrow release failed for {escrow_job_id!r}; "
+                    f"escrow remains PENDING — reconciliation required. "
+                    f"NOT auto-refunding."
+                )
+                raise EscrowReleaseFailedError(
+                    f"shard {shard.shard_index} executed successfully "
+                    f"but escrow release failed for {escrow_job_id!r}; "
+                    f"reconciliation required"
+                )
+            return output
+
+        # FAILURE path: compute did not complete. Refund escrow, then
+        # fall back to local (if wired) or re-raise the failure.
         await self.payment_escrow.refund_escrow(
             escrow_job_id, reason=str(last_exc),
         )
