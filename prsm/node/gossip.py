@@ -53,6 +53,7 @@ GOSSIP_AGENT_DEREGISTER = "agent_deregister"
 GOSSIP_PROVENANCE_QUERY = "provenance_query"
 GOSSIP_PROVENANCE_RESPONSE = "provenance_response"
 GOSSIP_CAPABILITY_ANNOUNCE = "capability_announce"
+GOSSIP_MARKETPLACE_LISTING = "marketplace_listing"     # Phase 3: provider capacity + price advertisement
 GOSSIP_HARDWARE_PROFILE = "hardware_profile"
 GOSSIP_TEE_CAPABILITY = "tee_capability"
 

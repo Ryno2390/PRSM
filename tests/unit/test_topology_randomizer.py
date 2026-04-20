@@ -56,22 +56,30 @@ def test_assign_unique_returns_distinct_nodes():
 
 
 def test_acceptance_criterion_shard0_appearance_bound():
-    """Phase 2.1 Line Item B acceptance: across 100 consecutive
-    inferences from the same requester, no single node appears in
-    more than 10% of the assignments at shard position 0."""
+    """Phase 2.1 Line Item B acceptance: the fraction of inferences
+    any single node claims at shard position 0 stays under 10%.
+
+    Sampling note: we run 1000 inferences rather than the design's
+    nominal 100. Reason: at 100 samples across a 20-node uniform
+    pool, the expected max-node count is ~5 but the *max across all
+    nodes* distribution peaks near 10-12 — so a strict '<= 10' bound
+    would flake ~25% of the time under a perfectly uniform RNG. At
+    1000 samples, expected per-node is 50 and the max converges
+    tightly around 65-70, well under 10% = 100. The <10% spec is
+    enforced meaningfully without CI flakes."""
     r = TopologyRandomizer()
     pool = [f"node-{i}" for i in range(20)]
 
     shard0_nodes = []
-    for _ in range(100):
+    for _ in range(1000):
         assignment = r.assign(pool, num_shards=4)
         shard0_nodes.append(assignment[0].node_id)
 
     freq = Counter(shard0_nodes)
     most_common_count = freq.most_common(1)[0][1]
-    assert most_common_count <= 10, (
+    assert most_common_count <= 100, (
         f"acceptance criterion violated: top node appeared "
-        f"{most_common_count}/100 times (>10%); freq histogram={freq}"
+        f"{most_common_count}/1000 times (>10%); freq histogram={freq}"
     )
 
 
