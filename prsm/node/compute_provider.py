@@ -9,6 +9,8 @@ with resource monitoring.
 """
 
 import asyncio
+import base64
+import hashlib
 import json
 import logging
 import os
@@ -20,9 +22,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
+import numpy as np
+
 if TYPE_CHECKING:
     from prsm.node.config import NodeConfig
 
+from prsm.compute.model_sharding.executor import execute_shard_locally
+from prsm.compute.model_sharding.models import ModelShard
+from prsm.compute.shard_receipt import build_receipt_signing_payload
 from prsm.node.config import is_active_now
 from prsm.node.gossip import (
     GOSSIP_JOB_OFFER,
@@ -34,7 +41,7 @@ from prsm.node.gossip import (
 )
 from prsm.node.identity import NodeIdentity
 from prsm.node.local_ledger import LocalLedger, TransactionType
-from prsm.node.transport import P2PMessage, WebSocketTransport
+from prsm.node.transport import MSG_DIRECT, P2PMessage, WebSocketTransport
 from prsm.node.payment_escrow import PaymentEscrow
 from prsm.node.result_consensus import ResultConsensus
 
@@ -166,6 +173,8 @@ class ComputeProvider:
         )
         self._escrow_task: Optional[asyncio.Task] = None
 
+        self._current_jobs: int = 0
+
     @property
     def available_capacity(self) -> Dict[str, Any]:
         active_count = len(self.active_jobs)
@@ -188,6 +197,7 @@ class ComputeProvider:
         self.gossip.subscribe(GOSSIP_JOB_OFFER, self._on_job_offer)
         self.gossip.subscribe(GOSSIP_JOB_CONFIRM, self._on_job_confirm)
         self.gossip.subscribe(GOSSIP_JOB_CANCEL, self._on_job_cancel)
+        self.transport.on_message(MSG_DIRECT, self._on_direct_message)
         # Jobs waiting for confirm before execution
         self._pending_confirm: Dict[str, ComputeJob] = {}
         logger.info(
@@ -658,6 +668,178 @@ class ComputeProvider:
             "max_concurrent_jobs": self.max_concurrent_jobs,
             "gpu_allocation_pct": self.gpu_allocation_pct,
         }
+
+    # ── Phase 2: remote shard-execute handler ─────────────────────
+
+    MAX_SHARD_BYTES = 10 * 1024 * 1024
+
+    async def _on_direct_message(self, msg: P2PMessage, peer) -> None:
+        """Route MSG_DIRECT messages to subtype-specific handlers.
+
+        Other subscribers may also receive this dispatch; each handler
+        filters by subtype and ignores messages it doesn't own.
+        """
+        subtype = msg.payload.get("subtype", "")
+        if subtype == "shard_execute_request":
+            await self._on_shard_execute_request(msg, peer)
+
+    async def _on_shard_execute_request(self, msg: P2PMessage, peer) -> None:
+        """Accept a shard_execute_request, run execute_shard_locally,
+        sign a receipt, and send a shard_execute_response.
+
+        Uses the same execute_shard_locally helper the local executor
+        uses, so local and remote execution produce bit-identical output.
+        """
+        payload = msg.payload
+        request_id = payload.get("request_id", "")
+        job_id = payload.get("job_id", "")
+        shard_index = payload.get("shard_index", 0)
+
+        try:
+            decline_reason = self._can_accept_shard(payload)
+            if decline_reason is not None:
+                await self._send_shard_response(
+                    peer.peer_id, request_id,
+                    status="declined", shard_index=shard_index,
+                    error=decline_reason,
+                )
+                return
+
+            shard = self._deserialize_shard_from_payload(payload)
+            input_bytes = base64.b64decode(payload.get("input_b64", ""))
+
+            self._current_jobs += 1
+            try:
+                output = execute_shard_locally(shard, input_bytes)
+            finally:
+                self._current_jobs -= 1
+
+            output_bytes = output.tobytes()
+            output_hash = hashlib.sha256(output_bytes).hexdigest()
+            executed_at = int(time.time())
+
+            sig_payload = build_receipt_signing_payload(
+                job_id=job_id,
+                shard_index=shard_index,
+                output_hash=output_hash,
+                executed_at_unix=executed_at,
+            )
+            signature = self.identity.sign(sig_payload)
+
+            receipt = {
+                "job_id": job_id,
+                "shard_index": shard_index,
+                "provider_id": self.identity.node_id,
+                "provider_pubkey_b64": self.identity.public_key_b64,
+                "output_hash": output_hash,
+                "executed_at_unix": executed_at,
+                "signature": signature,
+            }
+
+            await self._send_shard_response(
+                peer.peer_id, request_id,
+                status="completed",
+                shard_index=shard_index,
+                output_bytes=output_bytes,
+                output_shape=list(output.shape),
+                output_dtype=str(output.dtype),
+                receipt=receipt,
+            )
+        except Exception as exc:
+            logger.warning(
+                f"shard_execute_request failed for job {job_id!r} "
+                f"shard {shard_index}: {exc}"
+            )
+            await self._send_shard_response(
+                peer.peer_id, request_id,
+                status="failed", shard_index=shard_index, error=str(exc),
+            )
+
+    def _can_accept_shard(self, payload: Dict[str, Any]) -> Optional[str]:
+        """Return None if the shard request is acceptable, else a string
+        reason (becomes the response's `error` field).
+
+        Checks (in order):
+          1. Capacity: _current_jobs < max_concurrent_jobs
+          2. Deadline: deadline_unix > now
+          3. Tensor decodable
+          4. Payload size: decoded tensor bytes <= 10 MB
+          5. Checksum: declared == sha256(tensor_bytes)
+        """
+        if self._current_jobs >= self.max_concurrent_jobs:
+            return "resource_unavailable"
+
+        now = int(time.time())
+        deadline = payload.get("deadline_unix", 0)
+        if deadline < now:
+            return "deadline_past"
+
+        try:
+            tensor_bytes = base64.b64decode(payload.get("tensor_data_b64", ""))
+        except Exception:
+            return "tensor_decode_failed"
+
+        if len(tensor_bytes) > self.MAX_SHARD_BYTES:
+            return "shard_too_large"
+
+        declared_checksum = payload.get("checksum", "")
+        actual_checksum = hashlib.sha256(tensor_bytes).hexdigest()
+        if declared_checksum != actual_checksum:
+            return "checksum_mismatch"
+
+        return None
+
+    def _deserialize_shard_from_payload(self, payload: Dict[str, Any]) -> ModelShard:
+        """Build a ModelShard from a shard_execute_request payload.
+
+        The executor currently interprets tensor_data as float64 (see
+        execute_shard_locally). Payload's tensor_dtype is carried for
+        future-proofing but not yet enforced at the executor layer.
+        """
+        tensor_bytes = base64.b64decode(payload["tensor_data_b64"])
+        return ModelShard(
+            shard_id=f"{payload.get('job_id', '')}:{payload.get('shard_index', 0)}",
+            model_id=payload.get("model_id", ""),
+            shard_index=payload["shard_index"],
+            total_shards=payload.get("total_shards", 1),
+            tensor_data=tensor_bytes,
+            tensor_shape=tuple(payload["tensor_shape"]),
+            size_bytes=len(tensor_bytes),
+            checksum=payload.get("checksum", ""),
+        )
+
+    async def _send_shard_response(
+        self,
+        peer_id: str,
+        request_id: str,
+        status: str,
+        shard_index: int,
+        output_bytes: Optional[bytes] = None,
+        output_shape: Optional[list] = None,
+        output_dtype: Optional[str] = None,
+        receipt: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        payload: Dict[str, Any] = {
+            "subtype": "shard_execute_response",
+            "request_id": request_id,
+            "status": status,
+            "shard_index": shard_index,
+            "error": error,
+        }
+        if output_bytes is not None:
+            payload["output_b64"] = base64.b64encode(output_bytes).decode()
+            payload["output_shape"] = output_shape
+            payload["output_dtype"] = output_dtype
+        if receipt is not None:
+            payload["receipt"] = receipt
+
+        resp = P2PMessage(
+            msg_type=MSG_DIRECT,
+            sender_id=self.identity.node_id,
+            payload=payload,
+        )
+        await self.transport.send_to_peer(peer_id, resp)
 
 
 def _cpu_benchmark(iterations: int) -> int:
