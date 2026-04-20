@@ -62,6 +62,13 @@ class ShardExecutionReceipt:
 
     Fields form the serialized `receipt` sub-object in a
     shard_execute_response MSG_DIRECT payload.
+
+    The `tee_attestation` field is a Phase 2.1 schema reservation
+    (Vision doc §7 Line Item C). When present, it carries a TEE quote
+    bound to this specific execution. Phase 2.1 ships the field only;
+    verification logic (quote chain validation, revocation check, tier
+    gating) lands in a Phase 2.1 follow-up without breaking wire
+    format. Current Phase 2 builds leave it None.
     """
     job_id: str
     shard_index: int
@@ -70,6 +77,7 @@ class ShardExecutionReceipt:
     output_hash: str
     executed_at_unix: int
     signature: str
+    tee_attestation: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -84,6 +92,7 @@ class ShardExecutionReceipt:
             output_hash=data["output_hash"],
             executed_at_unix=data["executed_at_unix"],
             signature=data["signature"],
+            tee_attestation=data.get("tee_attestation"),
         )
 
 
