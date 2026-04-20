@@ -27,6 +27,21 @@ from prsm.node.local_ledger import LocalLedger, Transaction, TransactionType
 logger = logging.getLogger(__name__)
 
 
+class EscrowNotFoundError(KeyError):
+    """Raised when a caller references a job_id with no escrow record."""
+
+
+class EscrowAmountError(ValueError):
+    """Raised when a release amount exceeds the escrowed amount."""
+
+
+class EscrowAlreadyFinalizedError(RuntimeError):
+    """Raised on cross-state transitions: release on a REFUNDED escrow or
+    refund on a RELEASED escrow. Same-state repeats (double-release,
+    double-refund) are idempotent no-ops with warnings, not errors — only
+    *cross-state* transitions are illegal."""
+
+
 class EscrowStatus(str, Enum):
     PENDING = "pending"           # Waiting for results
     RELEASED = "released"        # Payment distributed
@@ -141,15 +156,36 @@ class PaymentEscrow:
 
         If consensus was reached, full payment goes to provider.
         If consensus failed but partial work was done, can specify partial_amount.
+
+        State-machine guards:
+          - Double-release on an already-RELEASED escrow: idempotent no-op
+            (warns, returns None). Never double-pays.
+          - Release on a REFUNDED escrow: raises EscrowAlreadyFinalizedError.
+          - No escrow at all for this job_id: returns None (preserves legacy
+            'not found' behavior for backwards compat with existing callers).
         """
-        # Find the escrow for this job
+        escrow_any = None
         escrow = None
         for e in self._escrows.values():
-            if e.job_id == job_id and e.status == EscrowStatus.PENDING:
-                escrow = e
-                break
+            if e.job_id == job_id:
+                escrow_any = e
+                if e.status == EscrowStatus.PENDING:
+                    escrow = e
+                    break
 
         if not escrow:
+            if escrow_any is not None:
+                if escrow_any.status == EscrowStatus.RELEASED:
+                    logger.warning(
+                        f"escrow for job {job_id[:8]}... already released; "
+                        f"release_escrow is a no-op"
+                    )
+                    return None
+                if escrow_any.status == EscrowStatus.REFUNDED:
+                    raise EscrowAlreadyFinalizedError(
+                        f"escrow for job {job_id!r} is already REFUNDED; "
+                        f"cannot release"
+                    )
             logger.warning(f"No pending escrow found for job {job_id[:8]}...")
             return None
 
@@ -209,14 +245,36 @@ class PaymentEscrow:
             return None
 
     async def refund_escrow(self, job_id: str, reason: str = "") -> bool:
-        """Refund escrow to the requester (job failed or cancelled)."""
+        """Refund escrow to the requester (job failed or cancelled).
+
+        State-machine guards:
+          - Double-refund on an already-REFUNDED escrow: idempotent no-op
+            (warns, returns True). Never double-refunds.
+          - Refund on a RELEASED escrow: raises EscrowAlreadyFinalizedError.
+          - No escrow at all for this job_id: returns False (legacy).
+        """
+        escrow_any = None
         escrow = None
         for e in self._escrows.values():
-            if e.job_id == job_id and e.status == EscrowStatus.PENDING:
-                escrow = e
-                break
+            if e.job_id == job_id:
+                escrow_any = e
+                if e.status == EscrowStatus.PENDING:
+                    escrow = e
+                    break
 
         if not escrow:
+            if escrow_any is not None:
+                if escrow_any.status == EscrowStatus.REFUNDED:
+                    logger.warning(
+                        f"escrow for job {job_id[:8]}... already refunded; "
+                        f"refund_escrow is a no-op"
+                    )
+                    return True
+                if escrow_any.status == EscrowStatus.RELEASED:
+                    raise EscrowAlreadyFinalizedError(
+                        f"escrow for job {job_id!r} is already RELEASED; "
+                        f"cannot refund"
+                    )
             return False
 
         escrow_wallet = f"escrow-{escrow.escrow_id}"
