@@ -121,14 +121,8 @@ class MarketplaceOrchestrator:
         succeeds. Raises NoEligibleProvidersError if the pool is
         exhausted; raises ShardDispatchError as-is for malicious
         failures (caller decides whether to abort the job)."""
-        attempted: set = set()
-        remaining = [l for l in eligible if l.provider_id not in attempted]
-
         last_reason: Optional[str] = None
-        for listing in remaining:
-            if listing.provider_id in attempted:
-                continue
-            attempted.add(listing.provider_id)
+        for listing in eligible:
 
             # Step 1: price handshake.
             quote = await self.price_negotiator.request_quote(
