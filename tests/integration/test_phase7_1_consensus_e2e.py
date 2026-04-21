@@ -497,37 +497,58 @@ def test_phase7_1_consensus_mismatch_e2e(hardhat_node, deployed):
         assert batch_id is not None, f"no BatchCommitted event from {label}"
         batch_ids[label] = batch_id
 
-    # ── 5. Requester challenges C's batch with A's leaf as majority ────
+    # ── 5. Requester submits CONSENSUS_MISMATCH via ConsensusChallengeSubmitter ─
 
-    requester_acct = w3.eth.account.from_key(deployed["requesterKey"])
-    # Proof for a 1-leaf tree is empty (leaf hash IS the root).
-    aux = _encode_consensus_aux(
-        conflicting_batch_id=batch_ids["A"],
-        majority_proof=[],
-        majority_leaf=contract_leaves["A"],
+    # Phase 7.1x: the submitter service is the production handoff point
+    # for minority-receipt → on-chain challenge. The E2E exercises it
+    # here to prove the auxData encoding + tx shape match the contract
+    # byte-for-byte (unit tests use mocked web3; this proves the bytes
+    # themselves are right).
+    from prsm.marketplace.consensus_submitter import (
+        ChallengeAttempt, ConsensusChallengeSubmitter, ReceiptLeafFields,
     )
-    tx = registry.functions.challengeReceipt(
-        batch_ids["C"],
-        contract_leaves["C"],
-        [],   # 1-leaf proof for C's batch is also empty
-        int(ReasonCode.CONSENSUS_MISMATCH),
-        aux,
-    ).build_transaction({
-        "from": requester_acct.address,
-        "nonce": w3.eth.get_transaction_count(
-            requester_acct.address, "pending",
-        ),
-        "gasPrice": w3.eth.gas_price,
-        "chainId": w3.eth.chain_id,
-        # 1M gas budget to cover the slash hook's nested call (Phase 7 §8.7).
-        "gas": 1_000_000,
-    })
-    signed = w3.eth.account.sign_transaction(tx, requester_acct.key)
-    raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
+
+    submitter = ConsensusChallengeSubmitter(
+        rpc_url=hardhat_node,
+        registry_address=deployed["registry"],
+        private_key=deployed["requesterKey"],
+    )
+
+    # Convert the on-chain leaf dicts to ReceiptLeafFields for the
+    # submitter API (normally the caller derives these from Python
+    # ShardExecutionReceipt objects via from_python_receipt; here we
+    # build directly because the E2E has the contract-leaf form at hand).
+    def _fields(leaf: dict) -> ReceiptLeafFields:
+        return ReceiptLeafFields(
+            job_id_hash=leaf["jobIdHash"],
+            shard_index=leaf["shardIndex"],
+            provider_id_hash=leaf["providerIdHash"],
+            provider_pubkey_hash=leaf["providerPubkeyHash"],
+            output_hash=leaf["outputHash"],
+            executed_at_unix=leaf["executedAtUnix"],
+            value_ftns_wei=leaf["valueFtns"],
+            signature_hash=leaf["signatureHash"],
+        )
+
+    attempt = ChallengeAttempt(
+        minority_batch_id=batch_ids["C"],
+        minority_leaf=_fields(contract_leaves["C"]),
+        minority_proof=[],   # 1-leaf batch
+        majority_batch_id=batch_ids["A"],
+        majority_leaf=_fields(contract_leaves["A"]),
+        majority_proof=[],   # 1-leaf batch
+    )
+    result = submitter.submit_one(attempt)
+    assert result.success, (
+        f"submitter failed: {result.error_type}: {result.error_message}"
+    )
+    assert result.tx_hash_hex.startswith("0x")
+
+    # Look up the submitted tx's receipt so we can decode Slashed event below.
     challenge_rcpt = w3.eth.wait_for_transaction_receipt(
-        w3.eth.send_raw_transaction(raw), timeout=60,
+        bytes.fromhex(result.tx_hash_hex[2:]), timeout=60,
     )
-    assert challenge_rcpt.status == 1, "challengeReceipt reverted"
+    assert challenge_rcpt.status == 1, "submitter tx reverted"
 
     # ── 6. Assert slash landed on C, not on A or B ─────────────────────
 

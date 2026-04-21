@@ -135,7 +135,7 @@ From the three per-phase review gates. All are non-blockers for tag but tracked 
 
 ### From Phase 7.1 (Task 8 review)
 
-- **§8.6 — `consensus_minority_queue` persistence.** In-process-only seam; needs drain/persistence via Phase 7.1x consensus-submitter service. Orchestrator-layer operational gap, not contract-security.
+- **§8.6 — `consensus_minority_queue` persistence.** ⚙️ PARTIALLY RESOLVED pre-audit. Drain API + `ConsensusChallengeSubmitter` service shipped (`prsm/marketplace/consensus_submitter.py`). E2E rewired to exercise the submitter. Persistence + retry/backoff + automatic batch-commit coordination still queue for Phase 7.1x.next — not contract-security, orchestrator operations.
 - **§8.7 — Sybil-requester griefing vector.** Under MVP auth (requester-only challenger), attacker with two EOAs can self-slash at 30% net loss + reputation crush. Negative-EV by design; Phase 7.1x `consensus_group_id` is the planned fix.
 - **§8.8 — asyncio timeout/cancel propagation.** Low-priority grep confirming `RemoteShardDispatcher` wraps transport timeouts into `ShardDispatchError` before they reach the gather boundary.
 
