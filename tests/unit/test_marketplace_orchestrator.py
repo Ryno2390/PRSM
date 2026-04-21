@@ -581,3 +581,277 @@ def test_orchestrator_empty_receipt_on_fallback_path_skips_accumulation():
     ))
 
     batch.accumulate.assert_not_called()
+
+
+# ── Phase 7 Task 5: on-chain tier gating ─────────────────────────────────
+
+
+def _make_orchestrator_with_stake_gate(listings, *, resolver=None):
+    """Orchestrator wired with a stake_manager_client + provider address
+    resolver so Phase 7 tier gating is active."""
+    identity = generate_node_identity(display_name="requester")
+
+    directory = MagicMock()
+    directory.list_active_providers = MagicMock(return_value=listings)
+    directory.get_listing = MagicMock(
+        side_effect=lambda pid, **kw: next(
+            (l for l in listings if l.provider_id == pid), None
+        )
+    )
+    reputation = ReputationTracker()
+    eligibility = EligibilityFilter(reputation_tracker=reputation)
+
+    price_negotiator = MagicMock()
+    price_negotiator.request_quote = AsyncMock()
+
+    remote_dispatcher = MagicMock()
+    remote_dispatcher.dispatch = AsyncMock()
+
+    stake_manager = MagicMock()
+    # effective_tier is a sync read; use MagicMock, not AsyncMock.
+    stake_manager.effective_tier = MagicMock(return_value="critical")
+
+    if resolver is None:
+        def resolver(provider_id):
+            return "0x" + "a" * 40
+
+    orchestrator = MarketplaceOrchestrator(
+        identity=identity,
+        directory=directory,
+        eligibility_filter=eligibility,
+        reputation=reputation,
+        price_negotiator=price_negotiator,
+        remote_dispatcher=remote_dispatcher,
+        provider_address_resolver=resolver,
+        stake_manager_client=stake_manager,
+    )
+    return (
+        orchestrator, price_negotiator, remote_dispatcher,
+        reputation, stake_manager,
+    )
+
+
+def test_onchain_tier_gate_skipped_when_policy_is_open():
+    """If policy.min_stake_tier=='open' (the default), the on-chain
+    gate short-circuits — no RPC to StakeBond. Preserves Phase 3
+    zero-cost-latency on low-value jobs."""
+    listing = _make_listing()
+    orch, quoter, dispatcher, _, stake_manager = (
+        _make_orchestrator_with_stake_gate([listing])
+    )
+
+    quoter.request_quote.return_value = _make_quote(listing)
+    dispatcher.dispatch.return_value = np.array([1.0], dtype=np.float64)
+
+    _run(orch.orchestrate_sharded_inference(
+        shards=[_make_shard(0)],
+        input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+        job_id="job-1", policy=DispatchPolicy(min_stake_tier="open"),
+    ))
+
+    stake_manager.effective_tier.assert_not_called()
+    dispatcher.dispatch.assert_awaited_once()
+
+
+def test_onchain_tier_gate_skipped_when_stake_manager_unwired():
+    """Phase 3.1 preservation: if stake_manager_client is None, Phase 7
+    gating is invisible even under a premium policy."""
+    # Build a non-phase-7 orchestrator (no stake_manager_client).
+    listing = _make_listing(stake_tier="premium")
+    orch, quoter, dispatcher, _ = _make_orchestrator([listing])
+
+    quoter.request_quote.return_value = _make_quote(listing)
+    dispatcher.dispatch.return_value = np.array([1.0], dtype=np.float64)
+
+    _run(orch.orchestrate_sharded_inference(
+        shards=[_make_shard(0)],
+        input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+        job_id="job-1",
+        policy=DispatchPolicy(min_stake_tier="premium"),
+    ))
+
+    dispatcher.dispatch.assert_awaited_once()
+
+
+def test_onchain_tier_gate_skipped_when_resolver_returns_none():
+    """Providers without a resolvable Ethereum address (pre-Phase 7
+    listings) pass the gate — the listing-claim filter has already
+    approved them."""
+    listing = _make_listing(stake_tier="premium")
+    orch, quoter, dispatcher, _, stake_manager = (
+        _make_orchestrator_with_stake_gate(
+            [listing], resolver=lambda pid: None,
+        )
+    )
+
+    quoter.request_quote.return_value = _make_quote(listing)
+    dispatcher.dispatch.return_value = np.array([1.0], dtype=np.float64)
+
+    _run(orch.orchestrate_sharded_inference(
+        shards=[_make_shard(0)],
+        input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+        job_id="job-1",
+        policy=DispatchPolicy(min_stake_tier="premium"),
+    ))
+
+    # Resolver returned None → no RPC issued, dispatch proceeds.
+    stake_manager.effective_tier.assert_not_called()
+    dispatcher.dispatch.assert_awaited_once()
+
+
+def test_onchain_tier_gate_passes_when_stake_meets_required():
+    """Provider with on-chain tier ≥ required → dispatch proceeds and
+    the RPC was consulted once."""
+    listing = _make_listing(stake_tier="premium")
+    orch, quoter, dispatcher, _, stake_manager = (
+        _make_orchestrator_with_stake_gate([listing])
+    )
+    stake_manager.effective_tier.return_value = "premium"
+
+    quoter.request_quote.return_value = _make_quote(listing)
+    dispatcher.dispatch.return_value = np.array([1.0], dtype=np.float64)
+
+    _run(orch.orchestrate_sharded_inference(
+        shards=[_make_shard(0)],
+        input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+        job_id="job-1",
+        policy=DispatchPolicy(min_stake_tier="premium"),
+    ))
+
+    stake_manager.effective_tier.assert_called_once()
+    dispatcher.dispatch.assert_awaited_once()
+
+
+def test_onchain_tier_gate_rejects_cheater_and_retries_next():
+    """Provider listing claims 'premium' but StakeBond says 'standard'
+    (or 'open') → gate rejects, reputation.record_failure, move to next
+    provider. The quote RPC is never issued for the cheater."""
+    listing_cheater = _make_listing(stake_tier="premium")
+    listing_honest = _make_listing(stake_tier="premium")
+    orch, quoter, dispatcher, reputation, stake_manager = (
+        _make_orchestrator_with_stake_gate([listing_cheater, listing_honest])
+    )
+
+    # Cheater returns "standard" on chain; honest returns "premium".
+    def by_addr(addr):
+        # Both providers resolve to stub addresses; differentiate by call
+        # order via side_effect list below.
+        return addr
+
+    tier_sequence = ["standard", "premium"]
+    stake_manager.effective_tier.side_effect = lambda addr: tier_sequence.pop(0)
+
+    quoter.request_quote.return_value = _make_quote(listing_honest)
+    dispatcher.dispatch.return_value = np.array([42.0], dtype=np.float64)
+
+    result = _run(orch.orchestrate_sharded_inference(
+        shards=[_make_shard(0)],
+        input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+        job_id="job-1",
+        policy=DispatchPolicy(min_stake_tier="premium"),
+    ))
+
+    np.testing.assert_array_equal(result, np.array([42.0]))
+    # Cheater: failure recorded, no quote issued.
+    rep_cheater = reputation.get_reputation(listing_cheater.provider_id)
+    assert len(rep_cheater.failed_dispatches) == 1
+    # Gate was checked twice (cheater + honest); quote only for honest.
+    assert stake_manager.effective_tier.call_count == 2
+    assert quoter.request_quote.await_count == 1
+
+
+def test_onchain_tier_gate_exhausts_pool_when_all_cheat():
+    """Pool entirely of listing-cheaters → every gate check rejects,
+    ends in NoEligibleProvidersError."""
+    listings = [_make_listing(stake_tier="critical") for _ in range(3)]
+    orch, quoter, dispatcher, reputation, stake_manager = (
+        _make_orchestrator_with_stake_gate(listings)
+    )
+    stake_manager.effective_tier.return_value = "open"  # every provider cheats
+
+    with pytest.raises(NoEligibleProvidersError) as excinfo:
+        _run(orch.orchestrate_sharded_inference(
+            shards=[_make_shard(0)],
+            input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+            job_id="job-1",
+            policy=DispatchPolicy(min_stake_tier="critical"),
+        ))
+
+    assert "tier_below_required_onchain" in str(excinfo.value)
+    # No quote RPCs, no dispatches — cheaters get stopped at the gate.
+    quoter.request_quote.assert_not_called()
+    dispatcher.dispatch.assert_not_called()
+    # Each cheater logged a failure.
+    for listing in listings:
+        rep = reputation.get_reputation(listing.provider_id)
+        assert len(rep.failed_dispatches) == 1
+
+
+def test_onchain_tier_gate_fails_open_on_rpc_error():
+    """If StakeBond RPC raises, the gate fails OPEN (logs warning,
+    allows dispatch). Closed-fail would let an attacker DoS the RPC
+    to block all dispatch; the listing filter + slashing-on-misbehavior
+    still protect the cheat case."""
+    listing = _make_listing(stake_tier="premium")
+    orch, quoter, dispatcher, _, stake_manager = (
+        _make_orchestrator_with_stake_gate([listing])
+    )
+    stake_manager.effective_tier.side_effect = RuntimeError("RPC timeout")
+
+    quoter.request_quote.return_value = _make_quote(listing)
+    dispatcher.dispatch.return_value = np.array([1.0], dtype=np.float64)
+
+    _run(orch.orchestrate_sharded_inference(
+        shards=[_make_shard(0)],
+        input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+        job_id="job-1",
+        policy=DispatchPolicy(min_stake_tier="premium"),
+    ))
+
+    # RPC raised but dispatch proceeded.
+    stake_manager.effective_tier.assert_called_once()
+    dispatcher.dispatch.assert_awaited_once()
+
+
+def test_onchain_tier_gate_ordering_standard_below_critical():
+    """Ordinal check: a provider with on-chain 'standard' cannot
+    serve a 'critical' job."""
+    listing = _make_listing(stake_tier="critical")
+    orch, quoter, dispatcher, reputation, stake_manager = (
+        _make_orchestrator_with_stake_gate([listing])
+    )
+    stake_manager.effective_tier.return_value = "standard"
+
+    with pytest.raises(NoEligibleProvidersError):
+        _run(orch.orchestrate_sharded_inference(
+            shards=[_make_shard(0)],
+            input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+            job_id="job-1",
+            policy=DispatchPolicy(min_stake_tier="critical"),
+        ))
+
+    rep = reputation.get_reputation(listing.provider_id)
+    assert len(rep.failed_dispatches) == 1
+    quoter.request_quote.assert_not_called()
+
+
+def test_onchain_tier_gate_runs_before_price_handshake():
+    """The gate must run BEFORE the price handshake so a cheater
+    doesn't get to occupy a quote slot (they'd waste resources on
+    the quoter side and could cause DoS)."""
+    listing = _make_listing(stake_tier="premium")
+    orch, quoter, dispatcher, _, stake_manager = (
+        _make_orchestrator_with_stake_gate([listing])
+    )
+    stake_manager.effective_tier.return_value = "open"  # cheater
+
+    with pytest.raises(NoEligibleProvidersError):
+        _run(orch.orchestrate_sharded_inference(
+            shards=[_make_shard(0)],
+            input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+            job_id="job-1",
+            policy=DispatchPolicy(min_stake_tier="premium"),
+        ))
+
+    # Quote was never solicited — we didn't waste a quote slot on cheater.
+    quoter.request_quote.assert_not_called()

@@ -41,6 +41,11 @@ from prsm.marketplace.policy import DispatchPolicy
 from prsm.marketplace.price_handshake import PriceNegotiator, PriceQuote
 from prsm.marketplace.reputation import ReputationTracker
 
+# Phase 7 Task 5 — on-chain tier gating. Ordering mirrors
+# EligibilityFilter._TIER_ORDER — kept in lock-step because we reuse it
+# to compare the on-chain effectiveTier string against policy.min_stake_tier.
+_TIER_ORDER = {"open": 0, "standard": 1, "premium": 2, "critical": 3}
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,6 +80,13 @@ class MarketplaceOrchestrator:
         # (local-ledger-only settlement via the dispatcher's escrow flow).
         batch_settlement_client=None,
         provider_address_resolver=None,
+        # Phase 7 Task 5 — on-chain tier gating. When wired, the
+        # orchestrator verifies StakeBond.effectiveTier(provider) meets
+        # policy.min_stake_tier before dispatching. Closes the gap where
+        # a provider claims a tier in their listing but hasn't actually
+        # bonded stake to back it. When None, gating is skipped and the
+        # orchestrator behaves as Phase 3.1 did (listing-claim-only tier).
+        stake_manager_client=None,
     ):
         self.identity = identity
         self.directory = directory
@@ -84,6 +96,7 @@ class MarketplaceOrchestrator:
         self.remote_dispatcher = remote_dispatcher
         self.batch_settlement_client = batch_settlement_client
         self.provider_address_resolver = provider_address_resolver
+        self.stake_manager_client = stake_manager_client
 
     async def orchestrate_sharded_inference(
         self,
@@ -132,6 +145,15 @@ class MarketplaceOrchestrator:
         failures (caller decides whether to abort the job)."""
         last_reason: Optional[str] = None
         for listing in eligible:
+
+            # Phase 7 Task 5: on-chain tier gate. A listing-claimed tier
+            # can be a lie; StakeBond.effectiveTier is the ground truth.
+            # Check BEFORE the price handshake so a cheating provider
+            # doesn't get to occupy a quote slot.
+            if not self._onchain_tier_meets(listing, policy):
+                self.reputation.record_failure(listing.provider_id)
+                last_reason = "tier_below_required_onchain"
+                continue
 
             # Step 1: price handshake.
             quote = await self.price_negotiator.request_quote(
@@ -225,6 +247,62 @@ class MarketplaceOrchestrator:
             f"eligible pool (size={len(eligible)}) without success; "
             f"last failure reason: {last_reason or 'unknown'}"
         )
+
+    def _onchain_tier_meets(
+        self,
+        listing: ProviderListing,
+        policy: DispatchPolicy,
+    ) -> bool:
+        """Phase 7 Task 5 — Return True iff the listing should be allowed
+        to serve the job under the on-chain tier policy.
+
+        Three short-circuits preserve the additive integration pattern:
+          - If the policy's min_stake_tier is "open" (the default), any
+            on-chain tier is acceptable; skip the RPC.
+          - If stake_manager_client OR provider_address_resolver is None,
+            the orchestrator is not wired for Phase 7 — fall back to the
+            listing-claim tier (already enforced by EligibilityFilter).
+          - If the resolver can't map the provider to an Ethereum address,
+            skip the check (providers without chain identity predate
+            Phase 7; the listing filter has already approved them).
+
+        If the RPC itself raises, we fail OPEN with a loud warning.
+        Closed-fail here would let an attacker DoS the StakeBond RPC to
+        block all dispatch — and the listing filter plus slashing-on-
+        misbehavior still protect against the cheat case. Operators
+        watching the warning log can harden to fail-closed later.
+        """
+        if policy.min_stake_tier == "open":
+            return True
+        if self.stake_manager_client is None or self.provider_address_resolver is None:
+            return True
+
+        provider_eth = self.provider_address_resolver(listing.provider_id)
+        if provider_eth is None:
+            return True
+
+        try:
+            onchain_tier = self.stake_manager_client.effective_tier(
+                provider_eth
+            )
+        except Exception as exc:
+            logger.warning(
+                f"on-chain tier check failed for provider "
+                f"{listing.provider_id[:12]}…: "
+                f"{type(exc).__name__}: {exc}; failing open"
+            )
+            return True
+
+        required_ord = _TIER_ORDER.get(policy.min_stake_tier, -1)
+        actual_ord = _TIER_ORDER.get(onchain_tier, -1)
+        if actual_ord < required_ord:
+            logger.info(
+                f"provider {listing.provider_id[:12]}… rejected: on-chain "
+                f"tier {onchain_tier!r} below required {policy.min_stake_tier!r} "
+                f"(listing claimed {listing.stake_tier!r})"
+            )
+            return False
+        return True
 
     async def _accumulate_settlement_receipt(
         self,
