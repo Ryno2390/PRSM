@@ -485,3 +485,91 @@ def test_runner_respects_limit(queue):
     assert queue.count_by_status().get(STATUS_SUBMITTED) == 2
     # 3 still submittable for the next tick.
     assert queue.count_by_status().get(STATUS_SUBMITTABLE) == 3
+
+
+# ── Pre-audit P1: default-deny retry classification ─────────────────
+
+
+def test_runner_marks_unexpected_bug_as_terminal(queue):
+    """Pre-audit review P1 fix: unexpected error types (KeyError,
+    ValueError, generic Exception from a bug in submit_one) must NOT
+    retry forever. The allowlist accepts only BroadcastFailedError;
+    everything else — including unknown types — is terminal.
+
+    Before this fix, a bug that escaped submit_one's web3-error
+    classification would bounce between SUBMITTABLE and mark_failed
+    indefinitely, silently accumulating attempts."""
+    queue.enqueue_from_drained([_drained_entry()])
+    queue.record_batch_commit("provC", "job-phase7.1x", 0, b"\x01" * 32)
+    queue.record_batch_commit("majA", "job-phase7.1x", 0, b"\x02" * 32)
+
+    submitter = _stub_submitter([
+        ChallengeResult(
+            success=False, tx_hash_hex=None,
+            error_type="KeyError",       # an unexpected bug inside encoder
+            error_message="'majorityLeaf' missing",
+        ),
+    ])
+    process_submittable_queue(queue, submitter)
+    # Terminal — row does NOT bounce back to SUBMITTABLE.
+    assert queue.count_by_status() == {STATUS_FAILED: 1}
+
+
+def test_runner_caps_retries_at_max_attempts(queue):
+    """Even for retryable (BroadcastFailedError) errors, a row must
+    terminal-fail after max_attempts to prevent a misconfigured RPC
+    endpoint from burning ops budget on one row indefinitely."""
+    queue.enqueue_from_drained([_drained_entry()])
+    queue.record_batch_commit("provC", "job-phase7.1x", 0, b"\x01" * 32)
+    queue.record_batch_commit("majA", "job-phase7.1x", 0, b"\x02" * 32)
+
+    # Simulate max_attempts=3 runs; RPC is persistently down.
+    submitter = _stub_submitter([
+        ChallengeResult(
+            success=False, tx_hash_hex=None,
+            error_type="BroadcastFailedError",
+            error_message="rpc down",
+        ) for _ in range(3)
+    ])
+    # First tick: attempts goes 0→1, still under cap → SUBMITTABLE.
+    process_submittable_queue(queue, submitter, max_attempts=3)
+    row = queue.list_pending()[0]
+    assert row.status == STATUS_SUBMITTABLE
+    assert row.attempts == 1
+
+    # Second tick: 1→2, still under cap → SUBMITTABLE.
+    process_submittable_queue(queue, submitter, max_attempts=3)
+    row = queue.list_pending()[0]
+    assert row.status == STATUS_SUBMITTABLE
+    assert row.attempts == 2
+
+    # Third tick: 2→3, cap reached → terminal FAILED.
+    process_submittable_queue(queue, submitter, max_attempts=3)
+    assert queue.count_by_status() == {STATUS_FAILED: 1}
+
+
+def test_runner_default_max_attempts_is_set(queue):
+    """Default max_attempts should not be None / unbounded. 5 is the
+    current default; pinning it so a regression that removes the cap
+    is caught."""
+    from prsm.marketplace.consensus_submitter import DEFAULT_MAX_ATTEMPTS
+    assert DEFAULT_MAX_ATTEMPTS == 5
+
+
+def test_runner_broadcast_failed_still_retries_under_cap(queue):
+    """Regression: the existing 'BroadcastFailed → SUBMITTABLE' happy
+    path must still work under the new allowlist."""
+    queue.enqueue_from_drained([_drained_entry()])
+    queue.record_batch_commit("provC", "job-phase7.1x", 0, b"\x01" * 32)
+    queue.record_batch_commit("majA", "job-phase7.1x", 0, b"\x02" * 32)
+
+    submitter = _stub_submitter([
+        ChallengeResult(
+            success=False, tx_hash_hex=None,
+            error_type="BroadcastFailedError",
+            error_message="rpc blip",
+        ),
+    ])
+    process_submittable_queue(queue, submitter, max_attempts=5)
+    # One attempt, far below cap → still SUBMITTABLE.
+    assert queue.count_by_status() == {STATUS_SUBMITTABLE: 1}

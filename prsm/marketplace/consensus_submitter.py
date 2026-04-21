@@ -356,22 +356,39 @@ class ConsensusChallengeSubmitter:
 # ── Runner: drives queue → submit → mark_* ─────────────────────
 
 
-# Terminal error types — rows that hit these should NOT be retried.
-# OnChainRevertedError means the contract said no (ChallengeNotProven,
-# InsufficientGasForSlash with too-low manual budget, etc.); a retry
-# would produce the same revert.
-_TERMINAL_ERROR_TYPES = frozenset({"OnChainRevertedError"})
+# Phase 7.1x.next — Pre-audit hardening (review gate P1):
+# Explicit allowlist of retryable errors. Default-deny is safer than
+# default-retry because unexpected bugs (KeyError in encoder, runtime
+# type errors, etc.) surface in submit_one's catch-all as failure
+# results with the bug's exception class as error_type. Without an
+# allowlist those rows would bounce between SUBMITTABLE and mark_failed
+# forever, accumulating attempts but never advancing.
+#
+# Only BroadcastFailedError is genuinely transient — the tx was never
+# signed/sent, retrying is safe and correct. Every other failure path
+# is terminal:
+#   - OnChainRevertedError: contract said no. Retrying reproduces the
+#     revert.
+#   - OnChainPendingError: broadcast succeeded but receipt unknown.
+#     UNSAFE to auto-retry (could double-submit). Operator reconciles
+#     via the recorded tx_hash.
+#   - Any other type: unexpected bug. Stop bleeding ops budget on it
+#     and surface as terminal so a human investigates.
+_RETRYABLE_ERROR_TYPES = frozenset({"BroadcastFailedError"})
 
-# Soft-failure types — leave the row SUBMITTABLE so the runner retries.
-# OnChainPendingError is special: broadcast succeeded but receipt was
-# unknown, so the tx MAY still land. UNSAFE to auto-retry (could double-
-# submit). We treat it as terminal for now — operators reconcile by
-# reading the tx_hash. Phase 7.1x.next+ can add a "pending_watch" state.
-_PENDING_NEEDS_MANUAL = frozenset({"OnChainPendingError"})
+# Absolute attempt cap even for retryable errors. Without this, a
+# misconfigured RPC endpoint could cause a submittable row to retry
+# indefinitely. After N attempts we terminal-fail the row so operator
+# can investigate. Tuned conservatively — 5 is plenty for transient
+# blips; chronic failures should surface.
+DEFAULT_MAX_ATTEMPTS = 5
 
 
 def process_submittable_queue(
-    queue, submitter: ConsensusChallengeSubmitter, limit: int = 100,
+    queue,
+    submitter: ConsensusChallengeSubmitter,
+    limit: int = 100,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
 ) -> List[ChallengeResult]:
     """Phase 7.1x.next runner loop: pull all SUBMITTABLE rows from the
     queue, fire CONSENSUS_MISMATCH challenges via the submitter, update
@@ -384,6 +401,10 @@ def process_submittable_queue(
     Accepts the queue as a parameter rather than importing
     `ConsensusChallengeQueue` directly so this module doesn't force a
     sqlite3 dependency on callers who only want the submitter API.
+
+    max_attempts caps retries per row even for retryable errors —
+    prevents a misconfigured RPC endpoint from burning ops budget on
+    one row indefinitely.
     """
     rows = queue.list_submittable(limit=limit)
     results: List[ChallengeResult] = []
@@ -406,10 +427,14 @@ def process_submittable_queue(
         if result.success:
             queue.mark_submitted(row.row_id, result.tx_hash_hex)
         else:
-            terminal = (
-                result.error_type in _TERMINAL_ERROR_TYPES
-                or result.error_type in _PENDING_NEEDS_MANUAL
-            )
+            # Terminal unless the error is explicitly retryable AND the
+            # row hasn't exhausted its attempt budget. submit_one
+            # increments attempts via mark_failed, so a row at attempts
+            # == max_attempts-1 will hit max_attempts after this call
+            # and should terminal now.
+            is_retryable_type = result.error_type in _RETRYABLE_ERROR_TYPES
+            under_cap = row.attempts + 1 < max_attempts
+            terminal = not (is_retryable_type and under_cap)
             queue.mark_failed(
                 row.row_id,
                 result.error_type or "UnknownError",
