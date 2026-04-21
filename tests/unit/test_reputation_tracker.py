@@ -14,7 +14,9 @@ Phase 3 Task 6. Verifies:
 """
 from __future__ import annotations
 
-from prsm.marketplace.reputation import ReputationTracker
+import pytest
+
+from prsm.marketplace.reputation import ReputationTracker, SlashEvent
 
 
 def test_new_provider_is_neutral():
@@ -162,3 +164,166 @@ def test_touch_sets_first_seen_and_last_seen():
     tracker.record_success("p1", latency_ms=100.0)
     rep = tracker.get_reputation("p1")
     assert rep.first_seen_unix == first_seen_initial
+
+
+# ── Phase 7 Task 6: record_slash ────────────────────────────────────────
+
+
+def _record_slash(tracker, provider_id, **overrides):
+    kwargs = dict(
+        batch_id="0x" + "ab" * 32,
+        slash_amount_wei=2_500 * 10**18,
+        reason="DOUBLE_SPEND",
+    )
+    kwargs.update(overrides)
+    tracker.record_slash(provider_id, **kwargs)
+
+
+def test_record_slash_appends_slash_event():
+    tracker = ReputationTracker()
+    _record_slash(tracker, "p1", reason="DOUBLE_SPEND", tx_hash="0x" + "1" * 64)
+    events = tracker.get_slash_events("p1")
+    assert len(events) == 1
+    ev = events[0]
+    assert isinstance(ev, SlashEvent)
+    assert ev.reason == "DOUBLE_SPEND"
+    assert ev.slash_amount_wei == 2_500 * 10**18
+    assert ev.tx_hash == "0x" + "1" * 64
+    assert ev.recorded_unix > 0
+
+
+def test_has_been_slashed_flips_after_first_slash():
+    tracker = ReputationTracker()
+    assert tracker.has_been_slashed("p1") is False
+    _record_slash(tracker, "p1")
+    assert tracker.has_been_slashed("p1") is True
+
+
+def test_has_been_slashed_false_for_unknown():
+    assert ReputationTracker().has_been_slashed("nobody") is False
+
+
+def test_slashed_count_grows_with_each_slash():
+    tracker = ReputationTracker()
+    assert tracker.slashed_count("p1") == 0
+    for _ in range(3):
+        _record_slash(tracker, "p1")
+    assert tracker.slashed_count("p1") == 3
+    assert len(tracker.get_slash_events("p1")) == 3
+
+
+def test_slash_weights_heavy_in_score_for():
+    """One slash at SLASH_WEIGHT=100 on a provider with 20 successes:
+    score = 20 / (20 + 100) = 0.1667 (was 1.0 pre-slash)."""
+    tracker = ReputationTracker()
+    for _ in range(20):
+        tracker.record_success("p1", latency_ms=50.0)
+    pre = tracker.score_for("p1")
+    assert pre == 1.0
+
+    _record_slash(tracker, "p1")
+    post = tracker.score_for("p1")
+    assert post == pytest.approx(20 / 120, abs=1e-9)
+    assert post < 0.2  # crushed
+
+
+def test_one_slash_pushes_past_min_samples_cold_start():
+    """A brand-new provider caught cheating on their first job should
+    NOT still get the neutral 0.5 cold-start shield. One slash at
+    SLASH_WEIGHT=100 pushes weighted total over MIN_SAMPLES_FOR_SCORE=10
+    all by itself."""
+    tracker = ReputationTracker()
+    _record_slash(tracker, "fresh_cheater")
+    # 0 successes + 0 failures + 1 slash * 100 weight = 100 weighted total
+    # → score = 0 / 100 = 0.0, not the 0.5 cold-start value.
+    assert tracker.score_for("fresh_cheater") == 0.0
+
+
+def test_slash_does_not_pollute_failure_count():
+    """Slashes live in their own stream — they should not appear in
+    failed_dispatches. Audit tools depend on that separation."""
+    tracker = ReputationTracker()
+    _record_slash(tracker, "p1")
+    rep = tracker.get_reputation("p1")
+    assert len(rep.failed_dispatches) == 0
+    assert len(rep.slash_events) == 1
+
+
+def test_record_slash_requires_provider_id():
+    tracker = ReputationTracker()
+    with pytest.raises(ValueError, match="provider_id"):
+        tracker.record_slash(
+            "", batch_id="0xab", slash_amount_wei=1, reason="DOUBLE_SPEND",
+        )
+
+
+def test_record_slash_requires_batch_id():
+    tracker = ReputationTracker()
+    with pytest.raises(ValueError, match="batch_id"):
+        tracker.record_slash(
+            "p1", batch_id="", slash_amount_wei=1, reason="DOUBLE_SPEND",
+        )
+
+
+def test_record_slash_rejects_negative_amount():
+    tracker = ReputationTracker()
+    with pytest.raises(ValueError, match="slash_amount_wei"):
+        tracker.record_slash(
+            "p1", batch_id="0xab", slash_amount_wei=-1,
+            reason="DOUBLE_SPEND",
+        )
+
+
+def test_record_slash_accepts_zero_amount():
+    """Zero-amount slash is valid: the contract supports 0-bps slash
+    rates (e.g., if a provider at 'open' tier is challenged). The
+    reputation signal still matters — they were caught cheating."""
+    tracker = ReputationTracker()
+    tracker.record_slash(
+        "p1", batch_id="0xab", slash_amount_wei=0, reason="INVALID_SIGNATURE",
+    )
+    assert tracker.slashed_count("p1") == 1
+
+
+def test_record_slash_requires_reason():
+    tracker = ReputationTracker()
+    with pytest.raises(ValueError, match="reason"):
+        tracker.record_slash(
+            "p1", batch_id="0xab", slash_amount_wei=1, reason="",
+        )
+
+
+def test_record_slash_stores_unknown_reason_verbatim():
+    """If the contract ever emits a reason code this module doesn't
+    know about, store it as-is. The audit trail matters more than
+    enum hygiene; we don't want to silently drop future evidence."""
+    tracker = ReputationTracker()
+    tracker.record_slash(
+        "p1", batch_id="0xab", slash_amount_wei=1,
+        reason="SOME_FUTURE_REASON",
+    )
+    events = tracker.get_slash_events("p1")
+    assert events[0].reason == "SOME_FUTURE_REASON"
+
+
+def test_record_slash_updates_last_seen():
+    tracker = ReputationTracker()
+    tracker.record_success("p1", latency_ms=50.0)
+    rep_before = tracker.get_reputation("p1")
+    last_before = rep_before.last_seen_unix
+    _record_slash(tracker, "p1")
+    rep_after = tracker.get_reputation("p1")
+    assert rep_after.last_seen_unix >= last_before
+
+
+def test_slash_events_preserve_insertion_order():
+    tracker = ReputationTracker()
+    _record_slash(tracker, "p1", batch_id="0x" + "01" * 32, slash_amount_wei=100)
+    _record_slash(tracker, "p1", batch_id="0x" + "02" * 32, slash_amount_wei=200)
+    _record_slash(tracker, "p1", batch_id="0x" + "03" * 32, slash_amount_wei=300)
+    events = tracker.get_slash_events("p1")
+    assert [ev.slash_amount_wei for ev in events] == [100, 200, 300]
+
+
+def test_get_slash_events_empty_for_unknown():
+    assert ReputationTracker().get_slash_events("nobody") == []
