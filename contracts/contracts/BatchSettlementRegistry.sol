@@ -2,9 +2,43 @@
 pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
 interface IEscrowPool {
     function settleFromRequester(address requester, address recipient, uint256 amount) external;
+}
+
+/// @notice Pluggable signature-verification surface used by the
+/// INVALID_SIGNATURE challenge path. The production deployment
+/// substitutes an audited Ed25519 verifier (per PRSM-PHASE3.1 §10.1
+/// resolution). The interface is opaque to the cryptographic scheme
+/// so a future migration (e.g., to BLS12-381 or secp256r1) doesn't
+/// require contract surgery.
+interface ISignatureVerifier {
+    /// @return true iff `signature` is a valid signature of `messageHash`
+    ///         under `publicKey` according to the implementing scheme.
+    function verify(
+        bytes32 messageHash,
+        bytes calldata signature,
+        bytes calldata publicKey
+    ) external view returns (bool);
+}
+
+/// @notice Canonical on-chain representation of a Phase 2 ShardExecutionReceipt,
+/// ABI-encoded + keccak256'd to produce Merkle-tree leaves.
+///
+/// NOTE: canonical-form alignment between this struct and the Python-side
+/// off-chain encoding is a Task 5 deliverable. Task 3 ships the struct
+/// + on-chain challenge dispatch; Task 5 locks the parity.
+struct ReceiptLeaf {
+    bytes32 jobIdHash;             // keccak256(utf8(receipt.job_id))
+    uint32 shardIndex;             // receipt.shard_index
+    bytes32 providerIdHash;        // keccak256(utf8(receipt.provider_id))
+    bytes32 providerPubkeyHash;    // keccak256(base64decode(provider_pubkey_b64))
+    bytes32 outputHash;            // bytes32 of hex-decoded receipt.output_hash
+    uint64 executedAtUnix;         // receipt.executed_at_unix
+    uint128 valueFtns;             // per-receipt quoted price in FTNS base units
+    bytes32 signatureHash;         // keccak256(base64decode(receipt.signature))
 }
 
 /**
@@ -62,12 +96,45 @@ contract BatchSettlementRegistry is Ownable {
     /// Default 3 days per design §5.1.
     uint256 public challengeWindowSeconds;
 
+    /// @dev Reason codes for challengeReceipt. Ordering is stable; adding
+    /// new codes appends to the enum. MALFORMED is reserved but not
+    /// implementable on-chain without extra infrastructure; use of it in
+    /// Task 3 reverts with NotYetImplemented.
+    enum ReasonCode {
+        DOUBLE_SPEND,        // 0: receipt present in two committed batches
+        INVALID_SIGNATURE,   // 1: Ed25519 sig doesn't verify under declared pubkey
+        NO_ESCROW,           // 2: batch.requester attests no matching authorization
+        EXPIRED,             // 3: receipt.executed_at_unix beyond lookback window
+        MALFORMED            // 4: reserved (not yet implementable)
+    }
+
     /// @dev EscrowPool contract authorized to execute settlement transfers.
     /// Set by owner via setEscrowPool; finalizeBatch invokes it to move
     /// FTNS from requester's escrow balance to provider's wallet.
     /// May be address(0) in Task 1 scope (no transfer happens); once set
     /// in Task 2, finalizeBatch requires it to be configured.
     IEscrowPool public escrowPool;
+
+    /// @dev Pluggable Ed25519 verifier for INVALID_SIGNATURE challenges.
+    /// May be address(0) until a production verifier is deployed;
+    /// INVALID_SIGNATURE challenges revert with VerifierNotConfigured
+    /// if it is unset.
+    ISignatureVerifier public signatureVerifier;
+
+    /// @dev Maximum receipt age (in seconds) that a provider may batch.
+    /// EXPIRED challenges succeed if block.timestamp - leaf.executedAtUnix
+    /// exceeds this window. Default 30 days per design §5.2 reason 3.
+    /// Governance-adjustable within reasonable bounds.
+    uint256 public settlementLookbackWindowSeconds;
+
+    uint256 public constant MIN_LOOKBACK_SECONDS = 1 days;
+    uint256 public constant MAX_LOOKBACK_SECONDS = 365 days;
+
+    /// @dev invalidatedReceipts[batchId][receiptLeafHash] = true if this
+    /// specific receipt has been successfully challenged. Prevents
+    /// double-challenges that would double-subtract value.
+    mapping(bytes32 batchId => mapping(bytes32 receiptLeafHash => bool))
+        public invalidatedReceipts;
 
     /// @dev Per-provider monotonic counter used in batchId derivation to
     /// avoid collision when a provider commits multiple batches in the
@@ -99,22 +166,41 @@ contract BatchSettlementRegistry is Ownable {
         bytes32 indexed batchId,
         address indexed provider,
         uint256 finalValueFTNS,
-        uint256 invalidatedCount,
+        uint256 invalidatedValueFTNS,
         uint64 finalizeTimestamp
     );
 
     event ChallengeWindowUpdated(uint256 oldSeconds, uint256 newSeconds);
     event EscrowPoolUpdated(address oldPool, address newPool);
+    event SignatureVerifierUpdated(address oldVerifier, address newVerifier);
+    event SettlementLookbackUpdated(uint256 oldSeconds, uint256 newSeconds);
+    event ReceiptChallenged(
+        bytes32 indexed batchId,
+        bytes32 indexed receiptLeafHash,
+        address indexed challenger,
+        ReasonCode reason,
+        uint128 invalidatedValueFTNS
+    );
 
     error InvalidChallengeWindow(uint256 provided);
+    error InvalidLookbackWindow(uint256 provided);
     error BatchAlreadyCommitted(bytes32 batchId);
     error BatchNotFound(bytes32 batchId);
     error BatchNotPending(bytes32 batchId, BatchStatus current);
     error ChallengeWindowNotElapsed(bytes32 batchId, uint64 commitTimestamp, uint256 windowSeconds);
+    error ChallengeWindowElapsed(bytes32 batchId);
     error EmptyMerkleRoot();
     error ZeroReceiptCount();
     error ZeroRequester();
     error EscrowPoolNotConfigured();
+    error InvalidMerkleProof(bytes32 batchId, bytes32 receiptLeafHash);
+    error ReceiptAlreadyInvalidated(bytes32 batchId, bytes32 receiptLeafHash);
+    error ChallengeNotProven(ReasonCode reason);
+    error VerifierNotConfigured();
+    error MalformedReasonNotImplemented();
+    error CallerNotRequester(address caller, address requester);
+    error ReceiptNotExpired(uint64 executedAtUnix, uint256 lookbackSeconds);
+    error ConflictingBatchNotCommitted(bytes32 conflictingBatchId);
 
     constructor(address initialOwner, uint256 initialChallengeWindow) Ownable(initialOwner) {
         if (initialChallengeWindow < MIN_CHALLENGE_WINDOW_SECONDS ||
@@ -122,6 +208,7 @@ contract BatchSettlementRegistry is Ownable {
             revert InvalidChallengeWindow(initialChallengeWindow);
         }
         challengeWindowSeconds = initialChallengeWindow;
+        settlementLookbackWindowSeconds = 30 days; // default per design §5.2
     }
 
     /**
@@ -232,9 +319,163 @@ contract BatchSettlementRegistry is Ownable {
             batchId,
             b.provider,
             finalValue,
-            0, // invalidatedCount; Task 3 will track and emit
+            b.invalidatedValueFTNS,
             uint64(block.timestamp)
         );
+    }
+
+    // ── Challenges (Task 3) ───────────────────────────────────────
+
+    /**
+     * @notice Challenge a specific receipt inside a PENDING batch. Reason-
+     *         code-specific verification determines whether the challenge
+     *         succeeds; on success, the receipt's value is subtracted from
+     *         the batch's final payable amount at finalizeBatch time.
+     *
+     * @param batchId the pending batch
+     * @param leaf canonical ReceiptLeaf being challenged
+     * @param merkleProof proof that keccak256(abi.encode(leaf)) is in
+     *                    batches[batchId].merkleRoot
+     * @param reason which check the contract performs; see ReasonCode
+     * @param auxData additional data per-reason-code. See individual
+     *                _handle* functions for encoding.
+     */
+    function challengeReceipt(
+        bytes32 batchId,
+        ReceiptLeaf calldata leaf,
+        bytes32[] calldata merkleProof,
+        ReasonCode reason,
+        bytes calldata auxData
+    ) external {
+        Batch storage b = batches[batchId];
+        if (b.status == BatchStatus.NONEXISTENT) revert BatchNotFound(batchId);
+        if (b.status != BatchStatus.PENDING) {
+            revert BatchNotPending(batchId, b.status);
+        }
+        uint256 elapsed = block.timestamp - b.commitTimestamp;
+        if (elapsed >= challengeWindowSeconds) {
+            // Cannot challenge after window elapses — finalize is
+            // eligible.  Challengers must act within the window.
+            revert ChallengeWindowElapsed(batchId);
+        }
+
+        bytes32 leafHash = _hashLeaf(leaf);
+        if (invalidatedReceipts[batchId][leafHash]) {
+            revert ReceiptAlreadyInvalidated(batchId, leafHash);
+        }
+
+        if (!MerkleProof.verify(merkleProof, b.merkleRoot, leafHash)) {
+            revert InvalidMerkleProof(batchId, leafHash);
+        }
+
+        bool proven;
+        if (reason == ReasonCode.DOUBLE_SPEND) {
+            proven = _handleDoubleSpend(leaf, leafHash, auxData);
+        } else if (reason == ReasonCode.INVALID_SIGNATURE) {
+            proven = _handleInvalidSignature(leaf, auxData);
+        } else if (reason == ReasonCode.NO_ESCROW) {
+            proven = _handleNoEscrow(b);
+        } else if (reason == ReasonCode.EXPIRED) {
+            proven = _handleExpired(leaf);
+        } else {
+            // MALFORMED reserved — cannot prove on-chain in Task 3 scope.
+            revert MalformedReasonNotImplemented();
+        }
+
+        if (!proven) revert ChallengeNotProven(reason);
+
+        // Record + accumulate invalidated value.
+        invalidatedReceipts[batchId][leafHash] = true;
+        b.invalidatedValueFTNS += leaf.valueFtns;
+
+        emit ReceiptChallenged(batchId, leafHash, msg.sender, reason, leaf.valueFtns);
+    }
+
+    /// @dev Compute the canonical keccak256 leaf hash for a ReceiptLeaf.
+    function _hashLeaf(ReceiptLeaf calldata leaf) internal pure returns (bytes32) {
+        return keccak256(abi.encode(leaf));
+    }
+
+    /**
+     * @dev DOUBLE_SPEND: the same receipt was committed in a different
+     *      batch. auxData layout:
+     *        abi.encode(bytes32 conflictingBatchId, bytes32[] conflictingProof)
+     *      Succeeds iff the receipt's leafHash is provable in both
+     *      `this batch` (already verified by caller) and the conflicting
+     *      batch.
+     */
+    function _handleDoubleSpend(
+        ReceiptLeaf calldata leaf,
+        bytes32 leafHash,
+        bytes calldata auxData
+    ) internal view returns (bool) {
+        (bytes32 conflictingBatchId, bytes32[] memory conflictingProof) =
+            abi.decode(auxData, (bytes32, bytes32[]));
+
+        Batch storage other = batches[conflictingBatchId];
+        if (other.status == BatchStatus.NONEXISTENT) {
+            revert ConflictingBatchNotCommitted(conflictingBatchId);
+        }
+        // Conflicting batch may be PENDING, FINALIZED, or VOIDED — all
+        // establish that the receipt was claimed there too.
+
+        return MerkleProof.verify(conflictingProof, other.merkleRoot, leafHash);
+    }
+
+    /**
+     * @dev INVALID_SIGNATURE: the receipt's signature doesn't verify under
+     *      its declared pubkey. auxData layout:
+     *        abi.encode(bytes signingMessage, bytes publicKey, bytes signature)
+     *      Contract verifies:
+     *        - keccak256(publicKey) == leaf.providerPubkeyHash
+     *        - keccak256(signature) == leaf.signatureHash
+     *        - ISignatureVerifier.verify returns FALSE
+     *      If verify returns TRUE, the signature is genuinely valid →
+     *      challenge is not proven (challenger wasted gas).
+     */
+    function _handleInvalidSignature(
+        ReceiptLeaf calldata leaf,
+        bytes calldata auxData
+    ) internal view returns (bool) {
+        if (address(signatureVerifier) == address(0)) {
+            revert VerifierNotConfigured();
+        }
+        (bytes memory signingMessage, bytes memory publicKey, bytes memory signature) =
+            abi.decode(auxData, (bytes, bytes, bytes));
+
+        // Bind the submitted pubkey + signature to the leaf-committed hashes.
+        if (keccak256(publicKey) != leaf.providerPubkeyHash) return false;
+        if (keccak256(signature) != leaf.signatureHash) return false;
+
+        bytes32 messageHash = keccak256(signingMessage);
+        bool valid = signatureVerifier.verify(messageHash, signature, publicKey);
+        return !valid; // challenge succeeds iff verification fails
+    }
+
+    /**
+     * @dev NO_ESCROW: the batch's named requester attests (via msg.sender)
+     *      that they did not authorize this receipt. No cryptographic
+     *      proof of a negative is possible on-chain, so this reduces to
+     *      an authorization check — only the batch.requester can invoke.
+     *      Their signed transaction IS the attestation.
+     */
+    function _handleNoEscrow(Batch storage b) internal view returns (bool) {
+        if (msg.sender != b.requester) {
+            revert CallerNotRequester(msg.sender, b.requester);
+        }
+        return true;
+    }
+
+    /**
+     * @dev EXPIRED: receipt older than settlementLookbackWindowSeconds.
+     *      Pure time check against leaf.executedAtUnix.
+     */
+    function _handleExpired(ReceiptLeaf calldata leaf) internal view returns (bool) {
+        uint256 age = block.timestamp - uint256(leaf.executedAtUnix);
+        if (age <= settlementLookbackWindowSeconds) {
+            revert ReceiptNotExpired(leaf.executedAtUnix, settlementLookbackWindowSeconds);
+        }
+        return true;
     }
 
     // ── Governance surface ────────────────────────────────────────
@@ -274,6 +515,31 @@ contract BatchSettlementRegistry is Ownable {
         address old = address(escrowPool);
         escrowPool = IEscrowPool(newPool);
         emit EscrowPoolUpdated(old, newPool);
+    }
+
+    /**
+     * @notice Set the pluggable Ed25519 verifier used by INVALID_SIGNATURE
+     *         challenges. Owner-only. May be address(0) to effectively
+     *         disable INVALID_SIGNATURE challenges (they revert with
+     *         VerifierNotConfigured).
+     */
+    function setSignatureVerifier(address newVerifier) external onlyOwner {
+        address old = address(signatureVerifier);
+        signatureVerifier = ISignatureVerifier(newVerifier);
+        emit SignatureVerifierUpdated(old, newVerifier);
+    }
+
+    /**
+     * @notice Set the EXPIRED-receipt lookback window. Owner-only.
+     *         Bounded [1 day, 365 days] to prevent pathological values.
+     */
+    function setSettlementLookbackWindow(uint256 newSeconds) external onlyOwner {
+        if (newSeconds < MIN_LOOKBACK_SECONDS || newSeconds > MAX_LOOKBACK_SECONDS) {
+            revert InvalidLookbackWindow(newSeconds);
+        }
+        uint256 old = settlementLookbackWindowSeconds;
+        settlementLookbackWindowSeconds = newSeconds;
+        emit SettlementLookbackUpdated(old, newSeconds);
     }
 
     function setChallengeWindowSeconds(uint256 newSeconds) external onlyOwner {
