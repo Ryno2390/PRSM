@@ -135,19 +135,26 @@ Phase 7 only adds one field to the `Batch` struct in BatchSettlementRegistry: `u
 
 The independent code-reviewer agent ran on `phase7-merge-ready-20260421` and returned **SAFE TO MERGE** with two non-blocker follow-ups. Both are disclosed here for auditor context; both will be addressed pre-mainnet.
 
-### 5.1 Challenge-tx gas floor (design doc §8.7)
+### 5.1 Challenge-tx gas floor (design doc §8.7) ✅ RESOLVED PRE-AUDIT
 
-**Issue:** `challengeReceipt` wraps `stakeBond.slash` in `try/catch`. When the challenger under-pays gas, the outer tx succeeds (receipt invalidated, event emitted) but the nested slash silently OOGs via the catch. `eth_estimateGas` produces a too-small budget because it simulates the tx as succeeding without the slash.
+**Original issue:** `challengeReceipt` wrapped `stakeBond.slash` in `try/catch`. When the challenger under-paid gas, the outer tx succeeded (receipt invalidated, event emitted) but the nested slash silently OOGed via the catch. `eth_estimateGas` produced a too-small budget because it simulated the tx as succeeding without the slash. In competitive-challenger races, a challenger who under-paid gas could burn a receipt while inadvertently shielding the provider from slash — adverse selection.
 
-**Impact:** In competitive-challenger races, a challenger who under-pays gas can burn a receipt (winning the first-to-invalidate race) while inadvertently shielding the provider from slash. This is adverse selection.
+**Resolution (commit TBD, pre-audit):** Landed contract-level `MIN_SLASH_GAS = 150_000` floor. `BatchSettlementRegistry.challengeReceipt` now performs `if (gasleft() < MIN_SLASH_GAS) revert InsufficientGasForSlash(gasleft(), MIN_SLASH_GAS);` immediately before the `try stakeBond.slash(...)` block. If the challenger under-funds gas, the outer tx reverts cleanly — rolling back the receipt invalidation too, so the challenger's tx is all-or-nothing.
 
-**Current mitigation:** Task 7's E2E test hard-codes a 1_000_000-gas budget. Phase 7 wallet/orchestrator integrations must do the same on production challenges.
+**Why the floor + try/catch (not drop try/catch entirely):** preserves best-effort semantics for legitimate slash-ineligibility cases (`NotSlashable` when provider already withdrew, `NothingToSlash` when stake fully drained) — those should NOT unwind the challenge's receipt invalidation. The floor excludes only the OOG case.
 
-**Preferred hardening (auditor opinion wanted):**
-- Option A: `require(gasleft() >= MIN_SLASH_GAS, "InsufficientGasForSlash")` immediately before the `try stakeBond.slash(...)` block. Suggested floor: 150_000 gas (below ~200K actual cost, leaves headroom for catch path).
-- Option B: drop the `try/catch` under the branch `address(stakeBond) != address(0) && tier_slash_rate_bps > 0`. Rationale: the only realistic reverts from `slash()` (`NotSlashable`, `NothingToSlash`) are legitimate failure modes the challenger should learn about, not silently succeed through.
+**Why 150_000:** the slash path costs ~200K gas with storage writes + event. 150K leaves headroom for the catch path and Solidity's 63/64 forwarding while comfortably rejecting under-funded submissions. Tuned at deploy time if audit suggests a different floor.
 
-**Auditor: which option do you recommend, or is there a better one?**
+**Test coverage:** 7 new tests in `contracts/test/BatchSettlementGasFloor.test.js`:
+- `MIN_SLASH_GAS` exposed as a public constant (150_000).
+- Under-funded challenge at `gasLimit: 120_000` reverts (generic OOG before the floor check).
+- Under-funded challenge at `gasLimit: 180_000` reaches the floor check and reverts `InsufficientGasForSlash`.
+- Happy path: estimator-allocated gas → slash lands normally.
+- Happy path: explicit 1M gas → slash lands normally (matches E2E behavior).
+- EXPIRED challenges skip the floor (no slash path = no gas requirement).
+- `stakeBond` unset skips the floor entirely.
+
+**Auditor: please verify the floor value is appropriate against the actual gas report** (`npx hardhat test --gas-reporter` — Slashing test suite emits per-op costs).
 
 ### 5.2 Cross-process nonce-race on shared provider keys (design doc §8.8)
 
@@ -177,10 +184,11 @@ npx hardhat test \
   test/StakeBond.test.js \
   test/BatchSettlementRegistry.test.js \
   test/BatchSettlementChallenge.test.js \
-  test/BatchSettlementSlashing.test.js
+  test/BatchSettlementSlashing.test.js \
+  test/BatchSettlementGasFloor.test.js
 ```
 
-Expected: 122 passing in ~2 seconds. Gas report emitted (useful cross-check for the §5.1 MIN_SLASH_GAS estimate).
+Expected: 129 passing in ~2 seconds. Gas report emitted (useful cross-check for the §5.1 MIN_SLASH_GAS value).
 
 ### 6.2 Python unit
 

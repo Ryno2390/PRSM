@@ -370,20 +370,19 @@ For Phase 7 MVP: accept the drift. Periodic governance recalibration via `setTie
 
 Phase 3.1 Task 3 ships `INVALID_SIGNATURE` with a pluggable verifier (mock in tests; production Ed25519 library TBD for pre-audit). Slashing based on `INVALID_SIGNATURE` challenges is only as sound as the verifier. Real-deploy substitution of the verifier is a pre-Phase-7-mainnet-deploy step (call it part of Phase 7 Task 9 audit prep, not a blocker for merge).
 
-### 8.7 Challenge-tx gas floor (from Task 8 review)
+### 8.7 Challenge-tx gas floor (from Task 8 review) ✅ RESOLVED PRE-AUDIT
 
-`BatchSettlementRegistry.challengeReceipt` wraps `stakeBond.slash` in `try/catch` for best-effort semantics. The reviewer flagged that `estimateGas` can under-budget the tx because the outer call succeeds even when the nested slash silently OOGs — a challenger who under-pays gas gets receipt invalidation without slashing, creating an adverse-selection window in competitive-challenger races.
+`BatchSettlementRegistry.challengeReceipt` wrapped `stakeBond.slash` in `try/catch` for best-effort semantics. The reviewer flagged that `estimateGas` could under-budget the tx because the outer call succeeded even when the nested slash silently OOGed — a challenger who under-paid gas would get receipt invalidation without slashing, creating an adverse-selection window in competitive-challenger races.
 
-Task 7's E2E hard-codes a 1M-gas budget as a workaround. For mainnet, the preferred hardening (per reviewer) is a contract-level floor:
+**Resolved 2026-04-21 (pre-audit):** Landed contract-level `MIN_SLASH_GAS = 150_000` floor with a `require(gasleft() >= MIN_SLASH_GAS)` check immediately before the `stakeBond.slash` try/catch. If a challenger under-funds gas, the tx now reverts cleanly with `InsufficientGasForSlash(available, required)` — rolling back the receipt invalidation too, so the challenger's tx is all-or-nothing.
 
-```solidity
-require(gasleft() >= MIN_SLASH_GAS, "InsufficientGasForSlash");
-try stakeBond.slash(...) { } catch { }
-```
+Why this value: the slash path costs ~200K gas with storage writes + event. 150K leaves headroom for the catch path and Solidity's 63/64 forwarding while comfortably rejecting under-funded submissions. Tuned at deploy time if audit suggests a different floor.
 
-with `MIN_SLASH_GAS` ≈ 150_000 (below the ~200K slash actually costs with storage + event, leaves headroom for the catch path). Alternative: remove the try/catch entirely when `stakeBond != 0 && tier_slash_rate_bps > 0` — under that branch, the only realistic revert causes (`NotSlashable`, `NothingToSlash`) are edge cases the challenger should learn about, not silently succeed through.
+Why the floor + try/catch (not drop try/catch): preserves best-effort for legitimate slash-ineligibility cases (`NotSlashable` when provider already withdrawn, `NothingToSlash` when stake fully drained) — those should NOT unwind the challenge's receipt invalidation. The floor excludes only the OOG case, which is the pathological one.
 
-**Disposition:** carried into Phase 7 Task 9 (audit prep). The auditor will flag this regardless; resolving it then rather than now keeps the diff small pre-audit.
+Test coverage: 7 new tests in `contracts/test/BatchSettlementGasFloor.test.js` — under-funded challenge reverts with custom error, happy path works at normal estimator-allocated gas, floor is NOT enforced on EXPIRED or when stakeBond is unset (no slash path = no gas requirement).
+
+Phase 7/7.1 E2E tests were already pre-allocating 1M gas and continue to pass without modification.
 
 ### 8.8 Cross-process nonce-race on shared provider keys (from Task 8 review)
 
