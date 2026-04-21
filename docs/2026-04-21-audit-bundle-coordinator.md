@@ -135,7 +135,7 @@ From the three per-phase review gates. All are non-blockers for tag but tracked 
 
 ### From Phase 7.1 (Task 8 review)
 
-- **§8.6 — `consensus_minority_queue` persistence.** ⚙️ PARTIALLY RESOLVED pre-audit. Drain API + `ConsensusChallengeSubmitter` service shipped (`prsm/marketplace/consensus_submitter.py`). E2E rewired to exercise the submitter. Persistence + retry/backoff + automatic batch-commit coordination still queue for Phase 7.1x.next — not contract-security, orchestrator operations.
+- **§8.6 — `consensus_minority_queue` persistence.** ✅ RESOLVED pre-audit via three shipped artifacts: (1) `ConsensusChallengeSubmitter` service (`prsm/marketplace/consensus_submitter.py`), (2) SQLite-backed `ConsensusChallengeQueue` (`prsm/marketplace/consensus_queue.py`) with PENDING → SUBMITTABLE → SUBMITTED/FAILED lifecycle + crash-safety test, (3) `process_submittable_queue` runner with outcome-based retry classification. Remaining follow-ups (exponential backoff, multi-process claim leases, `BatchCommitted` event watcher) are Phase 7.1x.next+ operational polish, not contract-security.
 - **§8.7 — Sybil-requester griefing vector.** Under MVP auth (requester-only challenger), attacker with two EOAs can self-slash at 30% net loss + reputation crush. Negative-EV by design; Phase 7.1x `consensus_group_id` is the planned fix.
 - **§8.8 — asyncio timeout/cancel propagation.** ✅ VERIFIED + FIXED PRE-AUDIT. Full grep pass completed; `asyncio.TimeoutError` is wrapped by `_dispatch_once`'s retry loop into `ShardDispatchError`; `asyncio.CancelledError` correctly propagates (outer-loop cancellation). One real gap found and fixed: `PeerNotConnectedError` now classified as partial-response in `MultiShardDispatcher` rather than aborting the gather.
 

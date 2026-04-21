@@ -391,7 +391,12 @@ class MarketplaceOrchestrator:
 
         # Step 6: queue minority for downstream challenge.
         if receipt.minority_receipts:
-            self._queue_consensus_challenges(receipt)
+            # Convert per-provider FTNS price (float) to wei (uint128) so
+            # the submitter can build ReceiptLeafFields without having
+            # to know the policy. Queue entry carries the numeric value
+            # the challenge tx eventually asserts in the leaf.
+            per_provider_wei = int(round(per_provider_escrow * 10**18))
+            self._queue_consensus_challenges(receipt, per_provider_wei)
 
         return receipt.agreed_output
 
@@ -447,7 +452,9 @@ class MarketplaceOrchestrator:
         self.consensus_minority_queue.clear()
         return drained
 
-    def _queue_consensus_challenges(self, receipt) -> None:
+    def _queue_consensus_challenges(
+        self, receipt, value_ftns_per_provider_wei: int,
+    ) -> None:
         """Phase 7.1 Task 5 — accumulate minority receipts for the
         downstream challenge-submitter service to consume.
 
@@ -457,9 +464,12 @@ class MarketplaceOrchestrator:
         accumulator has once the batch is committed. A production
         challenge-submitter drains this queue after batch commit.
 
-        MVP shape: (batch_id=None when not-yet-committed, minority
-        receipts, majority receipts). The submitter service supplies
-        the batch_id when draining.
+        Entry shape: (job_id, shard_index, agreed_output_hash,
+        majority_receipts, minority_receipts, value_ftns_per_provider_wei).
+        The per-provider wei value is carried here so the submitter
+        (or ConsensusChallengeQueue) can build ReceiptLeafFields
+        without knowing the dispatch policy. The submitter service
+        supplies batch_ids when draining.
         """
         self.consensus_minority_queue.append({
             "job_id": receipt.job_id,
@@ -467,6 +477,7 @@ class MarketplaceOrchestrator:
             "agreed_output_hash": receipt.agreed_output_hash,
             "majority_receipts": receipt.majority_receipts,
             "minority_receipts": receipt.minority_receipts,
+            "value_ftns_per_provider_wei": value_ftns_per_provider_wei,
         })
         logger.info(
             f"queued {len(receipt.minority_receipts)} consensus-mismatch "
