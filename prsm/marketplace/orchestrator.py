@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -68,6 +68,13 @@ class MarketplaceOrchestrator:
         reputation: ReputationTracker,
         price_negotiator: PriceNegotiator,
         remote_dispatcher,
+        # Phase 3.1 (Task 7) — optional batched-settlement integration.
+        # When both are wired, after each successful remote dispatch the
+        # orchestrator forwards a BatchedReceipt to the settlement client.
+        # When either is None, the orchestrator behaves as Phase 3 did
+        # (local-ledger-only settlement via the dispatcher's escrow flow).
+        batch_settlement_client=None,
+        provider_address_resolver=None,
     ):
         self.identity = identity
         self.directory = directory
@@ -75,6 +82,8 @@ class MarketplaceOrchestrator:
         self.reputation = reputation
         self.price_negotiator = price_negotiator
         self.remote_dispatcher = remote_dispatcher
+        self.batch_settlement_client = batch_settlement_client
+        self.provider_address_resolver = provider_address_resolver
 
     async def orchestrate_sharded_inference(
         self,
@@ -140,17 +149,40 @@ class MarketplaceOrchestrator:
                 continue
 
             # Step 2: dispatch the shard under the quoted price.
+            # Use dispatch_with_receipt when Phase 3.1 batched settlement
+            # is wired so we can forward the verified receipt to the
+            # settlement accumulator; otherwise use the Phase 2 dispatch
+            # API that returns just the output.
             started = time.time()
+            use_batched_settlement = (
+                self.batch_settlement_client is not None
+                and self.provider_address_resolver is not None
+                and getattr(self.identity, "ethereum_address", None) is not None
+            )
             try:
-                output = await self.remote_dispatcher.dispatch(
-                    shard=shard,
-                    input_tensor=input_tensor,
-                    node_id=listing.provider_id,
-                    job_id=job_id,
-                    stake_tier=_stake_tier_for(listing.stake_tier),
-                    escrow_amount_ftns=quote.quoted_price_ftns,
-                    require_tee_attestation=policy.require_tee,
-                )
+                if use_batched_settlement:
+                    result = await self.remote_dispatcher.dispatch_with_receipt(
+                        shard=shard,
+                        input_tensor=input_tensor,
+                        node_id=listing.provider_id,
+                        job_id=job_id,
+                        stake_tier=_stake_tier_for(listing.stake_tier),
+                        escrow_amount_ftns=quote.quoted_price_ftns,
+                        require_tee_attestation=policy.require_tee,
+                    )
+                    output = result.output
+                    receipt = result.receipt
+                else:
+                    output = await self.remote_dispatcher.dispatch(
+                        shard=shard,
+                        input_tensor=input_tensor,
+                        node_id=listing.provider_id,
+                        job_id=job_id,
+                        stake_tier=_stake_tier_for(listing.stake_tier),
+                        escrow_amount_ftns=quote.quoted_price_ftns,
+                        require_tee_attestation=policy.require_tee,
+                    )
+                    receipt = None
             except ShardPreemptedError:
                 # Honest-work failure — no reputation penalty.
                 self.reputation.record_preemption(listing.provider_id)
@@ -170,6 +202,21 @@ class MarketplaceOrchestrator:
             # Success.
             latency_ms = (time.time() - started) * 1000
             self.reputation.record_success(listing.provider_id, latency_ms)
+
+            # Phase 3.1 (Task 7): accumulate the verified receipt for
+            # batched on-chain settlement, when wired. Silently skip if
+            # receipt is empty (fallback path) or addresses aren't
+            # resolvable — we never want to block Phase 3 success on an
+            # optional settlement failure.
+            if use_batched_settlement and receipt:
+                await self._accumulate_settlement_receipt(
+                    listing=listing,
+                    job_id=job_id,
+                    shard_index=shard.shard_index,
+                    receipt=receipt,
+                    quoted_price_ftns=quote.quoted_price_ftns,
+                )
+
             return output
 
         # Exhausted the eligible pool without a success.
@@ -178,3 +225,65 @@ class MarketplaceOrchestrator:
             f"eligible pool (size={len(eligible)}) without success; "
             f"last failure reason: {last_reason or 'unknown'}"
         )
+
+    async def _accumulate_settlement_receipt(
+        self,
+        listing: ProviderListing,
+        job_id: str,
+        shard_index: int,
+        receipt: Dict[str, Any],
+        quoted_price_ftns: float,
+    ) -> None:
+        """Phase 3.1 (Task 7) — build a BatchedReceipt and forward to
+        the settlement accumulator. Lazy imports so callers without
+        Phase 3.1 wiring don't pay the import cost.
+
+        Never raises: if the provider address resolver returns None, or
+        the settlement client's accumulate fails, we log and swallow.
+        Phase 3.1 batched settlement is strictly additive; its failures
+        must not block Phase 3 dispatch success."""
+        try:
+            from prsm.compute.shard_receipt import ShardExecutionReceipt
+            from prsm.settlement.accumulator import BatchedReceipt
+
+            provider_eth = self.provider_address_resolver(listing.provider_id)
+            if provider_eth is None:
+                logger.debug(
+                    f"batched settlement skipped for provider "
+                    f"{listing.provider_id[:12]}…: no Ethereum address resolved"
+                )
+                return
+
+            # Reconstruct a ShardExecutionReceipt dataclass from the
+            # verified receipt dict so the settlement layer's canonical-
+            # form encoding (Task 5) can reference typed fields.
+            shard_receipt = ShardExecutionReceipt(
+                job_id=receipt.get("job_id", ""),
+                shard_index=receipt.get("shard_index", shard_index),
+                provider_id=receipt.get("provider_id", ""),
+                provider_pubkey_b64=receipt.get("provider_pubkey_b64", ""),
+                output_hash=receipt.get("output_hash", ""),
+                executed_at_unix=receipt.get("executed_at_unix", 0),
+                signature=receipt.get("signature", ""),
+                tee_attestation=receipt.get("tee_attestation"),
+            )
+
+            # Value field is in FTNS base units (wei, 18 decimals). The
+            # orchestrator receives the quoted price as a float FTNS
+            # value per Phase 3's price-handshake semantics.
+            value_ftns_wei = int(round(quoted_price_ftns * 10**18))
+
+            br = BatchedReceipt(
+                receipt=shard_receipt,
+                requester_address=self.identity.ethereum_address,
+                provider_address=provider_eth,
+                value_ftns=value_ftns_wei,
+                local_escrow_id=f"{job_id}:shard:{shard_index}",
+            )
+            await self.batch_settlement_client.accumulate(br)
+        except Exception as exc:
+            logger.warning(
+                f"batched settlement accumulate failed for shard "
+                f"{shard_index} of job {job_id!r}: "
+                f"{type(exc).__name__}: {exc}"
+            )
