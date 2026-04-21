@@ -174,6 +174,24 @@ contract BatchSettlementRegistry is Ownable {
     uint256 public constant MIN_CHALLENGE_WINDOW_SECONDS = 1 hours;
     uint256 public constant MAX_CHALLENGE_WINDOW_SECONDS = 30 days;
 
+    /// @dev Minimum `gasleft()` required immediately before the
+    ///      stakeBond.slash call in challengeReceipt. Set conservatively
+    ///      below the actual slash cost (~200K gas with storage writes +
+    ///      event) but well above Solidity's 63/64 forwarding floor so
+    ///      the nested slash cannot silently OOG via the try/catch.
+    ///
+    ///      Why this exists: without the floor, eth_estimateGas can
+    ///      under-budget a CONSENSUS_MISMATCH / DOUBLE_SPEND /
+    ///      INVALID_SIGNATURE challenge — the outer tx succeeds (receipt
+    ///      invalidation lands) while the inner slash silently reverts
+    ///      with out-of-gas, caught by the try/catch. A challenger who
+    ///      under-paid gas gets a free burn of the receipt without the
+    ///      economic penalty the provider owes. With this floor, the
+    ///      outer tx reverts cleanly before any state change, forcing
+    ///      the estimator (or a conscientious manual submission) to
+    ///      allocate enough gas for the slash to actually complete.
+    uint256 public constant MIN_SLASH_GAS = 150_000;
+
     event BatchCommitted(
         bytes32 indexed batchId,
         address indexed provider,
@@ -225,6 +243,7 @@ contract BatchSettlementRegistry is Ownable {
     error ReceiptNotExpired(uint64 executedAtUnix, uint256 lookbackSeconds);
     error ConflictingBatchNotCommitted(bytes32 conflictingBatchId);
     error InvalidSlashRateBps(uint16 provided);
+    error InsufficientGasForSlash(uint256 available, uint256 required);
 
     constructor(address initialOwner, uint256 initialChallengeWindow) Ownable(initialOwner) {
         if (initialChallengeWindow < MIN_CHALLENGE_WINDOW_SECONDS ||
@@ -435,16 +454,29 @@ contract BatchSettlementRegistry is Ownable {
                 || reason == ReasonCode.CONSENSUS_MISMATCH
             )
         ) {
+            // Gas-floor guard — revert cleanly BEFORE the try/catch if
+            // the challenger hasn't funded enough gas for the slash to
+            // complete. Without this, the try/catch could swallow a
+            // nested out-of-gas revert and leave the receipt invalidated
+            // but the provider unslashed — see MIN_SLASH_GAS commentary.
+            // Reverting here rolls back the receipt invalidation too, so
+            // the challenger's tx is all-or-nothing: either they fund
+            // the slash or they get nothing.
+            if (gasleft() < MIN_SLASH_GAS) {
+                revert InsufficientGasForSlash(gasleft(), MIN_SLASH_GAS);
+            }
             // Wrapped in try/catch so a StakeBond-level revert (e.g.,
             // provider already fully slashed, stake already withdrawn)
             // doesn't undo the challenge's receipt-invalidation work.
-            // The ReceiptChallenged event is the authoritative record;
-            // the slash is an economic downstream consequence.
+            // OOG is excluded by the gas floor above; the only catchable
+            // reverts now are legitimate slash-ineligibility conditions
+            // (NotSlashable, NothingToSlash, CallerNotSlasher) that
+            // should NOT unwind the challenge.
             try stakeBond.slash(b.provider, msg.sender, batchId) {
                 // success; bounty credited + foundation reserve updated
             } catch {
                 // swallow — receipt is already invalidated; slash is
-                // best-effort
+                // best-effort under non-OOG conditions
             }
         }
     }

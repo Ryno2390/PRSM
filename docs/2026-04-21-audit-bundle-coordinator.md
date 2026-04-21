@@ -100,7 +100,8 @@ cd contracts && npx hardhat test \
   test/BatchSettlementRegistry.test.js \
   test/BatchSettlementChallenge.test.js \
   test/BatchSettlementSlashing.test.js \
-  test/BatchSettlementConsensus.test.js
+  test/BatchSettlementConsensus.test.js \
+  test/BatchSettlementGasFloor.test.js
 
 # Python unit (excludes conftest-brittle legacy tests)
 .venv/bin/python -m pytest \
@@ -119,7 +120,7 @@ cd contracts && npx hardhat test \
   tests/integration/test_phase7_1_consensus_e2e.py -v
 ```
 
-Expected at `phase7.1-audit-prep-20260421`: **303 passing total** (132 Solidity + 169 Python unit + 2 Python E2E).
+Expected at the current tip: **310 passing total** (139 Solidity — includes 7 new §8.7 gas-floor tests landed pre-audit — + 169 Python unit + 2 Python E2E).
 
 ---
 
@@ -129,7 +130,7 @@ From the three per-phase review gates. All are non-blockers for tag but tracked 
 
 ### From Phase 7 (Task 8 review)
 
-- **§8.7 — Challenge-tx gas floor.** `try/catch` around `stakeBond.slash` lets `eth_estimateGas` under-budget tx; adverse selection in competitive-challenger races. Preferred fix: `require(gasleft() >= MIN_SLASH_GAS)` before the try/catch, or drop the try/catch under the slash-eligible branch.
+- **§8.7 — Challenge-tx gas floor.** ✅ RESOLVED PRE-AUDIT. Landed contract-level `MIN_SLASH_GAS = 150_000` with `require(gasleft() >= MIN_SLASH_GAS)` before the `stakeBond.slash` try/catch. Preserves best-effort semantics for legitimate slash-ineligibility while excluding the OOG path. 7 new tests in `BatchSettlementGasFloor.test.js` pin the behavior.
 - **§8.8 — Cross-process nonce-race on shared provider keys.** Not a regression from Phase 1.1; Phase 7 widens exposure. Operator runbook invariant now in `OPERATOR_GUIDE.md` §On-chain Keypairs.
 
 ### From Phase 7.1 (Task 8 review)
