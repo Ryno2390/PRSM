@@ -405,7 +405,7 @@ contract BatchSettlementRegistry is Ownable {
         } else if (reason == ReasonCode.EXPIRED) {
             proven = _handleExpired(leaf);
         } else if (reason == ReasonCode.CONSENSUS_MISMATCH) {
-            proven = _handleConsensusMismatch(b, leaf, auxData);
+            proven = _handleConsensusMismatch(batchId, b, leaf, auxData);
         } else {
             // MALFORMED reserved — cannot prove on-chain in Task 3 scope.
             revert MalformedReasonNotImplemented();
@@ -538,33 +538,45 @@ contract BatchSettlementRegistry is Ownable {
 
     /**
      * @dev CONSENSUS_MISMATCH (Phase 7.1): the provider's receipt disagrees
-     *      with a majority group in the same batch under a k-of-n
-     *      redundant-execution job. auxData layout:
+     *      with a majority receipt from a DIFFERENT provider's batch for
+     *      the same shard of the same job under a k-of-n redundant-
+     *      execution dispatch. auxData layout:
      *        abi.encode(
-     *          bytes32 majorityAgreedHash,   // the winning output hash
-     *          bytes32 minorityClaimedHash,  // the disagreer's output hash
-     *          bytes32[] majorityProof,      // proof for ONE majority leaf
-     *          ReceiptLeaf majorityLeaf      // the majority receipt used for proof
+     *          bytes32 conflictingBatchId,  // the majority provider's batch
+     *          bytes32[] majorityProof,     // proof for the majority leaf
+     *          ReceiptLeaf majorityLeaf     // the majority receipt
      *        )
      *      The challenged leaf (passed into challengeReceipt) is the
-     *      minority leaf — its provider forfeits stake.
+     *      minority leaf. The challenge slashes b.provider — the
+     *      committer of THIS (minority) batch. Cross-batch structure
+     *      mirrors DOUBLE_SPEND: in k-of-n each provider commits their
+     *      own batch of their own receipts, so slashing the minority's
+     *      stake requires challenging the minority's batch.
      *
-     *      MVP authorization: caller must be the batch's requester. Only
-     *      they know both receipts came from the same k-of-n job; opening
-     *      this to third parties enables self-slash bounty mining per
-     *      design §3.6. Phase 7.1x will introduce a `consensus_group_id`
-     *      on the batch so any holder of k signed receipts can challenge.
+     *      MVP authorization: caller must be the minority batch's
+     *      requester. Only the requester of the k-of-n job knows that
+     *      BOTH receipts came from the same dispatch; opening this to
+     *      third parties enables self-slash bounty mining per design
+     *      §3.6. Phase 7.1x will introduce a `consensus_group_id` that
+     *      any holder of k signed receipts can use.
      *
      *      Checks performed (all must pass):
-     *        1. caller == batch.requester
-     *        2. auxData.minorityClaimedHash == leaf.outputHash  (binding)
-     *        3. auxData.majorityAgreedHash == majorityLeaf.outputHash (binding)
-     *        4. majorityLeaf.outputHash != leaf.outputHash  (genuine disagreement)
-     *        5. MerkleProof.verify(majorityProof, b.merkleRoot, hash(majorityLeaf))
+     *        1. caller == minorityBatch.requester
+     *        2. conflictingBatchId != batchId   (distinct batches — a
+     *           provider cannot disagree with themselves in one batch;
+     *           blocks self-referential challenges)
+     *        3. leaf.jobIdHash == majorityLeaf.jobIdHash   (same job)
+     *        4. leaf.shardIndex == majorityLeaf.shardIndex (same shard)
+     *        5. leaf.outputHash != majorityLeaf.outputHash (genuine
+     *           disagreement — different bytes for identical input)
+     *        6. conflictingBatch exists
+     *        7. MerkleProof.verify(majorityProof, conflictingBatch.root,
+     *             hash(majorityLeaf))
      *
      *      Returns true iff all pass.
      */
     function _handleConsensusMismatch(
+        bytes32 batchId,
         Batch storage b,
         ReceiptLeaf calldata leaf,
         bytes calldata auxData
@@ -574,24 +586,32 @@ contract BatchSettlementRegistry is Ownable {
         }
 
         (
-            bytes32 majorityAgreedHash,
-            bytes32 minorityClaimedHash,
+            bytes32 conflictingBatchId,
             bytes32[] memory majorityProof,
             ReceiptLeaf memory majorityLeaf
-        ) = abi.decode(auxData, (bytes32, bytes32, bytes32[], ReceiptLeaf));
+        ) = abi.decode(auxData, (bytes32, bytes32[], ReceiptLeaf));
 
-        // Bind the hashes declared in auxData to the leaves they describe.
-        // Without this, a caller could pass any bytes32 pair and the proof
-        // check would be against fabricated values.
-        if (minorityClaimedHash != leaf.outputHash) return false;
-        if (majorityAgreedHash != majorityLeaf.outputHash) return false;
+        // Distinct batches. Otherwise a single provider could challenge
+        // their own receipt against another of their own — nonsense and
+        // opens a self-slash rent-extraction vector.
+        if (conflictingBatchId == batchId) return false;
 
-        // Genuine disagreement, not a self-referential challenge.
-        if (majorityLeaf.outputHash == leaf.outputHash) return false;
+        // Same shard of same job — otherwise "disagreement" is meaningless.
+        if (leaf.jobIdHash != majorityLeaf.jobIdHash) return false;
+        if (leaf.shardIndex != majorityLeaf.shardIndex) return false;
 
-        // Majority leaf must be in THIS batch's Merkle tree.
+        // Genuine disagreement on output bytes.
+        if (leaf.outputHash == majorityLeaf.outputHash) return false;
+
+        // The conflicting batch must be committed.
+        Batch storage other = batches[conflictingBatchId];
+        if (other.status == BatchStatus.NONEXISTENT) {
+            revert ConflictingBatchNotCommitted(conflictingBatchId);
+        }
+
+        // Majority leaf must be provable in the conflicting batch.
         bytes32 majorityLeafHash = keccak256(abi.encode(majorityLeaf));
-        if (!MerkleProof.verify(majorityProof, b.merkleRoot, majorityLeafHash)) {
+        if (!MerkleProof.verify(majorityProof, other.merkleRoot, majorityLeafHash)) {
             return false;
         }
 
