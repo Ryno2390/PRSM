@@ -48,6 +48,7 @@ class SettlementContractClient(Protocol):
 
     async def commit_batch(
         self,
+        provider_address: str,
         requester_address: str,
         merkle_root: bytes,
         receipt_count: int,
@@ -56,6 +57,9 @@ class SettlementContractClient(Protocol):
     ) -> Tuple[bytes, int]:
         """Submit commitBatch; return (batch_id, commit_timestamp_unix).
 
+        provider_address is redundant in the real Solidity wrapper
+        (the contract uses msg.sender as the provider), but is passed
+        through for mock/test implementations and for audit logging.
         The implementation parses the BatchCommitted event from the
         transaction receipt and returns the emitted batch_id + timestamp.
         """
@@ -127,13 +131,29 @@ class BatchSettlementClient:
     # ── Accumulation ─────────────────────────────────────────────
 
     async def accumulate(self, br: BatchedReceipt) -> None:
-        """Record a receipt. Caller (MarketplaceOrchestrator) invokes
-        this after each successful Phase 3 dispatch."""
-        if br.provider_address != self._provider:
+        """Record a receipt. Caller (MarketplaceOrchestrator or a
+        provider-side ComputeProvider hook) invokes this after each
+        successful Phase 3 dispatch.
+
+        Safety: the client's bound address must match EITHER the
+        provider (earning side) OR the requester (spending side) on
+        the receipt. Provider-side operators bind `provider_address`
+        to their own address + receive receipts where provider_address
+        matches; requester-side operators (e.g., MarketplaceOrchestrator
+        in Phase 3.1 Task 7) bind the same parameter to their own
+        address + receive receipts where requester_address matches.
+        Both modes catch wrong-client routing while allowing either
+        architectural pattern.
+        """
+        if (
+            br.provider_address != self._provider
+            and br.requester_address != self._provider
+        ):
             raise ValueError(
-                f"BatchSettlementClient for provider "
-                f"{self._provider!r} refusing receipt intended for "
-                f"{br.provider_address!r}"
+                f"BatchSettlementClient bound to {self._provider!r} "
+                f"refusing receipt with provider={br.provider_address!r} "
+                f"requester={br.requester_address!r} — neither matches "
+                f"the client's bound address"
             )
         self._accumulator.add(br)
 
@@ -168,15 +188,14 @@ class BatchSettlementClient:
 
     async def _commit_one(self, ready: ReadyBatch) -> CommittedBatch:
         """Convert receipts to canonical leaves, build tree, submit
-        commitBatch. On success, returns the CommittedBatch record."""
+        commitBatch. On success, returns the CommittedBatch record.
+
+        Architectural note: this client is side-agnostic (provider-side
+        batching or requester-side auditing both route through the same
+        _commit_one code path). The on-chain contract enforces commit
+        authority via `msg.sender`; the Python client trusts the
+        accumulator's keyed batches."""
         requester_address, provider_address = ready.key
-        if provider_address != self._provider:
-            # Accumulator should never produce a batch for another
-            # provider on this client's accumulator, but guard anyway.
-            raise ValueError(
-                f"ready batch provider {provider_address!r} does not "
-                f"match client's provider {self._provider!r}"
-            )
 
         leaves = [
             batched_receipt_to_leaf(br) for br in ready.batch.receipts
@@ -185,6 +204,7 @@ class BatchSettlementClient:
         tree = build_tree_and_proofs(leaf_hashes)
 
         batch_id, commit_ts = await self._contract.commit_batch(
+            provider_address=provider_address,
             requester_address=requester_address,
             merkle_root=tree.root,
             receipt_count=len(leaves),

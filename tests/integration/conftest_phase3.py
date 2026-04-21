@@ -200,3 +200,114 @@ async def spin_up_three_node_marketplace_cluster(
         ))
 
     return nodes
+
+
+# ── Phase 3.1 Task 8: cluster with batch-settlement wiring ────────
+
+from prsm.settlement import (  # noqa: E402
+    AccumulatorConfig,
+    BatchSettlementClient,
+    ReceiptAccumulator,
+)
+
+
+@dataclass
+class Phase3_1TestNode(Phase3TestNode):
+    """Extends Phase3TestNode with the Phase 3.1 batched-settlement stack.
+
+    Each node gets its own ReceiptAccumulator + BatchSettlementClient
+    wired to a shared MockSettlementChain. Requester's
+    MarketplaceOrchestrator is reconfigured with batch_settlement_client
+    + provider_address_resolver so successful dispatches accumulate
+    BatchedReceipts for on-chain settlement.
+    """
+    batch_accumulator: Optional[ReceiptAccumulator] = None
+    batch_settlement_client: Optional[BatchSettlementClient] = None
+    ethereum_address: Optional[str] = None
+
+
+async def spin_up_three_node_phase3_1_cluster(
+    provider_prices: Optional[List[float]] = None,
+    accumulator_config: Optional[AccumulatorConfig] = None,
+    challenge_window_seconds: int = 3 * 24 * 3600,
+) -> "Tuple[List[Phase3_1TestNode], Any]":
+    """Same as spin_up_three_node_marketplace_cluster, plus:
+      - Each node gets a ReceiptAccumulator + BatchSettlementClient
+        bound to a shared MockSettlementChain.
+      - Each node's NodeIdentity gains a synthetic ethereum_address
+        derived from its node_id (deterministic test addresses).
+      - The requester (node 0) gets a provider_address_resolver that
+        maps provider node_ids to their synthetic Ethereum addresses.
+      - The requester's orchestrator is rewired with the batch
+        settlement client + resolver.
+
+    Returns (nodes, mock_chain). Tests use the mock_chain to advance
+    time (simulating challenge-window elapse) and inspect on-chain
+    balances.
+    """
+    # Local import — sys.path was prepended at module top so siblings resolve.
+    from mock_settlement_chain import MockSettlementChain
+
+    # Build the base Phase 3 cluster.
+    base_nodes = await spin_up_three_node_marketplace_cluster(
+        provider_prices=provider_prices,
+    )
+
+    # Shared mock chain across all 3 nodes.
+    mock_chain = MockSettlementChain(challenge_window_seconds=challenge_window_seconds)
+
+    phase3_1_nodes: List[Phase3_1TestNode] = []
+
+    # Assign synthetic Ethereum addresses deterministically.
+    def _eth_address_for(node_id: str) -> str:
+        return "0x" + node_id[:40].ljust(40, "0")
+
+    # Pre-compute resolver map from all 3 nodes' provider ids to eth addresses.
+    provider_eth_map: Dict[str, str] = {
+        n.identity.node_id: _eth_address_for(n.identity.node_id)
+        for n in base_nodes
+    }
+
+    def resolver(provider_id: str) -> Optional[str]:
+        return provider_eth_map.get(provider_id)
+
+    for i, base in enumerate(base_nodes):
+        eth_addr = _eth_address_for(base.identity.node_id)
+        base.identity.ethereum_address = eth_addr
+
+        accum_cfg = accumulator_config or AccumulatorConfig()
+        acc = ReceiptAccumulator(accum_cfg)
+
+        contract_client = mock_chain.for_provider(eth_addr)
+
+        settlement_client = BatchSettlementClient(
+            accumulator=acc,
+            contract_client=contract_client,
+            provider_address=eth_addr,
+        )
+
+        # Wire into the existing orchestrator.
+        base.orchestrator.batch_settlement_client = settlement_client
+        base.orchestrator.provider_address_resolver = resolver
+
+        p3_1 = Phase3_1TestNode(
+            identity=base.identity,
+            transport=base.transport,
+            gossip=base.gossip,
+            ledger=base.ledger,
+            payment_escrow=base.payment_escrow,
+            compute_provider=base.compute_provider,
+            remote_shard_dispatcher=base.remote_shard_dispatcher,
+            advertiser=base.advertiser,
+            directory=base.directory,
+            eligibility=base.eligibility,
+            reputation=base.reputation,
+            price_negotiator=base.price_negotiator,
+            orchestrator=base.orchestrator,
+            batch_accumulator=acc,
+            batch_settlement_client=settlement_client,
+            ethereum_address=eth_addr,
+        )
+        phase3_1_nodes.append(p3_1)
+
+    return phase3_1_nodes, mock_chain
