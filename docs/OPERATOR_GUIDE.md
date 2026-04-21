@@ -471,6 +471,47 @@ Treasury, governance, and slasher-admin roles (owner of `StakeBond`, owner of `B
 
 ---
 
+## Redundant-Execution Dispatch (Tier B)
+
+Jobs submitted with `DispatchPolicy.consensus_mode="majority"` run on k providers in parallel (default k=3). The orchestrator compares output hashes, returns the majority's result, and records the minority for later on-chain challenge.
+
+### What operators need to know
+
+**1. Minority receipts accumulate in-process.**
+
+`MarketplaceOrchestrator.consensus_minority_queue` is a per-process list. Each dispatch that finds a disagreeing provider appends a record there. Nothing auto-submits these as on-chain `CONSENSUS_MISMATCH` challenges — that's the job of a separate **consensus-submitter service**.
+
+If you run the orchestrator without a consensus-submitter:
+- The job still returns the correct (majority) output to the caller.
+- The minority provider gets a reputation penalty via `ReputationTracker`.
+- **But their stake is NOT slashed on-chain.** The minority walks away unpunished economically.
+
+This is acceptable for early bake-in (Phase 7.1 MVP) but unsafe at scale. If you're running consensus dispatch in production, either wire a consensus-submitter service or document that your deployment does not enforce the economic layer of Tier B.
+
+**2. Crash recovery drops pending challenges.**
+
+The queue is in-memory. A process restart between dispatch and submission drops whatever minority receipts haven't been drained. Phase 7.1x's consensus-submitter is the planned solution (SQLite/Redis-backed drain). Until then, treat the queue as best-effort — critical-tier jobs with consensus enabled should also pair with on-chain settlement audit (cross-check batch emissions vs orchestrator logs).
+
+**3. Cost model.**
+
+k=3 consensus means 3× the compute cost per shard. Requester pays all k providers from a single escrow. Partial responses (e.g., 2-of-3 with one preempted) still consense if the threshold is met; the non-respondent forfeits their escrow share per Phase 2's existing timeout semantics.
+
+**4. Price discovery.**
+
+Phase 7.1 MVP splits `policy.max_price_per_shard_ftns` evenly across k providers rather than running k parallel price handshakes. Per-provider price discovery in the consensus path is Phase 7.1x work. Set `max_price_per_shard_ftns` generously relative to the per-provider ceiling you'd accept; the effective per-provider budget is `max_price / k`.
+
+### Operator checklist for Tier B
+
+- [ ] `policy.consensus_mode` set to `"majority"` (or `"unanimous"` if you require full k-agreement)
+- [ ] `policy.consensus_k` set appropriately (default 3; higher for critical)
+- [ ] `multi_dispatcher` wired on the orchestrator (else RuntimeError at dispatch)
+- [ ] `stake_manager_client` wired (else the on-chain tier gate skips, per Phase 7)
+- [ ] `provider_address_resolver` wired (else the on-chain tier gate skips, per Phase 7)
+- [ ] Consensus-submitter service deployed and draining `consensus_minority_queue`, OR you have a documented policy that your deployment doesn't enforce the economic layer
+- [ ] Eligible pool sized ≥ consensus_k; smaller pools fail-fast with `NoEligibleProvidersError`
+
+---
+
 ## Security Checklist
 
 - [ ] Generate unique `SECRET_KEY` (never use default)

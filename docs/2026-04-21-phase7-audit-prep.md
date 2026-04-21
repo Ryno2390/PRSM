@@ -210,12 +210,18 @@ Requires: `npx hardhat` on PATH, hardhat `node_modules` installed. Auto-skips ot
 
 ## 7. Engagement plan
 
-### 7.1 Bundled engagement with Phase 3.1 Task 10
+### 7.1 Bundled engagement with Phase 3.1 Task 10 + Phase 7.1 Task 9
 
-Per the Phase 7 design doc §6 Task 9 and Phase 3.1 design doc §Task 10, the audit is **bundled** with Phase 3.1's mainnet-prep audit. Single engagement, single auditor, reviews both `phase3.1-merge-ready-20260421` and `phase7-merge-ready-20260421` surfaces.
+Per the Phase 7 design doc §6 Task 9, Phase 3.1 design doc §Task 10, and Phase 7.1 design doc §6 Task 9, the audit is **bundled across three merge-ready trees** in a single engagement. The auditor reviews:
+
+- `phase3.1-merge-ready-20260421` (Tier A receipt-only + batched settlement)
+- `phase7-merge-ready-20260421` (Tier C stake + slashing — this bundle)
+- `phase7.1-merge-ready-20260421` (Tier B redundant execution)
+
+Top-level entry point for the auditor: `docs/2026-04-21-audit-bundle-coordinator.md`. Individual per-phase bundles: this doc + `docs/2026-04-21-phase7.1-audit-prep.md`.
 
 Rationale:
-- The Phase 7 slash path lives inside Phase 3.1's `challengeReceipt` — splitting the audits risks seam-crossing issues falling between engagements.
+- Phase 7's slash path lives inside Phase 3.1's `challengeReceipt`; Phase 7.1 adds one more branch to that same handler. The three seams are tight — splitting the audits risks seam-crossing issues falling between engagements.
 - Shared context reduces auditor ramp time → lower cost.
 - One finding backlog, one remediation cycle, one deploy.
 
