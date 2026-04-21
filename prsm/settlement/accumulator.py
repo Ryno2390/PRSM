@@ -1,0 +1,213 @@
+"""Phase 3.1 Task 4: ReceiptAccumulator.
+
+Off-chain per-counterparty queue of Phase 2 ShardExecutionReceipts
+awaiting on-chain batch settlement. Pure data + trigger logic — no
+network, no async, no crypto. Pairs naturally with Task 5's Merkle-tree
+builder + Task 6's on-chain client: when the accumulator reports a
+batch is READY, the client pops it, builds the Merkle tree, and posts
+commitBatch to the BatchSettlementRegistry.
+
+Design contract (docs/2026-04-21-phase3.1-batch-settlement-design.md §2.1):
+  - Receipts are indexed per (requester_address, provider_address)
+    pair. One batch = one pair (Task 2 design refinement).
+  - Three trigger thresholds, all configurable:
+      count: default 1000 receipts
+      time:  default 3600 seconds since first receipt in batch
+      value: default 100 FTNS cumulative (in base units, 18 decimals)
+  - First trigger to fire wins; the batch becomes READY.
+  - Caller (Task 6 client) polls `ready_batches()` and pops each.
+
+The accumulator is intentionally stateless about settlement outcomes —
+it does not track "in-flight" batches after pop. Caller owns the
+committed-batch lifecycle (via the on-chain registry state + local
+PaymentEscrow reconciliation, Task 7).
+"""
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+from decimal import Decimal
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
+
+from prsm.compute.shard_receipt import ShardExecutionReceipt
+
+
+class TriggerReason(str, Enum):
+    """Which of the three configured thresholds fired for a batch."""
+    COUNT = "count"
+    TIME = "time"
+    VALUE = "value"
+
+
+@dataclass(frozen=True)
+class BatchedReceipt:
+    """A Phase 2 ShardExecutionReceipt wrapped with the metadata needed
+    for on-chain settlement.
+
+    Constructed by the caller (typically MarketplaceOrchestrator, Task 7)
+    immediately after a successful remote dispatch, from the receipt
+    returned by RemoteShardDispatcher + the addresses + the quoted
+    price that was actually escrowed.
+    """
+    receipt: ShardExecutionReceipt
+    requester_address: str       # 0x-hex Ethereum address paying this receipt
+    provider_address: str        # 0x-hex Ethereum address earning this receipt
+    value_ftns: int              # quoted price in FTNS base units (wei, 18 dec)
+    local_escrow_id: str         # pointer back to local PaymentEscrow entry
+
+
+@dataclass
+class PendingBatch:
+    """Mutable accumulator for one (requester, provider) pair's receipts."""
+    receipts: List[BatchedReceipt] = field(default_factory=list)
+    started_at_unix: int = 0
+    total_value_ftns: int = 0
+
+    @property
+    def count(self) -> int:
+        return len(self.receipts)
+
+    def is_empty(self) -> bool:
+        return not self.receipts
+
+    def append(self, br: BatchedReceipt, at_unix: int) -> None:
+        """Add a receipt. Sets started_at_unix on the first append."""
+        if self.is_empty():
+            self.started_at_unix = at_unix
+        self.receipts.append(br)
+        self.total_value_ftns += br.value_ftns
+
+
+@dataclass(frozen=True)
+class ReadyBatch:
+    """A batch that has crossed at least one threshold. The caller pops
+    it from the accumulator and commits it on chain."""
+    key: Tuple[str, str]          # (requester_address, provider_address)
+    batch: PendingBatch
+    trigger: TriggerReason        # which threshold fired first
+
+
+@dataclass(frozen=True)
+class AccumulatorConfig:
+    """Thresholds and configuration. Defaults per Phase 3.1 design §2.1."""
+    count_threshold: int = 1000
+    time_threshold_seconds: int = 3600          # 1 hour
+    value_threshold_ftns: int = 100 * 10**18    # 100 FTNS in wei
+
+    def __post_init__(self):
+        if self.count_threshold <= 0:
+            raise ValueError(
+                f"count_threshold must be positive (got {self.count_threshold})"
+            )
+        if self.time_threshold_seconds <= 0:
+            raise ValueError(
+                f"time_threshold_seconds must be positive "
+                f"(got {self.time_threshold_seconds})"
+            )
+        if self.value_threshold_ftns <= 0:
+            raise ValueError(
+                f"value_threshold_ftns must be positive "
+                f"(got {self.value_threshold_ftns})"
+            )
+
+
+class ReceiptAccumulator:
+    """Per-counterparty accumulator of batched receipts.
+
+    Key is a (requester_address, provider_address) tuple — each pair gets
+    its own independent batch + independent trigger state.
+
+    Accumulator is mutation-only from the writer's side (add); readers
+    inspect readiness via ready_batches() and drain via pop_batch().
+    Not thread-safe; callers must serialize access if used from multiple
+    coroutines (typical deployment: single MarketplaceOrchestrator owns
+    one accumulator instance).
+    """
+
+    def __init__(self, config: Optional[AccumulatorConfig] = None):
+        self._config = config if config is not None else AccumulatorConfig()
+        self._pending: Dict[Tuple[str, str], PendingBatch] = {}
+
+    @property
+    def config(self) -> AccumulatorConfig:
+        return self._config
+
+    def add(
+        self,
+        br: BatchedReceipt,
+        at_unix: Optional[int] = None,
+    ) -> None:
+        """Add a receipt to its counterparty batch. Sets started_at_unix
+        on the first append if this (requester, provider) pair is new
+        or had a previously-drained batch.
+
+        at_unix override is for deterministic testing; production uses
+        current wall clock.
+        """
+        key = (br.requester_address, br.provider_address)
+        batch = self._pending.setdefault(key, PendingBatch())
+        now = at_unix if at_unix is not None else int(time.time())
+        batch.append(br, now)
+
+    def _check_triggers(
+        self,
+        batch: PendingBatch,
+        now: int,
+    ) -> Optional[TriggerReason]:
+        """Return the first threshold that has fired, or None.
+
+        Check order matches the spec's listing order (count, time, value).
+        In practice two can fire simultaneously; the order is arbitrary
+        but stable for logging."""
+        if batch.is_empty():
+            return None
+        if batch.count >= self._config.count_threshold:
+            return TriggerReason.COUNT
+        elapsed = now - batch.started_at_unix
+        if elapsed >= self._config.time_threshold_seconds:
+            return TriggerReason.TIME
+        if batch.total_value_ftns >= self._config.value_threshold_ftns:
+            return TriggerReason.VALUE
+        return None
+
+    def ready_batches(self, at_unix: Optional[int] = None) -> List[ReadyBatch]:
+        """List all batches that have hit at least one threshold."""
+        now = at_unix if at_unix is not None else int(time.time())
+        ready: List[ReadyBatch] = []
+        for key, batch in self._pending.items():
+            trigger = self._check_triggers(batch, now)
+            if trigger is not None:
+                ready.append(ReadyBatch(key=key, batch=batch, trigger=trigger))
+        return ready
+
+    def pop_batch(
+        self,
+        key: Tuple[str, str],
+    ) -> Optional[PendingBatch]:
+        """Remove and return the batch for this (requester, provider) key.
+
+        The caller (Task 6 settlement client) is responsible for actually
+        committing the popped batch on-chain. If the commit fails, the
+        caller can re-add the receipts via add() — the accumulator is
+        stateless about commit outcomes."""
+        return self._pending.pop(key, None)
+
+    def peek_batch(
+        self,
+        key: Tuple[str, str],
+    ) -> Optional[PendingBatch]:
+        """Non-destructive read of a batch's current state."""
+        return self._pending.get(key)
+
+    def pending_keys(self) -> List[Tuple[str, str]]:
+        """List of every (requester, provider) pair with a non-empty batch."""
+        return [k for k, v in self._pending.items() if not v.is_empty()]
+
+    def total_receipt_count(self) -> int:
+        """Sum of receipt counts across all pending batches."""
+        return sum(b.count for b in self._pending.values())
+
+    def total_pending_value_ftns(self) -> int:
+        """Sum of all pending batches' cumulative value."""
+        return sum(b.total_value_ftns for b in self._pending.values())
