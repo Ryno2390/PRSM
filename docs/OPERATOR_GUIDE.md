@@ -442,6 +442,35 @@ docker-compose logs -f prsm-api | grep -E "ERROR|WARN"
 
 ---
 
+## On-chain Keypairs
+
+Nodes that participate in on-chain economic activity (provenance, royalty distribution, stake bonding, batched settlement) hold at least one Ethereum-compatible keypair. The invariants below apply to ALL such keypairs.
+
+### Invariant: one keypair per OS process
+
+**Do not share a provider keypair across multiple processes or multiple machines.**
+
+Every PRSM Web3 client (`ProvenanceRegistryClient`, `RoyaltyDistributorClient`, `StakeManagerClient`, etc.) serializes tx build-and-send via an in-process lock. That lock does NOT coordinate across processes. If two processes on the same host (or two hosts) sign transactions for the same keypair concurrently, they can read the same `pending` nonce from the RPC and both broadcast against it. One transaction will revert; the other lands.
+
+This is a correctness-preserving failure (no double-spend, no slashable misbehavior), but it wastes gas and generates confusing operator telemetry.
+
+**Practical rules:**
+
+- One Python process = one provider keypair. If you run a compute node AND a content-hosting node, give them separate keypairs.
+- If you run multiple replicas (Kubernetes deployment with `replicas > 1`), ensure each replica has its own keypair — do NOT mount the same keyfile across pods.
+- If you operate both a Phase 1.1 content node and a Phase 7 compute-provider node, use a distinct keypair per role. They may share an owner (for accounting), but not a signing key.
+- Rotation: when rotating keys, finalize the old key's pending txs BEFORE the new key begins signing.
+
+### Invariant: key material stays local
+
+Never upload keyfile contents to external services (pastebins, shared notes, CI logs, screenshot tools). Key material belongs on the host that uses it; if you need to back it up, encrypt first with a passphrase only you hold.
+
+### Invariant: hardware wallets for Foundation / multi-sig roles
+
+Treasury, governance, and slasher-admin roles (owner of `StakeBond`, owner of `BatchSettlementRegistry`) MUST run behind a 2-of-3 hardware-wallet multi-sig. See PRSM-GOV-1 §8 for the quorum spec. Operator nodes do NOT hold these keys — they belong exclusively to the Foundation.
+
+---
+
 ## Security Checklist
 
 - [ ] Generate unique `SECRET_KEY` (never use default)
