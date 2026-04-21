@@ -342,6 +342,381 @@ describe("StakeBond — lifecycle", function () {
   });
 });
 
+
+// ── Phase 7 Task 2: slash() + bounty accrual ──────────────────────
+
+describe("StakeBond — slash + bounty", function () {
+  let bond, token;
+  let owner, provider, challenger, slasher, foundation, other;
+  const ONE_FTNS = ethers.parseUnits("1", 18);
+  const DEFAULT_UNBOND_DELAY = 7 * 24 * 60 * 60;
+  const PREMIUM_STAKE = 25_000n * ONE_FTNS;
+  const STANDARD_STAKE = 5_000n * ONE_FTNS;
+  const STANDARD_SLASH_BPS = 5000;
+  const PREMIUM_SLASH_BPS = 10000;
+  const REASON_ID = ethers.keccak256(ethers.toUtf8Bytes("batch-1"));
+
+  beforeEach(async function () {
+    [owner, provider, challenger, slasher, foundation, other] =
+      await ethers.getSigners();
+
+    const Token = await ethers.getContractFactory("MockERC20");
+    token = await Token.deploy();
+    await token.waitForDeployment();
+
+    const Bond = await ethers.getContractFactory("StakeBond");
+    bond = await Bond.deploy(
+      owner.address,
+      await token.getAddress(),
+      DEFAULT_UNBOND_DELAY
+    );
+    await bond.waitForDeployment();
+
+    // Authorize the `slasher` signer to call slash().
+    await bond.connect(owner).setSlasher(slasher.address);
+
+    // Fund + approve the provider's stake.
+    await token.mint(provider.address, PREMIUM_STAKE * 2n);
+    await token
+      .connect(provider)
+      .approve(await bond.getAddress(), PREMIUM_STAKE * 2n);
+  });
+
+  describe("slash — authorization", function () {
+    beforeEach(async function () {
+      await bond.connect(provider).bond(PREMIUM_STAKE, PREMIUM_SLASH_BPS);
+    });
+
+    it("reverts when called by non-slasher", async function () {
+      await expect(
+        bond
+          .connect(other)
+          .slash(provider.address, challenger.address, REASON_ID)
+      ).to.be.revertedWithCustomError(bond, "CallerNotSlasher");
+    });
+
+    it("reverts when called by the owner (owner is not the slasher)", async function () {
+      await expect(
+        bond
+          .connect(owner)
+          .slash(provider.address, challenger.address, REASON_ID)
+      ).to.be.revertedWithCustomError(bond, "CallerNotSlasher");
+    });
+
+    it("succeeds when called by the authorized slasher", async function () {
+      await expect(
+        bond
+          .connect(slasher)
+          .slash(provider.address, challenger.address, REASON_ID)
+      ).to.emit(bond, "Slashed");
+    });
+
+    it("old slasher loses authorization after setSlasher rotation", async function () {
+      await bond.connect(owner).setSlasher(other.address);
+      await expect(
+        bond
+          .connect(slasher)
+          .slash(provider.address, challenger.address, REASON_ID)
+      ).to.be.revertedWithCustomError(bond, "CallerNotSlasher");
+    });
+  });
+
+  describe("slash — amount + split", function () {
+    it("slashes 50% of standard stake; splits 70/30 challenger/foundation", async function () {
+      await bond.connect(provider).bond(STANDARD_STAKE, STANDARD_SLASH_BPS);
+      // 50% of 5K FTNS = 2.5K FTNS total slash
+      // 70% → challenger bounty = 1.75K FTNS
+      // 30% → Foundation reserve = 0.75K FTNS
+      const expectedSlash = (STANDARD_STAKE * 5000n) / 10000n;
+      const expectedChallengerBounty = (expectedSlash * 7000n) / 10000n;
+      const expectedFoundationShare = expectedSlash - expectedChallengerBounty;
+
+      await expect(
+        bond
+          .connect(slasher)
+          .slash(provider.address, challenger.address, REASON_ID)
+      )
+        .to.emit(bond, "Slashed")
+        .withArgs(
+          provider.address,
+          challenger.address,
+          REASON_ID,
+          expectedSlash,
+          expectedChallengerBounty,
+          expectedFoundationShare
+        );
+
+      // Stake amount reduced by slash.
+      const stake = await bond.stakeOf(provider.address);
+      expect(stake.amount).to.equal(STANDARD_STAKE - expectedSlash);
+
+      // Pools credited.
+      expect(await bond.slashedBountyPayable(challenger.address)).to.equal(
+        expectedChallengerBounty
+      );
+      expect(await bond.foundationReserveBalance()).to.equal(
+        expectedFoundationShare
+      );
+    });
+
+    it("slashes 100% of premium stake", async function () {
+      await bond.connect(provider).bond(PREMIUM_STAKE, PREMIUM_SLASH_BPS);
+      await bond
+        .connect(slasher)
+        .slash(provider.address, challenger.address, REASON_ID);
+
+      const stake = await bond.stakeOf(provider.address);
+      expect(stake.amount).to.equal(0);
+
+      // 70% → challenger = 17.5K FTNS
+      // 30% → Foundation = 7.5K FTNS
+      expect(await bond.slashedBountyPayable(challenger.address)).to.equal(
+        (PREMIUM_STAKE * 7000n) / 10000n
+      );
+      expect(await bond.foundationReserveBalance()).to.equal(
+        (PREMIUM_STAKE * 3000n) / 10000n
+      );
+    });
+
+    it("routes 100% to Foundation when challenger == provider (self-slash)", async function () {
+      await bond.connect(provider).bond(PREMIUM_STAKE, PREMIUM_SLASH_BPS);
+      await bond
+        .connect(slasher)
+        .slash(provider.address, provider.address, REASON_ID);
+
+      expect(await bond.slashedBountyPayable(provider.address)).to.equal(0);
+      expect(await bond.foundationReserveBalance()).to.equal(PREMIUM_STAKE);
+    });
+
+    it("routes 100% to Foundation when challenger is zero-address", async function () {
+      await bond.connect(provider).bond(PREMIUM_STAKE, PREMIUM_SLASH_BPS);
+      await bond
+        .connect(slasher)
+        .slash(provider.address, ethers.ZeroAddress, REASON_ID);
+
+      expect(await bond.foundationReserveBalance()).to.equal(PREMIUM_STAKE);
+    });
+
+    it("permits slashing during UNBONDING state", async function () {
+      await bond.connect(provider).bond(PREMIUM_STAKE, PREMIUM_SLASH_BPS);
+      await bond.connect(provider).requestUnbond();
+
+      const stakeBefore = await bond.stakeOf(provider.address);
+      expect(stakeBefore.status).to.equal(2); // UNBONDING
+
+      await expect(
+        bond
+          .connect(slasher)
+          .slash(provider.address, challenger.address, REASON_ID)
+      ).to.emit(bond, "Slashed");
+
+      const stakeAfter = await bond.stakeOf(provider.address);
+      expect(stakeAfter.amount).to.equal(0); // 100% slashed
+      expect(stakeAfter.status).to.equal(2); // still UNBONDING
+    });
+
+    it("rejects slashing a WITHDRAWN stake", async function () {
+      await bond.connect(provider).bond(STANDARD_STAKE, STANDARD_SLASH_BPS);
+      await bond.connect(provider).requestUnbond();
+      await time.increase(DEFAULT_UNBOND_DELAY + 10);
+      await bond.connect(provider).withdraw();
+
+      await expect(
+        bond
+          .connect(slasher)
+          .slash(provider.address, challenger.address, REASON_ID)
+      ).to.be.revertedWithCustomError(bond, "NotSlashable");
+    });
+
+    it("rejects slashing a never-bonded provider", async function () {
+      await expect(
+        bond
+          .connect(slasher)
+          .slash(other.address, challenger.address, REASON_ID)
+      ).to.be.revertedWithCustomError(bond, "NotSlashable");
+    });
+
+    it("second slash operates on remaining stake", async function () {
+      await bond.connect(provider).bond(STANDARD_STAKE, STANDARD_SLASH_BPS);
+
+      // First slash: 50% of 5K = 2.5K remaining 2.5K
+      await bond
+        .connect(slasher)
+        .slash(provider.address, challenger.address, REASON_ID);
+      let stake = await bond.stakeOf(provider.address);
+      expect(stake.amount).to.equal(STANDARD_STAKE / 2n);
+
+      // Second slash: 50% of 2.5K = 1.25K remaining 1.25K
+      await bond
+        .connect(slasher)
+        .slash(provider.address, challenger.address, REASON_ID);
+      stake = await bond.stakeOf(provider.address);
+      expect(stake.amount).to.equal(STANDARD_STAKE / 4n);
+    });
+
+    it("rejects slash when stake fully drained", async function () {
+      await bond.connect(provider).bond(PREMIUM_STAKE, PREMIUM_SLASH_BPS);
+      await bond
+        .connect(slasher)
+        .slash(provider.address, challenger.address, REASON_ID);
+      // 100% slashed; amount = 0. Second slash: NothingToSlash.
+      await expect(
+        bond
+          .connect(slasher)
+          .slash(provider.address, challenger.address, REASON_ID)
+      ).to.be.revertedWithCustomError(bond, "NothingToSlash");
+    });
+  });
+
+  describe("slash + withdraw interaction", function () {
+    it("post-slash withdraw returns only the remaining amount", async function () {
+      await bond.connect(provider).bond(STANDARD_STAKE, STANDARD_SLASH_BPS);
+      const providerBalBefore = await token.balanceOf(provider.address);
+
+      await bond
+        .connect(slasher)
+        .slash(provider.address, challenger.address, REASON_ID);
+      // 50% slashed; 2.5K FTNS remains in the stake.
+
+      await bond.connect(provider).requestUnbond();
+      await time.increase(DEFAULT_UNBOND_DELAY + 10);
+      await bond.connect(provider).withdraw();
+
+      const providerBalAfter = await token.balanceOf(provider.address);
+      expect(providerBalAfter - providerBalBefore).to.equal(STANDARD_STAKE / 2n);
+    });
+  });
+
+  describe("claimBounty", function () {
+    beforeEach(async function () {
+      await bond.connect(provider).bond(PREMIUM_STAKE, PREMIUM_SLASH_BPS);
+      await bond
+        .connect(slasher)
+        .slash(provider.address, challenger.address, REASON_ID);
+    });
+
+    it("transfers accumulated bounty to the challenger", async function () {
+      const expectedBounty = (PREMIUM_STAKE * 7000n) / 10000n;
+      const balBefore = await token.balanceOf(challenger.address);
+
+      await expect(bond.connect(challenger).claimBounty())
+        .to.emit(bond, "BountyClaimed")
+        .withArgs(challenger.address, expectedBounty);
+
+      expect(await token.balanceOf(challenger.address)).to.equal(
+        balBefore + expectedBounty
+      );
+      expect(await bond.slashedBountyPayable(challenger.address)).to.equal(0);
+    });
+
+    it("is idempotent — second claim reverts cleanly", async function () {
+      await bond.connect(challenger).claimBounty();
+      await expect(
+        bond.connect(challenger).claimBounty()
+      ).to.be.revertedWithCustomError(bond, "NothingToClaim");
+    });
+
+    it("reverts for someone with zero balance", async function () {
+      await expect(
+        bond.connect(other).claimBounty()
+      ).to.be.revertedWithCustomError(bond, "NothingToClaim");
+    });
+
+    it("accumulates across multiple slashes", async function () {
+      // First slash already fired in beforeEach. Bond a second provider
+      // so we can accumulate another slash credited to the same challenger.
+      await token.mint(other.address, PREMIUM_STAKE);
+      await token
+        .connect(other)
+        .approve(await bond.getAddress(), PREMIUM_STAKE);
+      await bond.connect(other).bond(PREMIUM_STAKE, PREMIUM_SLASH_BPS);
+      await bond
+        .connect(slasher)
+        .slash(other.address, challenger.address, REASON_ID);
+
+      // Claim should pay out sum of both slashes' bounties.
+      const expected = 2n * ((PREMIUM_STAKE * 7000n) / 10000n);
+      await bond.connect(challenger).claimBounty();
+      expect(await token.balanceOf(challenger.address)).to.be.gte(expected);
+    });
+  });
+
+  describe("drainFoundationReserve", function () {
+    beforeEach(async function () {
+      await bond.connect(provider).bond(PREMIUM_STAKE, PREMIUM_SLASH_BPS);
+      await bond
+        .connect(slasher)
+        .slash(provider.address, challenger.address, REASON_ID);
+      // Foundation reserve now holds 30% of PREMIUM_STAKE.
+    });
+
+    it("reverts when foundation wallet not set", async function () {
+      await expect(
+        bond.connect(owner).drainFoundationReserve()
+      ).to.be.revertedWithCustomError(
+        bond,
+        "FoundationReserveWalletNotSet"
+      );
+    });
+
+    it("transfers full reserve to the configured wallet", async function () {
+      await bond
+        .connect(owner)
+        .setFoundationReserveWallet(foundation.address);
+
+      const expectedReserve = (PREMIUM_STAKE * 3000n) / 10000n;
+      const balBefore = await token.balanceOf(foundation.address);
+
+      await expect(bond.connect(owner).drainFoundationReserve())
+        .to.emit(bond, "FoundationReserveDrained")
+        .withArgs(foundation.address, expectedReserve);
+
+      expect(await token.balanceOf(foundation.address)).to.equal(
+        balBefore + expectedReserve
+      );
+      expect(await bond.foundationReserveBalance()).to.equal(0);
+    });
+
+    it("reverts on empty reserve (already drained)", async function () {
+      await bond
+        .connect(owner)
+        .setFoundationReserveWallet(foundation.address);
+      await bond.connect(owner).drainFoundationReserve();
+      await expect(
+        bond.connect(owner).drainFoundationReserve()
+      ).to.be.revertedWithCustomError(bond, "FoundationReserveEmpty");
+    });
+
+    it("non-owner cannot drain", async function () {
+      await bond
+        .connect(owner)
+        .setFoundationReserveWallet(foundation.address);
+      await expect(
+        bond.connect(provider).drainFoundationReserve()
+      ).to.be.reverted;
+    });
+  });
+
+  describe("setFoundationReserveWallet", function () {
+    it("owner can set the wallet", async function () {
+      await expect(
+        bond.connect(owner).setFoundationReserveWallet(foundation.address)
+      )
+        .to.emit(bond, "FoundationReserveWalletUpdated")
+        .withArgs(ethers.ZeroAddress, foundation.address);
+      expect(await bond.foundationReserveWallet()).to.equal(
+        foundation.address
+      );
+    });
+
+    it("non-owner cannot set the wallet", async function () {
+      await expect(
+        bond.connect(provider).setFoundationReserveWallet(foundation.address)
+      ).to.be.reverted;
+    });
+  });
+});
+
 function anyUint() {
   return (value) => typeof value === "bigint" || typeof value === "number";
 }

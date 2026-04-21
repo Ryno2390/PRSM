@@ -60,14 +60,37 @@ contract StakeBond is Ownable, ReentrancyGuard {
     uint256 public constant MAX_UNBOND_DELAY_SECONDS = 30 days;
 
     /// @dev Authorized slasher address. Only this contract can call
-    /// slash() in Task 2. Default address(0) = slashing disabled.
-    /// Owner updates via setSlasher. In production, the slasher is
-    /// the BatchSettlementRegistry.
+    /// slash(). Default address(0) = slashing disabled. Owner updates
+    /// via setSlasher. In production, the slasher is the
+    /// BatchSettlementRegistry.
     address public slasher;
 
     /// @dev Per-provider stake record. Re-bonding after a full withdraw
     /// overwrites the prior record.
     mapping(address provider => Stake) public stakes;
+
+    /// @dev Per-challenger claimable bounty balance. Accrues 70% of
+    /// slashed FTNS when the challenger is NOT the slashed provider.
+    /// Claimed via claimBounty(); zeroed on claim.
+    mapping(address challenger => uint256) public slashedBountyPayable;
+
+    /// @dev Accumulated Foundation-reserve balance from slashing
+    /// (30% normal case; 100% on self-slash / anonymous challenger).
+    /// Drained via drainFoundationReserve() by owner to the
+    /// foundationReserveWallet address.
+    uint256 public foundationReserveBalance;
+
+    /// @dev Destination for drainFoundationReserve. Owner-set; must
+    /// be non-zero before drain can succeed. Typically the Foundation's
+    /// 2-of-3 multi-sig treasury wallet.
+    address public foundationReserveWallet;
+
+    /// @dev Bounty split in basis points. 7000 = 70% of slash amount
+    /// goes to challenger; remainder (3000 = 30%) to Foundation reserve.
+    /// When the challenger equals the provider or is address(0), the
+    /// entire slash goes to the Foundation reserve (prevents self-slash
+    /// schemes that would net-profit by capturing the challenger bounty).
+    uint16 public constant CHALLENGER_BOUNTY_BPS = 7000;
 
     event Bonded(
         address indexed provider,
@@ -85,6 +108,17 @@ contract StakeBond is Ownable, ReentrancyGuard {
     );
     event UnbondDelayUpdated(uint256 oldDelay, uint256 newDelay);
     event SlasherUpdated(address oldSlasher, address newSlasher);
+    event FoundationReserveWalletUpdated(address oldWallet, address newWallet);
+    event Slashed(
+        address indexed provider,
+        address indexed challenger,
+        bytes32 indexed reasonId,
+        uint256 slashAmount,
+        uint256 challengerBounty,
+        uint256 foundationShare
+    );
+    event BountyClaimed(address indexed challenger, uint256 amount);
+    event FoundationReserveDrained(address indexed recipient, uint256 amount);
 
     error ZeroAmount();
     error ZeroAddress();
@@ -95,6 +129,12 @@ contract StakeBond is Ownable, ReentrancyGuard {
     error UnbondDelayNotElapsed(uint64 eligibleAt);
     error InvalidSlashRateBps(uint16 provided);
     error TransferFailed();
+    error CallerNotSlasher(address caller, address expectedSlasher);
+    error NotSlashable(address provider, StakeStatus status);
+    error NothingToSlash(address provider);
+    error NothingToClaim(address challenger);
+    error FoundationReserveEmpty();
+    error FoundationReserveWalletNotSet();
 
     constructor(
         address initialOwner,
@@ -251,5 +291,122 @@ contract StakeBond is Ownable, ReentrancyGuard {
         address old = slasher;
         slasher = newSlasher;
         emit SlasherUpdated(old, newSlasher);
+    }
+
+    /**
+     * @notice Set the destination wallet for drainFoundationReserve.
+     *         Owner-only. Must be non-zero before drain can succeed.
+     */
+    function setFoundationReserveWallet(address newWallet) external onlyOwner {
+        address old = foundationReserveWallet;
+        foundationReserveWallet = newWallet;
+        emit FoundationReserveWalletUpdated(old, newWallet);
+    }
+
+    // ── Slashing (Task 2) ─────────────────────────────────────────
+
+    /**
+     * @notice Slash a provider's stake at their bonded slash rate.
+     *         Slasher-only (the authorized BatchSettlementRegistry).
+     *
+     *         Amount slashed = current stake × tier_slash_rate_bps / 10000.
+     *         Split:
+     *           - If challenger ∈ {provider, address(0)}: 100% → Foundation
+     *             reserve. Prevents self-slash schemes where a sophisticated
+     *             adversary operates both the provider and the challenger
+     *             to net-profit from the 70% bounty.
+     *           - Otherwise: 70% → challenger's claimable bounty balance,
+     *             30% → Foundation reserve.
+     *
+     *         Slashing is permitted in BOTH BonDED and UNBONDING states —
+     *         closes the challenge-then-unbond race escape.
+     *
+     * @param provider  provider address whose stake is slashed
+     * @param challenger address that submitted the successful challenge
+     * @param reasonId   opaque identifier (typically the batchId that
+     *                   contained the invalid receipt) for audit trail
+     */
+    function slash(
+        address provider,
+        address challenger,
+        bytes32 reasonId
+    ) external nonReentrant {
+        if (msg.sender != slasher) {
+            revert CallerNotSlasher(msg.sender, slasher);
+        }
+        Stake storage s = stakes[provider];
+        if (s.status != StakeStatus.BONDED && s.status != StakeStatus.UNBONDING) {
+            revert NotSlashable(provider, s.status);
+        }
+        if (s.amount == 0) revert NothingToSlash(provider);
+
+        // slashAmount = amount * tier_slash_rate_bps / 10000, capped at amount.
+        uint256 slashAmount = (uint256(s.amount) * uint256(s.tier_slash_rate_bps)) / 10000;
+        if (slashAmount == 0) revert NothingToSlash(provider);
+        if (slashAmount > s.amount) slashAmount = s.amount;  // defensive
+
+        // Effects before interactions.
+        s.amount -= uint128(slashAmount);
+
+        // Split + credit to claimable pools. No ERC-20 transfer here —
+        // FTNS stays in this contract until claimed via claimBounty /
+        // drainFoundationReserve. Keeps the slash operation lightweight
+        // and decouples the challenger's claim timing.
+        uint256 challengerShare;
+        uint256 foundationShare;
+        if (challenger == provider || challenger == address(0)) {
+            challengerShare = 0;
+            foundationShare = slashAmount;
+        } else {
+            challengerShare = (slashAmount * uint256(CHALLENGER_BOUNTY_BPS)) / 10000;
+            foundationShare = slashAmount - challengerShare;
+            slashedBountyPayable[challenger] += challengerShare;
+        }
+        foundationReserveBalance += foundationShare;
+
+        emit Slashed(
+            provider, challenger, reasonId,
+            slashAmount, challengerShare, foundationShare
+        );
+    }
+
+    /**
+     * @notice Claim accumulated bounty from successful challenges.
+     *         Permissionless for the caller's own balance. Idempotent —
+     *         a zero-balance claim reverts rather than emitting a
+     *         noise event.
+     */
+    function claimBounty() external nonReentrant {
+        uint256 amount = slashedBountyPayable[msg.sender];
+        if (amount == 0) revert NothingToClaim(msg.sender);
+
+        // Effects before interaction.
+        slashedBountyPayable[msg.sender] = 0;
+
+        bool ok = ftns.transfer(msg.sender, amount);
+        if (!ok) revert TransferFailed();
+
+        emit BountyClaimed(msg.sender, amount);
+    }
+
+    /**
+     * @notice Move the accumulated Foundation-reserve balance to the
+     *         configured foundationReserveWallet. Owner-only. Reverts
+     *         if the wallet is unset or the reserve is empty.
+     */
+    function drainFoundationReserve() external onlyOwner nonReentrant {
+        if (foundationReserveWallet == address(0)) {
+            revert FoundationReserveWalletNotSet();
+        }
+        uint256 amount = foundationReserveBalance;
+        if (amount == 0) revert FoundationReserveEmpty();
+
+        // Effects before interaction.
+        foundationReserveBalance = 0;
+
+        bool ok = ftns.transfer(foundationReserveWallet, amount);
+        if (!ok) revert TransferFailed();
+
+        emit FoundationReserveDrained(foundationReserveWallet, amount);
     }
 }
