@@ -17,6 +17,7 @@ Defaults rationale (docs/2026-04-20-phase3-marketplace-design.md §8.4):
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -35,3 +36,12 @@ class DispatchPolicy:
     min_capacity_shards_per_sec: float = 0.0
     max_timeout_seconds: float = 30.0
     require_unique_providers: bool = False
+    # Phase 7.1 Task 5: redundant-execution verification (Tier B). When
+    # consensus_mode is None (the default), dispatch is single-provider
+    # as in Phase 7. When set, the orchestrator routes the shard to k
+    # providers in parallel and decides agreement by output-hash voting.
+    #   - "majority": winning group >= (k // 2) + 1 (default)
+    #   - "unanimous": all k must respond AND all must agree
+    #   - "byzantine": reserved — raises NotImplementedError until 7.1x
+    consensus_mode: Optional[str] = None
+    consensus_k: int = 3

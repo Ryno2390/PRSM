@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -87,6 +87,13 @@ class MarketplaceOrchestrator:
         # bonded stake to back it. When None, gating is skipped and the
         # orchestrator behaves as Phase 3.1 did (listing-claim-only tier).
         stake_manager_client=None,
+        # Phase 7.1 Task 5 — redundant-execution consensus. When wired AND
+        # policy.consensus_mode is set, _dispatch_one_shard routes to the
+        # MultiShardDispatcher for k-way parallel dispatch + consensus
+        # voting. When None or when policy.consensus_mode is None, the
+        # orchestrator follows the single-provider path (Phase 7 behavior
+        # preserved byte-for-byte).
+        multi_dispatcher=None,
     ):
         self.identity = identity
         self.directory = directory
@@ -97,6 +104,16 @@ class MarketplaceOrchestrator:
         self.batch_settlement_client = batch_settlement_client
         self.provider_address_resolver = provider_address_resolver
         self.stake_manager_client = stake_manager_client
+        self.multi_dispatcher = multi_dispatcher
+        # Phase 7.1: minority receipts from consensus dispatches accumulate
+        # here for downstream challenge submission. The orchestrator does
+        # NOT submit challenges on-chain itself — challenges require a
+        # batch-committed merkle tree + proof, which the settlement-
+        # accumulator owns. A higher-level service drains this queue after
+        # batches are committed to the registry (Phase 7.1 Task 7 E2E
+        # demonstrates the full path; a production challenge-submitter
+        # service is Phase 7.1x scope).
+        self.consensus_minority_queue: List[Any] = []
 
     async def orchestrate_sharded_inference(
         self,
@@ -120,16 +137,35 @@ class MarketplaceOrchestrator:
 
         outputs: List[np.ndarray] = []
         for shard in shards:
-            output = await self._dispatch_one_shard(
-                shard=shard,
-                input_tensor=input_tensor,
-                job_id=job_id,
-                eligible=eligible,
-                policy=policy,
-            )
+            if self._consensus_requested(policy):
+                output = await self._dispatch_one_shard_with_consensus(
+                    shard=shard,
+                    input_tensor=input_tensor,
+                    job_id=job_id,
+                    eligible=eligible,
+                    policy=policy,
+                )
+            else:
+                output = await self._dispatch_one_shard(
+                    shard=shard,
+                    input_tensor=input_tensor,
+                    job_id=job_id,
+                    eligible=eligible,
+                    policy=policy,
+                )
             outputs.append(output)
 
         return np.concatenate(outputs, axis=0)
+
+    @staticmethod
+    def _consensus_requested(policy: DispatchPolicy) -> bool:
+        """Phase 7.1 routing guard. Consensus is active only when the
+        policy explicitly requests it (not None, not the degenerate
+        "single" value that means "skip multi-dispatcher")."""
+        return (
+            policy.consensus_mode is not None
+            and policy.consensus_mode != "single"
+        )
 
     async def _dispatch_one_shard(
         self,
@@ -246,6 +282,173 @@ class MarketplaceOrchestrator:
             f"shard {shard.shard_index} of job {job_id!r} exhausted the "
             f"eligible pool (size={len(eligible)}) without success; "
             f"last failure reason: {last_reason or 'unknown'}"
+        )
+
+    async def _dispatch_one_shard_with_consensus(
+        self,
+        shard: ModelShard,
+        input_tensor: np.ndarray,
+        job_id: str,
+        eligible: List[ProviderListing],
+        policy: DispatchPolicy,
+    ) -> np.ndarray:
+        """Phase 7.1 consensus path. Runs one shard on k providers
+        concurrently and returns the majority-agreed output.
+
+        Flow:
+          1. Apply the Phase 7 on-chain tier gate to the eligible pool.
+          2. Rank the survivors by (reputation * 1/price) and pick top-k.
+          3. Hand the k node_ids to MultiShardDispatcher.
+          4. Record reputation outcomes: successes for majority,
+             failures for minority.
+          5. Queue minority receipts for challenge (no on-chain submission
+             here — that's a post-batch-commit concern).
+          6. Return the agreed ndarray.
+
+        Preconditions: self.multi_dispatcher is not None (checked at
+        the routing decision in orchestrate_sharded_inference via
+        _consensus_requested → MultiDispatcher presence).
+        """
+        if self.multi_dispatcher is None:
+            raise RuntimeError(
+                "consensus_mode requested but multi_dispatcher is not wired"
+            )
+
+        # Step 1: tier gate. Reuse the single-path helper — any listing
+        # whose on-chain tier doesn't meet the policy's floor is excluded
+        # BEFORE we pay the asyncio.gather cost on k dispatches.
+        tier_eligible = [
+            l for l in eligible if self._onchain_tier_meets(l, policy)
+        ]
+        for excluded in eligible:
+            if excluded not in tier_eligible:
+                self.reputation.record_failure(excluded.provider_id)
+
+        # Step 2: select top-k.
+        k = policy.consensus_k
+        if len(tier_eligible) < k:
+            raise NoEligibleProvidersError(
+                f"consensus_mode={policy.consensus_mode!r} k={k} needs at "
+                f"least {k} eligible providers after tier gating; got "
+                f"{len(tier_eligible)}"
+            )
+        selected = self._select_top_k(tier_eligible, k)
+
+        # Step 3: fair escrow split across the k. MVP uses the policy's
+        # max_price_per_shard_ftns as the budget (no per-provider price
+        # handshake in consensus path — price discovery in k-of-n is
+        # deferred to Phase 7.1x per design §3.3). If the policy has no
+        # ceiling, fall back to the maximum listing price among selected.
+        total_budget = (
+            policy.max_price_per_shard_ftns
+            if policy.max_price_per_shard_ftns != float("inf")
+            else max(l.price_per_shard_ftns for l in selected) * k
+        )
+        per_provider_escrow = total_budget / k
+
+        # Step 4: dispatch via multi-dispatcher.
+        from prsm.compute.multi_dispatcher import (  # lazy import
+            ConsensusFailedError,
+            InsufficientResponsesError,
+        )
+        started = time.time()
+        try:
+            receipt = await self.multi_dispatcher.dispatch_with_consensus(
+                shard=shard,
+                input_tensor=input_tensor,
+                node_ids=[l.provider_id for l in selected],
+                job_id=job_id,
+                stake_tier=_stake_tier_for(selected[0].stake_tier),
+                escrow_amount_per_provider_ftns=per_provider_escrow,
+                require_tee_attestation=policy.require_tee,
+            )
+        except (InsufficientResponsesError, ConsensusFailedError) as exc:
+            # Both failures are recorded as failures against the whole
+            # selected set. A production challenge-submitter may treat
+            # ConsensusFailed more aggressively (challenge every
+            # disagreer), but that needs the actual receipts we don't
+            # have in the exception. MVP: blanket-fail and surface.
+            for listing in selected:
+                self.reputation.record_failure(listing.provider_id)
+            raise NoEligibleProvidersError(
+                f"consensus dispatch failed for shard {shard.shard_index} "
+                f"of job {job_id!r}: {type(exc).__name__}: {exc}"
+            ) from exc
+
+        # Step 5: reputation updates.
+        latency_ms = (time.time() - started) * 1000
+        majority_ids = {r.provider_id for r in receipt.majority_receipts}
+        minority_ids = {r.provider_id for r in receipt.minority_receipts}
+        # Providers who failed to respond at all (neither majority nor
+        # minority) pass the partial-response logic in MultiDispatcher;
+        # they're NOT in `receipt`. We don't record a failure for them
+        # here — preemption/TEE-missing are honest-work or advertising
+        # concerns handled inside the single dispatcher already.
+        for provider_id in majority_ids:
+            self.reputation.record_success(provider_id, latency_ms)
+        for provider_id in minority_ids:
+            self.reputation.record_failure(provider_id)
+
+        # Step 6: queue minority for downstream challenge.
+        if receipt.minority_receipts:
+            self._queue_consensus_challenges(receipt)
+
+        return receipt.agreed_output
+
+    @staticmethod
+    def _select_top_k(
+        listings: List[ProviderListing], k: int,
+    ) -> List[ProviderListing]:
+        """Phase 7.1 Task 5 top-k selection.
+
+        Rank by `reputation_proxy * (1 / price)`. Since the orchestrator's
+        ReputationTracker holds the actual score and selection needs to be
+        pure / testable, we use the listing's advertised stake_tier as
+        reputation proxy for MVP:
+          - open=1, standard=2, premium=3, critical=4
+        Multiply by (1 / price) and take the top k. Ties broken by
+        lexicographic provider_id (deterministic — the requester can
+        audit why a given set was picked).
+        """
+        tier_score = {"open": 1, "standard": 2, "premium": 3, "critical": 4}
+
+        def score(listing: ProviderListing) -> Tuple[float, str]:
+            tier = tier_score.get(listing.stake_tier, 0)
+            # Guard against division by zero even though the filter's
+            # min_price_per_shard_ftns rejects <=0 listings already.
+            price = max(listing.price_per_shard_ftns, 1e-9)
+            # Negate because we'll sort descending by (score, then
+            # ascending by provider_id — stable tiebreak).
+            return (-tier / price, listing.provider_id)
+
+        sorted_listings = sorted(listings, key=score)
+        return sorted_listings[:k]
+
+    def _queue_consensus_challenges(self, receipt) -> None:
+        """Phase 7.1 Task 5 — accumulate minority receipts for the
+        downstream challenge-submitter service to consume.
+
+        No on-chain submission here. The orchestrator runs inside the
+        dispatch path; challenges are a post-batch-commit action that
+        needs the Merkle tree + proof, which only the settlement
+        accumulator has once the batch is committed. A production
+        challenge-submitter drains this queue after batch commit.
+
+        MVP shape: (batch_id=None when not-yet-committed, minority
+        receipts, majority receipts). The submitter service supplies
+        the batch_id when draining.
+        """
+        self.consensus_minority_queue.append({
+            "job_id": receipt.job_id,
+            "shard_index": receipt.shard_index,
+            "agreed_output_hash": receipt.agreed_output_hash,
+            "majority_receipts": receipt.majority_receipts,
+            "minority_receipts": receipt.minority_receipts,
+        })
+        logger.info(
+            f"queued {len(receipt.minority_receipts)} consensus-mismatch "
+            f"challenge(s) for job {receipt.job_id!r} shard "
+            f"{receipt.shard_index}"
         )
 
     def _onchain_tier_meets(
