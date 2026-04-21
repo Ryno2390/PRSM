@@ -119,7 +119,8 @@ contract BatchSettlementRegistry is Ownable {
         INVALID_SIGNATURE,   // 1: Ed25519 sig doesn't verify under declared pubkey
         NO_ESCROW,           // 2: batch.requester attests no matching authorization
         EXPIRED,             // 3: receipt.executed_at_unix beyond lookback window
-        MALFORMED            // 4: reserved (not yet implementable)
+        MALFORMED,           // 4: reserved (not yet implementable)
+        CONSENSUS_MISMATCH   // 5: Phase 7.1 — provider's receipt disagrees with a majority in same batch
     }
 
     /// @dev EscrowPool contract authorized to execute settlement transfers.
@@ -403,6 +404,8 @@ contract BatchSettlementRegistry is Ownable {
             proven = _handleNoEscrow(b);
         } else if (reason == ReasonCode.EXPIRED) {
             proven = _handleExpired(leaf);
+        } else if (reason == ReasonCode.CONSENSUS_MISMATCH) {
+            proven = _handleConsensusMismatch(b, leaf, auxData);
         } else {
             // MALFORMED reserved — cannot prove on-chain in Task 3 scope.
             revert MalformedReasonNotImplemented();
@@ -416,17 +419,21 @@ contract BatchSettlementRegistry is Ownable {
 
         emit ReceiptChallenged(batchId, leafHash, msg.sender, reason, leaf.valueFtns);
 
-        // Phase 7: DOUBLE_SPEND + INVALID_SIGNATURE challenges slash the
-        // provider's stake. NO_ESCROW is requester-attestation-based
-        // (griefing risk if slash triggered) and EXPIRED is protocol-
-        // hygiene rather than malice — neither triggers slashing.
-        // Slashing is best-effort: if stakeBond is unconfigured, or if
-        // the provider has no stake, the challenge still succeeds and
-        // the receipt stays invalidated.
+        // Phase 7 + 7.1: DOUBLE_SPEND / INVALID_SIGNATURE / CONSENSUS_MISMATCH
+        // challenges slash the provider's stake. NO_ESCROW is requester-
+        // attestation-based (griefing risk if slash triggered) and EXPIRED
+        // is protocol-hygiene rather than malice — neither triggers slashing.
+        // Slashing is best-effort: if stakeBond is unconfigured, or if the
+        // provider has no stake, the challenge still succeeds and the
+        // receipt stays invalidated.
         if (
             address(stakeBond) != address(0)
             && b.tier_slash_rate_bps > 0
-            && (reason == ReasonCode.DOUBLE_SPEND || reason == ReasonCode.INVALID_SIGNATURE)
+            && (
+                reason == ReasonCode.DOUBLE_SPEND
+                || reason == ReasonCode.INVALID_SIGNATURE
+                || reason == ReasonCode.CONSENSUS_MISMATCH
+            )
         ) {
             // Wrapped in try/catch so a StakeBond-level revert (e.g.,
             // provider already fully slashed, stake already withdrawn)
@@ -526,6 +533,68 @@ contract BatchSettlementRegistry is Ownable {
         if (age <= settlementLookbackWindowSeconds) {
             revert ReceiptNotExpired(leaf.executedAtUnix, settlementLookbackWindowSeconds);
         }
+        return true;
+    }
+
+    /**
+     * @dev CONSENSUS_MISMATCH (Phase 7.1): the provider's receipt disagrees
+     *      with a majority group in the same batch under a k-of-n
+     *      redundant-execution job. auxData layout:
+     *        abi.encode(
+     *          bytes32 majorityAgreedHash,   // the winning output hash
+     *          bytes32 minorityClaimedHash,  // the disagreer's output hash
+     *          bytes32[] majorityProof,      // proof for ONE majority leaf
+     *          ReceiptLeaf majorityLeaf      // the majority receipt used for proof
+     *        )
+     *      The challenged leaf (passed into challengeReceipt) is the
+     *      minority leaf — its provider forfeits stake.
+     *
+     *      MVP authorization: caller must be the batch's requester. Only
+     *      they know both receipts came from the same k-of-n job; opening
+     *      this to third parties enables self-slash bounty mining per
+     *      design §3.6. Phase 7.1x will introduce a `consensus_group_id`
+     *      on the batch so any holder of k signed receipts can challenge.
+     *
+     *      Checks performed (all must pass):
+     *        1. caller == batch.requester
+     *        2. auxData.minorityClaimedHash == leaf.outputHash  (binding)
+     *        3. auxData.majorityAgreedHash == majorityLeaf.outputHash (binding)
+     *        4. majorityLeaf.outputHash != leaf.outputHash  (genuine disagreement)
+     *        5. MerkleProof.verify(majorityProof, b.merkleRoot, hash(majorityLeaf))
+     *
+     *      Returns true iff all pass.
+     */
+    function _handleConsensusMismatch(
+        Batch storage b,
+        ReceiptLeaf calldata leaf,
+        bytes calldata auxData
+    ) internal view returns (bool) {
+        if (msg.sender != b.requester) {
+            revert CallerNotRequester(msg.sender, b.requester);
+        }
+
+        (
+            bytes32 majorityAgreedHash,
+            bytes32 minorityClaimedHash,
+            bytes32[] memory majorityProof,
+            ReceiptLeaf memory majorityLeaf
+        ) = abi.decode(auxData, (bytes32, bytes32, bytes32[], ReceiptLeaf));
+
+        // Bind the hashes declared in auxData to the leaves they describe.
+        // Without this, a caller could pass any bytes32 pair and the proof
+        // check would be against fabricated values.
+        if (minorityClaimedHash != leaf.outputHash) return false;
+        if (majorityAgreedHash != majorityLeaf.outputHash) return false;
+
+        // Genuine disagreement, not a self-referential challenge.
+        if (majorityLeaf.outputHash == leaf.outputHash) return false;
+
+        // Majority leaf must be in THIS batch's Merkle tree.
+        bytes32 majorityLeafHash = keccak256(abi.encode(majorityLeaf));
+        if (!MerkleProof.verify(majorityProof, b.merkleRoot, majorityLeafHash)) {
+            return false;
+        }
+
         return true;
     }
 
