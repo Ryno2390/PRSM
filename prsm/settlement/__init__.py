@@ -18,12 +18,34 @@ from prsm.settlement.accumulator import (
     ReceiptAccumulator,
     TriggerReason,
 )
+from prsm.settlement.merkle import (
+    MerkleTree,
+    ReceiptLeaf,
+    batched_receipt_to_leaf,
+    build_merkle_proof,
+    build_merkle_root,
+    build_tree_and_proofs,
+    encode_leaf,
+    hash_leaf,
+    verify_merkle_proof,
+)
 
 __all__ = [
+    # Accumulator (Task 4)
     "AccumulatorConfig",
     "BatchedReceipt",
     "PendingBatch",
     "ReadyBatch",
     "ReceiptAccumulator",
     "TriggerReason",
+    # Merkle + canonical encoding (Task 5)
+    "MerkleTree",
+    "ReceiptLeaf",
+    "batched_receipt_to_leaf",
+    "build_merkle_proof",
+    "build_merkle_root",
+    "build_tree_and_proofs",
+    "encode_leaf",
+    "hash_leaf",
+    "verify_merkle_proof",
 ]
