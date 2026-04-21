@@ -59,6 +59,61 @@ SLASH_RATE_PREMIUM_BPS = 10_000   # 100%
 SLASH_RATE_CRITICAL_BPS = 10_000  # 100%
 
 
+class ReasonCode(IntEnum):
+    """Mirrors BatchSettlementRegistry.sol:ReasonCode.
+
+    Ordering is stable — new codes append. Python callers who pass a
+    reason into challengeReceipt must use the integer value from this
+    enum; the contract's function signature accepts `uint8`.
+    """
+    DOUBLE_SPEND = 0
+    INVALID_SIGNATURE = 1
+    NO_ESCROW = 2
+    EXPIRED = 3
+    MALFORMED = 4          # reserved; reverts on-chain if used
+    CONSENSUS_MISMATCH = 5  # Phase 7.1 — k-of-n redundant-execution disagreement
+
+
+# Reasons that trigger on-chain slashing via the registry's challenge
+# hook. Kept as a frozenset so callers can cheaply test membership when
+# deciding whether to expect a Slashed event on a challenge receipt.
+SLASHABLE_REASONS = frozenset({
+    ReasonCode.DOUBLE_SPEND,
+    ReasonCode.INVALID_SIGNATURE,
+    ReasonCode.CONSENSUS_MISMATCH,
+})
+
+
+def _reason_keccak(reason: "ReasonCode | str") -> bytes:
+    """Return keccak256(reason_name_utf8). Useful when callers need a
+    bytes32 identifier for off-chain correlation (e.g., logging a slash
+    event alongside the reason that triggered it).
+
+    Accepts the enum OR the raw string so callers can build identifiers
+    for reason codes the current Python build doesn't know about —
+    future-proof against new ReasonCode values landing on-chain first.
+    """
+    if not HAS_WEB3:
+        raise RuntimeError("web3 package required for keccak hashing")
+    name = reason.name if isinstance(reason, ReasonCode) else str(reason)
+    return bytes(Web3.keccak(name.encode("utf-8")))
+
+
+# Precomputed keccak identifiers for the slashable reasons. Useful for
+# event-log correlation and audit trails that want a canonical 32-byte
+# tag for each reason independent of the (small, potentially re-ordered)
+# enum integer. Note: the StakeBond.Slashed event's `reasonId` is the
+# batchId the slash was tied to, NOT this value — these are separate
+# identifiers that serve different observability needs.
+REASON_DOUBLE_SPEND_KECCAK = None  # set below once web3 is imported
+REASON_INVALID_SIGNATURE_KECCAK = None
+REASON_CONSENSUS_MISMATCH_KECCAK = None
+if HAS_WEB3:
+    REASON_DOUBLE_SPEND_KECCAK = _reason_keccak(ReasonCode.DOUBLE_SPEND)
+    REASON_INVALID_SIGNATURE_KECCAK = _reason_keccak(ReasonCode.INVALID_SIGNATURE)
+    REASON_CONSENSUS_MISMATCH_KECCAK = _reason_keccak(ReasonCode.CONSENSUS_MISMATCH)
+
+
 class StakeStatus(IntEnum):
     """Mirrors StakeBond.sol:StakeStatus."""
     NONE = 0
@@ -406,6 +461,8 @@ __all__ = [
     "StakeManagerClient",
     "StakeRecord",
     "StakeStatus",
+    "ReasonCode",
+    "SLASHABLE_REASONS",
     "TransferStatus",
     "BroadcastFailedError",
     "OnChainPendingError",
@@ -416,4 +473,7 @@ __all__ = [
     "SLASH_RATE_STANDARD_BPS",
     "SLASH_RATE_PREMIUM_BPS",
     "SLASH_RATE_CRITICAL_BPS",
+    "REASON_DOUBLE_SPEND_KECCAK",
+    "REASON_INVALID_SIGNATURE_KECCAK",
+    "REASON_CONSENSUS_MISMATCH_KECCAK",
 ]
