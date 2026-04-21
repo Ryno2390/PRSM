@@ -353,10 +353,78 @@ class ConsensusChallengeSubmitter:
         return tx_hash_hex, TransferStatus.CONFIRMED
 
 
+# ── Runner: drives queue → submit → mark_* ─────────────────────
+
+
+# Terminal error types — rows that hit these should NOT be retried.
+# OnChainRevertedError means the contract said no (ChallengeNotProven,
+# InsufficientGasForSlash with too-low manual budget, etc.); a retry
+# would produce the same revert.
+_TERMINAL_ERROR_TYPES = frozenset({"OnChainRevertedError"})
+
+# Soft-failure types — leave the row SUBMITTABLE so the runner retries.
+# OnChainPendingError is special: broadcast succeeded but receipt was
+# unknown, so the tx MAY still land. UNSAFE to auto-retry (could double-
+# submit). We treat it as terminal for now — operators reconcile by
+# reading the tx_hash. Phase 7.1x.next+ can add a "pending_watch" state.
+_PENDING_NEEDS_MANUAL = frozenset({"OnChainPendingError"})
+
+
+def process_submittable_queue(
+    queue, submitter: ConsensusChallengeSubmitter, limit: int = 100,
+) -> List[ChallengeResult]:
+    """Phase 7.1x.next runner loop: pull all SUBMITTABLE rows from the
+    queue, fire CONSENSUS_MISMATCH challenges via the submitter, update
+    row statuses based on outcome. Returns the list of results in the
+    same order the queue returned rows.
+
+    Safe to call repeatedly from a scheduler (cron / asyncio.sleep
+    loop). Idempotent once a row transitions to a terminal state.
+
+    Accepts the queue as a parameter rather than importing
+    `ConsensusChallengeQueue` directly so this module doesn't force a
+    sqlite3 dependency on callers who only want the submitter API.
+    """
+    rows = queue.list_submittable(limit=limit)
+    results: List[ChallengeResult] = []
+    for row in rows:
+        attempt = ChallengeAttempt(
+            minority_batch_id=row.minority_batch_id,
+            minority_leaf=ReceiptLeafFields.from_python_receipt(
+                row.minority_receipt,
+                value_ftns_wei=row.value_ftns_per_provider_wei,
+            ),
+            minority_proof=[],   # 1-leaf-per-provider batches in MVP
+            majority_batch_id=row.majority_batch_id,
+            majority_leaf=ReceiptLeafFields.from_python_receipt(
+                row.majority_receipt,
+                value_ftns_wei=row.value_ftns_per_provider_wei,
+            ),
+            majority_proof=[],
+        )
+        result = submitter.submit_one(attempt)
+        if result.success:
+            queue.mark_submitted(row.row_id, result.tx_hash_hex)
+        else:
+            terminal = (
+                result.error_type in _TERMINAL_ERROR_TYPES
+                or result.error_type in _PENDING_NEEDS_MANUAL
+            )
+            queue.mark_failed(
+                row.row_id,
+                result.error_type or "UnknownError",
+                result.error_message or "",
+                terminal=terminal,
+            )
+        results.append(result)
+    return results
+
+
 __all__ = [
     "ConsensusChallengeSubmitter",
     "ChallengeAttempt",
     "ChallengeResult",
     "ReceiptLeafFields",
     "DEFAULT_CHALLENGE_GAS",
+    "process_submittable_queue",
 ]
