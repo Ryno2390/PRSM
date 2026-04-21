@@ -389,6 +389,8 @@ def process_submittable_queue(
     submitter: ConsensusChallengeSubmitter,
     limit: int = 100,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    claimant_id: Optional[str] = None,
+    lease_seconds: Optional[float] = None,
 ) -> List[ChallengeResult]:
     """Phase 7.1x.next runner loop: pull all SUBMITTABLE rows from the
     queue, fire CONSENSUS_MISMATCH challenges via the submitter, update
@@ -405,8 +407,21 @@ def process_submittable_queue(
     max_attempts caps retries per row even for retryable errors —
     prevents a misconfigured RPC endpoint from burning ops budget on
     one row indefinitely.
+
+    Phase 7.1x.next+ §5.3: pass claimant_id to opt into multi-runner-
+    safe mode. The runner atomically claims SUBMITTABLE rows with a
+    time-bounded lease, preventing two concurrent runners against the
+    same DB from double-submitting. When claimant_id is None (the
+    single-runner default), the legacy list_submittable path is used —
+    faster, no claim overhead, no safety guarantee across processes.
     """
-    rows = queue.list_submittable(limit=limit)
+    if claimant_id is not None:
+        claim_kwargs = {"claimant_id": claimant_id, "limit": limit}
+        if lease_seconds is not None:
+            claim_kwargs["lease_seconds"] = lease_seconds
+        rows = queue.claim_submittable(**claim_kwargs)
+    else:
+        rows = queue.list_submittable(limit=limit)
     results: List[ChallengeResult] = []
     for row in rows:
         attempt = ChallengeAttempt(
