@@ -53,6 +53,8 @@ class SettlementContractClient(Protocol):
         merkle_root: bytes,
         receipt_count: int,
         total_value_ftns: int,
+        tier_slash_rate_bps: int,
+        consensus_group_id: bytes,
         metadata_uri: str,
     ) -> Tuple[bytes, int]:
         """Submit commitBatch; return (batch_id, commit_timestamp_unix).
@@ -62,6 +64,15 @@ class SettlementContractClient(Protocol):
         through for mock/test implementations and for audit logging.
         The implementation parses the BatchCommitted event from the
         transaction receipt and returns the emitted batch_id + timestamp.
+
+        tier_slash_rate_bps (Phase 7): basis-point slash rate snapshot,
+        0-10000. 0 means this batch's provider hasn't bonded stake, so
+        no slashing on successful challenge.
+
+        consensus_group_id (Phase 7.1x §8.7): 32-byte identifier binding
+        this batch to a k-of-n consensus dispatch. All-zero bytes means
+        "not a consensus batch" — only DOUBLE_SPEND / INVALID_SIGNATURE
+        challenges apply; CONSENSUS_MISMATCH is not targetable.
         """
         ...
 
@@ -195,7 +206,8 @@ class BatchSettlementClient:
         _commit_one code path). The on-chain contract enforces commit
         authority via `msg.sender`; the Python client trusts the
         accumulator's keyed batches."""
-        requester_address, provider_address = ready.key
+        # AccumulatorKey is (requester, provider, group_id, slash_rate_bps).
+        requester_address, provider_address, group_id, slash_rate_bps = ready.key
 
         leaves = [
             batched_receipt_to_leaf(br) for br in ready.batch.receipts
@@ -209,6 +221,8 @@ class BatchSettlementClient:
             merkle_root=tree.root,
             receipt_count=len(leaves),
             total_value_ftns=ready.batch.total_value_ftns,
+            tier_slash_rate_bps=slash_rate_bps,
+            consensus_group_id=group_id,
             metadata_uri="",
         )
 

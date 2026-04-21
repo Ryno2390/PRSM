@@ -55,14 +55,49 @@ class BatchedReceipt:
     provider_address: str        # 0x-hex Ethereum address earning this receipt
     value_ftns: int              # quoted price in FTNS base units (wei, 18 dec)
     local_escrow_id: str         # pointer back to local PaymentEscrow entry
+    # Phase 7: the provider's bond-time slash-rate snapshot in basis
+    # points. 0 = no bonded stake / no slash. Snapshot at commit time
+    # means a provider cannot dodge slashing via mid-batch downgrade.
+    # Defaults to 0 so pre-Phase-7 callers don't have to specify.
+    tier_slash_rate_bps: int = 0
+    # Phase 7.1x §8.7: non-zero binds this receipt to a k-of-n consensus
+    # dispatch. CONSENSUS_MISMATCH challenges require both the minority
+    # and majority batches to share a non-zero group_id AND to come from
+    # different providers. Zero means "not a consensus receipt" — batch
+    # together with other zero-group receipts from the same (requester,
+    # provider) pair. Defaults to all-zero bytes so pre-Phase-7.1x
+    # callers don't have to specify.
+    consensus_group_id: bytes = b"\x00" * 32
+
+    def __post_init__(self):
+        if not (0 <= self.tier_slash_rate_bps <= 10000):
+            raise ValueError(
+                f"tier_slash_rate_bps must be in [0, 10000] "
+                f"(got {self.tier_slash_rate_bps})"
+            )
+        if len(self.consensus_group_id) != 32:
+            raise ValueError(
+                f"consensus_group_id must be 32 bytes "
+                f"(got {len(self.consensus_group_id)})"
+            )
 
 
 @dataclass
 class PendingBatch:
-    """Mutable accumulator for one (requester, provider) pair's receipts."""
+    """Mutable accumulator for one (requester, provider, group_id,
+    tier_slash_rate_bps) key's receipts.
+
+    Every receipt in one PendingBatch must share the same group_id and
+    slash_rate — those are batch-level invariants (they serialize as
+    single fields on the on-chain Batch struct). Receipts that disagree
+    on either belong in a different PendingBatch keyed separately in
+    the accumulator."""
     receipts: List[BatchedReceipt] = field(default_factory=list)
     started_at_unix: int = 0
     total_value_ftns: int = 0
+    # Captured from the first receipt; all subsequent receipts must match.
+    tier_slash_rate_bps: int = 0
+    consensus_group_id: bytes = b"\x00" * 32
 
     @property
     def count(self) -> int:
@@ -72,18 +107,43 @@ class PendingBatch:
         return not self.receipts
 
     def append(self, br: BatchedReceipt, at_unix: int) -> None:
-        """Add a receipt. Sets started_at_unix on the first append."""
+        """Add a receipt. Sets started_at_unix + batch-level fields on
+        the first append. Subsequent appends must agree on
+        tier_slash_rate_bps and consensus_group_id — the caller's
+        accumulator keying should guarantee this; we assert defensively."""
         if self.is_empty():
             self.started_at_unix = at_unix
+            self.tier_slash_rate_bps = br.tier_slash_rate_bps
+            self.consensus_group_id = br.consensus_group_id
+        else:
+            if br.tier_slash_rate_bps != self.tier_slash_rate_bps:
+                raise ValueError(
+                    f"receipt tier_slash_rate_bps {br.tier_slash_rate_bps} "
+                    f"disagrees with batch {self.tier_slash_rate_bps}"
+                )
+            if br.consensus_group_id != self.consensus_group_id:
+                raise ValueError(
+                    "receipt consensus_group_id disagrees with batch"
+                )
         self.receipts.append(br)
         self.total_value_ftns += br.value_ftns
+
+
+# Phase 7.1x §8.7 + Phase 7: accumulator key extended to separate
+# batches that disagree on batch-level slash rate or consensus group.
+# A non-zero consensus_group_id binds a receipt to a k-of-n dispatch;
+# a given provider in a given group has exactly one batch. Non-
+# consensus receipts (group_id = all-zero bytes) still batch together
+# by (requester, provider) as in Phase 3.1.
+AccumulatorKey = Tuple[str, str, bytes, int]
+#                     (requester, provider, group_id, slash_rate_bps)
 
 
 @dataclass(frozen=True)
 class ReadyBatch:
     """A batch that has crossed at least one threshold. The caller pops
     it from the accumulator and commits it on chain."""
-    key: Tuple[str, str]          # (requester_address, provider_address)
+    key: AccumulatorKey           # see AccumulatorKey alias above
     batch: PendingBatch
     trigger: TriggerReason        # which threshold fired first
 
@@ -127,7 +187,7 @@ class ReceiptAccumulator:
 
     def __init__(self, config: Optional[AccumulatorConfig] = None):
         self._config = config if config is not None else AccumulatorConfig()
-        self._pending: Dict[Tuple[str, str], PendingBatch] = {}
+        self._pending: Dict[AccumulatorKey, PendingBatch] = {}
 
     @property
     def config(self) -> AccumulatorConfig:
@@ -145,7 +205,12 @@ class ReceiptAccumulator:
         at_unix override is for deterministic testing; production uses
         current wall clock.
         """
-        key = (br.requester_address, br.provider_address)
+        key: AccumulatorKey = (
+            br.requester_address,
+            br.provider_address,
+            br.consensus_group_id,
+            br.tier_slash_rate_bps,
+        )
         batch = self._pending.setdefault(key, PendingBatch())
         now = at_unix if at_unix is not None else int(time.time())
         batch.append(br, now)
@@ -183,9 +248,9 @@ class ReceiptAccumulator:
 
     def pop_batch(
         self,
-        key: Tuple[str, str],
+        key: AccumulatorKey,
     ) -> Optional[PendingBatch]:
-        """Remove and return the batch for this (requester, provider) key.
+        """Remove and return the batch for this key.
 
         The caller (Task 6 settlement client) is responsible for actually
         committing the popped batch on-chain. If the commit fails, the
@@ -195,13 +260,13 @@ class ReceiptAccumulator:
 
     def peek_batch(
         self,
-        key: Tuple[str, str],
+        key: AccumulatorKey,
     ) -> Optional[PendingBatch]:
         """Non-destructive read of a batch's current state."""
         return self._pending.get(key)
 
-    def pending_keys(self) -> List[Tuple[str, str]]:
-        """List of every (requester, provider) pair with a non-empty batch."""
+    def pending_keys(self) -> List[AccumulatorKey]:
+        """List of every accumulator key with a non-empty batch."""
         return [k for k, v in self._pending.items() if not v.is_empty()]
 
     def total_receipt_count(self) -> int:
