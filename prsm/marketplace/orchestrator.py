@@ -424,6 +424,29 @@ class MarketplaceOrchestrator:
         sorted_listings = sorted(listings, key=score)
         return sorted_listings[:k]
 
+    def drain_consensus_minority_queue(self) -> List[Dict[str, Any]]:
+        """Phase 7.1x — pop all pending minority-receipt entries off the
+        in-process queue. Returns them in FIFO order for a downstream
+        `ConsensusChallengeSubmitter` to turn into on-chain challenges.
+
+        This is the orchestrator's side of the §8.6 seam the Task 8
+        review flagged. The submitter service calls this method after
+        the settlement accumulator commits the minority batches on-
+        chain, pairs each entry with the committed batch_ids, and fires
+        the `CONSENSUS_MISMATCH` challenges.
+
+        Idempotent + crash-atomic from the orchestrator's perspective:
+        once drained, entries are the caller's responsibility. If the
+        submitter crashes mid-drain, the orchestrator's queue is
+        already empty and those minority receipts are lost. Persistence
+        is future work (a Phase 7.1x.next follow-up); MVP assumes the
+        submitter runs in the same process as the orchestrator or
+        handles its own persistence after drain.
+        """
+        drained = list(self.consensus_minority_queue)
+        self.consensus_minority_queue.clear()
+        return drained
+
     def _queue_consensus_challenges(self, receipt) -> None:
         """Phase 7.1 Task 5 — accumulate minority receipts for the
         downstream challenge-submitter service to consume.

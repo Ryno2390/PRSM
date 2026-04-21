@@ -1,0 +1,362 @@
+"""Phase 7.1x: ConsensusChallengeSubmitter.
+
+Closes the §8.6 seam from the Phase 7.1 Task 8 review: the
+MarketplaceOrchestrator queues minority receipts from consensus
+dispatches in `consensus_minority_queue`, but never submits on-chain
+`CONSENSUS_MISMATCH` challenges itself. This module is the submitter
+service that drains the queue and actually slashes minority providers
+via `BatchSettlementRegistry.challengeReceipt`.
+
+Responsibilities:
+  - Accept a `ChallengeAttempt` (minority + majority pair from a
+    ConsensusShardReceipt, plus both batch_ids and a Merkle proof
+    for the majority leaf in its committed batch).
+  - Build the `auxData` bytes per the Phase 7.1 `_handleConsensusMismatch`
+    layout: `abi.encode(conflictingBatchId, majorityProof, majorityLeaf)`.
+  - Sign + broadcast `challengeReceipt(minorityBatchId, minorityLeaf,
+    [minority-batch Merkle proof], ReasonCode.CONSENSUS_MISMATCH, aux)`.
+  - Surface the outcome as a `ChallengeResult` — success with tx hash,
+    or the specific contract revert that fired.
+  - Force a gas budget comfortably above Phase 7 §8.7's
+    `MIN_SLASH_GAS` so the estimator-binary-search still catches the
+    floor but the slash completes inside the forced budget.
+
+Explicit non-responsibilities (deferred to later work):
+  - **Batch commit coordination.** The caller is responsible for
+    ensuring both the minority and majority batches are committed
+    on-chain before calling `submit_one`. The submitter will surface
+    `ConflictingBatchNotCommitted` cleanly if a batch isn't ready.
+  - **Persistence.** The drained queue entries live in-memory in the
+    caller. If this process crashes mid-submission, those receipts
+    are lost. Adding a SQLite backing store is a follow-up.
+  - **Retry / backoff.** The submitter returns per-attempt results;
+    the caller decides whether to retry. No built-in queuing.
+  - **Proof construction.** The caller constructs the Merkle proof for
+    the majority leaf. For 1-leaf batches the proof is empty; for
+    multi-leaf batches the caller owns the tree. The submitter just
+    relays bytes to the contract.
+"""
+from __future__ import annotations
+
+import logging
+import threading
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
+
+try:
+    from web3 import Web3
+    from eth_abi import encode as abi_encode
+    from eth_account import Account
+    from eth_utils import keccak
+    HAS_WEB3 = True
+except ImportError:  # pragma: no cover
+    HAS_WEB3 = False
+    Web3 = None  # type: ignore
+    Account = None  # type: ignore
+
+from prsm.compute.shard_receipt import ShardExecutionReceipt
+from prsm.economy.web3.provenance_registry import (
+    BroadcastFailedError,
+    OnChainPendingError,
+    OnChainRevertedError,
+    TransferStatus,
+)
+from prsm.economy.web3.stake_manager import ReasonCode
+
+logger = logging.getLogger(__name__)
+
+
+# Minimum gas to send with a CONSENSUS_MISMATCH challenge tx. The
+# registry now requires gasleft() >= MIN_SLASH_GAS (150_000) before the
+# slash try/catch. 1_000_000 leaves plenty of headroom for the full
+# path (Merkle verify + binding checks + slash + event emission).
+DEFAULT_CHALLENGE_GAS = 1_000_000
+
+
+@dataclass(frozen=True)
+class ReceiptLeafFields:
+    """On-chain-encoded ReceiptLeaf tuple fields.
+
+    Matches `BatchSettlementRegistry.ReceiptLeaf`:
+      (bytes32, uint32, bytes32, bytes32, bytes32, uint64, uint128, bytes32)
+
+    The caller is responsible for deriving these from the Python
+    `ShardExecutionReceipt` — see `from_python_receipt` below for the
+    canonical conversion.
+    """
+    job_id_hash: bytes
+    shard_index: int
+    provider_id_hash: bytes
+    provider_pubkey_hash: bytes
+    output_hash: bytes
+    executed_at_unix: int
+    value_ftns_wei: int
+    signature_hash: bytes
+
+    @classmethod
+    def from_python_receipt(
+        cls,
+        receipt: ShardExecutionReceipt,
+        value_ftns_wei: int,
+    ) -> "ReceiptLeafFields":
+        """Convert a Python `ShardExecutionReceipt` into the on-chain
+        ReceiptLeaf fields.
+
+        Hashing rules match what the Phase 7.1 E2E test uses (so the
+        contract-side `_hashLeaf` + `_handleConsensusMismatch`
+        comparisons work byte-for-byte):
+
+          - job_id_hash = keccak256(job_id.utf8)
+          - provider_id_hash = keccak256(provider_id.utf8)
+          - provider_pubkey_hash = keccak256(provider_pubkey_b64.utf8)
+          - output_hash = bytes.fromhex(receipt.output_hash)  (hex str → 32 bytes)
+          - signature_hash = keccak256(signature.utf8)
+
+        `value_ftns_wei` comes from the orchestrator's per-provider
+        escrow amount; the receipt itself doesn't carry a price.
+        """
+        if not HAS_WEB3:
+            raise RuntimeError("web3 required for leaf-field hashing")
+        output_bytes = bytes.fromhex(receipt.output_hash)
+        if len(output_bytes) != 32:
+            raise ValueError(
+                f"receipt.output_hash must be 32 bytes hex (got "
+                f"{len(output_bytes)})"
+            )
+        return cls(
+            job_id_hash=bytes(keccak(receipt.job_id.encode("utf-8"))),
+            shard_index=receipt.shard_index,
+            provider_id_hash=bytes(keccak(receipt.provider_id.encode("utf-8"))),
+            provider_pubkey_hash=bytes(
+                keccak(receipt.provider_pubkey_b64.encode("utf-8"))
+            ),
+            output_hash=output_bytes,
+            executed_at_unix=receipt.executed_at_unix,
+            value_ftns_wei=value_ftns_wei,
+            signature_hash=bytes(keccak(receipt.signature.encode("utf-8"))),
+        )
+
+    def to_tuple(self) -> Tuple:
+        """Return the fields as the tuple web3.py expects for the
+        contract's `ReceiptLeaf calldata` argument."""
+        return (
+            self.job_id_hash, self.shard_index, self.provider_id_hash,
+            self.provider_pubkey_hash, self.output_hash,
+            self.executed_at_unix, self.value_ftns_wei,
+            self.signature_hash,
+        )
+
+
+@dataclass(frozen=True)
+class ChallengeAttempt:
+    """One CONSENSUS_MISMATCH challenge worth of inputs.
+
+    Built by the caller after batch commit: the caller knows both
+    batch_ids, the full `ReceiptLeafFields` for each, and any Merkle
+    proofs needed for multi-leaf batches (empty for 1-leaf).
+    """
+    minority_batch_id: bytes
+    minority_leaf: ReceiptLeafFields
+    minority_proof: List[bytes]   # proof within the minority's batch
+    majority_batch_id: bytes
+    majority_leaf: ReceiptLeafFields
+    majority_proof: List[bytes]   # proof within the majority's batch
+
+
+@dataclass(frozen=True)
+class ChallengeResult:
+    """Outcome of one challenge attempt."""
+    success: bool
+    tx_hash_hex: Optional[str]
+    error_type: Optional[str]   # exception class name, None on success
+    error_message: Optional[str]
+
+
+class ConsensusChallengeSubmitter:
+    """Sync Web3 client for CONSENSUS_MISMATCH challenges.
+
+    One instance per challenger keypair. Shares the nonce-lock pattern
+    established by `ProvenanceRegistryClient` and `StakeManagerClient`
+    (see `OPERATOR_GUIDE.md` §On-chain Keypairs for the one-keypair-
+    per-process invariant).
+    """
+
+    CHALLENGE_RECEIPT_ABI = [{
+        "inputs": [
+            {"name": "batchId", "type": "bytes32"},
+            {
+                "components": [
+                    {"name": "jobIdHash", "type": "bytes32"},
+                    {"name": "shardIndex", "type": "uint32"},
+                    {"name": "providerIdHash", "type": "bytes32"},
+                    {"name": "providerPubkeyHash", "type": "bytes32"},
+                    {"name": "outputHash", "type": "bytes32"},
+                    {"name": "executedAtUnix", "type": "uint64"},
+                    {"name": "valueFtns", "type": "uint128"},
+                    {"name": "signatureHash", "type": "bytes32"},
+                ],
+                "name": "leaf",
+                "type": "tuple",
+            },
+            {"name": "merkleProof", "type": "bytes32[]"},
+            {"name": "reason", "type": "uint8"},
+            {"name": "auxData", "type": "bytes"},
+        ],
+        "name": "challengeReceipt",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function",
+    }]
+
+    def __init__(
+        self,
+        rpc_url: str,
+        registry_address: str,
+        private_key: str,
+        gas_budget: int = DEFAULT_CHALLENGE_GAS,
+    ) -> None:
+        if not HAS_WEB3:
+            raise RuntimeError(
+                "web3 package is required (pip install web3 eth-account)"
+            )
+        self.web3 = Web3(Web3.HTTPProvider(rpc_url))
+        self.registry_address = Web3.to_checksum_address(registry_address)
+        self.registry = self.web3.eth.contract(
+            address=self.registry_address,
+            abi=self.CHALLENGE_RECEIPT_ABI,
+        )
+        self._account = Account.from_key(private_key)
+        self._tx_lock = threading.Lock()
+        self.gas_budget = gas_budget
+
+    @property
+    def address(self) -> str:
+        return self._account.address
+
+    # ── Writes ─────────────────────────────────────────────────
+
+    def submit_one(self, attempt: ChallengeAttempt) -> ChallengeResult:
+        """Submit a single CONSENSUS_MISMATCH challenge on-chain.
+
+        Returns a `ChallengeResult` capturing success + tx hash, or the
+        contract revert that fired. Never raises — the caller receives
+        a uniform result shape and decides whether to retry, escalate,
+        or drop.
+        """
+        try:
+            aux = self._encode_aux(attempt)
+            with self._tx_lock:
+                tx = self.registry.functions.challengeReceipt(
+                    attempt.minority_batch_id,
+                    attempt.minority_leaf.to_tuple(),
+                    attempt.minority_proof,
+                    int(ReasonCode.CONSENSUS_MISMATCH),
+                    aux,
+                ).build_transaction(self._tx_overrides())
+                tx_hash_hex, _ = self._sign_and_send(tx)
+            return ChallengeResult(
+                success=True, tx_hash_hex=tx_hash_hex,
+                error_type=None, error_message=None,
+            )
+        except (BroadcastFailedError, OnChainPendingError,
+                OnChainRevertedError) as exc:
+            logger.warning(
+                f"consensus challenge failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            return ChallengeResult(
+                success=False,
+                tx_hash_hex=getattr(exc, "tx_hash", None),
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
+        except Exception as exc:
+            # Catch-all so the caller's loop through a queue never
+            # aborts on one broken attempt. Log loudly so the bug
+            # surfaces.
+            logger.error(
+                f"consensus challenge raised unexpected {type(exc).__name__}: "
+                f"{exc}"
+            )
+            return ChallengeResult(
+                success=False, tx_hash_hex=None,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
+
+    def submit_batch(
+        self, attempts: List[ChallengeAttempt],
+    ) -> List[ChallengeResult]:
+        """Submit a list of attempts sequentially. Returns a parallel
+        list of results. One failure does NOT abort the loop."""
+        return [self.submit_one(a) for a in attempts]
+
+    # ── Internals ──────────────────────────────────────────────
+
+    def _encode_aux(self, attempt: ChallengeAttempt) -> bytes:
+        """Mirror `_handleConsensusMismatch`'s auxData layout:
+           abi.encode(bytes32 conflictingBatchId, bytes32[] majorityProof,
+                      ReceiptLeaf majorityLeaf).
+        """
+        return bytes(abi_encode(
+            [
+                "bytes32",
+                "bytes32[]",
+                "(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32)",
+            ],
+            [
+                attempt.majority_batch_id,
+                attempt.majority_proof,
+                attempt.majority_leaf.to_tuple(),
+            ],
+        ))
+
+    def _tx_overrides(self) -> dict:
+        return {
+            "from": self._account.address,
+            "nonce": self.web3.eth.get_transaction_count(
+                self._account.address, "pending"
+            ),
+            "gasPrice": self.web3.eth.gas_price,
+            "chainId": self.web3.eth.chain_id,
+            # Force enough gas to clear MIN_SLASH_GAS + full slash path.
+            # Without this, estimateGas can under-budget per Phase 7 §8.7
+            # — though the new floor makes under-funding revert cleanly
+            # instead of silently swallowing the slash.
+            "gas": self.gas_budget,
+        }
+
+    def _sign_and_send(self, tx: dict) -> Tuple[str, "TransferStatus"]:
+        signed = self.web3.eth.account.sign_transaction(tx, self._account.key)
+        raw = getattr(signed, "raw_transaction", None) or getattr(
+            signed, "rawTransaction", None
+        )
+        try:
+            tx_hash_bytes = self.web3.eth.send_raw_transaction(raw)
+        except Exception as exc:
+            raise BroadcastFailedError(f"broadcast failed: {exc}") from exc
+
+        tx_hash_hex = "0x" + tx_hash_bytes.hex()
+        try:
+            receipt = self.web3.eth.wait_for_transaction_receipt(
+                tx_hash_bytes, timeout=120,
+            )
+        except Exception as exc:
+            raise OnChainPendingError(
+                f"broadcast OK but receipt unknown: {exc}",
+                tx_hash=tx_hash_hex,
+            ) from exc
+
+        if receipt.status != 1:
+            raise OnChainRevertedError(f"challenge tx reverted: {tx_hash_hex}")
+
+        return tx_hash_hex, TransferStatus.CONFIRMED
+
+
+__all__ = [
+    "ConsensusChallengeSubmitter",
+    "ChallengeAttempt",
+    "ChallengeResult",
+    "ReceiptLeafFields",
+    "DEFAULT_CHALLENGE_GAS",
+]
