@@ -1,28 +1,23 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-// Phase 7.1 Task 3 — BatchSettlementRegistry CONSENSUS_MISMATCH path.
-//
-// A successful k-of-n redundant-execution dispatch can produce a batch
-// with two receipts for the SAME shard from different providers whose
-// outputs disagree. The requester then challenges the minority leaf via
-// ReasonCode.CONSENSUS_MISMATCH, passing the majority leaf + proof as
-// auxData. The contract verifies:
-//   1. caller is the batch requester (MVP authorization)
-//   2. the hash bindings in auxData match the leaf fields
-//   3. the majority and minority hashes are genuinely different
-//   4. the majority leaf is in the same batch's Merkle tree
-// On success, the receipt is invalidated AND the slash hook fires.
+// Phase 7.1 Task 3 (revised during Task 7 E2E): CONSENSUS_MISMATCH uses
+// a CROSS-BATCH proof, mirroring DOUBLE_SPEND's structure. In Phase 7.1's
+// k-of-n redundant-execution model, each provider commits their own
+// batch of their own receipts; the challenge against a minority
+// provider uses a majority provider's (different) batch as proof of
+// disagreement. Slashing naturally hits b.provider — the committer of
+// the challenged (minority) batch.
 
 describe("BatchSettlementRegistry — Phase 7.1 CONSENSUS_MISMATCH", function () {
   let registry, escrowPool, token, verifier, stakeBond;
-  let owner, provider, requester, challenger, foundation;
+  let owner, providerMajority, providerMinority, requester, foundation, other;
   const ONE_FTNS = ethers.parseUnits("1", 18);
   const DEFAULT_WINDOW = 3 * 24 * 60 * 60;
   const DEFAULT_UNBOND_DELAY = 7 * 24 * 60 * 60;
   const PREMIUM_STAKE = 25_000n * ONE_FTNS;
   const PREMIUM_SLASH_BPS = 10000;
-  const CONSENSUS_MISMATCH = 5; // ReasonCode enum value
+  const CONSENSUS_MISMATCH = 5;
 
   function makeLeaf(overrides = {}) {
     return {
@@ -50,48 +45,15 @@ describe("BatchSettlementRegistry — Phase 7.1 CONSENSUS_MISMATCH", function ()
     return ethers.keccak256(encoded);
   }
 
-  // OpenZeppelin MerkleProof.verify hashes pairs in sorted order.
-  function pairHash(a, b) {
-    const aBuf = ethers.getBytes(a);
-    const bBuf = ethers.getBytes(b);
-    const sorted = Buffer.compare(
-      Buffer.from(aBuf), Buffer.from(bBuf)
-    ) < 0 ? [a, b] : [b, a];
-    return ethers.keccak256(
-      ethers.concat([sorted[0], sorted[1]])
-    );
-  }
-
-  function buildTwoLeafTree(leafMajority, leafMinority) {
-    const hMaj = hashLeaf(leafMajority);
-    const hMin = hashLeaf(leafMinority);
-    const root = pairHash(hMaj, hMin);
-    // In a 2-leaf tree each leaf's proof is the sibling's hash.
-    return {
-      root,
-      proofForMajority: [hMin],
-      proofForMinority: [hMaj],
-      majorityHash: hMaj,
-      minorityHash: hMin,
-    };
-  }
-
-  function encodeAux(
-    majorityAgreedHash,
-    minorityClaimedHash,
-    majorityProof,
-    majorityLeaf,
-  ) {
+  function encodeAux(conflictingBatchId, majorityProof, majorityLeaf) {
     return ethers.AbiCoder.defaultAbiCoder().encode(
       [
-        "bytes32",
         "bytes32",
         "bytes32[]",
         "tuple(bytes32,uint32,bytes32,bytes32,bytes32,uint64,uint128,bytes32)",
       ],
       [
-        majorityAgreedHash,
-        minorityClaimedHash,
+        conflictingBatchId,
         majorityProof,
         [
           majorityLeaf.jobIdHash, majorityLeaf.shardIndex,
@@ -103,8 +65,8 @@ describe("BatchSettlementRegistry — Phase 7.1 CONSENSUS_MISMATCH", function ()
     );
   }
 
-  async function deployPhase71Stack() {
-    [owner, provider, requester, challenger, foundation] =
+  async function deployStack() {
+    [owner, providerMajority, providerMinority, requester, foundation, other] =
       await ethers.getSigners();
 
     const Token = await ethers.getContractFactory("MockERC20");
@@ -146,286 +108,269 @@ describe("BatchSettlementRegistry — Phase 7.1 CONSENSUS_MISMATCH", function ()
     );
     await registry.connect(owner).setStakeBond(await stakeBond.getAddress());
 
-    // Fund + bond the provider.
-    await token.mint(provider.address, PREMIUM_STAKE * 2n);
-    await token.connect(provider).approve(
-      await stakeBond.getAddress(), PREMIUM_STAKE * 2n,
-    );
-    await stakeBond.connect(provider).bond(PREMIUM_STAKE, PREMIUM_SLASH_BPS);
+    // Both providers bond premium stake so both are slashable if caught.
+    for (const p of [providerMajority, providerMinority]) {
+      await token.mint(p.address, PREMIUM_STAKE * 2n);
+      await token.connect(p).approve(
+        await stakeBond.getAddress(), PREMIUM_STAKE * 2n,
+      );
+      await stakeBond.connect(p).bond(PREMIUM_STAKE, PREMIUM_SLASH_BPS);
+    }
   }
 
   beforeEach(async function () {
-    await deployPhase71Stack();
+    await deployStack();
   });
 
-  async function commitTwoLeafBatch(leafMajority, leafMinority) {
-    const tree = buildTwoLeafTree(leafMajority, leafMinority);
-    const tx = await registry.connect(provider).commitBatch(
-      requester.address,
-      tree.root,
-      2,
-      leafMajority.valueFtns + leafMinority.valueFtns,
-      PREMIUM_SLASH_BPS,
-      "ipfs://consensus-batch",
+  /**
+   * Commit a single-leaf batch for `signer`. Returns {batchId, leafHash}.
+   * In Phase 7.1's k-of-n flow, each participating provider commits
+   * their own batch of their own receipts. Proof for a 1-leaf tree is
+   * empty — the leaf hash IS the root.
+   */
+  async function commitSingleLeafBatch(signer, leaf) {
+    const root = hashLeaf(leaf);
+    const tx = await registry.connect(signer).commitBatch(
+      requester.address, root, 1, leaf.valueFtns,
+      PREMIUM_SLASH_BPS, "ipfs://" + signer.address.slice(0, 8),
     );
     const r = await tx.wait();
     const batchId = r.logs.find(
       (l) => l.fragment && l.fragment.name === "BatchCommitted",
     ).args[0];
-    return { batchId, tree };
+    return { batchId, leafHash: hashLeaf(leaf) };
   }
 
   // ── Happy path ──────────────────────────────────────────────────
 
-  it("slashes minority provider on legitimate CONSENSUS_MISMATCH", async function () {
-    const leafMaj = makeLeaf({
-      providerIdHash: ethers.keccak256(ethers.toUtf8Bytes("providerA")),
+  it("slashes the minority provider on legitimate CONSENSUS_MISMATCH", async function () {
+    const majorityLeaf = makeLeaf({
+      providerIdHash: ethers.keccak256(ethers.toUtf8Bytes("A")),
       outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_OK")),
     });
-    const leafMin = makeLeaf({
-      providerIdHash: ethers.keccak256(ethers.toUtf8Bytes("providerC")),
+    const minorityLeaf = makeLeaf({
+      providerIdHash: ethers.keccak256(ethers.toUtf8Bytes("C")),
       outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_CHEAT")),
     });
-    const { batchId, tree } = await commitTwoLeafBatch(leafMaj, leafMin);
 
-    const aux = encodeAux(
-      leafMaj.outputHash, leafMin.outputHash,
-      tree.proofForMajority, leafMaj,
+    // Each provider commits their own batch of their own receipt.
+    const majorityBatch = await commitSingleLeafBatch(
+      providerMajority, majorityLeaf,
+    );
+    const minorityBatch = await commitSingleLeafBatch(
+      providerMinority, minorityLeaf,
     );
 
-    const stakeBefore = await stakeBond.stakeOf(provider.address);
-    expect(stakeBefore.amount).to.equal(PREMIUM_STAKE);
+    // 1-leaf proof is empty (leaf hash IS the root).
+    const aux = encodeAux(majorityBatch.batchId, [], majorityLeaf);
+
+    const preMajorityStake = await stakeBond.stakeOf(providerMajority.address);
+    const preMinorityStake = await stakeBond.stakeOf(providerMinority.address);
+    expect(preMajorityStake.amount).to.equal(PREMIUM_STAKE);
+    expect(preMinorityStake.amount).to.equal(PREMIUM_STAKE);
 
     await expect(
       registry.connect(requester).challengeReceipt(
-        batchId, leafMin, tree.proofForMinority, CONSENSUS_MISMATCH, aux,
+        minorityBatch.batchId, minorityLeaf, [],
+        CONSENSUS_MISMATCH, aux,
+        { gasLimit: 1_000_000 },
       ),
     ).to.emit(stakeBond, "Slashed");
 
-    const stakeAfter = await stakeBond.stakeOf(provider.address);
-    expect(stakeAfter.amount).to.equal(0);
+    // Minority's stake drained 100%; majority's stake untouched.
+    const postMajorityStake = await stakeBond.stakeOf(providerMajority.address);
+    const postMinorityStake = await stakeBond.stakeOf(providerMinority.address);
+    expect(postMajorityStake.amount).to.equal(PREMIUM_STAKE);
+    expect(postMinorityStake.amount).to.equal(0);
   });
 
-  // ── Binding failures ────────────────────────────────────────────
+  // ── Authorization ───────────────────────────────────────────────
 
-  it("rejects when minorityClaimedHash in aux != leaf.outputHash", async function () {
-    const leafMaj = makeLeaf({
+  it("rejects when caller is not the minority batch's requester", async function () {
+    const majorityLeaf = makeLeaf({
       outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_OK")),
     });
-    const leafMin = makeLeaf({
+    const minorityLeaf = makeLeaf({
       outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_CHEAT")),
     });
-    const { batchId, tree } = await commitTwoLeafBatch(leafMaj, leafMin);
-
-    // Flip the minority hash in auxData to something that doesn't
-    // match the leaf we're challenging.
-    const bogusMinorityHash = ethers.keccak256(ethers.toUtf8Bytes("BOGUS"));
-    const aux = encodeAux(
-      leafMaj.outputHash, bogusMinorityHash,
-      tree.proofForMajority, leafMaj,
+    const majBatch = await commitSingleLeafBatch(
+      providerMajority, majorityLeaf,
+    );
+    const minBatch = await commitSingleLeafBatch(
+      providerMinority, minorityLeaf,
     );
 
+    const aux = encodeAux(majBatch.batchId, [], majorityLeaf);
+
+    // `other` is not the batch's requester — MVP rejects.
     await expect(
-      registry.connect(requester).challengeReceipt(
-        batchId, leafMin, tree.proofForMinority, CONSENSUS_MISMATCH, aux,
-      ),
-    ).to.be.revertedWithCustomError(registry, "ChallengeNotProven");
-  });
-
-  it("rejects when majorityAgreedHash in aux != majorityLeaf.outputHash", async function () {
-    const leafMaj = makeLeaf({
-      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_OK")),
-    });
-    const leafMin = makeLeaf({
-      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_CHEAT")),
-    });
-    const { batchId, tree } = await commitTwoLeafBatch(leafMaj, leafMin);
-
-    const bogusMajorityHash = ethers.keccak256(ethers.toUtf8Bytes("NOPE"));
-    const aux = encodeAux(
-      bogusMajorityHash, leafMin.outputHash,
-      tree.proofForMajority, leafMaj,
-    );
-
-    await expect(
-      registry.connect(requester).challengeReceipt(
-        batchId, leafMin, tree.proofForMinority, CONSENSUS_MISMATCH, aux,
-      ),
-    ).to.be.revertedWithCustomError(registry, "ChallengeNotProven");
-  });
-
-  // ── No actual disagreement ──────────────────────────────────────
-
-  it("rejects when majority and minority output hashes are equal", async function () {
-    // Both receipts claim the same output hash — there's no dispute
-    // here; either both are wrong (DOUBLE_SPEND territory) or neither
-    // is wrong. CONSENSUS_MISMATCH is the wrong tool.
-    const sameHash = ethers.keccak256(ethers.toUtf8Bytes("SAME"));
-    const leafMaj = makeLeaf({
-      providerIdHash: ethers.keccak256(ethers.toUtf8Bytes("A")),
-      outputHash: sameHash,
-    });
-    const leafMin = makeLeaf({
-      providerIdHash: ethers.keccak256(ethers.toUtf8Bytes("B")),
-      outputHash: sameHash,
-    });
-    const { batchId, tree } = await commitTwoLeafBatch(leafMaj, leafMin);
-
-    const aux = encodeAux(
-      sameHash, sameHash, tree.proofForMajority, leafMaj,
-    );
-    await expect(
-      registry.connect(requester).challengeReceipt(
-        batchId, leafMin, tree.proofForMinority, CONSENSUS_MISMATCH, aux,
-      ),
-    ).to.be.revertedWithCustomError(registry, "ChallengeNotProven");
-  });
-
-  // ── Merkle proof failures ───────────────────────────────────────
-
-  it("rejects when majority proof does not verify against batch root", async function () {
-    const leafMaj = makeLeaf({
-      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_OK")),
-    });
-    const leafMin = makeLeaf({
-      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_CHEAT")),
-    });
-    const { batchId, tree } = await commitTwoLeafBatch(leafMaj, leafMin);
-
-    // Use a fake proof (sibling hash that isn't in this batch).
-    const bogusSibling = ethers.keccak256(ethers.toUtf8Bytes("BOGUS_SIBLING"));
-    const aux = encodeAux(
-      leafMaj.outputHash, leafMin.outputHash,
-      [bogusSibling], leafMaj,
-    );
-
-    await expect(
-      registry.connect(requester).challengeReceipt(
-        batchId, leafMin, tree.proofForMinority, CONSENSUS_MISMATCH, aux,
-      ),
-    ).to.be.revertedWithCustomError(registry, "ChallengeNotProven");
-  });
-
-  // ── Authorization (MVP: requester-only) ─────────────────────────
-
-  it("rejects when caller is not the batch requester", async function () {
-    const leafMaj = makeLeaf({
-      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_OK")),
-    });
-    const leafMin = makeLeaf({
-      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_CHEAT")),
-    });
-    const { batchId, tree } = await commitTwoLeafBatch(leafMaj, leafMin);
-
-    const aux = encodeAux(
-      leafMaj.outputHash, leafMin.outputHash,
-      tree.proofForMajority, leafMaj,
-    );
-    // `challenger` is a different signer than `requester` — Phase 7.1
-    // MVP forbids this. Phase 7.1x introduces consensus_group_id so
-    // any holder of both receipts can challenge.
-    await expect(
-      registry.connect(challenger).challengeReceipt(
-        batchId, leafMin, tree.proofForMinority, CONSENSUS_MISMATCH, aux,
+      registry.connect(other).challengeReceipt(
+        minBatch.batchId, minorityLeaf, [],
+        CONSENSUS_MISMATCH, aux,
       ),
     ).to.be.revertedWithCustomError(registry, "CallerNotRequester");
   });
 
-  // ── Best-effort slashing (Phase 7 invariant preserved) ──────────
+  // ── Same-batch (self-referential) rejection ─────────────────────
 
-  it("challenge succeeds even if slash is skipped (stakeBond unset)", async function () {
-    // Disable the slash hook by setting stakeBond to zero address.
-    await registry.connect(owner).setStakeBond(ethers.ZeroAddress);
+  it("rejects when conflictingBatchId equals the batch being challenged", async function () {
+    // A provider can't disagree with themselves inside one batch.
+    const leaf = makeLeaf();
+    const batch = await commitSingleLeafBatch(providerMinority, leaf);
 
-    const leafMaj = makeLeaf({
-      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_OK")),
-    });
-    const leafMin = makeLeaf({
-      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_CHEAT")),
-    });
-    const { batchId, tree } = await commitTwoLeafBatch(leafMaj, leafMin);
-
-    const aux = encodeAux(
-      leafMaj.outputHash, leafMin.outputHash,
-      tree.proofForMajority, leafMaj,
-    );
-
-    // Receipt still invalidated; stake untouched.
+    const aux = encodeAux(batch.batchId, [], leaf);
     await expect(
       registry.connect(requester).challengeReceipt(
-        batchId, leafMin, tree.proofForMinority, CONSENSUS_MISMATCH, aux,
+        batch.batchId, leaf, [],
+        CONSENSUS_MISMATCH, aux,
       ),
-    ).to.emit(registry, "ReceiptChallenged");
-
-    const stakeAfter = await stakeBond.stakeOf(provider.address);
-    expect(stakeAfter.amount).to.equal(PREMIUM_STAKE); // unchanged
+    ).to.be.revertedWithCustomError(registry, "ChallengeNotProven");
   });
 
-  it("challenge succeeds even when provider has no stake", async function () {
-    // Unbond + withdraw before challenge → slash silently skipped via
-    // try/catch but receipt invalidation stands.
-    await stakeBond.connect(provider).requestUnbond();
-    // Fast-forward past the unbond delay.
-    await ethers.provider.send(
-      "evm_increaseTime", [DEFAULT_UNBOND_DELAY + 1],
-    );
-    await ethers.provider.send("evm_mine", []);
-    await stakeBond.connect(provider).withdraw();
-    const s = await stakeBond.stakeOf(provider.address);
-    expect(s.amount).to.equal(0);
+  // ── Disagreement-semantics guards ───────────────────────────────
 
-    const leafMaj = makeLeaf({
+  it("rejects when leaves are for different shards", async function () {
+    const majorityLeaf = makeLeaf({
+      shardIndex: 0,
       outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_OK")),
     });
-    const leafMin = makeLeaf({
+    const minorityLeaf = makeLeaf({
+      shardIndex: 1,   // different shard — cross-challenge is meaningless
       outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_CHEAT")),
     });
-
-    // Need to commit the batch BEFORE withdraw — provider can't commit
-    // with 0 amount in some flows. Actually commitBatch doesn't check
-    // stake at all; so we commit now.
-    // NOTE: re-ordering here — the test's intent is "provider with no
-    // stake at challenge time". commitBatch doesn't gate on stake, so
-    // this is fine.
-    const { batchId, tree } = await commitTwoLeafBatch(leafMaj, leafMin);
-
-    const aux = encodeAux(
-      leafMaj.outputHash, leafMin.outputHash,
-      tree.proofForMajority, leafMaj,
+    const majBatch = await commitSingleLeafBatch(
+      providerMajority, majorityLeaf,
+    );
+    const minBatch = await commitSingleLeafBatch(
+      providerMinority, minorityLeaf,
     );
 
-    // Challenge succeeds (emits ReceiptChallenged); no Slashed event.
-    const tx = await registry.connect(requester).challengeReceipt(
-      batchId, leafMin, tree.proofForMinority, CONSENSUS_MISMATCH, aux,
-      { gasLimit: 1_000_000 }, // ensure slash-path has headroom per Phase 7 §8.7
-    );
-    const rcpt = await tx.wait();
-    const slashedEvents = rcpt.logs.filter((l) => {
-      try {
-        return stakeBond.interface.parseLog(l)?.name === "Slashed";
-      } catch (_) { return false; }
-    });
-    expect(slashedEvents.length).to.equal(0);
+    const aux = encodeAux(majBatch.batchId, [], majorityLeaf);
+    await expect(
+      registry.connect(requester).challengeReceipt(
+        minBatch.batchId, minorityLeaf, [],
+        CONSENSUS_MISMATCH, aux,
+      ),
+    ).to.be.revertedWithCustomError(registry, "ChallengeNotProven");
   });
 
-  // ── 70/30 split preserved for CONSENSUS_MISMATCH ────────────────
-
-  it("slashed FTNS split matches the 70% challenger / 30% Foundation rule", async function () {
-    const leafMaj = makeLeaf({
+  it("rejects when leaves are from different jobs", async function () {
+    const majorityLeaf = makeLeaf({
+      jobIdHash: ethers.keccak256(ethers.toUtf8Bytes("job-A")),
       outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_OK")),
     });
-    const leafMin = makeLeaf({
+    const minorityLeaf = makeLeaf({
+      jobIdHash: ethers.keccak256(ethers.toUtf8Bytes("job-B")),
       outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_CHEAT")),
     });
-    const { batchId, tree } = await commitTwoLeafBatch(leafMaj, leafMin);
-
-    const aux = encodeAux(
-      leafMaj.outputHash, leafMin.outputHash,
-      tree.proofForMajority, leafMaj,
+    const majBatch = await commitSingleLeafBatch(
+      providerMajority, majorityLeaf,
+    );
+    const minBatch = await commitSingleLeafBatch(
+      providerMinority, minorityLeaf,
     );
 
+    const aux = encodeAux(majBatch.batchId, [], majorityLeaf);
+    await expect(
+      registry.connect(requester).challengeReceipt(
+        minBatch.batchId, minorityLeaf, [],
+        CONSENSUS_MISMATCH, aux,
+      ),
+    ).to.be.revertedWithCustomError(registry, "ChallengeNotProven");
+  });
+
+  it("rejects when outputs are equal (no real disagreement)", async function () {
+    const sameHash = ethers.keccak256(ethers.toUtf8Bytes("SAME"));
+    const majorityLeaf = makeLeaf({
+      providerIdHash: ethers.keccak256(ethers.toUtf8Bytes("A")),
+      outputHash: sameHash,
+    });
+    const minorityLeaf = makeLeaf({
+      providerIdHash: ethers.keccak256(ethers.toUtf8Bytes("B")),
+      outputHash: sameHash,
+    });
+    const majBatch = await commitSingleLeafBatch(
+      providerMajority, majorityLeaf,
+    );
+    const minBatch = await commitSingleLeafBatch(
+      providerMinority, minorityLeaf,
+    );
+
+    const aux = encodeAux(majBatch.batchId, [], majorityLeaf);
+    await expect(
+      registry.connect(requester).challengeReceipt(
+        minBatch.batchId, minorityLeaf, [],
+        CONSENSUS_MISMATCH, aux,
+      ),
+    ).to.be.revertedWithCustomError(registry, "ChallengeNotProven");
+  });
+
+  // ── Proof verification ──────────────────────────────────────────
+
+  it("rejects when majorityProof does not verify against conflicting batch root", async function () {
+    const majorityLeaf = makeLeaf({
+      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_OK")),
+    });
+    const minorityLeaf = makeLeaf({
+      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_CHEAT")),
+    });
+    const majBatch = await commitSingleLeafBatch(
+      providerMajority, majorityLeaf,
+    );
+    const minBatch = await commitSingleLeafBatch(
+      providerMinority, minorityLeaf,
+    );
+
+    // Fake proof (non-empty sibling when the real proof is empty).
+    const bogusSibling = ethers.keccak256(ethers.toUtf8Bytes("BOGUS"));
+    const aux = encodeAux(majBatch.batchId, [bogusSibling], majorityLeaf);
+    await expect(
+      registry.connect(requester).challengeReceipt(
+        minBatch.batchId, minorityLeaf, [],
+        CONSENSUS_MISMATCH, aux,
+      ),
+    ).to.be.revertedWithCustomError(registry, "ChallengeNotProven");
+  });
+
+  it("reverts when conflicting batch does not exist", async function () {
+    const leaf = makeLeaf({
+      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_CHEAT")),
+    });
+    const minBatch = await commitSingleLeafBatch(providerMinority, leaf);
+
+    const fakeBatchId = ethers.keccak256(ethers.toUtf8Bytes("DOES_NOT_EXIST"));
+    const fakeLeaf = makeLeaf({
+      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_OK")),
+    });
+    const aux = encodeAux(fakeBatchId, [], fakeLeaf);
+    await expect(
+      registry.connect(requester).challengeReceipt(
+        minBatch.batchId, leaf, [],
+        CONSENSUS_MISMATCH, aux,
+      ),
+    ).to.be.revertedWithCustomError(registry, "ConflictingBatchNotCommitted");
+  });
+
+  // ── 70/30 split preserved ───────────────────────────────────────
+
+  it("slashed FTNS split matches 70% challenger / 30% Foundation", async function () {
+    const majorityLeaf = makeLeaf({
+      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_OK")),
+    });
+    const minorityLeaf = makeLeaf({
+      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_CHEAT")),
+    });
+    const majBatch = await commitSingleLeafBatch(
+      providerMajority, majorityLeaf,
+    );
+    const minBatch = await commitSingleLeafBatch(
+      providerMinority, minorityLeaf,
+    );
+
+    const aux = encodeAux(majBatch.batchId, [], majorityLeaf);
     await registry.connect(requester).challengeReceipt(
-      batchId, leafMin, tree.proofForMinority, CONSENSUS_MISMATCH, aux,
+      minBatch.batchId, minorityLeaf, [],
+      CONSENSUS_MISMATCH, aux,
       { gasLimit: 1_000_000 },
     );
 
@@ -435,5 +380,35 @@ describe("BatchSettlementRegistry — Phase 7.1 CONSENSUS_MISMATCH", function ()
       .to.equal(expectedBounty);
     expect(await stakeBond.foundationReserveBalance())
       .to.equal(expectedFoundation);
+  });
+
+  // ── Best-effort slashing preserved ──────────────────────────────
+
+  it("challenge still succeeds when stakeBond is unset", async function () {
+    await registry.connect(owner).setStakeBond(ethers.ZeroAddress);
+
+    const majorityLeaf = makeLeaf({
+      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_OK")),
+    });
+    const minorityLeaf = makeLeaf({
+      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_CHEAT")),
+    });
+    const majBatch = await commitSingleLeafBatch(
+      providerMajority, majorityLeaf,
+    );
+    const minBatch = await commitSingleLeafBatch(
+      providerMinority, minorityLeaf,
+    );
+
+    const aux = encodeAux(majBatch.batchId, [], majorityLeaf);
+    await expect(
+      registry.connect(requester).challengeReceipt(
+        minBatch.batchId, minorityLeaf, [],
+        CONSENSUS_MISMATCH, aux,
+      ),
+    ).to.emit(registry, "ReceiptChallenged");
+
+    const minStake = await stakeBond.stakeOf(providerMinority.address);
+    expect(minStake.amount).to.equal(PREMIUM_STAKE); // untouched
   });
 });
