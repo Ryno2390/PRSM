@@ -48,6 +48,7 @@ from prsm.compute.model_sharding.models import ModelShard, PipelineStakeTier
 from prsm.compute.remote_dispatcher import (
     DispatchResult,
     MissingAttestationError,
+    PeerNotConnectedError,
     RemoteShardDispatcher,
     ShardDispatchError,
     ShardPreemptedError,
@@ -188,17 +189,27 @@ class MultiShardDispatcher:
                 ShardPreemptedError,
                 MissingAttestationError,
                 ShardDispatchError,
+                PeerNotConnectedError,
             )):
                 # Honest-work failures + advertised-tier violations +
-                # generic dispatch failures: provider simply didn't
-                # contribute. Log and exclude.
+                # generic dispatch failures + offline providers: the
+                # provider simply didn't contribute. Log and exclude
+                # from consensus. PeerNotConnectedError is the Phase 7.1
+                # §8.8 audit follow-up — one offline provider in a
+                # k-of-n dispatch is a classic partial-response case,
+                # not a gather-aborting bug.
                 logger.warning(
                     f"multi-dispatch: provider {node_id[:12]}… failed: "
                     f"{type(r).__name__}: {r}"
                 )
             else:
                 # Unexpected exception type — bubble up. A bug we shouldn't
-                # silently paper over with "partial response."
+                # silently paper over with "partial response." (Note:
+                # asyncio.CancelledError subclasses BaseException and is
+                # NOT caught by `except Exception` inside RemoteShardDispatcher
+                # — it correctly propagates here so outer-loop job
+                # cancellation cancels the gather rather than being
+                # silently swallowed.)
                 raise r
 
         receipts = [
