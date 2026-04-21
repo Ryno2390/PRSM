@@ -8,6 +8,17 @@ interface IEscrowPool {
     function settleFromRequester(address requester, address recipient, uint256 amount) external;
 }
 
+interface IStakeBond {
+    /// @notice Slash `provider`'s stake for misbehavior; route 70% to
+    /// `challenger` bounty, 30% to Foundation reserve (or 100%
+    /// Foundation when challenger ∈ {provider, 0x0}). Slasher-only.
+    function slash(
+        address provider,
+        address challenger,
+        bytes32 reasonId
+    ) external;
+}
+
 /// @notice Pluggable signature-verification surface used by the
 /// INVALID_SIGNATURE challenge path. The production deployment
 /// substitutes an audited Ed25519 verifier (per PRSM-PHASE3.1 §10.1
@@ -81,15 +92,18 @@ contract BatchSettlementRegistry is Ownable {
     }
 
     struct Batch {
-        address provider;           // who submitted + claims payment
-        address requester;          // who owes payment (funds this batch from escrow)
-        bytes32 merkleRoot;         // root of the receipt-hash tree
-        uint256 receiptCount;       // number of receipts in the tree
-        uint256 totalValueFTNS;     // sum of receipt values, pre-challenge
-        uint256 invalidatedValueFTNS; // sum of successfully-challenged values; set by Task 3
-        uint64  commitTimestamp;    // block.timestamp at commit
+        address provider;             // who submitted + claims payment
+        address requester;            // who owes payment (funds this batch from escrow)
+        bytes32 merkleRoot;           // root of the receipt-hash tree
+        uint256 receiptCount;         // number of receipts in the tree
+        uint256 totalValueFTNS;       // sum of receipt values, pre-challenge
+        uint256 invalidatedValueFTNS; // sum of successfully-challenged values
+        uint64  commitTimestamp;      // block.timestamp at commit
         BatchStatus status;
-        string metadataURI;         // optional IPFS pointer (see §10.7 of design)
+        uint16  tier_slash_rate_bps;  // Phase 7: provider's stake tier slash rate at commit;
+                                      // 0 means no-stake / no-slash. Snapshot at commit so
+                                      // the provider can't dodge slashing via mid-batch downgrade.
+        string  metadataURI;          // optional IPFS pointer (see §10.7 of design)
     }
 
     /// @dev Challenge window in seconds. Governance-adjustable.
@@ -114,6 +128,13 @@ contract BatchSettlementRegistry is Ownable {
     /// May be address(0) in Task 1 scope (no transfer happens); once set
     /// in Task 2, finalizeBatch requires it to be configured.
     IEscrowPool public escrowPool;
+
+    /// @dev Phase 7: StakeBond contract used to slash providers on
+    /// successful DOUBLE_SPEND or INVALID_SIGNATURE challenges.
+    /// May be address(0) — in which case challenges succeed (receipt
+    /// value invalidated) but no stake is slashed (Phase 3.1 behavior
+    /// preserved when Phase 7 is not deployed).
+    IStakeBond public stakeBond;
 
     /// @dev Pluggable Ed25519 verifier for INVALID_SIGNATURE challenges.
     /// May be address(0) until a production verifier is deployed;
@@ -172,6 +193,7 @@ contract BatchSettlementRegistry is Ownable {
 
     event ChallengeWindowUpdated(uint256 oldSeconds, uint256 newSeconds);
     event EscrowPoolUpdated(address oldPool, address newPool);
+    event StakeBondUpdated(address oldBond, address newBond);
     event SignatureVerifierUpdated(address oldVerifier, address newVerifier);
     event SettlementLookbackUpdated(uint256 oldSeconds, uint256 newSeconds);
     event ReceiptChallenged(
@@ -201,6 +223,7 @@ contract BatchSettlementRegistry is Ownable {
     error CallerNotRequester(address caller, address requester);
     error ReceiptNotExpired(uint64 executedAtUnix, uint256 lookbackSeconds);
     error ConflictingBatchNotCommitted(bytes32 conflictingBatchId);
+    error InvalidSlashRateBps(uint16 provided);
 
     constructor(address initialOwner, uint256 initialChallengeWindow) Ownable(initialOwner) {
         if (initialChallengeWindow < MIN_CHALLENGE_WINDOW_SECONDS ||
@@ -225,11 +248,13 @@ contract BatchSettlementRegistry is Ownable {
         bytes32 merkleRoot,
         uint256 receiptCount,
         uint256 totalValueFTNS,
+        uint16 tierSlashRateBps,
         string calldata metadataURI
     ) external returns (bytes32 batchId) {
         if (requester == address(0)) revert ZeroRequester();
         if (merkleRoot == bytes32(0)) revert EmptyMerkleRoot();
         if (receiptCount == 0) revert ZeroReceiptCount();
+        if (tierSlashRateBps > 10000) revert InvalidSlashRateBps(tierSlashRateBps);
 
         uint256 sequence = providerBatchSequence[msg.sender]++;
 
@@ -253,6 +278,7 @@ contract BatchSettlementRegistry is Ownable {
             invalidatedValueFTNS: 0,
             commitTimestamp: uint64(block.timestamp),
             status: BatchStatus.PENDING,
+            tier_slash_rate_bps: tierSlashRateBps,
             metadataURI: metadataURI
         });
 
@@ -389,6 +415,31 @@ contract BatchSettlementRegistry is Ownable {
         b.invalidatedValueFTNS += leaf.valueFtns;
 
         emit ReceiptChallenged(batchId, leafHash, msg.sender, reason, leaf.valueFtns);
+
+        // Phase 7: DOUBLE_SPEND + INVALID_SIGNATURE challenges slash the
+        // provider's stake. NO_ESCROW is requester-attestation-based
+        // (griefing risk if slash triggered) and EXPIRED is protocol-
+        // hygiene rather than malice — neither triggers slashing.
+        // Slashing is best-effort: if stakeBond is unconfigured, or if
+        // the provider has no stake, the challenge still succeeds and
+        // the receipt stays invalidated.
+        if (
+            address(stakeBond) != address(0)
+            && b.tier_slash_rate_bps > 0
+            && (reason == ReasonCode.DOUBLE_SPEND || reason == ReasonCode.INVALID_SIGNATURE)
+        ) {
+            // Wrapped in try/catch so a StakeBond-level revert (e.g.,
+            // provider already fully slashed, stake already withdrawn)
+            // doesn't undo the challenge's receipt-invalidation work.
+            // The ReceiptChallenged event is the authoritative record;
+            // the slash is an economic downstream consequence.
+            try stakeBond.slash(b.provider, msg.sender, batchId) {
+                // success; bounty credited + foundation reserve updated
+            } catch {
+                // swallow — receipt is already invalidated; slash is
+                // best-effort
+            }
+        }
     }
 
     /// @dev Compute the canonical keccak256 leaf hash for a ReceiptLeaf.
@@ -491,6 +542,18 @@ contract BatchSettlementRegistry is Ownable {
         address old = address(escrowPool);
         escrowPool = IEscrowPool(newPool);
         emit EscrowPoolUpdated(old, newPool);
+    }
+
+    /**
+     * @notice Set the StakeBond contract used to slash providers on
+     *         DOUBLE_SPEND / INVALID_SIGNATURE challenges. Owner-only.
+     *         Address(0) disables slashing (receipt invalidation still
+     *         works — Phase 3.1 behavior preserved).
+     */
+    function setStakeBond(address newBond) external onlyOwner {
+        address old = address(stakeBond);
+        stakeBond = IStakeBond(newBond);
+        emit StakeBondUpdated(old, newBond);
     }
 
     /**
