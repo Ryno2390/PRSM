@@ -3,6 +3,10 @@ pragma solidity ^0.8.22;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+interface IEscrowPool {
+    function settleFromRequester(address requester, address recipient, uint256 amount) external;
+}
+
 /**
  * @title BatchSettlementRegistry
  * @notice On-chain anchor for Phase 3.1 batched-settlement receipts.
@@ -44,6 +48,7 @@ contract BatchSettlementRegistry is Ownable {
 
     struct Batch {
         address provider;           // who submitted + claims payment
+        address requester;          // who owes payment (funds this batch from escrow)
         bytes32 merkleRoot;         // root of the receipt-hash tree
         uint256 receiptCount;       // number of receipts in the tree
         uint256 totalValueFTNS;     // sum of receipt values, pre-challenge
@@ -56,6 +61,13 @@ contract BatchSettlementRegistry is Ownable {
     /// @dev Challenge window in seconds. Governance-adjustable.
     /// Default 3 days per design §5.1.
     uint256 public challengeWindowSeconds;
+
+    /// @dev EscrowPool contract authorized to execute settlement transfers.
+    /// Set by owner via setEscrowPool; finalizeBatch invokes it to move
+    /// FTNS from requester's escrow balance to provider's wallet.
+    /// May be address(0) in Task 1 scope (no transfer happens); once set
+    /// in Task 2, finalizeBatch requires it to be configured.
+    IEscrowPool public escrowPool;
 
     /// @dev Per-provider monotonic counter used in batchId derivation to
     /// avoid collision when a provider commits multiple batches in the
@@ -92,6 +104,7 @@ contract BatchSettlementRegistry is Ownable {
     );
 
     event ChallengeWindowUpdated(uint256 oldSeconds, uint256 newSeconds);
+    event EscrowPoolUpdated(address oldPool, address newPool);
 
     error InvalidChallengeWindow(uint256 provided);
     error BatchAlreadyCommitted(bytes32 batchId);
@@ -100,7 +113,8 @@ contract BatchSettlementRegistry is Ownable {
     error ChallengeWindowNotElapsed(bytes32 batchId, uint64 commitTimestamp, uint256 windowSeconds);
     error EmptyMerkleRoot();
     error ZeroReceiptCount();
-    error ZeroProvider();
+    error ZeroRequester();
+    error EscrowPoolNotConfigured();
 
     constructor(address initialOwner, uint256 initialChallengeWindow) Ownable(initialOwner) {
         if (initialChallengeWindow < MIN_CHALLENGE_WINDOW_SECONDS ||
@@ -120,18 +134,20 @@ contract BatchSettlementRegistry is Ownable {
      * @return batchId deterministic identifier for the committed batch
      */
     function commitBatch(
+        address requester,
         bytes32 merkleRoot,
         uint256 receiptCount,
         uint256 totalValueFTNS,
         string calldata metadataURI
     ) external returns (bytes32 batchId) {
+        if (requester == address(0)) revert ZeroRequester();
         if (merkleRoot == bytes32(0)) revert EmptyMerkleRoot();
         if (receiptCount == 0) revert ZeroReceiptCount();
 
         uint256 sequence = providerBatchSequence[msg.sender]++;
 
         batchId = keccak256(
-            abi.encode(msg.sender, merkleRoot, receiptCount, block.number, sequence)
+            abi.encode(msg.sender, requester, merkleRoot, receiptCount, block.number, sequence)
         );
 
         // Defensive: deterministic derivation means this should never
@@ -143,6 +159,7 @@ contract BatchSettlementRegistry is Ownable {
 
         batches[batchId] = Batch({
             provider: msg.sender,
+            requester: requester,
             merkleRoot: merkleRoot,
             receiptCount: receiptCount,
             totalValueFTNS: totalValueFTNS,
@@ -195,9 +212,21 @@ contract BatchSettlementRegistry is Ownable {
         b.status = BatchStatus.FINALIZED;
 
         // Final payable = total - invalidated (Task 3 sets invalidatedValueFTNS).
-        // In Task 1 scope, invalidatedValueFTNS is always 0, so finalValue ==
-        // totalValueFTNS. Task 2 will pipe finalValue into EscrowPool transfers.
+        // In Task 2 scope, invalidatedValueFTNS is always 0, so finalValue ==
+        // totalValueFTNS. Task 3 will track challenges and reduce finalValue.
         uint256 finalValue = b.totalValueFTNS - b.invalidatedValueFTNS;
+
+        // Task 2: execute settlement via EscrowPool. A configured pool is
+        // required once we've reached this code path — the contract is
+        // meant to actually move value, not just emit events. Setting
+        // finalValue=0 (pathological case where every receipt was
+        // invalidated) skips the transfer but still finalizes state.
+        if (finalValue > 0) {
+            if (address(escrowPool) == address(0)) {
+                revert EscrowPoolNotConfigured();
+            }
+            escrowPool.settleFromRequester(b.requester, b.provider, finalValue);
+        }
 
         emit BatchFinalized(
             batchId,
@@ -234,6 +263,19 @@ contract BatchSettlementRegistry is Ownable {
      *
      * @param newSeconds new window duration in seconds
      */
+    /**
+     * @notice Set the EscrowPool contract that executes settlement transfers.
+     *         Owner-only. The pool must be deployed separately; this function
+     *         registers its address with the registry. Setting to address(0)
+     *         effectively disables finalization of non-zero-value batches.
+     * @param newPool EscrowPool contract address
+     */
+    function setEscrowPool(address newPool) external onlyOwner {
+        address old = address(escrowPool);
+        escrowPool = IEscrowPool(newPool);
+        emit EscrowPoolUpdated(old, newPool);
+    }
+
     function setChallengeWindowSeconds(uint256 newSeconds) external onlyOwner {
         if (newSeconds < MIN_CHALLENGE_WINDOW_SECONDS ||
             newSeconds > MAX_CHALLENGE_WINDOW_SECONDS) {
