@@ -50,6 +50,7 @@ import logging
 import sqlite3
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -86,6 +87,16 @@ CREATE TABLE IF NOT EXISTS consensus_challenges (
     last_error TEXT,
     last_tx_hash TEXT,
 
+    -- Phase 7.1x.next+ §5.3 audit follow-up: claim-lease for multi-runner
+    -- safety. claimed_by holds an opaque token unique per claim call
+    -- (typically "<runner_id>:<uuid4>"). lease_expires_at is a float
+    -- epoch-seconds timestamp after which the claim is considered
+    -- abandoned and reclaimable. A single-runner deployment never
+    -- populates these columns; they remain NULL.
+    claimed_by TEXT,
+    claimed_at REAL,
+    lease_expires_at REAL,
+
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
@@ -98,7 +109,16 @@ CREATE INDEX IF NOT EXISTS idx_consensus_majority_provider
     ON consensus_challenges(majority_provider_id, status);
 CREATE INDEX IF NOT EXISTS idx_consensus_job_shard
     ON consensus_challenges(job_id, shard_index, status);
+-- Note: idx_consensus_claim (over the lease columns) is created by
+-- _migrate_schema AFTER the ALTER TABLE, so pre-existing DBs without
+-- the lease columns don't blow up here on a column reference.
 """
+
+
+# Default lease duration for claim_submittable. 5 minutes is generous
+# for a single submit_one + mark_* cycle (typical: ~15s including a
+# few RPC retries); re-lease is cheap. Callers can override per call.
+DEFAULT_LEASE_SECONDS = 300.0
 
 
 @dataclass(frozen=True)
@@ -119,6 +139,10 @@ class PendingChallenge:
     attempts: int
     last_error: Optional[str]
     last_tx_hash: Optional[str]
+    # §5.3 lease fields (None on single-runner / unclaimed rows).
+    claimed_by: Optional[str]
+    claimed_at: Optional[float]
+    lease_expires_at: Optional[float]
     created_at: float
     updated_at: float
 
@@ -140,7 +164,46 @@ class ConsensusChallengeQueue:
         # from the main thread. The internal lock serializes writes.
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.executescript(_SCHEMA_SQL)
+        self._migrate_schema()
         self._conn.commit()
+
+    def _migrate_schema(self) -> None:
+        """Apply schema changes to pre-existing DBs.
+
+        SQLite's `ADD COLUMN` doesn't support `IF NOT EXISTS`; check the
+        current schema first. Idempotent — safe to call on every open.
+
+        Commits after each ALTER because Python's sqlite3 default
+        isolation_level wraps DDL in an implicit transaction; without
+        an explicit commit, subsequent queries on the same connection
+        may not see the new columns (the implicit BEGIN blocks
+        schema reload).
+        """
+        cur = self._conn.cursor()
+        cur.execute("PRAGMA table_info(consensus_challenges)")
+        existing_columns = {row[1] for row in cur.fetchall()}
+        lease_columns = [
+            ("claimed_by", "TEXT"),
+            ("claimed_at", "REAL"),
+            ("lease_expires_at", "REAL"),
+        ]
+        added_any = False
+        for col_name, col_type in lease_columns:
+            if col_name not in existing_columns:
+                cur.execute(
+                    f"ALTER TABLE consensus_challenges "
+                    f"ADD COLUMN {col_name} {col_type}"
+                )
+                added_any = True
+        # Also ensure the claim-index exists (CREATE IF NOT EXISTS in
+        # _SCHEMA_SQL covers fresh DBs; pre-existing DBs miss this
+        # index because they had an older CREATE TABLE).
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_consensus_claim
+                ON consensus_challenges(status, claimed_by, lease_expires_at)
+        """)
+        if added_any:
+            self._conn.commit()
 
     # ── Enqueue ─────────────────────────────────────────────────
 
@@ -287,7 +350,10 @@ class ConsensusChallengeQueue:
     def list_submittable(self, limit: int = 100) -> List[PendingChallenge]:
         """Return all rows with status=SUBMITTABLE, oldest first.
         The submitter runner calls this, fires `submit_one` per row,
-        and updates status via mark_submitted / mark_failed."""
+        and updates status via mark_submitted / mark_failed.
+
+        This is the LEGACY / single-runner entry point — it does NOT
+        claim a lease. For multi-runner safety use `claim_submittable`."""
         with self._lock:
             cur = self._conn.cursor()
             cur.execute(
@@ -302,6 +368,75 @@ class ConsensusChallengeQueue:
             rows = cur.fetchall()
             col_names = [d[0] for d in cur.description]
         return [self._row_to_dataclass(dict(zip(col_names, r))) for r in rows]
+
+    def claim_submittable(
+        self,
+        claimant_id: str,
+        lease_seconds: float = DEFAULT_LEASE_SECONDS,
+        limit: int = 100,
+    ) -> List[PendingChallenge]:
+        """Phase 7.1x.next+ §5.3: atomic claim of SUBMITTABLE rows for
+        a specific runner, with a time-bounded lease.
+
+        Two runners pointed at the same DB cannot both claim the same
+        row — the UPDATE-with-subquery is one atomic SQL statement, and
+        the WHERE clause excludes rows that already hold a live lease.
+        Expired leases (lease_expires_at < now) are reclaimable, so a
+        runner crash doesn't strand rows forever.
+
+        claimant_id is a human-readable identifier (e.g., hostname,
+        pod name). The stored `claimed_by` combines it with a per-call
+        uuid4 so concurrent claims from the same claimant don't
+        collide on row lookup.
+
+        Caller contract: after running `submit_one` on a claimed row,
+        call `mark_submitted` or `mark_failed` — both clear the lease.
+        If the runner crashes before marking, the row auto-reclaims
+        after lease_seconds.
+        """
+        claim_token = f"{claimant_id}:{uuid.uuid4().hex}"
+        now = time.time()
+        lease_expires = now + lease_seconds
+        with self._lock:
+            cur = self._conn.cursor()
+            # Atomic claim: single UPDATE with a subquery picks rows
+            # that are SUBMITTABLE AND either unclaimed OR have an
+            # expired lease. No two-step read-then-write race is
+            # possible because the whole operation is one SQL
+            # statement under the lock + SQLite transactional bounds.
+            cur.execute(
+                """
+                UPDATE consensus_challenges
+                SET claimed_by = ?, claimed_at = ?,
+                    lease_expires_at = ?, updated_at = ?
+                WHERE row_id IN (
+                    SELECT row_id FROM consensus_challenges
+                    WHERE status = ?
+                      AND (claimed_by IS NULL OR lease_expires_at < ?)
+                    ORDER BY created_at ASC
+                    LIMIT ?
+                )
+                """,
+                (
+                    claim_token, now, lease_expires, now,
+                    STATUS_SUBMITTABLE, now, limit,
+                ),
+            )
+            # Fetch the just-claimed rows by their unique claim_token.
+            cur.execute(
+                """
+                SELECT * FROM consensus_challenges
+                WHERE claimed_by = ?
+                ORDER BY created_at ASC
+                """,
+                (claim_token,),
+            )
+            rows = cur.fetchall()
+            col_names = [d[0] for d in cur.description]
+            self._conn.commit()
+        return [
+            self._row_to_dataclass(dict(zip(col_names, r))) for r in rows
+        ]
 
     def list_pending(self, limit: int = 1000) -> List[PendingChallenge]:
         """All non-terminal rows (PENDING + SUBMITTABLE). Useful for
@@ -322,14 +457,18 @@ class ConsensusChallengeQueue:
         return [self._row_to_dataclass(dict(zip(col_names, r))) for r in rows]
 
     def mark_submitted(self, row_id: int, tx_hash_hex: str) -> None:
-        """Terminal success: challenge tx landed. No retries from here."""
+        """Terminal success: challenge tx landed. No retries from here.
+        Clears any active claim-lease so the row doesn't keep a
+        claimant reference after it's done."""
         now = time.time()
         with self._lock:
             self._conn.execute(
                 """
                 UPDATE consensus_challenges
                 SET status = ?, last_tx_hash = ?, last_error = NULL,
-                    attempts = attempts + 1, updated_at = ?
+                    attempts = attempts + 1, updated_at = ?,
+                    claimed_by = NULL, claimed_at = NULL,
+                    lease_expires_at = NULL
                 WHERE row_id = ?
                 """,
                 (STATUS_SUBMITTED, tx_hash_hex, now, row_id),
@@ -348,7 +487,12 @@ class ConsensusChallengeQueue:
         `terminal=True` moves the row to FAILED (no more retries —
         e.g., contract revert, abandoned after N attempts). `terminal=
         False` keeps it SUBMITTABLE so the runner retries on the next
-        tick (e.g., transient RPC failure)."""
+        tick (e.g., transient RPC failure).
+
+        Both branches clear the claim-lease so a terminal row isn't
+        stuck pointing at its last claimant, and a retryable row is
+        immediately reclaimable by any runner (including this one)
+        rather than waiting for the lease to expire."""
         now = time.time()
         new_status = STATUS_FAILED if terminal else STATUS_SUBMITTABLE
         err = f"{error_type}: {error_message}"
@@ -357,7 +501,9 @@ class ConsensusChallengeQueue:
                 """
                 UPDATE consensus_challenges
                 SET status = ?, last_error = ?,
-                    attempts = attempts + 1, updated_at = ?
+                    attempts = attempts + 1, updated_at = ?,
+                    claimed_by = NULL, claimed_at = NULL,
+                    lease_expires_at = NULL
                 WHERE row_id = ?
                 """,
                 (new_status, err, now, row_id),
@@ -416,6 +562,9 @@ class ConsensusChallengeQueue:
             attempts=row["attempts"],
             last_error=row["last_error"],
             last_tx_hash=row["last_tx_hash"],
+            claimed_by=row.get("claimed_by"),
+            claimed_at=row.get("claimed_at"),
+            lease_expires_at=row.get("lease_expires_at"),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -424,6 +573,7 @@ class ConsensusChallengeQueue:
 __all__ = [
     "ConsensusChallengeQueue",
     "PendingChallenge",
+    "DEFAULT_LEASE_SECONDS",
     "STATUS_PENDING",
     "STATUS_SUBMITTABLE",
     "STATUS_SUBMITTED",
