@@ -122,17 +122,29 @@ describe("BatchSettlementRegistry — Phase 7.1 CONSENSUS_MISMATCH", function ()
     await deployStack();
   });
 
+  // Phase 7.1x §8.7: every consensus-participating batch must be
+  // committed with a non-zero consensus_group_id. A legitimate k-of-n
+  // dispatch uses ONE shared group_id across all k providers'
+  // batches. The default helper below uses this constant; tests that
+  // need mismatched or zero group_ids override it explicitly.
+  const DEFAULT_GROUP_ID = ethers.keccak256(
+    ethers.toUtf8Bytes("consensus-group-phase7.1x")
+  );
+
   /**
    * Commit a single-leaf batch for `signer`. Returns {batchId, leafHash}.
    * In Phase 7.1's k-of-n flow, each participating provider commits
    * their own batch of their own receipts. Proof for a 1-leaf tree is
    * empty — the leaf hash IS the root.
    */
-  async function commitSingleLeafBatch(signer, leaf) {
+  async function commitSingleLeafBatch(
+    signer, leaf, consensusGroupId = DEFAULT_GROUP_ID,
+  ) {
     const root = hashLeaf(leaf);
     const tx = await registry.connect(signer).commitBatch(
       requester.address, root, 1, leaf.valueFtns,
-      PREMIUM_SLASH_BPS, "ipfs://" + signer.address.slice(0, 8),
+      PREMIUM_SLASH_BPS, consensusGroupId,
+      "ipfs://" + signer.address.slice(0, 8),
     );
     const r = await tx.wait();
     const batchId = r.logs.find(
@@ -186,7 +198,14 @@ describe("BatchSettlementRegistry — Phase 7.1 CONSENSUS_MISMATCH", function ()
 
   // ── Authorization ───────────────────────────────────────────────
 
-  it("rejects when caller is not the minority batch's requester", async function () {
+  it("accepts a third-party challenger when group_ids match", async function () {
+    // Phase 7.1x §8.7 update: once both batches share a non-zero
+    // consensus_group_id AND are committed by different providers,
+    // authorization opens up to any caller. What used to be a
+    // requester-only MVP restriction is replaced by the group_id
+    // binding — the sybil-requester griefing vector is closed at a
+    // structurally safer layer (attacker must control k distinct
+    // provider keys rather than one provider + one requester).
     const majorityLeaf = makeLeaf({
       outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_OK")),
     });
@@ -202,13 +221,95 @@ describe("BatchSettlementRegistry — Phase 7.1 CONSENSUS_MISMATCH", function ()
 
     const aux = encodeAux(majBatch.batchId, [], majorityLeaf);
 
-    // `other` is not the batch's requester — MVP rejects.
+    // `other` is not the batch's requester — now allowed.
     await expect(
       registry.connect(other).challengeReceipt(
         minBatch.batchId, minorityLeaf, [],
         CONSENSUS_MISMATCH, aux,
+        { gasLimit: 1_000_000 },
       ),
-    ).to.be.revertedWithCustomError(registry, "CallerNotRequester");
+    ).to.emit(stakeBond, "Slashed");
+
+    const stake = await stakeBond.stakeOf(providerMinority.address);
+    expect(stake.amount).to.equal(0);
+  });
+
+  // ── §8.7 group_id binding ───────────────────────────────────────
+
+  it("rejects when consensus_group_ids differ between batches", async function () {
+    // Different group_ids → the two batches weren't part of the same
+    // k-of-n dispatch → no genuine disagreement to claim.
+    const majorityLeaf = makeLeaf({
+      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_OK")),
+    });
+    const minorityLeaf = makeLeaf({
+      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_CHEAT")),
+    });
+    const groupA = ethers.keccak256(ethers.toUtf8Bytes("group-A"));
+    const groupB = ethers.keccak256(ethers.toUtf8Bytes("group-B"));
+    const majBatch = await commitSingleLeafBatch(
+      providerMajority, majorityLeaf, groupA,
+    );
+    const minBatch = await commitSingleLeafBatch(
+      providerMinority, minorityLeaf, groupB,
+    );
+
+    const aux = encodeAux(majBatch.batchId, [], majorityLeaf);
+    await expect(
+      registry.connect(requester).challengeReceipt(
+        minBatch.batchId, minorityLeaf, [],
+        CONSENSUS_MISMATCH, aux,
+      ),
+    ).to.be.revertedWithCustomError(registry, "ChallengeNotProven");
+  });
+
+  it("rejects when minority batch has zero group_id", async function () {
+    // Zero group_id means "not part of a consensus dispatch" — can't
+    // be targeted by CONSENSUS_MISMATCH. Use DOUBLE_SPEND or similar.
+    const majorityLeaf = makeLeaf({
+      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_OK")),
+    });
+    const minorityLeaf = makeLeaf({
+      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_CHEAT")),
+    });
+    const majBatch = await commitSingleLeafBatch(
+      providerMajority, majorityLeaf,
+    );
+    // Minority batch with group_id=0 — shouldn't be challengeable.
+    const minBatch = await commitSingleLeafBatch(
+      providerMinority, minorityLeaf, ethers.ZeroHash,
+    );
+
+    const aux = encodeAux(majBatch.batchId, [], majorityLeaf);
+    await expect(
+      registry.connect(requester).challengeReceipt(
+        minBatch.batchId, minorityLeaf, [],
+        CONSENSUS_MISMATCH, aux,
+      ),
+    ).to.be.revertedWithCustomError(registry, "ChallengeNotProven");
+  });
+
+  it("rejects when both batches are from the same provider", async function () {
+    // A single provider committing two conflicting batches is either
+    // DOUBLE_SPEND (which has its own reason code) or self-slash
+    // theatre. CONSENSUS_MISMATCH requires DIFFERENT providers.
+    const leafA = makeLeaf({
+      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_A")),
+    });
+    const leafB = makeLeaf({
+      outputHash: ethers.keccak256(ethers.toUtf8Bytes("HASH_B")),
+    });
+    // BOTH batches from providerMinority.
+    const batchA = await commitSingleLeafBatch(providerMinority, leafA);
+    const batchB = await commitSingleLeafBatch(providerMinority, leafB);
+
+    const aux = encodeAux(batchA.batchId, [], leafA);
+    await expect(
+      registry.connect(requester).challengeReceipt(
+        batchB.batchId, leafB, [],
+        CONSENSUS_MISMATCH, aux,
+      ),
+    ).to.be.revertedWithCustomError(registry, "ChallengeNotProven");
   });
 
   // ── Same-batch (self-referential) rejection ─────────────────────

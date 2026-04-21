@@ -103,6 +103,14 @@ contract BatchSettlementRegistry is Ownable {
         uint16  tier_slash_rate_bps;  // Phase 7: provider's stake tier slash rate at commit;
                                       // 0 means no-stake / no-slash. Snapshot at commit so
                                       // the provider can't dodge slashing via mid-batch downgrade.
+        bytes32 consensus_group_id;   // Phase 7.1x §8.7: non-zero binds this batch to a k-of-n
+                                      // consensus dispatch. CONSENSUS_MISMATCH challenges require
+                                      // both batches to share the same non-zero group_id AND to be
+                                      // committed by different providers — closes the sybil-requester
+                                      // griefing vector by forcing an attacker to control k distinct
+                                      // provider keys (not one provider + one requester) to trigger.
+                                      // Zero means "not part of a consensus group" — DOUBLE_SPEND /
+                                      // INVALID_SIGNATURE challenges still work unchanged.
         string  metadataURI;          // optional IPFS pointer (see §10.7 of design)
     }
 
@@ -260,6 +268,10 @@ contract BatchSettlementRegistry is Ownable {
      * @param merkleRoot keccak256 Merkle root over the set of receipt-hash leaves
      * @param receiptCount number of receipts in the batch
      * @param totalValueFTNS sum of receipt values in FTNS base units
+     * @param consensusGroupId Phase 7.1x: non-zero to mark this batch as
+     *        part of a k-of-n consensus dispatch. Zero for single-provider
+     *        batches. See Batch struct commentary for the sybil-griefing
+     *        rationale (§8.7 fix).
      * @param metadataURI optional off-chain pointer (e.g., ipfs://...)
      * @return batchId deterministic identifier for the committed batch
      */
@@ -269,6 +281,7 @@ contract BatchSettlementRegistry is Ownable {
         uint256 receiptCount,
         uint256 totalValueFTNS,
         uint16 tierSlashRateBps,
+        bytes32 consensusGroupId,
         string calldata metadataURI
     ) external returns (bytes32 batchId) {
         if (requester == address(0)) revert ZeroRequester();
@@ -299,6 +312,7 @@ contract BatchSettlementRegistry is Ownable {
             commitTimestamp: uint64(block.timestamp),
             status: BatchStatus.PENDING,
             tier_slash_rate_bps: tierSlashRateBps,
+            consensus_group_id: consensusGroupId,
             metadataURI: metadataURI
         });
 
@@ -569,10 +583,10 @@ contract BatchSettlementRegistry is Ownable {
     }
 
     /**
-     * @dev CONSENSUS_MISMATCH (Phase 7.1): the provider's receipt disagrees
-     *      with a majority receipt from a DIFFERENT provider's batch for
-     *      the same shard of the same job under a k-of-n redundant-
-     *      execution dispatch. auxData layout:
+     * @dev CONSENSUS_MISMATCH (Phase 7.1 + 7.1x §8.7): the provider's
+     *      receipt disagrees with a majority receipt from a DIFFERENT
+     *      provider's batch for the same shard of the same job under a
+     *      k-of-n redundant-execution dispatch. auxData layout:
      *        abi.encode(
      *          bytes32 conflictingBatchId,  // the majority provider's batch
      *          bytes32[] majorityProof,     // proof for the majority leaf
@@ -580,29 +594,36 @@ contract BatchSettlementRegistry is Ownable {
      *        )
      *      The challenged leaf (passed into challengeReceipt) is the
      *      minority leaf. The challenge slashes b.provider — the
-     *      committer of THIS (minority) batch. Cross-batch structure
-     *      mirrors DOUBLE_SPEND: in k-of-n each provider commits their
-     *      own batch of their own receipts, so slashing the minority's
-     *      stake requires challenging the minority's batch.
+     *      committer of THIS (minority) batch.
      *
-     *      MVP authorization: caller must be the minority batch's
-     *      requester. Only the requester of the k-of-n job knows that
-     *      BOTH receipts came from the same dispatch; opening this to
-     *      third parties enables self-slash bounty mining per design
-     *      §3.6. Phase 7.1x will introduce a `consensus_group_id` that
-     *      any holder of k signed receipts can use.
+     *      Authorization (Phase 7.1x §8.7 update): the challenge is open
+     *      to ANY caller — third-party bounty hunters and the original
+     *      requester alike. What makes this safe is the consensus_group_id
+     *      binding: both batches must carry the same non-zero group_id
+     *      (set at commit time), AND they must be committed by DIFFERENT
+     *      providers. Without the group_id binding, a sybil attacker
+     *      controlling provider P + requester R could commit two P-signed
+     *      batches with conflicting outputs and have R challenge to
+     *      collect the 70% bounty (griefing, not farming — negative EV
+     *      with the 30% Foundation skim, but still possible). With the
+     *      binding, an attacker must control k DIFFERENT provider keys
+     *      to trigger a slash, multiplying the cost k×.
      *
      *      Checks performed (all must pass):
-     *        1. caller == minorityBatch.requester
-     *        2. conflictingBatchId != batchId   (distinct batches — a
-     *           provider cannot disagree with themselves in one batch;
-     *           blocks self-referential challenges)
-     *        3. leaf.jobIdHash == majorityLeaf.jobIdHash   (same job)
-     *        4. leaf.shardIndex == majorityLeaf.shardIndex (same shard)
-     *        5. leaf.outputHash != majorityLeaf.outputHash (genuine
-     *           disagreement — different bytes for identical input)
-     *        6. conflictingBatch exists
-     *        7. MerkleProof.verify(majorityProof, conflictingBatch.root,
+     *        1. conflictingBatchId != batchId   (distinct batches)
+     *        2. b.consensus_group_id != 0       (minority batch opted
+     *           into consensus — non-consensus batches can't be
+     *           targeted by CONSENSUS_MISMATCH; use DOUBLE_SPEND)
+     *        3. b.consensus_group_id == other.consensus_group_id
+     *           (both batches belong to the SAME k-of-n dispatch)
+     *        4. b.provider != other.provider   (distinct providers —
+     *           same-provider disagreement is DOUBLE_SPEND territory,
+     *           not CONSENSUS_MISMATCH)
+     *        5. leaf.jobIdHash == majorityLeaf.jobIdHash
+     *        6. leaf.shardIndex == majorityLeaf.shardIndex
+     *        7. leaf.outputHash != majorityLeaf.outputHash
+     *        8. conflictingBatch exists
+     *        9. MerkleProof.verify(majorityProof, conflictingBatch.root,
      *             hash(majorityLeaf))
      *
      *      Returns true iff all pass.
@@ -613,20 +634,20 @@ contract BatchSettlementRegistry is Ownable {
         ReceiptLeaf calldata leaf,
         bytes calldata auxData
     ) internal view returns (bool) {
-        if (msg.sender != b.requester) {
-            revert CallerNotRequester(msg.sender, b.requester);
-        }
-
         (
             bytes32 conflictingBatchId,
             bytes32[] memory majorityProof,
             ReceiptLeaf memory majorityLeaf
         ) = abi.decode(auxData, (bytes32, bytes32[], ReceiptLeaf));
 
-        // Distinct batches. Otherwise a single provider could challenge
-        // their own receipt against another of their own — nonsense and
-        // opens a self-slash rent-extraction vector.
+        // Distinct batches. Self-referential challenges are blocked here
+        // regardless of what else matches.
         if (conflictingBatchId == batchId) return false;
+
+        // Consensus-group opt-in: the minority batch must have been
+        // committed with a non-zero group_id. Batches that didn't opt in
+        // to consensus can't be targeted by CONSENSUS_MISMATCH.
+        if (b.consensus_group_id == bytes32(0)) return false;
 
         // Same shard of same job — otherwise "disagreement" is meaningless.
         if (leaf.jobIdHash != majorityLeaf.jobIdHash) return false;
@@ -640,6 +661,11 @@ contract BatchSettlementRegistry is Ownable {
         if (other.status == BatchStatus.NONEXISTENT) {
             revert ConflictingBatchNotCommitted(conflictingBatchId);
         }
+
+        // Sybil-griefing mitigation: both batches must share the same
+        // non-zero group_id AND be committed by different providers.
+        if (b.consensus_group_id != other.consensus_group_id) return false;
+        if (b.provider == other.provider) return false;
 
         // Majority leaf must be provable in the conflicting batch.
         bytes32 majorityLeafHash = keccak256(abi.encode(majorityLeaf));

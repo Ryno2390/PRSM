@@ -87,7 +87,7 @@ describe("BatchSettlementRegistry", function () {
       const tx = await registry
         .connect(provider)
         .commitBatch(
-          requester.address, DUMMY_ROOT, receiptCount, totalValue, 0, metadataURI
+          requester.address, DUMMY_ROOT, receiptCount, totalValue, 0, ethers.ZeroHash, metadataURI
         );
       const r = await tx.wait();
       const batchId = r.logs.find(
@@ -109,7 +109,7 @@ describe("BatchSettlementRegistry", function () {
       await expect(
         registry
           .connect(provider)
-          .commitBatch(ethers.ZeroAddress, DUMMY_ROOT, 10, ONE_FTNS, 0, "")
+          .commitBatch(ethers.ZeroAddress, DUMMY_ROOT, 10, ONE_FTNS, 0, ethers.ZeroHash, "")
       ).to.be.revertedWithCustomError(registry, "ZeroRequester");
     });
 
@@ -117,24 +117,24 @@ describe("BatchSettlementRegistry", function () {
       expect(await registry.providerBatchSequence(provider.address)).to.equal(0);
       await registry
         .connect(provider)
-        .commitBatch(requester.address, DUMMY_ROOT, 10, ONE_FTNS,  0, "");
+        .commitBatch(requester.address, DUMMY_ROOT, 10, ONE_FTNS,  0, ethers.ZeroHash, "");
       expect(await registry.providerBatchSequence(provider.address)).to.equal(1);
       await registry
         .connect(provider)
-        .commitBatch(requester.address, DUMMY_ROOT_2, 10, ONE_FTNS,  0, "");
+        .commitBatch(requester.address, DUMMY_ROOT_2, 10, ONE_FTNS,  0, ethers.ZeroHash, "");
       expect(await registry.providerBatchSequence(provider.address)).to.equal(2);
     });
 
     it("produces distinct batchIds for back-to-back identical commits", async function () {
       const tx1 = await registry
         .connect(provider)
-        .commitBatch(requester.address, DUMMY_ROOT, 100, ONE_FTNS,  0, "");
+        .commitBatch(requester.address, DUMMY_ROOT, 100, ONE_FTNS,  0, ethers.ZeroHash, "");
       const r1 = await tx1.wait();
       const id1 = r1.logs.find((l) => l.fragment && l.fragment.name === "BatchCommitted").args[0];
 
       const tx2 = await registry
         .connect(provider)
-        .commitBatch(requester.address, DUMMY_ROOT, 100, ONE_FTNS,  0, "");
+        .commitBatch(requester.address, DUMMY_ROOT, 100, ONE_FTNS,  0, ethers.ZeroHash, "");
       const r2 = await tx2.wait();
       const id2 = r2.logs.find((l) => l.fragment && l.fragment.name === "BatchCommitted").args[0];
 
@@ -145,7 +145,7 @@ describe("BatchSettlementRegistry", function () {
       await expect(
         registry
           .connect(provider)
-          .commitBatch(requester.address, ethers.ZeroHash, 10, ONE_FTNS, 0, "")
+          .commitBatch(requester.address, ethers.ZeroHash, 10, ONE_FTNS, 0, ethers.ZeroHash, "")
       ).to.be.revertedWithCustomError(registry, "EmptyMerkleRoot");
     });
 
@@ -153,7 +153,7 @@ describe("BatchSettlementRegistry", function () {
       await expect(
         registry
           .connect(provider)
-          .commitBatch(requester.address, DUMMY_ROOT, 0, ONE_FTNS, 0, "")
+          .commitBatch(requester.address, DUMMY_ROOT, 0, ONE_FTNS, 0, ethers.ZeroHash, "")
       ).to.be.revertedWithCustomError(registry, "ZeroReceiptCount");
     });
 
@@ -161,7 +161,7 @@ describe("BatchSettlementRegistry", function () {
       await expect(
         registry
           .connect(provider)
-          .commitBatch(requester.address, DUMMY_ROOT, 1, 0, 0, "")
+          .commitBatch(requester.address, DUMMY_ROOT, 1, 0, 0, ethers.ZeroHash, "")
       ).to.not.be.reverted;
     });
   });
@@ -173,7 +173,7 @@ describe("BatchSettlementRegistry", function () {
     beforeEach(async function () {
       const tx = await registry
         .connect(provider)
-        .commitBatch(requester.address, DUMMY_ROOT, 100, batchValue,  0, "ipfs://m");
+        .commitBatch(requester.address, DUMMY_ROOT, 100, batchValue,  0, ethers.ZeroHash, "ipfs://m");
       const r = await tx.wait();
       batchId = r.logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
@@ -249,7 +249,7 @@ describe("BatchSettlementRegistry", function () {
       // escrowPool were unset. Verifies the `if (finalValue > 0)` guard.
       const tx = await registry
         .connect(provider)
-        .commitBatch(requester.address, DUMMY_ROOT_2, 1, 0,  0, "");
+        .commitBatch(requester.address, DUMMY_ROOT_2, 1, 0,  0, ethers.ZeroHash, "");
       const r = await tx.wait();
       const zeroBatchId = r.logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
@@ -320,7 +320,7 @@ describe("BatchSettlementRegistry", function () {
     it("shorter post-commit window lets older pending batches finalize sooner", async function () {
       const tx = await registry
         .connect(provider)
-        .commitBatch(requester.address, DUMMY_ROOT, 10, ONE_FTNS,  0, "");
+        .commitBatch(requester.address, DUMMY_ROOT, 10, ONE_FTNS,  0, ethers.ZeroHash, "");
       const r = await tx.wait();
       const id = r.logs.find((l) => l.fragment && l.fragment.name === "BatchCommitted").args[0];
 
@@ -352,7 +352,7 @@ describe("BatchSettlementRegistry", function () {
     beforeEach(async function () {
       const tx = await registry
         .connect(provider)
-        .commitBatch(requester.address, DUMMY_ROOT, 100, ONE_FTNS * 10n,  0, "");
+        .commitBatch(requester.address, DUMMY_ROOT, 100, ONE_FTNS * 10n,  0, ethers.ZeroHash, "");
       const r = await tx.wait();
       batchId = r.logs.find((l) => l.fragment && l.fragment.name === "BatchCommitted").args[0];
     });

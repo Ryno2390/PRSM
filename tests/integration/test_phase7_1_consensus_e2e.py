@@ -409,6 +409,7 @@ def test_phase7_1_consensus_mismatch_e2e(hardhat_node, deployed):
                 {"name": "receiptCount", "type": "uint256"},
                 {"name": "totalValueFTNS", "type": "uint256"},
                 {"name": "tierSlashRateBps", "type": "uint16"},
+                {"name": "consensusGroupId", "type": "bytes32"},
                 {"name": "metadataURI", "type": "string"},
             ],
             "name": "commitBatch",
@@ -462,6 +463,11 @@ def test_phase7_1_consensus_mismatch_e2e(hardhat_node, deployed):
         abi=registry_abi_subset,
     )
 
+    # Phase 7.1x §8.7: all k providers in a consensus dispatch share
+    # ONE group_id. The contract rejects CONSENSUS_MISMATCH challenges
+    # unless both batches carry the same non-zero group_id.
+    consensus_group_id = keccak(f"consensus-group-{job_id}".encode())
+
     batch_ids = {}  # label → batch_id
     for label, (addr, key) in provider_accounts.items():
         acct = w3.eth.account.from_key(key)
@@ -473,6 +479,7 @@ def test_phase7_1_consensus_mismatch_e2e(hardhat_node, deployed):
             1,
             leaf["valueFtns"],
             SLASH_RATE_CRITICAL_BPS,
+            consensus_group_id,
             f"ipfs://phase7.1-{label}",
         ).build_transaction({
             "from": acct.address,

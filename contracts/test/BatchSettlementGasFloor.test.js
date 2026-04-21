@@ -105,13 +105,13 @@ describe("BatchSettlementRegistry — §8.7 MIN_SLASH_GAS floor", function () {
     // the way to the slash hook (so we can probe the gas floor).
     const root = hashLeaf(leaf);
     const tx1 = await registry.connect(provider).commitBatch(
-      requester.address, root, 1, leaf.valueFtns, PREMIUM_SLASH_BPS, "b1",
+      requester.address, root, 1, leaf.valueFtns, PREMIUM_SLASH_BPS, ethers.ZeroHash, "b1",
     );
     const id1 = (await tx1.wait()).logs.find(
       (l) => l.fragment && l.fragment.name === "BatchCommitted"
     ).args[0];
     const tx2 = await registry.connect(provider).commitBatch(
-      requester.address, root, 1, leaf.valueFtns, PREMIUM_SLASH_BPS, "b2",
+      requester.address, root, 1, leaf.valueFtns, PREMIUM_SLASH_BPS, ethers.ZeroHash, "b2",
     );
     const id2 = (await tx2.wait()).logs.find(
       (l) => l.fragment && l.fragment.name === "BatchCommitted"
@@ -227,7 +227,7 @@ describe("BatchSettlementRegistry — §8.7 MIN_SLASH_GAS floor", function () {
     const root = hashLeaf(oldLeaf);
     const tx = await registry.connect(provider).commitBatch(
       requester.address, root, 1, oldLeaf.valueFtns,
-      PREMIUM_SLASH_BPS, "expired-batch",
+      PREMIUM_SLASH_BPS, ethers.ZeroHash, "expired-batch",
     );
     const batchId = (await tx.wait()).logs.find(
       (l) => l.fragment && l.fragment.name === "BatchCommitted"

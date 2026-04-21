@@ -98,7 +98,7 @@ describe("BatchSettlementRegistry — Phase 7 slashing integration", function ()
   async function commitOneLeafBatch(leaf, tierSlashRateBps = PREMIUM_SLASH_BPS, metadata = "") {
     const root = hashLeaf(leaf);
     const tx = await registry.connect(provider).commitBatch(
-      requester.address, root, 1, leaf.valueFtns, tierSlashRateBps, metadata
+      requester.address, root, 1, leaf.valueFtns, tierSlashRateBps, ethers.ZeroHash, metadata
     );
     const r = await tx.wait();
     return r.logs.find(
@@ -111,16 +111,12 @@ describe("BatchSettlementRegistry — Phase 7 slashing integration", function ()
       const sharedLeaf = makeLeaf({ valueFtns: ONE_FTNS });
       const root = hashLeaf(sharedLeaf);
 
-      const tx1 = await registry.connect(provider).commitBatch(
-        requester.address, root, 1, sharedLeaf.valueFtns, PREMIUM_SLASH_BPS, "b1"
-      );
+      const tx1 = await registry.connect(provider).commitBatch(requester.address, root, 1, sharedLeaf.valueFtns, PREMIUM_SLASH_BPS, ethers.ZeroHash, "b1");
       const id1 = (await tx1.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
 
-      const tx2 = await registry.connect(provider).commitBatch(
-        requester.address, root, 1, sharedLeaf.valueFtns, PREMIUM_SLASH_BPS, "b2"
-      );
+      const tx2 = await registry.connect(provider).commitBatch(requester.address, root, 1, sharedLeaf.valueFtns, PREMIUM_SLASH_BPS, ethers.ZeroHash, "b2");
       const id2 = (await tx2.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
@@ -157,15 +153,11 @@ describe("BatchSettlementRegistry — Phase 7 slashing integration", function ()
       const sharedLeaf = makeLeaf();
       const root = hashLeaf(sharedLeaf);
 
-      const tx1 = await registry.connect(provider).commitBatch(
-        requester.address, root, 1, sharedLeaf.valueFtns, STANDARD_SLASH_BPS, "b1"
-      );
+      const tx1 = await registry.connect(provider).commitBatch(requester.address, root, 1, sharedLeaf.valueFtns, STANDARD_SLASH_BPS, ethers.ZeroHash, "b1");
       const id1 = (await tx1.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
-      const tx2 = await registry.connect(provider).commitBatch(
-        requester.address, root, 1, sharedLeaf.valueFtns, STANDARD_SLASH_BPS, "b2"
-      );
+      const tx2 = await registry.connect(provider).commitBatch(requester.address, root, 1, sharedLeaf.valueFtns, STANDARD_SLASH_BPS, ethers.ZeroHash, "b2");
       const id2 = (await tx2.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
@@ -257,15 +249,11 @@ describe("BatchSettlementRegistry — Phase 7 slashing integration", function ()
 
       const sharedLeaf = makeLeaf();
       const root = hashLeaf(sharedLeaf);
-      const tx1 = await registry.connect(provider).commitBatch(
-        requester.address, root, 1, sharedLeaf.valueFtns, PREMIUM_SLASH_BPS, "b1"
-      );
+      const tx1 = await registry.connect(provider).commitBatch(requester.address, root, 1, sharedLeaf.valueFtns, PREMIUM_SLASH_BPS, ethers.ZeroHash, "b1");
       const id1 = (await tx1.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
-      const tx2 = await registry.connect(provider).commitBatch(
-        requester.address, root, 1, sharedLeaf.valueFtns, PREMIUM_SLASH_BPS, "b2"
-      );
+      const tx2 = await registry.connect(provider).commitBatch(requester.address, root, 1, sharedLeaf.valueFtns, PREMIUM_SLASH_BPS, ethers.ZeroHash, "b2");
       const id2 = (await tx2.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
@@ -291,15 +279,11 @@ describe("BatchSettlementRegistry — Phase 7 slashing integration", function ()
       const sharedLeaf = makeLeaf();
       const root = hashLeaf(sharedLeaf);
 
-      const tx1 = await registry.connect(provider).commitBatch(
-        requester.address, root, 1, sharedLeaf.valueFtns, 0, "b1"
-      );
+      const tx1 = await registry.connect(provider).commitBatch(requester.address, root, 1, sharedLeaf.valueFtns, 0, ethers.ZeroHash, "b1");
       const id1 = (await tx1.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
-      const tx2 = await registry.connect(provider).commitBatch(
-        requester.address, root, 1, sharedLeaf.valueFtns, 0, "b2"
-      );
+      const tx2 = await registry.connect(provider).commitBatch(requester.address, root, 1, sharedLeaf.valueFtns, 0, ethers.ZeroHash, "b2");
       const id2 = (await tx2.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
@@ -322,15 +306,11 @@ describe("BatchSettlementRegistry — Phase 7 slashing integration", function ()
       const leaf = makeLeaf();
       const root = hashLeaf(leaf);
 
-      const tx1 = await registry.connect(freshProvider).commitBatch(
-        requester.address, root, 1, leaf.valueFtns, PREMIUM_SLASH_BPS, "b1"
-      );
+      const tx1 = await registry.connect(freshProvider).commitBatch(requester.address, root, 1, leaf.valueFtns, PREMIUM_SLASH_BPS, ethers.ZeroHash, "b1");
       const id1 = (await tx1.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
-      const tx2 = await registry.connect(freshProvider).commitBatch(
-        requester.address, root, 1, leaf.valueFtns, PREMIUM_SLASH_BPS, "b2"
-      );
+      const tx2 = await registry.connect(freshProvider).commitBatch(requester.address, root, 1, leaf.valueFtns, PREMIUM_SLASH_BPS, ethers.ZeroHash, "b2");
       const id2 = (await tx2.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
@@ -367,11 +347,9 @@ describe("BatchSettlementRegistry — Phase 7 slashing integration", function ()
   describe("commitBatch validates tier_slash_rate_bps bounds", function () {
     it("reverts on rate > 10000 bps", async function () {
       await expect(
-        registry.connect(provider).commitBatch(
-          requester.address,
+        registry.connect(provider).commitBatch(requester.address,
           ethers.keccak256(ethers.toUtf8Bytes("x")),
-          1, ONE_FTNS, 10001, ""
-        )
+          1, ONE_FTNS, 10001, ethers.ZeroHash, "")
       ).to.be.revertedWithCustomError(registry, "InvalidSlashRateBps");
     });
   });
