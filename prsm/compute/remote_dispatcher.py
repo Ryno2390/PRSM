@@ -14,6 +14,7 @@ import base64
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
 import numpy as np
@@ -23,6 +24,21 @@ from prsm.compute.shard_receipt import VerificationStrategy
 from prsm.node.transport import MSG_DIRECT, P2PMessage
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DispatchResult:
+    """Augmented result from `dispatch_with_receipt`. Returned when the
+    caller needs the verified Phase 2 receipt alongside the numerical
+    output — e.g., for Phase 3.1 batched-settlement accumulation.
+
+    The plain `dispatch()` method discards the receipt and returns just
+    the output for backwards-compatibility with Phase 2 callers.
+    """
+    output: np.ndarray
+    receipt: Dict[str, Any]            # Phase 2 ShardExecutionReceipt dict form
+    provider_node_id: str              # node_id that served this shard
+    escrow_amount_ftns: float          # escrow amount that will be released
 
 
 class ShardTooLargeError(ValueError):
@@ -139,7 +155,45 @@ class RemoteShardDispatcher:
         require_tee_attestation: bool = False,
     ) -> np.ndarray:
         """Dispatch shard to node_id and return the output tensor.
-        Raises on unrecoverable failure after escrow refund."""
+        Raises on unrecoverable failure after escrow refund.
+
+        This is the Phase 2 API — returns just the output for
+        backwards-compatible callers. Phase 3.1 callers needing the
+        verified receipt for batched-settlement accumulation should
+        use `dispatch_with_receipt` instead.
+        """
+        result = await self.dispatch_with_receipt(
+            shard=shard,
+            input_tensor=input_tensor,
+            node_id=node_id,
+            job_id=job_id,
+            stake_tier=stake_tier,
+            escrow_amount_ftns=escrow_amount_ftns,
+            require_tee_attestation=require_tee_attestation,
+        )
+        return result.output
+
+    async def dispatch_with_receipt(
+        self,
+        shard: ModelShard,
+        input_tensor: np.ndarray,
+        node_id: str,
+        job_id: str,
+        stake_tier: PipelineStakeTier,
+        escrow_amount_ftns: float,
+        require_tee_attestation: bool = False,
+    ) -> DispatchResult:
+        """Phase 3.1 variant: returns DispatchResult with both the
+        numerical output AND the verified receipt dict, suitable for
+        forwarding to a BatchSettlementClient for on-chain accumulation.
+
+        On fallback paths (size-too-large or peer-not-connected with
+        a local_fallback wired), the returned DispatchResult has an
+        empty receipt dict — fallback execution produces no on-chain-
+        settleable evidence, so there's nothing to accumulate. Callers
+        MUST check `bool(result.receipt)` before forwarding to the
+        settlement layer.
+        """
         if len(shard.tensor_data) > self.max_shard_bytes:
             if self.local_fallback is not None:
                 logger.warning(
@@ -147,7 +201,12 @@ class RemoteShardDispatcher:
                     f"{len(shard.tensor_data)} exceeds max "
                     f"{self.max_shard_bytes}; falling back to local"
                 )
-                return await self._call_fallback(shard, input_tensor)
+                output = await self._call_fallback(shard, input_tensor)
+                return DispatchResult(
+                    output=output, receipt={},
+                    provider_node_id=node_id,
+                    escrow_amount_ftns=0.0,
+                )
             raise ShardTooLargeError(
                 f"shard {shard.shard_index} size "
                 f"{len(shard.tensor_data)} exceeds max {self.max_shard_bytes}"
@@ -157,7 +216,12 @@ class RemoteShardDispatcher:
         if peer is None:
             if self.local_fallback is not None:
                 logger.warning(f"peer {node_id} not connected; falling back")
-                return await self._call_fallback(shard, input_tensor)
+                output = await self._call_fallback(shard, input_tensor)
+                return DispatchResult(
+                    output=output, receipt={},
+                    provider_node_id=node_id,
+                    escrow_amount_ftns=0.0,
+                )
             raise PeerNotConnectedError(
                 f"node_id {node_id!r} is not a connected peer"
             )
@@ -179,10 +243,11 @@ class RemoteShardDispatcher:
             )
 
         output: Optional[np.ndarray] = None
+        receipt: Optional[Dict[str, Any]] = None
         last_exc: Optional[BaseException] = None
         for attempt in range(self.max_retries + 1):
             try:
-                output = await self._dispatch_once(
+                output, receipt = await self._dispatch_once(
                     shard=shard,
                     input_tensor=input_tensor,
                     node_id=node_id,
@@ -239,7 +304,12 @@ class RemoteShardDispatcher:
                     f"but escrow release failed for {escrow_job_id!r}; "
                     f"reconciliation required"
                 )
-            return output
+            return DispatchResult(
+                output=output,
+                receipt=receipt or {},
+                provider_node_id=node_id,
+                escrow_amount_ftns=escrow_amount_ftns,
+            )
 
         # FAILURE path: compute did not complete. Refund escrow, then
         # fall back to local (if wired) or re-raise the failure.
@@ -252,7 +322,11 @@ class RemoteShardDispatcher:
                 f"shard {shard.shard_index} dispatch failed after "
                 f"{self.max_retries} retries; falling back to local"
             )
-            return await self._call_fallback(shard, input_tensor)
+            fallback_output = await self._call_fallback(shard, input_tensor)
+            return DispatchResult(
+                output=fallback_output, receipt={},
+                provider_node_id=node_id, escrow_amount_ftns=0.0,
+            )
 
         # Preemption is an honest-work signal — re-raise as-is so
         # caller can distinguish from malicious/timeout failures and
@@ -279,7 +353,7 @@ class RemoteShardDispatcher:
         stake_tier: PipelineStakeTier,
         escrow_job_id: str,
         require_tee_attestation: bool = False,
-    ) -> np.ndarray:
+    ) -> "tuple[np.ndarray, Dict[str, Any]]":
         """Single dispatch attempt. Raises asyncio.TimeoutError if no
         response arrives within default_timeout."""
         request_id = str(uuid.uuid4())
@@ -363,7 +437,7 @@ class RemoteShardDispatcher:
                 f"tee_attestation field"
             )
 
-        return output
+        return output, receipt
 
     async def _on_direct_message(self, msg, peer) -> None:
         """Route shard_execute_response to pending futures."""

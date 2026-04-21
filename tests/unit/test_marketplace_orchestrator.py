@@ -343,3 +343,241 @@ def test_orchestrator_multiple_shards_concatenates_in_order():
     np.testing.assert_array_equal(
         result, np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float64),
     )
+
+
+# ── Phase 3.1 Task 7: batched-settlement accumulation hook ────────
+
+
+def _make_orchestrator_with_settlement(listings):
+    """Variant of _make_orchestrator that wires an AsyncMock
+    BatchSettlementClient + a provider_address_resolver so the
+    Phase 3.1 hook path is active."""
+    identity = generate_node_identity(display_name="requester")
+    identity.ethereum_address = "0x" + "e" * 40  # set to activate the hook
+
+    directory = MagicMock()
+    directory.list_active_providers = MagicMock(return_value=listings)
+    directory.get_listing = MagicMock(
+        side_effect=lambda pid, **kw: next(
+            (l for l in listings if l.provider_id == pid), None
+        )
+    )
+    reputation = ReputationTracker()
+    eligibility = EligibilityFilter(reputation_tracker=reputation)
+
+    price_negotiator = MagicMock()
+    price_negotiator.request_quote = AsyncMock()
+
+    remote_dispatcher = MagicMock()
+    remote_dispatcher.dispatch = AsyncMock()
+    remote_dispatcher.dispatch_with_receipt = AsyncMock()
+
+    batch_client = MagicMock()
+    batch_client.accumulate = AsyncMock()
+
+    # Simple resolver: maps provider_id → a synthetic Ethereum address.
+    def resolver(provider_id):
+        return "0x" + "f" * 40  # always return a stub address
+
+    orchestrator = MarketplaceOrchestrator(
+        identity=identity,
+        directory=directory,
+        eligibility_filter=eligibility,
+        reputation=reputation,
+        price_negotiator=price_negotiator,
+        remote_dispatcher=remote_dispatcher,
+        batch_settlement_client=batch_client,
+        provider_address_resolver=resolver,
+    )
+    return (orchestrator, price_negotiator, remote_dispatcher, batch_client)
+
+
+def _make_dispatch_result(output: np.ndarray, node_id: str, amount: float = 0.05):
+    """Build the DispatchResult shape dispatch_with_receipt returns."""
+    from prsm.compute.remote_dispatcher import DispatchResult
+    return DispatchResult(
+        output=output,
+        receipt={
+            "job_id": "job-1",
+            "shard_index": 0,
+            "provider_id": "provider-id-hex",
+            "provider_pubkey_b64": "AAAA",
+            "output_hash": "a" * 64,
+            "executed_at_unix": 1700000000,
+            "signature": "BBBB",
+        },
+        provider_node_id=node_id,
+        escrow_amount_ftns=amount,
+    )
+
+
+def test_orchestrator_accumulates_when_settlement_client_wired():
+    """Happy path: a successful dispatch forwards a BatchedReceipt to
+    the settlement client."""
+    listing = _make_listing()
+    orch, quoter, dispatcher, batch = _make_orchestrator_with_settlement([listing])
+
+    quoter.request_quote.return_value = _make_quote(listing)
+    dispatcher.dispatch_with_receipt.return_value = _make_dispatch_result(
+        np.array([1.0, 2.0], dtype=np.float64), listing.provider_id,
+    )
+
+    _run(orch.orchestrate_sharded_inference(
+        shards=[_make_shard(0)],
+        input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+        job_id="job-1", policy=DispatchPolicy(),
+    ))
+
+    # Settlement client was invoked with a BatchedReceipt.
+    batch.accumulate.assert_awaited_once()
+    br = batch.accumulate.await_args.args[0]
+    assert br.requester_address == orch.identity.ethereum_address
+    assert br.provider_address == "0x" + "f" * 40  # from resolver
+    assert br.receipt.job_id == "job-1"
+
+
+def test_orchestrator_does_not_use_dispatch_with_receipt_when_not_wired():
+    """Phase 3 preservation: without a settlement client, the orchestrator
+    uses the Phase 2 dispatch API that returns only np.ndarray."""
+    listing = _make_listing()
+    orch, quoter, dispatcher, _ = _make_orchestrator([listing])  # no batch client
+
+    quoter.request_quote.return_value = _make_quote(listing)
+    dispatcher.dispatch.return_value = np.array([1.0], dtype=np.float64)
+
+    _run(orch.orchestrate_sharded_inference(
+        shards=[_make_shard(0)],
+        input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+        job_id="job-1", policy=DispatchPolicy(),
+    ))
+
+    # Old API was used; new API was NOT.
+    dispatcher.dispatch.assert_awaited_once()
+    dispatcher.dispatch_with_receipt.assert_not_called()
+
+
+def test_orchestrator_skips_accumulation_when_ethereum_address_missing():
+    """If identity.ethereum_address is None (Phase 2/3 node without
+    Phase 3.1 setup), fall back to Phase 2 dispatch API — no batched
+    settlement attempted."""
+    listing = _make_listing()
+    orch, quoter, dispatcher, batch = _make_orchestrator_with_settlement([listing])
+    orch.identity.ethereum_address = None  # clear it
+
+    quoter.request_quote.return_value = _make_quote(listing)
+    dispatcher.dispatch.return_value = np.array([1.0], dtype=np.float64)
+
+    _run(orch.orchestrate_sharded_inference(
+        shards=[_make_shard(0)],
+        input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+        job_id="job-1", policy=DispatchPolicy(),
+    ))
+
+    # Fell back to Phase 2 API; no settlement accumulation.
+    dispatcher.dispatch.assert_awaited_once()
+    dispatcher.dispatch_with_receipt.assert_not_called()
+    batch.accumulate.assert_not_called()
+
+
+def test_orchestrator_skips_accumulation_when_resolver_returns_none():
+    """Resolver returning None for a provider (unknown Ethereum address)
+    skips accumulation for that shard gracefully — no raise."""
+    listing = _make_listing()
+    orch, quoter, dispatcher, batch = _make_orchestrator_with_settlement([listing])
+    # Override resolver to return None.
+    orch.provider_address_resolver = lambda pid: None
+
+    quoter.request_quote.return_value = _make_quote(listing)
+    dispatcher.dispatch_with_receipt.return_value = _make_dispatch_result(
+        np.array([1.0], dtype=np.float64), listing.provider_id,
+    )
+
+    _run(orch.orchestrate_sharded_inference(
+        shards=[_make_shard(0)],
+        input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+        job_id="job-1", policy=DispatchPolicy(),
+    ))
+
+    # Dispatch succeeded; accumulate skipped without raising.
+    dispatcher.dispatch_with_receipt.assert_awaited_once()
+    batch.accumulate.assert_not_called()
+
+
+def test_orchestrator_accumulation_failure_does_not_break_dispatch():
+    """If the settlement client's accumulate raises, the orchestrator
+    still returns the dispatch output — batched settlement is strictly
+    additive; its failures must never block Phase 3 success."""
+    listing = _make_listing()
+    orch, quoter, dispatcher, batch = _make_orchestrator_with_settlement([listing])
+
+    batch.accumulate.side_effect = RuntimeError("settlement RPC down")
+
+    quoter.request_quote.return_value = _make_quote(listing)
+    expected = np.array([42.0], dtype=np.float64)
+    dispatcher.dispatch_with_receipt.return_value = _make_dispatch_result(
+        expected, listing.provider_id,
+    )
+
+    result = _run(orch.orchestrate_sharded_inference(
+        shards=[_make_shard(0)],
+        input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+        job_id="job-1", policy=DispatchPolicy(),
+    ))
+
+    np.testing.assert_array_equal(result, expected)
+
+
+def test_orchestrator_value_ftns_converted_to_wei():
+    """Phase 3's quoted_price is a float FTNS; Phase 3.1 uses uint128
+    wei. Orchestrator must multiply by 10^18."""
+    listing = _make_listing()
+    orch, quoter, dispatcher, batch = _make_orchestrator_with_settlement([listing])
+
+    # Quote 0.05 FTNS = 5 * 10^16 wei
+    quote = PriceQuote(
+        request_id="q-1",
+        listing_id=listing.listing_id,
+        shard_index=0,
+        quoted_price_ftns=0.05,
+        quote_expires_unix=9999999999,
+        provider_id=listing.provider_id,
+        provider_pubkey_b64=listing.provider_pubkey_b64,
+        signature="sig",
+    )
+    quoter.request_quote.return_value = quote
+    dispatcher.dispatch_with_receipt.return_value = _make_dispatch_result(
+        np.array([1.0], dtype=np.float64), listing.provider_id, amount=0.05,
+    )
+
+    _run(orch.orchestrate_sharded_inference(
+        shards=[_make_shard(0)],
+        input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+        job_id="job-1", policy=DispatchPolicy(),
+    ))
+
+    br = batch.accumulate.await_args.args[0]
+    assert br.value_ftns == 5 * 10**16
+
+
+def test_orchestrator_empty_receipt_on_fallback_path_skips_accumulation():
+    """If dispatch_with_receipt returns an empty-receipt DispatchResult
+    (e.g., local_fallback path), no accumulation happens."""
+    listing = _make_listing()
+    orch, quoter, dispatcher, batch = _make_orchestrator_with_settlement([listing])
+
+    from prsm.compute.remote_dispatcher import DispatchResult
+    quoter.request_quote.return_value = _make_quote(listing)
+    dispatcher.dispatch_with_receipt.return_value = DispatchResult(
+        output=np.array([1.0], dtype=np.float64),
+        receipt={},  # empty — fallback path
+        provider_node_id=listing.provider_id,
+        escrow_amount_ftns=0.0,
+    )
+
+    _run(orch.orchestrate_sharded_inference(
+        shards=[_make_shard(0)],
+        input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+        job_id="job-1", policy=DispatchPolicy(),
+    ))
+
+    batch.accumulate.assert_not_called()

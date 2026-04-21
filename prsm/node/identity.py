@@ -29,6 +29,11 @@ class NodeIdentity:
     private_key_bytes: bytes = field(repr=False)
     display_name: str = "prsm-node"
     created_at: float = field(default_factory=time.time)
+    # Phase 3.1: optional Ethereum address for on-chain settlement
+    # participation. Separate from the Ed25519 node identity — set by
+    # operators who want to participate in batched on-chain settlement
+    # (Phase 3.1) or on-chain governance. None for Phase 2/3 nodes.
+    ethereum_address: Optional[str] = None
 
     # Cached key objects (not serialized)
     _private_key: Optional[Ed25519PrivateKey] = field(default=None, repr=False)
