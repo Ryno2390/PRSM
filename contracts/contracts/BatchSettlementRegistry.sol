@@ -481,30 +481,6 @@ contract BatchSettlementRegistry is Ownable {
     // ── Governance surface ────────────────────────────────────────
 
     /**
-     * @notice Update the challenge-window duration. Owner-only.
-     *         Does NOT affect batches already in PENDING state — they
-     *         retain the window value at their commit time, which is
-     *         derived from the old challengeWindowSeconds at commit.
-     *
-     *         Wait: this is subtle. The storage holds batches keyed by
-     *         commitTimestamp; the finalization check reads the CURRENT
-     *         challengeWindowSeconds. So a post-change finalization of
-     *         an already-pending batch uses the NEW window. This is
-     *         acceptable because:
-     *           1. Shrinking the window lets older pending batches
-     *              finalize sooner (favorable to provider; no one loses
-     *              value).
-     *           2. Expanding the window delays older pending batches'
-     *              finalization — this is a governance decision, publicly
-     *              announced per PRSM-GOV-1 §10.3 (14-day notice period
-     *              for non-emergency on-chain transactions).
-     *         Callers relying on a specific finalization horizon must
-     *         read challengeWindowSeconds at commit time AND monitor for
-     *         governance-event adjustments.
-     *
-     * @param newSeconds new window duration in seconds
-     */
-    /**
      * @notice Set the EscrowPool contract that executes settlement transfers.
      *         Owner-only. The pool must be deployed separately; this function
      *         registers its address with the registry. Setting to address(0)
@@ -542,6 +518,29 @@ contract BatchSettlementRegistry is Ownable {
         emit SettlementLookbackUpdated(old, newSeconds);
     }
 
+    /**
+     * @notice Update the challenge-window duration. Owner-only.
+     *         Does NOT affect batches already in PENDING state — they
+     *         retain the window value at their commit time, which is
+     *         derived from the old challengeWindowSeconds at commit.
+     *
+     *         Subtle: storage holds batches keyed by commitTimestamp;
+     *         finalization reads the CURRENT challengeWindowSeconds. So
+     *         a post-change finalization of an already-pending batch
+     *         uses the NEW window. Acceptable because:
+     *           1. Shrinking the window lets older pending batches
+     *              finalize sooner (favorable to provider; no one loses
+     *              value).
+     *           2. Expanding the window delays older pending batches'
+     *              finalization — a governance decision, publicly
+     *              announced per PRSM-GOV-1 §10.3 (14-day notice period
+     *              for non-emergency on-chain transactions).
+     *         Callers relying on a specific finalization horizon must
+     *         read challengeWindowSeconds at commit time AND monitor for
+     *         governance-event adjustments.
+     *
+     * @param newSeconds new window duration in seconds
+     */
     function setChallengeWindowSeconds(uint256 newSeconds) external onlyOwner {
         if (newSeconds < MIN_CHALLENGE_WINDOW_SECONDS ||
             newSeconds > MAX_CHALLENGE_WINDOW_SECONDS) {
