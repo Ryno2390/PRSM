@@ -74,6 +74,8 @@ def _make_mock_contract(commit_return=None, default_status: int = 1):
         _call_counter = {"n": 0}
 
         async def commit_default(**kwargs):
+            # kwargs includes provider_address, requester_address,
+            # merkle_root, receipt_count, total_value_ftns, metadata_uri.
             _call_counter["n"] += 1
             bid = hashlib.sha256(
                 f"mock-batch-{_call_counter['n']}".encode()
@@ -111,16 +113,41 @@ def test_client_forwards_accumulate_to_internal_accumulator():
 
 
 def test_client_rejects_receipt_for_wrong_provider():
-    """Safety check: if a receipt comes in for a different provider than
-    this client manages, raise rather than silently accumulate."""
+    """Safety check: the client's bound address must match EITHER
+    the receipt's provider_address OR requester_address. A receipt
+    for a provider different from the client AND a requester the
+    client doesn't match raises rather than silently accumulating."""
     acc = ReceiptAccumulator()
     contract = _make_mock_contract()
     client = BatchSettlementClient(acc, contract, PROVIDER_ADDR)
 
-    br = _make_batched(provider=OTHER_PROVIDER_ADDR)
+    # Receipt's provider is not our bound addr, and requester is also
+    # not our bound addr — must reject.
+    br = _make_batched(
+        provider=OTHER_PROVIDER_ADDR,
+        requester=REQUESTER_A,  # also != PROVIDER_ADDR
+    )
     with pytest.raises(ValueError, match="refusing receipt"):
         _run(client.accumulate(br))
     assert acc.total_receipt_count() == 0
+
+
+def test_client_accepts_receipt_when_bound_as_requester():
+    """Requester-side binding: client's bound address is the requester's
+    Ethereum address; receipts where requester_address matches accumulate
+    cleanly. This is the Task 7 orchestrator hook's pattern."""
+    acc = ReceiptAccumulator()
+    contract = _make_mock_contract()
+    # Bind the client to REQUESTER_A instead of a provider.
+    client = BatchSettlementClient(acc, contract, REQUESTER_A)
+
+    # Receipt from various providers, all paid by REQUESTER_A.
+    br = _make_batched(
+        requester=REQUESTER_A,
+        provider=OTHER_PROVIDER_ADDR,
+    )
+    _run(client.accumulate(br))
+    assert acc.total_receipt_count() == 1
 
 
 # ── Commit path ───────────────────────────────────────────────────
