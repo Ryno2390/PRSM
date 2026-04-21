@@ -449,3 +449,125 @@ def test_commit_passes_correct_merkle_root_to_contract():
     # Contract was called with the matching root.
     kwargs = contract.commit_batch.await_args.kwargs
     assert kwargs["merkle_root"] == expected_tree.root
+
+
+# ── Phase 7 + 7.1x extensions flow through commit_batch ───────────────
+
+
+def _make_batched_with_extras(
+    shard_index: int = 0,
+    tier_slash_rate_bps: int = 0,
+    consensus_group_id: bytes = b"\x00" * 32,
+) -> BatchedReceipt:
+    """Variant of _make_batched that overrides the Phase 7 / 7.1x fields."""
+    base = _make_batched(shard_index=shard_index)
+    return BatchedReceipt(
+        receipt=base.receipt,
+        requester_address=base.requester_address,
+        provider_address=base.provider_address,
+        value_ftns=base.value_ftns,
+        local_escrow_id=base.local_escrow_id,
+        tier_slash_rate_bps=tier_slash_rate_bps,
+        consensus_group_id=consensus_group_id,
+    )
+
+
+def test_commit_passes_tier_slash_rate_and_group_id_defaults():
+    """Legacy (non-Phase-7) callers who don't populate the new fields
+    get through with zero defaults, matching the pre-Phase-7.1x
+    behaviour of non-consensus DOUBLE_SPEND-only batches."""
+    cfg = AccumulatorConfig(
+        count_threshold=2, time_threshold_seconds=3600,
+        value_threshold_ftns=10**30,
+    )
+    acc = ReceiptAccumulator(cfg)
+    contract = _make_mock_contract()
+    client = BatchSettlementClient(acc, contract, PROVIDER_ADDR)
+
+    for i in range(2):
+        _run(client.accumulate(_make_batched(shard_index=i)))
+    _run(client.commit_ready_batches())
+
+    kwargs = contract.commit_batch.await_args.kwargs
+    assert kwargs["tier_slash_rate_bps"] == 0
+    assert kwargs["consensus_group_id"] == b"\x00" * 32
+
+
+def test_commit_passes_tier_slash_rate_from_receipts():
+    """When the orchestrator populates tier_slash_rate_bps on the
+    receipts (Phase 7 snapshot at bond time), commit_batch receives
+    that value — enabling the on-chain slash hook to fire on
+    successful challenges."""
+    cfg = AccumulatorConfig(
+        count_threshold=2, time_threshold_seconds=3600,
+        value_threshold_ftns=10**30,
+    )
+    acc = ReceiptAccumulator(cfg)
+    contract = _make_mock_contract()
+    client = BatchSettlementClient(acc, contract, PROVIDER_ADDR)
+
+    for i in range(2):
+        _run(client.accumulate(
+            _make_batched_with_extras(shard_index=i, tier_slash_rate_bps=5000)
+        ))
+    _run(client.commit_ready_batches())
+
+    kwargs = contract.commit_batch.await_args.kwargs
+    assert kwargs["tier_slash_rate_bps"] == 5000
+
+
+def test_commit_passes_consensus_group_id_from_receipts():
+    """When receipts carry a non-zero consensus_group_id (Phase 7.1x
+    k-of-n dispatch), commit_batch receives it. Without this the
+    CONSENSUS_MISMATCH handler rejects any challenge against the
+    resulting batch because `b.consensus_group_id == 0` short-circuits."""
+    cfg = AccumulatorConfig(
+        count_threshold=2, time_threshold_seconds=3600,
+        value_threshold_ftns=10**30,
+    )
+    acc = ReceiptAccumulator(cfg)
+    contract = _make_mock_contract()
+    client = BatchSettlementClient(acc, contract, PROVIDER_ADDR)
+
+    group = b"\xcc" * 32
+    for i in range(2):
+        _run(client.accumulate(
+            _make_batched_with_extras(
+                shard_index=i, tier_slash_rate_bps=10000,
+                consensus_group_id=group,
+            )
+        ))
+    _run(client.commit_ready_batches())
+
+    kwargs = contract.commit_batch.await_args.kwargs
+    assert kwargs["consensus_group_id"] == group
+    assert kwargs["tier_slash_rate_bps"] == 10000
+
+
+def test_commit_separates_batches_with_different_group_ids():
+    """The accumulator-key extension means receipts from the same
+    (requester, provider) pair with DIFFERENT consensus_group_ids
+    land in separate batches; commit_ready_batches produces one
+    CommittedBatch per group."""
+    cfg = AccumulatorConfig(
+        count_threshold=1, time_threshold_seconds=3600,
+        value_threshold_ftns=10**30,
+    )
+    acc = ReceiptAccumulator(cfg)
+    contract = _make_mock_contract()
+    client = BatchSettlementClient(acc, contract, PROVIDER_ADDR)
+
+    _run(client.accumulate(
+        _make_batched_with_extras(shard_index=0, consensus_group_id=b"\x01" * 32)
+    ))
+    _run(client.accumulate(
+        _make_batched_with_extras(shard_index=1, consensus_group_id=b"\x02" * 32)
+    ))
+    committed = _run(client.commit_ready_batches())
+    assert len(committed) == 2
+    # Each call got its own group_id.
+    group_ids_seen = {
+        call.kwargs["consensus_group_id"]
+        for call in contract.commit_batch.await_args_list
+    }
+    assert group_ids_seen == {b"\x01" * 32, b"\x02" * 32}

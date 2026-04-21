@@ -12,6 +12,7 @@ protocol spec.
 
 from prsm.settlement.accumulator import (
     AccumulatorConfig,
+    AccumulatorKey,
     BatchedReceipt,
     PendingBatch,
     ReadyBatch,
@@ -39,6 +40,7 @@ from prsm.settlement.merkle import (
 __all__ = [
     # Accumulator (Task 4)
     "AccumulatorConfig",
+    "AccumulatorKey",
     "BatchedReceipt",
     "PendingBatch",
     "ReadyBatch",

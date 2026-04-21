@@ -99,7 +99,7 @@ def test_add_creates_batch_for_new_pair():
     br = _make_batched()
     acc.add(br, at_unix=1000)
 
-    key = (ADDR_REQUESTER_A, ADDR_PROVIDER_X)
+    key = (ADDR_REQUESTER_A, ADDR_PROVIDER_X, b"\x00" * 32, 0)
     assert key in acc.pending_keys()
     batch = acc.peek_batch(key)
     assert batch is not None
@@ -113,7 +113,7 @@ def test_add_appends_to_existing_batch():
     for i in range(3):
         acc.add(_make_batched(shard_index=i), at_unix=1000 + i)
 
-    key = (ADDR_REQUESTER_A, ADDR_PROVIDER_X)
+    key = (ADDR_REQUESTER_A, ADDR_PROVIDER_X, b"\x00" * 32, 0)
     batch = acc.peek_batch(key)
     assert batch.count == 3
     assert batch.total_value_ftns == 3 * ONE_FTNS
@@ -125,7 +125,7 @@ def test_add_does_not_move_started_at_on_subsequent_appends():
     acc = ReceiptAccumulator()
     acc.add(_make_batched(shard_index=0), at_unix=500)
     acc.add(_make_batched(shard_index=1), at_unix=2000)  # much later
-    key = (ADDR_REQUESTER_A, ADDR_PROVIDER_X)
+    key = (ADDR_REQUESTER_A, ADDR_PROVIDER_X, b"\x00" * 32, 0)
     assert acc.peek_batch(key).started_at_unix == 500
 
 
@@ -138,8 +138,8 @@ def test_different_providers_tracked_in_separate_batches():
     acc.add(_make_batched(provider=ADDR_PROVIDER_Y), at_unix=1000)
 
     keys = set(acc.pending_keys())
-    assert (ADDR_REQUESTER_A, ADDR_PROVIDER_X) in keys
-    assert (ADDR_REQUESTER_A, ADDR_PROVIDER_Y) in keys
+    assert (ADDR_REQUESTER_A, ADDR_PROVIDER_X, b"\x00" * 32, 0) in keys
+    assert (ADDR_REQUESTER_A, ADDR_PROVIDER_Y, b"\x00" * 32, 0) in keys
     assert len(keys) == 2
 
 
@@ -270,7 +270,7 @@ def test_time_trigger_reported_when_time_is_only_fired():
 def test_pop_batch_removes_batch():
     acc = ReceiptAccumulator()
     acc.add(_make_batched(), at_unix=1000)
-    key = (ADDR_REQUESTER_A, ADDR_PROVIDER_X)
+    key = (ADDR_REQUESTER_A, ADDR_PROVIDER_X, b"\x00" * 32, 0)
 
     popped = acc.pop_batch(key)
     assert popped is not None
@@ -281,7 +281,7 @@ def test_pop_batch_removes_batch():
 
 def test_pop_batch_returns_none_for_unknown_key():
     acc = ReceiptAccumulator()
-    assert acc.pop_batch((ADDR_REQUESTER_A, ADDR_PROVIDER_X)) is None
+    assert acc.pop_batch((ADDR_REQUESTER_A, ADDR_PROVIDER_X, b"\x00" * 32, 0)) is None
 
 
 def test_ready_batches_after_pop_are_empty():
@@ -289,7 +289,7 @@ def test_ready_batches_after_pop_are_empty():
     acc = ReceiptAccumulator(cfg)
     acc.add(_make_batched(), at_unix=1000)
     assert len(acc.ready_batches(at_unix=1100)) == 1
-    acc.pop_batch((ADDR_REQUESTER_A, ADDR_PROVIDER_X))
+    acc.pop_batch((ADDR_REQUESTER_A, ADDR_PROVIDER_X, b"\x00" * 32, 0))
     assert acc.ready_batches(at_unix=1100) == []
 
 
@@ -313,7 +313,7 @@ def test_only_triggered_batches_in_ready_list():
 
     ready = acc.ready_batches(at_unix=1100)
     assert len(ready) == 1
-    assert ready[0].key == (ADDR_REQUESTER_A, ADDR_PROVIDER_Y)
+    assert ready[0].key == (ADDR_REQUESTER_A, ADDR_PROVIDER_Y, b"\x00" * 32, 0)
 
 
 # ── Config validation ─────────────────────────────────────────────
@@ -350,10 +350,10 @@ def test_pending_keys_excludes_empty_batches():
     acc = ReceiptAccumulator()
     acc.add(_make_batched(provider=ADDR_PROVIDER_X), at_unix=1000)
     acc.add(_make_batched(provider=ADDR_PROVIDER_Y), at_unix=1000)
-    acc.pop_batch((ADDR_REQUESTER_A, ADDR_PROVIDER_X))
+    acc.pop_batch((ADDR_REQUESTER_A, ADDR_PROVIDER_X, b"\x00" * 32, 0))
     keys = acc.pending_keys()
     assert len(keys) == 1
-    assert keys[0] == (ADDR_REQUESTER_A, ADDR_PROVIDER_Y)
+    assert keys[0] == (ADDR_REQUESTER_A, ADDR_PROVIDER_Y, b"\x00" * 32, 0)
 
 
 def test_readd_to_previously_popped_key_starts_fresh():
@@ -361,7 +361,131 @@ def test_readd_to_previously_popped_key_starts_fresh():
     started_at_unix is set to the new first append's timestamp."""
     acc = ReceiptAccumulator()
     acc.add(_make_batched(), at_unix=1000)
-    key = (ADDR_REQUESTER_A, ADDR_PROVIDER_X)
+    key = (ADDR_REQUESTER_A, ADDR_PROVIDER_X, b"\x00" * 32, 0)
     acc.pop_batch(key)
     acc.add(_make_batched(shard_index=1), at_unix=5000)
     assert acc.peek_batch(key).started_at_unix == 5000
+
+
+# ── Phase 7 + 7.1x key extensions ──────────────────────────────────
+
+
+def _batched_with_extras(
+    tier_slash_rate_bps: int = 0,
+    consensus_group_id: bytes = b"\x00" * 32,
+    shard_index: int = 0,
+):
+    """Helper: _make_batched + override the Phase 7 / Phase 7.1x fields."""
+    base = _make_batched(shard_index=shard_index)
+    return BatchedReceipt(
+        receipt=base.receipt,
+        requester_address=base.requester_address,
+        provider_address=base.provider_address,
+        value_ftns=base.value_ftns,
+        local_escrow_id=base.local_escrow_id,
+        tier_slash_rate_bps=tier_slash_rate_bps,
+        consensus_group_id=consensus_group_id,
+    )
+
+
+def test_different_consensus_group_ids_batch_separately():
+    """Two receipts from the same provider for the same requester but
+    with DIFFERENT consensus_group_ids MUST land in different batches.
+    A single on-chain Batch struct carries one group_id; mixing would
+    break the CONSENSUS_MISMATCH binding invariant."""
+    acc = ReceiptAccumulator()
+    group_a = b"\x01" * 32
+    group_b = b"\x02" * 32
+    acc.add(
+        _batched_with_extras(consensus_group_id=group_a, shard_index=0),
+        at_unix=1000,
+    )
+    acc.add(
+        _batched_with_extras(consensus_group_id=group_b, shard_index=1),
+        at_unix=1000,
+    )
+    keys = acc.pending_keys()
+    assert len(keys) == 2
+    assert (ADDR_REQUESTER_A, ADDR_PROVIDER_X, group_a, 0) in keys
+    assert (ADDR_REQUESTER_A, ADDR_PROVIDER_X, group_b, 0) in keys
+
+
+def test_different_tier_slash_rates_batch_separately():
+    """Similarly, a provider who re-bonded at a different tier between
+    receipts produces receipts with different tier_slash_rate_bps.
+    Those can't share a batch either (Batch struct carries one rate)."""
+    acc = ReceiptAccumulator()
+    acc.add(_batched_with_extras(tier_slash_rate_bps=5000, shard_index=0),
+            at_unix=1000)
+    acc.add(_batched_with_extras(tier_slash_rate_bps=10000, shard_index=1),
+            at_unix=1000)
+    keys = acc.pending_keys()
+    assert len(keys) == 2
+    slashes = {k[3] for k in keys}
+    assert slashes == {5000, 10000}
+
+
+def test_zero_group_id_receipts_batch_together_legacy():
+    """Pre-Phase-7.1x receipts (no consensus dispatch) all carry
+    group_id = zero bytes. They should continue to batch together by
+    (requester, provider) as in Phase 3.1 — the new key just degenerates."""
+    acc = ReceiptAccumulator()
+    for i in range(3):
+        acc.add(_batched_with_extras(shard_index=i), at_unix=1000 + i)
+    keys = acc.pending_keys()
+    assert len(keys) == 1
+    batch = acc.peek_batch(keys[0])
+    assert batch.count == 3
+
+
+def test_batch_level_slash_rate_captured_on_first_append():
+    """PendingBatch.tier_slash_rate_bps + consensus_group_id are pinned
+    on the first receipt and surface via the batch for audit/commit
+    payload construction."""
+    acc = ReceiptAccumulator()
+    group = b"\xab" * 32
+    acc.add(
+        _batched_with_extras(
+            tier_slash_rate_bps=10000,
+            consensus_group_id=group,
+        ),
+        at_unix=1000,
+    )
+    key = (ADDR_REQUESTER_A, ADDR_PROVIDER_X, group, 10000)
+    batch = acc.peek_batch(key)
+    assert batch.tier_slash_rate_bps == 10000
+    assert batch.consensus_group_id == group
+
+
+def test_batched_receipt_rejects_bad_slash_rate():
+    from prsm.settlement.accumulator import BatchedReceipt
+    from prsm.compute.shard_receipt import ShardExecutionReceipt
+    base_receipt = ShardExecutionReceipt(
+        job_id="j", shard_index=0, provider_id="p",
+        provider_pubkey_b64="k", output_hash="o",
+        executed_at_unix=1, signature="s",
+    )
+    with pytest.raises(ValueError, match="tier_slash_rate_bps"):
+        BatchedReceipt(
+            receipt=base_receipt,
+            requester_address="0x00", provider_address="0x01",
+            value_ftns=1, local_escrow_id="e",
+            tier_slash_rate_bps=10001,
+        )
+
+
+def test_batched_receipt_rejects_bad_group_id_length():
+    from prsm.settlement.accumulator import BatchedReceipt
+    from prsm.compute.shard_receipt import ShardExecutionReceipt
+    base_receipt = ShardExecutionReceipt(
+        job_id="j", shard_index=0, provider_id="p",
+        provider_pubkey_b64="k", output_hash="o",
+        executed_at_unix=1, signature="s",
+    )
+    with pytest.raises(ValueError, match="consensus_group_id"):
+        BatchedReceipt(
+            receipt=base_receipt,
+            requester_address="0x00", provider_address="0x01",
+            value_ftns=1, local_escrow_id="e",
+            consensus_group_id=b"\x00" * 31,  # 31 bytes, not 32
+        )
