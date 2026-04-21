@@ -120,7 +120,7 @@ cd contracts && npx hardhat test \
   tests/integration/test_phase7_1_consensus_e2e.py -v
 ```
 
-Expected at the current tip: **310 passing total** (139 Solidity — includes 7 new §8.7 gas-floor tests landed pre-audit — + 169 Python unit + 2 Python E2E).
+Expected at the current tip: **359 passing total** (142 Solidity + 215 Python unit + 2 Python E2E).
 
 ---
 
@@ -136,7 +136,7 @@ From the three per-phase review gates. All are non-blockers for tag but tracked 
 ### From Phase 7.1 (Task 8 review)
 
 - **§8.6 — `consensus_minority_queue` persistence.** ✅ RESOLVED pre-audit via three shipped artifacts: (1) `ConsensusChallengeSubmitter` service (`prsm/marketplace/consensus_submitter.py`), (2) SQLite-backed `ConsensusChallengeQueue` (`prsm/marketplace/consensus_queue.py`) with PENDING → SUBMITTABLE → SUBMITTED/FAILED lifecycle + crash-safety test, (3) `process_submittable_queue` runner with outcome-based retry classification. Remaining follow-ups (exponential backoff, multi-process claim leases, `BatchCommitted` event watcher) are Phase 7.1x.next+ operational polish, not contract-security.
-- **§8.7 — Sybil-requester griefing vector.** Under MVP auth (requester-only challenger), attacker with two EOAs can self-slash at 30% net loss + reputation crush. Negative-EV by design; Phase 7.1x `consensus_group_id` is the planned fix.
+- **§8.7 — Sybil-requester griefing vector.** ✅ RESOLVED PRE-AUDIT via `consensus_group_id` binding in `Batch` struct + `_handleConsensusMismatch`. Both batches must share a non-zero `consensus_group_id` AND be committed by different providers, multiplying the attacker cost from `1×` stake burn to `k×`. As a bonus, the requester-only auth is replaced by open third-party challenger (closes §8.5 too). 3 new tests pin the behavior.
 - **§8.8 — asyncio timeout/cancel propagation.** ✅ VERIFIED + FIXED PRE-AUDIT. Full grep pass completed; `asyncio.TimeoutError` is wrapped by `_dispatch_once`'s retry loop into `ShardDispatchError`; `asyncio.CancelledError` correctly propagates (outer-loop cancellation). One real gap found and fixed: `PeerNotConnectedError` now classified as partial-response in `MultiShardDispatcher` rather than aborting the gather.
 
 ---

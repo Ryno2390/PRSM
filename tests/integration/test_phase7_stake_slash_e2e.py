@@ -365,6 +365,7 @@ def test_phase7_bond_slash_claim_rep_e2e(hardhat_node, deployed):
                 {"name": "receiptCount", "type": "uint256"},
                 {"name": "totalValueFTNS", "type": "uint256"},
                 {"name": "tierSlashRateBps", "type": "uint16"},
+                {"name": "consensusGroupId", "type": "bytes32"},
                 {"name": "metadataURI", "type": "string"},
             ],
             "name": "commitBatch",
@@ -424,6 +425,7 @@ def test_phase7_bond_slash_claim_rep_e2e(hardhat_node, deployed):
         1,
         leaf["valueFtns"],
         SLASH_RATE_CRITICAL_BPS,
+        b"\x00" * 32,   # consensus_group_id unused for this single-provider DOUBLE_SPEND test
         "ipfs://phase7-e2e",
     ).build_transaction({
         "from": provider_acct.address,

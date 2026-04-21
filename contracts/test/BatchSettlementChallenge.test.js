@@ -98,7 +98,7 @@ describe("BatchSettlementRegistry — challengeReceipt", function () {
 
     const tx = await registry
       .connect(provider)
-      .commitBatch(requester.address, root, 1, leaf.valueFtns,  0, "");
+      .commitBatch(requester.address, root, 1, leaf.valueFtns,  0, ethers.ZeroHash, "");
     const r = await tx.wait();
     const batchId = r.logs.find(
       (l) => l.fragment && l.fragment.name === "BatchCommitted"
@@ -117,7 +117,7 @@ describe("BatchSettlementRegistry — challengeReceipt", function () {
       // First batch.
       const tx1 = await registry
         .connect(provider)
-        .commitBatch(requester.address, root, 1, sharedLeaf.valueFtns,  0, "b1");
+        .commitBatch(requester.address, root, 1, sharedLeaf.valueFtns,  0, ethers.ZeroHash, "b1");
       const id1 = (await tx1.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
@@ -125,7 +125,7 @@ describe("BatchSettlementRegistry — challengeReceipt", function () {
       // Second batch with the same receipt.
       const tx2 = await registry
         .connect(provider)
-        .commitBatch(requester.address, root, 1, sharedLeaf.valueFtns,  0, "b2");
+        .commitBatch(requester.address, root, 1, sharedLeaf.valueFtns,  0, ethers.ZeroHash, "b2");
       const id2 = (await tx2.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
@@ -181,14 +181,14 @@ describe("BatchSettlementRegistry — challengeReceipt", function () {
 
       const tx1 = await registry
         .connect(provider)
-        .commitBatch(requester.address, rootA, 1, leafA.valueFtns,  0, "");
+        .commitBatch(requester.address, rootA, 1, leafA.valueFtns,  0, ethers.ZeroHash, "");
       const idA = (await tx1.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
 
       const tx2 = await registry
         .connect(provider)
-        .commitBatch(requester.address, rootB, 1, leafB.valueFtns,  0, "");
+        .commitBatch(requester.address, rootB, 1, leafB.valueFtns,  0, ethers.ZeroHash, "");
       const idB = (await tx2.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
@@ -220,7 +220,7 @@ describe("BatchSettlementRegistry — challengeReceipt", function () {
 
       const tx = await registry
         .connect(provider)
-        .commitBatch(requester.address, root, 1, leaf.valueFtns,  0, "");
+        .commitBatch(requester.address, root, 1, leaf.valueFtns,  0, ethers.ZeroHash, "");
       const batchId = (await tx.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
@@ -371,7 +371,7 @@ describe("BatchSettlementRegistry — challengeReceipt", function () {
 
       const tx = await registry
         .connect(provider)
-        .commitBatch(requester.address, rootA, 1, leafA.valueFtns,  0, "");
+        .commitBatch(requester.address, rootA, 1, leafA.valueFtns,  0, ethers.ZeroHash, "");
       const id = (await tx.wait()).logs.find(
         (l) => l.fragment && l.fragment.name === "BatchCommitted"
       ).args[0];
@@ -499,7 +499,7 @@ describe("BatchSettlementRegistry — challengeReceipt", function () {
     const value = batchValue || leaf.valueFtns;
     const tx = await registry
       .connect(provider)
-      .commitBatch(requester.address, root, 1, value,  0, "");
+      .commitBatch(requester.address, root, 1, value,  0, ethers.ZeroHash, "");
     const r = await tx.wait();
     const batchId = r.logs.find(
       (l) => l.fragment && l.fragment.name === "BatchCommitted"
