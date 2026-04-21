@@ -1,10 +1,12 @@
 # PRSM Mainnet Audit — Bundle Coordinator
 
-**Date:** 2026-04-21
-**Bundle tag reference:** `phase7.1-audit-prep-20260421` (newest; includes all three trees)
+**Date:** 2026-04-22 (refreshed)
+**Bundle tag reference:** `phase7.1x-audit-prep-20260422` — includes the full hardening arc.
 **Engagement model:** single auditor, one remediation cycle, one Base mainnet deploy ceremony.
 
-This is the first document an external auditor should read. It frames **three merge-ready trees** as one coherent engagement, points to the per-phase scope bundles that drill into each surface, and surfaces the cross-phase seams that an auditor should focus on first.
+This is the first document an external auditor should read. It frames the full audit tree as one coherent engagement, points to the per-phase scope bundles that drill into each surface, and surfaces the cross-phase seams that an auditor should focus on first.
+
+> **📌 For auditors starting here:** the most recent audit-prep bundle is **`docs/2026-04-22-phase7.1x-audit-prep.md`** — it covers the tree with all pre-audit hardening landed, including six previously-open review findings that are now **RESOLVED pre-audit**. The three 2026-04-21 per-phase bundles remain as historical context but their tags predate the hardening.
 
 ---
 
