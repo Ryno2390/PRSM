@@ -18,6 +18,12 @@ from prsm.settlement.accumulator import (
     ReceiptAccumulator,
     TriggerReason,
 )
+from prsm.settlement.client import (
+    BatchSettlementClient,
+    CommittedBatch,
+    FinalizedBatch,
+    SettlementContractClient,
+)
 from prsm.settlement.merkle import (
     MerkleTree,
     ReceiptLeaf,
@@ -48,4 +54,9 @@ __all__ = [
     "encode_leaf",
     "hash_leaf",
     "verify_merkle_proof",
+    # Client (Task 6)
+    "BatchSettlementClient",
+    "CommittedBatch",
+    "FinalizedBatch",
+    "SettlementContractClient",
 ]
