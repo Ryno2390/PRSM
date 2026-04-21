@@ -23,6 +23,7 @@ from prsm.compute.multi_dispatcher import (
 from prsm.compute.remote_dispatcher import (
     DispatchResult,
     MissingAttestationError,
+    PeerNotConnectedError,
     ShardDispatchError,
     ShardPreemptedError,
 )
@@ -195,6 +196,33 @@ def test_dispatch_error_excluded():
         escrow_amount_per_provider_ftns=0.05,
     ))
     assert receipt.responded == 2
+
+
+def test_peer_not_connected_excluded():
+    """Phase 7.1 §8.8 audit follow-up: a provider whose peer is offline
+    raises PeerNotConnectedError from RemoteShardDispatcher (when no
+    local_fallback is wired). Previously MultiDispatcher would treat
+    this as a bug and abort the whole gather, which is wrong — offline
+    in a k-of-n dispatch is a classic partial-response case. Must be
+    classified alongside ShardPreempted."""
+    md, single = _make_dispatcher(k=3)
+    single.dispatch_with_receipt = AsyncMock(side_effect=[
+        _make_dispatch_result("provA", "HASH_OK"),
+        _make_dispatch_result("provB", "HASH_OK"),
+        PeerNotConnectedError("provC is offline"),
+    ])
+    receipt = _run(md.dispatch_with_consensus(
+        shard=_make_shard(),
+        input_tensor=np.array([1.0, 1.0], dtype=np.float64),
+        node_ids=["provA", "provB", "provC"],
+        job_id="job-phase7.1",
+        stake_tier=PipelineStakeTier.STANDARD,
+        escrow_amount_per_provider_ftns=0.05,
+    ))
+    # Consensus still reached because 2-of-3 met the MAJORITY threshold.
+    # PeerNotConnectedError was treated as a partial response, not a bug.
+    assert receipt.responded == 2
+    assert receipt.agreed_output_hash == "HASH_OK"
 
 
 def test_empty_receipt_fallback_excluded():
