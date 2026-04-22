@@ -9,6 +9,12 @@
 - `docs/2026-04-21-prsm-cis-1-confidential-inference-silicon.md` — the Confidential Inference Silicon standard this charter governs.
 - `docs/TECH_CHOICES.md` — PRSM technical-choice rationale for investor context.
 
+**Standards ratifying under this charter (added 2026-04-22):**
+- `docs/2026-04-22-prsm-supply-1-supply-diversity-standard.md` — **PRSM-SUPPLY-1**, supply-side diversity standard. First standard drafted under §9 ratification path (still pre-ratification pending Foundation convocation). Measures provider + geographic concentration; activates soft-cap mechanisms + Foundation diversity bonus when triggers fire. Amendable via §9.2; parameter adjustments are simple majority, threshold lowering below 20% requires supermajority.
+
+**Research program coordinated under this charter (added 2026-04-22):**
+- `docs/2026-04-14-phase4plus-research-track.md` + its 6 per-item partner-handoff docs (R2/R3/R4/R6/R7/R8 as of 2026-04-22). Foundation-funded research partnerships identified as viable delivery model for items R1-R3 per §R8's 2026-04-19 governance split. Combined R2+R3+R7+R8 research-program budget scopes at $950k-$1.65M over 6-8 quarters; Foundation R&D line-item per §4.6.
+
 **This document is not legal advice.** Before acting on any specific provision, the founder MUST consult qualified corporate counsel in each intended jurisdiction (US, Switzerland, Cayman Islands, or other candidates identified in §5.1).
 
 ---

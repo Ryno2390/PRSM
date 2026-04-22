@@ -1,5 +1,7 @@
 # PRSM — Investor Executive Summary
 
+> ⚠️ **SUPERSEDED 2026-04-22.** This version reflects state through Phase 3 (as of 2026-04-21) and predates the Phase 3.1 + 7 + 7.1 + 7.1x shipment, PRSM-SUPPLY-1, the pre-audit hardening arc, and the Phase 4+ research-track expansion. **Use `docs/2026-04-22-prsm-investor-executive-summary.md` instead.** This file retained only for historical reference.
+
 **Prismatica, Inc.** | **Reg D Rule 506(c)** | **April 2026**
 **Contact:** *[founder contact]* | **Data room:** *[access link]*
 

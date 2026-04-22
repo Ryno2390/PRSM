@@ -8,7 +8,16 @@
 **Companions:**
 - `docs/2026-04-21-prsm-cis-1-confidential-inference-silicon.md` — silicon standard this paper prices.
 - `docs/2026-04-21-prsm-tok-1-ftns-tokenomics.md` — tokenomics standard.
-- `docs/2026-04-21-prsm-investor-executive-summary.md` — scannable investor-facing overview.
+- `docs/2026-04-22-prsm-investor-executive-summary.md` — scannable investor-facing overview (refreshed 2026-04-22 post-Phase-7.1x).
+
+**Post-v0.1 state updates (noted 2026-04-22):**
+
+Two new reserve-flow drivers land post-v0.1 that ECON-WP v2 should incorporate. Neither materially changes the v0.1 bear/base/bull headline conclusions; both refine the Foundation-reserve model.
+
+1. **Phase 7 + 7.1 + 7.1x slashing economics.** Three on-chain slashable reason codes (DOUBLE_SPEND, INVALID_SIGNATURE, CONSENSUS_MISMATCH) with 70/30 challenger/Foundation bounty split on slashed stakes; self-slash re-routes 100% to Foundation reserve. Net effect: a trickle of slash-driven FTNS into the reserve, proportional to provider-misbehavior rates (expected: low under rational operators; the slash deterrent is load-bearing by being costly-to-trigger, not by being frequently-triggered).
+2. **PRSM-SUPPLY-1 diversity bonus** (per `docs/2026-04-22-prsm-supply-1-supply-diversity-standard.md` §6.2). Foundation-funded bonus of up to 10% of a qualifying listing's gross FTNS when specific supply-concentration triggers fire (§5.2). Self-extinguishing as concentration improves. Represents a new OUTFLOW from the Foundation reserve to diverse operators. Initial monthly cap placeholder is $50k USD-equivalent; ECON-WP v2 should model this as a scenario-dependent reserve burn.
+
+Net reserve direction post-v0.1: roughly reserve-neutral in the base case (slash inflow ≈ diversity-bonus outflow at equilibrium). Bear cases with heavy slash activity net-positive for the reserve; bull cases with aggressive supply growth and active intervention triggers net-negative. Explicit modeling is v2 scope.
 
 **This document is not legal or investment advice.** Projections are illustrative scenario analyses, not promised returns. Any investor relying on the math below MUST independently verify assumptions and should consult qualified financial and legal advisors.
 
