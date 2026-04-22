@@ -254,12 +254,18 @@ See [Deployment Guide](deploy/production/DEPLOYMENT_GUIDE.md) for full instructi
 
 ## Documentation
 
+**Start here:** [`docs/INDEX.md`](docs/INDEX.md) — navigable map of the full docs surface (89 docs) with audience-oriented entry points (investors / auditors / Foundation officers / research partners / new engineers).
+
+**Commonly-referenced docs:**
+
 | Document | Description |
 |----------|------------|
 | [Getting Started](docs/GETTING_STARTED.md) | Install → configure → first query in 5 minutes |
+| [Executive Summary](docs/2026-04-22-prsm-investor-executive-summary.md) | Investor / partner positioning + shipped-coverage summary |
 | [Technology Choices](docs/TECH_CHOICES.md) | Why Ethereum + Base — investor-facing chain-choice rationale |
 | [Sovereign-Edge AI Spec](docs/SOVEREIGN_EDGE_AI_SPEC.md) | Phase 1 architecture (Rings 1-6) |
 | [Confidential Compute Spec](docs/CONFIDENTIAL_COMPUTE_SPEC.md) | Phase 2 architecture (Rings 7-10) |
+| [Audit-Gap Roadmap](docs/2026-04-10-audit-gap-roadmap.md) | Master roadmap — phase status + scope + planning-artifact pointers |
 | [Implementation Status](docs/IMPLEMENTATION_STATUS.md) | Subsystem status and test coverage |
 | [Deployment Guide](deploy/production/DEPLOYMENT_GUIDE.md) | Production deployment walkthrough |
 | [SDK Developer Guide](docs/SDK_DEVELOPER_GUIDE.md) | Building on PRSM |
