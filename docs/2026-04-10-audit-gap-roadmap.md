@@ -131,7 +131,7 @@ Each phase ships independently. Each phase produces working, demonstrable softwa
 
 ## Phase 4 — Wallet SDK & Consumer Onboarding
 
-**Status: not yet detail-planned. Target Q4 2026.**
+**Status: design + TDD plan drafted 2026-04-22 (see [`2026-04-22-phase4-wallet-sdk-design-plan.md`](./2026-04-22-phase4-wallet-sdk-design-plan.md)). Target Q4 2026.**
 
 **Why fourth:** Today, user onboarding requires CLI, raw Ed25519 keys, and manual FTNS contract interaction. Most users will never tolerate this. Coinbase Wallet SDK + WalletConnect lets users sign in with a familiar wallet UX.
 
@@ -149,7 +149,7 @@ Each phase ships independently. Each phase produces working, demonstrable softwa
 
 ## Phase 5 — Fiat On-Ramp & KYC
 
-**Status: not yet detail-planned. Target Q1 2027. Compliance-gated.**
+**Status: design + TDD plan drafted 2026-04-22 (see [`2026-04-22-phase5-fiat-onramp-design-plan.md`](./2026-04-22-phase5-fiat-onramp-design-plan.md)). Target Q1 2027. Compliance-gated.**
 
 **Why fifth:** Meganode ROI story requires FTNS → USD conversion. Stripe/PayPal client code exists in `prsm/economy/payments/` but isn't wired with real keys, has no KYC, and Coinbase/Kraken integrations are sandbox stubs.
 
@@ -168,7 +168,7 @@ Each phase ships independently. Each phase produces working, demonstrable softwa
 
 ## Phase 6 — P2P Network Hardening
 
-**Status: not yet detail-planned. Target Q2 2027.**
+**Status: design + TDD plan drafted 2026-04-22 (see [`2026-04-22-phase6-p2p-hardening-design-plan.md`](./2026-04-22-phase6-p2p-hardening-design-plan.md)). Target Q2 2027.**
 
 **Why sixth:** libp2p prototype exists but bootstrap nodes, NAT traversal, and DHT have not been load-tested. Once Phases 1-5 attract users, these become production blockers.
 
