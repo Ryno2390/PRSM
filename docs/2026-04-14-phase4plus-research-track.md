@@ -72,15 +72,14 @@ The research content below is retained as framing context for the threat-model s
 
 **Effort if pursued:** substantial research partnership with a specialized cryptography group. Not a solo project. Overlaps significantly with R1 (FHE for private inference) since many underlying primitives are shared.
 
-## R6: Post-Quantum Signatures
+## R6: Post-Quantum Signatures ⏳ WATCH MEMO PUBLISHED
 
-**Vision doc reference:** none yet, but implicit in any long-horizon cryptographic system.
+**2026-04-22 update:** promoted from stub to a concise trigger-watch memo at `docs/2026-04-22-r6-pq-signatures-watch-memo.md` (**R6-WATCH-1**). The memo documents the current signature surface (three layers — node identity, receipt sigs, on-chain verifier — each with different migration implications), the signature-specific threat model (no harvest-now-forge-later; lead-time-driven rather than urgent), four trigger conditions (one already fired: NIST Aug 2024 finalization of ML-DSA + SLH-DSA), and a 3-phase dual-sign migration playbook when triggers promote. No engineering action today; scheduled re-review on 2027-04-22 or on any trigger firing.
 
-**Research question:** When should PRSM's Ed25519 signing infrastructure (receipts, on-chain settlement) migrate to post-quantum primitives?
+The framing below is preserved as the originating context.
 
-**Why it's here:** not urgent; post-quantum threat models put classical signatures safe through at least 2030+ for most workloads, and Ethereum L2 itself will migrate before PRSM needs to unilaterally.
+---
 
-**Trigger to move to engineering:** NIST finalization of post-quantum signature standards + Ethereum-level migration plans.
 
 ## R7: KV Cache & Activation Compression for Consumer-Edge Inference ⏳ BENCHMARK PLAN DRAFTED
 
