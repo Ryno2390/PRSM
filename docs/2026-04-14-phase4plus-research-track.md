@@ -4,7 +4,13 @@
 
 **Context:** Several items referenced in `PRSM_Vision.md` are explicitly positioned as research roadmap, not product. This document prevents them from being forgotten, without committing to a delivery schedule.
 
-## R1: Fully Homomorphic Encryption (FHE) for Private Inference
+## R1: Fully Homomorphic Encryption (FHE) for Private Inference ⏳ SCOPING DOC DRAFTED
+
+**2026-04-22 update:** promoted from stub to partner-handoff-ready scoping doc at `docs/2026-04-22-r1-fhe-inference-scoping-doc.md` (**R1-SCOPING-1**). Five preregistered research questions (Q1 scheme-family selection across CKKS/TFHE/BGV, Q2 selective-layer FHE + hardware-accel overhead bounding to ≤1000×, Q3 composition with tensor-parallel sharding, Q4 composition with R2 MPC + R7 compression, Q5 promotion triggers). Four-phase plan (scheme selection → selective-layer prototype → sharding composition → stack positioning) over 17-25 months. Five promotion triggers (hardware accel shipping, academic overhead breakthrough, regulated-industry partner demand, threshold-FHE maturation, competitor FHE tier launch) — R1 moves from watch-item to funded Phase-1 when at least two fire. R5-SCOPING-1 shares primitives; joint partner engagement saves $200k-$600k. Execution earliest Q3 2027 (after R2+R7 complete), latest Q4 2029. Budget $500k-$1M standalone, $600k-$1M joint with R5. Partner profile: cryptography research group with transformer-scale FHE publication record.
+
+The framing below is preserved as originating context.
+
+---
 
 **Vision doc reference:** Section 7, "Honest limits" — *"FHE is currently 10,000-100,000× slower than plaintext inference and not production-ready for frontier-scale models."*
 
@@ -65,7 +71,13 @@ The research content below is retained as framing context for the threat-model s
 
 **Remaining research-track disposition:** closed. Follow-up work is now engineering (provider-registry seed list, stake-binding floor values, orchestrator integration) and Foundation treasury (diversity-bonus budget). Neither is research.
 
-## R5: Content Tier C Hardening Against Majority Collusion
+## R5: Content Tier C Hardening Against Majority Collusion ⏳ SCOPING DOC DRAFTED
+
+**2026-04-22 update:** promoted from stub to partner-handoff-ready scoping doc at `docs/2026-04-22-r5-tier-c-hardening-scoping-doc.md` (**R5-SCOPING-1**). Four candidate mechanisms (threshold FHE / secure aggregation / all-or-nothing transform / functional encryption) each scored against the four open threat-surfaces (A nation-state compelled disclosure, B foundation compromise, C quantum break of AES, D adaptive/rushing adversary) Phase 7 Tier C leaves open. Five preregistered research questions, three-phase plan over 11-15 months. Five promotion triggers — principal trigger T1 is named regulated-industry customer demand (RFP/LOI), not speculation. Scheduled AFTER Phase 7 ships (earliest Q1 2029) AND after R1 Phase 1 completes OR joint-engagement partner confirmed. R1 primitive sharing saves $200k-$600k. Budget $300k-$600k standalone, $600k-$1M joint with R1. Closes the partner-handoff sweep across R1-R8.
+
+The framing below is preserved as originating context.
+
+---
 
 **Vision doc reference:** `PRSM_Vision.md` §7 "Honest limits" — *"A colluder who obtains enough erasure-coded fragments (above the K-of-N reconstruction threshold) plus enough key-shares (above the M-of-N threshold) can reconstruct Tier C content."*
 
