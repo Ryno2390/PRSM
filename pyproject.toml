@@ -137,6 +137,7 @@ blockchain = [
     "eth-account>=0.9.0",
     "hexbytes>=0.3.0",
     "siwe>=4.4.0",  # EIP-4361 Sign-In With Ethereum (Phase 4)
+    "zfec>=1.5.8",  # Reed-Solomon erasure coding (Phase 7-storage)
 ]
 
 vectorstore = [
