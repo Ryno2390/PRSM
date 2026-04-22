@@ -31,7 +31,14 @@
 
 **Effort if pursued:** moderate — this is closer to integration research than foundational cryptography research.
 
-## R3: Activation-Inversion Attack Characterization & Mitigation
+## R3: Activation-Inversion Attack Characterization & Mitigation ⏳ THREAT MODEL + METHODOLOGY DRAFTED
+
+**2026-04-22 update:** the PRSM-specific threat model, attack catalog (A1-A6 ranked by attacker scale S1-S3), defense-stack coverage matrix, and red-team methodology are specified at `docs/2026-04-22-r3-threat-model.md` (**R3-TM-1**). 16-week execution plan co-designed with R7-BENCH-1 — R3 Phase 4 directly feeds R7's H5 gate. Execution pending Foundation budget allocation and research-partner identification (combined R3+R7 budget ~$250k-$500k).
+
+The research content below is retained as framing context for the threat-model spec.
+
+---
+
 
 **Vision doc reference:** Section 7, "Honest limits" — *"Activation-inversion attacks (Zhu et al. 2019 and follow-up literature) can partially reconstruct input prompts from early-layer activations."*
 
