@@ -248,11 +248,15 @@ Prometheus / OpenTelemetry export from every PRSM node. Foundation dashboard scr
 
 ### Task 2: Bootstrap node infrastructure deploy
 
-- Foundation-operated deploy playbook (Terraform / Ansible / similar).
-- 3 geographically distributed nodes.
-- Monitoring + auto-restart.
-- Rotation procedure.
-- **Output:** operational runbook + 3 live bootstrap nodes.
+**Full scoping doc:** [`2026-04-22-phase6-task2-bootstrap-ops-runbook.md`](./2026-04-22-phase6-task2-bootstrap-ops-runbook.md) (PHASE6-TASK2-BOOTSTRAP-OPS-1).
+
+- Foundation-operated deploy playbook (Terraform + Ansible, three providers across three regions).
+- 3 bootstrap nodes, YubiKey-backed multi-sig signing ceremony, pairwise Ed25519 signatures (FROST upgrade later).
+- 30-day signed-list expiry, quarterly bootstrap-identity rotation, 18-month signing-key rotation.
+- Monitoring dashboards + alert routing (BootstrapNodeDown / BootstrapFetchFailing / SignatureVerificationSpike / TLSCertExpirySoon / DNSTXTMismatch).
+- Failure-mode runbooks (node down / HTTPS down / both unreachable / key compromise / regional outage).
+- Promotion triggers: T1 Task 1 shipped (DONE), T2 Foundation entity operational, T3 DevRel role filled, T4 mainnet + pre-Phase-4-onboarding scale.
+- **Output:** operational runbook + 3 live bootstrap nodes + published signed list verifiable by `prsm/node/bootstrap.py` clients.
 
 ### Task 3: NAT traversal integration
 
