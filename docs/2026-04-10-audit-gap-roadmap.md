@@ -3,7 +3,7 @@
 > **Created:** 2026-04-10
 > **Last updated:** 2026-04-16
 > **Source:** Audit performed on PRSM v1.7.0 codebase against the meganode-bootstrap product plan
-> **Status:** Phase 1 in Sepolia bake-in (Day 5 of 7 as of 2026-04-16; mainnet deploy imminent). Phase 2 design + implementation plan complete; execution pending Phase 1 ship. Phase 3 preplanning stub captured. Phase 4+ research track (R1-R7) tracked as parallel workstream. Phase 7 scope expanded to include content confidentiality tiers B/C. Phase 8 added for on-chain halving schedule enforcement. Hybrid tokenomics legal/governance workstream running on independent cadence.
+> **Status:** Phase 1 in Sepolia bake-in (Day 5 of 7 as of 2026-04-16; mainnet deploy imminent). Phase 2 design + implementation plan complete; execution pending Phase 1 ship. Phase 3 (marketplace) + Phase 3.1 (batch settlement) shipped; three Phase 3.x follow-ons (MCP completion / liquidity / operator toolkit) scoped in PRSM-PHASE3-STATUS-1. Phase 4+ research track (R1-R7) tracked as parallel workstream. Phase 7 scope expanded to include content confidentiality tiers B/C. Phase 8 added for on-chain halving schedule enforcement. Hybrid tokenomics legal/governance workstream running on independent cadence.
 
 ## Goal
 
@@ -103,12 +103,15 @@ Each phase ships independently. Each phase produces working, demonstrable softwa
 
 ## Phase 3 — Marketplace Matching Engine
 
-**Status: preplanning stub captured 2026-04-14. Formal plan to be drafted post-Phase-2-ship via subagent-driven planning flow.**
+**Status: ✅ SHIPPED. Phase 3 marketplace matching engine + Phase 3.1 batch settlement both delivered (see tags / commit history). Three Phase 3.x follow-on workstreams scoped as partner-handoff-ready (MCP completion / liquidity guarantee / operator toolkit). See [`2026-04-22-phase3-status-and-forward-plan.md`](./2026-04-22-phase3-status-and-forward-plan.md) (PRSM-PHASE3-STATUS-1) for the current state.**
 
 **Why third:** With Phases 1+2 complete, supply (compute, data, storage) is monetizable. But discovery is implicit — buyers and sellers find each other only through query routing. A real marketplace exposes listings, prices, and lets users explicitly buy compute time or data access.
 
 **Planning artifacts:**
-- Preplanning: [`2026-04-14-phase3-preplanning.md`](./2026-04-14-phase3-preplanning.md) — scope notes and Vision-doc-derived workstreams
+- Phase 3 design + TDD: [`2026-04-20-phase3-marketplace-design.md`](./2026-04-20-phase3-marketplace-design.md) + [`2026-04-20-phase3-marketplace-plan.md`](./2026-04-20-phase3-marketplace-plan.md) — DELIVERED
+- Phase 3.1 batch settlement: [`2026-04-21-phase3.1-batch-settlement-design.md`](./2026-04-21-phase3.1-batch-settlement-design.md) — DELIVERED
+- Phase 3 status + forward plan: [`2026-04-22-phase3-status-and-forward-plan.md`](./2026-04-22-phase3-status-and-forward-plan.md) — scopes MCP completion, liquidity guarantee, operator toolkit as Phase 3.x follow-ons
+- Historical preplanning stub: [`2026-04-14-phase3-preplanning.md`](./2026-04-14-phase3-preplanning.md) — superseded by the status doc
 
 **Workstreams captured from Vision doc (beyond original audit-gap scope):**
 1. **MCP server** — highest-leverage adoption lever. Exposes PRSM's query / retrieval / compute interfaces via Model Context Protocol so Claude Desktop, ChatGPT Desktop, Gemini, and any MCP-compatible client can invoke PRSM without users switching interfaces. Per `PRSM_Vision.md` Executive Summary positioning: PRSM is a complement to frontier LLMs via MCP, not a replacement.

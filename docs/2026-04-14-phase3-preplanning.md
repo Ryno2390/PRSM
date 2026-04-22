@@ -1,6 +1,10 @@
 # Phase 3 Pre-Planning Stub
 
-**Status:** Pre-planning only. Not yet a formal phase plan. Captured 2026-04-14 during Phase 1.3 Sepolia bake-in so Vision-doc-derived requirements are not forgotten when Phase 2 ships.
+**Status:** HISTORICAL. Superseded by [`2026-04-22-phase3-status-and-forward-plan.md`](./2026-04-22-phase3-status-and-forward-plan.md) (PRSM-PHASE3-STATUS-1) as of 2026-04-22. The marketplace matching engine (Workstream 0, implicit) shipped as Phase 3 + Phase 3.1; the three workstreams listed below are now scoped as Phase 3.x follow-ons in the status doc. Please read the status doc first.
+
+---
+
+**Original status:** Pre-planning only. Not yet a formal phase plan. Captured 2026-04-14 during Phase 1.3 Sepolia bake-in so Vision-doc-derived requirements are not forgotten when Phase 2 ships.
 
 **Context:** Phase 3 is the "Marketplace" phase in the current roadmap — the layer where PRSM transitions from protocol-level primitives (Phase 1: on-chain provenance; Phase 2: remote compute dispatch) to external-facing product surface. This document captures the workstreams that need to land in Phase 3 per `PRSM_Vision.md` (specifically the Executive Summary "Positioning" paragraph and Section 6's four-tier supply architecture).
 
