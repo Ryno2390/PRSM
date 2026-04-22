@@ -23,6 +23,7 @@ from prsm.node.config import NodeConfig, NodeRole
 from prsm.node.discovery import PeerDiscovery
 from prsm.node.gossip import GossipProtocol
 from prsm.node.identity import generate_node_identity
+from prsm.node.ledger_sync import LedgerSync
 from prsm.node.local_ledger import LocalLedger, TransactionType
 from prsm.node.transport import WebSocketTransport
 
@@ -37,6 +38,19 @@ async def _setup_node(name, p2p_port, bootstrap=None):
     await ledger.create_wallet(identity.node_id, name)
     await ledger.create_wallet("system")
     await ledger.issue_welcome_grant(identity.node_id, 100.0)
+
+    # LedgerSync handles cross-node FTNS transfers over gossip. Without it,
+    # the requester's ledger.transfer debits the requester but the
+    # recipient node's ledger never credits — payment doesn't cross
+    # process boundaries. Production wiring (prsm.node.node) sets
+    # ledger_sync on the requester after construction; the test must do
+    # the same.
+    ledger_sync = LedgerSync(
+        identity=identity,
+        gossip=gossip,
+        ledger=ledger,
+        transport=transport,
+    )
 
     discovery = PeerDiscovery(
         transport,
@@ -54,12 +68,15 @@ async def _setup_node(name, p2p_port, bootstrap=None):
         gossip=gossip,
         ledger=ledger,
     )
+    # Production nodes set this attribute after construction.
+    requester.ledger_sync = ledger_sync
 
     return {
         "identity": identity,
         "transport": transport,
         "gossip": gossip,
         "ledger": ledger,
+        "ledger_sync": ledger_sync,
         "discovery": discovery,
         "provider": provider,
         "requester": requester,
@@ -69,6 +86,7 @@ async def _setup_node(name, p2p_port, bootstrap=None):
 async def _start_node(node):
     await node["transport"].start()
     await node["gossip"].start()
+    node["ledger_sync"].start()
     await node["provider"].start()
     await node["requester"].start()
     await node["discovery"].start()
@@ -78,6 +96,7 @@ async def _stop_node(node):
     await node["discovery"].stop()
     await node["provider"].stop()
     await node["requester"].stop()
+    await node["ledger_sync"].stop()
     await node["gossip"].stop()
     await node["transport"].stop()
     await node["ledger"].close()
@@ -138,6 +157,17 @@ async def test_two_nodes_compute_job_and_payment():
         assert result is not None, f"Job timed out. Status: {submitted.status.value}, error: {submitted.error}"
         assert "primes_found" in result
         assert submitted.result_verified  # signature verified
+
+        # Wait for payment gossip to propagate A -> B. ComputeRequester
+        # publishes GOSSIP_FTNS_TRANSACTION via LedgerSync after debiting
+        # locally; B's LedgerSync subscription fires on receipt and
+        # credits B's ledger. Give a few poll cycles for gossip fan-out.
+        expected_b = 105.0
+        for _ in range(30):  # up to ~3s
+            balance_b_check = await node_b["ledger"].get_balance(node_b["identity"].node_id)
+            if abs(balance_b_check - expected_b) < 0.01:
+                break
+            await asyncio.sleep(0.1)
 
         # Verify payment was recorded
         balance_a_after = await node_a["ledger"].get_balance(node_a["identity"].node_id)
