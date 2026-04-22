@@ -16,7 +16,14 @@
 
 **Effort if pursued:** substantial research partnership with a specialized cryptography group. Not a solo project.
 
-## R2: Multi-Party Computation (MPC) for Sharded Inference
+## R2: Multi-Party Computation (MPC) for Sharded Inference ⏳ SCOPING DOC DRAFTED
+
+**2026-04-22 update:** promoted from stub to partner-handoff-ready scoping doc at `docs/2026-04-22-r2-mpc-scoping-doc.md` (**R2-SCOPING-1**). Five preregistered research questions (Q1 protocol selection, Q2 MPC-on-first-N-layers scoping, Q3 non-collusion quantification via PRSM-SUPPLY-1 metrics, Q4 bandwidth-latency under 9000× handicap, Q5 composition with R7). MPC-on-first-N-layers framed as realistic first milestone with Puma-line as starting protocol. Scheduled AFTER R3 Phase 1 + R7 Phase 2 complete so N-layer selection + compression scheme are both fixed inputs. 20-week plan, $300k-$500k budget for R2 alone, $550k-$1M for combined R2+R3+R7 program. Partner profile: cryptography research group with transformer-MPC experience.
+
+The framing below is preserved as originating context.
+
+---
+
 
 **Vision doc reference:** Section 7, "Honest limits" — *"MPC is 10-100× overhead and requires non-colluding node assumptions."*
 
