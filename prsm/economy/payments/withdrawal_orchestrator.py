@@ -41,7 +41,7 @@ import logging
 import secrets
 import sqlite3
 import time
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import Callable, Optional, Protocol

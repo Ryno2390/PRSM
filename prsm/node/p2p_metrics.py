@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterable, Optional
+from typing import Callable, Dict
 
 
 __all__ = [

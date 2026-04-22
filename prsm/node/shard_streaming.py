@@ -24,8 +24,8 @@ Integrity guarantees:
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
-from typing import Iterable, Iterator, List, Optional
+from dataclasses import dataclass
+from typing import Iterable, List
 
 
 __all__ = [
