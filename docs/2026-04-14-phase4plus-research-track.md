@@ -43,20 +43,13 @@
 
 **Effort if pursued:** a quarter of red-team + blue-team work; reportable results.
 
-## R4: Per-Provider Supply Caps and Geographic Diversity Incentives
+## R4: Per-Provider Supply Caps and Geographic Diversity Incentives ✅ PROMOTED TO STANDARD DRAFT
 
-**Vision doc reference:** Section 6 subsection, "Honest caveats" — *"If T3 dominates supply, PRSM effectively runs on 3-4 hyperscalers underneath. Mitigable via supply caps per provider and geographic-diversity bonuses."*
+**Original vision-doc reference:** Section 6 subsection, "Honest caveats" — *"If T3 dominates supply, PRSM effectively runs on 3-4 hyperscalers underneath. Mitigable via supply caps per provider and geographic-diversity bonuses."*
 
-**Research question:** How should PRSM governance parameterize supply-side diversity constraints so that no single cloud provider or geographic region exceeds X% of network capacity, without destroying T3 economics?
+**Resolution (2026-04-22):** promoted from research stub to governance standard draft at `docs/2026-04-22-prsm-supply-1-supply-diversity-standard.md` — **PRSM-SUPPLY-1**. The standard specifies definitions, measurement, triggers (preserved from this stub: 30% single-provider, 40% single-country, operator concern), soft-cap + diversity-bonus enforcement mechanisms, a 5,000-provider / 36-month bootstrap grace period, and the ratification path under PRSM-GOV-1 §9.
 
-**Why this is research, not engineering:** Policy parameters that depend on empirical network data that doesn't yet exist. Premature implementation risks over-constraining the network during bootstrap when diversity emerges organically anyway.
-
-**Triggers to move this to engineering work:**
-- Monitoring data shows any single provider exceeds 30% of supply.
-- Monitoring data shows any single country exceeds 40% of supply.
-- An operator raises a governance concern backed by data.
-
-**Effort if pursued:** small — mostly governance-design work and parameter tuning once monitoring exists.
+**Remaining research-track disposition:** closed. Follow-up work is now engineering (provider-registry seed list, stake-binding floor values, orchestrator integration) and Foundation treasury (diversity-bonus budget). Neither is research.
 
 ## R5: Content Tier C Hardening Against Majority Collusion
 
