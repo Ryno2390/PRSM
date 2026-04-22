@@ -183,7 +183,10 @@ server = [
 ]
 
 mcp = [
-    # MCP server for AI agent integration
+    # MCP server for AI agent integration.
+    # `mcp` is the official SDK (imported directly by prsm/mcp_server.py).
+    # `fastmcp` is an optional high-level wrapper.
+    "mcp>=1.27.0",
     "fastmcp>=2.0.0",
 ]
 
