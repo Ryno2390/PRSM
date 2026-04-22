@@ -187,7 +187,7 @@ Each phase ships independently. Each phase produces working, demonstrable softwa
 
 ## Phase 7 — Storage Hardening + Content Confidentiality + Verification Tiers
 
-**Status: not yet detail-planned. Target Q3-Q4 2027. Scope expanded 2026-04-15 to match `PRSM_Vision.md` §2 tiered content model.**
+**Status: design + TDD plan drafted 2026-04-22 for §7.1 + §7.2 workstreams (see [`2026-04-22-phase7-storage-design-plan.md`](./2026-04-22-phase7-storage-design-plan.md)). §7.3 (compute verification Tier B/C) already shipped as Phase 7 / 7.1 / 7.1x under separate numbering — the storage plan scopes only the remaining storage-hardening + content-confidentiality workstreams. Target Q3-Q4 2027. Scope expanded 2026-04-15 to match `PRSM_Vision.md` §2 tiered content model.**
 
 **Why last of the core phases:** Storage works for dev/staging but is a single-replica copy with no slashing. At scale, data loss is inevitable without redundancy guarantees. Equally important, without Tier B/C content confidentiality, PRSM cannot serve regulated-industry workloads (healthcare, legal, financial services) — which is the addressable market the Vision doc's private-inference stack targets and which Prismatica's commissioned-dataset + domain-model + clean-rooms revenue streams depend on (per `Prismatica_Vision.md` §2.5, §2.6, §3.3).
 
