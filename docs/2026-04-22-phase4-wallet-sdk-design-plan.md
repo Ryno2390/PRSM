@@ -250,15 +250,21 @@ A consumer with zero prior crypto experience can: (a) land on PRSM's web onboard
 
 ### 8.1 Embedded-wallet vendor selection
 
+**Resolved 2026-04-22 → see [`2026-04-22-phase4-wallet-vendor-decision.md`](./2026-04-22-phase4-wallet-vendor-decision.md) (PHASE4-WALLET-VENDOR-1).**
+
 Three candidates:
 
 - **Privy** — most polished UX, generous free tier, MPC + embedded-wallet export.
 - **Web3Auth** — older, widely-integrated, non-custodial option.
 - **Magic.link** — email + passkey, strong mobile support.
 
-Selection based on: (a) non-custodial option for users who want it, (b) Base mainnet support, (c) pricing at PRSM scale, (d) SDK stability.
+Selection based on: (a) non-custodial option for users who want it, (b) Base mainnet support, (c) pricing at PRSM scale, (d) SDK stability, (e) open-source posture, (f) exit/migration story.
 
-**Tentative recommendation:** Privy. Revisit at Task 4 kickoff.
+**Recommendation (PHASE4-WALLET-VENDOR-1 §5):** Privy conditional on PV-1 (12-month pricing commitment) + PV-2 (Foundation security review of client SDK). Web3Auth as explicit fallback. Magic.link rejected for closed-source client SDK + weak exit story.
+
+**Phase 4 Tasks 3/4 engineering remains blocked on the G1-G6 green-light checklist (PHASE4-WALLET-VENDOR-1 §6):** vendor signed, credentials issued, pricing commitment received, security review complete, integration POC runs, sandbox telemetry baseline. All six must clear before Task 3 or 4 TDD begins.
+
+Re-review triggers specified at §7 of the decision memo: date drift (60 days), vendor events, new candidate emergence, Phase 4 scope change.
 
 ### 8.2 Off-chain vs on-chain identity binding
 
