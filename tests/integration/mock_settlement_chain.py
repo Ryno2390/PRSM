@@ -116,9 +116,18 @@ class MockSettlementChain:
         receipt_count: int,
         total_value_ftns: int,
         metadata_uri: str = "",
+        *,
+        tier_slash_rate_bps: int = 0,
+        consensus_group_id: bytes = b"\x00" * 32,
     ) -> Tuple[bytes, int]:
         """Mock of BatchSettlementRegistry.commitBatch. Returns
-        (batch_id, commit_timestamp_unix)."""
+        (batch_id, commit_timestamp_unix).
+
+        tier_slash_rate_bps (Phase 7) + consensus_group_id (Phase 7.1x)
+        accepted for wire compatibility with the real
+        SettlementContractClient.commit_batch signature. Not used by the
+        mock — they're informational fields that the real contract
+        snapshots for slashing / consensus-group attribution."""
         if receipt_count == 0:
             raise ValueError("mock chain: zero receiptCount")
         if not merkle_root or merkle_root == b"\x00" * 32:
@@ -206,8 +215,14 @@ class MockContractClient:
         merkle_root: bytes,
         receipt_count: int,
         total_value_ftns: int,
-        metadata_uri: str,
+        tier_slash_rate_bps: int = 0,
+        consensus_group_id: bytes = b"\x00" * 32,
+        metadata_uri: str = "",
     ) -> Tuple[bytes, int]:
+        """Mirrors SettlementContractClient.commit_batch exactly —
+        positional args + tier_slash_rate_bps (Phase 7) +
+        consensus_group_id (Phase 7.1x). Forwards everything to
+        MockSettlementChain.commit_batch."""
         return await self._chain.commit_batch(
             provider=provider_address,
             requester=requester_address,
@@ -215,6 +230,8 @@ class MockContractClient:
             receipt_count=receipt_count,
             total_value_ftns=total_value_ftns,
             metadata_uri=metadata_uri,
+            tier_slash_rate_bps=tier_slash_rate_bps,
+            consensus_group_id=consensus_group_id,
         )
 
     async def is_finalizable(self, batch_id: bytes) -> bool:
