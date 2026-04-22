@@ -163,7 +163,14 @@ TurboQuant's data-oblivious property makes it the best-fit *starting* candidate 
 - Monitoring data shows T1/T2 supply share falling below target and T3 concentration exceeding R4 thresholds — forcing prioritization of T1-viability mechanisms. OR
 - Observed T3 capacity approaches the rented-GPU spot/on-demand supply ceiling and prices begin to drift upward, making T1/T2 expansion the obvious cost-control lever.
 
-## R8: Anti-Exfiltration Architecture for Frontier-Model Inference (Added 2026-04-19)
+## R8: Anti-Exfiltration Architecture for Frontier-Model Inference (Added 2026-04-19) ⏳ COMPOSITION ANALYSIS DRAFTED
+
+**2026-04-22 update:** promoted from stub to defense-stack composition analysis at `docs/2026-04-22-r8-defense-stack-composition.md` (**R8-COMP-1**). Formalizes the attack chain as sub-threats, maps each sub-threat against the five defense layers (L1 TEE / L2 MPC / L3 fingerprinting / L4 watermarking / L5 CIS-1 silicon), and specifies minimum-sufficient stacks per adversary class (A-L1 opportunistic through A-L4 vendor-colluding). Identifies L3 + L4 as the unsponsored layers with highest leverage per research dollar (~$400k-$650k to commission both); recommends commissioning now ahead of frontier-lab asks so the answer to "what defenses do you have?" is "actively researching with named partners" rather than "defined as open research." Cross-track integration: R2 contributes L2, R3+R7 contribute 1e coverage, R6 contributes crypto-migration readiness for L3/L4, CIS-1 contributes L5. Combined R2+R3+R7+R8 research program scopes at $950k-$1.65M over 6-8 quarters.
+
+The framing below is preserved as originating context.
+
+---
+
 
 **Research question:** What combination of hardware confidentiality, cryptographic weight sharding, fingerprint-based clone detection, and output watermarking is sufficient for a frontier AI lab to accept permissionless inference hosting on PRSM — i.e., to publish proprietary SOTA model weights to untrusted meganodes without expecting the weights to be exfiltrated, perturbed to evade provenance checks, and re-monetized by a thief at a lower FTNS rate?
 
