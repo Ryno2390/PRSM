@@ -75,7 +75,14 @@
 
 **Trigger to move to engineering:** NIST finalization of post-quantum signature standards + Ethereum-level migration plans.
 
-## R7: KV Cache & Activation Compression for Consumer-Edge Inference
+## R7: KV Cache & Activation Compression for Consumer-Edge Inference ⏳ BENCHMARK PLAN DRAFTED
+
+**2026-04-22 update:** the "concrete starting hypothesis" has been promoted to a preregistered experimental design at `docs/2026-04-22-r7-benchmark-plan.md` (**R7-BENCH-1**). Five hypotheses with pass/fail/null conditions, five phases over 16 weeks, a partner-handoff checklist, and an R3 red-team integration gate that is explicitly blocking. Execution is pending Foundation budget allocation and research-partner identification.
+
+The research content below is retained as the framing the benchmark plan promotes from.
+
+---
+
 
 **Vision doc reference:** Section 7 — *"In a datacenter, Megatron-style sharding runs over NVLink at ~900 GB/s. PRSM replaces NVLink with BitTorrent-mediated activation streaming between SPRKs. Orders of magnitude slower..."* Also Section 6, T1/T2 supply tier viability.
 
