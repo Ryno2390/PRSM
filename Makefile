@@ -1,54 +1,89 @@
 # PRSM Development Makefile
-# Provides common development tasks
+# Common development tasks. Targets referencing pre-v1.6-pivot code + scripts
+# were removed 2026-04-22 as part of pre-audit hygiene (scope-alignment sprint
+# deleted those modules/scripts; retained Makefile entries were broken).
 
-.PHONY: help install install-dev test test-cov lint format clean run docker docker-optimized docs nwtn-test nwtn-stress load-test \
+.PHONY: help install install-dev test test-unit test-integration test-chaos test-cov test-hardhat test-all \
+        lint format clean run \
+        db-upgrade db-downgrade db-revision setup-dev ci-test \
+        docker-build docker-run docker-down docker-clean docker-logs docker-shell \
+        docker-run-dev docker-run-performance docker-run-observability \
+        k8s-deploy k8s-deploy-production k8s-status k8s-logs \
+        obs-stack-up obs-stack-down obs-metrics obs-logs obs-dashboards \
+        docs docs-serve metrics \
         build publish-test publish docker-push bootstrap-build smoke
 
 # Default target
 help:
 	@echo "PRSM Development Commands:"
-	@echo "  install      Install production dependencies"
-	@echo "  install-dev  Install development dependencies"
-	@echo "  test         Run tests"
-	@echo "  test-cov     Run tests with coverage reporting"
-	@echo "  lint         Run linting checks"
-	@echo "  format       Format code with black and isort"
-	@echo "  clean        Clean up generated files"
-	@echo "  run          Run the PRSM development server"
-	@echo "  docker       Build and run with Docker"
-	@echo "  docker-optimized  Build optimized Docker images"
-	@echo "  docker-performance  Run with performance optimizations"
-	@echo "  docs         Build documentation"
-	@echo "  k8s-deploy   Deploy to Kubernetes"
-	@echo "  k8s-test-autoscaling  Test autoscaling under load"
-	@echo "  obs-stack-up  Start observability stack"
-	@echo "  obs-dashboards  Show monitoring dashboard URLs"
-	@echo "  nwtn-test    Validate NWTN 5-agent pipeline"
-	@echo "  nwtn-stress  Stress test NWTN orchestrator (1000 users)"
-	@echo "  ftns-test    Test FTNS microsecond precision and accuracy"
-	@echo "  benchmark-quick  Run performance benchmarks (PRSM only)"
-	@echo "  benchmark-full   Run comprehensive benchmarks (vs GPT-4/Claude)"
-	@echo "  benchmark-load   Run concurrent load test (1000 users)"
-	@echo "  validate-compliance  Validate Phase 1 compliance requirements"
-	@echo "  test-circuit-breakers  Run circuit breaker failure tests"
-	@echo "  validate-resilience  Validate Phase 1 resilience requirements"
-	@echo "  bootstrap-network  Deploy 10-node bootstrap test network"
-	@echo "  load-test    Run comprehensive load testing suite"
-	@echo "  validate-phase1  Complete Phase 1 validation suite"
-	@echo "  safeguard-test   Test Recursive Self-Improvement Safeguards"
-	@echo "  validate-phase3  Complete Phase 3 validation suite"
 	@echo ""
-	@echo "Deployment Commands:"
-	@echo "  build           Build Python package (wheel + sdist)"
-	@echo "  publish-test    Publish to TestPyPI (dry run)"
-	@echo "  publish         Publish to PyPI (production)"
-	@echo "  docker-build    Build Docker image"
-	@echo "  docker-push     Push Docker image to GHCR"
-	@echo "  bootstrap-build Build bootstrap Docker image"
-	@echo "  smoke           Run smoke test (quick validation)"
-	@echo "  test            Run full test suite"
+	@echo "Setup:"
+	@echo "  install              Install production dependencies"
+	@echo "  install-dev          Install development dependencies + pre-commit"
+	@echo "  setup-dev            Copy .env.example + run install-dev"
+	@echo ""
+	@echo "Testing:"
+	@echo "  test                 Run full pytest suite"
+	@echo "  test-unit            Run unit tests only (tests/unit)"
+	@echo "  test-integration     Run integration tests only (tests/integration)"
+	@echo "  test-chaos           Run chaos tests only (tests/chaos)"
+	@echo "  test-cov             Run tests with coverage reporting"
+	@echo "  test-hardhat         Run Solidity contract tests (hardhat)"
+	@echo "  test-all             Run pytest + hardhat together"
+	@echo ""
+	@echo "Code Quality:"
+	@echo "  lint                 flake8 + mypy + black check + isort check"
+	@echo "  format               black + isort"
+	@echo "  clean                Remove generated files"
+	@echo ""
+	@echo "Run:"
+	@echo "  run                  Start API dev server with --reload"
+	@echo ""
+	@echo "Database (alembic):"
+	@echo "  db-upgrade           Apply migrations"
+	@echo "  db-downgrade         Revert one migration"
+	@echo "  db-revision msg=MSG  Autogenerate a new migration"
+	@echo ""
+	@echo "Docker:"
+	@echo "  docker-build         Build main PRSM image"
+	@echo "  docker-run           docker-compose up -d"
+	@echo "  docker-run-dev       Run with dev overrides (docker/docker-compose.dev.yml)"
+	@echo "  docker-run-performance  Run with performance overrides"
+	@echo "  docker-run-observability  Run with observability stack overrides"
+	@echo "  docker-down          Stop containers"
+	@echo "  docker-clean         Prune unused Docker resources"
+	@echo "  docker-logs          Follow prsm-api logs"
+	@echo "  docker-shell         Shell into prsm-api"
+	@echo "  docker-push          Push image to GHCR"
+	@echo "  bootstrap-build      Build bootstrap Docker image"
+	@echo ""
+	@echo "Kubernetes:"
+	@echo "  k8s-deploy           Apply base manifests"
+	@echo "  k8s-deploy-production Apply production overlay"
+	@echo "  k8s-status           kubectl get pods,hpa,vpa -n prsm-system"
+	@echo "  k8s-logs             Follow prsm-api deployment logs"
+	@echo ""
+	@echo "Observability:"
+	@echo "  obs-stack-up         Start observability stack"
+	@echo "  obs-stack-down       Stop observability stack"
+	@echo "  obs-metrics          curl /metrics (first 20 lines)"
+	@echo "  obs-logs             Follow Grafana logs"
+	@echo "  obs-dashboards       Print dashboard URLs"
+	@echo ""
+	@echo "Documentation:"
+	@echo "  docs                 Build mkdocs site"
+	@echo "  docs-serve           Serve docs locally"
+	@echo ""
+	@echo "Deployment:"
+	@echo "  build                Build Python wheel + sdist (dist/)"
+	@echo "  publish-test         Publish to TestPyPI"
+	@echo "  publish              Publish to PyPI (production)"
+	@echo "  smoke                Quick smoke test (bootstrap server)"
 
+# ==============================================================================
 # Installation
+# ==============================================================================
+
 install:
 	pip install -r requirements.txt
 
@@ -56,20 +91,39 @@ install-dev:
 	pip install -r requirements-dev.txt
 	pre-commit install
 
+setup-dev: install-dev
+	cp .env.example .env
+	@echo "Please edit .env with your configuration"
+	@echo "Then run: make db-upgrade"
+
+# ==============================================================================
 # Testing
+# ==============================================================================
+
 test:
 	pytest
+
+test-unit:
+	pytest tests/unit
+
+test-integration:
+	pytest tests/integration
+
+test-chaos:
+	pytest tests/chaos
 
 test-cov:
 	pytest --cov=prsm --cov-report=html --cov-report=term
 
-test-integration:
-	pytest -m integration
+test-hardhat:
+	cd contracts && npx hardhat test
 
-test-unit:
-	pytest -m unit
+test-all: test test-hardhat
 
+# ==============================================================================
 # Code Quality
+# ==============================================================================
+
 lint:
 	flake8 prsm tests
 	mypy prsm
@@ -80,7 +134,10 @@ format:
 	black prsm tests
 	isort prsm tests
 
+# ==============================================================================
 # Cleanup
+# ==============================================================================
+
 clean:
 	find . -type f -name "*.pyc" -delete
 	find . -type d -name "__pycache__" -delete
@@ -92,14 +149,17 @@ clean:
 	rm -rf .pytest_cache/
 	rm -rf .mypy_cache/
 
+# ==============================================================================
 # Development Server
+# ==============================================================================
+
 run:
 	uvicorn prsm.interface.api.main:app --reload --host 0.0.0.0 --port 8000
 
-run-worker:
-	@echo "Worker mode coming in a future release. Use 'make run' to start the API server."
+# ==============================================================================
+# Database (alembic)
+# ==============================================================================
 
-# Database
 db-upgrade:
 	alembic upgrade head
 
@@ -109,27 +169,31 @@ db-downgrade:
 db-revision:
 	alembic revision --autogenerate -m "$(msg)"
 
+# ==============================================================================
 # Docker
+# ==============================================================================
+
+# Image registry configuration — override via env or command line.
+GHCR_OWNER ?= ryneschultz
+IMAGE_NAME ?= prsm
+IMAGE_TAG ?= latest
+
 docker-build:
-	docker build -t prsm:latest .
-
-docker-build-optimized:
-	./scripts/optimize-docker-build.sh production
-
-docker-build-dev:
-	./scripts/optimize-docker-build.sh development
-
-docker-build-all:
-	./scripts/optimize-docker-build.sh all
+	@echo "🐳 Building Docker image $(IMAGE_NAME):$(IMAGE_TAG)..."
+	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) .
+	@echo "✅ Built: $(IMAGE_NAME):$(IMAGE_TAG)"
 
 docker-run:
 	docker-compose up -d
 
 docker-run-dev:
-	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+	docker-compose -f docker-compose.yml -f docker/docker-compose.dev.yml up -d
 
 docker-run-performance:
-	docker-compose -f docker-compose.yml -f docker-compose.performance.yml up -d
+	docker-compose -f docker-compose.yml -f docker/docker-compose.performance.yml up -d
+
+docker-run-observability:
+	docker-compose -f docker-compose.yml -f docker/docker-compose.observability.yml up -d
 
 docker-down:
 	docker-compose down
@@ -144,42 +208,26 @@ docker-logs:
 docker-shell:
 	docker-compose exec prsm-api bash
 
-# Documentation
-docs:
-	mkdocs build
+docker-push:
+	@echo "📤 Pushing $(IMAGE_NAME):$(IMAGE_TAG) to GHCR..."
+	docker tag $(IMAGE_NAME):$(IMAGE_TAG) ghcr.io/$(GHCR_OWNER)/$(IMAGE_NAME):$(IMAGE_TAG)
+	docker push ghcr.io/$(GHCR_OWNER)/$(IMAGE_NAME):$(IMAGE_TAG)
+	@echo "✅ Pushed: ghcr.io/$(GHCR_OWNER)/$(IMAGE_NAME):$(IMAGE_TAG)"
 
-docs-serve:
-	mkdocs serve
+bootstrap-build:
+	@echo "🚀 Building bootstrap Docker image..."
+	cd docker && docker build -f Dockerfile.bootstrap -t prsm-bootstrap:$(IMAGE_TAG) ..
+	@echo "✅ Built: prsm-bootstrap:$(IMAGE_TAG)"
 
-# Monitoring
-metrics:
-	@echo "Metrics are available at /metrics when the API server is running (make run)."
+# ==============================================================================
+# Kubernetes
+# ==============================================================================
 
-# Development Setup
-setup-dev: install-dev
-	cp .env.example .env
-	@echo "Please edit .env with your configuration"
-	@echo "Then run: make db-upgrade"
-
-# CI/CD helpers
-ci-test: lint test-cov
-
-# Network setup for P2P
-setup-p2p:
-	@echo "P2P networking coming in a future release. The system currently operates in single-node mode."
-
-# Kubernetes autoscaling
 k8s-deploy:
 	kubectl apply -k deploy/kubernetes/base
 
 k8s-deploy-production:
 	kubectl apply -k deploy/kubernetes/overlays/production
-
-k8s-test-autoscaling:
-	./scripts/test-autoscaling.sh --duration 300 --concurrent 1000 --rps 100
-
-k8s-scale-test:
-	./scripts/test-autoscaling.sh --duration 600 --concurrent 2000 --rps 200
 
 k8s-status:
 	kubectl get pods,hpa,vpa -n prsm-system
@@ -187,246 +235,59 @@ k8s-status:
 k8s-logs:
 	kubectl logs -f deployment/prsm-api -n prsm-system
 
-# Observability stack
+# ==============================================================================
+# Observability
+# ==============================================================================
+
 obs-stack-up:
-	docker-compose -f docker-compose.yml -f docker-compose.observability.yml up -d
+	docker-compose -f docker-compose.yml -f docker/docker-compose.observability.yml up -d
 
 obs-stack-down:
-	docker-compose -f docker-compose.yml -f docker-compose.observability.yml down
+	docker-compose -f docker-compose.yml -f docker/docker-compose.observability.yml down
 
 obs-metrics:
 	curl -s http://localhost:9091/metrics | head -20
 
 obs-logs:
-	docker-compose -f docker-compose.yml -f docker-compose.observability.yml logs -f grafana-enhanced
+	docker-compose -f docker-compose.yml -f docker/docker-compose.observability.yml logs -f grafana-enhanced
 
 obs-dashboards:
-	@echo "Grafana: http://localhost:3000 (admin/prsm_admin)"
+	@echo "Grafana:    http://localhost:3000 (admin/prsm_admin)"
 	@echo "Prometheus: http://localhost:9090"
-	@echo "Jaeger: http://localhost:16686"
-	@echo "Kibana: http://localhost:5601"
+	@echo "Jaeger:     http://localhost:16686"
+	@echo "Kibana:     http://localhost:5601"
 
-# NWTN Orchestrator Testing (Phase 1 requirements)
-nwtn-test:
-	@echo "🤖 Running NWTN Agent Pipeline Validation..."
-	python scripts/validate-nwtn-agents.py
+metrics:
+	@echo "Metrics are available at /metrics when the API server is running (make run)."
 
-nwtn-stress:
-	@echo "🚀 Running NWTN Orchestrator Stress Test (1000 concurrent users)..."
-	python scripts/nwtn-stress-test.py --users 1000 --duration 300 --latency 2000
+# ==============================================================================
+# Documentation
+# ==============================================================================
 
-nwtn-stress-quick:
-	@echo "🚀 Running Quick NWTN Stress Test (100 concurrent users)..."
-	python scripts/nwtn-stress-test.py --quick
+docs:
+	mkdocs build
 
-nwtn-stress-extended:
-	@echo "🚀 Running Extended NWTN Stress Test (2000 concurrent users)..."
-	python scripts/nwtn-stress-test.py --users 2000 --duration 600 --latency 2000
+docs-serve:
+	mkdocs serve
 
-# Load Testing Suite
-load-test:
-	@echo "📈 Running Comprehensive Load Test Suite..."
-	./scripts/load-test-suite.sh --users 1000 --duration 300s
+# ==============================================================================
+# CI helpers
+# ==============================================================================
 
-load-test-quick:
-	@echo "📈 Running Quick Load Test..."
-	./scripts/load-test-suite.sh --quick
+ci-test: lint test-cov
 
-load-test-phase1:
-	@echo "🎯 Running Phase 1 Load Test Validation..."
-	./scripts/validate-phase1-requirements.sh --url http://localhost:8000
-
-# Performance Testing Pipeline
-test-phase1: nwtn-test load-test-phase1
-	@echo "✅ Phase 1 validation complete!"
-
-test-performance: nwtn-stress load-test
-	@echo "📊 Performance testing complete!"
-
-# FTNS Accounting Ledger Testing
-ftns-test:
-	@echo "💰 Running FTNS precision and accuracy tests..."
-	python scripts/test-ftns-precision.py
-
-ftns-validate:
-	@echo "🔍 Validating FTNS microsecond precision..."
-	python scripts/test-ftns-precision.py --quick
-
-# Performance Benchmark Testing
-test-benchmarks:
-	@echo "🎯 Running performance benchmark tests..."
-	python scripts/test-performance-benchmarks.py
-
-benchmark-quick:
-	@echo "🚀 Running quick benchmark (PRSM only)..."
-	python scripts/performance-benchmark-suite.py quick
-
-benchmark-full:
-	@echo "🚀 Running comprehensive benchmark (PRSM vs GPT-4/Claude)..."
-	python scripts/performance-benchmark-suite.py full
-
-benchmark-load:
-	@echo "🔥 Running concurrent load test (1000 users)..."
-	python scripts/performance-benchmark-suite.py load
-
-validate-compliance:
-	@echo "✅ Validating Phase 1 compliance requirements..."
-	python scripts/test-performance-benchmarks.py validate
-
-# Circuit Breaker Testing
-test-circuit-breakers:
-	@echo "🛡️ Running circuit breaker tests..."
-	python scripts/test-circuit-breakers.py
-
-test-circuit-breakers-quick:
-	@echo "🔧 Running quick circuit breaker test..."
-	python scripts/test-circuit-breakers.py quick
-
-test-circuit-breakers-comprehensive:
-	@echo "🧪 Running comprehensive circuit breaker test suite..."
-	python scripts/test-circuit-breakers.py comprehensive
-
-test-component-circuits:
-	@echo "🔧 Testing component-specific circuit breakers..."
-	python scripts/test-circuit-breakers.py components
-
-validate-resilience:
-	@echo "🛡️ Validating Phase 1 resilience requirements..."
-	python scripts/validate-circuit-breaker-resilience.py
-
-validate-resilience-quick:
-	@echo "🔧 Running quick resilience check..."
-	python scripts/validate-circuit-breaker-resilience.py quick
-
-# Bootstrap Test Network
-bootstrap-network:
-	@echo "🚀 Deploying 10-node bootstrap test network..."
-	python scripts/bootstrap-test-network.py
-
-bootstrap-network-quick:
-	@echo "🔧 Running quick bootstrap test..."
-	python scripts/bootstrap-test-network.py quick
-
-# Development workflow with performance validation
-dev-test: install-dev test lint nwtn-test ftns-test test-benchmarks test-circuit-breakers
-	@echo "🔧 Development testing complete!"
-
-# Phase 2 Economic Model Testing
-economic-simulation:
-	@echo "🏦 Running economic simulation with agent-based model..."
-	python prsm/economics/agent_based_model.py
-
-economic-simulation-comprehensive:
-	@echo "📊 Running comprehensive economic validation..."
-	python prsm/economics/agent_based_model.py comprehensive
-
-economic-simulation-quick:
-	@echo "🔧 Running quick economic simulation test..."
-	python3 -c "import asyncio; from prsm.economics.agent_based_model import run_economic_simulation; print('Success:', asyncio.run(run_economic_simulation(steps=24, num_agents=100)))"
-
-jupyter-dashboard:
-	@echo "📊 Starting PRSM Economic Dashboard..."
-	cd notebooks && jupyter lab economic_dashboard.ipynb
-
-# Distributed Safety Testing
-safety-red-team:
-	@echo "🔴 Running distributed safety red team exercise..."
-	python3 scripts/distributed_safety_red_team.py
-
-safety-red-team-quick:
-	@echo "🔧 Running quick safety test..."
-	python3 scripts/distributed_safety_red_team.py quick
-
-# Quality Assurance System
-quality-assurance:
-	@echo "🔍 Running automated model validation pipeline..."
-	python3 prsm/quality/automated_validation_pipeline.py
-
-quality-assurance-quick:
-	@echo "🔧 Running quick quality assurance test..."
-	python3 prsm/quality/automated_validation_pipeline.py quick
-
-# Complete Phase 1 validation
-validate-phase1: nwtn-test ftns-test test-benchmarks test-circuit-breakers bootstrap-network-quick load-test-phase1
-	@echo "✅ Complete Phase 1 validation finished!"
-	python scripts/test-performance-benchmarks.py validate
-	python scripts/validate-circuit-breaker-resilience.py
-
-# Phase 2 validation
-validate-phase2: economic-simulation-comprehensive safety-red-team-quick quality-assurance-quick
-	@echo "✅ Phase 2 validation finished!"
-	@echo "  📊 Economic simulation with agent-based modeling: COMPLETED"
-	@echo "  🔴 Distributed safety red team exercise: COMPLETED"
-	@echo "  🔍 Quality assurance pipeline: COMPLETED"
-
-# Phase 3 Testing
-p2p-network-test:
-	@echo "🌍 Testing Multi-Region P2P Network..."
-	python3 prsm/federation/multi_region_p2p_network.py quick
-
-marketplace-test:
-	@echo "🏪 Testing Model Marketplace MVP..."
-	python3 prsm/marketplace/model_marketplace.py quick
-
-marketplace-test-full:
-	@echo "🏪 Running full Model Marketplace deployment..."
-	python3 prsm/marketplace/model_marketplace.py
-
-onboarding-test:
-	@echo "👥 Testing Contributor Onboarding System..."
-	python3 prsm/onboarding/contributor_onboarding.py quick
-
-onboarding-test-full:
-	@echo "👥 Running full Contributor Onboarding deployment..."
-	python3 prsm/onboarding/contributor_onboarding.py
-
-data-spine-test:
-	@echo "🌐 Testing PRSM Data Spine Proxy..."
-	python3 prsm/spine/data_spine_proxy.py quick
-
-data-spine-test-full:
-	@echo "🌐 Running full Data Spine Proxy deployment..."
-	python3 prsm/spine/data_spine_proxy.py
-
-safeguard-test:
-	@echo "🛡️ Testing Recursive Self-Improvement Safeguards..."
-	python3 prsm/safety/recursive_improvement_safeguards.py quick
-
-safeguard-test-full:
-	@echo "🛡️ Running full Recursive Self-Improvement Safeguards deployment..."
-	python3 prsm/safety/recursive_improvement_safeguards.py
-
-# Phase 3 validation
-validate-phase3: p2p-network-test marketplace-test onboarding-test data-spine-test safeguard-test
-	@echo "✅ Phase 3 validation finished!"
-	@echo "  🌍 Multi-Region P2P Network: COMPLETED"
-	@echo "  🏪 Model Marketplace MVP: COMPLETED"
-	@echo "  👥 Contributor Onboarding System: COMPLETED"
-	@echo "  🌐 PRSM Data Spine Proxy: COMPLETED"
-	@echo "  🛡️ Recursive Self-Improvement Safeguards: COMPLETED"
-
-# =============================================================================
-# Deployment Targets (Sprint 11 - PyPI Publishing & Bootstrap Deployment)
-# =============================================================================
-# These are thin wrappers around deployment commands for one-liner execution.
-# Customize variables below for your environment.
-# ----------------------------------------------------------------------------
-
-# Docker image registry configuration
-# Override these with environment variables or edit directly
-GHCR_OWNER ?= ryneschultz
-IMAGE_NAME ?= prsm
-IMAGE_TAG ?= latest
+# ==============================================================================
+# Deployment — Python package publishing
+# ==============================================================================
 
 # Build Python package (creates .whl and .tar.gz in dist/)
 build: clean
 	@echo "📦 Building Python package..."
 	python -m build
-	@echo "✅ Package built successfully! Check dist/ directory."
+	@echo "✅ Built. Check dist/"
 
-# Publish to TestPyPI (dry run before production)
-# Requires: TWINE_USERNAME and TWINE_PASSWORD environment variables
-# Or use: twine upload --repository testpypi dist/* --verbose
+# Publish to TestPyPI.
+# Requires TWINE_USERNAME + TWINE_PASSWORD env vars.
 publish-test:
 	@echo "🧪 Publishing to TestPyPI..."
 	@if [ ! -d "dist" ] || [ -z "$$(ls -A dist 2>/dev/null)" ]; then \
@@ -434,11 +295,10 @@ publish-test:
 		exit 1; \
 	fi
 	twine upload --repository testpypi dist/*
-	@echo "✅ Published to TestPyPI! Verify at: https://test.pypi.org/project/prsm/"
+	@echo "✅ Published. Verify: https://test.pypi.org/project/prsm/"
 
-# Publish to PyPI (production)
-# Requires: TWINE_USERNAME and TWINE_PASSWORD environment variables
-# WARNING: This is irreversible - ensure you've tested on TestPyPI first!
+# Publish to PyPI (production) — irreversible.
+# Requires TWINE_USERNAME + TWINE_PASSWORD env vars.
 publish:
 	@echo "🚀 Publishing to PyPI (production)..."
 	@if [ ! -d "dist" ] || [ -z "$$(ls -A dist 2>/dev/null)" ]; then \
@@ -446,31 +306,13 @@ publish:
 		exit 1; \
 	fi
 	twine upload dist/*
-	@echo "✅ Published to PyPI! Verify at: https://pypi.org/project/prsm/"
+	@echo "✅ Published. Verify: https://pypi.org/project/prsm/"
 
-# Build Docker image (main PRSM image)
-docker-build:
-	@echo "🐳 Building Docker image..."
-	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) .
-	@echo "✅ Docker image built: $(IMAGE_NAME):$(IMAGE_TAG)"
+# ==============================================================================
+# Smoke test
+# ==============================================================================
 
-# Push Docker image to GitHub Container Registry
-docker-push:
-	@echo "📤 Pushing Docker image to GHCR..."
-	docker tag $(IMAGE_NAME):$(IMAGE_TAG) ghcr.io/$(GHCR_OWNER)/$(IMAGE_NAME):$(IMAGE_TAG)
-	docker push ghcr.io/$(GHCR_OWNER)/$(IMAGE_NAME):$(IMAGE_TAG)
-	@echo "✅ Image pushed to: ghcr.io/$(GHCR_OWNER)/$(IMAGE_NAME):$(IMAGE_TAG)"
-
-# Build bootstrap Docker image (for bootstrap server deployment)
-# Uses Dockerfile.bootstrap from docker/ directory
-bootstrap-build:
-	@echo "🚀 Building bootstrap Docker image..."
-	cd docker && docker build -f Dockerfile.bootstrap -t prsm-bootstrap:$(IMAGE_TAG) ..
-	@echo "✅ Bootstrap image built: prsm-bootstrap:$(IMAGE_TAG)"
-
-# Run smoke test (quick validation of core functionality)
-# Tests bootstrap server imports and basic functionality
 smoke:
 	@echo "🔥 Running smoke test..."
 	pytest tests/unit/test_bootstrap_server.py -v --tb=short
-	@echo "✅ Smoke test passed!"
+	@echo "✅ Smoke test passed."
