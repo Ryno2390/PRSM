@@ -22,7 +22,7 @@ import sqlite3
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal
 from pathlib import Path
-from typing import Dict, Literal, Optional, Protocol
+from typing import Dict, Literal, Protocol
 
 
 __all__ = [
