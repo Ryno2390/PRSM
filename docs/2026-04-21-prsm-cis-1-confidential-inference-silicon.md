@@ -11,6 +11,11 @@
 - `docs/2026-04-19-confidential-inference-silicon-standard.md` — original scope-setting doc. Retained as companion context.
 - `docs/2026-04-14-phase4plus-research-track.md` §R8 — threat model origin and research dependencies.
 
+**Companion documents (added 2026-04-22):**
+- `docs/2026-04-22-r8-defense-stack-composition.md` — **R8-COMP-1**, defense-stack composition analysis. Treats this standard as defense layer L5 of a five-layer stack (TEE / MPC / fingerprinting / watermarking / this silicon). Specifies which layer combinations close which attack chains and which frontier-lab scenarios require which stack configurations. CIS-1 is load-bearing specifically for A-L4 (vendor-colluding) and A-L3 (nation-state) adversary classes.
+- `docs/2026-04-22-r3-threat-model.md` — **R3-TM-1**, activation-inversion threat model. CIS-1's TEE attestation + memory-encryption defenses interact with R3's attack catalog; R3's red-team methodology is the verification mechanism for CIS-1 conformance claims that involve inversion resistance.
+- `docs/2026-04-22-r2-mpc-scoping-doc.md` — **R2-SCOPING-1**, MPC scoping. R2's weight-sharding mechanism composes with CIS-1 at the "minimum-sufficient stack" layer per R8-COMP-1 §5.
+
 ---
 
 ## 1. Preface

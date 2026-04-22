@@ -9,6 +9,12 @@
 - `docs/2026-04-21-prsm-gov-1-foundation-governance-charter.md` — governance charter this standard operates under.
 - `docs/2026-04-21-prsm-cis-1-confidential-inference-silicon.md` — compute-layer standard FTNS denominates.
 
+**Related standards (added 2026-04-22):**
+- `docs/2026-04-22-prsm-supply-1-supply-diversity-standard.md` — **PRSM-SUPPLY-1**, supply-side diversity standard. §6.2 introduces a Foundation-reserve-funded diversity bonus paid in FTNS (≤10% of qualifying listing's gross earnings). Affects reserve-to-operator FTNS flow when §5.2 intervention triggers fire; enters monitoring-only mode during a 5,000-provider-or-36-month bootstrap grace period. TOK-1 §4.6 (Foundation reserve management) should be read alongside SUPPLY-1 §7.3 (diversity-bonus budget line item); a future TOK-1 revision will fold the bonus payment stream into the reserve-flow model explicitly.
+
+**Economic-model dependency updates (added 2026-04-22):**
+- `docs/2026-04-21-prsm-economic-model-white-paper.md` — ECON-WP v1 prices per-chip-year revenue under the Phase 3 marketplace model. The Phase 7 + 7.1 + 7.1x slashing + bounty economics (70/30 challenger/Foundation split on slashed stakes) and the SUPPLY-1 diversity-bonus reserve outflow are the two Phase-7+ drivers that ECON-WP v2 should incorporate. Neither changes v1's headline bear/base/bull conclusions, but both refine the reserve-flow model.
+
 **Source material consolidated by this document:**
 - `PRSM_Tokenomics.md` (external vault, 701 lines) — detailed design + mathematical models.
 - `docs/2026-04-16-halving-schedule-implementation-plan.md` — halving operational + migration plan.
