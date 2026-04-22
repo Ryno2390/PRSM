@@ -15,8 +15,15 @@ import math
 import time
 
 from prsm.storage.blob_store import BlobStore
+from prsm.storage import erasure
 from prsm.storage.exceptions import ShardIntegrityError
-from prsm.storage.models import AlgorithmID, ContentHash, ShardManifest
+from prsm.storage.models import (
+    AlgorithmID,
+    ContentHash,
+    ErasureParams,
+    ShardingMode,
+    ShardManifest,
+)
 
 
 class ShardEngine:
@@ -55,36 +62,44 @@ class ShardEngine:
         owner_node_id: str,
         replication_factor: int,
         visibility: str = "public",
+        *,
+        sharding_mode: ShardingMode = ShardingMode.REPLICATION,
+        erasure_k: int = erasure.DEFAULT_K,
+        erasure_n: int = erasure.DEFAULT_N,
     ) -> ShardManifest:
         """Split *data* into shards, store each via the blob store, return manifest.
 
-        Content whose length is **<= shard_threshold** is stored as a single
-        shard.  Larger content is split into ``shard_size``-byte chunks (the
-        last chunk may be smaller).  All chunks — including the single-shard
-        case — are stored via :meth:`BlobStore.store`.
+        Two sharding modes:
 
-        Parameters
-        ----------
-        data:
-            Raw bytes to be sharded.
-        owner_node_id:
-            Identifier of the node that owns this content.
-        replication_factor:
-            Number of network replicas desired (stored in manifest metadata).
-        visibility:
-            Access-control label; default ``"public"``.
+        - **REPLICATION** (default, Tier A): content ≤ shard_threshold is
+          stored as a single shard; larger content is chunked into
+          ``shard_size``-byte pieces stored independently. Reassembly
+          concatenates every shard in order.
+        - **ERASURE** (Phase 7-storage Tier B/C): content is Reed-Solomon
+          encoded into ``erasure_n`` shards (default 10); any ``erasure_k``
+          (default 6) suffice for reassembly. Tolerates
+          ``erasure_n - erasure_k`` shard losses (default 40%).
 
-        Returns
-        -------
-        ShardManifest
-            Manifest describing the content hash, ordered shard hashes, and
-            all associated metadata.
+        All shards — including the single-shard replication case — are
+        stored via :meth:`BlobStore.store`.
         """
         # Hash the complete original content first.
         content_hash = ContentHash.from_data(data, AlgorithmID.SHA256)
         total_size = len(data)
 
-        # Determine chunks.
+        if sharding_mode is ShardingMode.ERASURE:
+            return await self._split_erasure(
+                data=data,
+                content_hash=content_hash,
+                total_size=total_size,
+                owner_node_id=owner_node_id,
+                replication_factor=replication_factor,
+                visibility=visibility,
+                k=erasure_k,
+                n=erasure_n,
+            )
+
+        # Replication path — unchanged from the legacy behaviour.
         if total_size <= self.shard_threshold:
             chunks = [data]
         else:
@@ -94,7 +109,6 @@ class ShardEngine:
                 for i in range(num_shards)
             ]
 
-        # Store each chunk and collect shard hashes.
         shard_hashes: list[ContentHash] = []
         for chunk in chunks:
             shard_hash = await self.blob_store.store(chunk)
@@ -110,37 +124,83 @@ class ShardEngine:
             replication_factor=replication_factor,
             owner_node_id=owner_node_id,
             visibility=visibility,
+            sharding_mode=ShardingMode.REPLICATION,
+            erasure_params=None,
+        )
+
+    async def _split_erasure(
+        self,
+        *,
+        data: bytes,
+        content_hash: ContentHash,
+        total_size: int,
+        owner_node_id: str,
+        replication_factor: int,
+        visibility: str,
+        k: int,
+        n: int,
+    ) -> ShardManifest:
+        """Erasure-encode + store. Produces one blob_store entry per
+        Reed-Solomon shard; manifest.shard_hashes is ordered by shard
+        index (0..n-1)."""
+        meta, shards = erasure.encode(data, k=k, n=n)
+
+        shard_hashes: list[ContentHash] = []
+        for shard in shards:
+            stored_hash = await self.blob_store.store(shard.data)
+            # Sanity: blob-store content-addressing must match the
+            # erasure shard's own sha256. The erasure module produces
+            # a raw 64-char hex digest; ContentHash.hex() prepends an
+            # algorithm byte — compare only the digest portion.
+            if stored_hash.digest.hex() != shard.sha256:
+                raise ShardIntegrityError(
+                    expected=shard.sha256,
+                    actual=stored_hash.digest.hex(),
+                )
+            shard_hashes.append(stored_hash)
+
+        return ShardManifest(
+            content_hash=content_hash,
+            shard_hashes=shard_hashes,
+            total_size=total_size,
+            shard_size=meta.shard_bytes,
+            algorithm_id=AlgorithmID.SHA256,
+            created_at=time.time(),
+            replication_factor=replication_factor,
+            owner_node_id=owner_node_id,
+            visibility=visibility,
+            sharding_mode=ShardingMode.ERASURE,
+            erasure_params=ErasureParams(
+                k=meta.k,
+                n=meta.n,
+                payload_bytes=meta.payload_bytes,
+                shard_bytes=meta.shard_bytes,
+                payload_sha256=meta.payload_sha256,
+            ),
         )
 
     async def reassemble(self, manifest: ShardManifest) -> bytes:
-        """Retrieve shards, verify integrity, and concatenate.
+        """Retrieve shards, verify integrity, and return the original content.
 
-        Each shard is retrieved from the blob store and its hash is checked
-        against the corresponding entry in *manifest.shard_hashes*.  After
-        all shards pass their per-shard checks, the reassembled content is
-        verified against *manifest.content_hash*.
+        Replication mode: concatenates every shard in order after
+        per-shard + overall hash checks.
 
-        Parameters
-        ----------
-        manifest:
-            The :class:`~prsm.storage.models.ShardManifest` produced by
-            :meth:`split`.
-
-        Returns
-        -------
-        bytes
-            The original content, byte-for-byte identical to what was passed
-            to :meth:`split`.
+        Erasure mode: retrieves as many shards as the blob_store can
+        supply (up to n), passes them to ``prsm.storage.erasure.decode``
+        which requires at least k distinct shards and verifies the
+        overall payload sha256 against the manifest's erasure_params.
 
         Raises
         ------
         ShardIntegrityError
-            If any individual shard or the final reassembled content fails its
-            hash check.
-        ContentNotFoundError
-            If a shard is missing from the blob store (propagated from
-            :meth:`BlobStore.retrieve`).
+            If any retrieved replication shard or the reassembled
+            replication payload fails its hash check.
+        InsufficientShardsError
+            Erasure mode only — fewer than k shards were retrievable.
         """
+        if manifest.sharding_mode is ShardingMode.ERASURE:
+            return await self._reassemble_erasure(manifest)
+
         parts: list[bytes] = []
 
         for expected_hash in manifest.shard_hashes:
@@ -169,3 +229,57 @@ class ShardEngine:
             )
 
         return reassembled
+
+    async def _reassemble_erasure(self, manifest: ShardManifest) -> bytes:
+        """Erasure-mode reassembly. Gathers surviving shards (skipping
+        any the blob_store cannot retrieve) and passes them to the
+        erasure decoder, which enforces the k-of-n threshold and the
+        overall payload sha256."""
+        if manifest.erasure_params is None:
+            raise ShardIntegrityError(
+                expected="erasure_params",
+                actual="None (manifest marked ERASURE but has no params)",
+            )
+        params = manifest.erasure_params
+
+        survivors: list[erasure.ErasureShard] = []
+        for index, expected_hash in enumerate(manifest.shard_hashes):
+            try:
+                raw = await self.blob_store.retrieve(expected_hash)
+            except Exception:
+                # Lost shard — skip. decode() will raise
+                # InsufficientShardsError if too many are missing.
+                continue
+
+            survivors.append(
+                erasure.ErasureShard(
+                    index=index,
+                    data=raw,
+                    # erasure.decode expects a bare hex digest, not the
+                    # algorithm-prefixed ContentHash.hex() serialisation.
+                    sha256=expected_hash.digest.hex(),
+                )
+            )
+
+        recovered = erasure.decode(
+            erasure.ErasureMetadata(
+                k=params.k,
+                n=params.n,
+                payload_bytes=params.payload_bytes,
+                shard_bytes=params.shard_bytes,
+                payload_sha256=params.payload_sha256,
+            ),
+            survivors,
+        )
+
+        # Cross-check against the manifest's content_hash (belt +
+        # suspenders on top of erasure.decode's payload_sha256 check).
+        actual_content_hash = ContentHash.from_data(
+            recovered, manifest.content_hash.algorithm_id
+        )
+        if actual_content_hash != manifest.content_hash:
+            raise ShardIntegrityError(
+                expected=manifest.content_hash.hex(),
+                actual=actual_content_hash.hex(),
+            )
+        return recovered
