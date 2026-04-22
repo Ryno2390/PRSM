@@ -1066,16 +1066,18 @@ def disable_rate_limiting():
     """Auto-use fixture to disable rate limiting during tests"""
     try:
         import prsm.interface.api.dependencies as deps
+        import prsm.interface.api.middleware  # noqa: F401 — force import for patch()
+        import prsm.core.security.middleware  # noqa: F401 — force import for patch()
     except (ImportError, ModuleNotFoundError, AttributeError):
         yield
         return
     # Clear the in-memory rate limit storage in dependencies
     deps._rate_limit_storage.clear()
-    
+
     # Patch both rate limiting middlewares:
     # 1. RateLimitMiddleware in prsm/interface/api/middleware.py
     # 2. RateLimitingMiddleware in prsm/core/security/middleware.py
-    
+
     with patch('prsm.interface.api.middleware.RateLimitMiddleware.dispatch') as mock_dispatch1, \
          patch('prsm.core.security.middleware.RateLimitingMiddleware.dispatch') as mock_dispatch2:
         

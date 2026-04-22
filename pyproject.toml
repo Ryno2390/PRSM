@@ -136,6 +136,7 @@ blockchain = [
     "web3>=6.0.0",
     "eth-account>=0.9.0",
     "hexbytes>=0.3.0",
+    "siwe>=4.4.0",  # EIP-4361 Sign-In With Ethereum (Phase 4)
 ]
 
 vectorstore = [
