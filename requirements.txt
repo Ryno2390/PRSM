@@ -76,7 +76,6 @@ jinja2>=3.1.0
 slack-sdk>=3.23.0
 twilio>=8.10.0
 pypd>=1.1.0
-httpx>=0.25.0
 
 # OpenTelemetry and Observability
 opentelemetry-api>=1.21.0
