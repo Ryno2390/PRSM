@@ -97,6 +97,9 @@ eth-utils>=2.0.0   # keccak256 for Phase 2 shard receipts + Phase 7 slashing
 hexbytes>=1.0.0
 siwe>=4.4.0        # EIP-4361 Sign-In With Ethereum for Phase 4 wallet onboarding
 
+# Storage & erasure coding
+zfec>=1.5.8        # Reed-Solomon erasure coding for Phase 7 shard durability
+
 # Networking & P2P
 pynacl>=1.5.0
 websockets>=12.0
