@@ -237,8 +237,9 @@ For the **full disambiguation reference** — including the third independent "T
 - `CompensationDistributor.sol` — pulls from `EmissionController` and distributes to compensation pools per governance-set weights (creator royalty bonus pool, node operator pool, contributor grant pool).
 - Migration from operational-policy-only enforcement (Epochs 1-2, years 0-8) to strict on-chain enforcement. Foundation genesis allocation continues operational-policy distribution in parallel.
 
-**Planning artifact:**
+**Planning artifacts:**
 - Scope doc + governance safeguards + timeline: [`2026-04-16-halving-schedule-implementation-plan.md`](./2026-04-16-halving-schedule-implementation-plan.md)
+- Engineering design + TDD plan (9-task breakdown, contract interfaces, risk register): [`2026-04-22-phase8-design-plan.md`](./2026-04-22-phase8-design-plan.md) (drafted 2.5 years ahead of target execution; parameter values calibrate on Epoch 1 operational data)
 
 **Dependencies:** Phases 1-7 shipped and stable; ≥2 years of Epoch 1 operational-policy data; foundation governance structure finalized; security-audit firms engaged (min 2 audits + formal verification of mint paths); multi-stakeholder testnet exercise pre-mainnet.
 
