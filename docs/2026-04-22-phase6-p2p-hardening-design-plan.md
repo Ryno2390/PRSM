@@ -264,10 +264,14 @@ Prometheus / OpenTelemetry export from every PRSM node. Foundation dashboard scr
 
 ### Task 4: DHT tuning via testnet measurement
 
+**Full scoping doc:** [`2026-04-22-phase6-task4-dht-tuning-plan.md`](./2026-04-22-phase6-task4-dht-tuning-plan.md) (PHASE6-TASK4-DHT-TUNING-1).
+
 - 50-100 node testnet deployed.
-- Parameter sweep: replication factor, query timeout, bucket size.
+- Parameter sweep: replication factor, query timeout, bucket size, alpha, republish interval.
 - Choose values minimizing p95 lookup latency subject to ≥99% lookup success.
-- **Output:** tuned parameter set committed to default config.
+- Five preregistered hypotheses (H1-H5) with pass/fail/null gates. Phased 5-week execution (prep → H1 sweep → H2+H3+H4 parallel → H5 + final validation → commit).
+- Promotion triggers: T1 Phase 6 Tasks 1+3+5+6+7 shipped (DONE, `phase6-merge-ready-20260422`), T2 Foundation bootstrap infra live (Task 2), T3 Foundation SRE capacity, T4 pre-mainnet-scale interest.
+- **Output:** tuned parameter set committed to `prsm/node/libp2p_*` defaults + publishable measurement report.
 
 ### Task 5: Connection liveness + rate limiting
 
