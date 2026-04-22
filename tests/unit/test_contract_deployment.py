@@ -38,10 +38,42 @@ _mock_web3_exceptions.__spec__ = importlib.machinery.ModuleSpec('web3.exceptions
 _mock_eth_account = MagicMock()
 _mock_eth_account.__spec__ = importlib.machinery.ModuleSpec('eth_account', None)
 
+# Save real modules (if loaded before this file) so we can restore them
+# after this file's own top-level imports complete. Otherwise downstream
+# tests that import `eth_account.messages` or real `web3` hit our
+# MagicMock-replaced sys.modules entries and fail at COLLECTION time —
+# the restore MUST happen before pytest collects the next test file, so
+# a module-scope fixture with a yield-teardown is too late.
+#
+# Specifically noticed at 2026-04-22: test_siwe_verifier.py +
+# test_wallet_binding.py fail when run AFTER this file because
+# `from eth_account.messages import encode_defunct` resolves to a
+# MagicMock attribute instead of the real package submodule.
+#
+# The `prsm.economy.blockchain.*` modules imported below pick up the
+# MagicMock-replaced web3 / eth_account *during* their own import chain
+# (that's the whole point of replacing them). Once those imports
+# complete, we restore the real modules — subsequent tests in this
+# file reuse the already-imported prsm.economy.blockchain.* which
+# captured the Mock-web3 in their own namespace, so they keep working.
+_real_modules_to_restore = {
+    name: sys.modules.get(name)
+    for name in ('web3', 'web3.contract', 'web3.exceptions', 'eth_account')
+}
+
 sys.modules['web3'] = mock_web3_module
 sys.modules['web3.contract'] = _mock_web3_contract
 sys.modules['web3.exceptions'] = _mock_web3_exceptions
 sys.modules['eth_account'] = _mock_eth_account
+
+
+def _restore_real_modules():
+    for name, real in _real_modules_to_restore.items():
+        if real is not None:
+            sys.modules[name] = real
+        else:
+            sys.modules.pop(name, None)
+
 
 # Import modules to test
 from prsm.economy.blockchain.networks import (
@@ -95,6 +127,14 @@ from prsm.economy.blockchain.ftns_bridge import (
     BridgeLimitError,
     ValidationError,
 )
+
+
+# All prsm.economy.blockchain.* imports have now captured the Mock-web3
+# into their own module namespaces. Restore the real sys.modules entries
+# so downstream test files (e.g., test_siwe_verifier.py,
+# test_wallet_binding.py) can import `eth_account.messages` / real `web3`
+# in the same pytest session.
+_restore_real_modules()
 
 
 # ============ Fixtures ============
