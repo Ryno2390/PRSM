@@ -3,6 +3,7 @@ Authentication API Endpoints
 Secure authentication and authorization endpoints for PRSM
 """
 
+import asyncio
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends, Request, status
 from fastapi.security import HTTPBearer

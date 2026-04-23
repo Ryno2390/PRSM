@@ -44,6 +44,7 @@ from prsm.node.gossip import (
 from prsm.node.transport import WebSocketTransport
 from prsm.node.identity import NodeIdentity
 from prsm.node.local_ledger import LocalLedger, TransactionType
+from prsm.storage.erasure import ErasureError
 from prsm.storage.models import ShardManifest
 
 logger = logging.getLogger(__name__)
@@ -641,7 +642,14 @@ class ContentUploader:
             )
             return uploaded
 
-        except ShardingError as e:
+        except ErasureError as e:
+            # The Phase 7-storage refactor renamed ShardingError → ErasureError
+            # (see prsm/storage/erasure.py:65). Old name was removed; this
+            # except was dead code that would have NameError'd if the try
+            # block raised. Caught at the ErasureError base so any of the
+            # four concrete subclasses (InsufficientShardsError,
+            # DuplicateShardError, CorruptShardError, PayloadChecksumError)
+            # trigger the monolithic fallback.
             logger.error(f"Sharding failed for {filename}: {e}")
             # Fall back to monolithic upload
             logger.info(f"Falling back to monolithic upload for {filename}")

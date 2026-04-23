@@ -17,6 +17,8 @@ even against quantum computing attacks while maintaining usability and
 performance for legitimate users.
 """
 
+import asyncio
+
 from .crypto_sharding import CryptoSharding
 from .post_quantum_crypto_sharding import PostQuantumCryptoSharding
 
