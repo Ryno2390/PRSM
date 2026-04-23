@@ -26,7 +26,7 @@ try:
     HAS_WEB3 = True
 except ImportError:  # pragma: no cover
     HAS_WEB3 = False
-    Web3 = None  # type: ignore
+    Web3 = None
 
 
 logger = logging.getLogger(__name__)
@@ -222,4 +222,4 @@ class EmissionClient:
 
     @property
     def controller_address(self) -> str:
-        return self._controller_address
+        return str(self._controller_address)
