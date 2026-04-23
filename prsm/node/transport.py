@@ -26,6 +26,7 @@ import websockets.client
 from prsm.node.identity import NodeIdentity, verify_signature
 
 if TYPE_CHECKING:
+    from prsm.node.jurisdiction_filter import PeerJurisdictionFilter
     from prsm.node.transport_adapter import TransportAdapter
 
 
@@ -168,6 +169,7 @@ class WebSocketTransport:
         handshake_timeout: float = 10.0,
         nonce_cleanup_interval: float = 60.0,
         transport_adapter: Optional["TransportAdapter"] = None,
+        jurisdiction_filter: Optional["PeerJurisdictionFilter"] = None,
     ):
         self.identity = identity
         self.host = host
@@ -185,6 +187,14 @@ class WebSocketTransport:
             from prsm.node.transport_adapter import DirectAdapter
             transport_adapter = DirectAdapter()
         self._transport_adapter = transport_adapter
+        # R9 Phase 6.3: optional peer-jurisdiction filter. When set,
+        # connect_to_peer consults the filter BEFORE adapter.open_connection.
+        # Blocked peers never reach the transport. Default None = no
+        # filtering (pre-R9 behavior). Per R9 §8 the Foundation does not
+        # ship default jurisdiction lists — operators configure this
+        # based on their own threat model. See
+        # docs/2026-04-23-r9-transport-censorship-resistance-scoping.md §6.
+        self._jurisdiction_filter = jurisdiction_filter
 
         self.peers: Dict[str, PeerConnection] = {}  # peer_id -> connection
         self._handlers: Dict[str, List[MessageHandler]] = {}
@@ -463,6 +473,20 @@ class WebSocketTransport:
         # websockets supports `sock=` to accept a pre-connected socket.
         try:
             host, port = _parse_uri_host_port(uri)
+
+            # R9 Phase 6.3: jurisdiction filter runs before any network I/O
+            # so a blocked peer never gets a TCP SYN. Operators who
+            # configured a filter (default None) can audit blocked peers
+            # via the logged reason code.
+            if self._jurisdiction_filter is not None:
+                decision = self._jurisdiction_filter.evaluate(host)
+                if not decision.allow:
+                    logger.info(
+                        "peer blocked by jurisdiction filter: host=%s reason=%s detected=%s",
+                        host, decision.reason, decision.detected_jurisdiction,
+                    )
+                    return None
+
             adapter = self._transport_adapter
             if adapter.name == "direct":
                 # Fast path: let websockets manage the connect itself.
