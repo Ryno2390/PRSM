@@ -17,7 +17,7 @@ from rich.text import Text
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from .theme import THEME, ICONS
-from .banner import PRSM_BANNER, PRSM_BANNER_COMPACT, TAGLINES, RULE
+from .banner import PRSM_BANNER, PRSM_BANNER_COMPACT, TAGLINES
 
 console = Console()
 

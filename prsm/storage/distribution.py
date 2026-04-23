@@ -13,14 +13,13 @@ import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Set
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
 )
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from prsm.storage.exceptions import PlacementError
 from prsm.storage.models import ContentDescriptor, ContentHash, ReplicationPolicy

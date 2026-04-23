@@ -7,7 +7,6 @@ size limits, rate limiting, and resource usage monitoring.
 """
 
 import asyncio
-import json
 import structlog
 import time
 from typing import Dict, Any, Optional, Callable, Set

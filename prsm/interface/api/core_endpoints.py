@@ -8,14 +8,12 @@ These are included directly in the main application, not as a router.
 
 import asyncio
 import json
-import os
 import structlog
 from datetime import datetime
 from typing import Dict, Any, Optional
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
 
 from prsm.core.config import get_settings
 from prsm.core.models import UserInput, PRSMResponse
@@ -456,8 +454,7 @@ def _register_websocket_endpoints(app: FastAPI) -> None:
     from prsm.interface.api.websocket import (
         websocket_manager,
         handle_websocket_message,
-        handle_conversation_message,
-        stream_ai_response
+        handle_conversation_message
     )
 
     @app.websocket("/ws/{user_id}")

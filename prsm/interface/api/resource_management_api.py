@@ -15,22 +15,18 @@ Features:
 """
 
 import asyncio
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from uuid import UUID
+from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 
 from ..federation.distributed_resource_manager import (
-    ResourceContributionSettings, ResourceType, ResourceMeasurement,
-    distributed_resource_manager, register_node_resources, 
+    ResourceContributionSettings, ResourceType, distributed_resource_manager, register_node_resources, 
     update_node_resource_settings, get_node_resource_profile,
-    get_network_resource_summary, allocate_resources_for_computation
+    get_network_resource_summary
 )
-from prsm.core.models import UserInput
-from prsm.economy.tokenomics.ftns_service import get_ftns_service
 import structlog
 
 logger = structlog.get_logger(__name__)

@@ -3,13 +3,11 @@ PRSM API Documentation UI Enhancements
 Custom documentation interface with interactive features
 """
 
-from typing import Any, Dict, Optional
-from fastapi import FastAPI, Request, Depends
+from typing import Dict
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
 import json
-import os
 from pathlib import Path
 
 # Template configuration

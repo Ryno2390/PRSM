@@ -8,7 +8,6 @@ Supports environment variables, config files, and secure defaults.
 import os
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 logger = logging.getLogger(__name__)

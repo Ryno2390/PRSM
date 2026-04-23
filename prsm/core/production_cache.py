@@ -7,10 +7,9 @@ and reduce database load for high concurrent usage.
 """
 
 import json
-import asyncio
 import hashlib
 from datetime import datetime, timedelta
-from typing import Any, Optional, Dict, List
+from typing import Any, Optional, Dict
 from functools import wraps
 import redis.asyncio as redis
 import structlog

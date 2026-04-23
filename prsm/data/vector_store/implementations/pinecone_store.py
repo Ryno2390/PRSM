@@ -29,7 +29,7 @@ except ImportError:
 
 from ..base import (
     PRSMVectorStore, ContentMatch, SearchFilters,
-    VectorStoreConfig, VectorStoreType, ContentType
+    VectorStoreConfig, ContentType
 )
 
 logger = logging.getLogger(__name__)

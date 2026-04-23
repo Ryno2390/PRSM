@@ -10,16 +10,13 @@ Real-time performance monitoring, distributed tracing, and metrics collection
 - Custom metrics and dashboards
 """
 
-import asyncio
 import time
 import json
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Callable, Union
+from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
-import logging
 from contextlib import asynccontextmanager
 
 import structlog

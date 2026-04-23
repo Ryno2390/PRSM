@@ -27,7 +27,7 @@ import asyncio
 import structlog
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 
 from sqlalchemy import text

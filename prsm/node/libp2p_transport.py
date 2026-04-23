@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 from prsm.node.identity import NodeIdentity
-from prsm.node.transport import P2PMessage, PeerConnection, MSG_GOSSIP, MSG_DIRECT
+from prsm.node.transport import P2PMessage, PeerConnection
 
 logger = logging.getLogger(__name__)
 

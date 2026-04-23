@@ -9,7 +9,6 @@ Mirrors the structure of ipfs_client.py for consistency.
 """
 
 import asyncio
-import hashlib
 import logging
 import time
 from dataclasses import dataclass, field

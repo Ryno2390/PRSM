@@ -10,14 +10,11 @@ The challenge: BitTorrent uses SHA-1 for piece hashes, while PRSM's
 storage proofs use SHA-256 Merkle proofs. This module bridges the two.
 """
 
-import asyncio
 import hashlib
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 from enum import Enum
 import random
 

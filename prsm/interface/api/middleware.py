@@ -349,7 +349,6 @@ async def _extract_user_id_from_token(request: Request) -> str:
 
     try:
         # Import here to avoid circular imports
-        from prsm.core.auth.jwt_handler import jwt_handler
 
         # Decode token without full verification (we just need the user ID)
         # Full verification happens in auth middleware

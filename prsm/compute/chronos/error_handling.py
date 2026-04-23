@@ -8,7 +8,6 @@ import asyncio
 import logging
 import functools
 from typing import Dict, List, Optional, Any, Callable
-from decimal import Decimal
 from datetime import datetime, timedelta
 from enum import Enum
 from dataclasses import dataclass, field

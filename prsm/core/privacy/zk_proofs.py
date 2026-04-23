@@ -14,22 +14,16 @@ Key Features:
 - Cryptographic proof generation and verification
 """
 
-import asyncio
 import hashlib
 import secrets
 import json
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Any, Set, Tuple, Union
+from typing import Dict, List, Optional, Any, Union
 from uuid import UUID, uuid4
 from dataclasses import dataclass
 from decimal import Decimal
 
-import numpy as np
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.backends import default_backend
 
 from pydantic import BaseModel, Field
 

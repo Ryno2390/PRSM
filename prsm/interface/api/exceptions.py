@@ -5,11 +5,10 @@ Provides consistent error responses and exception handling patterns
 
 import logging
 import traceback
-from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from uuid import uuid4
 
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException

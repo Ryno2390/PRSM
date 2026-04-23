@@ -21,7 +21,7 @@ import logging
 import time
 import statistics
 from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional, Set, Tuple, Any, Callable
+from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 import math
 import hashlib

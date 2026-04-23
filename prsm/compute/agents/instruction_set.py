@@ -10,7 +10,7 @@ instruction manifest that a pre-built WASM executor interprets.
 import json
 import logging
 from dataclasses import dataclass, field as dataclass_field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from enum import Enum
 
 logger = logging.getLogger(__name__)

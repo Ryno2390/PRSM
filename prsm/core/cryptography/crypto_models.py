@@ -9,9 +9,9 @@ privacy protocols, and secure communication infrastructure.
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 from sqlalchemy import Column, String, DateTime, Text, Integer, Boolean, ForeignKey, LargeBinary
 from prsm.core.db_types import UUID, JSONB
 from sqlalchemy.orm import relationship

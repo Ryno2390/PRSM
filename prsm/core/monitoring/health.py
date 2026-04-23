@@ -9,7 +9,7 @@ Monitors system health, component status, and operational readiness.
 import asyncio
 import logging
 import time
-from typing import Dict, List, Optional, Any, Callable, Union
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum

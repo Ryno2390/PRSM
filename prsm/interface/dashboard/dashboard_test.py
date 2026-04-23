@@ -4,7 +4,6 @@ Quick test of the PRSM monitoring dashboard functionality
 """
 
 import asyncio
-import time
 from pathlib import Path
 import sys
 

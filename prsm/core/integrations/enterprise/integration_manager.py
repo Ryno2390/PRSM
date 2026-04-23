@@ -8,19 +8,18 @@ for enterprise data connectivity and processing workflows.
 """
 
 import asyncio
-import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Any, Optional, Union, Callable
+from typing import Dict, List, Any, Optional, Callable
 import uuid
 from pathlib import Path
 
-from .data_connectors import DataConnector, ConnectionConfig, ConnectionStatus
-from .etl_pipeline import PipelineManager, ETLPipeline, PipelineStatus
+from .data_connectors import DataConnector
+from .etl_pipeline import PipelineManager
 from .transformation_engine import TransformationEngine
-from .sync_manager import DataSyncManager, SyncConfiguration
+from .sync_manager import DataSyncManager
 
 logger = logging.getLogger(__name__)
 

@@ -8,8 +8,7 @@ from uuid import uuid4
 from datetime import datetime
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query, Depends
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Query
 
 from prsm.core.database import FTNSQueries
 from prsm.core.redis_client import get_session_cache
@@ -183,9 +182,8 @@ async def upload_file_ui(file_data: Dict[str, Any]) -> Dict[str, Any]:
         import base64
         import hashlib
         import json
-        from pathlib import Path
         from datetime import timezone as tz
-        from prsm.storage import get_content_store, ContentHash
+        from prsm.storage import get_content_store
         from prsm.storage.exceptions import StorageError
 
         # Validate required fields

@@ -8,7 +8,7 @@ different content types (research papers, code, datasets, etc.).
 
 import re
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
 import hashlib

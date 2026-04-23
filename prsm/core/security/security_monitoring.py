@@ -3,19 +3,18 @@ PRSM API Security Monitoring and Threat Detection System
 Real-time security monitoring, threat detection, and incident response
 """
 
-from typing import Dict, Any, List, Optional, Tuple, Set, Callable
+from typing import Dict, Any, List, Optional, Set, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
 import asyncio
 import json
-import hashlib
 import ipaddress
 from collections import defaultdict, deque
 import redis.asyncio as aioredis
 import logging
 import time
-from fastapi import Request, BackgroundTasks
+from fastapi import BackgroundTasks
 try:
     import geoip2.database
     import geoip2.errors
@@ -23,7 +22,6 @@ try:
 except ImportError:
     _GEOIP2_AVAILABLE = False
 import re
-import statistics
 import math
 
 logger = logging.getLogger(__name__)

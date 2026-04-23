@@ -13,20 +13,18 @@ Cognition.AI's core insight: "actions carry implicit decisions" and agents
 need to share full reasoning context, not just final outputs.
 """
 
-import asyncio
 import json
-import hashlib
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple, Union, Set
+from typing import Dict, List, Optional, Any
 from uuid import UUID, uuid4
 
 import structlog
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from prsm.core.models import (
-    PRSMBaseModel, TimestampMixin, ReasoningStep, AgentType, TaskStatus, SafetyLevel
+    TimestampMixin, AgentType, SafetyLevel
 )
 from prsm.data.context.enhanced_context_compression import (
     ContextSegment, ContextType, ContextImportance, EnhancedContextCompressionEngine

@@ -21,13 +21,12 @@ Sprint 4 enhancements:
 
 import asyncio
 import collections
-import json
 import logging
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from prsm.node.gossip import (
     GOSSIP_TASK_ASSIGN,

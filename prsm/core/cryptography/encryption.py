@@ -6,25 +6,22 @@ Production-grade encryption service providing symmetric and asymmetric
 encryption, secure data storage, and comprehensive cryptographic operations.
 """
 
-import asyncio
 import hashlib
 import json
 import secrets
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 
 import structlog
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa, ec, padding
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
 from cryptography.fernet import Fernet
 
 from prsm.core.database import db_manager
 from .key_management import get_key_manager
 from .crypto_models import (
-    EncryptionAlgorithm, PrivacyLevel, KeyType,
-    EncryptionResult, DecryptionResult, EncryptedData,
+    EncryptionAlgorithm, PrivacyLevel, EncryptionResult, DecryptionResult, EncryptedData,
     EncryptionRequest, DecryptionRequest
 )
 

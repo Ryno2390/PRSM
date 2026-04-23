@@ -10,7 +10,7 @@ import hashlib
 import re
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Any, Set
 from uuid import uuid4
 
 

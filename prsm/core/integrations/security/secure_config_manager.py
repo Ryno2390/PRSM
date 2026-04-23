@@ -7,17 +7,15 @@ Handles migration from insecure environment variables to encrypted
 credential storage while maintaining backward compatibility.
 """
 
-import asyncio
 import os
 import secrets
 import structlog
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, List
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional
 from pathlib import Path
 
 from .secure_api_client_factory import SecureClientType, secure_client_factory
-from ..config.credential_manager import CredentialManager, CredentialType
-from ..models.integration_models import IntegrationPlatform
+from ..config.credential_manager import CredentialManager
 from .audit_logger import audit_logger
 from prsm.core.config import settings
 

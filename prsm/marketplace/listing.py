@@ -22,7 +22,7 @@ import hashlib
 import logging
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any, Dict, List, Optional
 
 from eth_utils import keccak

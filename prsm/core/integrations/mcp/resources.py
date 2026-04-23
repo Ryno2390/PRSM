@@ -6,12 +6,10 @@ Resource management for MCP servers (external data sources, files, APIs).
 """
 
 import logging
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
-from urllib.parse import urlparse
-import hashlib
 
-from .models import ResourceDefinition, MCPResource, MCPRequest, MCPMethod
+from .models import ResourceDefinition, MCPResource
 
 logger = logging.getLogger(__name__)
 

@@ -25,9 +25,7 @@ from prsm.node.gossip import GossipProtocol
 from prsm.node.local_ledger import LocalLedger, TransactionType
 from prsm.core.bittorrent_client import (
     BitTorrentClient,
-    BitTorrentResult,
     TorrentInfo,
-    TorrentState,
 )
 from prsm.core.bittorrent_manifest import (
     TorrentManifest,

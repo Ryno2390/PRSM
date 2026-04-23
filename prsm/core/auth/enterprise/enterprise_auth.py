@@ -7,18 +7,16 @@ and MFA capabilities. Provides a unified interface for all enterprise
 authentication needs.
 """
 
-import asyncio
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, List, Union
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 from enum import Enum
 import structlog
 
-from fastapi import HTTPException, status, Depends, Request
-from fastapi.security import HTTPBearer
+from fastapi import HTTPException
 
-from ..auth_manager import AuthManager, auth_manager
-from ..models import User, UserRole, TokenResponse
+from ..auth_manager import auth_manager
+from ..models import User, TokenResponse
 from .sso_provider import EnterpriseSSO, SSOConfig, enterprise_sso
 from .ldap_provider import LDAPProvider, LDAPConfig, create_ldap_provider
 from .mfa_provider import MFAProvider, MFAConfig, MFAMethod, create_mfa_provider

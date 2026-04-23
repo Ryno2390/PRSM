@@ -3,7 +3,7 @@ PRSM Cache Performance Monitoring
 Real-time cache metrics, performance analytics, and optimization recommendations
 """
 
-from typing import Dict, Any, List, Optional, Tuple, Callable
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -14,8 +14,8 @@ import statistics
 from collections import defaultdict, deque
 import redis.asyncio as aioredis
 import logging
-from fastapi import FastAPI, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 try:
     import plotly.graph_objects as go
     import plotly.express as px

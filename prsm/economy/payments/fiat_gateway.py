@@ -7,14 +7,11 @@ fraud detection, and compliance features for secure payment processing.
 """
 
 import asyncio
-import hashlib
-import hmac
-import json
 import os
 import uuid
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 
 import aiohttp
 import structlog
@@ -23,8 +20,8 @@ from cryptography.fernet import Fernet
 from prsm.core.config import get_settings
 from prsm.core.integrations.security.audit_logger import audit_logger
 from .payment_models import (
-    PaymentMethod, PaymentStatus, FiatCurrency,
-    PaymentRequest, PaymentResponse, PaymentMethodRequest, PaymentMethodResponse
+    PaymentStatus, FiatCurrency,
+    PaymentRequest, PaymentResponse
 )
 
 logger = structlog.get_logger(__name__)

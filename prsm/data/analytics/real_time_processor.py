@@ -14,11 +14,9 @@ from collections import deque, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from typing import Dict, List, Any, Optional, Callable, AsyncGenerator, Union
-import json
+from typing import Dict, List, Any, Optional, Callable, AsyncGenerator
 import threading
 
-from prsm.compute.plugins import require_optional, has_optional_dependency
 
 logger = logging.getLogger(__name__)
 

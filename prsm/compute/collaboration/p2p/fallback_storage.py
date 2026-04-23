@@ -18,13 +18,10 @@ import asyncio
 import json
 import logging
 import time
-import hashlib
 from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional, Set, Tuple, Any, Union
+from typing import Dict, List, Optional, Any
 from enum import Enum
 import aiohttp
-import base64
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -621,7 +618,6 @@ class FallbackStorageManager:
             IPFS hash string (e.g. 'QmXYZ...') or None on failure
         """
         import hashlib
-        import os
         try:
             with open(file_path, 'rb') as f:
                 content = f.read()

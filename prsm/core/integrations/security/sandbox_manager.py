@@ -28,17 +28,11 @@ import os
 import re
 import tempfile
 import shutil
-import subprocess
 import time
-import signal
-import threading
-import resource
 import uuid
-from contextlib import asynccontextmanager
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
-from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple, Set, Union
+from typing import Dict, List, Optional, Any, Set
 from uuid import UUID, uuid4
 from dataclasses import dataclass, field
 
@@ -47,7 +41,6 @@ from pydantic import BaseModel, Field
 
 from ..models.integration_models import SecurityRisk, LicenseType, SecurityScanResult
 from prsm.core.config import settings
-from prsm.core.models import TimestampMixin
 from .audit_logger import audit_logger
 
 logger = structlog.get_logger(__name__)

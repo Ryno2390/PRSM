@@ -6,7 +6,6 @@ based on configuration, with graceful handling of missing dependencies.
 """
 
 import os
-from typing import Type
 from ..base import PRSMVectorStore, VectorStoreConfig, VectorStoreType
 
 
@@ -77,19 +76,16 @@ def get_available_store_types() -> list[VectorStoreType]:
     
     # Check optional dependencies
     try:
-        import pymilvus
         available.append(VectorStoreType.MILVUS)
     except Exception:
         pass
     
     try:
-        import qdrant_client
         available.append(VectorStoreType.QDRANT)
     except Exception:
         pass
     
     try:
-        import pinecone
         available.append(VectorStoreType.PINECONE)
     except Exception:
         pass

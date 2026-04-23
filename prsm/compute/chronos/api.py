@@ -6,7 +6,7 @@ FastAPI endpoints for the CHRONOS clearing protocol.
 
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import Optional
 import logging
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from .clearing_engine import ChronosEngine
 from .wallet_manager import MultiSigWalletManager
 from .exchange_router import ExchangeRouter
-from .models import AssetType, SwapRequest, SwapType, TransactionStatus
+from .models import AssetType, SwapRequest, SwapType
 from prsm.storage import get_content_store
 from ..auth import get_current_user
 

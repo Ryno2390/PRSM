@@ -6,15 +6,15 @@ Core clearing and settlement logic for cross-asset swaps.
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 import hashlib
 import json
 
 from .models import (
     SwapRequest, Settlement, ClearingTransaction, LiquidityPool,
-    AssetType, SwapType, TransactionStatus
+    AssetType, TransactionStatus
 )
 from .wallet_manager import MultiSigWalletManager
 from .exchange_router import ExchangeRouter

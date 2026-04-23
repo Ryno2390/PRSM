@@ -3,7 +3,7 @@ PRSM Security Analytics and Reporting System
 Advanced security analytics, metrics generation, and reporting dashboard
 """
 
-from typing import Dict, Any, List, Optional, Tuple, Set
+from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -13,12 +13,9 @@ import statistics
 from collections import defaultdict, Counter
 import redis.asyncio as aioredis
 import logging
-from fastapi import FastAPI, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse
-import plotly.graph_objects as go
-import plotly.express as px
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 from plotly.utils import PlotlyJSONEncoder
-import pandas as pd
 
 logger = logging.getLogger(__name__)
 

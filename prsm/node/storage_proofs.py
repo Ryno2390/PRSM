@@ -14,15 +14,13 @@ This module implements:
 - StorageRewardIntegration: Integrates proofs with FTNS rewards
 """
 
-import asyncio
 import hashlib
-import logging
 import secrets
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 import structlog
 
 from prsm.node.identity import NodeIdentity

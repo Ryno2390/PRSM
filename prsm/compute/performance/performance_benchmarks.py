@@ -16,7 +16,6 @@ from typing import Dict, List, Any
 from dataclasses import dataclass
 from pathlib import Path
 import sys
-import os
 
 # Add PRSM to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -112,7 +111,7 @@ class PRSMBenchmarkSuite:
         print("\n🤖 Testing API Client Performance...")
         
         try:
-            from prsm.compute.agents.executors.api_clients import ModelClientRegistry, ModelProvider
+            from prsm.compute.agents.executors.api_clients import ModelClientRegistry
             
             # Test client initialization time
             start_time = time.time()

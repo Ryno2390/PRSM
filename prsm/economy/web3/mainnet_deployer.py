@@ -6,13 +6,10 @@ Production-grade deployment system for deploying FTNS smart contracts
 to Polygon mainnet with comprehensive security, monitoring, and verification.
 """
 
-import asyncio
 import structlog
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Dict, List, Optional, Any, Tuple
-from pathlib import Path
-import json
+from typing import Dict, List, Optional, Any
 import os
 
 try:
@@ -23,9 +20,7 @@ except ImportError:
     HAS_WEB3 = False
     Web3 = None
     Account = None
-import requests
 
-from prsm.core.config import get_settings
 from prsm.core.integrations.security.audit_logger import audit_logger
 from .contract_deployer import FTNSContractDeployer
 from .web3_service import Web3ServiceManager

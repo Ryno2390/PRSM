@@ -11,9 +11,8 @@ Usage:
 
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +61,6 @@ def _make_mock_handler(tool_def: Dict[str, Any]):
     get_type_hints() for Pydantic schema generation. We use exec() to create
     a real function with the correct signature and annotations.
     """
-    from typing import Optional
 
     tool_name = tool_def["name"]
     skill_name = tool_def["skill"]

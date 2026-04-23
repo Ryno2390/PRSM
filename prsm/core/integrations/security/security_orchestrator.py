@@ -8,7 +8,7 @@ before integration into PRSM. Provides a unified security pipeline.
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from uuid import uuid4
 
 from .vulnerability_scanner import VulnerabilityScanner, VulnerabilityResult

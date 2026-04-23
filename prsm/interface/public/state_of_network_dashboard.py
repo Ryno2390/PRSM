@@ -13,10 +13,9 @@ Addresses Gemini recommendation for user-facing experience.
 import asyncio
 import json
 import logging
-import os
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 try:

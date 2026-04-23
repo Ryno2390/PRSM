@@ -13,7 +13,6 @@ import structlog
 import logging
 import sys
 from typing import Any, Dict
-from pathlib import Path
 
 
 def configure_structlog(

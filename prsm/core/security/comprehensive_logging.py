@@ -11,19 +11,13 @@ import structlog
 import json
 import gzip
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Union, Callable
+from typing import Dict, List, Optional, Any, Callable
 from pathlib import Path
 from enum import Enum
 from dataclasses import dataclass, asdict
 from uuid import uuid4
-import threading
-import queue
-import time
-import hashlib
 import os
 
-from prsm.core.config import get_settings
-from prsm.core.integrations.security.audit_logger import audit_logger
 
 logger = structlog.get_logger(__name__)
 

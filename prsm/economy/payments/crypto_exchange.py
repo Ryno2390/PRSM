@@ -7,18 +7,16 @@ liquidity sourcing, and automated token conversion with multiple DEX support.
 """
 
 import asyncio
-import json
 import os
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 
 import aiohttp
 import structlog
 
-from prsm.core.config import get_settings
 from .payment_models import (
-    FiatCurrency, CryptoCurrency, ExchangeRate, PaymentStatus
+    ExchangeRate
 )
 
 logger = structlog.get_logger(__name__)

@@ -12,11 +12,10 @@ from pydantic import BaseModel, Field
 
 from ..standards import APIConfig, BaseAPIResponse, PaginatedResponse, PaginationParams
 from ..exceptions import (
-    raise_not_found, raise_validation_error, raise_forbidden,
-    NotFoundException, ValidationException
+    raise_not_found, raise_validation_error, NotFoundException, ValidationException
 )
 from ..dependencies import (
-    StandardAuth, RateLimitedAuth, RequireModelRead, RequireModelCreate,
+    StandardAuth, RequireModelRead, RequireModelCreate,
     get_pagination_params, create_endpoint_dependencies
 )
 from prsm.core.auth.models import User, Permission

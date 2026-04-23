@@ -3,9 +3,9 @@ PRSM Database Performance Optimization
 Advanced connection pooling, query optimization, read replicas, and performance monitoring
 """
 
-from typing import Dict, Any, List, Optional, Union, Callable, Tuple, Set
+from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
 import asyncio
 import time
@@ -16,14 +16,11 @@ import logging
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 import asyncpg
-from asyncpg import Pool, Connection
+from asyncpg import Pool
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool, NullPool
-from sqlalchemy import text, event, Engine
-from sqlalchemy.pool.events import PoolEvents
 import redis.asyncio as aioredis
-from .cache_invalidation import get_invalidation_manager, InvalidationEvent
 
 logger = logging.getLogger(__name__)
 

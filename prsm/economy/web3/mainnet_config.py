@@ -6,15 +6,13 @@ Manages production configuration for Polygon mainnet deployment including
 network settings, contract addresses, and environment-specific parameters.
 """
 
-import asyncio
 import structlog
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 from pathlib import Path
 import json
 import os
 
-from prsm.core.config import get_settings
 from prsm.core.integrations.security.audit_logger import audit_logger
 
 logger = structlog.get_logger(__name__)

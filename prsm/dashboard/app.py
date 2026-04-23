@@ -7,11 +7,9 @@ Provides real-time monitoring, job submission, and FTNS management.
 """
 
 import asyncio
-import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
-from uuid import UUID, uuid4
+from typing import Any, Dict, Optional, Set
 
 import structlog
 from fastapi import (
@@ -30,7 +28,6 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from prsm.core.auth.jwt_handler import jwt_handler
 from prsm.core.auth.auth_manager import AuthManager, AuthenticationError, security
 
 logger = structlog.get_logger(__name__)

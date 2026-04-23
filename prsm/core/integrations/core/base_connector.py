@@ -14,19 +14,17 @@ Key Features:
 - Health monitoring and diagnostics
 """
 
-import asyncio
 import logging
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Optional, Any, Union, Tuple
-from uuid import UUID
+from typing import Dict, List, Optional, Any
 
 logger = logging.getLogger(__name__)
 
 from ..models.integration_models import (
-    IntegrationPlatform, ConnectorConfig, IntegrationSource,
+    ConnectorConfig, IntegrationSource,
     ImportRequest, ImportResult, SecurityScanResult, ProvenanceMetadata,
     ConnectorHealth, ImportStatus, SecurityRisk
 )

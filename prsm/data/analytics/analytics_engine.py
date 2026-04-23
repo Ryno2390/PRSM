@@ -7,9 +7,9 @@ analytics capabilities including usage patterns, performance metrics,
 and learning insights.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 from uuid import uuid4
 
 import structlog

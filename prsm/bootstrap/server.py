@@ -11,11 +11,10 @@ import logging
 import signal
 import ssl
 import time
-import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Any, Callable
+from typing import Dict, List, Optional, Set, Any
 import aiohttp
 
 try:

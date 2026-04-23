@@ -5,10 +5,8 @@ PRSM Node Client
 Async Python client for PRSM node Ring 1-10 APIs.
 """
 
-import json
 import logging
 from typing import Any, Dict, List, Optional
-from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 

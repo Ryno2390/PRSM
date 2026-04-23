@@ -16,10 +16,10 @@ Features:
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, validator, SecretStr
+from pydantic import BaseModel, Field
 
 from ..models.integration_models import IntegrationPlatform
 from prsm.core.config import settings

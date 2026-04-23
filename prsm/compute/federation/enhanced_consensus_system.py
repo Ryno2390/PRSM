@@ -24,15 +24,13 @@ import asyncio
 import hashlib
 import json
 import logging
-import statistics
 import time
 from collections import defaultdict, deque
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Set, Any, Tuple, Union, Callable
-from uuid import UUID, uuid4
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Any
+from uuid import uuid4
 from enum import Enum
 from dataclasses import dataclass, field
-import math
 
 # Cryptographic imports
 try:
@@ -48,7 +46,6 @@ except ImportError:
     CRYPTO_AVAILABLE = False
 
 from prsm.core.config import settings
-from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
 # v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor / CircuitBreakerNetwork) deleted.
 
 logger = logging.getLogger(__name__)

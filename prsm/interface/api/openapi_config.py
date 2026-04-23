@@ -3,7 +3,7 @@ PRSM API OpenAPI Configuration
 Enhanced API documentation and schema definitions
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 from fastapi.openapi.utils import get_openapi
 from fastapi import FastAPI
 

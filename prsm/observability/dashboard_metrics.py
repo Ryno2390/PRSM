@@ -7,7 +7,7 @@ Collects and formats Ring 1-10 metrics for Streamlit dashboard display.
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 
 @dataclass

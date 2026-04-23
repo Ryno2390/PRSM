@@ -5,16 +5,15 @@ Main service layer that orchestrates all Web3 components including
 wallet management, contract interactions, event monitoring, and balance tracking.
 """
 
-import asyncio
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 from decimal import Decimal
 from datetime import datetime
 import os
 
 from prsm.core.database_service import DatabaseService
 from prsm.core.config import get_settings
-from .wallet_connector import Web3WalletConnector, NetworkType, WalletInfo
+from .wallet_connector import Web3WalletConnector, WalletInfo
 from .contract_interface import FTNSContractInterface
 from .event_monitor import Web3EventMonitor
 from .balance_service import FTNSBalanceService, BalanceChange

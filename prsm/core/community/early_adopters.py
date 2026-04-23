@@ -6,20 +6,18 @@ Comprehensive early adopter program with tiered benefits, milestone tracking,
 and community building features for PRSM's production launch.
 """
 
-import asyncio
 import structlog
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Dict, List, Optional, Any, Tuple
-from uuid import UUID, uuid4
+from typing import Dict, List, Optional, Any
+from uuid import uuid4
 
-from prsm.core.config import settings
 from prsm.economy.tokenomics.database_ftns_service import DatabaseFTNSService
 from prsm.economy.governance.token_distribution import get_governance_distributor, GovernanceParticipantTier
 from prsm.core.integrations.security.audit_logger import audit_logger
 from .models import (
     EarlyAdopterTier, EarlyAdopterProfile, EarlyAdopterRegistration,
-    EarlyAdopterStatusResponse, UserInterest
+    EarlyAdopterStatusResponse
 )
 
 logger = structlog.get_logger(__name__)

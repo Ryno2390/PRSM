@@ -40,7 +40,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import List
 
 import numpy as np
 

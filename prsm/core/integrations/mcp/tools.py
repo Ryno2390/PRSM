@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Any, Set
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-from .models import ToolDefinition, ToolCall, ToolResult, ToolParameterType, SecurityLevel
+from .models import ToolDefinition, ToolResult, ToolParameterType, SecurityLevel
 
 logger = logging.getLogger(__name__)
 

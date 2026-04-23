@@ -8,15 +8,14 @@ SSO, LDAP, and MFA management.
 
 from datetime import datetime
 from typing import Dict, Any, Optional, List
-from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, status, Depends, Request, Form, Query
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, EmailStr
 
-from ..auth_manager import get_current_user, require_permission, require_role
-from ..models import User, UserRole, Permission
+from ..auth_manager import get_current_user, require_permission
+from ..models import User, Permission
 from .enterprise_auth import get_enterprise_auth_manager, AuthenticationMethod
 from .mfa_provider import MFAMethod
 

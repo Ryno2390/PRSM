@@ -9,7 +9,6 @@ core system metrics, custom business metrics, and performance tracking.
 import asyncio
 import time
 import logging
-import threading
 from typing import Dict, List, Optional, Any, Callable, Union, Set
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta

@@ -16,9 +16,7 @@ from prsm.interface.auth import get_current_user
 from prsm.core.bittorrent_client import (
     BitTorrentClient,
     TorrentInfo,
-    TorrentState,
 )
-from prsm.core.bittorrent_manifest import TorrentManifest
 
 router = APIRouter(prefix="/api/v1/torrents", tags=["BitTorrent"])
 

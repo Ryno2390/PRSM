@@ -7,14 +7,13 @@ Optimizes routing through BTC as primary hub with USDC as USD bridge.
 
 import asyncio
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from decimal import Decimal
 from datetime import datetime
 from dataclasses import dataclass
 
-from .models import AssetType, SwapType
+from .models import AssetType
 from .exchange_router import ExchangeRouter
-from .price_oracles import price_aggregator, get_exchange_rate
 
 logger = logging.getLogger(__name__)
 

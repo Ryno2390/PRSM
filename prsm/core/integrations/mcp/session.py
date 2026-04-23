@@ -8,9 +8,9 @@ Session management for MCP tool interactions with context preservation.
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from .models import MCPSession, ToolCall, ToolResult
+from .models import MCPSession, ToolCall
 
 logger = logging.getLogger(__name__)
 

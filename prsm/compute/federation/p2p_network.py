@@ -4,23 +4,17 @@ Torrent-like model distribution with safety oversight and distributed execution
 """
 
 import asyncio
-import hashlib
-import json
 import logging
 import random
 import warnings
-from concurrent.futures import Future
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set, Any, Tuple
-from uuid import UUID, uuid4
+from typing import Dict, List, Optional, Set, Any
+from uuid import UUID
 
 from prsm.core.config import settings
 from prsm.core.models import (
-    ArchitectTask, PeerNode, ModelShard, TeacherModel, ModelType,
-    SafetyFlag, CircuitBreakerEvent, AgentResponse
+    ArchitectTask, PeerNode, ModelShard
 )
-from prsm.storage import get_content_store
-from prsm.economy.tokenomics.ftns_service import get_ftns_service
 # v1.6.0 scope alignment: prsm.core.safety deleted. Federation primitives
 # no longer validate in-network model output.
 from .consensus import get_consensus, ConsensusType

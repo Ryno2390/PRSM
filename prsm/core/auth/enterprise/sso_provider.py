@@ -6,20 +6,15 @@ Supports SAML 2.0 and OpenID Connect (OIDC) for enterprise single sign-on.
 Provides seamless integration with enterprise identity providers.
 """
 
-import asyncio
 import base64
 import json
 import secrets
-import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Union
-from urllib.parse import urlencode, urlparse, parse_qs
-import xml.etree.ElementTree as ET
+from urllib.parse import urlencode
 from dataclasses import dataclass
 import aiohttp
 import jwt
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.x509 import load_pem_x509_certificate
 import structlog
 

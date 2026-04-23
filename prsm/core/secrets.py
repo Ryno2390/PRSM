@@ -25,7 +25,7 @@ or other secret backends.
 """
 
 import os
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, List
 from functools import lru_cache
 import structlog
 

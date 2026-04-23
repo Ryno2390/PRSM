@@ -8,11 +8,9 @@ Decorators for easy caching of function results with different strategies.
 import asyncio
 import functools
 import hashlib
-import json
 import logging
 import time
-from typing import Any, Callable, Optional, Union, Dict, TypeVar
-from datetime import datetime, timezone
+from typing import Any, Callable, Optional, TypeVar
 
 from .cache_manager import get_cache_manager
 

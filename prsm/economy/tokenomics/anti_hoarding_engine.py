@@ -22,23 +22,17 @@ Economic Design:
 - Grace period: 90 days for new users to establish circulation patterns
 """
 
-import asyncio
-import hashlib
-import json
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, ROUND_HALF_UP
-from typing import Dict, Any, List, Optional, Tuple
-from uuid import UUID, uuid4
+from decimal import Decimal
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, and_, or_, func, desc
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, and_, or_, desc
 
 from prsm.economy.tokenomics.models import (
-    FTNSVelocityMetrics, FTNSDemurrageRecord, FTNSAntiHoardingConfig,
-    VelocityCategory, DemurrageStatus, ContributorTier
+    FTNSDemurrageRecord, VelocityCategory, DemurrageStatus, ContributorTier
 )
 
 logger = structlog.get_logger(__name__)

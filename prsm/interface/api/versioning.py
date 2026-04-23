@@ -3,7 +3,7 @@ PRSM API Versioning System
 Comprehensive version management and backward compatibility
 """
 
-from typing import Dict, Any, Optional, List, Callable, Union
+from typing import Dict, Any, Optional, List, Callable
 from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -11,7 +11,6 @@ from fastapi import Request, Response, HTTPException
 from fastapi.routing import APIRoute
 import re
 import logging
-import json
 
 logger = logging.getLogger(__name__)
 

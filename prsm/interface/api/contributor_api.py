@@ -25,7 +25,6 @@ from prsm.core.auth import get_current_user
 from prsm.core.database import get_db_session
 from prsm.economy.tokenomics.contributor_manager import ContributorManager, ContributionProofRequest
 from prsm.economy.tokenomics.models import ContributorTier, ContributionType, ProofStatus
-from prsm.storage import get_content_store
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()

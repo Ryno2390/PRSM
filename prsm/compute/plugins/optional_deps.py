@@ -8,8 +8,7 @@ Safe handling of optional dependencies with graceful fallbacks.
 
 import logging
 import importlib
-import sys
-from typing import Dict, Any, Optional, Callable, Union, List
+from typing import Dict, Any, Optional, Callable, List
 from dataclasses import dataclass
 from functools import wraps
 

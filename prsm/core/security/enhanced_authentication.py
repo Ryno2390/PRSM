@@ -3,7 +3,7 @@ PRSM Enhanced Authentication Security System
 Comprehensive authentication with multi-factor auth, session management, and advanced security features
 """
 
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -14,19 +14,13 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import secrets
 import hashlib
 import hmac
-import base64
 import pyotp
 import qrcode
 import io
 import redis.asyncio as aioredis
 import logging
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import smtplib
 import json
-import ipaddress
 from collections import defaultdict, deque
-import asyncio
 
 logger = logging.getLogger(__name__)
 

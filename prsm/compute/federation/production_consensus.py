@@ -6,13 +6,11 @@ Real Byzantine fault tolerance with cryptographic verification
 import asyncio
 import hashlib
 import json
-import logging
 import statistics
-import time
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set, Any, Tuple, Union
-from uuid import UUID, uuid4
+from typing import Dict, List, Optional, Set, Any
+from uuid import uuid4
 from enum import Enum
 
 # Cryptographic imports
@@ -28,7 +26,7 @@ except ImportError as e:
     print("Install with: pip install pynacl")
 
 from prsm.core.config import settings
-from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
+from prsm.core.models import PeerNode
 # v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor / CircuitBreakerNetwork) deleted.
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 

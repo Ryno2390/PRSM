@@ -12,17 +12,16 @@ import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Union, Callable
+from typing import Dict, List, Any, Optional
 import uuid
 
-from .metrics_collector import MetricsCollector, MetricDefinition
+from .metrics_collector import MetricsCollector
 from .visualization_engine import VisualizationEngine, ChartType, ChartConfiguration, DataSeries
-from .bi_query_engine import BusinessIntelligenceEngine, BIQuery, QueryBuilder
+from .bi_query_engine import BusinessIntelligenceEngine, BIQuery
 
-from prsm.compute.plugins import require_optional, has_optional_dependency
 
 logger = logging.getLogger(__name__)
 

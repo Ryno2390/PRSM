@@ -23,8 +23,6 @@ Security Considerations:
 - Rate limits prevent rapid stake manipulation
 """
 
-import asyncio
-import hashlib
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Any, List, Optional, Tuple
@@ -34,8 +32,7 @@ from enum import Enum
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, and_, or_, func, desc
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, func
 
 from prsm.core.database import get_async_session, StakeModel, UnstakeRequestModel, SlashEventModel
 

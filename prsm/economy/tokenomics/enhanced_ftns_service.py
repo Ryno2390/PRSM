@@ -32,11 +32,10 @@ Key Features:
 - Comprehensive error handling
 """
 
-import asyncio
 import time
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, getcontext, ROUND_HALF_UP
-from typing import List, Dict, Any, Optional, Tuple, Union
+from typing import List, Dict, Any, Optional, Tuple
 from uuid import UUID, uuid4
 from dataclasses import dataclass, field
 import structlog
@@ -48,8 +47,8 @@ getcontext().prec = 28  # 28 decimal places for microsecond precision
 
 from prsm.core.config import get_settings
 from prsm.core.models import (
-    FTNSTransaction, FTNSBalance, PRSMSession, 
-    AgentType, UserInput, PRSMResponse
+    FTNSTransaction, PRSMSession, 
+    AgentType, PRSMResponse
 )
 from prsm.core.database_service import get_database_service
 

@@ -7,16 +7,15 @@ FastAPI middleware for request validation and security checking.
 
 import logging
 import time
-from typing import Dict, Any, Optional, Type, Callable, List
-from fastapi import Request, Response, HTTPException
+from typing import Dict, Any, Optional, Type, List
+from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError as PydanticValidationError
 
 from .exceptions import (
-    ValidationError, SecurityValidationError, SchemaValidationError,
-    ValidationErrorCollection
+    ValidationError, SecurityValidationError, SchemaValidationError
 )
-from .schemas import BaseValidationSchema, APIResponseSchema, ValidationErrorResponseSchema
+from .schemas import APIResponseSchema, ValidationErrorResponseSchema
 from .sanitization import prevent_injection_attacks
 
 logger = logging.getLogger(__name__)

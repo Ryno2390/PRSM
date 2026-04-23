@@ -17,25 +17,18 @@ This module implements a comprehensive trading marketplace that enables:
 5. Market making to ensure liquidity and price discovery
 """
 
-import asyncio
-import json
-import hashlib
-import time
-import math
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple, Union, Set
+from typing import Dict, List, Optional, Any
 from uuid import UUID, uuid4
-from collections import defaultdict, deque
-import statistics
-from dataclasses import dataclass
+from collections import defaultdict
 
 import structlog
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from prsm.core.models import PRSMBaseModel, TimestampMixin
 from prsm.compute.scheduling.workflow_scheduler import ResourceType
-from prsm.compute.scheduling.ftns_pricing_engine import FTNSPricingEngine, ArbitrageOpportunity
+from prsm.compute.scheduling.ftns_pricing_engine import FTNSPricingEngine
 
 logger = structlog.get_logger(__name__)
 

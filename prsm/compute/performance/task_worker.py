@@ -3,9 +3,9 @@ PRSM Distributed Task Worker System
 High-performance distributed workers with intelligent load balancing, failure handling, and monitoring
 """
 
-from typing import Dict, Any, List, Optional, Union, Callable, Tuple, Set
+from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
 import asyncio
 import json
@@ -15,7 +15,7 @@ import logging
 import signal
 import psutil
 import traceback
-from collections import defaultdict, deque
+from collections import deque
 import redis.asyncio as aioredis
 from contextlib import asynccontextmanager
 

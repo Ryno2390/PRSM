@@ -19,7 +19,7 @@ Features:
 - Faucet information for testnets
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, Optional, Any
 from enum import Enum
 import os

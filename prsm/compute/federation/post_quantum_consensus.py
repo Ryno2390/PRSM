@@ -11,9 +11,9 @@ import hashlib
 import json
 import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set, Any, Tuple, Union
+from typing import Dict, List, Optional, Set, Any
 from dataclasses import dataclass, field
-from uuid import UUID, uuid4
+from uuid import uuid4
 from enum import Enum
 
 # Import post-quantum crypto directly

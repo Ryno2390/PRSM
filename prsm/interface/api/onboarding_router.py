@@ -24,7 +24,7 @@ All POST endpoints accept both JSON (for API clients) and HTML form data
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 import json
 import shutil
 import sys

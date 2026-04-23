@@ -6,13 +6,12 @@ Standardized error handling decorators and handlers for consistent
 error processing across all PRSM components.
 """
 
-import asyncio
 import logging
 import functools
-from typing import Callable, Any, Dict, Optional, Union, Type, Awaitable
+from typing import Callable, Any, Dict, Optional, Awaitable
 from contextlib import contextmanager, asynccontextmanager
 
-from .exceptions import PRSMException, ProcessingError, ErrorSeverity, ErrorCategory
+from .exceptions import PRSMException, ProcessingError, ErrorSeverity
 from .logging import ErrorLogger
 
 logger = logging.getLogger(__name__)

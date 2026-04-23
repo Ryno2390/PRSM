@@ -4,7 +4,7 @@ Secure authentication and authorization endpoints for PRSM
 """
 
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Request, status
 from fastapi.security import HTTPBearer
 import structlog
@@ -12,9 +12,9 @@ import structlog
 from prsm.core.auth.models import (
     LoginRequest, RegisterRequest, TokenResponse, UserResponse, 
     PasswordChange, TokenRefreshRequest, PermissionCheck, RoleAssignment,
-    User, UserRole, Permission
+    User, UserRole
 )
-from prsm.core.auth.auth_manager import auth_manager, get_current_user, require_auth, require_permission, require_role
+from prsm.core.auth.auth_manager import auth_manager, require_auth, require_role
 from prsm.core.integrations.security.audit_logger import audit_logger
 
 logger = structlog.get_logger(__name__)

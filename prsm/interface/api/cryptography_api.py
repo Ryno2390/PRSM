@@ -10,16 +10,14 @@ import structlog
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel, Field
 
 from prsm.core.auth import get_current_user
-from prsm.core.auth.models import UserRole
-from prsm.core.auth.auth_manager import auth_manager
 from prsm.core.cryptography import (
     get_key_manager, get_encryption_service, get_zk_proof_system,
     KeyType, EncryptionAlgorithm, KeyUsage, PrivacyLevel,
-    KeyGenerationRequest, EncryptionRequest, DecryptionRequest, ZKProofRequest
+    KeyGenerationRequest, EncryptionRequest, ZKProofRequest
 )
 
 logger = structlog.get_logger(__name__)

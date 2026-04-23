@@ -13,14 +13,13 @@ Key Endpoints:
 - Integration analytics
 """
 
-import asyncio
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Dict, List, Optional, Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from prsm.core.integrations.core.integration_manager import integration_manager
 from ..connectors.github_connector import GitHubConnector
@@ -28,7 +27,7 @@ from ..connectors.huggingface_connector import HuggingFaceConnector
 from ..connectors.ollama_connector import OllamaConnector
 from ..models.integration_models import (
     IntegrationPlatform, ConnectorConfig, IntegrationSource,
-    ImportRequest, ImportResult, ImportStatus, ConnectorHealth,
+    ImportRequest, ImportStatus, ConnectorHealth,
     IntegrationStats
 )
 from prsm.core.models import PRSMBaseModel

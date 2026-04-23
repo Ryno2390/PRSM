@@ -15,7 +15,7 @@ import sys
 import click
 from rich.table import Table
 
-from .ui import console, section, summary_panel, success, info, error, muted
+from .ui import console, section, summary_panel, info, error
 from .theme import THEME, ICONS
 
 

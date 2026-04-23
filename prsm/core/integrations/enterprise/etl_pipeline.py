@@ -8,16 +8,15 @@ batch and streaming data processing with robust error handling and monitoring.
 """
 
 import asyncio
-import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Any, Optional, Union, Callable, AsyncGenerator
+from typing import Dict, List, Any, Optional, Callable
 import uuid
 from pathlib import Path
 
-from .data_connectors import DataConnector, ConnectionConfig, QueryRequest, QueryResult
+from .data_connectors import DataConnector, QueryRequest
 
 logger = logging.getLogger(__name__)
 

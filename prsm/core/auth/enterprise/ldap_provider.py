@@ -6,10 +6,9 @@ Provides LDAP and Active Directory authentication and user synchronization.
 Supports group-based role mapping and automatic user provisioning.
 """
 
-import asyncio
 import ssl
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List, Set
+from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 import structlog
 

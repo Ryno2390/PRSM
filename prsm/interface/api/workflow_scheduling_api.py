@@ -17,10 +17,10 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Depends, status, Query
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 
-from prsm.core.auth import get_current_user, require_auth
+from prsm.core.auth import get_current_user
 from prsm.compute.scheduling.workflow_scheduler import (
     get_workflow_scheduler, ScheduledWorkflow, WorkflowStep, 
     ExecutionWindow, ResourceRequirement, ResourceType,

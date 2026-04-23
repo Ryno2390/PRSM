@@ -16,22 +16,15 @@ Key Features:
 """
 
 import asyncio
-import aiohttp
 import hashlib
 import secrets
-import json
-import re
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Any, Set, Tuple, Union
+from typing import Dict, List, Optional, Any
 from uuid import UUID, uuid4
 from dataclasses import dataclass
-from decimal import Decimal
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse
 
-import feedparser
-import requests
-from bs4 import BeautifulSoup
 
 from pydantic import BaseModel, Field
 

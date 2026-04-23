@@ -26,14 +26,12 @@ performance and enable distributed coordination.
 import asyncio
 import json
 import time
-from contextlib import asynccontextmanager
-from typing import Dict, Any, Optional, List, Union, AsyncGenerator
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 import structlog
 
-import redis.asyncio as redis
 from redis.asyncio import ConnectionPool, Redis
-from redis.exceptions import RedisError, ConnectionError, TimeoutError
+from redis.exceptions import ConnectionError, TimeoutError
 
 from prsm.core.config import get_settings
 

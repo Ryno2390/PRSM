@@ -20,7 +20,6 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from prsm.node.compute_provider import JobStatus, JobType
 from prsm.node.gossip import (
     GOSSIP_JOB_ACCEPT,
-    GOSSIP_JOB_CANCEL,
     GOSSIP_JOB_CONFIRM,
     GOSSIP_JOB_OFFER,
     GOSSIP_JOB_RESULT,

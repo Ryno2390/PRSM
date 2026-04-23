@@ -12,11 +12,10 @@ Usage:
     app = create_app(environment="testing")  # Test configuration
 """
 
-from typing import Callable, Optional, List, Dict, Any
+from typing import Callable, Optional, List, Dict
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 import structlog
 
 from prsm.core.config import get_settings

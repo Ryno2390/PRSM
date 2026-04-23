@@ -23,14 +23,12 @@ Usage:
     results = await store.search(query_embedding, limit=10)
 """
 
-import asyncio
 import logging
-import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 

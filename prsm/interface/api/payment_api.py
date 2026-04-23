@@ -8,7 +8,7 @@ and payment status tracking with comprehensive security and compliance features.
 
 import structlog
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, HTTPException, Depends, status, Query, BackgroundTasks, Request
 from pydantic import BaseModel, Field
@@ -20,7 +20,7 @@ from prsm.economy.payments import (
     get_payment_processor, get_fiat_gateway, get_crypto_exchange,
     PaymentMethod, PaymentStatus, FiatCurrency, CryptoCurrency,
     PaymentRequest, PaymentResponse, TransactionQuery, TransactionList,
-    PaymentStats, ExchangeRate
+    PaymentStats
 )
 
 logger = structlog.get_logger(__name__)

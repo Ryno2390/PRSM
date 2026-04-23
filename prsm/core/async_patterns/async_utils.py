@@ -7,8 +7,7 @@ Common async patterns and utilities for improved I/O performance.
 
 import asyncio
 import logging
-import time
-from typing import Any, Callable, List, TypeVar, Optional, Union, Dict, AsyncIterator, Iterator
+from typing import Any, Callable, List, TypeVar, Optional, Union, Dict
 from functools import wraps
 from contextlib import asynccontextmanager
 import weakref

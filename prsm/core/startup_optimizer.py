@@ -8,7 +8,7 @@ connection warming, and efficient initialization strategies.
 
 import asyncio
 import time
-from typing import List, Callable, Any
+from typing import List, Callable
 from contextlib import asynccontextmanager
 import structlog
 

@@ -18,7 +18,6 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime
 from typing import Dict, List, Optional, Any
 import numpy as np
 
@@ -33,7 +32,7 @@ except ImportError:
 
 from ..base import (
     PRSMVectorStore, ContentMatch, SearchFilters,
-    VectorStoreConfig, VectorStoreType, ContentType
+    VectorStoreConfig, ContentType
 )
 
 logger = logging.getLogger(__name__)

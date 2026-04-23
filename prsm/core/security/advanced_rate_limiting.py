@@ -3,20 +3,15 @@ PRSM Advanced Rate Limiting System
 Enterprise-grade rate limiting with multiple tiers and intelligent threat detection
 """
 
-from typing import Dict, Any, List, Optional, Tuple, Callable
+from typing import Dict, Any, Optional, Tuple, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-import asyncio
 import json
-import hashlib
 import ipaddress
-from collections import defaultdict, deque
 import time
-import math
 
-from fastapi import Request, Response, HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Request, Response
 import redis.asyncio as aioredis
 import logging
 

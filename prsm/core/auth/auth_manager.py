@@ -4,19 +4,19 @@ Central authentication and authorization management for PRSM
 """
 
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from uuid import UUID, uuid4
 import structlog
 
-from fastapi import HTTPException, status, Depends, Request
+from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import select, or_
 from sqlalchemy.exc import IntegrityError
 
 from prsm.core.database import get_database_service, get_async_session, FTNSBalanceModel, FTNSTransactionModel
 from prsm.core.auth.models import User, UserRole, Permission, LoginRequest, RegisterRequest, TokenResponse
-from prsm.core.auth.jwt_handler import jwt_handler, TokenData
+from prsm.core.auth.jwt_handler import jwt_handler
 from prsm.core.integrations.security.audit_logger import audit_logger
 
 logger = structlog.get_logger(__name__)

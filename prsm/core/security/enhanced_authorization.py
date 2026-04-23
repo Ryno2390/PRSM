@@ -11,21 +11,16 @@ Production-ready security controls addressing Gemini's audit concerns:
 - API security headers and CORS configuration
 """
 
-import asyncio
 import time
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional, Set, Callable
-from uuid import UUID
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional, Callable
 from functools import wraps
-import hashlib
 import structlog
 
-from fastapi import HTTPException, Request, Depends, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from prsm.core.database_service import get_database_service
-from prsm.core.auth import get_current_user
 from prsm.core.models import UserRole
 from prsm.core.config import get_settings
 

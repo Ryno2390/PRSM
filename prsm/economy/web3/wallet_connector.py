@@ -5,14 +5,12 @@ Handles wallet connections, transaction signing, and Web3 provider management
 for seamless integration with Polygon blockchain.
 """
 
-import asyncio
 import logging
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, Optional
 from decimal import Decimal
 from dataclasses import dataclass
 from enum import Enum
 
-import json
 import os
 
 # Web3 imports with graceful fallback (matches pattern in blockchain/contract_manager.py)

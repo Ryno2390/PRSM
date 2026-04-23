@@ -20,14 +20,12 @@ import logging
 import time
 import secrets
 import hashlib
-from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional, Set, Tuple, Any, Union, Callable
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Any, Callable
 from enum import Enum
-import base64
-import struct
 
 from .crypto_sharding import CryptoSharding
-from .key_management import DistributedKeyManager, CryptographicKey, KeyType
+from .key_management import DistributedKeyManager
 from .access_control import PostQuantumAccessController, Permission
 
 logger = logging.getLogger(__name__)

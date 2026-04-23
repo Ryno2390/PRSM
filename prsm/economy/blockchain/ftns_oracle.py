@@ -25,13 +25,11 @@ Key Features:
 """
 
 import asyncio
-import json
-import time
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, getcontext
-from typing import Dict, List, Any, Optional, Tuple, Union
-from uuid import UUID, uuid4
-from dataclasses import dataclass, asdict
+from typing import Dict, List, Any, Optional
+from uuid import uuid4
+from dataclasses import dataclass
 import structlog
 from enum import Enum
 
@@ -52,7 +50,6 @@ except ImportError:
     HexBytes = None
 
 from prsm.core.config import get_settings
-from prsm.economy.tokenomics.production_ledger import get_production_ledger, TransactionRequest
 from prsm.core.database_service import get_database_service
 
 # Set precision for financial calculations

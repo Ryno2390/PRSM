@@ -28,7 +28,7 @@ import json
 import re
 import urllib.parse
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union, Callable
+from typing import Any, Dict, List, Optional, Union
 from enum import Enum
 import structlog
 

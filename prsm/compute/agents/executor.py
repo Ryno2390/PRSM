@@ -13,11 +13,10 @@ import base64
 import hashlib
 import json
 import logging
-import time
 from typing import Any, Dict, Tuple
 
 from prsm.compute.agents.models import AgentManifest, MobileAgent
-from prsm.compute.wasm.models import ExecutionStatus, ResourceLimits
+from prsm.compute.wasm.models import ResourceLimits
 from prsm.compute.wasm.runtime import WasmtimeRuntime
 
 logger = logging.getLogger(__name__)

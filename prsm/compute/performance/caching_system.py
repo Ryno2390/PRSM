@@ -3,18 +3,16 @@ PRSM Comprehensive Caching System
 Multi-layer caching with Redis clustering, intelligent invalidation, and performance monitoring
 """
 
-from typing import Dict, Any, List, Optional, Union, Callable, Tuple, Set
+from typing import Dict, Any, List, Optional, Union, Callable, Set
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 import asyncio
-import json
 import hashlib
 import pickle
 import time
 import statistics
 from collections import defaultdict, deque
-import redis.asyncio as aioredis
 from redis.asyncio.cluster import RedisCluster
 import logging
 from functools import wraps

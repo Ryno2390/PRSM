@@ -6,7 +6,7 @@ Comprehensive validation schemas for all PRSM API endpoints and data structures.
 """
 
 from pydantic import BaseModel, validator, Field, root_validator
-from typing import Optional, Dict, List, Any, Union
+from typing import Optional, Dict, List, Any
 from decimal import Decimal
 from datetime import datetime
 from enum import Enum

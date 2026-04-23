@@ -13,11 +13,10 @@ Key Features:
 - Democratic participation while preventing plutocracy
 """
 
-import asyncio
 import math
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Any, Set, Tuple
+from typing import Dict, List, Optional, Any, Set
 from uuid import UUID, uuid4
 from dataclasses import dataclass
 from decimal import Decimal

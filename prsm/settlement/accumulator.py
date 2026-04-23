@@ -26,9 +26,8 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from prsm.compute.shard_receipt import ShardExecutionReceipt
 

@@ -242,7 +242,6 @@ class PluginManager:
         
         # User plugins directory
         try:
-            import os
             user_plugins = Path.home() / ".prsm" / "plugins"
             if user_plugins.exists():
                 self._plugin_directories.append(user_plugins)

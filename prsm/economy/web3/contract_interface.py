@@ -5,10 +5,9 @@ Provides high-level interface for interacting with FTNS smart contracts
 including token operations, marketplace, and governance functions.
 """
 
-import asyncio
 import json
 import logging
-from typing import Dict, List, Optional, Tuple, Any, Union
+from typing import Dict, List, Optional, Any
 from decimal import Decimal
 from dataclasses import dataclass
 from pathlib import Path

@@ -12,14 +12,10 @@ Production-ready security middleware for PRSM API hardening:
 """
 
 import time
-import json
-from typing import Callable, Dict, Any, Optional
-from datetime import datetime, timezone
 import structlog
 
 from fastapi import Request, Response, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import RequestResponseEndpoint
 
 from prsm.core.config import get_settings

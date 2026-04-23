@@ -3,7 +3,7 @@ PRSM Advanced Metrics Collection and Export System
 Comprehensive metrics collection with Prometheus integration, custom metrics, and real-time monitoring
 """
 
-from typing import Dict, Any, List, Optional, Union, Callable, Set, Tuple
+from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum

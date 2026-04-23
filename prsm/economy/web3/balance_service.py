@@ -11,10 +11,9 @@ from typing import Dict, List, Optional, Tuple, Any
 from decimal import Decimal
 from datetime import datetime, timedelta
 from dataclasses import dataclass
-import json
 
 from prsm.core.database_service import DatabaseService
-from prsm.core.models import FTNSWallet, FTNSTransaction
+from prsm.core.models import FTNSWallet
 from .wallet_connector import Web3WalletConnector
 from .contract_interface import FTNSContractInterface, TokenBalance
 

@@ -10,13 +10,11 @@ import json
 import hashlib
 import structlog
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, Union, List
-from dataclasses import dataclass, field
+from typing import Dict, Any, Optional
+from dataclasses import dataclass
 from enum import Enum
 
 from pydantic import BaseModel, Field
-from sqlalchemy import Column, String, DateTime, Boolean, Text, Enum as SQLEnum
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from uuid import UUID, uuid4
 
 logger = structlog.get_logger(__name__)

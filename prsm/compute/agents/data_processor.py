@@ -14,7 +14,7 @@ import csv
 import io
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from prsm.compute.agents.instruction_set import AgentOp, InstructionManifest
 

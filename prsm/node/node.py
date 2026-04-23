@@ -8,15 +8,10 @@ a single running node.
 """
 
 import asyncio
-import hashlib
-import json
 import logging
 import os
 import time
-import uuid as _uuid
-from dataclasses import dataclass, field
-from enum import Enum as _Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from decimal import Decimal
 
 from contextlib import suppress
@@ -36,7 +31,7 @@ try:
 except Exception:
     _HAS_EMBEDDING_API = False
 from prsm.node.local_ledger import LocalLedger, TransactionType
-from prsm.node.dag_ledger import DAGLedger, DAGLedgerAdapter
+from prsm.node.dag_ledger import DAGLedger
 from prsm.node.transport import WebSocketTransport
 from prsm.node.discovery import PeerDiscovery
 from prsm.node.gossip import GossipProtocol
@@ -49,7 +44,7 @@ from prsm.node.content_provider import ContentProvider
 from prsm.node.ledger_sync import LedgerSync
 from prsm.node.agent_registry import AgentRegistry
 from prsm.node.agent_collaboration import AgentCollaboration, BidStrategy
-from prsm.economy.tokenomics.staking_manager import StakingManager, StakingConfig, StakeType
+from prsm.economy.tokenomics.staking_manager import StakingManager, StakingConfig
 from prsm.economy.ftns_onchain import OnChainFTNSLedger
 from prsm.node.content_economy import ContentEconomy, RoyaltyModel
 
