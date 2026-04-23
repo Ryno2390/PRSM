@@ -4,7 +4,10 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import asyncio
 import psutil
-# import aioredis  # Temporarily commented out for Python 3.13 compatibility
+# The top-level `aioredis` package is unmaintained and fails to import on
+# Python 3.13. `redis.asyncio` (redis-py >= 4.2) is the supported
+# replacement with the same from_url / ping / close API.
+from redis import asyncio as aioredis
 import asyncpg
 import httpx
 import time

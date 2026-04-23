@@ -17,6 +17,8 @@ files, while maintaining high availability and performance through
 intelligent distribution strategies.
 """
 
+import asyncio
+
 from .node_discovery import (
     NodeDiscovery,
     PeerNode,

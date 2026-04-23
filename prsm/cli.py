@@ -8,7 +8,13 @@ import socket
 import sys
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Forward references for type annotations — the actual NodeConfig class
+    # is imported inside functions that need it at runtime (setup wizard /
+    # configure flow) to avoid loading the full node stack at module import.
+    from prsm.node.config import NodeConfig  # noqa: F401
 from urllib.parse import urlparse
 
 import os
@@ -492,6 +498,9 @@ def main(ctx):
             click.echo("  ◇ PRSM is not configured yet. Run: prsm setup")
             click.echo()
 
+
+# ── Theme + icons (used by config/mcp subcommands below) ─────────────
+from prsm.cli_modules.theme import THEME, ICONS  # noqa: E402, F401
 
 # ── Skills CLI (Phase 4.3) ───────────────────────────────────────────
 from prsm.cli_modules.skills_cli import skills as skills_group  # noqa: E402
@@ -1657,6 +1666,8 @@ def _run_interactive_configure(config: "NodeConfig") -> None:
     backward compat), then also runs the new PRSMConfig wizard so both
     configs stay in sync.
     """
+    from prsm.node.compute_provider import detect_resources
+
     console.print()
     console.print("  NOTE: prsm node configure (interactive) is deprecated.", style="yellow")
     console.print("  Tip: Use `prsm config` for the full experience.", style="dim")
@@ -2268,6 +2279,16 @@ def ftns_yield_estimate(hours, stake):
 # ============================================================================
 # SETTLEMENT COMMANDS (under ftns group)
 # ============================================================================
+
+def _get_api_url() -> str:
+    """Return the PRSM API URL — env var override > loopback default.
+
+    Settlement subcommands read this when the caller omits --api-url.
+    Uses PRSM_API_URL env var if set, else 127.0.0.1:8000 which matches
+    the default in other CLI subcommands (e.g. `start --api-port 8000`).
+    """
+    return os.environ.get("PRSM_API_URL", "http://127.0.0.1:8000")
+
 
 @ftns.group()
 def settle():

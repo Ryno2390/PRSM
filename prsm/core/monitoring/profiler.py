@@ -9,6 +9,7 @@ and bottleneck identification.
 
 import asyncio
 import time
+import traceback
 import psutil
 import functools
 import tracemalloc

@@ -16,6 +16,7 @@ Key Features:
 import hashlib
 import json
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Dict, List, Optional, Any, Tuple
 from uuid import UUID, uuid4
 

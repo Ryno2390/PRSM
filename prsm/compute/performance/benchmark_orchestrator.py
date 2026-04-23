@@ -34,6 +34,10 @@ def get_global_collector():
             return {}
     return MockCollector()
 
+
+from prsm.compute.federation.p2p_network import P2PModelNetwork
+from prsm.compute.federation.multi_region_p2p_network import MultiRegionP2PNetwork
+
 from uuid import uuid4
 
 

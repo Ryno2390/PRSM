@@ -6,6 +6,7 @@ Optimizes API response times through compression, caching,
 connection pooling, and efficient request handling.
 """
 
+import asyncio
 import gzip
 import json
 from typing import Any, Dict

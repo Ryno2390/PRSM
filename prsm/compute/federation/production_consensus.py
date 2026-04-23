@@ -892,8 +892,12 @@ class ProductionConsensus:
                 else:
                     self.peer_reputations[peer_id] = 0.0
                 
-                # Economic penalty via FTNS
+                # Economic penalty via FTNS. Acquire service lazily — the
+                # module-level `get_ftns_service` is imported at the top of
+                # this file; the old local variable binding was lost during
+                # a refactor and pyflakes flagged it as undefined.
                 try:
+                    ftns_service = get_ftns_service()
                     await ftns_service.charge_context_access(peer_id, 10000)  # Heavy penalty
                 except Exception as e:
                     print(f"⚠️ FTNS penalty failed for peer {peer_id}: {e}")

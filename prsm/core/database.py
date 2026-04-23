@@ -28,8 +28,14 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List, AsyncGenerator
+from typing import Dict, Any, Optional, List, AsyncGenerator, TYPE_CHECKING
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    # Forward reference for the signature on upsert_proposal below. Real
+    # import avoided to prevent circular dependency between
+    # prsm.core.database and prsm.core.models / prsm.economy.governance.
+    from prsm.core.models import GovernanceProposal  # noqa: F401
 from sqlalchemy import (
     create_engine, MetaData, Table, Column, Integer, BigInteger, String, DateTime,
     Float, Boolean, JSON, Text, ForeignKey, Index, UniqueConstraint, text,

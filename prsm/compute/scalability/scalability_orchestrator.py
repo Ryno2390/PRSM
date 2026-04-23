@@ -25,6 +25,7 @@ from ..agents.executors.unified_router import UnifiedModelRouter
 from .cpu_optimizer import CPUOptimizer
 from .auto_scaler import AutoScaler
 from .advanced_cache import CacheManager
+from .intelligent_router import IntelligentRouter
 
 logger = structlog.get_logger(__name__)
 
