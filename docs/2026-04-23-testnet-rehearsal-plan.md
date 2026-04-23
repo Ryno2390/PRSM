@@ -43,7 +43,7 @@ Now the three deploy scripts — `deploy-audit-bundle.js`,
 
 | Deploy script | Bundle | Contracts |
 |---|---|---|
-| `deploy-audit-bundle.js` | Phase 3.1 + 7 + 7.1 audit scope | EscrowPool, BatchSettlementRegistry, SignatureVerifier (Mock on testnet, production Ed25519 on mainnet), StakeBond |
+| `deploy-audit-bundle.js` | Phase 3.1 + 7 + 7.1 audit scope | EscrowPool, BatchSettlementRegistry, production Ed25519Verifier (MockSignatureVerifier only if USE_MOCK_VERIFIER=1 on non-mainnet), StakeBond |
 | `deploy-phase8-emission.js` | Phase 8 emission layer | EmissionController, CompensationDistributor |
 | `deploy-phase7-storage.js` | Phase 7-storage | StorageSlashing, KeyDistribution |
 

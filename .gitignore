@@ -19,6 +19,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+# Exception: Solidity library sources for Ed25519 verifier live under contracts/contracts/lib/
+!contracts/contracts/lib/
 parts/
 sdist/
 var/
@@ -322,3 +324,4 @@ sdks/javascript/package-lock.json
 
 # Editor / IDE state
 .obsidian/
+.gstack/
