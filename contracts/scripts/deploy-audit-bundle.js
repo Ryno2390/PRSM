@@ -71,13 +71,16 @@ async function main() {
 
   if (balance === 0n) throw new Error("Deployer has zero balance");
 
-  // Mainnet production-verifier guard — refuse to deploy the mock to Base mainnet.
+  // Mainnet production-verifier behavior: deploy the production Ed25519Verifier
+  // by default. Operator can override with SIGNATURE_VERIFIER_ADDRESS (e.g., to
+  // share a verifier across multiple registries). USE_MOCK_VERIFIER=1 is an
+  // escape hatch only valid on non-mainnet networks.
   const isMainnet = network === "base" || network === "mainnet";
-  if (isMainnet && !preDeployedVerifier) {
+  const useMockVerifier = process.env.USE_MOCK_VERIFIER === "1";
+  if (isMainnet && useMockVerifier) {
     throw new Error(
-      "SIGNATURE_VERIFIER_ADDRESS is required on mainnet. The MockSignatureVerifier " +
-      "is test-only (verify() returns a flag set by anyone). Deploy an audited Ed25519 " +
-      "implementation first, then pass its address via SIGNATURE_VERIFIER_ADDRESS."
+      "USE_MOCK_VERIFIER=1 is forbidden on mainnet. MockSignatureVerifier is " +
+      "test-only (verify() returns a flag set by anyone)."
     );
   }
 
@@ -113,18 +116,28 @@ async function main() {
 
   // ── 3. Signature verifier ──────────────────────────────────────────
   let verifierAddress;
+  let verifierKind;
   if (preDeployedVerifier) {
     verifierAddress = hre.ethers.getAddress(preDeployedVerifier);
+    verifierKind = "pre-deployed";
     console.log(`\n[3/5] Using pre-deployed verifier at ${verifierAddress}`);
-  } else {
+  } else if (useMockVerifier) {
     console.log("\n[3/5] Deploying MockSignatureVerifier (TEST-ONLY)…");
     const Verifier = await hre.ethers.getContractFactory("MockSignatureVerifier");
     const verifier = await Verifier.deploy();
     await verifier.waitForDeployment();
     verifierAddress = await verifier.getAddress();
+    verifierKind = "mock";
+  } else {
+    console.log("\n[3/5] Deploying production Ed25519Verifier…");
+    const Verifier = await hre.ethers.getContractFactory("Ed25519Verifier");
+    const verifier = await Verifier.deploy();
+    await verifier.waitForDeployment();
+    verifierAddress = await verifier.getAddress();
+    verifierKind = "ed25519";
   }
   deployments.SignatureVerifier = verifierAddress;
-  console.log(`   SignatureVerifier:   ${verifierAddress}`);
+  console.log(`   SignatureVerifier:   ${verifierAddress}  (${verifierKind})`);
 
   // ── 4. StakeBond ────────────────────────────────────────────────────
   console.log("\n[4/5] Deploying StakeBond…");
@@ -201,7 +214,7 @@ async function main() {
     params: {
       challengeWindowSeconds: challengeWindow.toString(),
       unbondDelaySeconds: unbondDelay.toString(),
-      verifierIsMock: !preDeployedVerifier,
+      verifierKind,
     },
     contracts: {
       ...deployments,
@@ -227,7 +240,9 @@ async function main() {
       { name: "BatchSettlementRegistry", address: deployments.BatchSettlementRegistry, args: [deployer.address, challengeWindow] },
       { name: "StakeBond", address: deployments.StakeBond, args: [deployer.address, ftnsChecksum, unbondDelay] },
     ];
-    if (!preDeployedVerifier) {
+    if (verifierKind === "ed25519") {
+      targets.push({ name: "Ed25519Verifier", address: verifierAddress, args: [] });
+    } else if (verifierKind === "mock") {
       targets.push({ name: "MockSignatureVerifier", address: verifierAddress, args: [] });
     }
     for (const t of targets) {
