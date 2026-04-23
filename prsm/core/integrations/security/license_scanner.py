@@ -7,9 +7,7 @@ integration, ensuring PRSM only imports permissively licensed content.
 """
 
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Dict, List, Optional, Any
-from uuid import UUID, uuid4
 
 from ..models.integration_models import LicenseType
 

@@ -9,7 +9,7 @@ import logging
 import time
 from typing import Optional
 
-from prsm.compute.tee.models import TEEType, DPConfig, ConfidentialResult, PrivacyLevel
+from prsm.compute.tee.models import ConfidentialResult, PrivacyLevel
 from prsm.compute.tee.runtime import TEERuntime, SoftwareTEERuntime
 from prsm.compute.tee.dp_noise import DPNoiseInjector
 from prsm.compute.wasm.models import ResourceLimits, ExecutionStatus

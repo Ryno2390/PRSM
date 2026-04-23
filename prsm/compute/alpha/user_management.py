@@ -18,10 +18,8 @@ Manages the alpha testing program with 100+ technical users, including:
 ✅ Build community around PRSM platform
 """
 
-import asyncio
 import json
 import secrets
-import hashlib
 import uuid as _uuid
 from decimal import Decimal
 from datetime import datetime, timedelta
@@ -30,9 +28,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 import structlog
 
-from prsm.core.database import db_manager, FTNSQueries
+from prsm.core.database import FTNSQueries
 from prsm.economy.tokenomics.atomic_ftns_service import AtomicFTNSService
-from prsm.core.models import UserInput, PRSMResponse
+from prsm.core.models import PRSMResponse
 
 logger = structlog.get_logger(__name__)
 

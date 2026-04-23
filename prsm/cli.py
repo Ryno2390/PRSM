@@ -272,7 +272,6 @@ def parse_active_days(value: Optional[str]) -> List[int]:
 
 def _node_preflight_diagnostics(config: "NodeConfig") -> List[PreflightCheckResult]:
     """Run non-breaking node startup diagnostics with required/optional classification."""
-    from prsm.node.config import NodeRole
 
     checks: List[PreflightCheckResult] = []
 
@@ -446,7 +445,6 @@ def _init_config():
     module is imported, get_settings()/get_config() return valid objects.
     """
     from prsm.core.config import ConfigManager
-    from prsm.core.config.schemas import PRSMConfig
     manager = ConfigManager()
     if manager.get_config() is None:
         manager.load_config()
@@ -622,7 +620,6 @@ def dashboard(port: int, api_port: int):
     """Launch the high-fidelity PRSM Dashboard and API"""
     import subprocess
     import time
-    import os
 
     _init_config()
     
@@ -1374,7 +1371,6 @@ def peers():
     """List connected peers"""
     from prsm.node.config import NodeConfig
     from prsm.node.identity import load_node_identity
-    from pathlib import Path
 
     config = NodeConfig.load()
     identity = load_node_identity(config.identity_path)
@@ -1489,8 +1485,7 @@ def configure(show: bool, cpu: Optional[int], memory: Optional[int], storage: Op
     With --show, prints current configuration.
     With specific flags, updates only those settings.
     """
-    from prsm.node.config import NodeConfig, NodeRole
-    from prsm.node.compute_provider import detect_resources
+    from prsm.node.config import NodeConfig
     
     config = NodeConfig.load()
     
@@ -1601,7 +1596,6 @@ def configure(show: bool, cpu: Optional[int], memory: Optional[int], storage: Op
 
 def _show_configuration(config: "NodeConfig") -> None:
     """Display current node configuration in human-readable format."""
-    from prsm.node.config import NodeRole
     from prsm.node.compute_provider import detect_resources
     
     # Detect actual system resources
@@ -1696,7 +1690,6 @@ def _run_interactive_configure(config: "NodeConfig") -> None:
 
     # Also sync to the new config system
     try:
-        from prsm.cli_modules.config_schema import PRSMConfig
         from prsm.cli_modules.migration import migrate_if_needed
         migrate_if_needed()
     except Exception:
@@ -2778,7 +2771,6 @@ def upload(
 
     if semantic_shard:
         console.print(f"[bold]Semantic sharding enabled[/bold]")
-        import json
         from prsm.data.shard_models import SemanticShard, SemanticShardManifest
 
         # Read file and create simple shards based on line count
@@ -3598,7 +3590,6 @@ def status(infohash: str, api_url: str):
         progress = data.get("progress", 0) * 100
 
         from rich.panel import Panel
-        from rich.progress import Progress, BarColumn
 
         # Build progress bar
         progress_bar = "█" * int(progress / 5) + "░" * (20 - int(progress / 5))

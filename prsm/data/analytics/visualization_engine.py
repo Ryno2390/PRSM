@@ -13,11 +13,10 @@ import base64
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Any, Optional, Union, Tuple
-from pathlib import Path
+from typing import Dict, List, Any, Optional
 import io
 
-from prsm.compute.plugins import require_optional, has_optional_dependency
+from prsm.compute.plugins import require_optional
 
 logger = logging.getLogger(__name__)
 

@@ -3,17 +3,15 @@ PRSM API Migration and Deprecation System
 Comprehensive system for managing API migrations and deprecations
 """
 
-from typing import Dict, Any, List, Optional, Callable, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
-from fastapi import Request, Response, FastAPI
-from fastapi.responses import JSONResponse, HTMLResponse
-import json
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 import logging
 
-from .versioning import APIVersion, version_registry, get_request_version
-from .compatibility import compatibility_engine, migration_guide_generator
+from .versioning import APIVersion, version_registry
 
 logger = logging.getLogger(__name__)
 

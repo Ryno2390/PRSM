@@ -3,7 +3,7 @@ PRSM Observability Integration
 Complete integration of monitoring, tracing, metrics, logging, alerting, and dashboard systems
 """
 
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, Optional
 from dataclasses import dataclass
 import asyncio
 import logging
@@ -18,19 +18,18 @@ from .tracing import (
 from .metrics import (
     initialize_metrics, get_metrics_collector, start_metrics_collection,
     MetricsConfig, MetricDefinition, MetricType, increment_counter,
-    set_gauge, observe_histogram, time_operation
+    set_gauge, time_operation
 )
 from .structured_logging import (
     initialize_logging, get_logger, LoggingConfig, LogLevel,
     correlation_context, with_correlation, log_errors
 )
 from .monitoring_dashboard import (
-    initialize_dashboard, get_dashboard, start_dashboard_monitoring,
-    MonitoringDashboard, create_dashboard_app
+    initialize_dashboard, start_dashboard_monitoring
 )
 from .alerting import (
     initialize_alerting, get_alerting_system, start_alerting,
-    AlertingConfig, AlertRule, AlertSeverity, NotificationChannel,
+    AlertingConfig, AlertSeverity, NotificationChannel,
     create_cpu_alert_rule, create_memory_alert_rule, create_disk_alert_rule,
     create_error_rate_alert_rule
 )

@@ -7,7 +7,7 @@ Core data structures for clearing protocol operations.
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 from pydantic import BaseModel, Field
 import uuid

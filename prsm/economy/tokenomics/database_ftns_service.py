@@ -24,27 +24,24 @@ FTNS service while adding database persistence, blockchain integration,
 and production-grade features needed for real token economy operation.
 """
 
-import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, getcontext
-from typing import List, Dict, Any, Optional, Tuple, Union
-from uuid import UUID, uuid4
+from typing import List, Dict, Any, Optional, Tuple
+from uuid import UUID
 
-from sqlalchemy import select, update, delete, and_, or_, func
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 
 from prsm.core.database import get_async_session
 from prsm.core.config import get_settings
 from prsm.economy.tokenomics.models import (
     FTNSWallet, FTNSTransaction, FTNSProvenanceRecord,
-    FTNSDividendDistribution, FTNSDividendPayment, FTNSRoyaltyPayment,
     FTNSMarketplaceListing, FTNSMarketplaceTransaction,
     FTNSGovernanceVote, FTNSAuditLog,
-    TransactionType, TransactionStatus, WalletType,
-    DividendStatus, RoyaltyStatus
+    TransactionType, TransactionStatus, WalletType
 )
 
 # Set precision for financial calculations

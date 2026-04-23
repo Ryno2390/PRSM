@@ -7,7 +7,7 @@ and processor health. Backed by the RealTimeProcessor stream pipeline.
 """
 
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
+from typing import Optional
 import structlog
 
 from fastapi import APIRouter, HTTPException, Query, Depends

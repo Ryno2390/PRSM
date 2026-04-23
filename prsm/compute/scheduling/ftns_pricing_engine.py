@@ -15,21 +15,16 @@ This module implements sophisticated pricing algorithms that:
 4. Predict optimal execution times based on pricing trends
 """
 
-import asyncio
-import json
-import hashlib
-import time
 import math
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple, Union, Set
+from typing import Dict, List, Optional, Any, Tuple
 from uuid import UUID, uuid4
-from collections import defaultdict, deque
+from collections import defaultdict
 import statistics
-from dataclasses import dataclass
 
 import structlog
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from prsm.core.models import PRSMBaseModel, TimestampMixin
 from prsm.compute.scheduling.workflow_scheduler import ResourceType

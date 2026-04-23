@@ -10,14 +10,12 @@ Addresses Gemini recommendation for "Public Testnet and Governance Portal" to at
 """
 
 import asyncio
-import json
 import logging
 import uuid
 import time
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime
 
 try:
     from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException

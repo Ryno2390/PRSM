@@ -7,16 +7,16 @@ import asyncio
 import random
 import time
 from collections import defaultdict, deque
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Set, Any, Tuple, Union, Callable
-from uuid import UUID, uuid4
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Set, Any, Tuple
+from uuid import uuid4
 from enum import Enum
 import statistics
 
 from prsm.core.config import settings
-from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
+from prsm.core.models import PeerNode
 # v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor / CircuitBreakerNetwork) deleted.
-from .consensus import DistributedConsensus, ConsensusResult, ConsensusType
+from .consensus import ConsensusResult
 
 
 # === Fault Injection Configuration ===

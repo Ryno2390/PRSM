@@ -3,7 +3,7 @@ PRSM Database Performance Monitoring
 Real-time database performance monitoring, alerting, and analytics dashboard
 """
 
-from typing import Dict, Any, List, Optional, Union, Callable, Tuple, Set
+from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -14,7 +14,7 @@ import json
 import logging
 from collections import defaultdict, deque
 import redis.asyncio as aioredis
-from .database_optimization import get_connection_pool, QueryMetrics, ConnectionPoolMetrics
+from .database_optimization import get_connection_pool
 
 logger = logging.getLogger(__name__)
 

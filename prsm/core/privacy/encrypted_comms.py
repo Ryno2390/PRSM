@@ -15,25 +15,19 @@ Key Features:
 - Zero-knowledge authentication
 """
 
-import asyncio
 import base64
 import hashlib
 import secrets
 import json
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Any, Set, Tuple, Union
+from typing import Dict, List, Optional, Any
 from uuid import UUID, uuid4
 from dataclasses import dataclass
-from decimal import Decimal
 
 import aiofiles
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa, padding, x25519
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 
 from pydantic import BaseModel, Field

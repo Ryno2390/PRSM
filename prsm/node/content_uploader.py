@@ -16,7 +16,6 @@ handler pair has been retired here; ContentProvider is the canonical
 serve path and ContentProvider.request_content is the client path.
 """
 
-import asyncio
 import hashlib
 import json
 import logging

@@ -6,21 +6,18 @@ Comprehensive onboarding system for new PRSM users with staged progression,
 personalized guidance, and integration with early adopter programs.
 """
 
-import asyncio
 import structlog
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, List, Optional, Any, Tuple
-from uuid import UUID, uuid4
+from uuid import uuid4
 
-from prsm.core.config import settings
-from ..auth.auth_manager import auth_manager
 from prsm.economy.tokenomics.database_ftns_service import DatabaseFTNSService
 from prsm.economy.governance.token_distribution import get_governance_distributor, GovernanceParticipantTier
 from prsm.core.integrations.security.audit_logger import audit_logger
 from .models import (
     OnboardingStage, OnboardingProgress, OnboardingProgressResponse,
-    OnboardingStageUpdate, UserInterest, WelcomePackage
+    OnboardingStageUpdate, WelcomePackage
 )
 
 logger = structlog.get_logger(__name__)

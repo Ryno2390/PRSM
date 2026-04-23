@@ -20,15 +20,11 @@ import logging
 import socket
 import time
 from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional, Set, Tuple, Any
+from typing import Dict, List, Optional, Set, Any
 from urllib.parse import urlparse
-import struct
 import random
 
 import aiohttp
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, PublicFormat, NoEncryption
 
 logger = logging.getLogger(__name__)
 

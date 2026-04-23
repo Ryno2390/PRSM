@@ -15,12 +15,10 @@ Features:
 """
 
 import asyncio
-import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable
 import structlog
 
@@ -42,7 +40,6 @@ except ImportError:
         """Fallback TimeExhausted exception when web3 is not installed"""
         pass
 
-from .networks import NetworkConfig, get_network_config, NetworkType
 from .deployment import (
     DeploymentConfig,
     DeployedContract,

@@ -20,26 +20,20 @@ This module implements comprehensive notification delivery that enables:
 
 import asyncio
 import json
-import hashlib
-import time
-import smtplib
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple, Union, Set, Callable
+from typing import Dict, List, Optional, Any, Tuple
 from uuid import UUID, uuid4
 from collections import defaultdict, deque
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from dataclasses import dataclass, field
 
 import structlog
-from pydantic import BaseModel, Field
-import requests
+from pydantic import Field
 import aiohttp
 
-from prsm.core.models import PRSMBaseModel, TimestampMixin, AgentType
-from prsm.compute.scheduling.workflow_scheduler import ScheduledWorkflow, WorkflowStatus, SchedulingPriority
-from prsm.compute.scheduling.progress_tracker import ProgressStatus, ProgressTracker, ProgressAlert
+from prsm.core.models import PRSMBaseModel, TimestampMixin
+from prsm.compute.scheduling.progress_tracker import ProgressTracker
 
 logger = structlog.get_logger(__name__)
 

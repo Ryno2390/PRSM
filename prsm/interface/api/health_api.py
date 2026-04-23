@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import JSONResponse
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 from datetime import datetime
 import asyncio
 import psutil
@@ -14,8 +14,6 @@ import time
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from pydantic import BaseModel
 
-from prsm.core.database import get_db_session
-from prsm.core.redis_client import get_redis_client
 from ..auth import get_current_user
 from prsm.core.config import settings
 

@@ -3,7 +3,7 @@ PRSM API Response Schemas and Examples
 Comprehensive schemas for API documentation and validation
 """
 
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
 from enum import Enum

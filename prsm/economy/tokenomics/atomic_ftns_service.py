@@ -29,19 +29,15 @@ Security Features:
 # =============================================================================
 
 
-import asyncio
-import hashlib
 import structlog
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, getcontext
-from typing import Dict, List, Optional, Any, Tuple, Union
-from uuid import UUID, uuid4
-from dataclasses import dataclass, field
-from enum import Enum
+from typing import Dict, List, Optional, Any
+from uuid import uuid4
+from dataclasses import dataclass
 
-from sqlalchemy import text, select, update, and_
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 
 from prsm.core.config import get_settings
 from prsm.core.database import get_async_session

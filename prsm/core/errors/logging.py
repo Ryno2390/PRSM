@@ -12,7 +12,6 @@ import asyncio
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
-from pathlib import Path
 
 from .exceptions import PRSMException, ErrorSeverity, ErrorCategory
 

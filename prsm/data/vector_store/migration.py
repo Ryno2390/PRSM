@@ -8,10 +8,10 @@ implementations with data validation and rollback capabilities.
 import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Any, Tuple
 import numpy as np
 
-from .base import PRSMVectorStore, ContentMatch, VectorStoreConfig
+from .base import PRSMVectorStore
 
 logger = logging.getLogger(__name__)
 

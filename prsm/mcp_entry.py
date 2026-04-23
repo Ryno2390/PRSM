@@ -11,8 +11,6 @@ Usage:
 """
 
 import sys
-import os
-import io
 
 # IMMEDIATELY redirect stdout to stderr before ANY imports
 # This catches structlog output from prsm/__init__.py
@@ -24,7 +22,7 @@ import logging
 logging.basicConfig(level=logging.CRITICAL, stream=sys.stderr)
 
 # Now import prsm (all noise goes to stderr)
-from prsm.mcp_server import create_server, run_server
+from prsm.mcp_server import run_server
 
 # Restore stdout for MCP protocol
 sys.stdout = _real_stdout

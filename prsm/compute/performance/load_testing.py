@@ -15,15 +15,13 @@ import asyncio
 import time
 import statistics
 import json
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Callable, Tuple
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import aiohttp
 import websockets
 import psutil
-import logging
 
 import structlog
 

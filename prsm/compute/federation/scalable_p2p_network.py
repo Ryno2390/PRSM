@@ -26,11 +26,11 @@ import logging
 import statistics
 import time
 from collections import defaultdict, deque
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Set, Any, Tuple, Union, Callable
-from uuid import UUID, uuid4
+from datetime import datetime, timezone
+from typing import Dict, List, Set, Any
+from uuid import uuid4
 from enum import Enum
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # Network and cryptography imports
 try:
@@ -50,9 +50,8 @@ except ImportError as e:
     CRYPTO_AVAILABLE = False
 
 from prsm.core.config import settings
-from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
 # v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor / CircuitBreakerNetwork) deleted.
-from .consensus import DistributedConsensus, ConsensusResult, ConsensusType
+from .consensus import ConsensusResult, ConsensusType
 try:
     from .production_consensus import ProductionByzantineConsensus
 except ImportError:

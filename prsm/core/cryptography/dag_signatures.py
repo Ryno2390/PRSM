@@ -23,7 +23,7 @@ import base64
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519

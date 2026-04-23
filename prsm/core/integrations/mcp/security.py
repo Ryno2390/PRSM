@@ -7,7 +7,7 @@ Security validation and sandboxing for MCP tool execution.
 
 import logging
 import re
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 

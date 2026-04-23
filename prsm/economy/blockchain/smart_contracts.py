@@ -25,8 +25,6 @@ Features:
 """
 
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
-import json
 import structlog
 
 logger = structlog.get_logger(__name__)

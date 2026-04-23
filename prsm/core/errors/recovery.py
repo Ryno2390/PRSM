@@ -8,13 +8,12 @@ circuit breakers, fallback strategies, and self-healing systems.
 
 import asyncio
 import logging
-import time
 import random
-from typing import Dict, Any, Optional, Callable, Union, Type, List
+from typing import Dict, Any, Optional, Callable, List
 from dataclasses import dataclass, field
 from enum import Enum
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from .exceptions import PRSMException, ErrorSeverity, ErrorCategory, ProcessingError
 

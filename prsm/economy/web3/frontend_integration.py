@@ -5,23 +5,20 @@ Provides API endpoints and WebSocket handlers for frontend Web3 integration
 including wallet connection, transaction management, and real-time updates.
 """
 
-import asyncio
 import json
 import logging
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
 from prsm.core.config import get_settings
-from ..auth.auth_manager import AuthManager
-from prsm.core.database_service import DatabaseService
-from .wallet_connector import Web3WalletConnector, WalletInfo, TransactionResult, NetworkType
-from .contract_interface import FTNSContractInterface, TokenBalance
-from .faucet_integration import PolygonFaucetIntegration, FaucetResult
+from .wallet_connector import Web3WalletConnector
+from .contract_interface import FTNSContractInterface
+from .faucet_integration import PolygonFaucetIntegration
 
 logger = logging.getLogger(__name__)
 

@@ -6,17 +6,15 @@ Production-grade key management system with secure key generation,
 storage, rotation, and lifecycle management for enterprise deployment.
 """
 
-import asyncio
 import hashlib
 import os
 import secrets
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 
 import structlog
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec, ed25519
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.fernet import Fernet
@@ -24,8 +22,7 @@ from cryptography.fernet import Fernet
 from prsm.core.database import db_manager
 from prsm.core.config import get_settings
 from .crypto_models import (
-    KeyType, KeyUsage, CurveType, EncryptionAlgorithm,
-    CryptoKey, CryptoKeyStore, KeyGenerationRequest
+    KeyType, KeyUsage, CurveType, CryptoKey, CryptoKeyStore, KeyGenerationRequest
 )
 
 logger = structlog.get_logger(__name__)

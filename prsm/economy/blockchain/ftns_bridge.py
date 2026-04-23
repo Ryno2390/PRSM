@@ -28,14 +28,12 @@ Bridge Flow:
    - Mint local FTNS to user
 """
 
-import asyncio
 import hashlib
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from decimal import Decimal
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from uuid import uuid4
 import structlog
 
@@ -50,9 +48,9 @@ except ImportError:
     Web3 = None
     Account = None
 
-from .networks import NetworkConfig, get_network_config, NetworkType
-from .contract_manager import ContractManager, TransactionResult, TokenBalance
-from .deployment import DeploymentConfig, ContractType
+from .networks import get_network_config
+from .contract_manager import ContractManager
+from .deployment import ContractType
 
 logger = structlog.get_logger(__name__)
 

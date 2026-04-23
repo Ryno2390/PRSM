@@ -19,8 +19,6 @@ Key Features:
 import asyncio
 import json
 import os
-import tempfile
-from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Union
 from urllib.parse import quote
 
@@ -28,8 +26,7 @@ import aiohttp
 
 from prsm.core.integrations.core.base_connector import BaseConnector, ConnectorStatus
 from ..models.integration_models import (
-    IntegrationPlatform, ConnectorConfig, IntegrationSource,
-    ImportRequest, ImportResult, SecurityRisk, LicenseType
+    IntegrationPlatform, ConnectorConfig, IntegrationSource
 )
 from prsm.core.config import settings
 

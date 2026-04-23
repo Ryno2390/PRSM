@@ -3,9 +3,9 @@ PRSM Advanced Alerting and Notification System
 Comprehensive alerting system with multiple notification channels, intelligent rule engine, and escalation policies
 """
 
-from typing import Dict, Any, List, Optional, Union, Callable, Set, Tuple
+from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
 import asyncio
 import json
@@ -17,7 +17,6 @@ from email.mime.text import MimeText
 from email.mime.multipart import MimeMultipart
 from collections import defaultdict, deque
 import redis.asyncio as aioredis
-from contextlib import asynccontextmanager
 
 # HTTP client for webhooks
 try:

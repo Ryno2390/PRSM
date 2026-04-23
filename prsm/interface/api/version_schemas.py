@@ -3,11 +3,10 @@ PRSM API Version-Specific OpenAPI Schemas
 Generates different OpenAPI specifications for different API versions
 """
 
-from typing import Dict, Any, List, Optional, Set
+from typing import Dict, Any, List, Optional
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 import copy
-import json
 
 from .versioning import APIVersion, version_registry, VersionInfo
 from .openapi_config import API_TAGS_METADATA, SECURITY_SCHEMES, COMMON_RESPONSES

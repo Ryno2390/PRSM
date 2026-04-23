@@ -6,20 +6,19 @@ Addresses audit team recommendations for comprehensive API authentication
 import time
 import jwt
 import hashlib
-from typing import Dict, Any, Optional, Callable, List, Set
+from typing import Dict, Any, Optional, Callable, Set
 from datetime import datetime, timezone, timedelta
 import structlog
 from enum import Enum
 
 from fastapi import Request, Response, HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.status import (
     HTTP_401_UNAUTHORIZED, 
     HTTP_403_FORBIDDEN, 
-    HTTP_429_TOO_MANY_REQUESTS,
-    HTTP_422_UNPROCESSABLE_ENTITY
+    HTTP_429_TOO_MANY_REQUESTS
 )
 
 from prsm.core.config import get_settings

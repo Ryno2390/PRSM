@@ -21,7 +21,6 @@ Integration Points:
 """
 
 import asyncio
-import hashlib
 import logging
 import os
 import time
@@ -763,7 +762,6 @@ class ContentEconomy:
         # Accumulate to escrow for batch on-chain settlement (Phase 4)
         if self._escrow:
             try:
-                from prsm.node.multi_party_escrow import ContentEconomyEscrowBridge
                 for dist in distributions:
                     if dist["recipient_id"] != "system":
                         await self._escrow.accumulate(

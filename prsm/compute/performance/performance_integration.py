@@ -3,7 +3,7 @@ PRSM Performance Integration System
 Comprehensive integration and orchestration of all performance optimization components
 """
 
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import asyncio
@@ -12,8 +12,8 @@ import redis.asyncio as aioredis
 from contextlib import asynccontextmanager
 
 from .caching_system import initialize_cache_system, get_cache_manager, shutdown_cache_system
-from .cache_invalidation import initialize_invalidation_manager, get_invalidation_manager, shutdown_invalidation_manager
-from .cache_monitoring import initialize_cache_monitoring, get_cache_monitor, shutdown_cache_monitoring
+from .cache_invalidation import initialize_invalidation_manager, shutdown_invalidation_manager
+from .cache_monitoring import initialize_cache_monitoring, shutdown_cache_monitoring
 from .database_optimization import initialize_database_optimization, get_connection_pool, shutdown_database_optimization, DatabaseConfig
 from .db_monitoring import initialize_database_monitoring, get_database_monitor, shutdown_database_monitoring
 from .indexing_strategies import initialize_index_analyzer, get_index_analyzer, shutdown_index_analyzer

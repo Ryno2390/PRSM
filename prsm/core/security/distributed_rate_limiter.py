@@ -19,7 +19,7 @@ import asyncio
 import time
 import json
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
 import structlog

@@ -5,12 +5,10 @@ Advanced cache invalidation patterns, dependency tracking, and event-driven cach
 
 from typing import Dict, Any, List, Optional, Set, Callable, Union, Pattern
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
 import asyncio
-import json
 import re
-import hashlib
 from collections import defaultdict, deque
 import redis.asyncio as aioredis
 import logging

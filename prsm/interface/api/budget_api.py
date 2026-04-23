@@ -12,24 +12,19 @@ This API provides comprehensive budget management for PRSM sessions,
 enabling users to control FTNS spending with confidence and transparency.
 """
 
-import asyncio
-from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, List, Optional, Any
 from uuid import UUID, uuid4
 
 import structlog
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field, validator
 
 from ..auth import get_current_user
 from prsm.core.models import UserInput, PRSMSession
 from prsm.economy.tokenomics.ftns_budget_manager import (
-    FTNSBudgetManager, FTNSBudget, BudgetExpandRequest, BudgetPrediction,
-    SpendingCategory, BudgetStatus, get_ftns_budget_manager
+    FTNSBudgetManager, SpendingCategory, get_ftns_budget_manager
 )
-from prsm.economy.tokenomics.ftns_service import get_ftns_service
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/v1/budget", tags=["Budget Management"])

@@ -7,10 +7,9 @@ instead of direct environment variable access. Provides centralized credential
 management and security validation for all external service integrations.
 """
 
-import asyncio
 import structlog
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional
 from enum import Enum
 
 try:
@@ -22,7 +21,6 @@ except ImportError:
 
 from ..config.credential_manager import CredentialManager, CredentialType, CredentialData
 from ..models.integration_models import IntegrationPlatform
-from prsm.core.config import settings
 from .audit_logger import audit_logger
 
 logger = structlog.get_logger(__name__)

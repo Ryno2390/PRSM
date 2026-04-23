@@ -21,13 +21,10 @@ import statistics
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Dict, List, Optional, Set, Any, Tuple, Union
-from uuid import UUID, uuid4
+from typing import Dict, List, Optional, Any
+from uuid import uuid4
 
 from prsm.core.config import settings
-from prsm.core.models import (
-    PeerNode, AgentResponse, SafetyFlag, SafetyLevel
-)
 # v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor / CircuitBreakerNetwork)
 # deleted. Consensus no longer runs in-network model-output validation; it
 # focuses on Byzantine fault tolerance and cryptographic verification.

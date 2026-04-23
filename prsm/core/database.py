@@ -24,10 +24,8 @@ the system.
 - Multi-environment configuration support
 """
 
-import asyncio
-import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Dict, Any, Optional, List, AsyncGenerator, TYPE_CHECKING
 from uuid import uuid4
 
@@ -37,9 +35,8 @@ if TYPE_CHECKING:
     # prsm.core.database and prsm.core.models / prsm.economy.governance.
     from prsm.core.models import GovernanceProposal  # noqa: F401
 from sqlalchemy import (
-    create_engine, MetaData, Table, Column, Integer, BigInteger, String, DateTime,
-    Float, Boolean, JSON, Text, ForeignKey, Index, UniqueConstraint, text,
-    UUID as SQLAlchemyUUID
+    create_engine, MetaData, Column, Integer, BigInteger, String, DateTime,
+    Float, Boolean, JSON, Text, ForeignKey, Index, UniqueConstraint, text
 )
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
@@ -1030,7 +1027,7 @@ class SessionQueries:
     async def update_session_status(session_id: str, status: str) -> bool:
         """Update session status"""
         async with get_async_session() as db_session:
-            from sqlalchemy import select, update
+            from sqlalchemy import update
             
             stmt = (
                 update(PRSMSessionModel)
@@ -1149,7 +1146,7 @@ class FTNSQueries:
         Kept for backwards compatibility only.
         """
         async with get_async_session() as db_session:
-            from sqlalchemy import select, update
+            from sqlalchemy import update
             
             await FTNSQueries.get_user_balance(user_id)
             

@@ -162,8 +162,6 @@ def create_security_layer(node_id: str, config=None):
     Returns:
         Dictionary containing initialized security components
     """
-    import asyncio
-    
     # Use provided config or defaults
     full_config = DEFAULT_SECURITY_CONFIG.copy()
     if config:

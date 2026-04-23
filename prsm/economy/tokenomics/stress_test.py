@@ -11,10 +11,9 @@ Goal: Prevent Hyper-inflation during the 'Success Scenario'.
 
 import logging
 from decimal import Decimal
-from dataclasses import dataclass
-from typing import List, Dict, Any
+from typing import Dict, Any
 
-from prsm.economy.tokenomics.ftns_service import FTNSService, FTNSTransactionType
+from prsm.economy.tokenomics.ftns_service import FTNSService
 
 logger = logging.getLogger(__name__)
 

@@ -13,15 +13,12 @@ Comprehensive performance optimization including query optimization, API optimiz
 import asyncio
 import time
 import statistics
-import gc
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Callable, Tuple
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-import logging
 import psutil
-import sys
 
 import structlog
 

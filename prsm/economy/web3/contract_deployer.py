@@ -5,11 +5,10 @@ Handles deployment of FTNS smart contracts to Polygon networks
 with proper configuration and verification.
 """
 
-import asyncio
 import logging
 import json
 import os
-from typing import Dict, Optional, Any
+from typing import Dict, Optional
 from datetime import datetime
 from pathlib import Path
 
@@ -21,7 +20,6 @@ except ImportError:
     HAS_WEB3 = False
     Web3 = None
     Account = None
-import requests
 
 logger = logging.getLogger(__name__)
 

@@ -11,7 +11,6 @@ A BitTorrentRequester:
 - Pays FTNS for bandwidth consumed
 """
 
-import asyncio
 import logging
 import time
 import uuid
@@ -25,7 +24,6 @@ from prsm.node.gossip import GossipProtocol
 from prsm.node.local_ledger import LocalLedger, TransactionType
 from prsm.core.bittorrent_client import (
     BitTorrentClient,
-    BitTorrentResult,
     TorrentInfo,
 )
 from prsm.core.bittorrent_manifest import (

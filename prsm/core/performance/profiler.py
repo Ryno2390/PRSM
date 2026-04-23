@@ -12,12 +12,11 @@ import logging
 import pstats
 import time
 import tracemalloc
-from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import threading
-import os
 
 from .monitor import get_performance_monitor, MetricType
 

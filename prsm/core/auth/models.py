@@ -11,9 +11,8 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, EmailStr
 from sqlalchemy import Column, String, DateTime, Boolean, Enum as SQLEnum, Text, Integer
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.orm import relationship
 
-from prsm.core.models import TimestampMixin, Base
+from prsm.core.models import Base
 
 
 class UserRole(str, Enum):

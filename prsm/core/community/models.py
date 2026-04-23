@@ -5,18 +5,17 @@ Community Management Models
 Data models for community onboarding, early adopter programs, and user engagement.
 """
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Dict, List, Optional, Any, Set
-from uuid import UUID, uuid4
+from typing import Dict, List, Optional, Any
+from uuid import uuid4
 
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field
 from sqlalchemy import Column, String, DateTime, Boolean, Enum as SQLEnum, Text, Integer, JSON, Numeric
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.orm import relationship
 
-from prsm.core.models import TimestampMixin, Base
+from prsm.core.models import Base
 
 
 class OnboardingStage(str, Enum):

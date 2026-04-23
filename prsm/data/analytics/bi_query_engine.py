@@ -8,16 +8,15 @@ supporting complex aggregations, filtering, and data analysis.
 """
 
 import logging
-import asyncio
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Any, Optional, Union, Callable, Tuple
+from typing import Dict, List, Any, Optional, Callable
 import json
 import re
 from pathlib import Path
 
-from prsm.compute.plugins import require_optional, has_optional_dependency
+from prsm.compute.plugins import require_optional
 
 logger = logging.getLogger(__name__)
 

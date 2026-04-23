@@ -9,16 +9,16 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional, Union, AsyncIterator
-from uuid import UUID, uuid4
+from typing import Any, Dict, List, Optional, Union
+from uuid import UUID
 import aiohttp
 import websockets
-from websockets.exceptions import ConnectionClosed, WebSocketException
+from websockets.exceptions import ConnectionClosed
 
 from .models import (
     MCPServerInfo, MCPCapabilities, ToolDefinition, ResourceDefinition,
-    MCPRequest, MCPResponse, MCPNotification, ToolCall, ToolResult,
-    MCPSession, MCPProtocolVersion, MCPMethod, MCPIntegrationConfig
+    MCPRequest, ToolCall, ToolResult,
+    MCPProtocolVersion, MCPMethod, MCPIntegrationConfig
 )
 from .tools import ToolRegistry
 from .session import SessionManager

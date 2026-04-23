@@ -11,7 +11,7 @@ import json
 import logging
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import Response
@@ -29,7 +29,7 @@ except ImportError:
     HTMLResponse = JSONResponse = StaticFiles = Jinja2Templates = None
     uvicorn = None
 
-from .metrics import MetricsCollector, MetricValue
+from .metrics import MetricsCollector
 
 logger = logging.getLogger(__name__)
 

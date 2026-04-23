@@ -16,32 +16,24 @@ IMPLEMENTATION:
 """
 
 import asyncio
-import json
 import logging
 import time
-from collections import defaultdict, deque
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Set, Any, Tuple, Union, Callable
-from uuid import UUID, uuid4
-from enum import Enum
+from collections import deque
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Any
+from uuid import uuid4
 from dataclasses import dataclass, field
 
 from .enhanced_consensus_system import (
     EnhancedConsensusSystem, 
-    ConsensusPhase, 
-    ConsensusStatus,
-    ConsensusMessage,
-    ConsensusResult
+    ConsensusPhase
 )
 from .scalable_p2p_network import (
     ScalableP2PNetwork,
     NetworkMessage,
-    NodeRole,
-    NodeStatus,
-    P2PNode
+    NodeStatus
 )
 from prsm.core.config import settings
-from prsm.core.models import PeerNode
 # v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor) deleted.
 
 logger = logging.getLogger(__name__)

@@ -21,8 +21,7 @@ from prsm.core.auth.auth_manager import auth_manager
 from prsm.economy.governance.token_distribution import (
     get_governance_distributor, 
     GovernanceParticipantTier, 
-    ContributionType,
-    DistributionType
+    ContributionType
 )
 from prsm.economy.governance.voting import get_token_weighted_voting
 from prsm.economy.governance.quadratic_voting import quadratic_voting

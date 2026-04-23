@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional, Any, Callable
-import asyncio
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -805,7 +804,6 @@ class SecurityAuditChecklist:
         """Check JWT token expiry configuration"""
         try:
             import os
-            from prsm.core.auth.jwt_handler import jwt_handler
             
             # Check environment variable
             expiry_minutes = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
@@ -972,7 +970,6 @@ class SecurityAuditChecklist:
         try:
             # Verify no plaintext password storage
             # Check for proper hashing in auth manager
-            from prsm.core.auth.auth_manager import AuthManager
             
             # AuthManager uses passlib with bcrypt
             return CheckResult(
@@ -1369,7 +1366,6 @@ class SecurityAuditChecklist:
         """Check PII handling"""
         try:
             # Check for PII handling in audit logger
-            from prsm.core.integrations.security.audit_logger import audit_logger
             
             return CheckResult(
                 check_id="data_pii_handling",
@@ -1457,7 +1453,6 @@ class SecurityAuditChecklist:
     async def _check_logging_security(self) -> CheckResult:
         """Check security event logging"""
         try:
-            from prsm.core.integrations.security.audit_logger import audit_logger
             
             return CheckResult(
                 check_id="infra_logging_security",
@@ -1629,7 +1624,6 @@ class SecurityAuditChecklist:
         """Check error handling"""
         try:
             # Check for custom exception handlers
-            from prsm.core.auth.auth_manager import AuthenticationError, AuthorizationError
             
             return CheckResult(
                 check_id="app_error_handling",
@@ -1669,7 +1663,6 @@ class SecurityAuditChecklist:
         """Check GDPR compliance"""
         try:
             # Check for GDPR-related configurations
-            from prsm.core.integrations.security.audit_logger import audit_logger
             
             return CheckResult(
                 check_id="compliance_gdpr",
@@ -1688,7 +1681,6 @@ class SecurityAuditChecklist:
     async def _check_audit_trail(self) -> CheckResult:
         """Check audit trail"""
         try:
-            from prsm.core.integrations.security.audit_logger import audit_logger
             
             return CheckResult(
                 check_id="compliance_audit_trail",
@@ -1754,7 +1746,6 @@ class SecurityAuditChecklist:
     async def _check_anomaly_detection(self) -> CheckResult:
         """Check anomaly detection"""
         try:
-            from prsm.core.integrations.security.threat_detector import ThreatDetector
             
             return CheckResult(
                 check_id="monitor_anomaly_detection",

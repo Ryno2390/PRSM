@@ -16,7 +16,6 @@ import logging
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 from decimal import Decimal
-from datetime import timedelta
 
 import structlog
 from sqlalchemy import text

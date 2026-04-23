@@ -16,12 +16,11 @@ Expected overall improvement:
 import asyncio
 import time
 import statistics
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 import structlog
 
-from ..agents.executors.unified_router import UnifiedModelRouter
 from .cpu_optimizer import CPUOptimizer
 from .auto_scaler import AutoScaler
 from .advanced_cache import CacheManager

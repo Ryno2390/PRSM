@@ -14,17 +14,16 @@ Key Features:
 """
 
 import hashlib
-import json
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Dict, List, Optional, Any, Tuple
-from uuid import UUID, uuid4
+from typing import Dict, List, Optional, Any
+from uuid import uuid4
 
 from ..models.integration_models import (
     IntegrationPlatform, ProvenanceMetadata, IntegrationSource,
-    ImportRequest, ImportResult
+    ImportRequest
 )
-from prsm.core.models import ProvenanceRecord, FTNSTransaction, RoyaltyPayment
+from prsm.core.models import RoyaltyPayment
 from prsm.storage import get_content_store
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 

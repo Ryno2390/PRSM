@@ -3,17 +3,16 @@ PRSM Real-time Monitoring Dashboard
 Advanced real-time monitoring dashboard with WebSocket streaming, interactive visualizations, and alerting
 """
 
-from typing import Dict, Any, List, Optional, Union, Callable, Set
+from typing import Dict, Any, List, Optional, Set
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
 import asyncio
 import json
 import time
 import logging
-from collections import defaultdict, deque
+from collections import defaultdict
 import redis.asyncio as aioredis
-from contextlib import asynccontextmanager
 
 # FastAPI and WebSocket imports
 try:

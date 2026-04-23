@@ -8,16 +8,13 @@ Provides comprehensive security scanning and monitoring capabilities.
 
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
-from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from ..security.security_orchestrator import security_orchestrator, SecurityAssessment
 from ..security.audit_logger import audit_logger, EventLevel
-from ..security.threat_detector import ThreatLevel
-from ..models.integration_models import SecurityRisk
 from prsm.core.models import PRSMBaseModel
 
 

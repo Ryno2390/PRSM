@@ -10,9 +10,8 @@ This implementation delegates to the core auth and audit infrastructure.
 
 from typing import Any, Dict, Optional
 import structlog
-from fastapi import Depends, Request
+from fastapi import Request
 
-from prsm.core.auth.auth_manager import get_current_user
 from prsm.core.integrations.security.audit_logger import audit_logger
 
 logger = structlog.get_logger(__name__)

@@ -16,17 +16,16 @@ Key Features:
 - Perfect forward secrecy with quantum-safe key rotation
 """
 
-import os
 import hashlib
 import secrets
-from typing import List, Dict, Any, Optional, Tuple, Union
+from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from enum import Enum
 import base64
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Post-quantum cryptographic imports
 try:
@@ -38,12 +37,10 @@ except ImportError:
     print("⚠️  Post-quantum library (oqs-python) not available. Using classical crypto fallback.")
 
 # Classical crypto fallback
-from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives.hashes import SHA256, SHA3_256, SHA3_512
+from cryptography.hazmat.primitives.hashes import SHA3_256
 
 class CryptoMode(Enum):
     POST_QUANTUM = "post_quantum"

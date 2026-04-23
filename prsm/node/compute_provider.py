@@ -15,14 +15,11 @@ import json
 import logging
 import os
 import subprocess
-import tempfile
 import time
-import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, Optional, TYPE_CHECKING
 
-import numpy as np
 
 if TYPE_CHECKING:
     from prsm.node.config import NodeConfig
@@ -40,7 +37,7 @@ from prsm.node.gossip import (
     GossipProtocol,
 )
 from prsm.node.identity import NodeIdentity
-from prsm.node.local_ledger import LocalLedger, TransactionType
+from prsm.node.local_ledger import LocalLedger
 from prsm.node.transport import MSG_DIRECT, P2PMessage, WebSocketTransport
 from prsm.node.payment_escrow import PaymentEscrow
 from prsm.node.result_consensus import ResultConsensus
@@ -571,7 +568,7 @@ class ComputeProvider:
         """Execute a WASM module in a sandboxed runtime."""
         import base64
         from prsm.compute.wasm.runtime import WasmtimeRuntime
-        from prsm.compute.wasm.models import ResourceLimits, ExecutionStatus
+        from prsm.compute.wasm.models import ResourceLimits
 
         payload = job.payload
         wasm_bytes = base64.b64decode(payload.get("wasm_bytes_b64", ""))

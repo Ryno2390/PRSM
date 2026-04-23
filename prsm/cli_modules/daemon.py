@@ -15,8 +15,6 @@ from pathlib import Path
 from typing import Optional
 
 import click
-from rich.console import Console
-from rich.table import Table
 
 from .theme import THEME, ICONS
 from .ui import console, resource_bar

@@ -237,7 +237,6 @@ async def request_content_retrieval(
         economy._retrieval_requests[request_id] = internal_req
         
         # Broadcast request
-        import time
         await economy.gossip.publish("retrieval_request", {
             "request_id": request_id,
             "cid": request.cid,

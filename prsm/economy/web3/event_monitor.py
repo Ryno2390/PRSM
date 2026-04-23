@@ -8,11 +8,10 @@ with real-time processing, logging, and database integration.
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Set, Callable, Any
+from typing import Dict, List, Optional, Set, Any
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
-import json
 
 try:
     from web3 import Web3
@@ -26,10 +25,9 @@ except ImportError:
 
     class BlockNotFound(Exception):
         pass
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from prsm.core.database_service import DatabaseService
-from prsm.core.models import FTNSTransaction, Session as PRSMSession
+from prsm.core.models import FTNSTransaction
 from prsm.economy.tokenomics.models import FTNSWallet
 from .wallet_connector import Web3WalletConnector
 from .contract_interface import FTNSContractInterface

@@ -11,7 +11,7 @@ import hashlib
 import json
 import random
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 from decimal import Decimal
 import structlog
 
@@ -82,7 +82,6 @@ def generate_verification_hash(output_data: Any, model_id: str, input_hash: str)
     
     Includes quantization to handle floating-point non-determinism.
     """
-    import torch
     import numpy as np
 
     def quantize(data):

@@ -15,7 +15,6 @@ Features:
 Note: Requires Ollama to be installed and running locally.
 """
 
-import asyncio
 import json
 import logging
 import time
@@ -29,8 +28,7 @@ from pydantic import BaseModel, Field
 
 from prsm.core.integrations.core.base_connector import BaseConnector, ConnectorStatus
 from ..models.integration_models import (
-    IntegrationPlatform, ConnectorConfig, IntegrationSource,
-    LicenseType, SecurityRisk
+    IntegrationPlatform, ConnectorConfig, IntegrationSource
 )
 
 logger = logging.getLogger(__name__)

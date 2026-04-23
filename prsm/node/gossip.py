@@ -11,8 +11,7 @@ import asyncio
 import collections
 import logging
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
+from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 from prsm.node.transport import MSG_GOSSIP, MSG_PEER_CONNECTED, P2PMessage, PeerConnection, WebSocketTransport
 

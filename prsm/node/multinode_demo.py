@@ -17,9 +17,7 @@ Usage:
 
 import asyncio
 import logging
-import sys
 import time
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # Silence noisy logs during demo
@@ -34,13 +32,10 @@ console = Console()
 # Internal imports
 from prsm.node.identity import NodeIdentity, generate_node_identity
 from prsm.node.local_ledger import LocalLedger, TransactionType
-from prsm.node.compute_provider import ComputeProvider, JobType, JobStatus
-from prsm.node.compute_requester import ComputeRequester, SubmittedJob
+from prsm.node.compute_provider import ComputeProvider, JobType
+from prsm.node.compute_requester import ComputeRequester
 from prsm.node.gossip import (
     GOSSIP_JOB_OFFER,
-    GOSSIP_JOB_ACCEPT,
-    GOSSIP_JOB_RESULT,
-    GOSSIP_FTNS_TRANSACTION,
     GossipProtocol,
 )
 from prsm.node.result_consensus import ResultConsensus, ConsensusMode

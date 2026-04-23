@@ -8,19 +8,16 @@ to prevent security vulnerabilities while maintaining data integrity.
 
 import re
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Union, Type
+from typing import Any, Dict, Optional
 from datetime import datetime
-from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 try:
     from pydantic.fields import ModelField
 except ImportError:
     # Pydantic v2 compatibility
-    from pydantic._internal._model_construction import complete_model_class
     ModelField = None
 
-from .input_sanitization import input_sanitizer
 
 
 class SecureBaseModel(BaseModel):

@@ -3,9 +3,8 @@ Advanced Rate Limiting System
 Comprehensive rate limiting with Redis backend and intelligent protection
 """
 
-import asyncio
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any, Tuple
 from enum import Enum
 import structlog

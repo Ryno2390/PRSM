@@ -14,18 +14,17 @@ Key Endpoints:
 
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
-from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import Field, SecretStr
 
 from ..config.credential_manager import (
     credential_manager, CredentialData, CredentialType
 )
 from ..config.integration_config import (
     config_manager, IntegrationPreferences, PlatformConfig,
-    SecurityConfig, RateLimitConfig, SecurityLevel
+    SecurityConfig, RateLimitConfig
 )
 from ..models.integration_models import IntegrationPlatform
 from prsm.core.models import PRSMBaseModel

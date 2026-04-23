@@ -24,7 +24,7 @@ import logging
 import time
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 
-from prsm.node.transport import MSG_GOSSIP, P2PMessage, PeerConnection
+from prsm.node.transport import MSG_GOSSIP, P2PMessage
 
 logger = logging.getLogger(__name__)
 

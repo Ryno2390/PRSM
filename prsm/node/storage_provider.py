@@ -14,7 +14,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 from datetime import datetime, timezone
 
 from prsm.core.bandwidth_limiter import BandwidthLimiter
@@ -42,7 +42,6 @@ from prsm.node.storage_proofs import (
     ProofType,
     ChallengeStatus,
     ChallengeRecord,
-    DEFAULT_CHALLENGE_DIFFICULTY,
     DEFAULT_CHALLENGE_TIMEOUT_MINUTES,
 )
 

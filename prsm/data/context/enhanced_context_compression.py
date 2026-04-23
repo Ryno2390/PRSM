@@ -12,20 +12,19 @@ This module implements sophisticated context management techniques inspired by C
 insights on building robust long-running agents with proper context sharing and coordination.
 """
 
-import asyncio
 import json
 import hashlib
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple, Union, Set
+from typing import Dict, List, Optional, Any
 from uuid import UUID, uuid4
 
 import structlog
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from prsm.core.models import (
-    PRSMBaseModel, TimestampMixin, ReasoningStep, AgentType, TaskStatus
+    PRSMBaseModel, TimestampMixin, ReasoningStep, AgentType
 )
 # ModelExecutor removed (agents/executors/ deleted in v1.6.0 scope alignment)
 try:

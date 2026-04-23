@@ -18,10 +18,10 @@ import asyncio
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Dict, List, Optional, Any, Union, Type
-from uuid import UUID, uuid4
+from typing import Dict, List, Optional, Any, Type
+from uuid import UUID
 
-from .base_connector import BaseConnector, ConnectorStatus
+from .base_connector import BaseConnector
 from .provenance_engine import ProvenanceEngine
 from ..models.integration_models import (
     IntegrationPlatform, ConnectorConfig, IntegrationSource,
@@ -30,8 +30,6 @@ from ..models.integration_models import (
 )
 from ..security.sandbox_manager import SandboxManager
 from prsm.core.config import settings
-from prsm.core.models import FTNSTransaction
-from prsm.storage import get_content_store
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 
 

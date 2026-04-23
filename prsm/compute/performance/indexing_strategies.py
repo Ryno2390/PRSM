@@ -3,7 +3,7 @@ PRSM Database Indexing Strategies
 Intelligent index analysis, recommendations, and automated optimization
 """
 
-from typing import Dict, Any, List, Optional, Union, Tuple, Set
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 import re
-from collections import defaultdict, Counter
+from collections import defaultdict
 import redis.asyncio as aioredis
 from .database_optimization import get_connection_pool, QueryType
 

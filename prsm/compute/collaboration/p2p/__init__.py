@@ -204,8 +204,6 @@ def create_p2p_network(config=None):
     Returns:
         Dictionary containing initialized P2P components
     """
-    import asyncio
-    
     # Use provided config or defaults
     full_config = DEFAULT_CONFIG.copy()
     if config:

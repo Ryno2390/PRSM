@@ -26,7 +26,6 @@ import asyncio
 import json
 import logging
 import os
-import sys
 from typing import Any, Dict, Sequence
 
 from mcp.server import Server
@@ -34,7 +33,6 @@ from mcp.server.stdio import stdio_server
 from mcp.types import (
     Tool,
     TextContent,
-    CallToolResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -1028,7 +1026,6 @@ def main():
     We capture stdout during PRSM imports to prevent structlog noise
     from corrupting the JSON-RPC stream.
     """
-    import io
     import sys
 
     # Temporarily redirect stdout to stderr during imports

@@ -19,24 +19,20 @@ This module implements comprehensive job monitoring that enables:
 """
 
 import asyncio
-import json
-import time
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple, Union, Set, Callable
+from typing import Dict, List, Optional, Any, Callable
 from uuid import UUID, uuid4
-from collections import defaultdict, deque
+from collections import defaultdict
 import statistics
-from dataclasses import dataclass, field
 
 import structlog
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from prsm.core.models import PRSMBaseModel, TimestampMixin, AgentType
 from prsm.compute.scheduling.workflow_scheduler import (
-    ScheduledWorkflow, WorkflowStep, WorkflowStatus, ResourceType
+    ScheduledWorkflow, ResourceType
 )
-from prsm.compute.scheduling.workflow_persistence import WorkflowCheckpoint
 
 logger = structlog.get_logger(__name__)
 

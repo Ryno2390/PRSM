@@ -10,7 +10,7 @@ import logging
 import os
 import platform
 import subprocess
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 from prsm.compute.tee.models import TEEType, TEECapability
 

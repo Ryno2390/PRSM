@@ -14,8 +14,7 @@ Key Features:
 - Critical path visualization and analysis
 """
 
-import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import timedelta
 from typing import Dict, List, Optional, Set, Tuple, Any
 from dataclasses import dataclass, field
 from collections import defaultdict, deque

@@ -8,17 +8,14 @@ legitimate user content functionality.
 """
 
 import html
-import json
 import re
 import bleach
 import structlog
 from typing import Any, Dict, List, Optional, Union, Set
 from urllib.parse import urlparse
-from datetime import datetime, timezone
 
-from fastapi import Request, HTTPException, status
-from fastapi.security.utils import get_authorization_scheme_param
-from pydantic import BaseModel, Field, validator
+from fastapi import HTTPException, status
+from pydantic import BaseModel, Field
 
 from prsm.core.integrations.security.audit_logger import audit_logger
 

@@ -8,12 +8,11 @@ Handles alert rules, notifications, and escalation policies.
 
 import asyncio
 import logging
-from typing import Dict, List, Optional, Any, Callable, Union
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from abc import ABC, abstractmethod
-import json
 
 try:
     import smtplib

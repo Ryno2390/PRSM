@@ -42,7 +42,6 @@ settings = get_settings()
 app = create_app()
 
 # Re-export WebSocket manager for backward compatibility
-from prsm.interface.api.websocket import websocket_manager
 
 # Log application creation
 logger.info(

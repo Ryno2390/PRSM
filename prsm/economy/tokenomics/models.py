@@ -30,15 +30,12 @@ Economic Analytics:
 - Market manipulation detection
 """
 
-from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Dict, List, Optional, Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 from enum import Enum
 
 from sqlalchemy import (
-    Column, String, Integer, Float, Boolean, DateTime, Text, JSON,
-    ForeignKey, Index, CheckConstraint, UniqueConstraint, DECIMAL
+    Column, String, Integer, Float, Boolean, DateTime, Text, ForeignKey, Index, CheckConstraint, UniqueConstraint, DECIMAL
 )
 from prsm.core.db_types import UUID as PG_UUID, JSONB
 from sqlalchemy.ext.declarative import declarative_base

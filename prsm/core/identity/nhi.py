@@ -7,13 +7,12 @@ Allows the network to distinguish between trusted agents and malicious bots.
 """
 
 import logging
-import hashlib
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from uuid import UUID, uuid4
+from uuid import uuid4
 
-from prsm.core.cryptography.post_quantum import get_post_quantum_crypto, PostQuantumKeyPair
+from prsm.core.cryptography.post_quantum import get_post_quantum_crypto
 
 logger = logging.getLogger(__name__)
 

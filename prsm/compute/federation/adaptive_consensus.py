@@ -5,18 +5,15 @@ Dynamically optimizes consensus strategy based on network conditions
 
 import asyncio
 import statistics
-import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Set, Any, Tuple, Union
-from uuid import UUID, uuid4
+from typing import Dict, List, Optional, Set, Any
+from uuid import uuid4
 from enum import Enum
-import math
 
 from prsm.core.config import settings
-from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
+from prsm.core.models import PeerNode
 # v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor / CircuitBreakerNetwork) deleted.
-from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from .consensus import DistributedConsensus, ConsensusResult, ConsensusType
 from .hierarchical_consensus import HierarchicalConsensusNetwork
 

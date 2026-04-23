@@ -3,18 +3,15 @@ PRSM Advanced Distributed Task Queue System
 High-performance distributed task processing with Redis backend, intelligent routing, and comprehensive monitoring
 """
 
-from typing import Dict, Any, List, Optional, Union, Callable, Tuple, Set
+from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-import asyncio
 import json
 import uuid
 import time
 import logging
 import pickle
-import traceback
-from collections import defaultdict, deque
 import redis.asyncio as aioredis
 from functools import wraps
 import inspect

@@ -18,30 +18,21 @@ This module implements comprehensive rollback mechanisms that enable:
 6. Analytics and learning from failure patterns for prevention
 """
 
-import asyncio
-import json
-import hashlib
-import time
 from datetime import datetime, timezone, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple, Union, Set, Callable
+from typing import Dict, List, Optional, Any, Callable
 from uuid import UUID, uuid4
-from collections import defaultdict, deque
-import traceback
-from dataclasses import dataclass, field
+from collections import defaultdict
 
 import structlog
-from pydantic import BaseModel, Field
+from pydantic import Field
 
-from prsm.core.models import PRSMBaseModel, TimestampMixin, AgentType
-from prsm.compute.scheduling.workflow_scheduler import (
-    ScheduledWorkflow, WorkflowStep, WorkflowStatus, SchedulingPriority, ResourceType
-)
+from prsm.core.models import PRSMBaseModel, TimestampMixin
 from prsm.compute.scheduling.workflow_persistence import (
-    WorkflowCheckpoint, WorkflowPersistence, PersistenceStatus
+    WorkflowPersistence
 )
 from prsm.compute.scheduling.progress_tracker import (
-    ProgressTracker, ProgressStatus, StepProgressStatus
+    ProgressTracker
 )
 from prsm.compute.scheduling.notification_system import (
     NotificationSystem, NotificationType, NotificationPriority

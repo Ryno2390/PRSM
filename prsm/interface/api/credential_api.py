@@ -9,13 +9,12 @@ validation, rotation, and monitoring.
 
 import structlog
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
-from uuid import UUID
+from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, HTTPException, Depends, status
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field
 
-from prsm.core.auth import get_current_user, require_auth
+from prsm.core.auth import get_current_user
 from prsm.core.auth.models import UserRole
 from prsm.core.security.enhanced_authorization import get_enhanced_auth_manager
 from prsm.core.integrations.security.secure_api_client_factory import SecureClientType, secure_client_factory

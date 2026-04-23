@@ -9,7 +9,7 @@ Plugin for advanced analytics and visualization capabilities.
 import logging
 from typing import Dict, List, Any, Callable, Optional
 from ..plugin_manager import Plugin, PluginMetadata
-from ..optional_deps import require_optional, has_optional_dependency
+from ..optional_deps import require_optional
 
 logger = logging.getLogger(__name__)
 

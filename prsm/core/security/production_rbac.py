@@ -15,20 +15,15 @@ This replaces the in-memory prototype with production-grade security.
 import asyncio
 import time
 import json
-import hashlib
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional, Set, Tuple
-from uuid import UUID, uuid4
-from functools import wraps
+from typing import Dict, Any, List, Optional
+from uuid import uuid4
 import structlog
 
-import asyncpg
 import redis.asyncio as redis
-from fastapi import HTTPException, Request, Depends, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select, insert, update, delete, and_, or_, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, text
 
 from prsm.core.database_service import get_database_service
 from prsm.core.models import UserRole, User

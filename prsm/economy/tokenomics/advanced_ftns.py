@@ -9,7 +9,6 @@ Migration Notice:
 """
 
 import asyncio
-import math
 import statistics
 import structlog
 from collections import defaultdict
@@ -23,8 +22,7 @@ getcontext().prec = 18
 
 from prsm.core.config import settings
 from prsm.core.models import (
-    ImpactMetrics, DividendDistribution, RoyaltyPayment,
-    FTNSTransaction, FTNSBalance
+    ImpactMetrics, DividendDistribution, RoyaltyPayment
 )
 from .atomic_ftns_service import get_atomic_ftns_service, AtomicFTNSService
 

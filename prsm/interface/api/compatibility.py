@@ -3,11 +3,10 @@ PRSM API Backward Compatibility Layer
 Handles transformations and migrations between API versions
 """
 
-from typing import Dict, Any, List, Optional, Callable, Union
+from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from fastapi import Request, Response, HTTPException
-from pydantic import BaseModel, Field
 import json
 import logging
 

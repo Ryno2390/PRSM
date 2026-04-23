@@ -17,7 +17,6 @@ Key Features:
 """
 
 import asyncio
-import logging
 from typing import Dict, List, Optional, Any, Union, BinaryIO
 from dataclasses import dataclass, field
 from enum import Enum
@@ -30,9 +29,7 @@ import structlog
 from pydantic import BaseModel, Field
 
 from .knowledge_system import UnifiedKnowledgeSystem
-from .ipfs.content_addressing import ContentCategory, ContentProvenance, ContentLicense
-from .ingestion.public_source_porter import IngestionCandidate, IngestionResult, LicenseCompatibility
-from .tokenomics.ftns_economics import FTNSEconomicsEngine
+from .ipfs.content_addressing import ContentCategory
 
 logger = structlog.get_logger(__name__)
 

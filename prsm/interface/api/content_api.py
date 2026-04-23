@@ -15,7 +15,7 @@ Endpoints:
 import hashlib
 import time
 import structlog
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
@@ -60,7 +60,7 @@ async def upload_content_with_provenance(
     upload still succeeds and the CID is returned; provenance_registered=false
     in the response signals the gap.
     """
-    from prsm.storage import get_content_store, ContentHash
+    from prsm.storage import get_content_store
     from prsm.storage.exceptions import StorageError
     from prsm.core.database import ProvenanceQueries
 

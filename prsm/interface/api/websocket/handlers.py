@@ -6,7 +6,6 @@ Handles WebSocket message routing and processing.
 """
 
 import asyncio
-import json
 import structlog
 from typing import Dict, Any
 
@@ -94,7 +93,6 @@ async def handle_conversation_message(
     connection=None
 ) -> None:
     """Handle conversation-specific WebSocket messages with authentication context"""
-    from prsm.interface.api.websocket_auth import require_websocket_permission, WebSocketAuthError
 
     message_type = message.get("type")
 

@@ -12,27 +12,19 @@ Security Features (Phase 4.2):
 - OpenAPI specification
 """
 
-import asyncio
 import logging
-import time
 import uuid as _uuid
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Request
-from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, Field
 
 from prsm.node.api_hardening import (
     APIHardening,
     APISecurityConfig,
     StatusWebSocket,
-    RateLimitConfig,
-    RateLimiter,
-    generate_openapi_schema,
-    get_current_user,
     require_auth,
-    websocket_status_endpoint,
 )
 
 logger = logging.getLogger(__name__)

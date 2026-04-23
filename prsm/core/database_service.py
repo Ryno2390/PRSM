@@ -9,30 +9,21 @@ This service layer bridges the gap between the application logic and
 SQLAlchemy models, providing clean interfaces for database operations.
 """
 
-import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Union
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, update, delete, and_, or_, desc, func, text
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload, joinedload
+from sqlalchemy import select, update, and_, desc, func, text
 
 import json
 
 from .database import (
-    get_async_session, Base,
-    PRSMSessionModel, ReasoningStepModel, SafetyFlagModel,
-    ArchitectTaskModel, FTNSTransactionModel, FTNSBalanceModel,
-    TeacherModelModel, CircuitBreakerEventModel, PeerNodeModel,
-    ModelRegistryModel, TeamModel, TeamMemberModel, TeamWalletModel,
-    TeamTaskModel, TeamGovernanceModel,
-    ContentProvenanceModel, UserAPIConfigModel,
+    get_async_session, PRSMSessionModel, ReasoningStepModel, SafetyFlagModel,
+    ArchitectTaskModel, FTNSTransactionModel, ContentProvenanceModel, UserAPIConfigModel,
 )
 from .models import (
-    PRSMSession, ReasoningStep, SafetyFlag, ArchitectTask,
-    FTNSTransaction, FTNSBalance, TeacherModel
+    PRSMSession, SafetyFlag, ArchitectTask
 )
 
 logger = logging.getLogger(__name__)

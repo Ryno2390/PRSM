@@ -14,10 +14,10 @@ These models handle:
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, field_validator
 
 from prsm.core.models import PRSMBaseModel, TimestampMixin
 

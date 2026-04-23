@@ -24,8 +24,7 @@ This creates a single Web3 connection that:
 import asyncio
 import logging
 import os
-from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
 try:

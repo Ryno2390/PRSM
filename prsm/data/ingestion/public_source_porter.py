@@ -19,21 +19,18 @@ Key Features:
 
 import asyncio
 import json
-import logging
 import hashlib
 import aiohttp
 import feedparser
-from typing import Dict, List, Optional, Any, Tuple, Union
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from uuid import uuid4
 from datetime import datetime, timezone
 import re
-from pathlib import Path
-import mimetypes
 
 import structlog
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 
 from ..ipfs.content_addressing import (
     ContentAddressingSystem, AddressedContent, ContentCategory, 

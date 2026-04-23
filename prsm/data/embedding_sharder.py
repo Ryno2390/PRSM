@@ -14,8 +14,6 @@ Embedding backends (tried in order):
 import hashlib
 import json
 import logging
-import math
-import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np

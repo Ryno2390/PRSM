@@ -3,18 +3,17 @@ WebSocket Authentication and Authorization
 Secure authentication middleware for PRSM WebSocket connections
 """
 
-import json
 import structlog
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from urllib.parse import parse_qs
 from uuid import UUID
 
-from fastapi import WebSocket, WebSocketDisconnect, HTTPException, status
-from pydantic import BaseModel, ValidationError
+from fastapi import WebSocket
+from pydantic import BaseModel
 
-from prsm.core.auth import get_current_user, auth_manager, jwt_handler
-from prsm.core.auth.models import User, UserRole
+from prsm.core.auth import jwt_handler
+from prsm.core.auth.models import UserRole
 from prsm.core.database import get_database_service
 from prsm.core.integrations.security.audit_logger import audit_logger
 

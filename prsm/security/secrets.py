@@ -5,11 +5,8 @@ Secure secrets management for PRSM.
 Supports multiple backends: environment variables, HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager.
 """
 
-import asyncio
 import os
-import json
 import hashlib
-import hmac
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta

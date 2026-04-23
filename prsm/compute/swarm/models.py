@@ -7,7 +7,6 @@ Data structures for parallel map-reduce across sharded datasets.
 
 import math
 import time
-import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional

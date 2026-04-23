@@ -3,10 +3,9 @@ PRSM Distributed Task Processing Integration
 Complete distributed task processing system with queues, workers, and monitoring
 """
 
-from typing import Dict, Any, List, Optional, Union, Callable
+from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
-from enum import Enum
 import asyncio
 import json
 import logging
@@ -14,15 +13,14 @@ from contextlib import asynccontextmanager
 import redis.asyncio as aioredis
 
 from .task_queue import (
-    TaskQueue, TaskDefinition, TaskResult, TaskStatus, TaskPriority, TaskRegistry,
-    initialize_task_queues, get_task_queue, enqueue_task, get_all_queue_stats, task
+    TaskQueue, TaskDefinition, TaskResult, TaskPriority, TaskRegistry,
+    initialize_task_queues, get_task_queue, get_all_queue_stats
 )
 from .task_worker import (
-    TaskWorker, WorkerManager, WorkerStatus, 
-    initialize_worker_system, get_worker_manager, start_worker_cluster, stop_worker_cluster
+    WorkerManager, initialize_worker_system, get_worker_manager, start_worker_cluster, stop_worker_cluster
 )
 from .task_monitor import (
-    TaskMonitor, AlertType, AlertSeverity, TaskAlert,
+    TaskMonitor, TaskAlert,
     initialize_task_monitoring, get_task_monitor, start_task_monitoring, stop_task_monitoring
 )
 

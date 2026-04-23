@@ -10,13 +10,11 @@ for monitoring, metrics, and system health.
 import asyncio
 import time
 import json
-from typing import Dict, List, Optional, Any, Callable, Union
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import psutil
 import aiohttp
-from pathlib import Path
-import logging
 
 
 class ValidationStatus(Enum):

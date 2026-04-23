@@ -16,7 +16,6 @@ from typing import Optional, Tuple
 
 from prsm.compute.wasm.profiler_models import (
     HardwareProfile,
-    ComputeTier,
     ThermalClass,
 )
 

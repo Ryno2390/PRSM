@@ -12,13 +12,13 @@ import logging
 import threading
 import time
 from typing import Any, Dict, Optional, Union, List, Callable, TypeVar, Generic
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 import weakref
 
 from ..config.manager import get_config
-from ..errors.exceptions import ProcessingError, ConfigurationError
+from ..errors.exceptions import ConfigurationError
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +218,7 @@ class CacheManager:
         """Initialize default cache instances"""
         try:
             # Import here to avoid circular imports
-            from .cache_strategies import MemoryCache, MultiTierCache
+            from .cache_strategies import MemoryCache
             
             # Create default cache configurations
             cache_configs = {

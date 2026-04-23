@@ -6,7 +6,6 @@ Scans dependencies, code, and secrets for security issues.
 """
 
 import asyncio
-import os
 import re
 import subprocess
 import sys
@@ -15,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -357,7 +356,6 @@ class SecurityScanner:
         Returns:
             ScanResult with all findings
         """
-        import uuid
         
         scan_id = self._generate_scan_id()
         start_time = datetime.now(timezone.utc)

@@ -21,14 +21,14 @@ RESTful API endpoints for the alpha testing program, including:
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, validator
-from typing import Dict, List, Optional, Any
+from typing import List, Optional
 from datetime import datetime
 
 from ..alpha.user_management import (
     AlphaUserManager, AlphaUser, UserType, 
-    get_alpha_manager, FeedbackEntry
+    get_alpha_manager
 )
-from prsm.core.models import UserInput, PRSMResponse
+from prsm.core.models import PRSMResponse
 
 router = APIRouter(prefix="/alpha", tags=["Alpha Program"])
 security = HTTPBearer()

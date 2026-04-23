@@ -3,7 +3,7 @@ PRSM Structured Logging System
 Advanced structured logging with correlation IDs, distributed tracing integration, and observability
 """
 
-from typing import Dict, Any, List, Optional, Union, Callable, Set
+from typing import Dict, Any, List, Optional, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone

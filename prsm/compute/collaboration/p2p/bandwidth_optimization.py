@@ -22,13 +22,10 @@ import json
 import logging
 import time
 import statistics
-from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional, Set, Tuple, Any, Callable
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Set, Tuple, Any
 from enum import Enum
-import heapq
-import math
 
-from .node_discovery import PeerNode
 
 logger = logging.getLogger(__name__)
 

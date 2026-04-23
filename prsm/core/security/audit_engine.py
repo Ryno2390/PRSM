@@ -10,8 +10,7 @@ Implements high-stakes automated security scanning:
 
 import re
 import logging
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass
+from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)

@@ -15,8 +15,8 @@ import json
 import time
 import statistics
 import random
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Tuple, Union
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -38,7 +38,6 @@ def get_global_collector():
 from prsm.compute.federation.p2p_network import P2PModelNetwork
 from prsm.compute.federation.multi_region_p2p_network import MultiRegionP2PNetwork
 
-from uuid import uuid4
 
 
 class BenchmarkType(str, Enum):

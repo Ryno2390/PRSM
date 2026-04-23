@@ -87,13 +87,12 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple, Callable
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import aiosqlite
 
 from prsm.core.cryptography.dag_signatures import (
     DAGSignatureManager,
-    KeyPair,
     InvalidSignatureError,
     MissingSignatureError,
 )

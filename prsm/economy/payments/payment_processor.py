@@ -7,30 +7,27 @@ crypto conversions, and FTNS token distribution with comprehensive
 transaction management and compliance features.
 """
 
-import asyncio
 import hashlib
 import hmac
 import os
 import time
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, Optional, Any
 
 import structlog
-from sqlalchemy.orm import Session
 
 from prsm.core.database import db_manager
-from prsm.core.config import get_settings
 from prsm.core.integrations.security.audit_logger import audit_logger
 from prsm.economy.tokenomics.ftns_service import get_ftns_service
 from ..web3.web3_service import get_web3_service
 from .fiat_gateway import get_fiat_gateway
 from .crypto_exchange import get_crypto_exchange
 from .payment_models import (
-    PaymentMethod, PaymentStatus, FiatCurrency, CryptoCurrency,
+    PaymentStatus, FiatCurrency, CryptoCurrency,
     PaymentRequest, PaymentResponse, PaymentTransaction, ExchangeRate,
-    PaymentMethodRequest, PaymentMethodResponse, TransactionQuery, TransactionList,
+    TransactionQuery, TransactionList,
     PaymentStats, KYCStatus
 )
 

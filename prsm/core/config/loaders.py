@@ -10,7 +10,7 @@ import os
 import json
 import yaml
 import logging
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional
 from pathlib import Path
 from abc import ABC, abstractmethod
 import urllib.request

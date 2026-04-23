@@ -21,18 +21,14 @@ PRODUCTION CAPABILITIES:
 """
 
 import asyncio
-import hashlib
-import json
 import logging
 import statistics
 import time
 from collections import defaultdict, deque
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Set, Any, Tuple, Union, Callable
-from uuid import UUID, uuid4
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Set, Any
 from enum import Enum
 from dataclasses import dataclass, field
-import math
 
 # Machine learning for anomaly detection
 try:
@@ -45,10 +41,8 @@ except ImportError:
     ML_AVAILABLE = False
 
 from prsm.core.config import settings
-from prsm.core.models import PeerNode, AgentResponse, SafetyFlag, SafetyLevel
 # v1.6.0 scope alignment: prsm.core.safety (AGI SafetyMonitor) deleted.
 # Fault tolerance now routes events through the structured logger only.
-from .consensus import DistributedConsensus, ConsensusResult, ConsensusType
 
 logger = logging.getLogger(__name__)
 

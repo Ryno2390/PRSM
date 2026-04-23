@@ -5,11 +5,9 @@ Handles secure custody of FTNS, Bitcoin, and USD reserves.
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from decimal import Decimal
 from datetime import datetime
-import hashlib
-import json
 from dataclasses import dataclass
 
 from .models import AssetType

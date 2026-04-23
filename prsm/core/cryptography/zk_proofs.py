@@ -6,13 +6,9 @@ Production-grade zero-knowledge proof system with a fully decoupled
 in-memory fallback for edge environments and testing.
 """
 
-import asyncio
-import hashlib
-import json
-import secrets
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Union
-from uuid import UUID, uuid4
+from typing import Dict, List, Optional, Any
+from uuid import uuid4
 
 import structlog
 
@@ -24,7 +20,7 @@ except (ImportError, ValueError):
     HAS_DB = False
 
 from .crypto_models import (
-    ZKProof, ZKProofRecord, ProofResult,
+    ProofResult,
     ZKProofRequest
 )
 

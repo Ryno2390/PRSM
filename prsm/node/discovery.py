@@ -14,7 +14,7 @@ import random
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from prsm.node.transport import (

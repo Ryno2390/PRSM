@@ -7,7 +7,6 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 
 from prsm.core.config import get_settings
 
@@ -136,7 +135,6 @@ async def root():
 )
 async def health_check():
     """Standardized health check endpoint"""
-    from datetime import datetime
     
     health_status = HealthCheckResponse(
         status="healthy",

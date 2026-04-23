@@ -15,16 +15,15 @@ Key Features:
 
 import asyncio
 import structlog
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from decimal import Decimal, getcontext
-from typing import Dict, List, Optional, Any, Tuple, Set
+from typing import Dict, List, Optional, Any, Tuple
 from uuid import UUID, uuid4
 from enum import Enum
 
 # Set precision for governance calculations
 getcontext().prec = 18
 
-from prsm.core.config import settings
 from prsm.core.models import PRSMBaseModel
 from prsm.economy.tokenomics.database_ftns_service import DatabaseFTNSService
 from prsm.core.auth.auth_manager import auth_manager

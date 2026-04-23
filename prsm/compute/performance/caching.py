@@ -12,14 +12,11 @@ Multi-layer caching architecture with Redis cluster and CDN optimization
 
 import asyncio
 import time
-import hashlib
 import json
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any, Union, Callable
-from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Any
+from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
-import logging
 
 import structlog
 from redis.asyncio import Redis, RedisCluster

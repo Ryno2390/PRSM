@@ -3,18 +3,17 @@ PRSM Distributed Tracing System
 Comprehensive distributed tracing with OpenTelemetry integration for microservices observability
 """
 
-from typing import Dict, Any, List, Optional, Union, Callable, Set
+from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from enum import Enum
 import asyncio
 import json
 import uuid
-import time
 import logging
 import traceback
 import contextvars
-from collections import defaultdict, deque
+from collections import defaultdict
 from contextlib import contextmanager, asynccontextmanager
 import redis.asyncio as aioredis
 

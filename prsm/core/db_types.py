@@ -6,7 +6,6 @@ These wrappers fall back to JSON/String for SQLite (dev/test) while
 preserving the PostgreSQL-native types in production.
 """
 
-import sqlalchemy as sa
 from sqlalchemy import types
 
 

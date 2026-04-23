@@ -21,16 +21,13 @@ import time
 import secrets
 import hashlib
 from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional, Set, Tuple, Any, Union
+from typing import Dict, List, Optional, Set, Tuple, Any
 from enum import Enum
 import base64
-import struct
 
 # Post-quantum cryptography imports
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 
 # For production, these would be replaced with actual post-quantum libraries

@@ -3,7 +3,7 @@ PRSM Task Queue Monitoring and Alerting System
 Comprehensive monitoring, alerting, and analytics for distributed task processing
 """
 
-from typing import Dict, Any, List, Optional, Union, Callable, Tuple, Set
+from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -15,8 +15,8 @@ import logging
 from collections import defaultdict, deque
 import redis.asyncio as aioredis
 
-from .task_queue import TaskQueue, TaskStatus, TaskPriority
-from .task_worker import WorkerManager, WorkerStatus
+from .task_queue import TaskQueue
+from .task_worker import WorkerManager
 
 logger = logging.getLogger(__name__)
 
