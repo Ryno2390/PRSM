@@ -373,6 +373,7 @@ module = [
     "prsm.node.bootstrap_transport",
     "prsm.node.rpc_transport",
     "prsm.node.jurisdiction_filter",
+    "prsm.node.content_self_filter",
     "prsm.storage.encryption",
     "prsm.storage.erasure",
     "prsm.storage.key_sharing",
