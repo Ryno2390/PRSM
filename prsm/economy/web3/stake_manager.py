@@ -306,7 +306,19 @@ class StakeManagerClient:
         if private_key:
             self._account = Account.from_key(private_key)
 
-        self._tx_lock = threading.Lock()
+        # Per-account lock from the process-wide registry. Cross-client
+        # nonce safety: any other web3 client (e.g., ProvenanceRegistry,
+        # BatchSettlement) signing with the same account address acquires
+        # the same lock instance, serializing the
+        # build_transaction → sign → broadcast sequence across clients.
+        # Resolves Phase 7 §8.8. Falls back to a private Lock if there's
+        # no account (read-only client, unreachable from writes).
+        from prsm.economy.web3.tx_lock_registry import TX_LOCK_REGISTRY
+
+        if self._account is not None:
+            self._tx_lock = TX_LOCK_REGISTRY.get_lock(self._account.address)
+        else:
+            self._tx_lock = threading.Lock()
 
     @property
     def address(self) -> Optional[str]:
