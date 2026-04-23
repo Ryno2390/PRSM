@@ -87,6 +87,7 @@ Phases ordered by number. Each row: design/plan doc + status + any follow-on run
 | [`2026-04-21-phase7.1-audit-prep.md`](./2026-04-21-phase7.1-audit-prep.md) | Phase 7.1 audit prep | Ready |
 | [`2026-04-22-phase7.1x-audit-prep.md`](./2026-04-22-phase7.1x-audit-prep.md) | Phase 7.1x pre-audit hardening summary | `phase7.1x-merge-ready-20260422-2` |
 | [`2026-04-21-audit-bundle-coordinator.md`](./2026-04-21-audit-bundle-coordinator.md) | Bundled audit engagement pattern | Reference |
+| [`2026-04-23-testnet-rehearsal-plan.md`](./2026-04-23-testnet-rehearsal-plan.md) | Mainnet deploy rehearsal — bundled deploy scripts + local hardhat dry-run | Rehearsal infra live; hardware day is mechanical |
 
 ### Phase 7-storage — content durability + confidentiality
 
