@@ -91,6 +91,7 @@ Phases ordered by number. Each row: design/plan doc + status + any follow-on run
 | [`2026-04-23-auditor-shortlist-and-rfp.md`](./2026-04-23-auditor-shortlist-and-rfp.md) | Audit firm shortlist (6 firms) + decision criteria + copy-paste RFP email template | Send-ready once Foundation/multi-sig provisioned |
 | [`2026-04-23-foundation-jurisdiction-scoping.md`](./2026-04-23-foundation-jurisdiction-scoping.md) | Foundation jurisdiction scoping (5 jurisdictions) + recommendation (Cayman primary, Swiss Verein alternate) + counsel decision memo template | Hand-off ready for incoming legal counsel |
 | [`2026-04-23-legal-counsel-shortlist-and-rfp.md`](./2026-04-23-legal-counsel-shortlist-and-rfp.md) | Legal counsel shortlist (6 Cayman + 3 Swiss firms) + decision criteria + RFP email template | Send-ready once jurisdiction decision confirmed |
+| [`2026-04-23-prsm-pitch-deck.md`](./2026-04-23-prsm-pitch-deck.md) | 12-slide investor pitch deck draft (content + speaker notes + 7 appendix slides + build-out execution notes) | v1 for founder review before Figma/Keynote build |
 
 ### Phase 7-storage — content durability + confidentiality
 
