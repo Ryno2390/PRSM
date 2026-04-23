@@ -369,6 +369,7 @@ module = [
     "prsm.node.p2p_metrics",
     "prsm.node.rate_limit",
     "prsm.node.shard_streaming",
+    "prsm.node.transport_adapter",
     "prsm.storage.encryption",
     "prsm.storage.erasure",
     "prsm.storage.key_sharing",

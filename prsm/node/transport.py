@@ -16,13 +16,34 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Callable, Coroutine, Dict, List, Optional, Set
+from urllib.parse import urlparse
 
 import websockets
 import websockets.server
 import websockets.client
 
 from prsm.node.identity import NodeIdentity, verify_signature
+
+if TYPE_CHECKING:
+    from prsm.node.transport_adapter import TransportAdapter
+
+
+def _parse_uri_host_port(uri: str) -> tuple[str, int]:
+    """Extract ``(host, port)`` from a ws:// or wss:// URI.
+
+    Used by ``WebSocketTransport.connect_to_peer`` when routing through
+    a non-direct TransportAdapter — the adapter takes host+port, not
+    the full URI, because SOCKS proxies operate on TCP dest host/port
+    and don't care about the wrapping websocket scheme.
+    """
+    parsed = urlparse(uri)
+    host = parsed.hostname or ""
+    # Fall back to scheme default (443 for wss, 80 for ws) if no explicit port.
+    port = parsed.port if parsed.port is not None else (
+        443 if parsed.scheme == "wss" else 80
+    )
+    return host, port
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +167,7 @@ class WebSocketTransport:
         ws_ping_timeout: float = 10.0,
         handshake_timeout: float = 10.0,
         nonce_cleanup_interval: float = 60.0,
+        transport_adapter: Optional["TransportAdapter"] = None,
     ):
         self.identity = identity
         self.host = host
@@ -154,6 +176,15 @@ class WebSocketTransport:
         self.ws_ping_timeout = ws_ping_timeout
         self.handshake_timeout = handshake_timeout
         self.nonce_cleanup_interval = nonce_cleanup_interval
+        # R9 Phase 6.2: pluggable outbound-transport adapter. Default is
+        # DirectAdapter (pre-R9 behavior, unchanged). Operators in censoring
+        # jurisdictions inject SocksAdapter (Tor / V2Ray / Trojan / Shadow-
+        # socks via local SOCKS5) at node wiring time. See
+        # docs/2026-04-23-r9-transport-censorship-resistance-scoping.md §5.
+        if transport_adapter is None:
+            from prsm.node.transport_adapter import DirectAdapter
+            transport_adapter = DirectAdapter()
+        self._transport_adapter = transport_adapter
 
         self.peers: Dict[str, PeerConnection] = {}  # peer_id -> connection
         self._handlers: Dict[str, List[MessageHandler]] = {}
@@ -424,8 +455,29 @@ class WebSocketTransport:
             uri = f"wss://{address}"
         else:
             uri = f"ws://{address}"
+
+        # R9 Phase 6.2: outbound connections flow through the configured
+        # TransportAdapter. DirectAdapter (default) opens a native TCP
+        # socket, preserving pre-R9 behavior. SocksAdapter routes through
+        # a local SOCKS5 proxy (Tor / V2Ray / Trojan / Shadowsocks).
+        # websockets supports `sock=` to accept a pre-connected socket.
         try:
-            websocket = await websockets.client.connect(uri, open_timeout=self.handshake_timeout)
+            host, port = _parse_uri_host_port(uri)
+            adapter = self._transport_adapter
+            if adapter.name == "direct":
+                # Fast path: let websockets manage the connect itself.
+                # Avoids the adapter round-trip for the common case.
+                websocket = await websockets.client.connect(
+                    uri, open_timeout=self.handshake_timeout
+                )
+            else:
+                sock = await adapter.open_connection(
+                    host, port, timeout=self.handshake_timeout
+                )
+                websocket = await websockets.client.connect(
+                    uri, sock=sock, open_timeout=self.handshake_timeout,
+                    server_hostname=host,
+                )
 
             # Send handshake
             hs = P2PMessage(
