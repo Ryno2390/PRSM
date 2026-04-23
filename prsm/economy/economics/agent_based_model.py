@@ -56,6 +56,20 @@ except ImportError:
     MESA_AVAILABLE = False
     print("Warning: Mesa not available. Install with: pip install mesa")
 
+    # Stub bases so module-level class declarations still import successfully.
+    # Simulation code-paths raise ImportError at construction time (see
+    # PRSMEconomicModel.__init__); other consumers importing AgentProfile /
+    # StakeholderType dataclasses don't hit the simulation path.
+    class _MesaStub:  # type: ignore[no-redef]
+        def __init__(self, *args, **kwargs):  # pragma: no cover
+            raise ImportError("Mesa framework required. Install with: pip install mesa")
+
+    Agent = _MesaStub  # type: ignore[assignment,misc]
+    Model = _MesaStub  # type: ignore[assignment,misc]
+    RandomActivation = _MesaStub  # type: ignore[assignment,misc]
+    NetworkGrid = _MesaStub  # type: ignore[assignment,misc]
+    DataCollector = _MesaStub  # type: ignore[assignment,misc]
+
 logger = structlog.get_logger(__name__)
 
 class StakeholderType(Enum):

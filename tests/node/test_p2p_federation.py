@@ -40,6 +40,14 @@ class FakeIdentity:
 class FakeTransport:
     def __init__(self, peer_count=0):
         self.peer_count = peer_count
+        # PRSM transport contract surface: subsystems register inbound handlers
+        # keyed by message type (MSG_DIRECT, MSG_GOSSIP). See e.g.
+        # prsm/node/ledger_sync.py:77, prsm/compute/remote_dispatcher.py:145.
+        # The fake just records registrations so tests can drive them directly.
+        self._handlers: Dict[str, list] = {}
+
+    def on_message(self, msg_type, handler):
+        self._handlers.setdefault(msg_type, []).append(handler)
 
 
 class FakeGossip:

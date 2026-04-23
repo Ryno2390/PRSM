@@ -10,6 +10,11 @@ Self-hosted: docker run -d milvusdb/milvus:latest
 Cloud: https://cloud.zilliz.com
 """
 
+# Defer annotation evaluation so module loads when pymilvus is missing —
+# the `-> Collection` return annotation on line ~148 would otherwise fail
+# at class-def time and mask the intended ImportError raised from __init__.
+from __future__ import annotations
+
 import json
 import logging
 import uuid
