@@ -257,8 +257,8 @@ class ExchangeRouter:
                 "error": (
                     "Live exchange order placement is not implemented in PRSM "
                     "1.6.x. Chronos's in-scope role is the FTNS↔USD/USDT bridge "
-                    "(see prsm.compute.chronos.cashout_api). Set live_trading=False "
-                    "to use the simulated execution path."
+                    "(see prsm.compute.chronos.hub_spoke_router). Set "
+                    "live_trading=False to use the simulated execution path."
                 )
             }
 
