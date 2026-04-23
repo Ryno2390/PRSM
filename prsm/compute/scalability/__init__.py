@@ -18,7 +18,7 @@ PERFORMANCE VALIDATION:
 - Latency reduction: Performance gains to be validated
 """
 
-from ..agents.executors.unified_router import UnifiedModelRouter
+from .intelligent_router import IntelligentRouter, ComponentMetrics, RoutingRule
 from .cpu_optimizer import CPUOptimizer, CPUOptimizationConfig
 from .auto_scaler import AutoScaler, ScalingMetrics, ScalingPolicy, LoadBalancingPolicy
 from .advanced_cache import AdvancedCache, CacheManager, CacheLevel, CacheItem
@@ -26,17 +26,17 @@ from .scalability_orchestrator import ScalabilityOrchestrator
 
 __all__ = [
     "IntelligentRouter",
-    "ComponentMetrics", 
+    "ComponentMetrics",
     "RoutingRule",
     "CPUOptimizer",
     "CPUOptimizationConfig",
     "AutoScaler",
     "ScalingMetrics",
-    "ScalingPolicy", 
+    "ScalingPolicy",
     "LoadBalancingPolicy",
     "AdvancedCache",
     "CacheManager",
     "CacheLevel",
     "CacheItem",
-    "ScalabilityOrchestrator"
+    "ScalabilityOrchestrator",
 ]

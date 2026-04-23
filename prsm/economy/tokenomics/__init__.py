@@ -52,12 +52,14 @@ from .models import (
     StakeStatus, UnstakeRequestStatus, SlashReason, StakeType
 )
 
-# Export staking manager
+# Export staking manager. Note: StakeStatus / UnstakeRequestStatus /
+# SlashReason / StakeType live in both .models and .staking_manager as
+# independent enums — the package-level re-exports (listed in __all__
+# below) come from .models. Direct consumers that want the
+# staking_manager's variants import them by full path.
 from .staking_manager import (
     StakingManager, StakingConfig, StakeRecord, UnstakeRequest,
     SlashRecord, RewardCalculation, get_staking_manager,
-    StakeStatus as StakeStatusEnum, UnstakeRequestStatus as UnstakeRequestStatusEnum,
-    SlashReason as SlashReasonEnum, StakeType as StakeTypeEnum
 )
 
 __all__ = [
