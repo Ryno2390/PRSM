@@ -38,7 +38,7 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, cast
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -180,7 +180,7 @@ def decrypt(
     aead = AESGCM(key.key_bytes)
     combined = payload.ciphertext + payload.auth_tag
     try:
-        return aead.decrypt(payload.iv, combined, associated_data)
+        return cast(bytes, aead.decrypt(payload.iv, combined, associated_data))
     except InvalidTag as exc:
         raise EncryptionAuthError("authentication failed") from exc
 
@@ -232,14 +232,14 @@ class StreamingEncryptor:
     def encrypt_chunk(self, chunk: bytes) -> bytes:
         if self._finalized:
             raise EncryptionError("encryptor already finalized")
-        return self._cipher.update(chunk)
+        return cast(bytes, self._cipher.update(chunk))
 
     def finalize(self) -> bytes:
         if self._finalized:
             raise EncryptionError("encryptor already finalized")
         self._cipher.finalize()
         self._finalized = True
-        return self._cipher.tag
+        return cast(bytes, self._cipher.tag)
 
 
 class StreamingDecryptor:
@@ -274,7 +274,7 @@ class StreamingDecryptor:
     def decrypt_chunk(self, chunk: bytes) -> bytes:
         if self._finalized:
             raise EncryptionError("decryptor already finalized")
-        return self._cipher.update(chunk)
+        return cast(bytes, self._cipher.update(chunk))
 
     def finalize(self) -> None:
         if self._finalized:

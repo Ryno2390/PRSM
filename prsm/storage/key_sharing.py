@@ -122,8 +122,11 @@ def split_key(
     first_half = key.key_bytes[:_HALF_BYTES]
     second_half = key.key_bytes[_HALF_BYTES:]
 
-    first_shares = Shamir.split(m, n, first_half)
-    second_shares = Shamir.split(m, n, second_half)
+    # type stubs declare a required `ssss` kwarg that doesn't exist in the
+    # real pycryptodome Shamir.split(k, n, secret) signature — ignore the
+    # (wrong) type error.
+    first_shares = Shamir.split(m, n, first_half)  # type: ignore[call-arg]
+    second_shares = Shamir.split(m, n, second_half)  # type: ignore[call-arg]
 
     shares: List[KeyShare] = []
     for i in range(n):
@@ -191,8 +194,9 @@ def combine_shares(shares: Sequence[KeyShare]) -> AESKey:
     first_tuples = [(s.index + 1, s.first_half) for s in picked]
     second_tuples = [(s.index + 1, s.second_half) for s in picked]
 
-    first_half = Shamir.combine(first_tuples)
-    second_half = Shamir.combine(second_tuples)
+    # Same type-stub / real-API mismatch as in split() above.
+    first_half = Shamir.combine(first_tuples)  # type: ignore[call-arg]
+    second_half = Shamir.combine(second_tuples)  # type: ignore[call-arg]
 
     return AESKey(
         key_id=key_id,

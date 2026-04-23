@@ -262,7 +262,8 @@ class HttpsBootstrapFetcher:
             logger.warning("HTTPS fetch failed (%s): %s", self.url, exc)
             return None
         try:
-            return json.loads(body)
+            parsed: dict = json.loads(body)
+            return parsed
         except json.JSONDecodeError as exc:
             logger.warning("HTTPS body parse failed (%s): %s", self.url, exc)
             return None
@@ -291,7 +292,8 @@ class DnsBootstrapFetcher:
             return None
         body = "".join(chunks)
         try:
-            return json.loads(body)
+            parsed: dict = json.loads(body)
+            return parsed
         except json.JSONDecodeError as exc:
             logger.warning("DNS body parse failed (%s): %s", self.domain, exc)
             return None
