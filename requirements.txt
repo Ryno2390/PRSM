@@ -69,7 +69,7 @@ psutil>=5.9.0
 
 # Additional Production Dependencies
 gunicorn>=21.2.0
-requests>=2.31.0
+requests[socks]>=2.31.0   # [socks] extra for R9 Phase 6.2 RPC-over-transport (PySocks dep for web3.py HTTPProvider routing)
 jinja2>=3.1.0
 
 # Alerting and Notifications
