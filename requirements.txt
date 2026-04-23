@@ -63,7 +63,7 @@ rich>=13.7.0
 # Utilities
 click>=8.1.0
 python-dotenv>=1.0.0
-httpx>=0.25.0
+httpx[socks]>=0.25.0   # [socks] extra for R9 Phase 6.2 bootstrap-over-transport (socksio dep)
 tenacity>=8.2.0
 psutil>=5.9.0
 
