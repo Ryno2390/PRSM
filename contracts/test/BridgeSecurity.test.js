@@ -162,7 +162,7 @@ describe("BridgeSecurity", function () {
       
       await expect(
         bridgeSecurity.initialize(admin.address, 3, [])
-      ).to.be.revertedWith("Initializable: contract is already initialized");
+      ).to.be.revertedWithCustomError(bridgeSecurity, "InvalidInitialization");
     });
   });
 
@@ -406,7 +406,7 @@ describe("BridgeSecurity", function () {
         [validator1, validator2, validator3]
       );
       
-      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures(
+      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures.staticCall(
         message,
         signatures
       );
@@ -480,7 +480,7 @@ describe("BridgeSecurity", function () {
         [validator1, validator2, attacker]
       );
       
-      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures(
+      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures.staticCall(
         message,
         signatures
       );
@@ -508,7 +508,7 @@ describe("BridgeSecurity", function () {
       
       const signatures = [sig1, sig2, sig3];
       
-      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures(
+      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures.staticCall(
         message,
         signatures
       );
@@ -539,7 +539,7 @@ describe("BridgeSecurity", function () {
       
       const signatures = [sig1, sig2, forgedSig];
       
-      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures(
+      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures.staticCall(
         message,
         signatures
       );
@@ -565,14 +565,19 @@ describe("BridgeSecurity", function () {
         [validator1, validator2, validator3]
       );
       
-      // First verification should succeed
-      const [messageHash1, isValid1] = await bridgeSecurity.verifyBridgeSignatures(
+      // First verification: staticCall to check return value, then real
+      // call to mutate state (mark tx as processed). Ethers v6 tx responses
+      // don't expose tuple return values, so staticCall is the only way to
+      // read them — but staticCall doesn't change state, hence the follow-up
+      // real call below.
+      const [messageHash1, isValid1] = await bridgeSecurity.verifyBridgeSignatures.staticCall(
         message,
         signatures
       );
       expect(isValid1).to.be.true;
-      
-      // Second verification should fail (already processed)
+      await bridgeSecurity.verifyBridgeSignatures(message, signatures);
+
+      // Third real call should revert: already processed
       await expect(
         bridgeSecurity.verifyBridgeSignatures(message, signatures)
       ).to.be.reverted;
@@ -657,7 +662,7 @@ describe("BridgeSecurity", function () {
         [validator1, validator2, validator3]
       );
       
-      const [isValid, validCount] = await bridgeSecurity.checkBridgeSignatures(
+      const [isValid, validCount] = await bridgeSecurity.checkBridgeSignatures.staticCall(
         message,
         signatures
       );
@@ -721,7 +726,7 @@ describe("BridgeSecurity", function () {
       await bridgeSecurity.verifyBridgeSignatures(message, signatures);
       
       // Check should return false (already processed)
-      const [isValid, validCount] = await bridgeSecurity.checkBridgeSignatures(
+      const [isValid, validCount] = await bridgeSecurity.checkBridgeSignatures.staticCall(
         message,
         signatures
       );
@@ -755,7 +760,7 @@ describe("BridgeSecurity", function () {
     it("Should return correct configuration", async function () {
       const { bridgeSecurity } = await loadFixture(deployBridgeSecurityFixture);
       
-      const [threshold, validators] = await bridgeSecurity.getConfiguration();
+      const [threshold, validators] = await bridgeSecurity.getConfiguration.staticCall();
       
       expect(threshold).to.equal(3);
       expect(validators).to.equal(5);
@@ -782,7 +787,7 @@ describe("BridgeSecurity", function () {
         [validator1, validator2, validator3]
       );
       
-      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures(
+      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures.staticCall(
         message,
         signatures
       );
@@ -809,7 +814,7 @@ describe("BridgeSecurity", function () {
         [validator1, validator2, validator3, validator4, validator5]
       );
       
-      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures(
+      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures.staticCall(
         message,
         signatures
       );
@@ -851,7 +856,7 @@ describe("BridgeSecurity", function () {
         [validator1, validator2, validator3]
       );
       
-      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures(
+      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures.staticCall(
         message,
         signatures
       );
@@ -878,7 +883,7 @@ describe("BridgeSecurity", function () {
       );
       
       // Should still verify signatures (validation happens at bridge level)
-      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures(
+      const [messageHash, isValid] = await bridgeSecurity.verifyBridgeSignatures.staticCall(
         message,
         signatures
       );
@@ -897,7 +902,7 @@ describe("BridgeSecurity", function () {
       
       // Upgrade
       await expect(
-        bridgeSecurity.connect(admin).upgradeTo(await newImplementation.getAddress())
+        bridgeSecurity.connect(admin).upgradeToAndCall(await newImplementation.getAddress(), "0x")
       ).to.not.be.reverted;
     });
 
@@ -908,7 +913,7 @@ describe("BridgeSecurity", function () {
       const newImplementation = await BridgeSecurityV2.deploy();
       
       await expect(
-        bridgeSecurity.connect(attacker).upgradeTo(await newImplementation.getAddress())
+        bridgeSecurity.connect(attacker).upgradeToAndCall(await newImplementation.getAddress(), "0x")
       ).to.be.reverted;
     });
 
@@ -923,7 +928,7 @@ describe("BridgeSecurity", function () {
       // Upgrade
       const BridgeSecurityV2 = await ethers.getContractFactory("BridgeSecurity");
       const newImplementation = await BridgeSecurityV2.deploy();
-      await bridgeSecurity.connect(admin).upgradeTo(await newImplementation.getAddress());
+      await bridgeSecurity.connect(admin).upgradeToAndCall(await newImplementation.getAddress(), "0x");
       
       // Check state preserved
       expect(await bridgeSecurity.signatureThreshold()).to.equal(initialThreshold);
