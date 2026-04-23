@@ -9,7 +9,7 @@ digital signatures for enhanced security against future quantum attacks.
 import json
 import hashlib
 import structlog
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
@@ -252,8 +252,13 @@ class PostQuantumAuthManager:
             f"{user_id}_{datetime.now().isoformat()}".encode()
         ).hexdigest()[:16]
         challenge_data = f"PRSM_AUTH_{datetime.now(timezone.utc).isoformat()}_{challenge_id}"
-        expires_at = datetime.now(timezone.utc).replace(microsecond=0)
-        expires_at = expires_at.replace(minute=expires_at.minute + challenge_lifetime_minutes)
+        # Use timedelta for minute addition — .replace(minute=m+N) breaks
+        # when m+N > 59 (previously caused flaky test failures whenever
+        # current minute ≥ 50 with default 10-minute lifetime).
+        expires_at = (
+            datetime.now(timezone.utc).replace(microsecond=0)
+            + timedelta(minutes=challenge_lifetime_minutes)
+        )
 
         challenge = AuthenticationChallenge(
             challenge_id=challenge_id,
