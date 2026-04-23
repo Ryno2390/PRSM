@@ -34,7 +34,9 @@ class TestProjectStructure:
         "prsm/economy/tokenomics",
         "prsm/data",
         "prsm/interface",
-        "prsm/sdks",
+        # SDKs live at the top level (sdks/) not under prsm/ — keep test
+        # aligned with actual layout after the 2026 repo-audit relocation.
+        "sdks",
         "tests",
         "docs",
         "scripts",

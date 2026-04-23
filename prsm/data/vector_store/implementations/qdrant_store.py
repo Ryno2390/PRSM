@@ -9,6 +9,11 @@ Self-hosted: docker run -p 6333:6333 qdrant/qdrant
 Cloud: https://cloud.qdrant.io
 """
 
+# Defer annotation evaluation so module loads when the optional dep is missing —
+# return-type annotations referencing the lazy-imported lib would otherwise fail
+# at class-def time and mask the intended ImportError raised from __init__.
+from __future__ import annotations
+
 import json
 import logging
 import uuid

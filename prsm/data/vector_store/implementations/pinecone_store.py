@@ -9,6 +9,11 @@ Install: pip install pinecone-client
 Setup: Create an index at https://app.pinecone.io
 """
 
+# Defer annotation evaluation so module loads when the optional dep is missing —
+# return-type annotations referencing the lazy-imported lib would otherwise fail
+# at class-def time and mask the intended ImportError raised from __init__.
+from __future__ import annotations
+
 import json
 import logging
 import uuid
