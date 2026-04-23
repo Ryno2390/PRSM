@@ -206,7 +206,18 @@ class ProvenanceRegistryClient:
         # Phase 1.1 Task 5: serialize the entire build → sign → send
         # sequence so concurrent callers don't race on get_transaction_count
         # and end up with two txs sharing the same nonce.
-        self._tx_lock = threading.Lock()
+        #
+        # Phase 7 §8.8 (2026-04-23): lock acquired from the process-wide
+        # TX_LOCK_REGISTRY keyed by account address. Any other web3 client
+        # (StakeManager, etc.) signing with the same account acquires the
+        # same lock — preventing cross-client nonce races when one operator
+        # key is shared across clients.
+        from prsm.economy.web3.tx_lock_registry import TX_LOCK_REGISTRY
+
+        if self._account is not None:
+            self._tx_lock = TX_LOCK_REGISTRY.get_lock(self._account.address)
+        else:
+            self._tx_lock = threading.Lock()
 
     @property
     def address(self) -> Optional[str]:
