@@ -88,13 +88,23 @@ When a PRSM node starts, it connects to bootstrap peers to join the network. The
 2. **Fallback nodes** (trusted PRSM community relays) are tried if all primary nodes are unreachable.
 3. If all candidates fail, the node starts in **degraded local mode** — it remains functional for local operations but cannot discover remote peers until inbound connections arrive or bootstrap targets recover.
 
+### Current bootstrap deployment state (as of 2026-04-24)
+
+Current production state: a single bootstrap droplet in NYC3. The domain names `bootstrap1.prsm-network.com`, `fallback1.prsm-network.com`, and `fallback2.prsm-network.com` **all presently resolve to the same droplet IP** (`159.203.129.218`). The fallback names are DNS slots reserved for future multi-region droplets (Europe + Asia deployments planned post-funding per Prismatica's operating-cost model); today they do not provide independent redundancy.
+
+**What this means for you as a new node operator:**
+
+- Your node bootstrap behavior works as documented — the fallback logic runs correctly whether the fallbacks resolve to separate infrastructure or not.
+- If the NYC3 droplet is unreachable (DO outage, region failure, takedown), all three names fail together and your node will enter degraded local mode. This is a known risk; the mitigation (multi-region bootstrap) is on the Prismatica operating roadmap, not shipped.
+- If the fallback behavior is not useful for your environment, you can disable it — see "Disabling Fallback Behavior" below.
+
 ### Configuration Reference
 
 | Setting | Default | Description |
 |---|---|---|
-| `bootstrap_nodes` | `["wss://bootstrap.prsm-network.com"]` | Primary bootstrap peers (tried first) |
+| `bootstrap_nodes` | `["wss://bootstrap1.prsm-network.com:8765"]` | Primary bootstrap peers (tried first) — currently a single NYC3 droplet |
 | `bootstrap_fallback_enabled` | `true` | Enable/disable trusted fallback peers |
-| `bootstrap_fallback_nodes` | `["wss://fallback1.prsm-network.com", "wss://fallback2.prsm-network.com"]` | Fallback peers (tried after all primaries fail) |
+| `bootstrap_fallback_nodes` | `["wss://fallback1.prsm-network.com", "wss://fallback2.prsm-network.com"]` | Fallback peer DNS slots (tried after all primaries fail). **Today these resolve to the same NYC3 droplet**; they become real redundancy when additional droplets deploy. |
 | `bootstrap_validate_addresses` | `true` | Reject malformed bootstrap addresses before connection attempts |
 | `bootstrap_retry_attempts` | `2` | Number of connection attempts per bootstrap node |
 | `bootstrap_connect_timeout` | `5.0` | Seconds to wait for each connection attempt |
