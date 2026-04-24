@@ -20,35 +20,35 @@ def create_enhanced_docs_ui(app: FastAPI) -> None:
     @app.get("/docs/playground", response_class=HTMLResponse, include_in_schema=False)
     async def api_playground(request: Request):
         """Interactive API playground with real-time testing"""
-        return templates.TemplateResponse("api_playground.html", {
+        return templates.TemplateResponse(request, "api_playground.html", {
             "request": request,
             "api_base_url": str(request.base_url),
             "title": "PRSM API Playground"
-        })
+        }))
     
     @app.get("/docs/examples", response_class=HTMLResponse, include_in_schema=False)
     async def code_examples(request: Request):
         """Code examples in multiple programming languages"""
-        return templates.TemplateResponse("code_examples.html", {
+        return templates.TemplateResponse(request, "code_examples.html", {
             "request": request,
             "title": "PRSM API Code Examples"
-        })
+        }))
     
     @app.get("/docs/guides", response_class=HTMLResponse, include_in_schema=False)
     async def integration_guides(request: Request):
         """Integration guides and tutorials"""
-        return templates.TemplateResponse("integration_guides.html", {
+        return templates.TemplateResponse(request, "integration_guides.html", {
             "request": request,
             "title": "PRSM API Integration Guides"
-        })
+        }))
     
     @app.get("/docs/sdk", response_class=HTMLResponse, include_in_schema=False)
     async def sdk_documentation(request: Request):
         """SDK documentation and downloads"""
-        return templates.TemplateResponse("sdk_docs.html", {
+        return templates.TemplateResponse(request, "sdk_docs.html", {
             "request": request,
             "title": "PRSM SDKs and Libraries"
-        })
+        }))
     
     @app.get("/docs/postman", response_class=JSONResponse, include_in_schema=False)
     async def postman_collection():

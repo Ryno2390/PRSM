@@ -102,7 +102,13 @@ async def test_three_node_sharded_inference_end_to_end():
 
     full_output = np.concatenate(shard_outputs, axis=0)
 
-    np.testing.assert_array_equal(full_output, expected_output)
+    # Use assert_allclose rather than assert_array_equal — different BLAS
+    # implementations (OpenBLAS on Ubuntu CI vs Accelerate on Apple
+    # Silicon dev machines) produce results that differ by 1-2 ulps due
+    # to floating-point operation ordering. Tolerance of 1e-12 is vastly
+    # tighter than any semantically meaningful difference while forgiving
+    # these benign numerical artifacts.
+    np.testing.assert_allclose(full_output, expected_output, rtol=1e-12, atol=1e-12)
 
     escrows = list(requester.payment_escrow._escrows.values())
     b_escrows = [e for e in escrows if e.job_id.endswith(":shard:1")]

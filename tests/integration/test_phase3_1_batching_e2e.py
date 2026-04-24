@@ -124,7 +124,11 @@ async def test_phase3_1_full_lifecycle_commit_then_finalize():
     )
 
     # Phase 3 output unchanged.
-    np.testing.assert_array_equal(result, expected_output)
+    # Use assert_allclose rather than assert_array_equal to allow for
+    # 1-2 ulp differences between BLAS implementations (OpenBLAS on CI
+    # Ubuntu vs Accelerate on Apple Silicon). Tolerance of 1e-12 is
+    # far tighter than any semantic variance.
+    np.testing.assert_allclose(result, expected_output, rtol=1e-12, atol=1e-12)
 
     # Phase 3.1: accumulator received 4 BatchedReceipts.
     # (Each dispatched to whichever provider the randomizer picked.)

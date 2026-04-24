@@ -113,9 +113,7 @@ async def onboarding_welcome(request: Request):
     checks = await _run_prerequisite_checks()
     if _wants_json(request):
         return JSONResponse(checks)
-    return templates.TemplateResponse(
-        "onboarding/welcome.html",
-        {"request": request, "checks": checks, "step": 1}
+    return templates.TemplateResponse(request, "onboarding/welcome.html", {"request": request, "checks": checks, "step": 1})
     )
 
 
@@ -133,9 +131,7 @@ async def api_keys_form(request: Request):
     """Step 2: API key input form."""
     if _wants_json(request):
         return JSONResponse({"step": 2, "message": "Submit API keys via POST"})
-    return templates.TemplateResponse(
-        "onboarding/api_keys.html",
-        {"request": request, "step": 2}
+    return templates.TemplateResponse(request, "onboarding/api_keys.html", {"request": request, "step": 2})
     )
 
 
@@ -236,14 +232,12 @@ async def backend_selection_form(request: Request):
             "current_selection": _pending_config.get("primary_backend", "mock")
         })
 
-    return templates.TemplateResponse(
-        "onboarding/backend.html",
-        {
+    return templates.TemplateResponse(request, "onboarding/backend.html", {
             "request": request,
             "step": 3,
             "available_backends": available_backends,
             "current_selection": _pending_config.get("primary_backend", "mock")
-        }
+        })
     )
 
 
@@ -296,16 +290,14 @@ async def network_config_form(request: Request):
             }
         })
 
-    return templates.TemplateResponse(
-        "onboarding/network.html",
-        {
+    return templates.TemplateResponse(request, "onboarding/network.html", {
             "request": request,
             "step": 4,
             "ipfs_status": ipfs_status,
             "p2p_port": _pending_config.get("p2p_port", 8765),
             "api_port": _pending_config.get("api_port", 8080),
             "bootstrap_nodes": ",".join(_pending_config.get("bootstrap_nodes", ["wss://bootstrap1.prsm-network.com:8765"]))
-        }
+        })
     )
 
 
@@ -402,14 +394,12 @@ async def identity_form(request: Request):
             "identity_path": str(IDENTITY_OUTPUT_PATH)
         })
 
-    return templates.TemplateResponse(
-        "onboarding/identity.html",
-        {
+    return templates.TemplateResponse(request, "onboarding/identity.html", {
             "request": request,
             "step": 5,
             "existing_identity": existing_identity,
             "identity_path": str(IDENTITY_OUTPUT_PATH)
-        }
+        })
     )
 
 
@@ -499,14 +489,12 @@ async def launch_review(request: Request):
             "config_path": str(CONFIG_OUTPUT_PATH)
         })
 
-    return templates.TemplateResponse(
-        "onboarding/launch.html",
-        {
+    return templates.TemplateResponse(request, "onboarding/launch.html", {
             "request": request,
             "step": 6,
             "config": final_config,
             "config_path": str(CONFIG_OUTPUT_PATH)
-        }
+        })
     )
 
 
@@ -542,13 +530,11 @@ async def execute_launch(request: Request):
                 "next_step": "Run: prsm node start"
             })
 
-        return templates.TemplateResponse(
-            "onboarding/success.html",
-            {
+        return templates.TemplateResponse(request, "onboarding/success.html", {
                 "request": request,
                 "config_path": str(CONFIG_OUTPUT_PATH),
                 "step": 6
-            }
+            })
         )
 
     except Exception as e:

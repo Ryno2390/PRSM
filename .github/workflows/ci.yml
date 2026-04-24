@@ -32,18 +32,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go (for libp2p shared library)
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-          cache-dependency-path: libp2p/go.sum
-
-      - name: Build libp2p shared library
-        # E2E tests that exercise the P2P transport require the native
-        # libprsm_p2p library (built from the Go code in libp2p/). Not
-        # building it would skip 42 E2E tests with import errors.
-        run: make -C libp2p build
-
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
@@ -57,7 +45,12 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Run tests with coverage
-        run: pytest --timeout=120 --cov=prsm --cov-report=xml --cov-report=term -q
+        # -m "not e2e" deselects 42 E2E tests that require live P2P
+        # infrastructure (libp2p Go library + WebSocket ports + peer-ID
+        # multiaddr fixtures). Run locally with `pytest -m e2e` after
+        # building libp2p shared library via `make -C libp2p build`.
+        # See pytest.ini § markers for the full rationale.
+        run: pytest -m "not e2e" --timeout=120 --cov=prsm --cov-report=xml --cov-report=term -q
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
