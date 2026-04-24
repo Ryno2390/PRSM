@@ -32,6 +32,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Go (for libp2p shared library)
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: libp2p/go.sum
+
+      - name: Build libp2p shared library
+        # E2E tests that exercise the P2P transport require the native
+        # libprsm_p2p library (built from the Go code in libp2p/). Not
+        # building it would skip 42 E2E tests with import errors.
+        run: make -C libp2p build
+
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
