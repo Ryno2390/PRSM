@@ -141,7 +141,7 @@ Partner-handoff-ready items as of 2026-04-24.
 | Doc | Identifier | Scope |
 |---|---|---|
 | [`2026-04-21-prsm-gov-1-foundation-governance-charter.md`](./2026-04-21-prsm-gov-1-foundation-governance-charter.md) | **PRSM-GOV-1** | Foundation governance charter (v0.2, revised 2026-04-24 — chip-certification authority rescinded; Prismatica's six-stream architecture added; CIS-1-dependent prohibited amendments removed) |
-| [`2026-04-21-prsm-tok-1-ftns-tokenomics.md`](./2026-04-21-prsm-tok-1-ftns-tokenomics.md) | **PRSM-TOK-1** | FTNS tokenomics specification |
+| [`2026-04-21-prsm-tok-1-ftns-tokenomics.md`](./2026-04-21-prsm-tok-1-ftns-tokenomics.md) | **PRSM-TOK-1** | FTNS tokenomics specification (v0.2, revised 2026-04-24 — CIS-1 references updated to reflect deferred-research status; economic-model companion archived; core tokenomics primitives unchanged) |
 | [`2026-04-22-prsm-supply-1-supply-diversity-standard.md`](./2026-04-22-prsm-supply-1-supply-diversity-standard.md) | **PRSM-SUPPLY-1** | Operator-supply diversity standard |
 | [`2026-04-23-prsm-policy-jurisdiction-1.md`](./2026-04-23-prsm-policy-jurisdiction-1.md) | **PRSM-POLICY-JURISDICTION-1** | Foundation boundary subsidiary policy (codifies R9 §8 non-operational commitments) |
 | [`2026-04-14-hybrid-tokenomics-legal-tracking.md`](./2026-04-14-hybrid-tokenomics-legal-tracking.md) | — | Hybrid tokenomics legal/governance workstream tracker |
@@ -153,6 +153,7 @@ Partner-handoff-ready items as of 2026-04-24.
 | [`archive/research/README.md`](./archive/research/README.md) | — | Archive index explaining deferred-research rationale (2026-04-24) |
 | [`archive/research/2026-04-21-prsm-cis-1-confidential-inference-silicon.md`](./archive/research/2026-04-21-prsm-cis-1-confidential-inference-silicon.md) | **PRSM-CIS-1** (deferred) | Confidential inference silicon standard — drafted as active standard in April 2026, reclassified as deferred research 2026-04-24 per canonical Vision docs (Prismatica's day-1 business is not chip design). If revived, re-enters via §9 ratification path. |
 | [`archive/research/2026-04-19-confidential-inference-silicon-standard.md`](./archive/research/2026-04-19-confidential-inference-silicon-standard.md) | — | Predecessor CIS-1 draft (also deferred) |
+| [`archive/research/2026-04-21-prsm-economic-model-cis-silicon.md`](./archive/research/2026-04-21-prsm-economic-model-cis-silicon.md) | **PRSM-ECON-WP-1** (archived) | CIS-priced economic model — archived 2026-04-24 alongside CIS-1 source docs. Bottom-up thesis relies on chip-unit economics that no longer apply. A successor paper priced around Prismatica's six-stream core business (per `Prismatica_Vision.md` §2-3) remains to be drafted. |
 
 ### 4.3 Historical
 
@@ -170,7 +171,7 @@ Partner-handoff-ready items as of 2026-04-24.
 | [`2026-04-22-prsm-investor-executive-summary.md`](./2026-04-22-prsm-investor-executive-summary.md) | Current executive summary (v2, rewritten 2026-04-24 — aligned with canonical Vision docs: 3-layer P2P protocol + MCP + TUI framing, Prismatica's 6 core streams + 3 growth adjacencies, Reg D 506(c) equity raise framing, no CIS-1 headline moat). **Use this.** |
 | [`2026-04-23-prsm-pitch-deck.md`](./2026-04-23-prsm-pitch-deck.md) | 12-slide pitch deck (v2 rewritten 2026-04-24) — companion to exec summary. See §2 Phase 7 for full entry. |
 | [`2026-04-22-session-summary-engineering-sprint.md`](./2026-04-22-session-summary-engineering-sprint.md) | 2026-04-22 engineering-sprint changelog (Phase 4/5/6/7-storage/8 sprint) |
-| [`2026-04-21-prsm-economic-model-white-paper.md`](./2026-04-21-prsm-economic-model-white-paper.md) | Economic-model white paper (FTNS pricing, settlement, supply) |
+| *Economic model white paper moved 2026-04-24 to [`archive/research/`](./archive/research/)* — the v1 paper was CIS-priced; a successor paper around Prismatica's six-stream business remains to be drafted |
 | [`SCIENCE_FIRST_MEDIA_KIT.md`](./SCIENCE_FIRST_MEDIA_KIT.md) | Science-first framing media kit |
 
 ---

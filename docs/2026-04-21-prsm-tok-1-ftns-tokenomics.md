@@ -1,19 +1,22 @@
 # PRSM-TOK-1: FTNS Tokenomics Standard
 
 **Document identifier:** PRSM-TOK-1
-**Version:** 0.1 Draft
+**Version:** 0.2 Draft (revised 2026-04-24)
 **Status:** Consolidates prior tokenomics drafting into standards-track form. Parameter values below are the current recommendations, pending Foundation board ratification and counsel confirmation (§13).
-**Date:** 2026-04-21
+**Date:** 2026-04-21 (revised 2026-04-24)
 **Drafting authority:** PRSM founder, pending Foundation convocation
+
+**Revision note (2026-04-24):** Per canonical Vision docs (`PRSM_Vision.md`, `Prismatica_Vision.md`, `PRSM_Tokenomics.md` in founder materials), PRSM-CIS-1 (confidential-silicon standard) is reclassified as deferred research exploration rather than an active Foundation standard. PRSM-ECON-WP-1 (economic-model white paper) is a CIS-derivative analysis priced around chip unit economics; it has been archived alongside the CIS-1 source docs. Tokenomics sections that referenced CIS-1 as a companion standard or relied on the CIS-priced ECON-WP framing have been updated inline. The **core tokenomics primitives (halving, burn, staking, POL, compensation-only distribution)** are independent of CIS-1 and remain unchanged.
+
 **Companions:**
 - `docs/2026-04-21-prsm-gov-1-foundation-governance-charter.md` — governance charter this standard operates under.
-- `docs/2026-04-21-prsm-cis-1-confidential-inference-silicon.md` — compute-layer standard FTNS denominates.
 
 **Related standards (added 2026-04-22):**
-- `docs/2026-04-22-prsm-supply-1-supply-diversity-standard.md` — **PRSM-SUPPLY-1**, supply-side diversity standard. §6.2 introduces a Foundation-reserve-funded diversity bonus paid in FTNS (≤10% of qualifying listing's gross earnings). Affects reserve-to-operator FTNS flow when §5.2 intervention triggers fire; enters monitoring-only mode during a 5,000-provider-or-36-month bootstrap grace period. TOK-1 §4.6 (Foundation reserve management) should be read alongside SUPPLY-1 §7.3 (diversity-bonus budget line item); a future TOK-1 revision will fold the bonus payment stream into the reserve-flow model explicitly.
+- `docs/2026-04-22-prsm-supply-1-supply-diversity-standard.md` — **PRSM-SUPPLY-1**, supply-side diversity standard. §6.2 introduces a Foundation-reserve-funded diversity bonus paid in FTNS (≤10% of qualifying listing's gross earnings). Affects reserve-to-operator FTNS flow when §5.2 intervention triggers fire; enters monitoring-only mode during a 5,000-provider-or-36-month bootstrap grace period. TOK-1 §4.6 (Foundation reserve management) should be read alongside SUPPLY-1 §7.3 (diversity-bonus budget line item).
+- `docs/2026-04-23-prsm-policy-jurisdiction-1.md` — **PRSM-POLICY-JURISDICTION-1**, Foundation boundary subsidiary policy codifying anti-operational commitments.
 
-**Economic-model dependency updates (added 2026-04-22):**
-- `docs/2026-04-21-prsm-economic-model-white-paper.md` — ECON-WP v1 prices per-chip-year revenue under the Phase 3 marketplace model. The Phase 7 + 7.1 + 7.1x slashing + bounty economics (70/30 challenger/Foundation split on slashed stakes) and the SUPPLY-1 diversity-bonus reserve outflow are the two Phase-7+ drivers that ECON-WP v2 should incorporate. Neither changes v1's headline bear/base/bull conclusions, but both refine the reserve-flow model.
+**Archived dependencies (see `docs/archive/research/` for full rationale):**
+- `archive/research/2026-04-21-prsm-economic-model-cis-silicon.md` — **PRSM-ECON-WP-1**, the CIS-priced economic model. Archived 2026-04-24 alongside the CIS-1 source docs because its bottom-up methodology is chip-unit-economics-driven. A successor economic model priced around Prismatica's six-stream core business (see `Prismatica_Vision.md` §2-3: commons curation, T3/T4 compute, FTNS treasury, protocol-native VC fund, commissioned datasets, domain models) remains to be drafted.
 
 **Source material consolidated by this document:**
 - `PRSM_Tokenomics.md` (external vault, 701 lines) — detailed design + mathematical models.
@@ -69,9 +72,9 @@ Out of scope:
 
 ## 2. Normative references
 
-- **FTNSTokenSimple.sol** — Base mainnet ERC-20 token contract at [`0x5276a3756C85f2E9e46f6D34386167a209aa16e5`](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5).
+- **FTNSTokenSimple.sol** — ERC-20 + UUPS proxy token contract. Deployed to Base Sepolia testnet (7-day bake-in passed); mainnet deploy hardware-gated pending Foundation multi-sig quorum + external audit engagement. Mainnet contract address will be assigned at deploy ceremony.
 - **PRSM-GOV-1** — Foundation Governance Charter.
-- **PRSM-CIS-1** — Confidential Inference Silicon Standard.
+- **PRSM-CIS-1** — Confidential Inference Silicon Standard *(currently deferred research per 2026-04-24 revision; see `archive/research/README.md`)*.
 - **Howey v. SEC (1946)** — foundational US securities-classification test.
 - **SEC v. Telegram Group Inc. (2020)** — relevant precedent on pre-launch token sale treatment.
 - **Regulation D, Rule 506(c)** — accredited-investor private-offering exemption relied upon by Prismatica's equity raise.
@@ -83,9 +86,9 @@ Out of scope:
 
 | Parameter | Value | Status |
 |---|---|---|
-| Token symbol | `FTNS` ("Photons") | Fixed (deployed) |
-| Blockchain | Base (Ethereum L2), chain ID 8453 | Fixed (deployed) |
-| Contract address | `0x5276a3756C85f2E9e46f6D34386167a209aa16e5` | Fixed (deployed) |
+| Token symbol | `FTNS` (Fungible Token for Node Support; "Photons") | Fixed |
+| Blockchain | Base (Ethereum L2), chain ID 8453 | Fixed (mainnet target; currently deployed to Base Sepolia testnet) |
+| Contract address | **TBD at mainnet-deploy ceremony** (Base Sepolia: see `docs/2026-04-11-phase1.3-sepolia-bakein-log.md` for current testnet address) | Pending |
 | Standard | ERC-20 | Fixed |
 | Decimals | 18 | Fixed |
 | **Initial supply** | **100,000,000 FTNS** | Fixed (minted to Foundation treasury at genesis) |
@@ -153,7 +156,7 @@ PRSM's bootstrap capital requirement (design, engineering, infrastructure, initi
 
 1. Prismatica is incorporated as a Delaware C-corporation (PRSM-GOV-1 §6.3 recommendation).
 2. Prismatica sells equity via standard Reg D Rule 506(c) to accredited investors.
-3. Capital is deployed to build PRSM infrastructure (first-implementer CIS hardware, T4 meganodes, commissioned data, ML research).
+3. Capital is deployed to build Prismatica's commercial business on PRSM — six core streams + three growth adjacencies per `Prismatica_Vision.md` §2-3: T3/T4 compute operations, commons-data curation, commissioned-dataset origination, domain-specific foundation models, protocol-native VC fund seed capacity, FTNS treasury accumulation, managed enterprise inference, scholarly publishing, data clean-rooms.
 4. Prismatica accumulates FTNS organically through its own network participation — earning compensation by operating meganodes, by building and licensing PRSM-compatible services, and by receiving documented operational FTNS distributions from the Foundation when those are for specific services rendered.
 5. Prismatica investor returns flow from Prismatica's enterprise value growth, driven by operating revenue + FTNS treasury appreciation + other commercial activities.
 
@@ -270,7 +273,7 @@ All 100M initial supply mints to Foundation treasury at genesis. The Foundation 
 | Node operator pool | **25–35%** | As services rendered | Funds the operator-bonus layer during bootstrap |
 | Contributor grants | **15–20%** | 4-year vesting, 1-year cliff | Engineers, researchers, maintainers |
 | Foundation operational reserve | **10–15%** | Retained at Foundation discretion | Ecosystem grants, POL defense (§10), strategic distributions |
-| Initial Prismatica allocation | **5–10%** | 4-year vesting | Granted to Prismatica as first-implementer compensation |
+| Initial Prismatica allocation | **5–10%** | 4-year vesting | Granted to Prismatica as first-mover commercial-operator compensation (T4 meganode baseline capacity, commons-data curation, and anchor operational role during the bootstrap period) |
 
 Constraints:
 - Total MUST equal 100% of the 100M genesis supply.
@@ -505,11 +508,11 @@ The following items REQUIRE counsel opinion before finalization (flagged **[COUN
 - Halving schedule moves from operational policy to strict on-chain enforcement.
 - Foundation operational discretion on rates narrowed to pause-only (§6.4).
 
-### 12.3 Interaction with PRSM-CIS-1
+### 12.3 Independence from deferred research standards
 
-PRSM-CIS-1 ships on a 5-10-year horizon (§16 timeline in that document). FTNS does not depend on CIS silicon existing; CIS chips, when they ship, are paid for in FTNS (compensation to Prismatica and other implementers for CIS-certified meganode operation).
+FTNS tokenomics do not depend on any single protocol-standard arc (CIS-1, FHE, MPC, etc.). The core mechanisms — halving emissions, burn-on-use, staking locks, Protocol-Owned Liquidity reserve, compensation-only distribution — operate against any compute tier Prismatica or third-party operators provision on PRSM (T1 consumer edge, T2 prosumer, T3 cloud arbitrage, T4 meganodes). Revenue-mix composition shifts as the network matures and research tracks ship or are deferred, but the core tokenomics primitives remain identical.
 
-If CIS fails to ship, FTNS tokenomics are unaffected — the revenue-mix composition shifts (more fee revenue from the H100-CC-equivalent tier, less from the premium CIS tier) but the core mechanisms (halving, burn, staking, POL) remain identical.
+*(Previous §12.3 "Interaction with PRSM-CIS-1" was removed 2026-04-24 alongside the CIS-1 reclassification as deferred research. If CIS-1 is revived under the §9 ratification path, a new §12.x covering that standard's FTNS-denomination semantics can be added at that time.)*
 
 ### 12.4 Interaction with PRSM-GOV-1
 
