@@ -10,6 +10,7 @@ NOTE: Tests requiring PRSMEconomicModel need Mesa <3.0 due to API changes.
 Mesa 3.5.1 removed RandomActivation in favor of Schedule, breaking compatibility.
 """
 
+import pathlib
 import pytest
 import uuid as uuid_lib
 import numpy as np
@@ -142,7 +143,7 @@ class TestAgentBasedModelReproducibility:
     def test_no_stdlib_random_import_in_module(self):
         """Test that stdlib random module is not imported in agent_based_model"""
         # Read the file directly and check for 'import random'
-        with open('/Users/ryneschultz/Documents/GitHub/PRSM/prsm/economy/economics/agent_based_model.py', 'r') as f:
+        with open(str(pathlib.Path(__file__).parent.parent.parent / 'prsm' / 'economy' / 'economics' / 'agent_based_model.py'), 'r') as f:
             content = f.read()
 
         # Check that 'import random' is not at the module level
@@ -305,14 +306,14 @@ class TestAgentBasedModelCodeChanges:
 
     def test_uuid_import_present(self):
         """Test that uuid module is imported (for simulation_id)"""
-        with open('/Users/ryneschultz/Documents/GitHub/PRSM/prsm/economy/economics/agent_based_model.py', 'r') as f:
+        with open(str(pathlib.Path(__file__).parent.parent.parent / 'prsm' / 'economy' / 'economics' / 'agent_based_model.py'), 'r') as f:
             content = f.read()
 
         assert 'import uuid' in content, "uuid import should be present"
 
     def test_no_random_module_import(self):
         """Test that random module is NOT imported"""
-        with open('/Users/ryneschultz/Documents/GitHub/PRSM/prsm/economy/economics/agent_based_model.py', 'r') as f:
+        with open(str(pathlib.Path(__file__).parent.parent.parent / 'prsm' / 'economy' / 'economics' / 'agent_based_model.py'), 'r') as f:
             lines = f.readlines()
 
         # Check that no line is exactly 'import random'
@@ -321,7 +322,7 @@ class TestAgentBasedModelCodeChanges:
 
     def test_rng_initialization_in_model(self):
         """Test that PRSMEconomicModel has rng initialization"""
-        with open('/Users/ryneschultz/Documents/GitHub/PRSM/prsm/economy/economics/agent_based_model.py', 'r') as f:
+        with open(str(pathlib.Path(__file__).parent.parent.parent / 'prsm' / 'economy' / 'economics' / 'agent_based_model.py'), 'r') as f:
             content = f.read()
 
         assert 'self.rng = np.random.default_rng' in content, "RNG initialization should be present"
