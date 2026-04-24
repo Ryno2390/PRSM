@@ -1,14 +1,16 @@
-# PRSM: P2P Infrastructure Protocol for Open-Source Collaboration
+# PRSM — Protocol for Research, Storage, and Modeling
 
 **The code goes to the data. Not the other way around.**
 
-PRSM is a P2P infrastructure protocol that aggregates latent storage, compute, and data from consumer nodes — gaming PCs, consoles, laptops, phones — into a mesh network accessible to third-party LLMs via MCP tools. Contributors earn FTNS tokens for sharing their latent resources; users leverage PRSM infrastructure through their preferred LLMs (local or via OAuth/API). PRSM is not an AGI framework. Reasoning happens in third-party LLMs; PRSM provides the infrastructure those LLMs use to access distributed resources and data.
+PRSM is a peer-to-peer protocol that unifies three resource markets — data, compute, economic settlement — under one token. Frontier LLMs (Claude, GPT, Gemini, or local MCP-compatible models) call PRSM via MCP as a retrieval and heavy-compute substrate whenever a query needs data the model doesn't have, compute beyond its context budget, or verifiable provenance. Contributors earn **FTNS** (*Fungible Token for Node Support*) for sharing storage, compute, and data from idle consumer devices. Reasoning happens in your LLM; execution happens on PRSM nodes with cryptographically-enforced creator royalties.
 
-**Version 1.7.0** | [PyPI](https://pypi.org/project/prsm-network/) | [Getting Started](docs/GETTING_STARTED.md) | [Architecture Spec](docs/SOVEREIGN_EDGE_AI_SPEC.md)
+**Version 1.7.0** | [PyPI](https://pypi.org/project/prsm-network/) | [Getting Started](docs/GETTING_STARTED.md) | [Documentation Index](docs/INDEX.md)
 
 [![PyPI version](https://badge.fury.io/py/prsm-network.svg)](https://pypi.org/project/prsm-network/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![MCP Tools](https://img.shields.io/badge/MCP%20tools-16-blue.svg)](#mcp-integration)
+
+> **Community** — Discord + GitHub Discussions launching 2026-04-24. Links will be added here once servers are live.
 
 ---
 
@@ -179,7 +181,7 @@ See [Confidential Compute Spec](docs/CONFIDENTIAL_COMPUTE_SPEC.md) for details.
 
 ## Built on Ethereum + Base
 
-PRSM's smart contracts live on **Base**, an Ethereum Layer 2 operated by Coinbase. The FTNS token is a standard ERC-20 at [`0x5276a375...16e5`](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5).
+PRSM's smart contracts target **Base**, an Ethereum Layer 2 operated by Coinbase. The FTNS token is implemented as a standard ERC-20 (`FTNSTokenSimple.sol`) deployed to **Base Sepolia testnet**. Mainnet deploy is hardware-gated pending multi-sig quorum; the Foundation's 2-of-3 Safe on Base mainnet is the deployer of record for Phase 1.3 contracts (FTNSToken + ProvenanceRegistry + RoyaltyDistributor). See [`docs/2026-04-22-prsm-investor-executive-summary.md`](docs/2026-04-22-prsm-investor-executive-summary.md) for the current shipped-state summary.
 
 **Why Ethereum:**
 
@@ -246,22 +248,23 @@ See [Deployment Guide](deploy/production/DEPLOYMENT_GUIDE.md) for full instructi
 | Version | 1.7.0 |
 | MCP Tools | 16 |
 | SDKs | Python, JavaScript, Go |
-| FTNS Token | [Base mainnet](https://basescan.org/address/0x5276a3756C85f2E9e46f6D34386167a209aa16e5) |
-| Bootstrap | `wss://bootstrap1.prsm-network.com:8765` |
+| FTNS Token | Base Sepolia testnet (mainnet deploy hardware-gated) |
+| Bootstrap | `wss://bootstrap1.prsm-network.com:8765` (NYC3 droplet, single-region today; Europe + Asia expansion planned) |
 | License | MIT |
 
 ---
 
 ## Documentation
 
-**Start here:** [`docs/INDEX.md`](docs/INDEX.md) — navigable map of the full docs surface (89 docs) with audience-oriented entry points (investors / auditors / Foundation officers / research partners / new engineers).
+**Start here:** [`docs/INDEX.md`](docs/INDEX.md) — navigable map of the full docs surface (97 docs) with audience-oriented entry points (investors / auditors / Foundation officers / research partners / new engineers).
 
 **Commonly-referenced docs:**
 
 | Document | Description |
 |----------|------------|
 | [Getting Started](docs/GETTING_STARTED.md) | Install → configure → first query in 5 minutes |
-| [Executive Summary](docs/2026-04-22-prsm-investor-executive-summary.md) | Investor / partner positioning + shipped-coverage summary |
+| [Executive Summary](docs/2026-04-22-prsm-investor-executive-summary.md) | Investor / partner positioning + shipped-coverage (v2, aligned with canonical Vision docs) |
+| [Pitch Deck](docs/2026-04-23-prsm-pitch-deck.md) | 12-slide investor pitch deck (v2) — companion to the executive summary |
 | [Technology Choices](docs/TECH_CHOICES.md) | Why Ethereum + Base — investor-facing chain-choice rationale |
 | [Sovereign-Edge AI Spec](docs/SOVEREIGN_EDGE_AI_SPEC.md) | Phase 1 architecture (Rings 1-6) |
 | [Confidential Compute Spec](docs/CONFIDENTIAL_COMPUTE_SPEC.md) | Phase 2 architecture (Rings 7-10) |
