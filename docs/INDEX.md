@@ -167,6 +167,7 @@ Partner-handoff-ready items as of 2026-04-24.
 
 | Doc | Purpose |
 |---|---|
+| [`investor/README.md`](./investor/README.md) | **Investor data room — read first.** Navigable index for the 10-doc data room (round terms, risk factors, use of funds, entity structure, business model, founder bio, FAQ, SAFE template, cap table). $1.25M on YC post-money SAFE at $10M cap. **Use this for all serious investor conversations.** |
 | [`2026-04-21-prsm-investor-executive-summary.md`](./2026-04-21-prsm-investor-executive-summary.md) | Prior executive summary (Phase 3 as most-recent milestone, pre-Vision-alignment framing) — **superseded** |
 | [`2026-04-22-prsm-investor-executive-summary.md`](./2026-04-22-prsm-investor-executive-summary.md) | Current executive summary (v2, rewritten 2026-04-24 — aligned with canonical Vision docs: 3-layer P2P protocol + MCP + TUI framing, Prismatica's 6 core streams + 3 growth adjacencies, Reg D 506(c) equity raise framing, no CIS-1 headline moat). **Use this.** |
 | [`2026-04-23-prsm-pitch-deck.md`](./2026-04-23-prsm-pitch-deck.md) | 12-slide pitch deck (v2 rewritten 2026-04-24) — companion to exec summary. See §2 Phase 7 for full entry. |
