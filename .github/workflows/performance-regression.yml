@@ -231,7 +231,7 @@ if "success_rate" in rlt_perf:
 EOF
 
       - name: 📤 Upload Performance Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: performance-baseline-${{ github.sha }}
@@ -255,7 +255,7 @@ EOF
         uses: actions/checkout@v4
 
       - name: 📥 Download Current Performance Data
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: performance-baseline-${{ github.sha }}
           path: ./current-performance

@@ -78,7 +78,7 @@ jobs:
         semgrep --config=auto prsm/ --json --output=semgrep-report.json || true
 
     - name: Upload security reports
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: security-reports
         path: |
@@ -169,7 +169,7 @@ jobs:
         python -m pytest tests/test_seal.py -v
 
     - name: Upload test results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: test-reports
@@ -212,7 +212,7 @@ jobs:
         k6 run tests/performance/load_test_1000_users.js
         
     - name: Upload performance reports
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: performance-reports
         path: |
@@ -310,7 +310,7 @@ jobs:
         terraform plan -var="environment=staging" -out=tfplan
 
     - name: Upload Terraform plan
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: terraform-plan
         path: deploy/enterprise/terraform/tfplan

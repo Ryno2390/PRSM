@@ -73,7 +73,7 @@ jobs:
       continue-on-error: true
     
     - name: Upload Security Reports
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: security-reports
@@ -191,7 +191,7 @@ jobs:
         REDIS_URL: redis://localhost:6379/0
     
     - name: Upload Test Results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: test-results-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.test-type }}
@@ -239,7 +239,7 @@ jobs:
         pip install psutil memory-profiler line-profiler
     
     - name: Download Previous Performance Baselines
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: performance-baselines
         path: .
@@ -280,7 +280,7 @@ jobs:
       continue-on-error: true
     
     - name: Upload Performance Results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: performance-results
@@ -293,7 +293,7 @@ jobs:
         retention-days: 90
     
     - name: Save Performance Baselines
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: github.ref == 'refs/heads/main'
       with:
         name: performance-baselines
@@ -398,7 +398,7 @@ jobs:
         "
     
     - name: Upload Documentation
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: documentation
@@ -441,7 +441,7 @@ jobs:
         python -c "import prsm; print('Package installed successfully')"
     
     - name: Upload Build Artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: build-artifacts
         path: dist/
@@ -460,7 +460,7 @@ jobs:
       uses: actions/checkout@v4
     
     - name: Download Test Results
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: performance-results
         path: performance-results/

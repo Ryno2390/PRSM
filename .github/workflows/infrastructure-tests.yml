@@ -98,7 +98,7 @@ jobs:
       continue-on-error: true
     
     - name: Upload Test Results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: infrastructure-test-results-${{ matrix.test-category }}
@@ -193,7 +193,7 @@ jobs:
         fi
     
     - name: Upload Full-Stack Test Results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: full-stack-integration-results
@@ -277,7 +277,7 @@ jobs:
     
     steps:
     - name: Download Test Results
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: full-stack-integration-results
         path: test-results/
@@ -339,7 +339,7 @@ jobs:
         python scripts/automated_security_control_testing.py
     
     - name: Upload Security Results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: security-compliance-results

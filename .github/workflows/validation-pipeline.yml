@@ -69,7 +69,7 @@ jobs:
         echo "Trigger: ${{ github.event_name }}" >> validation-workspace/session-info.txt
     
     - name: Upload validation workspace
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: validation-workspace-${{ steps.setup.outputs.validation-id }}
         path: validation-workspace/
@@ -141,7 +141,7 @@ jobs:
         "
     
     - name: Upload test results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: test-results-${{ needs.evidence-infrastructure.outputs.validation-id }}
@@ -215,7 +215,7 @@ jobs:
         "
     
     - name: Upload benchmark results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: benchmark-results-${{ needs.evidence-infrastructure.outputs.validation-id }}
         path: validation/benchmarks/
@@ -280,7 +280,7 @@ jobs:
         "
     
     - name: Upload economic results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: economic-results-${{ needs.evidence-infrastructure.outputs.validation-id }}
         path: validation/economic_simulations/
@@ -348,7 +348,7 @@ jobs:
         "
     
     - name: Upload safety results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: safety-results-${{ needs.evidence-infrastructure.outputs.validation-id }}
         path: validation/safety_tests/
@@ -372,7 +372,7 @@ jobs:
         pip install -r requirements.txt
     
     - name: Download all artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
     
     - name: Compile evidence report
       run: |
@@ -403,7 +403,7 @@ jobs:
         "
     
     - name: Upload evidence report
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: evidence-report-${{ needs.evidence-infrastructure.outputs.validation-id }}
         path: |
@@ -426,7 +426,7 @@ jobs:
       uses: actions/checkout@v4
     
     - name: Download evidence report
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: evidence-report-${{ needs.evidence-infrastructure.outputs.validation-id }}
     

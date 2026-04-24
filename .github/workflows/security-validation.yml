@@ -184,7 +184,7 @@ else:
 EOF
 
       - name: 📤 Upload Security Reports
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: security-reports-${{ github.sha }}
@@ -456,7 +456,7 @@ else:
 EOF
 
       - name: 📤 Upload Security Test Results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: security-test-results-${{ github.sha }}
