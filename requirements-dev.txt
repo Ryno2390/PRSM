@@ -102,5 +102,5 @@ wheel>=0.42.0
 python-decouple>=3.8
 
 # Additional Development Utilities
-tox>=4.11.0
+tox>=4.53.0
 watchdog>=3.0.0
