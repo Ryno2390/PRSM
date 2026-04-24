@@ -39,7 +39,7 @@ import { PRSMClient } from '@prsm/sdk';
 
 const client = new PRSMClient({
   apiKey: 'your_api_key_here',
-  baseUrl: 'https://api.prsm.org'
+  baseUrl: 'https://api.prsm-network.com'
 });
 
 // Get a free cost quote

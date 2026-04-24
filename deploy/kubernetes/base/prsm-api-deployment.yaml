@@ -135,7 +135,7 @@ spec:
       nodeSelector:
         kubernetes.io/os: linux
       tolerations:
-      - key: "prsm.org/workload"
+      - key: "prsm-network.com/workload"
         operator: "Equal"
         value: "api"
         effect: "NoSchedule"

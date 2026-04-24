@@ -579,8 +579,8 @@ export class PRSMClient extends EventEmitter {
     this.validateConfig(config);
 
     // Set up base configuration
-    this.baseUrl = config.baseUrl || 'https://api.prsm.org';
-    this.websocketUrl = config.websocketUrl || 'wss://api.prsm.org/ws';
+    this.baseUrl = config.baseUrl || 'https://api.prsm-network.com';
+    this.websocketUrl = config.websocketUrl || 'wss://api.prsm-network.com/ws';
     this.debug = config.debug ?? false;
     this.timeout = config.timeout ?? 30000;
     this.maxRetries = config.maxRetries ?? 3;

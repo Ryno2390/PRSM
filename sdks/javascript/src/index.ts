@@ -18,7 +18,7 @@
  * 
  * const client = new PRSMClient({ 
  *   apiKey: 'your_api_key',
- *   baseUrl: 'https://api.prsm.org'
+ *   baseUrl: 'https://api.prsm-network.com'
  * });
  * 
  * // Submit a research query
@@ -422,15 +422,15 @@ export const API_VERSION = 'v1';
 
 /** Default API endpoints */
 export const DEFAULT_ENDPOINTS = {
-  PRODUCTION: 'https://api.prsm.org',
-  STAGING: 'https://staging-api.prsm.org',
+  PRODUCTION: 'https://api.prsm-network.com',
+  STAGING: 'https://staging-api.prsm-network.com',
   DEVELOPMENT: 'http://localhost:8000',
 } as const;
 
 /** Default WebSocket endpoints */
 export const DEFAULT_WEBSOCKET_ENDPOINTS = {
-  PRODUCTION: 'wss://api.prsm.org/ws',
-  STAGING: 'wss://staging-api.prsm.org/ws',
+  PRODUCTION: 'wss://api.prsm-network.com/ws',
+  STAGING: 'wss://staging-api.prsm-network.com/ws',
   DEVELOPMENT: 'ws://localhost:8000/ws',
 } as const;
 

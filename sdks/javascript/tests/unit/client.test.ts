@@ -33,7 +33,7 @@ describe('PRSMClient', () => {
     it('should use default configuration when not provided', () => {
       const client = new PRSMClient({ apiKey: 'test_key' });
       
-      expect(client.baseUrl).toBe('https://api.prsm.org');
+      expect(client.baseUrl).toBe('https://api.prsm-network.com');
       expect(client.timeout).toBe(30000);
       expect(client.debug).toBe(false);
     });

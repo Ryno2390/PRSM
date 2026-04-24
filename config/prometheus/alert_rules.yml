@@ -14,7 +14,7 @@ groups:
     annotations:
       summary: "PRSM service {{ $labels.job }} is down"
       description: "PRSM service {{ $labels.job }} on {{ $labels.instance }} has been down for more than 30 seconds."
-      runbook_url: "https://docs.prsm.org/runbooks/service-down"
+      runbook_url: "https://docs.prsm-network.com/runbooks/service-down"
 
   - alert: PRSMHighRestartRate
     expr: increase(kube_pod_container_status_restarts_total{container=~"prsm-.*"}[1h]) > 3
@@ -26,7 +26,7 @@ groups:
     annotations:
       summary: "High restart rate for PRSM service {{ $labels.container }}"
       description: "PRSM service {{ $labels.container }} has restarted {{ $value }} times in the last hour."
-      runbook_url: "https://docs.prsm.org/runbooks/high-restart-rate"
+      runbook_url: "https://docs.prsm-network.com/runbooks/high-restart-rate"
 
   - alert: PRSMPodCrashLooping
     expr: rate(kube_pod_container_status_restarts_total{container=~"prsm-.*"}[15m]) > 0
@@ -38,7 +38,7 @@ groups:
     annotations:
       summary: "PRSM pod {{ $labels.pod }} is crash looping"
       description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is crash looping with restart rate {{ $value }}/min."
-      runbook_url: "https://docs.prsm.org/runbooks/crash-loop"
+      runbook_url: "https://docs.prsm-network.com/runbooks/crash-loop"
 
 # =============================================================================
 # PRSM API Performance Alerts
@@ -55,7 +55,7 @@ groups:
     annotations:
       summary: "High API response time detected"
       description: "PRSM API 95th percentile response time is {{ $value }}s, exceeding 2s threshold."
-      runbook_url: "https://docs.prsm.org/runbooks/high-response-time"
+      runbook_url: "https://docs.prsm-network.com/runbooks/high-response-time"
 
   - alert: PRSMHighErrorRate
     expr: rate(http_requests_total{job="prsm-api", status=~"5.."}[5m]) / rate(http_requests_total{job="prsm-api"}[5m]) > 0.05
@@ -67,7 +67,7 @@ groups:
     annotations:
       summary: "High API error rate detected"
       description: "PRSM API error rate is {{ $value | humanizePercentage }}, exceeding 5% threshold."
-      runbook_url: "https://docs.prsm.org/runbooks/high-error-rate"
+      runbook_url: "https://docs.prsm-network.com/runbooks/high-error-rate"
 
   - alert: PRSMAPIRateLimitReached
     expr: rate(http_requests_total{job="prsm-api", status="429"}[5m]) > 10
@@ -79,7 +79,7 @@ groups:
     annotations:
       summary: "API rate limiting frequently triggered"
       description: "PRSM API is rate limiting {{ $value }} requests/second, indicating high load or potential abuse."
-      runbook_url: "https://docs.prsm.org/runbooks/rate-limiting"
+      runbook_url: "https://docs.prsm-network.com/runbooks/rate-limiting"
 
   - alert: PRSMLowThroughput
     expr: rate(http_requests_total{job="prsm-api"}[5m]) < 1
@@ -91,7 +91,7 @@ groups:
     annotations:
       summary: "Low API throughput detected"
       description: "PRSM API throughput is {{ $value }} requests/second, which is unusually low."
-      runbook_url: "https://docs.prsm.org/runbooks/low-throughput"
+      runbook_url: "https://docs.prsm-network.com/runbooks/low-throughput"
 
 # =============================================================================
 # Database Health Alerts
@@ -108,7 +108,7 @@ groups:
     annotations:
       summary: "PostgreSQL database is down"
       description: "PostgreSQL database has been down for more than 1 minute."
-      runbook_url: "https://docs.prsm.org/runbooks/postgresql-down"
+      runbook_url: "https://docs.prsm-network.com/runbooks/postgresql-down"
 
   - alert: PostgreSQLHighConnections
     expr: pg_stat_database_numbackends / pg_settings_max_connections > 0.8
@@ -120,7 +120,7 @@ groups:
     annotations:
       summary: "PostgreSQL connection usage is high"
       description: "PostgreSQL is using {{ $value | humanizePercentage }} of available connections."
-      runbook_url: "https://docs.prsm.org/runbooks/high-db-connections"
+      runbook_url: "https://docs.prsm-network.com/runbooks/high-db-connections"
 
   - alert: PostgreSQLSlowQueries
     expr: pg_stat_activity_max_tx_duration > 300
@@ -132,7 +132,7 @@ groups:
     annotations:
       summary: "PostgreSQL has slow running queries"
       description: "PostgreSQL has queries running for more than {{ $value }}s."
-      runbook_url: "https://docs.prsm.org/runbooks/slow-queries"
+      runbook_url: "https://docs.prsm-network.com/runbooks/slow-queries"
 
   - alert: PostgreSQLDeadlocks
     expr: rate(pg_stat_database_deadlocks[5m]) > 0
@@ -144,7 +144,7 @@ groups:
     annotations:
       summary: "PostgreSQL deadlocks detected"
       description: "PostgreSQL is experiencing {{ $value }} deadlocks/second."
-      runbook_url: "https://docs.prsm.org/runbooks/deadlocks"
+      runbook_url: "https://docs.prsm-network.com/runbooks/deadlocks"
 
 # =============================================================================
 # Redis Cache Alerts
@@ -161,7 +161,7 @@ groups:
     annotations:
       summary: "Redis cache is down"
       description: "Redis cache has been down for more than 1 minute."
-      runbook_url: "https://docs.prsm.org/runbooks/redis-down"
+      runbook_url: "https://docs.prsm-network.com/runbooks/redis-down"
 
   - alert: RedisHighMemoryUsage
     expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
@@ -173,7 +173,7 @@ groups:
     annotations:
       summary: "Redis memory usage is high"
       description: "Redis is using {{ $value | humanizePercentage }} of available memory."
-      runbook_url: "https://docs.prsm.org/runbooks/redis-memory"
+      runbook_url: "https://docs.prsm-network.com/runbooks/redis-memory"
 
   - alert: RedisHighConnectionCount
     expr: redis_connected_clients > 100
@@ -185,7 +185,7 @@ groups:
     annotations:
       summary: "Redis has high connection count"
       description: "Redis has {{ $value }} client connections, which is above normal."
-      runbook_url: "https://docs.prsm.org/runbooks/redis-connections"
+      runbook_url: "https://docs.prsm-network.com/runbooks/redis-connections"
 
 # =============================================================================
 # IPFS Storage Alerts
@@ -202,7 +202,7 @@ groups:
     annotations:
       summary: "IPFS node is down"
       description: "IPFS node has been down for more than 2 minutes."
-      runbook_url: "https://docs.prsm.org/runbooks/ipfs-down"
+      runbook_url: "https://docs.prsm-network.com/runbooks/ipfs-down"
 
   - alert: IPFSHighStorageUsage
     expr: ipfs_repo_size_bytes / ipfs_repo_size_limit_bytes > 0.85
@@ -214,7 +214,7 @@ groups:
     annotations:
       summary: "IPFS storage usage is high"
       description: "IPFS repository is using {{ $value | humanizePercentage }} of available storage."
-      runbook_url: "https://docs.prsm.org/runbooks/ipfs-storage"
+      runbook_url: "https://docs.prsm-network.com/runbooks/ipfs-storage"
 
   - alert: IPFSLowPeerCount
     expr: ipfs_swarm_peers < 5
@@ -226,7 +226,7 @@ groups:
     annotations:
       summary: "IPFS has low peer count"
       description: "IPFS node has only {{ $value }} peers, which may affect content availability."
-      runbook_url: "https://docs.prsm.org/runbooks/ipfs-peers"
+      runbook_url: "https://docs.prsm-network.com/runbooks/ipfs-peers"
 
 # =============================================================================
 # FTNS Token & Web3 Alerts
@@ -243,7 +243,7 @@ groups:
     annotations:
       summary: "Web3 connection failures detected"
       description: "{{ $value }} Web3 connection failures in the last 5 minutes."
-      runbook_url: "https://docs.prsm.org/runbooks/web3-connection"
+      runbook_url: "https://docs.prsm-network.com/runbooks/web3-connection"
 
   - alert: FTNSTokenTransferFailure
     expr: increase(ftns_transfer_failures_total[10m]) > 3
@@ -255,7 +255,7 @@ groups:
     annotations:
       summary: "FTNS token transfer failures"
       description: "{{ $value }} FTNS token transfer failures in the last 10 minutes."
-      runbook_url: "https://docs.prsm.org/runbooks/ftns-transfers"
+      runbook_url: "https://docs.prsm-network.com/runbooks/ftns-transfers"
 
   - alert: HighGasPrice
     expr: polygon_gas_price_gwei > 50
@@ -267,7 +267,7 @@ groups:
     annotations:
       summary: "High gas prices on Polygon network"
       description: "Gas price is {{ $value }} Gwei, which is above normal levels."
-      runbook_url: "https://docs.prsm.org/runbooks/high-gas"
+      runbook_url: "https://docs.prsm-network.com/runbooks/high-gas"
 
 # =============================================================================
 # Security & Safety Alerts
@@ -284,7 +284,7 @@ groups:
     annotations:
       summary: "PRSM safety circuit breaker triggered"
       description: "Circuit breaker activated with threat level {{ $value }}. System safety measures engaged."
-      runbook_url: "https://docs.prsm.org/runbooks/circuit-breaker"
+      runbook_url: "https://docs.prsm-network.com/runbooks/circuit-breaker"
 
   - alert: SecurityThreatDetected
     expr: increase(security_threats_detected_total[5m]) > 0
@@ -296,7 +296,7 @@ groups:
     annotations:
       summary: "Security threat detected"
       description: "{{ $value }} security threats detected in the last 5 minutes."
-      runbook_url: "https://docs.prsm.org/runbooks/security-threat"
+      runbook_url: "https://docs.prsm-network.com/runbooks/security-threat"
 
   - alert: UnauthorizedAccessAttempt
     expr: increase(http_requests_total{status="401"}[5m]) > 20
@@ -308,7 +308,7 @@ groups:
     annotations:
       summary: "High number of unauthorized access attempts"
       description: "{{ $value }} unauthorized access attempts in the last 5 minutes."
-      runbook_url: "https://docs.prsm.org/runbooks/unauthorized-access"
+      runbook_url: "https://docs.prsm-network.com/runbooks/unauthorized-access"
 
   - alert: AbnormalUserBehavior
     expr: increase(user_anomaly_score[10m]) > 0.8
@@ -320,7 +320,7 @@ groups:
     annotations:
       summary: "Abnormal user behavior detected"
       description: "User anomaly score is {{ $value }}, indicating potential security concern."
-      runbook_url: "https://docs.prsm.org/runbooks/user-anomaly"
+      runbook_url: "https://docs.prsm-network.com/runbooks/user-anomaly"
 
 # =============================================================================
 # Infrastructure Alerts
@@ -336,7 +336,7 @@ groups:
     annotations:
       summary: "High CPU usage detected"
       description: "CPU usage is {{ $value }}% on {{ $labels.instance }}."
-      runbook_url: "https://docs.prsm.org/runbooks/high-cpu"
+      runbook_url: "https://docs.prsm-network.com/runbooks/high-cpu"
 
   - alert: HighMemoryUsage
     expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.9
@@ -347,7 +347,7 @@ groups:
     annotations:
       summary: "High memory usage detected"
       description: "Memory usage is {{ $value | humanizePercentage }} on {{ $labels.instance }}."
-      runbook_url: "https://docs.prsm.org/runbooks/high-memory"
+      runbook_url: "https://docs.prsm-network.com/runbooks/high-memory"
 
   - alert: LowDiskSpace
     expr: (node_filesystem_size_bytes - node_filesystem_free_bytes) / node_filesystem_size_bytes > 0.85
@@ -358,7 +358,7 @@ groups:
     annotations:
       summary: "Low disk space detected"
       description: "Disk usage is {{ $value | humanizePercentage }} on {{ $labels.instance }}:{{ $labels.mountpoint }}."
-      runbook_url: "https://docs.prsm.org/runbooks/low-disk"
+      runbook_url: "https://docs.prsm-network.com/runbooks/low-disk"
 
   - alert: NetworkLatencyHigh
     expr: histogram_quantile(0.95, rate(network_latency_seconds_bucket[5m])) > 0.1
@@ -369,7 +369,7 @@ groups:
     annotations:
       summary: "High network latency detected"
       description: "95th percentile network latency is {{ $value }}s."
-      runbook_url: "https://docs.prsm.org/runbooks/network-latency"
+      runbook_url: "https://docs.prsm-network.com/runbooks/network-latency"
 
 # =============================================================================
 # Business Logic Alerts
@@ -386,7 +386,7 @@ groups:
     annotations:
       summary: "Low model training success rate"
       description: "Model training success rate is {{ $value | humanizePercentage }} over the last hour."
-      runbook_url: "https://docs.prsm.org/runbooks/training-success"
+      runbook_url: "https://docs.prsm-network.com/runbooks/training-success"
 
   - alert: MarketplaceTransactionFailures
     expr: increase(marketplace_transaction_failures_total[30m]) > 5
@@ -398,7 +398,7 @@ groups:
     annotations:
       summary: "High marketplace transaction failure rate"
       description: "{{ $value }} marketplace transaction failures in the last 30 minutes."
-      runbook_url: "https://docs.prsm.org/runbooks/marketplace-failures"
+      runbook_url: "https://docs.prsm-network.com/runbooks/marketplace-failures"
 
   - alert: GovernanceParticipationLow
     expr: governance_active_voters / governance_total_eligible < 0.1
@@ -410,4 +410,4 @@ groups:
     annotations:
       summary: "Low governance participation"
       description: "Only {{ $value | humanizePercentage }} of eligible voters are participating in governance."
-      runbook_url: "https://docs.prsm.org/runbooks/governance-participation"
+      runbook_url: "https://docs.prsm-network.com/runbooks/governance-participation"

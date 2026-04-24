@@ -54,9 +54,9 @@ from prsm.interface.onboarding.wallet_binding import (
 # Shared fixtures / constants
 # -----------------------------------------------------------------------------
 
-DOMAIN = "app.prsm.org"
+DOMAIN = "app.prsm-network.com"
 CHAIN_ID = 8453  # Base mainnet
-URI = "https://app.prsm.org/login"
+URI = "https://app.prsm-network.com/login"
 VERSION = "1"
 STATEMENT = "Sign in to PRSM."
 BINDING_ISSUED_AT = "2026-04-22T12:00:00Z"

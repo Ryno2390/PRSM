@@ -44,8 +44,8 @@ global.fetch = jest.fn();
 // Default test configuration
 const TEST_CONFIG = {
   API_KEY: 'test_api_key_12345',
-  BASE_URL: 'https://api.test.prsm.org',
-  WEBSOCKET_URL: 'wss://api.test.prsm.org/ws',
+  BASE_URL: 'https://api.test.prsm-network.com',
+  WEBSOCKET_URL: 'wss://api.test.prsm-network.com/ws',
   TIMEOUT: 5000,
 };
 

@@ -82,8 +82,8 @@ def create_app(
         openapi_tags=API_TAGS_METADATA,
         contact={
             "name": "PRSM API Support",
-            "email": "api-support@prsm.org",
-            "url": "https://developers.prsm.org"
+            "email": "api-support@prsm-network.com",
+            "url": "https://developers.prsm-network.com"
         },
         license_info={
             "name": "MIT License",
@@ -159,8 +159,8 @@ def _get_servers() -> List[Dict[str, str]]:
 
     if settings and hasattr(settings, 'is_production') and settings.is_production:
         servers.extend([
-            {"url": "https://api.prsm.org", "description": "Production server"},
-            {"url": "https://staging-api.prsm.org", "description": "Staging server"},
+            {"url": "https://api.prsm-network.com", "description": "Production server"},
+            {"url": "https://staging-api.prsm-network.com", "description": "Staging server"},
         ])
 
     # Always include localhost for development

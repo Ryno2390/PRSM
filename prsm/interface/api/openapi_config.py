@@ -15,7 +15,7 @@ API_TAGS_METADATA = [
                       "Includes JWT tokens, API keys, role-based access control, and two-factor authentication.",
         "externalDocs": {
             "description": "Authentication Guide",
-            "url": "https://docs.prsm.org/authentication"
+            "url": "https://docs.prsm-network.com/authentication"
         }
     },
     {
@@ -24,7 +24,7 @@ API_TAGS_METADATA = [
                       "and system health monitoring.",
         "externalDocs": {
             "description": "Core API Guide",
-            "url": "https://docs.prsm.org/core-api"
+            "url": "https://docs.prsm-network.com/core-api"
         }
     },
     {
@@ -33,7 +33,7 @@ API_TAGS_METADATA = [
                       "Trade AI models, datasets, tools, and other resources with real token transactions.",
         "externalDocs": {
             "description": "Marketplace Guide",
-            "url": "https://docs.prsm.org/marketplace"
+            "url": "https://docs.prsm-network.com/marketplace"
         }
     },
     {
@@ -53,7 +53,7 @@ API_TAGS_METADATA = [
         "description": "FTNS token transactions, balance management, and payment processing.",
         "externalDocs": {
             "description": "FTNS Token Guide",
-            "url": "https://docs.prsm.org/ftns-tokens"
+            "url": "https://docs.prsm-network.com/ftns-tokens"
         }
     },
     {
@@ -113,7 +113,7 @@ API_TAGS_METADATA = [
         "description": "Distributed storage system integration and file management.",
         "externalDocs": {
             "description": "IPFS Integration Guide",
-            "url": "https://docs.prsm.org/ipfs"
+            "url": "https://docs.prsm-network.com/ipfs"
         }
     },
     {
@@ -302,22 +302,22 @@ All API endpoints require authentication. Obtain an access token by:
 
 ## Support
 
-- **Documentation**: [https://docs.prsm.org](https://docs.prsm.org)
-- **API Support**: [api-support@prsm.org](mailto:api-support@prsm.org)
-- **Community**: [https://community.prsm.org](https://community.prsm.org)
+- **Documentation**: [https://docs.prsm-network.com](https://docs.prsm-network.com)
+- **API Support**: [api-support@prsm-network.com](mailto:api-support@prsm-network.com)
+- **Community**: [https://community.prsm-network.com](https://community.prsm-network.com)
 - **GitHub**: [https://github.com/prsm-org/prsm](https://github.com/prsm-org/prsm)
         """,
         routes=app.routes,
         tags=API_TAGS_METADATA,
         servers=[
-            {"url": "https://api.prsm.org", "description": "Production server"},
-            {"url": "https://staging-api.prsm.org", "description": "Staging server"},
+            {"url": "https://api.prsm-network.com", "description": "Production server"},
+            {"url": "https://staging-api.prsm-network.com", "description": "Staging server"},
             {"url": "http://localhost:8000", "description": "Development server"}
         ],
         contact={
             "name": "PRSM API Support",
-            "email": "api-support@prsm.org",
-            "url": "https://developers.prsm.org"
+            "email": "api-support@prsm-network.com",
+            "url": "https://developers.prsm-network.com"
         },
         license_info={
             "name": "MIT License",
@@ -335,7 +335,7 @@ All API endpoints require authentication. Obtain an access token by:
 
     # Add custom extensions
     openapi_schema["x-logo"] = {
-        "url": "https://assets.prsm.org/logo.png",
+        "url": "https://assets.prsm-network.com/logo.png",
         "altText": "PRSM Logo"
     }
 
@@ -353,11 +353,11 @@ ENVIRONMENT_CONFIGS = {
         "security_requirements": [],  # Optional auth for development
     },
     "staging": {
-        "servers": [{"url": "https://staging-api.prsm.org", "description": "Staging server"}],
+        "servers": [{"url": "https://staging-api.prsm-network.com", "description": "Staging server"}],
         "security_requirements": [{"BearerAuth": []}],
     },
     "production": {
-        "servers": [{"url": "https://api.prsm.org", "description": "Production server"}],
+        "servers": [{"url": "https://api.prsm-network.com", "description": "Production server"}],
         "security_requirements": [{"BearerAuth": []}],
     }
 }
@@ -388,13 +388,13 @@ API_EXAMPLES = {
 import httpx
 
 # Authenticate
-response = httpx.post("https://api.prsm.org/api/v1/auth/login", 
+response = httpx.post("https://api.prsm-network.com/api/v1/auth/login", 
                      json={"email": "user@example.com", "password": "password"})
 token = response.json()["access_token"]
 
 # Make authenticated request
 headers = {"Authorization": f"Bearer {token}"}
-response = httpx.get("https://api.prsm.org/api/v1/marketplace/resources", headers=headers)
+response = httpx.get("https://api.prsm-network.com/api/v1/marketplace/resources", headers=headers)
         ''',
         "websocket": '''
 import asyncio
@@ -416,14 +416,14 @@ async def connect_websocket():
 const axios = require('axios');
 
 // Authenticate
-const authResponse = await axios.post('https://api.prsm.org/api/v1/auth/login', {
+const authResponse = await axios.post('https://api.prsm-network.com/api/v1/auth/login', {
   email: 'user@example.com',
   password: 'password'
 });
 const token = authResponse.data.access_token;
 
 // Make authenticated request
-const response = await axios.get('https://api.prsm.org/api/v1/marketplace/resources', {
+const response = await axios.get('https://api.prsm-network.com/api/v1/marketplace/resources', {
   headers: { Authorization: `Bearer ${token}` }
 });
         ''',
@@ -441,12 +441,12 @@ ws.on('message', (data) => {
     "curl": {
         "auth": '''
 # Authenticate
-curl -X POST "https://api.prsm.org/api/v1/auth/login" \\
+curl -X POST "https://api.prsm-network.com/api/v1/auth/login" \\
      -H "Content-Type: application/json" \\
      -d '{"email": "user@example.com", "password": "password"}'
 
 # Make authenticated request  
-curl -X GET "https://api.prsm.org/api/v1/marketplace/resources" \\
+curl -X GET "https://api.prsm-network.com/api/v1/marketplace/resources" \\
      -H "Authorization: Bearer YOUR_TOKEN_HERE"
         '''
     }

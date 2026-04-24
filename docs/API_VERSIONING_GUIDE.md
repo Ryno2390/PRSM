@@ -47,24 +47,24 @@ PRSM API versions follow semantic versioning: `MAJOR.MINOR.PATCH`
 
 ### 1. URL Path (Recommended)
 ```bash
-curl https://api.prsm.org/api/v1/marketplace/resources
-curl https://api.prsm.org/api/v1.1/marketplace/resources
-curl https://api.prsm.org/api/v2/marketplace/resources
+curl https://api.prsm-network.com/api/v1/marketplace/resources
+curl https://api.prsm-network.com/api/v1.1/marketplace/resources
+curl https://api.prsm-network.com/api/v2/marketplace/resources
 ```
 
 ### 2. API-Version Header
 ```bash
-curl -H "API-Version: 1.1" https://api.prsm.org/api/marketplace/resources
+curl -H "API-Version: 1.1" https://api.prsm-network.com/api/marketplace/resources
 ```
 
 ### 3. Accept Header (Content Negotiation)
 ```bash
-curl -H "Accept: application/vnd.prsm.v1.1+json" https://api.prsm.org/api/marketplace/resources
+curl -H "Accept: application/vnd.prsm.v1.1+json" https://api.prsm-network.com/api/marketplace/resources
 ```
 
 ### 4. Query Parameter
 ```bash
-curl https://api.prsm.org/api/marketplace/resources?version=1.1
+curl https://api.prsm-network.com/api/marketplace/resources?version=1.1
 ```
 
 **Priority Order**: URL Path > API-Version Header > Accept Header > Query Parameter > Default
@@ -78,7 +78,7 @@ from prsm_sdk import PRSMClient
 # Specify version during initialization
 client = PRSMClient(
     api_version="1.1",
-    base_url="https://api.prsm.org"
+    base_url="https://api.prsm-network.com"
 )
 
 # Or set version per request
@@ -95,7 +95,7 @@ import { PRSMClient } from '@prsm/js-sdk';
 // Global version setting
 const client = new PRSMClient({
   apiVersion: '1.1',
-  baseURL: 'https://api.prsm.org'
+  baseURL: 'https://api.prsm-network.com'
 });
 
 // Per-request version
@@ -149,7 +149,7 @@ API-Version: 1.0
 API-Deprecation-Warning: true
 API-Deprecation-Date: 2024-07-01T00:00:00Z
 API-Sunset-Date: 2025-01-01T00:00:00Z
-API-Migration-Guide: https://docs.prsm.org/migration/v1.0-to-v1.1
+API-Migration-Guide: https://docs.prsm-network.com/migration/v1.0-to-v1.1
 ```
 
 ## Migration Process
@@ -159,28 +159,28 @@ API-Migration-Guide: https://docs.prsm.org/migration/v1.0-to-v1.1
 ```bash
 # Get your current API usage
 curl -H "Authorization: Bearer YOUR_TOKEN" \
-     https://api.prsm.org/api/migration/paths?from_version=1.0
+     https://api.prsm-network.com/api/migration/paths?from_version=1.0
 ```
 
 ### 2. Review Migration Checklist
 
 ```bash
 # Get detailed migration checklist
-curl https://api.prsm.org/api/migration/checklist?from_version=1.0&to_version=1.1
+curl https://api.prsm-network.com/api/migration/checklist?from_version=1.0&to_version=1.1
 ```
 
 ### 3. Identify Breaking Changes
 
 ```bash
 # Get breaking changes summary
-curl https://api.prsm.org/api/migration/breaking-changes?from_version=1.0&to_version=1.1
+curl https://api.prsm-network.com/api/migration/breaking-changes?from_version=1.0&to_version=1.1
 ```
 
 ### 4. Access Migration Guide
 
 Visit the interactive migration guide:
 ```
-https://api.prsm.org/migration/guide/1.0/to/1.1
+https://api.prsm-network.com/migration/guide/1.0/to/1.1
 ```
 
 ### Example Migration: v1.0 to v1.1
@@ -283,24 +283,24 @@ npm install @prsm/js-sdk@^1.1.0
 
 Each version has dedicated interactive documentation:
 
-- **v1.0**: https://api.prsm.org/docs/v1.0
-- **v1.1**: https://api.prsm.org/docs/v1.1  
-- **v2.0**: https://api.prsm.org/docs/v2.0
+- **v1.0**: https://api.prsm-network.com/docs/v1.0
+- **v1.1**: https://api.prsm-network.com/docs/v1.1  
+- **v2.0**: https://api.prsm-network.com/docs/v2.0
 
 ### OpenAPI Specifications
 
 Download version-specific OpenAPI specs:
 
-- **v1.0**: https://api.prsm.org/openapi/v1.0.json
-- **v1.1**: https://api.prsm.org/openapi/v1.1.json
-- **v2.0**: https://api.prsm.org/openapi/v2.0.json
+- **v1.0**: https://api.prsm-network.com/openapi/v1.0.json
+- **v1.1**: https://api.prsm-network.com/openapi/v1.1.json
+- **v2.0**: https://api.prsm-network.com/openapi/v2.0.json
 
 ### Migration Guides
 
 Interactive migration guides with checklists:
 
-- **v1.0 → v1.1**: https://api.prsm.org/migration/guide/1.0/to/1.1
-- **v1.1 → v2.0**: https://api.prsm.org/migration/guide/1.1/to/2.0
+- **v1.0 → v1.1**: https://api.prsm-network.com/migration/guide/1.0/to/1.1
+- **v1.1 → v2.0**: https://api.prsm-network.com/migration/guide/1.1/to/2.0
 
 ## Best Practices
 
@@ -320,7 +320,7 @@ client = PRSMClient()  # Uses whatever default is set
 import requests
 
 response = requests.get(
-    "https://api.prsm.org/api/v1/marketplace/resources",
+    "https://api.prsm-network.com/api/v1/marketplace/resources",
     headers={"Authorization": "Bearer TOKEN"}
 )
 
@@ -357,7 +357,7 @@ client = PRSMClient(api_version=API_VERSION)
 ```python
 # Monitor version lifecycle in your deployment pipeline
 def check_api_version_status():
-    response = requests.get("https://api.prsm.org/api/versions")
+    response = requests.get("https://api.prsm-network.com/api/versions")
     versions = response.json()["supported_versions"]
     
     current_version = os.getenv("PRSM_API_VERSION")
@@ -403,10 +403,10 @@ def get_api_version_for_user(user_id):
 
 ## Support and Resources
 
-- **📚 Version Documentation**: [https://docs.prsm.org/versioning](https://docs.prsm.org/versioning)
-- **🔄 Migration Tools**: [https://tools.prsm.org/migration](https://tools.prsm.org/migration)
-- **📧 Version Announcements**: [api-announcements@prsm.org](mailto:api-announcements@prsm.org)
-- **💬 Developer Community**: [https://community.prsm.org/api-versioning](https://community.prsm.org/api-versioning)
-- **🆘 Migration Support**: [migration-support@prsm.org](mailto:migration-support@prsm.org)
+- **📚 Version Documentation**: [https://docs.prsm-network.com/versioning](https://docs.prsm-network.com/versioning)
+- **🔄 Migration Tools**: [https://tools.prsm-network.com/migration](https://tools.prsm-network.com/migration)
+- **📧 Version Announcements**: [api-announcements@prsm-network.com](mailto:api-announcements@prsm-network.com)
+- **💬 Developer Community**: [https://community.prsm-network.com/api-versioning](https://community.prsm-network.com/api-versioning)
+- **🆘 Migration Support**: [migration-support@prsm-network.com](mailto:migration-support@prsm-network.com)
 
-For enterprise customers with custom SLAs, contact [enterprise@prsm.org](mailto:enterprise@prsm.org) for dedicated migration assistance.
+For enterprise customers with custom SLAs, contact [enterprise@prsm-network.com](mailto:enterprise@prsm-network.com) for dedicated migration assistance.

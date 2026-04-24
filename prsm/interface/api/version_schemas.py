@@ -100,7 +100,7 @@ class VersionedOpenAPIGenerator:
         # Add version-specific external docs
         schema["externalDocs"] = {
             "description": f"PRSM API v{version.value} Documentation",
-            "url": f"https://docs.prsm.org/api/v{version.value}"
+            "url": f"https://docs.prsm-network.com/api/v{version.value}"
         }
     
     def _get_version_description(self, version: APIVersion, version_info: Optional[VersionInfo]) -> str:
@@ -326,7 +326,7 @@ class VersionedOpenAPIGenerator:
 # Initialize client for v{version.value}
 client = PRSMClient(
     api_version="{version.value}",
-    base_url="https://api.prsm.org"
+    base_url="https://api.prsm-network.com"
 )
 
 # Authenticate
@@ -348,7 +348,7 @@ resources = await client.marketplace.search(
 // Initialize client for v{version.value}
 const client = new PRSMClient({{
   apiVersion: '{version.value}',
-  baseURL: 'https://api.prsm.org'
+  baseURL: 'https://api.prsm-network.com'
 }});
 
 // Authenticate
@@ -366,13 +366,13 @@ const resources = await client.marketplace.search({{
             "lang": "shell",
             "label": f"cURL v{version.value}",
             "source": f'''# Login (v{version.value})
-curl -X POST "https://api.prsm.org/api/v{version.major}/auth/login" \\
+curl -X POST "https://api.prsm-network.com/api/v{version.major}/auth/login" \\
   -H "Content-Type: application/json" \\
   -H "API-Version: {version.value}" \\
   -d '{{"email": "user@example.com", "password": "password"}}'
 
 # Search marketplace
-curl -X GET "https://api.prsm.org/api/v{version.major}/marketplace/resources?query=machine%20learning" \\
+curl -X GET "https://api.prsm-network.com/api/v{version.major}/marketplace/resources?query=machine%20learning" \\
   -H "Authorization: Bearer YOUR_TOKEN" \\
   -H "API-Version: {version.value}"'''
         })

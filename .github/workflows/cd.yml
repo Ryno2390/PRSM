@@ -77,7 +77,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     environment:
       name: staging
-      url: https://staging.prsm.org
+      url: https://staging.prsm-network.com
     
     steps:
       - name: Checkout code
@@ -117,10 +117,10 @@ jobs:
           echo "🧪 Running staging validation tests..."
           
           # Health check
-          timeout 300 bash -c 'until curl -f https://staging.prsm.org/health; do echo "Waiting for staging..."; sleep 10; done'
+          timeout 300 bash -c 'until curl -f https://staging.prsm-network.com/health; do echo "Waiting for staging..."; sleep 10; done'
           
           # API validation
-          curl -f https://staging.prsm.org/api/v1/health
+          curl -f https://staging.prsm-network.com/api/v1/health
           
           echo "✅ Staging tests passed"
 
@@ -134,7 +134,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     environment:
       name: production
-      url: https://prsm.org
+      url: https://prsm-network.com
     
     steps:
       - name: Checkout code
@@ -208,13 +208,13 @@ jobs:
           sleep 60
           
           # Health check
-          timeout 300 bash -c 'until curl -f https://prsm.org/health; do echo "Waiting for production..."; sleep 10; done'
+          timeout 300 bash -c 'until curl -f https://prsm-network.com/health; do echo "Waiting for production..."; sleep 10; done'
           
           # API validation
-          curl -f https://prsm.org/api/v1/health
+          curl -f https://prsm-network.com/api/v1/health
           
           # Performance check
-          response_time=$(curl -o /dev/null -s -w "%{time_total}" https://prsm.org/health)
+          response_time=$(curl -o /dev/null -s -w "%{time_total}" https://prsm-network.com/health)
           echo "Response time: ${response_time}s"
           
           if (( $(echo "$response_time > 2.0" | bc -l) )); then
@@ -228,7 +228,7 @@ jobs:
         run: |
           if [ "${{ job.status }}" == "success" ]; then
             echo "✅ Production deployment successful!"
-            echo "🌐 PRSM is now live at https://prsm.org"
+            echo "🌐 PRSM is now live at https://prsm-network.com"
           else
             echo "❌ Production deployment failed!"
             echo "🚨 Manual intervention required"
@@ -280,13 +280,13 @@ jobs:
             echo "Monitoring check $i/20..."
             
             # Health check
-            if ! curl -f https://prsm.org/health > /dev/null 2>&1; then
+            if ! curl -f https://prsm-network.com/health > /dev/null 2>&1; then
               echo "❌ Health check failed on attempt $i"
               exit 1
             fi
             
             # Performance check
-            response_time=$(curl -o /dev/null -s -w "%{time_total}" https://prsm.org/health)
+            response_time=$(curl -o /dev/null -s -w "%{time_total}" https://prsm-network.com/health)
             echo "Response time: ${response_time}s"
             
             sleep 30

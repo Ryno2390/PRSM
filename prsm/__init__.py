@@ -29,7 +29,7 @@ resources and data.
 
 __version__ = "1.7.0"
 __author__ = "PRSM Team"
-__email__ = "team@prsm.org"
+__email__ = "team@prsm-network.com"
 __description__ = "Protocol for Recursive Scientific Modeling - A P2P infrastructure protocol for open-source collaboration"
 
 from prsm.core.config import get_settings, settings

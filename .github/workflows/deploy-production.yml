@@ -208,7 +208,7 @@ jobs:
                   test_name='pre_production_load_test',
                   concurrent_users=50,
                   duration_seconds=60,
-                  base_url='https://staging.prsm.org',
+                  base_url='https://staging.prsm-network.com',
                   max_response_time_ms=2000,
                   min_success_rate=0.95
               )
@@ -269,7 +269,7 @@ jobs:
     if: needs.pre-deployment-checks.outputs.deploy-ready == 'true'
     environment:
       name: ${{ needs.pre-deployment-checks.outputs.environment }}
-      url: https://${{ needs.pre-deployment-checks.outputs.environment == 'production' && 'prsm.org' || format('staging.prsm.org') }}
+      url: https://${{ needs.pre-deployment-checks.outputs.environment == 'production' && 'prsm-network.com' || format('staging.prsm-network.com') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -316,7 +316,7 @@ jobs:
             --timeout=300s
           
           # Test API health endpoint
-          API_URL="https://${{ needs.pre-deployment-checks.outputs.environment == 'production' && 'prsm.org' || 'staging.prsm.org' }}"
+          API_URL="https://${{ needs.pre-deployment-checks.outputs.environment == 'production' && 'prsm-network.com' || 'staging.prsm-network.com' }}"
           
           echo "Testing API health at: ${API_URL}/health"
           for i in {1..10}; do
@@ -345,7 +345,7 @@ jobs:
         run: |
           echo "Running smoke tests against deployed environment..."
           
-          API_URL="https://${{ needs.pre-deployment-checks.outputs.environment == 'production' && 'prsm.org' || 'staging.prsm.org' }}"
+          API_URL="https://${{ needs.pre-deployment-checks.outputs.environment == 'production' && 'prsm-network.com' || 'staging.prsm-network.com' }}"
           
           # Test critical endpoints
           echo "Testing critical API endpoints..."
@@ -397,7 +397,7 @@ jobs:
                   test_name='post_deployment_validation',
                   concurrent_users=25,
                   duration_seconds=120,
-                  base_url='https://prsm.org',
+                  base_url='https://prsm-network.com',
                   max_response_time_ms=1500,
                   min_success_rate=0.98
               )
@@ -438,7 +438,7 @@ jobs:
             **Triggered by:** ${{ github.actor }}
             **Commit:** ${{ github.sha }}
             
-            ${{ job.status == 'success' && format('🎉 Deployment completed successfully!\n🌐 URL: https://{0}', needs.pre-deployment-checks.outputs.environment == 'production' && 'prsm.org' || 'staging.prsm.org') || '⚠️ Deployment failed - check logs for details' }}
+            ${{ job.status == 'success' && format('🎉 Deployment completed successfully!\n🌐 URL: https://{0}', needs.pre-deployment-checks.outputs.environment == 'production' && 'prsm-network.com' || 'staging.prsm-network.com') || '⚠️ Deployment failed - check logs for details' }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         if: always()
@@ -504,7 +504,7 @@ jobs:
         run: |
           echo "Verifying rollback health..."
           
-          API_URL="https://${{ needs.pre-deployment-checks.outputs.environment == 'production' && 'prsm.org' || 'staging.prsm.org' }}"
+          API_URL="https://${{ needs.pre-deployment-checks.outputs.environment == 'production' && 'prsm-network.com' || 'staging.prsm-network.com' }}"
           
           for i in {1..5}; do
             if curl -f "${API_URL}/health" --max-time 10; then

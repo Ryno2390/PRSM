@@ -66,7 +66,7 @@ groups:
     annotations:
       summary: "PRSM Phase 1 latency requirement failed"
       description: "95th percentile query latency is {{ $value }}s, exceeding 2s requirement."
-      runbook_url: "https://docs.prsm.org/runbooks/phase1-latency"
+      runbook_url: "https://docs.prsm-network.com/runbooks/phase1-latency"
       
   - alert: Phase1ConcurrencyRequirementFailed
     expr: prsm_concurrent_sessions_total < 1000
@@ -79,7 +79,7 @@ groups:
     annotations:
       summary: "PRSM Phase 1 concurrency requirement failed"
       description: "Current concurrent sessions {{ $value }} is below 1000 requirement."
-      runbook_url: "https://docs.prsm.org/runbooks/phase1-concurrency"
+      runbook_url: "https://docs.prsm-network.com/runbooks/phase1-concurrency"
       
   # FTNS microsecond precision requirement
   - alert: FTNSPrecisionRequirementFailed
@@ -93,7 +93,7 @@ groups:
     annotations:
       summary: "FTNS cost calculation precision requirement failed"
       description: "99th percentile FTNS calculation time is {{ $value }}s, exceeding 1ms requirement."
-      runbook_url: "https://docs.prsm.org/runbooks/ftns-precision"
+      runbook_url: "https://docs.prsm-network.com/runbooks/ftns-precision"
       
   # Agent pipeline performance
   - alert: AgentPipelinePerformanceDegraded
@@ -107,7 +107,7 @@ groups:
     annotations:
       summary: "Agent pipeline performance degraded"
       description: "Agent pipeline 95th percentile latency is {{ $value }}s."
-      runbook_url: "https://docs.prsm.org/runbooks/agent-performance"
+      runbook_url: "https://docs.prsm-network.com/runbooks/agent-performance"
 
 # =============================================================================
 # PRSM System Health Alerts

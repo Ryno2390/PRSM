@@ -8,7 +8,7 @@ metadata:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/rate-limit: "100"
-    nginx.ingress.kubernetes.io/cors-allow-origin: "https://prsm.org"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://prsm-network.com"
     nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
     nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization"
     nginx.ingress.kubernetes.io/server-snippet: |
@@ -19,11 +19,11 @@ metadata:
 spec:
   tls:
   - hosts:
-    - prsm.org
-    - www.prsm.org
+    - prsm-network.com
+    - www.prsm-network.com
     secretName: prsm-production-tls
   rules:
-  - host: prsm.org
+  - host: prsm-network.com
     http:
       paths:
       - path: /
@@ -33,7 +33,7 @@ spec:
             name: prsm-api-service
             port:
               number: 8000
-  - host: www.prsm.org
+  - host: www.prsm-network.com
     http:
       paths:
       - path: /

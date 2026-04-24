@@ -10,7 +10,7 @@ metadata:
     pod-security.kubernetes.io/warn: restricted
   annotations:
     description: "PRSM production environment"
-    contact: "team@prsm.org"
+    contact: "team@prsm-network.com"
     environment: "production"
     managed-by: "kustomize"
     compliance: "SOC2-compliant"

@@ -238,7 +238,7 @@ When contributing to PRSM security:
 
 For security-related issues, please follow responsible disclosure:
 - **Non-Critical**: Open GitHub issue with security label
-- **Critical**: Email security@prsm.org with details
+- **Critical**: Email security@prsm-network.com with details
 
 ---
 

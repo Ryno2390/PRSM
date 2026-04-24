@@ -176,10 +176,10 @@ kubectl rollout status deployment/prsm-api -n prsm-production
 
 ### Monitoring Dashboard URLs
 
-- **System Overview**: `https://grafana.prsm.org/d/prsm-overview`
-- **Security Dashboard**: `https://grafana.prsm.org/d/prsm-security`
-- **Prometheus**: `https://prometheus.prsm.org:9090`
-- **Alertmanager**: `https://alertmanager.prsm.org:9093`
+- **System Overview**: `https://grafana.prsm-network.com/d/prsm-overview`
+- **Security Dashboard**: `https://grafana.prsm-network.com/d/prsm-security`
+- **Prometheus**: `https://prometheus.prsm-network.com:9090`
+- **Alertmanager**: `https://alertmanager.prsm-network.com:9093`
 
 ### Alert Severity Levels
 
@@ -543,7 +543,7 @@ kubectl set image deployment/prsm-api prsm-api=prsm:latest -n prsm-production
 **Diagnosis**:
 ```bash
 # Check API response times
-curl -w "@curl-format.txt" -o /dev/null -s https://api.prsm.org/health
+curl -w "@curl-format.txt" -o /dev/null -s https://api.prsm-network.com/health
 
 # Monitor database connections
 kubectl exec -n prsm-production deployment/postgres -- \
@@ -636,10 +636,10 @@ kubectl describe pod -n prsm-production <pod-name>
 ### Emergency Contact Information
 
 #### Primary Contacts
-- **System Administrator**: admin@prsm.org
-- **DevOps Engineer**: devops@prsm.org
-- **Security Team**: security@prsm.org
-- **Database Administrator**: dba@prsm.org
+- **System Administrator**: admin@prsm-network.com
+- **DevOps Engineer**: devops@prsm-network.com
+- **Security Team**: security@prsm-network.com
+- **Database Administrator**: dba@prsm-network.com
 
 #### Escalation Matrix
 1. **Level 1**: System Administrator (0-15 minutes)

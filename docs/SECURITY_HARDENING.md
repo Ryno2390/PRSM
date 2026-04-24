@@ -132,7 +132,7 @@ For development environment security:
 
 For security-related questions or issues:
 
-- **Security Team**: security@prsm.org
+- **Security Team**: security@prsm-network.com
 - **Documentation**: [Security Framework](../security/README.md)
 - **Emergency**: Follow incident response procedures
 - **Community**: GitHub security discussions
