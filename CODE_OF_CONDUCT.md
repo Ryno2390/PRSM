@@ -117,7 +117,7 @@ This includes:
 
 If you experience or witness unacceptable behavior, or have any other concerns, please report it by contacting the community leaders at:
 
-- **Email**: conduct@prsm-project.org (if available)
+- **Email**: conduct@prsm-network.com (if available)
 - **GitHub**: Private message to repository maintainers
 - **Anonymous Form**: [Anonymous reporting form] (if available)
 
@@ -256,8 +256,8 @@ We also acknowledge the scientific research community's long-standing traditions
 
 For questions about this Code of Conduct:
 - **General Questions**: Use GitHub Discussions
-- **Conduct Reports**: conduct@prsm-project.org
-- **Appeal Requests**: appeals@prsm-project.org
+- **Conduct Reports**: conduct@prsm-network.com
+- **Appeal Requests**: appeals@prsm-network.com
 - **Urgent Issues**: Contact repository maintainers directly
 
 ---

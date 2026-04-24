@@ -355,7 +355,7 @@ enum SafetyLevel {
 
 ```bash
 # Clone the repository
-git clone https://github.com/PRSM-AI/PRSM.git
+git clone https://github.com/prsm-network/PRSM.git
 cd PRSM/sdks/javascript
 
 # Install dependencies
@@ -425,6 +425,6 @@ This project is licensed under the MIT License - see the [LICENSE](../../LICENSE
 ## Support
 
 - 📚 **Documentation**: [docs.prsm.ai/javascript-sdk](https://docs.prsm.ai/javascript-sdk)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/PRSM-AI/PRSM/issues)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/prsm-network/PRSM/issues)
 - 💬 **Community**: [Discord](https://discord.gg/prsm)
 - 📧 **Email**: [dev@prsm.ai](mailto:dev@prsm.ai)

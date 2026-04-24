@@ -411,7 +411,7 @@ class CommunityOnboardingService:
                 community_links={
                     "developer_forum": "/community/developers",
                     "technical_docs": "/docs",
-                    "github_repo": "https://github.com/PRSM-AI/PRSM"
+                    "github_repo": "https://github.com/prsm-network/PRSM"
                 },
                 getting_started_guide="/guides/developer-quickstart",
                 early_adopter_benefits=[

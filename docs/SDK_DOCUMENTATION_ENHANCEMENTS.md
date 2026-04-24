@@ -127,7 +127,7 @@ PRSM/
 ### Python Production Deployment
 ```bash
 # Clone and setup
-git clone https://github.com/PRSM-AI/prsm
+git clone https://github.com/prsm-network/prsm
 cd prsm/sdks/python/examples/production
 
 # Run deployment script

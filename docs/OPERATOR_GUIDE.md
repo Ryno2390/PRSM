@@ -28,7 +28,7 @@ The fastest way to run a production PRSM node.
 ### Step 1: Get the Code
 
 ```bash
-git clone https://github.com/PRSM-AI/PRSM.git
+git clone https://github.com/prsm-network/PRSM.git
 cd PRSM
 ```
 
@@ -172,7 +172,7 @@ sudo apt update
 sudo apt install python3.11 python3.11-venv ipfs
 
 # Clone and setup
-git clone https://github.com/PRSM-AI/PRSM.git /opt/prsm
+git clone https://github.com/prsm-network/PRSM.git /opt/prsm
 cd /opt/prsm
 python3.11 -m venv venv
 source venv/bin/activate
@@ -530,7 +530,7 @@ Phase 7.1 MVP splits `policy.max_price_per_shard_ftns` evenly across k providers
 ## Getting Help
 
 - **Documentation**: [docs.prsm.ai](https://docs.prsm.ai)
-- **GitHub Issues**: [github.com/PRSM-AI/PRSM/issues](https://github.com/PRSM-AI/PRSM/issues)
+- **GitHub Issues**: [github.com/prsm-network/PRSM/issues](https://github.com/prsm-network/PRSM/issues)
 - **Discord**: [discord.gg/prsm](https://discord.gg/prsm)
 - **Email**: ops@prsm.ai
 

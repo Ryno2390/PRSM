@@ -632,4 +632,4 @@ Every contribution, no matter how small, helps build an open-source commons for 
 
 > _"Science advances through collaboration, not competition. Thank you for being part of that advancement."_
 
-**Ready to contribute? Check out our [good first issues](https://github.com/PRSM-AI/PRSM/labels/good%20first%20issue) to get started!**
+**Ready to contribute? Check out our [good first issues](https://github.com/prsm-network/PRSM/labels/good%20first%20issue) to get started!**

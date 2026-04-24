@@ -33,11 +33,11 @@ PRSM implements a comprehensive security framework across multiple layers:
 **DO NOT** create public GitHub issues for security vulnerabilities. Instead:
 
 1. **Report privately** via GitHub Security Advisories: 
-   - Go to the [Security tab](https://github.com/PRSM-AI/PRSM/security/advisories)
+   - Go to the [Security tab](https://github.com/prsm-network/PRSM/security/advisories)
    - Click "Report a vulnerability"
 
 2. **Email directly** for urgent issues:
-   - Send to: security@prsm-project.org (if available)
+   - Send to: security@prsm-network.com (if available)
    - Include "PRSM SECURITY" in the subject line
 
 ### **Information to Include**
@@ -280,8 +280,8 @@ We welcome academic security research on PRSM:
 ## 📞 Contact Information
 
 ### **Security Team**
-- **GitHub Security Advisories**: [Report Vulnerability](https://github.com/PRSM-AI/PRSM/security/advisories/new)
-- **Email**: security@prsm-project.org (if available)
+- **GitHub Security Advisories**: [Report Vulnerability](https://github.com/prsm-network/PRSM/security/advisories/new)
+- **Email**: security@prsm-network.com (if available)
 - **PGP Key**: Available upon request for encrypted communication
 
 ### **General Security Questions**

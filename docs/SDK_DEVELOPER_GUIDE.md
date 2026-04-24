@@ -10,7 +10,7 @@ PRSM provides SDKs in three languages, allowing you to integrate decentralized A
 |----------|---------|--------|--------|
 | Python | `prsm-python-sdk` | ✅ Complete | `pip install prsm-python-sdk` |
 | JavaScript/TypeScript | `@prsm/js-sdk` | ✅ Complete | `npm install @prsm/js-sdk` |
-| Go | `prsm-go-sdk` | ✅ Complete | `go get github.com/PRSM-AI/prsm-go-sdk` |
+| Go | `prsm-go-sdk` | ✅ Complete | `go get github.com/prsm-network/prsm-go-sdk` |
 
 All SDKs provide:
 - Ring 1-10 compute query execution with cost control (quote → run → settle)
@@ -269,7 +269,7 @@ app.post('/query', async (req, res) => {
 ### Installation
 
 ```bash
-go get github.com/PRSM-AI/prsm-go-sdk
+go get github.com/prsm-network/prsm-go-sdk
 ```
 
 ### Quick Start
@@ -282,8 +282,8 @@ import (
     "fmt"
     "log"
 
-    prsm "github.com/PRSM-AI/prsm-go-sdk"
-    "github.com/PRSM-AI/prsm-go-sdk/types"
+    prsm "github.com/prsm-network/prsm-go-sdk"
+    "github.com/prsm-network/prsm-go-sdk/types"
 )
 
 func main() {
@@ -543,14 +543,14 @@ python basic_usage.py
 ## Additional Resources
 
 - **API Reference**: [docs.prsm.ai/api](https://docs.prsm.ai/api)
-- **SDK Source**: [github.com/PRSM-AI/PRSM/tree/main/sdks](https://github.com/PRSM-AI/PRSM/tree/main/sdks)
+- **SDK Source**: [github.com/prsm-network/PRSM/tree/main/sdks](https://github.com/prsm-network/PRSM/tree/main/sdks)
 - **Changelog**: See `CHANGELOG.md` in each SDK directory
-- **Contributing**: [github.com/PRSM-AI/PRSM/blob/main/CONTRIBUTING.md](https://github.com/PRSM-AI/PRSM/blob/main/CONTRIBUTING.md)
+- **Contributing**: [github.com/prsm-network/PRSM/blob/main/CONTRIBUTING.md](https://github.com/prsm-network/PRSM/blob/main/CONTRIBUTING.md)
 
 ---
 
 ## Support
 
-- **GitHub Issues**: [github.com/PRSM-AI/PRSM/issues](https://github.com/PRSM-AI/PRSM/issues)
+- **GitHub Issues**: [github.com/prsm-network/PRSM/issues](https://github.com/prsm-network/PRSM/issues)
 - **Discord**: [discord.gg/prsm](https://discord.gg/prsm)
 - **Email**: dev@prsm.ai

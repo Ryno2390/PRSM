@@ -365,7 +365,7 @@ We are committed to providing a welcoming and inclusive environment for all cont
 
 ## 📞 Contact & Support
 
-- **🐛 Report Issues**: [GitHub Issues](https://github.com/PRSM-AI/prsm/issues)
+- **🐛 Report Issues**: [GitHub Issues](https://github.com/prsm-network/prsm/issues)
 - **💬 Community Chat**: [Discord Server](https://discord.gg/prsm-ai)
 - **📧 Email Support**: contributors@prsm.ai
 - **🐦 Follow Updates**: [@PRSM_AI](https://twitter.com/prsm_ai)

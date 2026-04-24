@@ -313,13 +313,13 @@ When you upload data to PRSM:
 
 - **Documentation**: [docs.prsm.ai](https://docs.prsm.ai)
 - **Community Forum**: [community.prsm.ai](https://community.prsm.ai)
-- **GitHub Issues**: [github.com/PRSM-AI/PRSM/issues](https://github.com/PRSM-AI/PRSM/issues)
+- **GitHub Issues**: [github.com/prsm-network/PRSM/issues](https://github.com/prsm-network/PRSM/issues)
 - **Email Support**: support@prsm.ai
 
 ### Reporting Problems
 
 Found a bug or have a suggestion?
-1. Check [GitHub Issues](https://github.com/PRSM-AI/PRSM/issues) for known issues
+1. Check [GitHub Issues](https://github.com/prsm-network/PRSM/issues) for known issues
 2. Submit a new issue with:
    - Steps to reproduce
    - Expected behavior
