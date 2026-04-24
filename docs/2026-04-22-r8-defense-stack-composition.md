@@ -1,14 +1,17 @@
 # R8 Defense-Stack Composition Analysis: Anti-Exfiltration for Frontier-Model Inference
 
 **Document identifier:** R8-COMP-1
-**Version:** 0.1 Draft
-**Status:** Architectural composition analysis. Not an execution plan — R8 spans multiple research tracks (R2, R3, R7) and multi-year engineering (PRSM-CIS-1 silicon standard). This doc specifies how the pieces fit together, which combinations close which attack chains, and what the minimum-sufficient stack for frontier-lab acceptance looks like.
-**Date:** 2026-04-22
+**Version:** 0.2 Draft (revised 2026-04-24)
+**Status:** Architectural composition analysis. Not an execution plan — R8 spans multiple research tracks (R2, R3, R7) plus a deferred research arc (PRSM-CIS-1 silicon standard, reclassified 2026-04-24). This doc specifies how the pieces fit together, which combinations close which attack chains, and what the minimum-sufficient stack for frontier-lab acceptance looks like.
+**Date:** 2026-04-22 (revised 2026-04-24)
 **Drafting authority:** PRSM founder
 **Promotes:** `docs/2026-04-14-phase4plus-research-track.md` §R8 from stub to composition analysis.
+
+**Revision note (2026-04-24):** PRSM-CIS-1 (confidential-silicon standard) is reclassified as **deferred research exploration** per canonical Vision docs — the Foundation does not currently ratify silicon standards, and Prismatica's day-1 business does not include chip design / fabrication. This doc preserves the 5-layer composition analysis because the analysis itself (which adversary classes are blocked by which layer combinations) is a durable research output independent of which specific layers ship. **Layer L5 (CIS-1) is marked "deferred" throughout; the four other layers (L1 TEE, L2 MPC, L3 fingerprinting, L4 watermarking) remain active research arcs.** Conclusions that depend on L5 being live are now scoped as "if CIS-1 is revived" hypotheticals. See [`archive/research/README.md`](../archive/research/README.md) for the CIS-1 archive rationale.
+
 **Related documents:**
 - `docs/2026-04-14-phase4plus-research-track.md` §R8 — research stub.
-- `docs/2026-04-21-prsm-cis-1-confidential-inference-silicon.md` — PRSM-CIS-1, the silicon standard that provides one of R8's five defense layers.
+- `docs/archive/research/2026-04-21-prsm-cis-1-confidential-inference-silicon.md` — **PRSM-CIS-1 (deferred research)**, the silicon standard that would provide R8's L5 defense layer if revived.
 - `docs/2026-04-22-r2-mpc-scoping-doc.md` — R2 scoping. R2's MPC scheme IS R8's cryptographic weight-sharding defense layer (same primitive, different name).
 - `docs/2026-04-22-r3-threat-model.md` — R3 threat model. R8's "side channels" sub-threat is a strict superset of R3's A5 timing-attack vector.
 - `docs/2026-04-22-r7-benchmark-plan.md` — R7 compression. R7's H5 tests whether compression strengthens or weakens the attack surface R8 defends.
@@ -133,14 +136,17 @@ Five layers in the R8 stub's taxonomy. Each specified at the "what it blocks / w
 - **Current state:** production-robust LLM watermarking against adaptive attackers is not solved. Kirchenbauer-line work is evadable. Research-active.
 - **Unique property:** L4 is *post-hoc detection*. Works even if L1-L3 all failed; the only requirement is that someone is generating outputs from a derived model for PRSM users.
 
-### 3.5 Layer L5: Custom silicon (PRSM-CIS-1)
+### 3.5 Layer L5: Custom silicon (PRSM-CIS-1) *[DEFERRED RESEARCH, 2026-04-24]*
 
-- **Mechanism:** chip-level confidentiality anchored in PRSM's own attestation root. Tamper mesh, active shield, per-chip HRoT, no vendor-CA dependency.
-- **Primary source:** PRSM-CIS-1 (published silicon standard draft).
-- **Blocks:** 1a architecturally, 1b physical-invasion-resistant, 1c power-analysis-hardened, 1d de-cap-resistant with tamper mesh, 1f (no vendor CA to compromise — PRSM's attestation anchors to its own ProvenanceRegistry), **1* under A-L4 (vendor collusion) — this is the only layer that blocks the vendor-colluding threat**.
-- **Does not block:** 1e (activation-inversion is still orthogonal to hardware confidentiality), 3b (fingerprinting evasion).
-- **Current state:** CIS-1 standard draft published; no fab has committed to C2/C3-compliant silicon yet. 3-5 year engineering arc from first-committed-fab to deployed hardware. Three conformance levels (C1 baseline, C2 frontier-acceptable, C3 current-SOTA-acceptable).
-- **Unique property:** L5 is the only layer that addresses A-L4 (vendor collusion). Everything else assumes the vendor is neutral.
+> ⚠️ **Deferred research.** Per the 2026-04-24 revision note at the top of this doc, PRSM-CIS-1 is reclassified as deferred research exploration. The Foundation does not currently ratify silicon standards; no fab engagement exists; no C1/C2/C3 conformance testing is scheduled. The analysis below is preserved because the composition question ("which sub-threats require L5 to block?") remains a useful research output if CIS-1 is later revived. For the 4-layer stack actually under active research (L1-L4), see §3.1-§3.4 and the recomposed recommendations in §5 below.
+
+- **Mechanism (if revived):** chip-level confidentiality anchored in PRSM's own attestation root. Tamper mesh, active shield, per-chip HRoT, no vendor-CA dependency.
+- **Primary source:** `docs/archive/research/2026-04-21-prsm-cis-1-confidential-inference-silicon.md` (archived 2026-04-24).
+- **Would block (if revived):** 1a architecturally, 1b physical-invasion-resistant, 1c power-analysis-hardened, 1d de-cap-resistant with tamper mesh, 1f (no vendor CA to compromise), **1\* under A-L4 (vendor collusion) — this is the only layer that would block the vendor-colluding threat**.
+- **Would not block:** 1e (activation-inversion is still orthogonal to hardware confidentiality), 3b (fingerprinting evasion).
+- **Current state:** deferred. If revived via the §9 ratification path in PRSM-GOV-1, 3-5 year engineering arc from first-committed-fab to deployed hardware would apply. Three conformance levels (C1 / C2 / C3) described in the archived standard draft.
+- **Unique property:** L5 is the only analyzed layer that would address A-L4 (vendor collusion). Every other layer assumes the vendor is neutral.
+- **Current practical implication:** without L5, **the A-L4 vendor-colluding threat remains unmitigated in PRSM's current roadmap.** This is honest scoping: until CIS-1 or an equivalent hardware-vendor-independence layer is revived, frontier-lab publishing decisions must factor this residual trust on NVIDIA/AMD/cloud-provider infrastructure. The mitigation path is either (a) revive CIS-1 later, (b) rely on multi-vendor diversity + attestation-root diversification as partial mitigation, or (c) accept A-L4 as out-of-scope for the launch phase and focus on A-L1/L2/L3 threats.
 
 ---
 
@@ -148,7 +154,7 @@ Five layers in the R8 stub's taxonomy. Each specified at the "what it blocks / w
 
 Matrix of which layers block which sub-threats. `✅` = blocks; `🟡` = partial / probabilistic block; `❌` = does not block; `—` = not applicable.
 
-| Sub-threat | L1 TEE | L2 MPC | L3 FP | L4 WM | L5 CIS-1 | Best combo for this sub-threat |
+| Sub-threat | L1 TEE | L2 MPC | L3 FP | L4 WM | L5 CIS-1 *(deferred)* | Best combo for this sub-threat |
 |---|---|---|---|---|---|---|
 | 1a VRAM dump | ✅ | ✅ | ❌ | ❌ | ✅ | L1 or L2 or L5 |
 | 1b memory-bus side channel | 🟡 | ✅ | ❌ | ❌ | ✅ | L2 or L5 |
