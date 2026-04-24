@@ -24,7 +24,7 @@ def create_enhanced_docs_ui(app: FastAPI) -> None:
             "request": request,
             "api_base_url": str(request.base_url),
             "title": "PRSM API Playground"
-        }))
+        })
     
     @app.get("/docs/examples", response_class=HTMLResponse, include_in_schema=False)
     async def code_examples(request: Request):
@@ -32,7 +32,7 @@ def create_enhanced_docs_ui(app: FastAPI) -> None:
         return templates.TemplateResponse(request, "code_examples.html", {
             "request": request,
             "title": "PRSM API Code Examples"
-        }))
+        })
     
     @app.get("/docs/guides", response_class=HTMLResponse, include_in_schema=False)
     async def integration_guides(request: Request):
@@ -40,7 +40,7 @@ def create_enhanced_docs_ui(app: FastAPI) -> None:
         return templates.TemplateResponse(request, "integration_guides.html", {
             "request": request,
             "title": "PRSM API Integration Guides"
-        }))
+        })
     
     @app.get("/docs/sdk", response_class=HTMLResponse, include_in_schema=False)
     async def sdk_documentation(request: Request):
@@ -48,7 +48,7 @@ def create_enhanced_docs_ui(app: FastAPI) -> None:
         return templates.TemplateResponse(request, "sdk_docs.html", {
             "request": request,
             "title": "PRSM SDKs and Libraries"
-        }))
+        })
     
     @app.get("/docs/postman", response_class=JSONResponse, include_in_schema=False)
     async def postman_collection():

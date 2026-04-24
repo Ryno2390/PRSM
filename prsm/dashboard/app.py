@@ -816,7 +816,7 @@ class DashboardServer:
             templates_dir = Path(__file__).parent / "templates"
             if templates_dir.exists():
                 templates = Jinja2Templates(directory=str(templates_dir))
-                return templates.TemplateResponse(request, "dashboard.html", {"request": request}))
+                return templates.TemplateResponse(request, "dashboard.html", {"request": request})
             else:
                 # Fallback to static HTML
                 static_dir = Path(__file__).parent / "static"

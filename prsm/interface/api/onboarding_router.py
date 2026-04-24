@@ -114,9 +114,6 @@ async def onboarding_welcome(request: Request):
     if _wants_json(request):
         return JSONResponse(checks)
     return templates.TemplateResponse(request, "onboarding/welcome.html", {"request": request, "checks": checks, "step": 1})
-    )
-
-
 # =============================================================================
 # Step 2: API Keys
 # =============================================================================
@@ -132,9 +129,6 @@ async def api_keys_form(request: Request):
     if _wants_json(request):
         return JSONResponse({"step": 2, "message": "Submit API keys via POST"})
     return templates.TemplateResponse(request, "onboarding/api_keys.html", {"request": request, "step": 2})
-    )
-
-
 @router.post("/api-keys")
 async def submit_api_keys(
     request: Request,
@@ -238,7 +232,6 @@ async def backend_selection_form(request: Request):
             "available_backends": available_backends,
             "current_selection": _pending_config.get("primary_backend", "mock")
         })
-    )
 
 
 @router.post("/backend")
@@ -298,7 +291,6 @@ async def network_config_form(request: Request):
             "api_port": _pending_config.get("api_port", 8080),
             "bootstrap_nodes": ",".join(_pending_config.get("bootstrap_nodes", ["wss://bootstrap1.prsm-network.com:8765"]))
         })
-    )
 
 
 async def _check_ipfs_status() -> Dict[str, Any]:
@@ -400,7 +392,6 @@ async def identity_form(request: Request):
             "existing_identity": existing_identity,
             "identity_path": str(IDENTITY_OUTPUT_PATH)
         })
-    )
 
 
 @router.post("/identity")
@@ -495,7 +486,6 @@ async def launch_review(request: Request):
             "config": final_config,
             "config_path": str(CONFIG_OUTPUT_PATH)
         })
-    )
 
 
 @router.post("/launch")
@@ -535,7 +525,6 @@ async def execute_launch(request: Request):
                 "config_path": str(CONFIG_OUTPUT_PATH),
                 "step": 6
             })
-        )
 
     except Exception as e:
         logger.error("Failed to write configuration", error=str(e))
